@@ -182,7 +182,7 @@ fn string_eq_survives_being_stored_and_read_back() {
     assert_eq!(eval_ok(r#"(defvar (*s* string) "abc") (eq *s* *s*)"#), Value::Bool(true), "through a global");
     assert_eq!(
         eval_ok(
-            r#"(let ((s "abc")) (let ((c (sexpr-cons (Str s) (quote ())))) (eq s (sexpr-str (sexpr-car c)))))"#
+            r#"(let ((s "abc")) (let ((c (sexpr-cons (str s) (quote ())))) (eq s (sexpr-str (sexpr-car c)))))"#
         ),
         Value::Bool(true),
         "through a cons cell"

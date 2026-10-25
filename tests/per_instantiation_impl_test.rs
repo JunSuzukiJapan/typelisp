@@ -37,8 +37,8 @@ fn each_instantiation_has_its_own_method() {
 #[test]
 fn an_instantiation_without_an_impl_has_no_method() {
     let msg = check_err(&format!("{}(defun f () int (twice (make-instance 'Box :v 1.5)))", BOXES));
-    assert!(msg.contains("no method `twice` for type `box<f64>`"), "{}", msg);
-    assert!(msg.contains("`box<int>`") && msg.contains("`box<string>`"), "{}", msg);
+    assert!(msg.contains("no method `twice` for type `Box<f64>`"), "{}", msg);
+    assert!(msg.contains("`Box<int>`") && msg.contains("`Box<string>`"), "{}", msg);
 }
 
 /// A static method is picked by the type the call is expected to return.
@@ -50,7 +50,7 @@ fn a_static_method_is_picked_by_the_expected_type() {
         "14 ss",
     );
     let msg = check_err(&format!("{}(defun f () int (progn (Box::make) 0))", BOXES));
-    assert!(msg.contains("`box::make` is written for `box<int>`, `box<string>`"), "{}", msg);
+    assert!(msg.contains("`Box::make` is written for `Box<int>`, `Box<string>`"), "{}", msg);
 }
 
 /// With only one instantiation writing it, a static method needs nothing to
@@ -106,7 +106,7 @@ fn a_method_for_every_instantiation_and_for_one_is_refused() {
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (pub m (self) int 1))\n(impl Box<int> (pub m (self) int 2))");
     assert!(msg.contains("has a `m` for every instantiation already"), "{}", msg);
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub m (self) int 2))\n(impl Box<T> (pub m (self) int 1))");
-    assert!(msg.contains("`m` is written for `box<int>` already"), "{}", msg);
+    assert!(msg.contains("`m` is written for `Box<int>` already"), "{}", msg);
     // A field's accessor is a method for every instantiation too.
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub v (self) int 2))");
     assert!(msg.contains("has a `v` for every instantiation already"), "{}", msg);
@@ -136,7 +136,7 @@ fn a_trait_object_dispatches_to_its_instantiations_impl() {
         "int 2|string b",
     );
     let msg = check_err(&format!("{}(defun f () string (via-dyn (make-instance 'Box :v 1.5)))", SHOW));
-    assert!(msg.contains("box<f64>` does not implement `show`"), "{}", msg);
+    assert!(msg.contains("Box<f64>` does not implement `Show`"), "{}", msg);
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn a_where_bound_holds_at_each_instantiation_with_an_impl() {
         "int 3|string c",
     );
     let msg = check_err(&format!("{}(defun f () string (via-bound (make-instance 'Box :v 1.5)))", SHOW));
-    assert!(msg.contains("box<f64>` does not implement trait `show`"), "{}", msg);
+    assert!(msg.contains("Box<f64>` does not implement trait `Show`"), "{}", msg);
 }
 
 /// Each instantiation binds the trait's associated types itself.
@@ -162,7 +162,7 @@ fn each_instantiation_binds_its_own_associated_type() {
 "##;
     both(defs, r##"(format false "~a ~a ~a" (unwrap (make-instance 'Box :v 1)) (unwrap (make-instance 'Box :v "s")) (get-int (make-instance 'Box :v 5)))"##, "2 s! 6");
     let msg = check_err(&format!("{}(defun f () int (get-int (make-instance 'Box :v \"s\")))", defs));
-    assert!(msg.contains("with `item = string`, but `:dyn unwrap` requires `item = int`"), "{}", msg);
+    assert!(msg.contains("with `Item = string`, but `:dyn Unwrap` requires `Item = int`"), "{}", msg);
 }
 
 /// A supertrait has to be implemented at the instantiation (by its own
@@ -181,7 +181,7 @@ fn a_supertrait_is_needed_at_the_instantiation() {
         "2",
     );
     let msg = check_err(&format!("{}(impl A Box<string> (a ((self Self)) int 1))\n(impl B Box<int> (b ((self Self)) int 2))", base));
-    assert!(msg.contains("requires `a`"), "{}", msg);
+    assert!(msg.contains("requires `A`"), "{}", msg);
 }
 
 #[test]
@@ -191,12 +191,12 @@ fn a_trait_for_every_instantiation_and_for_one_is_refused() {
         "{}(impl Show Box<T> (show ((self Self)) string \"any\"))\n(impl Show Box<int> (show ((self Self)) string \"int\"))",
         base
     ));
-    assert!(msg.contains("implements `show` for every instantiation already"), "{}", msg);
+    assert!(msg.contains("implements `Show` for every instantiation already"), "{}", msg);
     let msg = check_err(&format!(
         "{}(impl Show Box<int> (show ((self Self)) string \"int\"))\n(impl Show Box<T> (show ((self Self)) string \"any\"))",
         base
     ));
-    assert!(msg.contains("`show` is implemented for `box<int>` already"), "{}", msg);
+    assert!(msg.contains("`Show` is implemented for `Box<int>` already"), "{}", msg);
 }
 
 /// A blanket impl materialized at two instantiations gives each its own
@@ -241,14 +241,14 @@ fn documentation_names_one_instantiations_method() {
     let doc = |name: &str| {
         eval_string(&format!("{}(match (documentation {}) ((some d) d) (none \"none\"))", DOCUMENTED, name))
     };
-    assert_eq!(doc("box<int>::twice"), "doubles the int");
-    assert_eq!(doc("box<string>::twice"), "repeats the string");
-    assert_eq!(doc("box::half"), "halves the float");
-    let msg = check_err(&format!("{}(documentation box::twice)", DOCUMENTED));
+    assert_eq!(doc("Box<int>::twice"), "doubles the int");
+    assert_eq!(doc("Box<string>::twice"), "repeats the string");
+    assert_eq!(doc("Box::half"), "halves the float");
+    let msg = check_err(&format!("{}(documentation Box::twice)", DOCUMENTED));
     assert!(msg.contains("is written for more than one instantiation"), "{}", msg);
-    assert!(msg.contains("`box<int>::twice`") && msg.contains("`box<string>::twice`"), "{}", msg);
-    let msg = check_err(&format!("{}(documentation box<f64>::twice)", DOCUMENTED));
-    assert!(msg.contains("`box<f64>` has no method `twice` of its own"), "{}", msg);
+    assert!(msg.contains("`Box<int>::twice`") && msg.contains("`Box<string>::twice`"), "{}", msg);
+    let msg = check_err(&format!("{}(documentation Box<f64>::twice)", DOCUMENTED));
+    assert!(msg.contains("`Box<f64>` has no method `twice` of its own"), "{}", msg);
 }
 
 /// `compile` takes the same names.
@@ -256,12 +256,12 @@ fn documentation_names_one_instantiations_method() {
 fn compile_names_one_instantiations_method() {
     assert_eq!(
         eval_string_compiled(&format!(
-            "{}(progn (compile box<int>::twice) (compile box::half) (format false \"~a ~a\" (twice (make-instance 'Box :v 3)) (half (make-instance 'Box :v 3.0))))",
+            "{}(progn (compile Box<int>::twice) (compile Box::half) (format false \"~a ~a\" (twice (make-instance 'Box :v 3)) (half (make-instance 'Box :v 3.0))))",
             DOCUMENTED
         )),
         "6 1.5"
     );
-    let msg = check_err(&format!("{}(compile box::twice)", DOCUMENTED));
+    let msg = check_err(&format!("{}(compile Box::twice)", DOCUMENTED));
     assert!(msg.contains("is written for more than one instantiation"), "{}", msg);
 }
 

@@ -282,10 +282,10 @@ fn built_in_enum_values_print_their_variant_names() {
     // `(<unknown-variant> 1)`. `Interp::new` now seeds that table from the
     // same `registry::builtin_sum_defs` the checker registers from, so the
     // renderer's lookup finds them without a second table to fall back to.
-    assert_eq!(eval_string(r#"(format false "~a" (option::some 1))"#), "(some 1)");
-    assert_eq!(eval_string(r#"(defun no-int () Option<int> (option::none)) (format false "~a" (no-int))"#), "none");
+    assert_eq!(eval_string(r#"(format false "~a" (Option::some 1))"#), "(some 1)");
+    assert_eq!(eval_string(r#"(defun no-int () Option<int> (Option::none)) (format false "~a" (no-int))"#), "none");
     assert_eq!(
-        eval_string(r#"(defun okv () Result<int,ParseIntError> (result::ok 7)) (format false "~a" (okv))"#),
+        eval_string(r#"(defun okv () Result<int,ParseIntError> (Result::ok 7)) (format false "~a" (okv))"#),
         "(ok 7)"
     );
 }
@@ -369,28 +369,28 @@ fn heap_info_prints_how_full_the_arena_is() {
 fn a_generic_handle_prints_its_type_arguments() {
     assert_eq!(
         eval_string(r#"(format false "~s" (the HashTable<string,int> (HashTable::new)))"#),
-        "#<hashtable<string,int> count=0>"
+        "#<HashTable<string,int> count=0>"
     );
     let chan = eval_string(r#"(format false "~s" (the Chan<string> (Chan::new 1)))"#);
-    assert!(chan.starts_with("#<chan<string> "), "got {}", chan);
+    assert!(chan.starts_with("#<Chan<string> "), "got {}", chan);
     let task = eval_string(r#"(defun three () int 3) (format false "~s" (task (three)))"#);
-    assert!(task.starts_with("#<task<int> "), "got {}", task);
+    assert!(task.starts_with("#<Task<int> "), "got {}", task);
 }
 
 #[test]
 fn variant_names_resolve_inside_a_nested_structure() {
     // `Option<int>` is an ordinary boxed enum inside the list, so it prints
     // with its variant name. It has to be spelled out: a bare
-    // `(option::some 1)` in an element position would take the element's own
+    // `(Option::some 1)` in an element position would take the element's own
     // `Option<Sexpr>` expectation instead, and *that* is the niche.
     assert_eq!(
-        eval_string(r#"(format false "~a" (list (the Option<int> (option::some 1)) 2))"#),
+        eval_string(r#"(format false "~a" (list (the Option<int> (Option::some 1)) 2))"#),
         "((some 1) 2)"
     );
     // The niche prints transparently: `Option<Sexpr>` *is* the S-expression,
     // so there is no wrapper to name. This is the visible spec change from
     // moving the empty list into `Option` (`docs/ja/reference/functions/printing.md` §1).
-    assert_eq!(eval_string(r#"(format false "~a" (list (option::some 1) 2))"#), "(1 2)");
+    assert_eq!(eval_string(r#"(format false "~a" (list (Option::some 1) 2))"#), "(1 2)");
 }
 
 #[test]

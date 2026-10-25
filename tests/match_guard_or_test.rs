@@ -17,8 +17,8 @@ const DEFS: &str = r##"
 (defun classify ((n int)) string
   (match n
     (0 "zero")
-    (k :when (< k 0) "negative")
-    (k :when (equals (mod k 2) 0) "even")
+    (_ :when (< n 0) "negative")
+    (_ :when (equals (mod n 2) 0) "even")
     (_ "odd")))
 (defun kind ((s Shape)) string
   (match s
@@ -97,7 +97,7 @@ fn an_or_pattern_of_literals_with_a_guard() {
 fn a_guard_in_a_closure_reads_a_captured_variable() {
     both(
         r##"(let* ((limit 10)
-                  (f (lambda ((n int)) bool (match n (k :when (> k limit) true) (_ false)))))
+                  (f (lambda ((n int)) bool (match n (_ :when (> n limit) true) (_ false)))))
              (format false "~a ~a" (f 11) (f 3)))"##,
         "true false",
     );
@@ -108,7 +108,7 @@ fn a_guard_in_a_closure_reads_a_captured_variable() {
 #[test]
 fn a_pattern_variable_captured_by_the_body_is_readable_in_the_guard() {
     both(
-        r##"(let ((g (match 5 (k :when (> k 1) (lambda () int (* k 2))) (_ (lambda () int 0)))))
+        r##"(let ((g (match (Option::some 5) ((some k) :when (> k 1) (lambda () int (* k 2))) (_ (lambda () int 0)))))
              (format false "~a" (g)))"##,
         "10",
     );
@@ -157,13 +157,13 @@ fn the_alternatives_must_bind_at_the_same_types() {
 
 #[test]
 fn a_guard_must_be_a_bool() {
-    let msg = check_err("(defun f ((n int)) int (match n (k :when k 1) (_ 0)))");
+    let msg = check_err("(defun f ((n int)) int (match n (_ :when n 1) (_ 0)))");
     assert!(msg.contains("bool"), "{}", msg);
 }
 
 #[test]
 fn a_guard_needs_a_condition() {
-    let msg = check_err("(defun f ((n int)) int (match n (k :when) (_ 0)))");
+    let msg = check_err("(defun f ((n int)) int (match n (_ :when) (_ 0)))");
     assert!(msg.contains("`:when` needs a condition"), "{}", msg);
 }
 

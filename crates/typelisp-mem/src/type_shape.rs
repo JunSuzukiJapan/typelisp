@@ -45,7 +45,7 @@ impl TypeShape {
     /// The named type `name` of the module `ns`, with no arguments or with
     /// `args`.
     pub fn named(ns: NsId, name: &str, args: &[TypeId]) -> TypeShape {
-        TypeShape::Named(ns, crate::symbols::intern_exact(ns, name), args.to_vec())
+        TypeShape::Named(ns, crate::symbols::intern_in(ns, name), args.to_vec())
     }
 
     /// The definition a named type is an instantiation of — what a table of
@@ -115,7 +115,7 @@ pub mod spec {
     pub const BOOL: TypeSpec = Named(StdModule::STD, "bool", &[]);
     pub const CHAR: TypeSpec = Named(StdModule::STD, "char", &[]);
     pub const STRING: TypeSpec = Named(StdModule::STD, "string", &[]);
-    pub const SEXPR: TypeSpec = Named(StdModule::STD, "sexpr", &[]);
+    pub const SEXPR: TypeSpec = Named(StdModule::STD, "Sexpr", &[]);
     pub const UNIT: TypeSpec = TypeSpec::Unit;
 }
 

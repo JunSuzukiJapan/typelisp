@@ -126,7 +126,7 @@ fn ret_of(src: &str, name: &str) -> Type {
 /// exists and means *non-empty*, so the two are not interchangeable in either
 /// direction here: these tests assert which one a form actually produces.
 fn opt_sexpr() -> Type {
-    Type::Named(Path::std("option"), vec![Type::Named(Path::std("sexpr"), vec![])])
+    Type::Named(Path::std("Option"), vec![Type::Named(Path::std("Sexpr"), vec![])])
 }
 
 fn ty(src: &str) -> Type {
@@ -205,7 +205,7 @@ fn gensym_is_typed_symbol() {
 
 #[test]
 fn symbol_string_bridges_are_typed() {
-    assert_eq!(ty("(string->symbol \"x\")"), Type::Symbol);
+    assert_eq!(ty("(intern \"x\")"), Type::Symbol);
     assert_eq!(ty_with_prelude("(symbol->string (gensym))"), Type::Str);
 }
 
@@ -286,7 +286,7 @@ fn ty_program(src: &str) -> Type {
 
 #[test]
 fn construct_some_infers_type_argument() {
-    assert_eq!(ty("(option::some 1)"), Type::Named(Path::std("option"), vec![Type::Int]));
+    assert_eq!(ty("(Option::some 1)"), Type::Named(Path::std("Option"), vec![Type::Int]));
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn nil_is_no_longer_a_sexpr_constructor() {
     // variant numbering is untouched), which means `(Nil)` would otherwise
     // still *resolve* — hence an explicit gate with a migration message
     // rather than an "unknown constructor" error.
-    let err = program("(Nil)").expect_err("`nil` should be retired");
+    let err = program("(nil)").expect_err("`nil` should be retired");
     let msg = format!("{:?}", err);
     assert!(msg.contains("no longer a `Sexpr` constructor"), "unexpected error: {}", msg);
 }
@@ -353,7 +353,7 @@ fn the_empty_list_is_an_option_sexpr_none() {
 #[test]
 fn construct_int_field_adopts_the_declared_width() {
     // The `int` variant's field is an `int`; the literal must adopt that type.
-    assert_eq!(ty("(int 5)"), Type::Named(Path::std("sexpr"), vec![]));
+    assert_eq!(ty("(int 5)"), Type::Named(Path::std("Sexpr"), vec![]));
 }
 
 // ---- match ------------------------------------------------------------------
@@ -363,8 +363,8 @@ fn match_option_exhaustive_unwrap_or() {
     // The canonical minimal goal: unwrap-or over Option<int> type-checks.
     let src = "(defun unwrap-or ((opt Option<int>) (default int)) int \
                  (match opt \
-                   ((Some v) v) \
-                   ((None) default)))";
+                   ((some v) v) \
+                   ((none) default)))";
     assert_eq!(program(src).unwrap().tag, "defun");
     assert_eq!(ret_of(src, "unwrap-or"), Type::Int);
 }
@@ -372,21 +372,21 @@ fn match_option_exhaustive_unwrap_or() {
 #[test]
 fn match_non_exhaustive_is_rejected() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((Some v) v)))";
+                 (match opt ((some v) v)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
 #[test]
 fn match_wildcard_makes_exhaustive() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((Some v) v) (_ 0)))";
+                 (match opt ((some v) v) (_ 0)))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
 #[test]
 fn match_arms_must_share_result_type() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((Some v) v) ((None) true)))";
+                 (match opt ((some v) v) ((none) true)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
@@ -394,7 +394,7 @@ fn match_arms_must_share_result_type() {
 fn match_binds_constructor_fields() {
     // `v` is bound at int inside the Some arm, so returning it as int is fine.
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((Some v) v) ((None) 0)))";
+                 (match opt ((some v) v) ((none) 0)))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
@@ -412,7 +412,7 @@ fn match_on_a_type_with_no_variants_needs_a_catch_all() {
 
 // ---- match arms fill each other's inference holes ---------------------------
 //
-// `(result::ok v)` fixes `T` and says nothing about `E`; `(result::err e)`
+// `(Result::ok v)` fixes `T` and says nothing about `E`; `(Result::err e)`
 // does the reverse. Neither arm can type itself where the `match` has no
 // expected type, so the arms are probed, their partial types merged, and the
 // arms re-checked against the result (`Checker::check_match`'s B4).
@@ -421,8 +421,8 @@ fn match_on_a_type_with_no_variants_needs_a_catch_all() {
 fn match_arms_pool_a_results_two_type_arguments() {
     let src = "(defun f ((r Result<int, string>)) int \
                  (let ((out (match r \
-                              ((ok v) (result::ok v)) \
-                              ((err e) (result::err e))))) \
+                              ((ok v) (Result::ok v)) \
+                              ((err e) (Result::err e))))) \
                    (match out ((ok v) v) ((err e) 0))))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
@@ -433,8 +433,8 @@ fn a_lone_unpinnable_arm_is_still_rejected() {
     // second pass draws on is empty and the original error stands.
     let src = "(defun f ((opt Option<int>)) int \
                  (let ((out (match opt \
-                              ((Some v) (result::ok v)) \
-                              ((None) (panic \"no\"))))) \
+                              ((some v) (Result::ok v)) \
+                              ((none) (panic \"no\"))))) \
                    0))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
@@ -443,7 +443,7 @@ fn a_lone_unpinnable_arm_is_still_rejected() {
 fn an_unpinnable_constructor_outside_a_match_is_still_rejected() {
     // The hole is a `match`-arm device only — everywhere else an
     // un-inferrable type argument is as fatal as it ever was.
-    assert_type_error("(let ((r (result::ok 1))) 0)");
+    assert_type_error("(let ((r (Result::ok 1))) 0)");
 }
 
 #[test]
@@ -452,7 +452,7 @@ fn a_probed_arm_takes_its_type_from_a_concrete_sibling() {
     // comes from an arm that is not itself a bare constructor.
     let src = "(defun f ((r Result<int, string>) (d Result<int, string>)) int \
                  (let ((out (match r \
-                              ((ok v) (result::ok v)) \
+                              ((ok v) (Result::ok v)) \
                               ((err e) d)))) \
                    0))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
@@ -465,8 +465,8 @@ fn arms_of_different_shapes_are_still_rejected() {
     // both report what they could not infer.
     let src = "(defun f ((r Result<int, string>)) int \
                  (let ((out (match r \
-                              ((ok v) (result::ok v)) \
-                              ((err e) (option::none))))) \
+                              ((ok v) (Result::ok v)) \
+                              ((err e) (Option::none))))) \
                    0))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
@@ -475,16 +475,16 @@ fn arms_of_different_shapes_are_still_rejected() {
 
 #[test]
 fn if_let_binds_in_then_branch() {
-    // if-let binding is `(pattern value)`: here pattern `(Some v)`, value `opt`.
+    // if-let binding is `(pattern value)`: here pattern `(some v)`, value `opt`.
     let src = "(defun f ((opt Option<int>)) int \
-                 (if-let ((Some v) opt) v 0))";
+                 (if-let ((some v) opt) v 0))";
     assert_eq!(program_with_prelude(src).expect("check failed").tag, "defun");
 }
 
 #[test]
 fn if_let_branches_must_agree() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (if-let ((Some v) opt) v true))";
+                 (if-let ((some v) opt) v true))";
     assert!(matches!(program_with_prelude(src), Err(Error::TypeError(_))));
 }
 
@@ -959,7 +959,7 @@ fn type_error_carries_source_location() {
 ///
 /// The hole opened exactly where a mistake is hardest to see, and it made a
 /// second one possible: with `Option<Sexpr>` parameters, `(equalp opt
-/// (option::some x))` had its constructor call take the *parameter's* type
+/// (Option::some x))` had its constructor call take the *parameter's* type
 /// argument and become the empty-list niche — a bare datum — while `opt`
 /// crossed as a boxed enum, so a comparison between two genuinely equal
 /// values answered `false`.
@@ -971,7 +971,7 @@ fn equality_requires_its_two_arguments_to_have_one_type() {
         // Two unrelated user structs — the case that used to answer `false`.
         "(defstruct pa (x int)) (defstruct pb (y string)) (equalp (make-instance 'pa :x 1) (make-instance 'pb :y \"z\"))",
         // Two different instantiations of the same generic.
-        "(equalp (the Option<char> (option::none)) (the Option<int> (option::none)))",
+        "(equalp (the Option<char> (Option::none)) (the Option<int> (Option::none)))",
         // And the case that was already an error, still is.
         "(equalp 1 \"a\")",
     ] {
@@ -988,7 +988,7 @@ fn equality_requires_its_two_arguments_to_have_one_type() {
 fn equality_still_compares_every_same_typed_pair() {
     for src in [
         "(equal (quote (1 2 3)) (quote (1 2 3)))",
-        "(equalp (option::some #\\x) (option::some #\\x))",
+        "(equalp (Option::some #\\x) (Option::some #\\x))",
         "(defstruct pt (x int)) (equalp (make-instance 'pt :x 1) (make-instance 'pt :x 1))",
     ] {
         assert!(program(src).is_ok(), "should check: {}", src);
@@ -1014,7 +1014,7 @@ fn a_quoted_symbol_is_a_symbol() {
     assert_eq!(ty("(quote 42)"), opt_sexpr());
     // It still reaches a `Symbol` parameter, and still reaches an
     // S-expression one.
-    assert!(program(r#"(defun f ((s Symbol)) string (symbol->string s)) (f (quote foo))"#).is_ok());
+    assert!(program(r#"(defun f ((s symbol)) string (symbol->string s)) (f (quote foo))"#).is_ok());
     assert!(program(r#"(defun g ((s Option<Sexpr>)) bool (sexpr-symp s)) (g (quote foo))"#).is_ok());
 }
 
@@ -1026,6 +1026,6 @@ fn a_quoted_symbol_is_a_symbol() {
 /// generic inference — with both sides `Symbol` there is nothing to widen.
 #[test]
 fn equality_between_a_built_and_a_quoted_symbol_is_order_independent() {
-    assert!(program(r#"(equal (string->symbol "foo") (quote foo))"#).is_ok());
-    assert!(program(r#"(equal (quote foo) (string->symbol "foo"))"#).is_ok());
+    assert!(program(r#"(equal (intern "foo") (quote foo))"#).is_ok());
+    assert!(program(r#"(equal (quote foo) (intern "foo"))"#).is_ok());
 }

@@ -60,7 +60,7 @@ use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, SymRef, Value, BUI
 
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
-use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
+use crate::types::{path_is_builtin, Path};
 
 use super::symbols::{
     callee_symbol_name, fresh_lambda_name, llvm_op_id, DynTables,
@@ -1210,7 +1210,7 @@ fn suspend_node(
 ///
 /// The representation it operates on is the receiver's for an instance method
 /// and the result's for a static one. That distinction is why `assoc` carries
-/// a result representation at all: `(vector::new)` and `(scope::new)` have no
+/// a result representation at all: `(Vector::new)` and `(Scope::new)` have no
 /// receiver, and the result is the only thing that says which container they
 /// are building.
 fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
@@ -1232,17 +1232,17 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // instance call with, so its representation is the first of the list.
     let self_repr = if instance { reprs.first().unwrap_or(&ret) } else { &ret }.clone();
 
-    if path_is_builtin(&type_name, "vector") && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
+    if path_is_builtin(&type_name, typelisp_mem::wk::VECTOR) && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
         return translate_vector_op(heap, &method, &self_repr, ret_type, &args, cx);
     }
-    if path_is_builtin(&type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
+    if path_is_builtin(&type_name, typelisp_mem::wk::HASHTABLE) && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
         return translate_hashtable_op(heap, &method, &self_repr, ret_type, &args, cx);
     }
     // `(wait t)` — the method-shaped member of the suspending set. Its answer
     // is *typed* (`Task<T>` -> `T`), which is the whole reason suspension is a
     // node carrying a kind rather than a name the island sniffs: a `call` node
     // has room for its arguments' representations and not for its result's.
-    if let Some(shim) = crate::compile::externs::rt_suspend_method_symbol(type_name.last_segment(), &method) {
+    if let Some(shim) = crate::compile::externs::rt_suspend_method_symbol(&type_name, &method) {
         if type_name.is_std() {
             // `(send ch v)`: the value is the one argument whose meaning the
             // driver cannot recover from its word, so it crosses tagged.
@@ -1269,7 +1269,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // A builtin static method with a shim of its own (`Thread::current-id`)
     // is an ordinary call of that shim: nothing is waited for, and there is
     // no compiled body to call.
-    if let Some(shim) = crate::compile::externs::rt_static_method_symbol(type_name.last_segment(), &method) {
+    if let Some(shim) = crate::compile::externs::rt_static_method_symbol(&type_name, &method) {
         if type_name.is_std() && !instance {
             let name_v = heap.alloc_string(shim.to_string());
             let mut f = Items::new(heap);
@@ -1292,9 +1292,8 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // ([`ConcreteNames::method_symbol`]), the name its body was compiled
     // under.
     let symbol = ConcreteNames::method_symbol(&type_name, &method);
-    let type_v = heap.alloc_string(builtin_receiver(&type_name).to_string());
     let mut f = Items::new(heap);
-    f.push(type_v);
+    f.push(builtin_receiver(&type_name));
     let method_v = f.heap().alloc_string(method);
     f.push(method_v);
     f.push(Value::Bool(instance));
@@ -1312,14 +1311,11 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
 /// island's frozen `native-scope` op, so this is a decision about `V` alone —
 /// which is exactly why [`Repr::Scope`] carries it.
 fn llvm_op_key(type_name: &Path, self_repr: &Repr) -> Option<&'static str> {
-    if !path_is_builtin_any(type_name, &LLVM_METHOD_RECEIVER_TYPES) {
-        return None;
-    }
-    match type_name.last_segment() {
-        "llvm-module" => Some("llvm-module"),
-        "llvm-function" => Some("llvm-function"),
-        "llvm-builder" => Some("llvm-builder"),
-        "scope" => match self_repr {
+    match typelisp_front::types::builtin_type(type_name)? {
+        wk::LLVM_MODULE => Some("llvm-module"),
+        wk::LLVM_FUNCTION => Some("llvm-function"),
+        wk::LLVM_BUILDER => Some("llvm-builder"),
+        wk::SCOPE => match self_repr {
             Repr::Scope(v) if **v == Repr::Handle => Some("native-scope"),
             _ => None,
         },
@@ -2449,16 +2445,16 @@ fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     })
 }
 
-/// The `TYPE` of an `assoc` node: the name of the standard library's type
+/// The `TYPE` of an `assoc` node: the vocabulary symbol of the built-in type
 /// `type_name` when it is one, which is all the island reads it for (the
-/// methods it lowers itself), and empty for any other type. Not the type's
-/// path: a type at the root is written as its name alone, and once it shadows
-/// a built-in's name it would be taken for the built-in.
-fn builtin_receiver(type_name: &Path) -> &'static str {
-    if type_name.is_std() {
-        type_name.last_segment()
-    } else {
-        ""
+/// methods it lowers itself, told apart with `case` on the symbol), and `()`
+/// for any other type. Not the type's name: a module's own type that
+/// shadows a built-in's name is another symbol, and must not be taken for
+/// the built-in.
+fn builtin_receiver(type_name: &Path) -> Value {
+    match crate::types::builtin_type(type_name) {
+        Some(_) => Value::Symbol(type_name.name_symbol()),
+        None => Value::Empty,
     }
 }
 
@@ -2473,9 +2469,8 @@ fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     let reprs = repr_list(heap, core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?)?;
     forwarding_lambda(heap, "method", &reprs, cx, move |heap, forwarded| {
         let symbol = ConcreteNames::method_symbol(&path, &method);
-        let type_v = heap.alloc_string(builtin_receiver(&path).to_string());
         let mut f = Items::new(heap);
-        f.push(type_v);
+        f.push(builtin_receiver(&path));
         let method_v = f.heap().alloc_string(method);
         f.push(method_v);
         f.push(Value::Bool(true));
@@ -2572,7 +2567,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     let Value::Bool(mutable) = parts[3] else { return Err(malformed(heap, form)) };
     let field_reprs = repr_list(heap, parts[4])?;
     let args = parts[5..].to_vec();
-    let is_sexpr = path_is_builtin(&path, "sexpr");
+    let is_sexpr = path_is_builtin(&path, typelisp_mem::wk::SEXPR);
 
     // The value's runtime type identity, taken from the node rather than
     // rebuilt from the path: the checker wrote it where the instantiation was
@@ -2819,7 +2814,7 @@ fn pattern_bindings(
             let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
             let sub = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
-            let repr = if path_is_builtin(&path, "sexpr") {
+            let repr = if path_is_builtin(&path, typelisp_mem::wk::SEXPR) {
                 Repr::Sexpr
             } else if cx.defs.is_struct(heap, &path)? {
                 Repr::Struct
@@ -2966,7 +2961,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             // for this node, made once more here.
             let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
-            let inner_repr = if path_is_builtin(&path, "sexpr") {
+            let inner_repr = if path_is_builtin(&path, typelisp_mem::wk::SEXPR) {
                 Repr::Sexpr
             } else if cx.defs.is_struct(heap, &path)? {
                 Repr::Struct
@@ -2997,7 +2992,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     let field_reprs = repr_list(heap, parts[4])?;
     let subpats = parts[5..].to_vec();
 
-    let kind = if path_is_builtin(&path, "sexpr") {
+    let kind = if path_is_builtin(&path, typelisp_mem::wk::SEXPR) {
         MATCH_KIND_SEXPR
     } else if cx.defs.is_struct(heap, &path)? {
         MATCH_KIND_STRUCT
@@ -3354,7 +3349,7 @@ mod tests {
 
     /// A `point` with two int fields and an `option` over a `sexpr`, which is
     /// enough to show both a struct's and an enum's field kinds.
-    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::option (none some) (() (sexpr)))"];
+    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::Option (none some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
@@ -3465,17 +3460,17 @@ mod tests {
     fn an_ordinary_method_call_is_named_by_its_qualified_type() {
         assert_eq!(
             bridged("(assoc ::std::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var a) (var b))"),
-            r#"(assoc "i32" "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#
+            r#"(assoc i32 "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
             bridged("(assoc ::m::point area true int-any-width (struct) (type-named ::std::i32) (var p))"),
-            r#"(assoc "" "area" true "tl_m::point''area" (2 var "p" false))"#
+            r#"(assoc () "area" true "tl_m::point''area" (2 var "p" false))"#
         );
         // Only the standard library's type is named for the island: a root
         // type that shadows a built-in's name is not taken for it.
         assert_eq!(
             bridged("(assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var a) (var b))"),
-            r#"(assoc "" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#
+            r#"(assoc () "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#
         );
     }
 
@@ -3484,19 +3479,19 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc ::std::vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::i32) (var v) (int-any-width 0))"),
+            bridged("(assoc ::std::Vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::i32) (var v) (int-any-width 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
-            bridged("(assoc ::std::vector push true unit ((vector sexpr) sexpr) (type-unit) (var v) (var x))"),
+            bridged("(assoc ::std::Vector push true unit ((vector sexpr) sexpr) (type-unit) (var v) (var x))"),
             r#"(vector-op "push" 6 (var "v" false) (var "x" false))"#
         );
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc ::std::vector new false (vector int-any-width) () (type-named ::std::vector (type-named ::std::i32)))"),
-            format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::vector (type-named ::std::i32))"))
+            bridged("(assoc ::std::Vector new false (vector int-any-width) () (type-named ::std::Vector (type-named ::std::i32)))"),
+            format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::Vector (type-named ::std::i32))"))
         );
     }
 
@@ -3507,13 +3502,13 @@ mod tests {
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc ::std::hashtable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
+            bridged("(assoc ::std::HashTable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
             r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc ::std::hashtable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::i32) (var h) (var n) (var i))"),
+            bridged("(assoc ::std::HashTable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::i32) (var h) (var n) (var i))"),
             r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
@@ -3539,11 +3534,11 @@ mod tests {
     /// `Repr::Scope` carries one.
     #[test]
     fn a_scope_routes_on_what_it_holds() {
-        let printed = bridged("(assoc ::std::scope get true enum ((scope handle) str) (type-named ::std::option (type-named ::std::llvm-value)) (var e) (var n))");
+        let printed = bridged("(assoc ::std::Scope get true enum ((scope handle) str) (type-named ::std::Option (type-named ::std::llvm-value)) (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc ::std::scope get true enum ((scope int-any-width) str) (type-named ::std::option (type-named ::std::i32)) (var e) (var n))"),
-            r#"(assoc "scope" "get" true "tl_std::scope''get" (2 var "e" false) (2 var "n" false))"#
+            bridged("(assoc ::std::Scope get true enum ((scope int-any-width) str) (type-named ::std::Option (type-named ::std::i32)) (var e) (var n))"),
+            r#"(assoc Scope "get" true "tl_std::Scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
 
@@ -3561,13 +3556,13 @@ mod tests {
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
-            bridged_with(&DEFS, "(construct ::std::option (type-named ::std::option (type-named ::std::sexpr)) 1 false (sexpr) (var x))"),
-            format!(r#"(construct false false {} 1 (6 var "x" false))"#, type_nodes("(type-named ::std::option (type-named ::std::sexpr))"))
+            bridged_with(&DEFS, "(construct ::std::Option (type-named ::std::Option (type-named ::std::Sexpr)) 1 false (sexpr) (var x))"),
+            format!(r#"(construct false false {} 1 (6 var "x" false))"#, type_nodes("(type-named ::std::Option (type-named ::std::Sexpr))"))
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
         assert_eq!(
-            bridged_with(&DEFS, &format!("(construct ::std::sexpr (type-named ::std::sexpr) {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
+            bridged_with(&DEFS, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
             format!("(construct true false () {SEXPR_CONS} (int-any-width 0 1) (int-any-width 0 2))")
         );
     }
@@ -3627,7 +3622,7 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::std::option (type-named ::std::option (type-named ::std::sexpr)) 0 false ()) (int-any-width 0)) ((pat-ctor ::std::option (type-named ::std::option (type-named ::std::sexpr)) 1 false (sexpr) (pat-bind x)) (var x)))"),
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::std::Option (type-named ::std::Option (type-named ::std::Sexpr)) 0 false ()) (int-any-width 0)) ((pat-ctor ::std::Option (type-named ::std::Option (type-named ::std::Sexpr)) 1 false (sexpr) (pat-bind x)) (var x)))"),
             r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x" 2)) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from
@@ -3701,7 +3696,7 @@ mod tests {
             &DEFS,
             r#"(match (var s) str ((pat-guard $match-scrut (assoc ::std::string equals true bool (str str) (type-named ::std::bool) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         );
-        assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true "tl_std::string''equals""#), "{}", printed);
+        assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc string "equals" true "tl_std::string''equals""#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
         assert!(printed.ends_with(" 2)"), "{}", printed);
     }
@@ -3913,7 +3908,7 @@ mod tests {
     fn a_method_reference_forwards_onto_the_method() {
         let printed = bridged("(methodref ::point area (struct) \"i32\")");
         assert!(
-            printed.ends_with(r#" () ((arg0 . 2)) (assoc "" "area" true "tl_point''area" (2 var "arg0" false)))"#),
+            printed.ends_with(r#" () ((arg0 . 2)) (assoc () "area" true "tl_point''area" (2 var "arg0" false)))"#),
             "{}",
             printed
         );
@@ -4030,7 +4025,7 @@ mod tests {
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
-        assert_eq!(body, r#"(assoc "i32" "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#);
+        assert_eq!(body, r#"(assoc i32 "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#);
         // The same mangling a call to it produces.
         assert!(bridged("(call ::m::add ())").contains(r#""tl_m::add""#));
     }

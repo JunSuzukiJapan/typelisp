@@ -49,7 +49,7 @@ fn type_arguments_are_inferred_or_written() {
              (make-instance 'Box :v "s")
              (the Box<f64> (make-instance 'Box :v 1.5))
              (make-instance 'Box<int> :v 7))"##,
-        r##"#<box<string> v: "s"> #<box<f64> v: 1.5> #<box<int> v: 7>"##,
+        r##"#<Box<string> v: "s"> #<Box<f64> v: 1.5> #<Box<int> v: 7>"##,
     );
 }
 
@@ -66,12 +66,12 @@ fn values_are_evaluated_in_the_order_written() {
 }
 
 /// A value is typed by its slot, written in slot order or not: a bare
-/// `(option::none)` needs the slot's type to know what it holds.
+/// `(Option::none)` needs the slot's type to know what it holds.
 #[test]
 fn a_value_is_typed_by_its_slot() {
     both(
-        r##"(let ((a (make-instance 'Holder :o (option::none) :n 1))
-                  (b (make-instance 'Holder :n 2 :o (option::none))))
+        r##"(let ((a (make-instance 'Holder :o (Option::none) :n 1))
+                  (b (make-instance 'Holder :n 2 :o (Option::none))))
              (format false "~s ~s" a::o b::n))"##,
         "none 2",
     );

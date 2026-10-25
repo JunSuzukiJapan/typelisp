@@ -147,7 +147,7 @@ fn an_associated_type_is_pinned_positionally() {
           (let ((n 0))
             (loop
               (match (next it)
-                ((Some x) (setf n (+ n x)))
+                ((some x) (setf n (+ n x)))
                 (_ (break))))
             n))
         (defun make-v () Vector<int> (Vector::new))
@@ -167,7 +167,7 @@ fn a_mismatched_associated_type_pin_is_rejected() {
           (push v 10)
           (total (iter v)))"#;
     let m = eval_err(src);
-    assert!(m.contains("requires") && m.contains("item"), "{}", m);
+    assert!(m.contains("requires") && m.contains("Item"), "{}", m);
 }
 
 #[test]
@@ -543,13 +543,13 @@ fn an_impl_for_one_instantiation_covers_only_that_instantiation() {
 "#;
     assert_eq!(eval_ok(&format!("{}(equal (f (make-instance 'Box :v 1)) \"int box 2\")", defs)), Value::Bool(true));
     let e = eval_err(&format!("{}(f (make-instance 'Box :v \"s\"))", defs));
-    assert!(e.contains("box<string>` does not implement `show`, so it cannot be used as `:dyn show`"), "{}", e);
+    assert!(e.contains("Box<string>` does not implement `Show`, so it cannot be used as `:dyn Show`"), "{}", e);
     // A `where` bound asks the same question.
     let e = eval_err(&format!(
         "{}(defun g<T> ((b T)) string (:where (Show T)) (show b))\n(g (make-instance 'Box :v \"s\"))",
         defs
     ));
-    assert!(e.contains("box<string>` does not implement trait `show`"), "{}", e);
+    assert!(e.contains("Box<string>` does not implement trait `Show`"), "{}", e);
 }
 
 /// A `where` bound is checked against a trait object too: it implements its
@@ -563,10 +563,10 @@ fn a_where_bound_is_checked_against_a_trait_object() {
         "{}(match (as-dyn-error (parse-int \"x\")) ((ok _) false) ((err e) (same e e)))",
         same
     ));
-    assert!(err.contains("type `:dyn error` does not implement trait `std::cmp::eq`"), "{}", err);
+    assert!(err.contains("type `:dyn Error` does not implement trait `std::cmp::Eq`"), "{}", err);
     // `()` has no name either, and is refused at the call, not inside `same`.
     let err = common::check_err(&format!("{}(same () ())", same));
-    assert!(err.contains("type `()` does not implement trait `std::cmp::eq`"), "{}", err);
+    assert!(err.contains("type `()` does not implement trait `std::cmp::Eq`"), "{}", err);
     // Its own trait is a bound it meets.
     assert_eq!(
         eval_string("(match (as-dyn-error (parse-int \"x\")) ((ok _) \"\") ((err e) (describe-error e)))"),

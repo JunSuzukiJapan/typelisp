@@ -198,7 +198,7 @@ fn setf_get_writes_through_a_hashtable_entry() {
                (let ((h (make-h)))
                  (set h \"a\" 1)
                  (setf (get h \"a\") 41)
-                 (match (get h \"a\") ((Some x) x) ((None) -1)))";
+                 (match (get h \"a\") ((some x) x) ((none) -1)))";
     assert_eq!(eval_ok_with_prelude(src), Value::Int(41));
 }
 

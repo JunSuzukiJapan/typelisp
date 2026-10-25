@@ -30,9 +30,9 @@
 | `int->int` | `(int->int x)` | `T→int` | `int` への拡大変換（常に正確）。`(as int x)` の実体 |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio` への拡大変換（常に正確） |
 | `int->char` | `(int->char x)` | `T→char` | Unicode スカラ値として解釈。不正な値は panic |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `None` で返す版 |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `none` で返す版 |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | 幅変換。入らない値は切り詰める（Rust の `as` と同じ） |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして。値がその幅に入らなければ `None` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして。値がその幅に入らなければ `none` |
 
 これらの変換は `(as Type x)`/`(try-as Type x)` 特殊形（[構文リファレンス](../syntax.md#7-その他の特殊形)）の
 実体でもある。ビット演算（`logand`/`ash`/`ldb` 等）と述語（`zerop`/`evenp` 等）は型をまたいで同じ形

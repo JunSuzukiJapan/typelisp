@@ -79,7 +79,7 @@ fn read1(src: &str) -> (Heap, Value) {
         let mut names = h.names();
         names.declare_module(ns_of(&["std".to_string(), "process".to_string()]));
         names.declare_module(ns_of(&["geometry".to_string()]));
-        let point = intern_in(typelisp::NsId::ROOT, "point");
+        let point = intern_in(typelisp::NsId::ROOT, "Point");
         names.declare_member(point, intern_in(typelisp::NsId::ROOT, "new"));
     }
     let r = Reader::new();
@@ -124,10 +124,11 @@ fn floats() {
 fn booleans() {
     let (_h, v) = read1("true");
     assert_eq!(v, Value::Bool(true));
-    let (_h, v) = read1("FALSE");
+    let (_h, v) = read1("false");
     assert_eq!(v, Value::Bool(false));
+    // Case-sensitive: only the lowercase spellings are the booleans.
     let (_h, v) = read1("True");
-    assert_eq!(v, Value::Bool(true));
+    assert!(matches!(v, Value::Symbol(_)), "{:?}", v);
 }
 
 #[test]
@@ -153,11 +154,11 @@ fn characters() {
 }
 
 #[test]
-fn symbols_are_case_insensitive() {
+fn symbols_are_case_sensitive() {
     let (h1, a) = read1("Foo");
     let (h2, b) = read1("FOO");
-    assert_eq!(show(&h1, a), "foo");
-    assert_eq!(show(&h2, b), "foo");
+    assert_eq!(show(&h1, a), "Foo");
+    assert_eq!(show(&h2, b), "FOO");
 }
 
 #[test]
@@ -165,7 +166,7 @@ fn operators_are_symbols() {
     roundtrip("+", "+");
     roundtrip("<=", "<=");
     roundtrip("1+", "1+");
-    roundtrip("Vec<String>", "vec<string>"); // case-folded
+    roundtrip("Vec<String>", "Vec<String>");
 }
 
 #[test]
@@ -179,11 +180,11 @@ fn double_colon_tokens_become_paths() {
         }
         _ => panic!("expected Path, got {:?}", v),
     }
-    // round-trips to the same text; segments are case-folded
+    // round-trips to the same text
     roundtrip("std::process::exit", "std::process::exit");
-    roundtrip("Point::new", "point::new");
+    roundtrip("Point::new", "Point::new");
     // `::` splits at top level only, so a generic arg stays in the last segment
-    roundtrip("geometry::Vec<String>", "geometry::vec<string>");
+    roundtrip("geometry::Vec<String>", "geometry::Vec<String>");
 }
 
 #[test]
@@ -466,9 +467,9 @@ fn unquote_splicing_spans_both_prefix_chars() {
 /// whitespace, `()`, `:dyn T` and tuple types included.
 #[test]
 fn a_generic_type_token_may_contain_a_spaced_dyn_argument() {
-    roundtrip("vector<:dyn drawable>", "vector<:dyn drawable>");
-    roundtrip("hashtable<string, :dyn drawable>", "hashtable<string,:dyn drawable>");
-    roundtrip("vector<:dyn iter<int>>", "vector<:dyn iter<int>>");
+    roundtrip("Vector<:dyn drawable>", "Vector<:dyn drawable>");
+    roundtrip("HashTable<string, :dyn drawable>", "HashTable<string,:dyn drawable>");
+    roundtrip("Vector<:dyn iter<int>>", "Vector<:dyn iter<int>>");
 }
 
 #[test]
@@ -486,7 +487,7 @@ fn a_leading_angle_bracket_is_still_the_comparison_operator() {
 fn an_operator_name_ending_in_an_angle_bracket_is_an_ordinary_name() {
     roundtrip("(string< a b)", "(string< a b)");
     roundtrip("(string<= a b)", "(string<= a b)");
-    roundtrip("(f vector<\n int>)", "(f vector< int>)");
+    roundtrip("(f Vector<\n int>)", "(f Vector< int>)");
 }
 
 /// Once a type follows the `<`, the arguments have to be well formed: the
@@ -498,9 +499,9 @@ fn malformed_type_arguments_are_a_read_error() {
     for (src, says) in [
         ("(a<b c)", "expected `,` or `>`, found `c`"),
         ("(f a<b)", "expected `,` or `>`, found `)`"),
-        ("(f vector<a", "end of input before the closing `>`"),
-        ("vector<(fn (int) int)>", "give a function type a name with `deftype`"),
-        ("vector<#{int string>", "expected a type"),
+        ("(f Vector<a", "end of input before the closing `>`"),
+        ("Vector<(fn (int) int)>", "give a function type a name with `deftype`"),
+        ("Vector<#{int string>", "expected a type"),
     ] {
         let err = r.read_all(&mut h, src).unwrap_err().to_string();
         assert!(err.contains(says), "reading {:?}: {}", src, err);
@@ -511,22 +512,22 @@ fn malformed_type_arguments_are_a_read_error() {
 /// written back as one space after a `,` and none elsewhere.
 #[test]
 fn type_arguments_may_span_lines() {
-    roundtrip("hashtable<string,\n    int>", "hashtable<string,int>");
-    roundtrip("hashtable<string ,int >", "hashtable<string,int>");
+    roundtrip("HashTable<string,\n    int>", "HashTable<string,int>");
+    roundtrip("HashTable<string ,int >", "HashTable<string,int>");
 }
 
 #[test]
 fn a_generic_type_token_may_contain_a_unit_argument() {
-    roundtrip("result<(), string>", "result<(),string>");
-    roundtrip("(defun f () result<(), string> 1)", "(defun f () result<(),string> 1)");
-    roundtrip("option<result<(),()>>", "option<result<(),()>>");
+    roundtrip("Result<(), string>", "Result<(),string>");
+    roundtrip("(defun f () Result<(), string> 1)", "(defun f () Result<(),string> 1)");
+    roundtrip("Option<Result<(),()>>", "Option<Result<(),()>>");
 }
 
 /// A tuple type is a type argument like any other.
 #[test]
 fn a_generic_type_token_may_contain_a_tuple_type() {
-    roundtrip("vector<#{int string}>", "vector<#{int string}>");
-    roundtrip("hashtable<#{int   vector<#{a b}>},int>", "hashtable<#{int vector<#{a b}>},int>");
+    roundtrip("Vector<#{int string}>", "Vector<#{int string}>");
+    roundtrip("HashTable<#{int   Vector<#{a b}>},int>", "HashTable<#{int Vector<#{a b}>},int>");
 }
 
 // ---- `:dyn Trait` joins into one datum ----------------------------------

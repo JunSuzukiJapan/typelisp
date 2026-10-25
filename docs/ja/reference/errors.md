@@ -42,7 +42,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | `T` 型が要る位置に `U` 型の式がある。暗黙の型変換は無いので、数値なら `(as T x)` で変換する。`int` と `i32` も別の型 |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | リテラルがその型に入らない。切り詰めたいなら `(as u8 300)` と書く |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | その名前の型が無い。型は、それを使う最初のフォームより前に定義する（型には前方宣言が無い）。型変数のつもりなら、関数名の `<foo>` などの宣言部に書く（[構文リファレンス 3.6](syntax.md#36-defstruct--構造体ユーザ定義型)） |
-| ``cannot infer type argument `t` for `vector::new` `` | 型引数が決まらない。`(the Vector<int> (Vector::new))` のように `the` で型を書く |
+| ``cannot infer type argument `t` for `Vector::new` `` | 型引数が決まらない。`(the Vector<int> (Vector::new))` のように `the` で型を書く |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` がすべての変種を扱っていない。足りない変種の腕か、`_` の腕を足す |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | 関数がトレイトを要求しているのに、渡した型が実装していない。`(impl Eq pt ...)` を書く（[標準トレイト](functions/traits.md)） |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | `:dyn` の位置に、そのトレイトを実装していない型の値を渡した。`impl` を書く |

@@ -1,4 +1,4 @@
-//! A `Symbol`-typed `defenum` field, across the interpreted and compiled tiers.
+//! A `symbol`-typed `defenum` field, across the interpreted and compiled tiers.
 //!
 //! A symbol is a `Value::Symbol` wherever it is held, so an enum carrying one
 //! is a heap enum box like any other (`type_key::alloc_typed_enum`): its field
@@ -30,12 +30,12 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
     Ok(last)
 }
 
-/// `:hello` — a keyword, the one self-evaluating `Symbol` literal
+/// `:hello` — a keyword, the one self-evaluating `symbol` literal
 /// (`Checker::check`'s `Value::Symbol` arm); `(quote hello)` is a `Sexpr`, not
-/// a `Symbol`, so it cannot go in this field.
-const TAG_ENUM: &str = "(defenum tag (named Symbol) (anon)) \
-                        (defun make-tag ((s Symbol)) tag (tag::named s)) \
-                        (defun tag-name ((t tag)) Symbol \
+/// a `symbol`, so it cannot go in this field.
+const TAG_ENUM: &str = "(defenum tag (named symbol) (anon)) \
+                        (defun make-tag ((s symbol)) tag (tag::named s)) \
+                        (defun tag-name ((t tag)) symbol \
                           (match t ((named s) s) ((anon) :anon)))";
 
 fn assert_named(h: &Heap, v: &Value, expected: &str) {

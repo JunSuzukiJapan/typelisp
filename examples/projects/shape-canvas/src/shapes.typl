@@ -111,7 +111,7 @@
 (defstruct bad-number (word string) (cause ParseIntError))
 (impl Error bad-number
   (message ((self Self)) string (append "not a number: " self::word))
-  (source ((self Self)) Option<:dyn Error> (option::some self::cause)))
+  (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
 
 ;; Strings have no split, so we cut on whitespace by hand.
 ;; 文字列に split は無いので空白区切りは自前で刻む。
@@ -135,10 +135,10 @@
 ;; typelisp に `?` は無いので、失敗の持ち上げは match で明示的に書く。
 (defun scan-nums ((ws Vector<string>) (from int) (acc Vector<int>)) Result<Vector<int>, :dyn Error>
   (if (>= from (len ws))
-      (result::ok acc)
+      (Result::ok acc)
       (match (parse-int (get ws from))
         ((ok n) (push acc n) (scan-nums ws (+ from 1) acc))
-        ((err e) (result::err (make-instance 'bad-number :word (get ws from) :cause e))))))
+        ((err e) (Result::err (make-instance 'bad-number :word (get ws from) :cause e))))))
 
 ;; A concrete type is returned but the return type is :dyn Shape -- implicit coercion
 ;; applies in return position, so it is boxed without writing (as :dyn Shape ...).
@@ -147,29 +147,29 @@
 (defun build-shape ((kind string) (ns Vector<int>)) Result<:dyn Shape, :dyn Error>
   (cond
     ((and (equal kind "rect") (= (len ns) 4))
-     (result::ok (make-instance 'rect :x (get ns 0) :y (get ns 1) :w (get ns 2) :h (get ns 3))))
+     (Result::ok (make-instance 'rect :x (get ns 0) :y (get ns 1) :w (get ns 2) :h (get ns 3))))
     ((and (equal kind "circle") (= (len ns) 3))
-     (result::ok (make-instance 'circle :cx (get ns 0) :cy (get ns 1) :r (get ns 2))))
+     (Result::ok (make-instance 'circle :cx (get ns 0) :cy (get ns 1) :r (get ns 2))))
     ((and (equal kind "hline") (= (len ns) 3))
-     (result::ok (make-instance 'hline :x (get ns 0) :y (get ns 1) :len (get ns 2))))
+     (Result::ok (make-instance 'hline :x (get ns 0) :y (get ns 1) :len (get ns 2))))
     ;; Both an unknown name and a wrong number of arguments end up here.
     ;; 名前が知らないものだった場合も、引数の個数が合わない場合もここへ落ちる。
-    (:else (result::err (make-instance 'bad-command :detail (format false "~a with ~d args" kind (len ns)))))))
+    (:else (Result::err (make-instance 'bad-command :detail (format false "~a with ~d args" kind (len ns)))))))
 
 (defun parse-line ((line string)) Result<:dyn Shape, :dyn Error>
   (let ((ws (split-words line)))
     (if (= (len ws) 0)
-        (result::err (make-instance 'bad-command :detail "(blank line)"))
+        (Result::err (make-instance 'bad-command :detail "(blank line)"))
         (match (scan-nums ws 1 (the Vector<int> (Vector::new)))
           ((ok ns) (build-shape (get ws 0) ns))
-          ((err e) (result::err e))))))
+          ((err e) (Result::err e))))))
 
 (defun collect-scene ((lines Vector<string>) (i int) (scene Vector<:dyn Shape>)) Result<Vector<:dyn Shape>, :dyn Error>
   (if (>= i (len lines))
-      (result::ok scene)
+      (Result::ok scene)
       (match (parse-line (get lines i))
         ((ok s) (push scene s) (collect-scene lines (+ i 1) scene))
-        ((err e) (result::err e)))))
+        ((err e) (Result::err e)))))
 
 ;; Turn one-shape-per-line descriptions like "circle 11 5 4" into a scene.
 ;; bad-command and bad-number are different types, but both are :dyn Error, so a

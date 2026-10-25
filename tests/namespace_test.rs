@@ -139,8 +139,8 @@ fn builtins_still_resolve() {
     // type itself, and `Type::ctor` construction, still resolve with no
     // setup needed.
     assert_eq!(
-        ty_program("(option::some 1)"),
-        Type::Named(Path::std("option"), vec![Type::Int])
+        ty_program("(Option::some 1)"),
+        Type::Named(Path::std("Option"), vec![Type::Int])
     );
 }
 
@@ -165,14 +165,14 @@ fn bare_result_and_error_constructors_no_longer_resolve() {
 #[test]
 fn use_option_makes_constructors_callable_bare() {
     assert_eq!(
-        ty_program("(use option) (some 1)"),
-        Type::Named(Path::std("option"), vec![Type::Int])
+        ty_program("(use Option) (some 1)"),
+        Type::Named(Path::std("Option"), vec![Type::Int])
     );
-    // `none` has no fields, so — same limitation as `option::none` alone,
+    // `none` has no fields, so — same limitation as `Option::none` alone,
     // see `prelude_test.rs`'s comment on this — it needs a declared return
     // type to seed `T` from; bare `(none)` with no context can't infer it.
-    let src = "(use option) (defun f () Option<int> (none)) (f)";
-    assert_eq!(ty_program(src), Type::Named(Path::std("option"), vec![Type::Int]));
+    let src = "(use Option) (defun f () Option<int> (none)) (f)";
+    assert_eq!(ty_program(src), Type::Named(Path::std("Option"), vec![Type::Int]));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn use_hashtable_makes_its_static_new_callable_bare() {
     // not `ctors`. A declared return type seeds `K`/`V` the same way any
     // `HashTable::new`/`Vector::new` call needs one (`let`'s binding value
     // is checked with `expected: None`, so `new` can't be inferred there).
-    let src = "(use hashtable) (defun f () HashTable<int,int> (new)) (f)";
+    let src = "(use HashTable) (defun f () HashTable<int,int> (new)) (f)";
     assert_eq!(program(src).expect("check failed").0, "expr");
 }
 
@@ -203,13 +203,13 @@ fn a_used_type_is_the_same_name_in_type_member_position() {
 #[test]
 fn use_is_scoped_to_its_own_namespace() {
     // `use`d inside `m`, `some` stays bare-unresolved at the root.
-    let src = "(module m (use option) (defun f () Option<int> (some 1))) (some 1)";
+    let src = "(module m (use Option) (defun f () Option<int> (some 1))) (some 1)";
     assert!(program(src).is_err());
 }
 
 #[test]
 fn use_inside_a_module_does_not_leak_to_a_sibling_module() {
-    let src = "(module a (use option)) (module b (defun f () Option<int> (some 1)))";
+    let src = "(module a (use Option)) (module b (defun f () Option<int> (some 1)))";
     assert!(program(src).is_err());
 }
 

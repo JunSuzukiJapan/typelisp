@@ -113,23 +113,23 @@ fn a_parameter_nothing_decides_is_an_error() {
         "{}\n(impl Box<T> (make<U> (self) Option<U> (Option::none)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
         DEFS
     ));
-    assert!(msg.contains("cannot infer type parameter `u`"), "{}", msg);
+    assert!(msg.contains("cannot infer type parameter `U`"), "{}", msg);
 }
 
 #[test]
 fn an_own_parameter_may_not_reuse_the_owners_name() {
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<T> (self (x T)) T x))");
-    assert!(msg.contains("the method's own type parameter `t` has the name of a type parameter of `box`"), "{}", msg);
+    assert!(msg.contains("the method's own type parameter `T` has the name of a type parameter of `Box`"), "{}", msg);
     // The declared name counts too, though this receiver spells it `A`: the
     // registered signature is written in the declared names.
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<A> (bad<T> (self (x T)) T x))");
-    assert!(msg.contains("the method's own type parameter `t`"), "{}", msg);
+    assert!(msg.contains("the method's own type parameter `T`"), "{}", msg);
 }
 
 #[test]
 fn an_own_parameter_may_not_be_declared_twice() {
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<U,U> (self (x U)) U x))");
-    assert!(msg.contains("type parameter `u` is declared twice"), "{}", msg);
+    assert!(msg.contains("type parameter `U` is declared twice"), "{}", msg);
 }
 
 /// `Pair<T,int>` names one of two variables, and specialization would have
@@ -137,14 +137,14 @@ fn an_own_parameter_may_not_be_declared_twice() {
 #[test]
 fn a_partly_generic_receiver_is_refused() {
     let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (bad<U> (self (x U)) U x))");
-    assert!(msg.contains("names every type parameter of `pair` as a distinct variable"), "{}", msg);
+    assert!(msg.contains("names every type parameter of `Pair` as a distinct variable"), "{}", msg);
 }
 
 /// A name the header does not declare is still unknown.
 #[test]
 fn an_undeclared_type_variable_is_still_unknown() {
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<U> (self (x W)) U x))");
-    assert!(msg.contains("unknown type `w`"), "{}", msg);
+    assert!(msg.contains("unknown type `W`"), "{}", msg);
 }
 
 /// A trait declares its methods' signatures, and those have no type
@@ -154,5 +154,5 @@ fn an_impl_method_cannot_add_type_parameters() {
     let msg = check_err(
         "(deftrait Show () (show ((self Self)) string))\n(defstruct P (x int))\n(impl Show P (show<U> ((self P)) string \"p\"))",
     );
-    assert!(msg.contains("`show<u>` declares type parameters of its own"), "{}", msg);
+    assert!(msg.contains("`show<U>` declares type parameters of its own"), "{}", msg);
 }

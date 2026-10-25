@@ -414,13 +414,13 @@ fn int_to_char_panics_past_the_max_scalar_value() {
     assert!(matches!(run("(int->char 1114112)"), Err(EvalError::Panic(_))));
 }
 
-// ---- symbol->string / string->symbol --------------------------------------------
+// ---- symbol->string / intern --------------------------------------------
 
 #[test]
 fn symbol_to_string_extracts_the_name() {
     // `symbol->string : Symbol -> string`. A `Symbol` is produced by
-    // `string->symbol` (or `gensym`), not by a quoted-datum `Sexpr`.
-    assert_eq!(eval_string(r#"(symbol->string (string->symbol "foo"))"#), "foo");
+    // `intern` (or `gensym`), not by a quoted-datum `Sexpr`.
+    assert_eq!(eval_string(r#"(symbol->string (intern "foo"))"#), "foo");
 }
 
 #[test]
@@ -431,13 +431,33 @@ fn symbol_to_string_rejects_a_non_symbol_at_check_time() {
 }
 
 #[test]
-fn string_to_symbol_round_trips_symbol_to_string() {
+fn intern_round_trips_symbol_to_string() {
     // Stated at `string`, where the two sides are the same type outright.
-    assert_eq!(eval_string(r#"(symbol->string (string->symbol "foo"))"#), "foo");
+    assert_eq!(eval_string(r#"(symbol->string (intern "foo"))"#), "foo");
     // And against the quoted symbol, in either order: `'foo` is a `Symbol`
     // too, so both sides of the generic `equal<T>(T, T)` already agree.
-    assert_eq!(eval_ok(r#"(equal (string->symbol "foo") (quote foo))"#), Value::Bool(true));
-    assert_eq!(eval_ok(r#"(equal (quote foo) (string->symbol "foo"))"#), Value::Bool(true));
+    assert_eq!(eval_ok(r#"(equal (intern "foo") (quote foo))"#), Value::Bool(true));
+    assert_eq!(eval_ok(r#"(equal (quote foo) (intern "foo"))"#), Value::Bool(true));
+}
+
+/// CL's `intern` makes no symbol when the module already sees one of that
+/// name: what it hands back is the symbol the reader reads the name as there,
+/// so a name `std` offers is `std`'s symbol in any module.
+#[test]
+fn intern_returns_the_symbol_the_module_already_sees() {
+    assert_eq!(eval_ok(r#"(eq (intern "push") (quote push))"#), Value::Bool(true));
+    assert_eq!(
+        eval_ok(r#"(module m (pub defun f () bool (eq (intern "push") (quote push)))) (m::f)"#),
+        Value::Bool(true)
+    );
+    assert_eq!(eval_ok(r#"(eq (intern "a-fresh-name") (intern "a-fresh-name"))"#), Value::Bool(true));
+}
+
+/// CL signals an error for a package that does not exist; `intern` does not
+/// make the module.
+#[test]
+fn intern_into_a_module_that_does_not_exist_is_an_error() {
+    assert!(matches!(run(r#"(intern "x" "no-such-module")"#), Err(EvalError::Panic(_))));
 }
 
 // `set-car`/`set-cdr` (destructive `Sexpr` cons mutation) were removed with the
@@ -482,62 +502,62 @@ fn eval_true(src: &str) {
 
 #[test]
 fn unwrap_returns_the_some_payload() {
-    assert_eq!(eval_ok("(unwrap (option::some 5))"), Value::Int(5));
+    assert_eq!(eval_ok("(unwrap (Option::some 5))"), Value::Int(5));
 }
 
 #[test]
 fn unwrap_panics_on_none() {
-    let src = "(defun get-opt () Option<int> (option::none)) (unwrap (get-opt))";
+    let src = "(defun get-opt () Option<int> (Option::none)) (unwrap (get-opt))";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn unwrap_or_returns_the_payload_when_some() {
-    assert_eq!(eval_ok("(unwrap-or (option::some 5) 9)"), Value::Int(5));
+    assert_eq!(eval_ok("(unwrap-or (Option::some 5) 9)"), Value::Int(5));
 }
 
 #[test]
 fn unwrap_or_returns_the_default_when_none() {
-    let src = "(defun get-opt () Option<int> (option::none)) (unwrap-or (get-opt) 9)";
+    let src = "(defun get-opt () Option<int> (Option::none)) (unwrap-or (get-opt) 9)";
     assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn is_some_distinguishes_some_from_none() {
-    eval_true("(is-some (option::some 1))");
-    let src = "(defun get-opt () Option<int> (option::none)) (is-some (get-opt))";
+    eval_true("(is-some (Option::some 1))");
+    let src = "(defun get-opt () Option<int> (Option::none)) (is-some (get-opt))";
     assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
 fn is_none_distinguishes_none_from_some() {
-    let src = "(defun get-opt () Option<int> (option::none)) (is-none (get-opt))";
+    let src = "(defun get-opt () Option<int> (Option::none)) (is-none (get-opt))";
     eval_true(src);
-    assert_eq!(eval_ok("(is-none (option::some 1))"), Value::Bool(false));
+    assert_eq!(eval_ok("(is-none (Option::some 1))"), Value::Bool(false));
 }
 
 #[test]
 fn result_unwrap_returns_the_ok_payload() {
-    let src = "(defun get-r () Result<int,ParseIntError> (result::ok 7)) (unwrap (get-r))";
+    let src = "(defun get-r () Result<int,ParseIntError> (Result::ok 7)) (unwrap (get-r))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn result_unwrap_panics_on_err() {
-    let src = r#"(defun get-r () Result<int,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
+    let src = r#"(defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn result_unwrap_or_returns_the_default_on_err() {
-    let src = r#"(defun get-r () Result<int,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
+    let src = r#"(defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn result_is_ok_and_is_err() {
-    let ok_src = "(defun get-r () Result<int,ParseIntError> (result::ok 7)) (is-ok (get-r))";
-    let err_src = r#"(defun get-r () Result<int,ParseIntError> (result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
+    let ok_src = "(defun get-r () Result<int,ParseIntError> (Result::ok 7)) (is-ok (get-r))";
+    let err_src = r#"(defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
     eval_true(ok_src);
     eval_true(err_src);
 }
@@ -548,8 +568,8 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     // disambiguated by `Checker::receiver_method` from each call's
     // receiver type, like any other type's instance methods.
     let src = r#"
-        (defun get-r () Result<int,ParseIntError> (result::ok 3))
-        (+ (unwrap (option::some 4)) (unwrap (get-r)))
+        (defun get-r () Result<int,ParseIntError> (Result::ok 3))
+        (+ (unwrap (Option::some 4)) (unwrap (get-r)))
     "#;
     assert_eq!(eval_ok(src), Value::Int(7));
 }
@@ -649,7 +669,7 @@ fn until_does_not_run_the_body_when_the_test_is_already_true() {
 #[test]
 fn while_let_drains_an_option_producing_call_until_none() {
     let src = r#"
-        (defun next ((n int)) Option<int> (if (> n 0) (option::some n) (option::none)))
+        (defun next ((n int)) Option<int> (if (> n 0) (Option::some n) (Option::none)))
         (let ((i 5) (sum 0))
           (while-let ((some x) (next i))
             (setf sum (+ sum x))
@@ -663,7 +683,7 @@ fn while_let_drains_an_option_producing_call_until_none() {
 #[test]
 fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
     let src = r#"
-        (defun get-opt () Option<int> (option::none))
+        (defun get-opt () Option<int> (Option::none))
         (let ((ran false))
           (while-let ((some x) (get-opt)) (setf ran true))
           ran)

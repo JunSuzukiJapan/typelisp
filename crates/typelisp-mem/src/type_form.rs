@@ -21,7 +21,7 @@
 //! type two ways.
 
 use crate::names::ConcreteNames;
-use crate::symbols::{child_ns_named, intern_exact, wk, NsId, SymRef};
+use crate::symbols::{child_ns_named, intern_in, wk, NsId, SymRef};
 use crate::{Heap, TypeId, TypeShape, Value};
 
 /// The interned identity of the type `form` writes, minting it if it has not
@@ -116,7 +116,7 @@ fn definition(heap: &Heap, path: Value) -> Option<(NsId, SymRef)> {
     let segments = heap.path_segments(id);
     let (root, segs) = segments.split_first()?;
     let (name, modules) = segs.split_last()?;
-    if *root != intern_exact(NsId::ROOT, "") {
+    if *root != intern_in(NsId::ROOT, "") {
         return None;
     }
     let mut ns = NsId::ROOT;
@@ -161,7 +161,7 @@ fn path_spelling(heap: &Heap, path: Value) -> Option<String> {
     let Value::Path(id) = path else { return None };
     let segments = heap.path_segments(id);
     let (root, segs) = segments.split_first()?;
-    if *root != intern_exact(NsId::ROOT, "") || segs.is_empty() {
+    if *root != intern_in(NsId::ROOT, "") || segs.is_empty() {
         return None;
     }
     Some(segs.iter().map(|s| s.name()).collect::<Vec<_>>().join("::"))

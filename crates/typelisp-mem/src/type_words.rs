@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 
-use crate::symbols::{child_ns, intern_exact, ns_name, ns_parent, NsId, SymRef};
+use crate::symbols::{child_ns, intern_in, ns_name, ns_parent, NsId, SymRef};
 use crate::{TypeId, TypeShape};
 
 const NAMED: i64 = 0;
@@ -247,7 +247,7 @@ impl Reader<'_> {
 
     unsafe fn sym(&mut self) -> SymRef {
         let home = self.ns();
-        intern_exact(home, self.string())
+        intern_in(home, self.string())
     }
 
     fn ids(&mut self, defined: &[TypeId]) -> Vec<TypeId> {
@@ -277,7 +277,7 @@ mod tests {
         let m = child_ns(NsId::STD, "type-words-test");
         let int = crate::intern_type(TypeShape::named(NsId::STD, "int", &[]));
         let gen = crate::intern_type(TypeShape::named(m, "gen", &[int, TypeId::OPTION_SEXPR]));
-        let template = crate::intern_type(TypeShape::named(NsId::STD, "option", &[crate::intern_type(TypeShape::Param(1))]));
+        let template = crate::intern_type(TypeShape::named(NsId::STD, "Option", &[crate::intern_type(TypeShape::Param(1))]));
         let f = crate::intern_type(TypeShape::Fn(vec![gen], Some(int), crate::intern_type(TypeShape::Unit)));
         let ptr = crate::intern_type(TypeShape::Ptr(gen));
         let mut list = TypeWords::default();
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn a_definition_reads_back() {
         let m = child_ns(child_ns(NsId::ROOT, "type-words-test"), "inner");
-        let sym = intern_exact(m, "callback");
+        let sym = intern_in(m, "callback");
         assert_eq!(unsafe { read_definition(&placed(&definition_words(m, sym))) }, (m, sym));
         assert_eq!(unsafe { read_ns(&placed(&ns_words(m))) }, m);
         assert_eq!(unsafe { read_ns(&placed(&ns_words(NsId::ROOT))) }, NsId::ROOT);

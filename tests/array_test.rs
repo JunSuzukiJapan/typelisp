@@ -313,7 +313,7 @@ fn aref_evaluates_the_array_before_its_subscripts() {
     // The rewrite reads the array last (at the `get`), so it must be bound
     // first for `(aref (f) (g))` to run `f` before `g` as written.
     let src = "(let ((log (the Vector<int> (Vector::new))))
-                 (labels ((arr () array<int> (progn (push log 1) (Array::new (dims1 2) 0)))
+                 (labels ((arr () Array<int> (progn (push log 1) (Array::new (dims1 2) 0)))
                           (sub () int (progn (push log 2) 0)))
                    (progn (aref (arr) (sub))
                           (foldl (iter log) (lambda ((acc int) (x int)) int (+ (* acc 10) x)) 0))))";

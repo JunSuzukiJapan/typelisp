@@ -129,7 +129,7 @@ determined*）。site 名は POSIX に記録場所が無いので常に `none`�
 固まらないため。
 
 `ed` の `$VISUAL`／`$EDITOR` は空白で分割されるので `EDITOR="code -w"` も書ける。
-どちらも未設定なら `Err`——`vi` を推測しない。行番号は `+N` の形で先頭に渡す。
+どちらも未設定なら `err`——`vi` を推測しない。行番号は `+N` の形で先頭に渡す。
 
 `dribble` が記録するのは、セッションの出力がプロセスを出る 3 つの経路すべて:
 `print`/`println`/`format` が書くもの、標準出力へつながるストリームへ書いたもの、
@@ -138,13 +138,13 @@ determined*）。site 名は POSIX に記録場所が無いので常に `none`�
 ## 6. 解析・評価
 
 いずれも実行時の（プログラム自身は制御できない）テキスト・データを扱うため、失敗時は panic では
-なく `Result` の `Err` を返す。エラー型は操作ごとの具象型（[エラー型](option-result.md#3-エラー型と-error-トレイト)）。
+なく `Result` の `err` を返す。エラー型は操作ごとの具象型（[エラー型](option-result.md#3-エラー型と-error-トレイト)）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL の `parse-integer`。前後の空白（`trim` と同じ集合）を読み飛ばし、符号 `+`/`-` を 1 つ、続けて `radix` 進（既定 10、2〜36。10 より上の桁は大文字小文字どちらでも）の数字を読む。桁数に上限は無い（`int`）。それ以外の文字が残れば `Err`。`:junk-allowed true` なら最初の非数字で読むのをやめて残りを無視する——ただし数字が 1 つも無ければ `Err`（CL の `nil` に当たる）。CL の第 2 値（読み終わり位置）は返さない。範囲外の `radix` は panic（テキストではなく呼び出し側の誤り） |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL の `parse-integer`。前後の空白（`trim` と同じ集合）を読み飛ばし、符号 `+`/`-` を 1 つ、続けて `radix` 進（既定 10、2〜36。10 より上の桁は大文字小文字どちらでも）の数字を読む。桁数に上限は無い（`int`）。それ以外の文字が残れば `err`。`:junk-allowed true` なら最初の非数字で読むのをやめて残りを無視する——ただし数字が 1 つも無ければ `err`（CL の `nil` に当たる）。CL の第 2 値（読み終わり位置）は返さない。範囲外の `radix` は panic（テキストではなく呼び出し側の誤り） |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。`inf`/`nan` も受ける |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s` から `Sexpr` を1つ読む（ソースを読むのと同じリーダ）。不完全な括弧・文字列などは `Err`。ストリームから読むのは `read-sexpr`（[ストリーム](streams-files.md#6-ジェネリック関数とファイル操作)） |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s` から `Sexpr` を1つ読む（ソースを読むのと同じリーダ）。不完全な括弧・文字列などは `err`。ストリームから読むのは `read-sexpr`（[ストリーム](streams-files.md#6-ジェネリック関数とファイル操作)） |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
 | `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上だが datum を終わらせた空白を消費しない。違いは返る位置に出る |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
@@ -167,7 +167,7 @@ CL は `read-from-string` から**2 値**（値と位置）を返すが、この
 preserving 版は 2 を返す。
 
 リーダが読む数値表記は [構文リファレンス 1 章](../syntax.md#1-字句要素)。`*print-radix*`
-（[印字](printing.md#62-基数大小読み戻し)）が印字する表記はそのまま読み戻せる。CL の `*read-base*` は無い。
+（[印字](printing.md#62-基数読み戻し)）が印字する表記はそのまま読み戻せる。CL の `*read-base*` は無い。
 
 ### 6.1 `eval` の意味
 
@@ -192,7 +192,7 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
   走る前に検査され「未定義」になる。ただし **後続の `eval` からは見える**（その `eval` の型チェックは
   実行時、定義後に走るため）。REPL は1行ずつ検査・実行するので、`eval` で定義した名前を次の行から
   直接呼べる。
-- **エラーの扱い**: 型エラー・構文エラーは `Err` を返す（panic しない）。評価したコード内の
+- **エラーの扱い**: 型エラー・構文エラーは `err` を返す（panic しない）。評価したコード内の
   **実行時の panic**（ゼロ除算など）は、直接書いたコードと同様にそのまま伝わる。途中の
   `unwind-protect` の cleanup は走る（[構文リファレンス 8 章](../syntax.md#8-非局所脱出catch--throw--unwind-protect)）。
 - **名前空間**: `typl file.typl` の実行時と AOT 実行ファイルの中では、`eval` はそのスクリプトの

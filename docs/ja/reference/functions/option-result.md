@@ -2,28 +2,28 @@
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-構成子: `Option<T>` は `Some(T)` / `None`。`Result<T,E>` は `Ok(T)` / `Err(E)`。
+構成子: `Option<T>` は `(some T)` / `none`。`Result<T,E>` は `(ok T)` / `(err E)`。
 `E` は任意の型でよい——組み込みの具象エラー型も、`defstruct`/`defenum` で書いた自前の型も
 そのまま載る（3 章）。
 
 | 名前 | 形式 | Option | Result | 説明 |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | 値を取り出す。`None`/`Err` なら panic |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | 値を取り出す。`none`/`err` なら panic |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | 値、または既定値 |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `Some` か |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `None` か |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `Ok` か |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `Err` か |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 値を取り出す。`None`/`Err` なら `msg` で panic |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 値、または `f` の結果。`f` は `None`/`Err` のときだけ呼ばれる |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok` の中身に `f` を適用する |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err` の中身に `f` を適用する |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok` なら中身を `f` に渡し、その結果を返す |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err` なら `f` の結果を返す |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)` を `Ok(v)` に、`None` を `Err(e)` にする |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `some` か |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `none` か |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `ok` か |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `err` か |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 値を取り出す。`none`/`err` なら `msg` で panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 値、または `f` の結果。`f` は `none`/`err` のときだけ呼ばれる |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `some`/`ok` の中身に `f` を適用する |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `err` の中身に `f` を適用する |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `some`/`ok` なら中身を `f` に渡し、その結果を返す |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err` なら `f` の結果を返す |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)` を `(ok v)` に、`none` を `(err e)` にする |
 
-構成子は `Option::some`/`Option::none`/`Result::ok`/`Result::err`（または `(use option)`/
-`(use result)` で裸名 `some`/`none`/`ok`/`err` も使える）。
+構成子は `Option::some`/`Option::none`/`Result::ok`/`Result::err`（または `(use Option)`/
+`(use Result)` で裸名 `some`/`none`/`ok`/`err` も使える）。
 
 分岐は `match` で明示するか、上の `map`/`and-then` などでつなぐ。Rust の `?` に当たる構文は無い。
 
@@ -36,9 +36,9 @@
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
-(-> (option::some 8)
+(-> (Option::some 8)
     (and-then half)                          ; (some 4)
     (and-then half)                          ; (some 2)
     (map (lambda ((x int)) int (* x 10)))    ; (some 20)
@@ -97,7 +97,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | エラーメッセージ（`Error` トレイトのメソッド） |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | このエラーが包んでいる原因、無ければ `None`（Rust の `Error::source`） |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | このエラーが包んでいる原因、無ければ `none`（Rust の `Error::source`） |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>`（`E` は `Error` 実装） | 具象エラー型を trait オブジェクトへ広げる |
 | `describe-error` | `(describe-error e)` | `E→string`（`E` は `Error` 実装） | メッセージと、`source` を辿った原因の連鎖を 1 行 1 原因で。CL に対応物は無い（Rust の "caused by"） |
 
@@ -107,10 +107,10 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (option::none)))
+  (source ((self Self)) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; 具象型をそのまま E に載せる
-  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
+  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; 種類を問わず一様に扱う
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -125,7 +125,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (result::err e))))
+    ((err e) (Result::err e))))
 ```
 
 **型とトレイトは1つの名前空間を共有する**（Rust と同じ）。同じモジュール内で

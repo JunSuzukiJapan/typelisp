@@ -127,7 +127,7 @@ fn pop_removes_and_returns_some_of_the_last_element() {
                    (push v 1)
                    (push v 2)
                    (push v 3)
-                   (match (pop v) ((Some x) x) ((None) -1))))
+                   (match (pop v) ((some x) x) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
@@ -148,7 +148,7 @@ fn pop_on_an_empty_vector_returns_none() {
     let src = "(defun make-v () Vector<int> (Vector::new))
                (defun f () int
                  (let ((v (make-v)))
-                   (match (pop v) ((Some x) x) ((None) -1))))
+                   (match (pop v) ((some x) x) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(-1));
 }

@@ -99,6 +99,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "int-receiver-type?",
     "float-receiver-type?",
     "int-wsig",
+    "width-cast-target",
     "build-normalize-int",
     "int-native-method?",
     "sexpr-native-method?",

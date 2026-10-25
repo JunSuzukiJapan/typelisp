@@ -445,7 +445,7 @@ impl Info {
     /// function.
     ///
     /// `ret` is here for the receiver-less case: with no receiver to classify,
-    /// the result is the only thing that says whether `(vector::new)` is a
+    /// the result is the only thing that says whether `(Vector::new)` is a
     /// container operation the island open-codes or an ordinary call.
     pub(super) fn assoc_form(
         &self,
@@ -759,7 +759,7 @@ impl Info {
             // change touch only the checker's choice of node, not the two
             // consumers that compile one.
             Pattern::Ctor { type_name, variant: 0, args, downcast: false, .. }
-                if args.is_empty() && crate::types::path_is_builtin(type_name, "sexpr") =>
+                if args.is_empty() && crate::types::path_is_builtin(type_name, typelisp_mem::wk::SEXPR) =>
             {
                 core::tagged(heap, wk::PAT_EMPTY, &[])?
             }

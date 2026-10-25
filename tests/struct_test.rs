@@ -546,7 +546,7 @@ fn match_reads_the_fields_beside_a_unit_one_correctly() {
 fn a_unit_payload_keeps_an_enum_heap_representable() {
     // `()` has a field encoding, so `Result<(), E>` is a heap enum box like
     // any other and can cross into compiled code.
-    let src = "(defun f () Result<(), string> (result::ok ())) (f)";
+    let src = "(defun f () Result<(), string> (Result::ok ())) (f)";
     assert!(
         matches!(eval_ok(src), Value::Boxed(_)),
         "a `()` payload must leave the enum a heap box"
@@ -555,7 +555,7 @@ fn a_unit_payload_keeps_an_enum_heap_representable() {
 
 #[test]
 fn a_unit_payload_matches_and_binds() {
-    let src = "(defun f () Result<(), string> (result::ok ())) \
+    let src = "(defun f () Result<(), string> (Result::ok ())) \
                (match (f) ((ok u) u) ((err _) ()))";
     assert_eq!(eval_ok(src), Value::Empty);
 }

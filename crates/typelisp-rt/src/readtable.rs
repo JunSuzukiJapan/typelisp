@@ -20,10 +20,10 @@ use typelisp_mem::{spec, Heap, StdModule, TypeSpec, Value};
 /// built under a type nobody else gives it is unmatchable.
 pub const READER_MACRO_OPTION_TYPE: TypeSpec = TypeSpec::Named(
     StdModule::STD,
-    "option",
+    "Option",
     &[TypeSpec::Fn(
         &[TypeSpec::Named(StdModule::IO, "string-input-stream", &[]), spec::CHAR],
-        &TypeSpec::Named(StdModule::STD, "option", &[spec::SEXPR]),
+        &TypeSpec::Named(StdModule::STD, "Option", &[spec::SEXPR]),
     )],
 );
 

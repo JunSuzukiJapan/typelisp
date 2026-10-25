@@ -154,7 +154,7 @@ fn set_then_get_returns_some() {
                (defun f () string
                  (let ((h (make-h)))
                    (set h 1 \"a\")
-                   (match (get h 1) ((Some v) v) ((None) \"missing\"))))
+                   (match (get h 1) ((some v) v) ((none) \"missing\"))))
                (f)";
     assert_eq!(eval_string(src), "a");
 }
@@ -164,7 +164,7 @@ fn get_missing_key_returns_none() {
     let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
-                   (match (get h 1) ((Some v) v) ((None) \"missing\"))))
+                   (match (get h 1) ((some v) v) ((none) \"missing\"))))
                (f)";
     assert_eq!(eval_string(src), "missing");
 }
@@ -176,7 +176,7 @@ fn set_overwrites_existing_key() {
                  (let ((h (make-h)))
                    (set h 1 \"a\")
                    (set h 1 \"b\")
-                   (match (get h 1) ((Some v) v) ((None) \"missing\"))))
+                   (match (get h 1) ((some v) v) ((none) \"missing\"))))
                (f)";
     assert_eq!(eval_string(src), "b");
 }
@@ -200,10 +200,10 @@ fn remove_returns_removed_value_and_drops_key() {
                (defun f () string
                  (let ((h (make-h)))
                    (set h 1 \"a\")
-                   (let ((removed (match (remove h 1) ((Some v) v) ((None) \"missing\"))))
+                   (let ((removed (match (remove h 1) ((some v) v) ((none) \"missing\"))))
                      (match (get h 1)
-                       ((Some v) v)
-                       ((None) removed)))))
+                       ((some v) v)
+                       ((none) removed)))))
                (f)";
     // After removing key 1, `get h 1` is None, so the result is whatever
     // `remove` returned (proving it returned the removed value, "a", not
@@ -216,7 +216,7 @@ fn remove_missing_key_returns_none() {
     let src = "(defun make-h () HashTable<int,string> (HashTable::new))
                (defun f () string
                  (let ((h (make-h)))
-                   (match (remove h 1) ((Some v) v) ((None) \"missing\"))))
+                   (match (remove h 1) ((some v) v) ((none) \"missing\"))))
                (f)";
     assert_eq!(eval_string(src), "missing");
 }
@@ -242,7 +242,7 @@ fn string_keys_work() {
                (defun f () int
                  (let ((h (make-h)))
                    (set h \"x\" 42)
-                   (match (get h \"x\") ((Some v) v) ((None) 0))))
+                   (match (get h \"x\") ((some v) v) ((none) 0))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -270,7 +270,7 @@ fn instance_method_dispatch_substitutes_k_and_v_independently() {
                  (let ((a (make-ints)) (b (make-strs)))
                    (set a 1 100)
                    (set b \"k\" \"v\")
-                   (match (get a 1) ((Some v) v) ((None) 0))))
+                   (match (get a 1) ((some v) v) ((none) 0))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(100));
 }
@@ -349,7 +349,7 @@ fn sexpr_values_survive_gc_pressure() {
                    (set h 0 (quote (a b c d e)))
                    (dotimes (i 500)
                      (set h 1 (quote (x y z))))
-                   (match (get h 0) ((Some v) v) ((None) (quote boom)))))
+                   (match (get h 0) ((some v) v) ((none) (quote boom)))))
                (f)";
     let (v, h) = run_with_prelude_under_gc_stress(src).expect("eval failed");
     assert_eq!(sexpr_to_string(&h, v), "(a b c d e)");

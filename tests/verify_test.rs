@@ -65,25 +65,25 @@ fn incompatible_block_exits_are_reported() {
 #[test]
 fn an_argument_that_does_not_fit_a_generic_parameter_is_reported() {
     let e = mismatch(r#"(defun first<T> ((v Vector<T>)) i32 1) (first 5)"#);
-    assert!(e.contains("type mismatch: expected `Vector<t>`, found `int`"), "{}", e);
+    assert!(e.contains("type mismatch: expected `Vector<T>`, found `int`"), "{}", e);
 }
 
 #[test]
 fn an_undecided_type_parameter_is_reported() {
-    let e = mismatch(r#"(defun make<T> () Vector<T> (vector::new)) (make)"#);
-    assert!(e.contains("cannot infer type parameter `t` for `make`"), "{}", e);
+    let e = mismatch(r#"(defun make<T> () Vector<T> (Vector::new)) (make)"#);
+    assert!(e.contains("cannot infer type parameter `T` for `make`"), "{}", e);
 }
 
 #[test]
 fn an_undecided_type_parameter_stops_before_its_use_complains() {
-    let e = mismatch(r#"(defun make<T> () Vector<T> (vector::new)) (let ((v (make))) (len v))"#);
-    assert!(e.contains("cannot infer type parameter `t` for `make`"), "{}", e);
+    let e = mismatch(r#"(defun make<T> () Vector<T> (Vector::new)) (let ((v (make))) (len v))"#);
+    assert!(e.contains("cannot infer type parameter `T` for `make`"), "{}", e);
 }
 
 #[test]
 fn the_argument_that_decided_nothing_is_reported_before_its_use() {
     let e = mismatch(r#"(defun first<T> ((v Vector<T>)) T (get v 0)) (let ((x (first 5))) (+ x 1))"#);
-    assert!(e.contains("type mismatch: expected `Vector<t>`, found `int`"), "{}", e);
+    assert!(e.contains("type mismatch: expected `Vector<T>`, found `int`"), "{}", e);
     assert!(e.contains(":1:62:"), "{}", e);
 }
 
@@ -94,7 +94,7 @@ fn an_unmet_where_bound_is_reported() {
            (defun f<T> ((x T)) i32 (:where (shout T)) 1)
            (f 5)"#,
     );
-    assert!(e.contains("f: type `int` does not implement trait `shout` required by `:where` clause on type parameter `t`"), "{}", e);
+    assert!(e.contains("f: type `int` does not implement trait `shout` required by `:where` clause on type parameter `T`"), "{}", e);
 }
 
 #[test]

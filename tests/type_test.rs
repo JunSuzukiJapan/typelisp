@@ -38,8 +38,8 @@ fn primitives() {
     assert_eq!(parse("f64"), Type::F64);
     assert_eq!(parse("bool"), Type::Bool);
     assert_eq!(parse("char"), Type::Char);
-    assert_eq!(parse("String"), Type::Str); // case-folded to "string"
-    assert_eq!(parse("Symbol"), Type::Symbol); // case-folded to "symbol"
+    assert_eq!(parse("string"), Type::Str);
+    assert_eq!(parse("symbol"), Type::Symbol);
 }
 
 #[test]
@@ -52,19 +52,19 @@ fn unit_as_a_generic_argument() {
     // `(`/`)` are reader delimiters, so `()` inside `<..>` is the reader's
     // type-argument grammar taking the pair as the unit type.
     let unit_string = vec![Type::Unit, Type::Str];
-    assert_eq!(parse("Result<(), String>"), Type::Named(Path::root("result"), unit_string.clone()));
+    assert_eq!(parse("Result<(), string>"), Type::Named(Path::root("Result"), unit_string.clone()));
     // Without the space, and with the unit in trailing position too.
-    assert_eq!(parse("Result<(),String>"), Type::Named(Path::root("result"), unit_string));
-    assert_eq!(parse("Result<(),()>"), Type::Named(Path::root("result"), vec![Type::Unit, Type::Unit]));
+    assert_eq!(parse("Result<(),string>"), Type::Named(Path::root("Result"), unit_string));
+    assert_eq!(parse("Result<(),()>"), Type::Named(Path::root("Result"), vec![Type::Unit, Type::Unit]));
 }
 
 #[test]
 fn unit_nested_inside_another_generic_argument() {
     assert_eq!(
-        parse("Option<Result<(), String>>"),
+        parse("Option<Result<(), string>>"),
         Type::Named(
-            Path::root("option"),
-            vec![Type::Named(Path::root("result"), vec![Type::Unit, Type::Str])]
+            Path::root("Option"),
+            vec![Type::Named(Path::root("Result"), vec![Type::Unit, Type::Str])]
         )
     );
 }
@@ -73,35 +73,35 @@ fn unit_nested_inside_another_generic_argument() {
 fn a_unit_argument_records_no_name() {
     // `()` is not a nominal name, so — like a primitive — it contributes
     // nothing to the semantic-token spans; the names around it still line up
-    // with their real columns (`file-error` starts past `result<(), `).
+    // with their real columns (`file-error` starts past `Result<(), `).
     assert_eq!(
-        spans("result<(), file-error>"),
-        vec![("result".to_string(), 1), ("file-error".to_string(), 12)]
+        spans("Result<(), file-error>"),
+        vec![("Result".to_string(), 1), ("file-error".to_string(), 12)]
     );
 }
 
 #[test]
 fn a_less_than_with_no_type_after_it_is_part_of_the_name() {
     // `Result<` at the end of the input has no type after its `<`, so it is
-    // the plain name `result<` — as `string<` is — which no type has; that is
+    // the plain name `Result<` — as `string<` is — which no type has; that is
     // the checker's to report. It used to reach `Path::from_segments` with
     // zero segments.
     let mut h = session();
     let v = Reader::new().read(&mut h, "Result<").expect("read failed");
-    assert_eq!(parse_type(&h, typelisp::mem::NsId::ROOT, v).unwrap(), Type::Named(Path::root("result<"), vec![]));
+    assert_eq!(parse_type(&h, typelisp::mem::NsId::ROOT, v).unwrap(), Type::Named(Path::root("Result<"), vec![]));
 }
 
 #[test]
 fn generic_option_and_vec() {
-    assert_eq!(parse("Option<int>"), Type::Named(Path::root("option"), vec![Type::Int]));
-    assert_eq!(parse("Vec<String>"), Type::Named(Path::root("vec"), vec![Type::Str]));
+    assert_eq!(parse("Option<int>"), Type::Named(Path::root("Option"), vec![Type::Int]));
+    assert_eq!(parse("Vec<string>"), Type::Named(Path::root("Vec"), vec![Type::Str]));
 }
 
 #[test]
 fn nested_generics() {
     assert_eq!(
         parse("Vec<Option<int>>"),
-        Type::Named(Path::root("vec"), vec![Type::Named(Path::root("option"), vec![Type::Int])])
+        Type::Named(Path::root("Vec"), vec![Type::Named(Path::root("Option"), vec![Type::Int])])
     );
 }
 
@@ -110,16 +110,16 @@ fn multi_param_generic() {
     assert_eq!(
         parse("Pair<K,V>"),
         Type::Named(
-            Path::root("pair"),
-            vec![Type::Named(Path::root("k"), vec![]), Type::Named(Path::root("v"), vec![])]
+            Path::root("Pair"),
+            vec![Type::Named(Path::root("K"), vec![]), Type::Named(Path::root("V"), vec![])]
         )
     );
 }
 
 #[test]
 fn sexpr_and_user_types_are_named() {
-    assert_eq!(parse("Sexpr"), Type::Named(Path::root("sexpr"), vec![]));
-    assert_eq!(parse("Point"), Type::Named(Path::root("point"), vec![]));
+    assert_eq!(parse("Sexpr"), Type::Named(Path::root("Sexpr"), vec![]));
+    assert_eq!(parse("Point"), Type::Named(Path::root("Point"), vec![]));
 }
 
 #[test]
@@ -130,11 +130,11 @@ fn never_type() {
 #[test]
 fn qualified_path_types() {
     // `geometry::Point` reads as a Path; its raw name keeps the `::`.
-    assert_eq!(parse("geometry::Point"), Type::Named(Path::of(&["geometry", "point"]), vec![]));
+    assert_eq!(parse("geometry::Point"), Type::Named(Path::of(&["geometry", "Point"]), vec![]));
     // generics stay on the last segment
     assert_eq!(
-        parse("geometry::Vec<String>"),
-        Type::Named(Path::of(&["geometry", "vec"]), vec![Type::Str])
+        parse("geometry::Vec<string>"),
+        Type::Named(Path::of(&["geometry", "Vec"]), vec![Type::Str])
     );
 }
 
@@ -147,7 +147,7 @@ fn function_types() {
     assert_eq!(parse("(fn () bool)"), Type::Fn(vec![], None, Box::new(Type::Bool)));
     assert_eq!(
         parse("(fn (Option<int>) int)"),
-        Type::Fn(vec![Type::Named(Path::root("option"), vec![Type::Int])], None, Box::new(Type::Int))
+        Type::Fn(vec![Type::Named(Path::root("Option"), vec![Type::Int])], None, Box::new(Type::Int))
     );
 }
 
@@ -209,18 +209,18 @@ fn dyn_pins_associated_types_positionally() {
 fn dyn_can_appear_as_a_generic_argument() {
     assert_eq!(
         parse("Vector<:dyn drawable>"),
-        Type::Named(Path::root("vector"), vec![Type::Dyn(Path::root("drawable"), vec![])])
+        Type::Named(Path::root("Vector"), vec![Type::Dyn(Path::root("drawable"), vec![])])
     );
     assert_eq!(
         parse("HashTable<string, :dyn drawable>"),
         Type::Named(
-            Path::root("hashtable"),
+            Path::root("HashTable"),
             vec![Type::Str, Type::Dyn(Path::root("drawable"), vec![])]
         )
     );
     assert_eq!(
         parse("Vector<:dyn iter<int>>"),
-        Type::Named(Path::root("vector"), vec![Type::Dyn(Path::root("iter"), vec![Type::Int])])
+        Type::Named(Path::root("Vector"), vec![Type::Dyn(Path::root("iter"), vec![Type::Int])])
     );
 }
 
@@ -292,10 +292,10 @@ fn a_qualified_name_is_located_at_its_last_segment() {
 #[test]
 fn a_generic_argument_is_located_inside_the_token() {
     // One symbol token, two names: the head at column 1 and the argument at
-    // column 12, past `hashtable<int,`.
+    // column 12, past `HashTable<int,`.
     assert_eq!(
-        spans("hashtable<int,todo-item>"),
-        vec![("hashtable".to_string(), 1), ("todo-item".to_string(), 15)]
+        spans("HashTable<int,todo-item>"),
+        vec![("HashTable".to_string(), 1), ("todo-item".to_string(), 15)]
     );
 }
 
@@ -303,9 +303,9 @@ fn a_generic_argument_is_located_inside_the_token() {
 fn the_head_is_recorded_before_its_arguments() {
     // The order matters: `parse_dyn_type` reinterprets the *first* recorded
     // name as the trait, so an outer name must always precede what nests in it.
-    let found = spans("vector<pair<a-type,b-type>>");
+    let found = spans("Vector<pair<a-type,b-type>>");
     let names: Vec<&str> = found.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, vec!["vector", "pair", "a-type", "b-type"]);
+    assert_eq!(names, vec!["Vector", "pair", "a-type", "b-type"]);
 }
 
 #[test]
@@ -325,10 +325,10 @@ fn a_dyn_head_is_flagged_as_a_trait() {
 
 #[test]
 fn a_nested_dyn_is_flagged_and_located_inside_its_token() {
-    // `vector<:dyn shape>` is a single token; the trait sits at column 13.
+    // `Vector<:dyn shape>` is a single token; the trait sits at column 13.
     let mut h = session();
     let r = Reader::new();
-    let read = r.read_all_in_spanned(&mut h, "t.typl", "vector<:dyn shape>").expect("read failed");
+    let read = r.read_all_in_spanned(&mut h, "t.typl", "Vector<:dyn shape>").expect("read failed");
     let (v, loc) = read[0].clone();
     let mut out = Vec::new();
     typelisp::parse_type_spanned(&h, typelisp::mem::NsId::ROOT, v, Some(&loc), &mut out).expect("parse failed");
@@ -345,18 +345,18 @@ fn without_a_span_the_parse_still_succeeds_and_records_nothing() {
     // Built here, as such a form is, so no element has a position either.
     let mut h = session();
     let rect = h.intern_symbol("rect");
-    let vector = h.intern_symbol("vector");
+    let vector = h.intern_symbol("Vector");
     let apply = h.intern_symbol("%type-apply");
     let tail = h.cons(rect, Value::Empty).unwrap();
     let tail = h.cons(vector, tail).unwrap();
     let v = h.cons(apply, tail).unwrap();
     let mut out = Vec::new();
     let ty = typelisp::parse_type_spanned(&h, typelisp::mem::NsId::ROOT, v, None, &mut out).expect("parse failed");
-    assert_eq!(ty, Type::Named(Path::root("vector"), vec![Type::Named(Path::root("rect"), vec![])]));
+    assert_eq!(ty, Type::Named(Path::root("Vector"), vec![Type::Named(Path::root("rect"), vec![])]));
     assert!(out.is_empty());
 }
 
-/// The *applied* spelling of a generic — `(vector char)` for `Vector<char>`.
+/// The *applied* spelling of a generic — `(Vector char)` for `Vector<char>`.
 ///
 /// Both are one type. The name form is what programs are written in; the
 /// list form exists because a generic *argument* is a whole type expression
@@ -364,16 +364,16 @@ fn without_a_span_the_parse_still_succeeds_and_records_nothing() {
 /// `:dyn` — see the test below for the one that has no name form at all.
 #[test]
 fn a_generic_can_be_written_applied() {
-    let vector_char = Type::Named(Path::root("vector"), vec![Type::Char]);
-    assert_eq!(parse("(vector char)"), vector_char);
+    let vector_char = Type::Named(Path::root("Vector"), vec![Type::Char]);
+    assert_eq!(parse("(Vector char)"), vector_char);
     assert_eq!(parse("Vector<char>"), vector_char);
     // Nested, and with a qualified head — the head is parsed as an ordinary
     // type expression, so every name spelling works there too.
     assert_eq!(
-        parse("(vector (option char))"),
+        parse("(Vector (Option char))"),
         Type::Named(
-            Path::root("vector"),
-            vec![Type::Named(Path::root("option"), vec![Type::Char])]
+            Path::root("Vector"),
+            vec![Type::Named(Path::root("Option"), vec![Type::Char])]
         )
     );
     assert_eq!(
@@ -390,9 +390,9 @@ fn a_generic_can_be_written_applied() {
 #[test]
 fn an_applied_generic_carries_an_argument_no_name_can_spell() {
     assert_eq!(
-        parse("(vector (fn (int) int))"),
+        parse("(Vector (fn (int) int))"),
         Type::Named(
-            Path::root("vector"),
+            Path::root("Vector"),
             vec![Type::Fn(vec![Type::Int], None, Box::new(Type::Int))]
         )
     );
@@ -406,8 +406,8 @@ fn an_applied_generic_carries_an_argument_no_name_can_spell() {
 fn an_applied_generic_is_rejected_without_arguments_or_with_an_applied_head() {
     // `(vector)` supplies no arguments, so it says nothing `vector` doesn't.
     assert!(parse_result("(vector)").is_err());
-    // `(vector<char> int)` gives `vector` two argument lists.
-    assert!(parse_result("(vector<char> int)").is_err());
+    // `(Vector<char> int)` gives `vector` two argument lists.
+    assert!(parse_result("(Vector<char> int)").is_err());
 }
 
 /// `Name<A>::member` names a member of one instantiation, not a type: it
@@ -415,8 +415,8 @@ fn an_applied_generic_is_rejected_without_arguments_or_with_an_applied_head() {
 /// position accepts.
 #[test]
 fn a_member_of_an_instantiation_is_not_a_type() {
-    assert_eq!(parse("vector<char>"), Type::Named(Path::root("vector"), vec![Type::Char]));
-    assert!(parse_result("vector<t>::new").is_err());
+    assert_eq!(parse("Vector<char>"), Type::Named(Path::root("Vector"), vec![Type::Char]));
+    assert!(parse_result("Vector<t>::new").is_err());
     let mut h = session();
-    assert!(Reader::new().read(&mut h, "vector<char>>").is_err());
+    assert!(Reader::new().read(&mut h, "Vector<char>>").is_err());
 }

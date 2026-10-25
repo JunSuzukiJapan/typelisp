@@ -3373,16 +3373,17 @@ pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
     encode(Value::Symbol(typelisp_mem::symbols::intern_at_home_path(&home, &name)))
 }
 
-/// `(intern NAME NAMESPACE)`: the symbol `NAME` in the module the string
-/// `NAMESPACE` names (`symbols::ns_named`) — `"keyword"` for a keyword. The
-/// checker supplies `NAMESPACE` when a call leaves it out, so here it is
-/// always present.
+/// `(intern NAME NAMESPACE)`: the symbol `NAME` reads as in the module the
+/// string `NAMESPACE` names (`symbols::ns_named`) — `"keyword"` for a
+/// keyword — the interpreter's `intern` exactly. The checker supplies
+/// `NAMESPACE` when a call leaves it out, so here it is always present; a
+/// module that does not exist is the language's error, not the runtime's.
 ///
 /// # Safety
 ///
 /// Same as [`rt_intern_symbol`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_intern(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_intern(args: *const i64, argc: u32) -> i64 {
     if argc != 2 {
         fatal("rt_intern: expected 2 arguments");
     }
@@ -3392,9 +3393,11 @@ pub unsafe extern "C" fn rt_intern(args: *const i64, argc: u32) -> i64 {
             _ => fatal("rt_intern: argument is not a Str"),
         }
     };
-    let (name, ns) = (str_arg(0), str_arg(1));
-    let ns = typelisp_mem::symbols::ns_named(&ns);
-    encode(Value::Symbol(typelisp_mem::symbols::intern_in(ns, &name)))
+    let (name, module) = (str_arg(0), str_arg(1));
+    let Some(ns) = typelisp_mem::symbols::ns_named(&module) else {
+        raise(format!("intern: no module named `{}`", module))
+    };
+    encode(Value::Symbol(active_heap().names().read(ns, &name)))
 }
 
 /// `(keywordp s)`: `1` if the symbol is a keyword — owned by the keyword
@@ -5527,11 +5530,11 @@ mod tests {
     /// root) applied to the types `args` are the words of — what a compiled
     /// call site reads out of its type table and hands the shims.
     fn make_type(path: &[&str], args: &[i64]) -> i64 {
-        use typelisp_mem::symbols::{child_ns, intern_exact, NsId};
+        use typelisp_mem::symbols::{child_ns, intern_in, NsId};
         let (name, modules) = path.split_last().expect("a path names something");
         let ns = modules.iter().fold(NsId::ROOT, |ns, seg| child_ns(ns, seg));
         let args: Vec<typelisp_mem::TypeId> = args.iter().map(|w| typelisp_mem::TypeId::from_word(*w).expect("a type's word")).collect();
-        typelisp_mem::intern_type(typelisp_mem::TypeShape::Named(ns, intern_exact(ns, name), args)).word()
+        typelisp_mem::intern_type(typelisp_mem::TypeShape::Named(ns, intern_in(ns, name), args)).word()
     }
 
     fn make_str(s: &str) -> i64 {
@@ -5692,7 +5695,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let type_name = make_type(&["option"], &[]);
+        let type_name = make_type(&["Option"], &[]);
         let payload = encode(Value::Int(42));
         // args = [type-name, raw variant index, field0]
         let args = [type_name, 0, payload];
@@ -5703,7 +5706,7 @@ mod tests {
                 let h = unsafe { active_heap() };
                 assert!(h.is_enum(id));
                 assert!(!h.is_struct(id), "an enum box must not read as a struct");
-                assert_eq!(&*h.enum_type_name(id), "option");
+                assert_eq!(&*h.enum_type_name(id), "Option");
                 assert_eq!(h.enum_variant(id), 0);
                 assert_eq!(h.enum_field_count(id), 1);
             }
@@ -5719,7 +5722,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let type_name = make_type(&["option"], &[]);
+        let type_name = make_type(&["Option"], &[]);
         let args = [type_name, 1];
         let tagged = unsafe { rt_data_new(args.as_ptr(), 2) };
 
@@ -5743,7 +5746,7 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let cell = heap.cons(Value::Int(7), Value::Empty).expect("cons");
-        let type_name = make_type(&["option"], &[]);
+        let type_name = make_type(&["Option"], &[]);
         let args = [type_name, 0, encode(cell)];
         let tagged = unsafe { rt_data_new(args.as_ptr(), 3) };
         let boxed = decode(tagged);
@@ -5880,10 +5883,10 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let empty = unsafe { rt_struct_new([make_type(&["vector"], &[])].as_ptr(), 1) };
+        let empty = unsafe { rt_struct_new([make_type(&["Vector"], &[])].as_ptr(), 1) };
         assert_eq!(unsafe { rt_struct_field_count([empty].as_ptr(), 1) }, 0, "empty vector has length 0");
 
-        let three = [make_type(&["vector"], &[]), encode(Value::Int(10)), encode(Value::Int(20)), encode(Value::Int(30))];
+        let three = [make_type(&["Vector"], &[]), encode(Value::Int(10)), encode(Value::Int(20)), encode(Value::Int(30))];
         let tagged = unsafe { rt_struct_new(three.as_ptr(), 4) };
         assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 3, "raw count, not a tagged Sexpr Int");
     }
@@ -5893,7 +5896,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_type(&["hashtable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
+        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "a fresh map is empty");
 
         // Two int->int entries (keys/values as raw tagged `Sexpr` ints). The
@@ -5907,14 +5910,14 @@ mod tests {
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "two distinct keys");
 
         // `keys` builds a `Vector` whose field count matches the entry count.
-        let keys = unsafe { rt_hashtable_keys([ht, make_type(&["vector"], &[make_type(&["i32"], &[])])].as_ptr(), 2) };
+        let keys = unsafe { rt_hashtable_keys([ht, make_type(&["Vector"], &[make_type(&["i32"], &[])])].as_ptr(), 2) };
         match decode(keys) {
             Value::Boxed(id) => assert_eq!(unsafe { active_heap() }.struct_field_count(id), 2),
             other => panic!("expected a boxed vector, got {:?}", other),
         }
 
         // `entries` builds a `Vector` of `cons-cell`s, one per entry.
-        let entries = unsafe { rt_hashtable_entries([ht, make_type(&["vector"], &[make_type(&["std", "cons-cell"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])])].as_ptr(), 2) };
+        let entries = unsafe { rt_hashtable_entries([ht, make_type(&["Vector"], &[make_type(&["std", "cons-cell"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])])].as_ptr(), 2) };
         match decode(entries) {
             Value::Boxed(id) => {
                 let h = unsafe { active_heap() };
@@ -5937,7 +5940,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_type(&["hashtable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
+        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
         let hash = 5;
         assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 0, "no bucket yet");
 
@@ -5962,7 +5965,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let tagged = unsafe { rt_struct_new([make_type(&["vector"], &[])].as_ptr(), 1) };
+        let tagged = unsafe { rt_struct_new([make_type(&["Vector"], &[])].as_ptr(), 1) };
         assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) }, 0, "push returns Unit (0)");
         assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) }, 0);
 
@@ -5976,7 +5979,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let tagged = unsafe { rt_struct_new([make_type(&["vector"], &[])].as_ptr(), 1) };
+        let tagged = unsafe { rt_struct_new([make_type(&["Vector"], &[])].as_ptr(), 1) };
         unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) };
         unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) };
 

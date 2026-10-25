@@ -765,11 +765,11 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // `set`/`len`/`push`/`pop`) are lowered to a `vector-op` node
             // (`core_bridge::translate_vector_method` -> `rt_struct_*`),
             // not a method call, so — like the native primitive methods
-            // below — they are never a real call target. `vector::iter`
+            // below — they are never a real call target. `Vector::iter`
             // is deliberately excluded from this list: it is a genuine
             // prelude `defmethod` (`vector-iter::new`) and must be
             // `compile`d like any other method.
-            if path_is_builtin(&key.0, "vector") && matches!(key.1.name(), "new" | "get" | "set" | "len" | "push" | "pop") {
+            if path_is_builtin(&key.0, typelisp_mem::wk::VECTOR) && matches!(key.1.name(), "new" | "get" | "set" | "len" | "push" | "pop") {
                 return false;
             }
             // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
@@ -778,7 +778,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // and `get`/`set`/`remove`/`maphash`/`size` — are deliberately
             // absent from that list, so they are validated and transitively
             // compiled like any other method.
-            if path_is_builtin(&key.0, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&key.1.name()) {
+            if path_is_builtin(&key.0, typelisp_mem::wk::HASHTABLE) && HASHTABLE_BUILTIN_METHODS.contains(&key.1.name()) {
                 return false;
             }
             // `llvm-*`/`scope` builtin methods are natively lowered to
@@ -815,14 +815,14 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // `core_bridge` lowers it to a plain `rt_*` call, and there is no
             // function for the graph to reach either.
             if key.0.is_std()
-                && (crate::compile::externs::rt_suspend_method_symbol(key.0.last_segment(), key.1.name()).is_some()
-                    || crate::compile::externs::rt_static_method_symbol(key.0.last_segment(), key.1.name()).is_some())
+                && (crate::compile::externs::rt_suspend_method_symbol(&key.0, key.1.name()).is_some()
+                    || crate::compile::externs::rt_static_method_symbol(&key.0, key.1.name()).is_some())
             {
                 return false;
             }
             interp.root.borrow().has_method(&key.0, key.1.name())
                 || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
-                || !is_native_lowered_primitive_method(key.0.last_segment(), key.1.name())
+                || !is_native_lowered_primitive_method(&key.0, key.1.name())
         })
         .collect();
     for (type_name, method) in &method_targets {

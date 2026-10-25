@@ -129,7 +129,7 @@ fn match_binds_a_variant_payload() {
 
 #[test]
 fn match_selects_the_nullary_arm() {
-    // `Nothing` alone can't infer its `T` (like a bare `(option::none)`), so
+    // `Nothing` alone can't infer its `T` (like a bare `(Option::none)`), so
     // pin it via a return-type-annotated helper — this is a property of the
     // shared inference, not of `defenum`.
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \

@@ -104,8 +104,8 @@ fn an_impl_for_one_instantiation_takes_only_that_instantiation() {
     let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n";
     both_with(defs, r##"(format false "~a" (twice (make-instance 'Box :v 4)))"##, "8");
     let msg = check_err(&format!("{}(defun f () int (twice (make-instance 'Box :v \"s\")))", defs));
-    assert!(msg.contains("no method `twice` for type `box<string>`"), "{}", msg);
-    assert!(msg.contains("`twice` is a method of `box<int>`"), "{}", msg);
+    assert!(msg.contains("no method `twice` for type `Box<string>`"), "{}", msg);
+    assert!(msg.contains("`twice` is a method of `Box<int>`"), "{}", msg);
 }
 
 /// Taken as a value, such a method has its one type, like a method of a type
@@ -121,8 +121,8 @@ fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
          (defun app ((f (fn (Box<string>) int)) (b Box<string>)) int (f b))\n\
          (defun g () int (app twice (make-instance 'Box :v \"s\")))",
     );
-    assert!(msg.contains("no method `twice` for type `box<string>`"), "{}", msg);
-    assert!(msg.contains("`twice` is a method of `box<int>`"), "{}", msg);
+    assert!(msg.contains("no method `twice` for type `Box<string>`"), "{}", msg);
+    assert!(msg.contains("`twice` is a method of `Box<int>`"), "{}", msg);
 }
 
 /// The target names every type parameter as a variable, or none: nothing
@@ -131,5 +131,5 @@ fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
 #[test]
 fn a_target_with_some_variables_and_some_types_is_refused() {
     let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (pub sb (self) int self::b))");
-    assert!(msg.contains("names every type parameter of `pair` as a distinct variable"), "{}", msg);
+    assert!(msg.contains("names every type parameter of `Pair` as a distinct variable"), "{}", msg);
 }

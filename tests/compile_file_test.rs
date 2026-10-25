@@ -184,19 +184,17 @@ fn printer_variables_take_effect_in_a_compiled_executable() {
         r#"(defun main () ()
              (setf *print-base* 16)
              (println "~a" 255)
-             (setf *print-case* :upcase)
-             (println "~s" 'hello)
              (setf *print-length* 2)
              (println "~a" '(1 2 3 4))
-             (setf *print-case* :bogus)
+             (setf *print-length* -1)
              (println "~a" 1))"#,
     )
     .expect("failed to write test source file");
     typelisp::compile::aot::compile_file(src.to_str().unwrap(), out.to_str().unwrap()).expect("compile_file failed");
     let run = Command::new(&out).output().expect("failed to run the compiled executable");
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "ff\nHELLO\n(1 2 ...)\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "ff\n(1 2 ...)\n");
     let stderr = String::from_utf8_lossy(&run.stderr);
-    assert!(stderr.contains("*print-case*") && stderr.contains(":bogus"), "{}", stderr);
+    assert!(stderr.contains("*print-length*") && stderr.contains("got -1"), "{}", stderr);
     assert_ne!(run.status.code(), Some(0));
 }
 
@@ -245,7 +243,7 @@ fn an_enum_variant_name_survives_an_instantiated_key_in_an_executable() {
         compile_and_run(
             "enum_variant_key",
             r#"(defun main () int
-                 (if (equal (format false "~a" (option::some 1)) "(some 1)") 0 1))"#,
+                 (if (equal (format false "~a" (Option::some 1)) "(some 1)") 0 1))"#,
         ),
         0
     );

@@ -208,7 +208,7 @@ enum Spawn {
     /// It is made here.
     No,
     /// `(task CALL)`: it becomes a task of its own, whose handle is built
-    /// under this type (`task<int>`).
+    /// under this type (`Task<int>`).
     Task(TypeId),
     /// `(thread CALL)`: it becomes a task on an OS thread of its own, which
     /// enters the compiled callee; the answer is read back by the node's
@@ -2520,8 +2520,8 @@ impl Interp {
         // *suspend*, and a builtin answers with a value or an error, with no way
         // to say "not yet". Intercepted here, where a `State` can say it.
         // `Thread<T>::join` is the same wait: a thread is a task.
-        if (method == "wait" && crate::types::path_is_builtin(&type_name, "task"))
-            || (method == "join" && crate::types::path_is_builtin(&type_name, "thread"))
+        if (method == "wait" && crate::types::path_is_builtin(&type_name, typelisp_mem::wk::TASK_TYPE))
+            || (method == "join" && crate::types::path_is_builtin(&type_name, typelisp_mem::wk::THREAD_TYPE))
         {
             let on = task_id_of(heap, argv.first().copied())?;
             return Ok((State::Blocked(Waiting::Task(on)), None));
@@ -2535,10 +2535,10 @@ impl Interp {
         // prelude's own `Iter::next`, and any `impl` a program writes) has to
         // fall through to ordinary resolution, and a monomorphized one
         // arrives under a mangled name that matches none of these.
-        if crate::types::path_is_builtin(&type_name, "chan") {
+        if crate::types::path_is_builtin(&type_name, typelisp_mem::wk::CHAN) {
             let op = match method.as_str() {
                 "new" => match argv.first() {
-                    // `ret_type` is the channel's own type (`chan<int>`), which
+                    // `ret_type` is the channel's own type (`Chan<int>`), which
                     // the handle is built under.
                     Some(Value::Int(n)) => ChanOp::New(*n, ret_type),
                     other => {

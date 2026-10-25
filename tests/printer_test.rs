@@ -332,11 +332,16 @@ fn a_computed_control_string_is_refused() {
 }
 
 #[test]
-fn the_name_is_case_folded_like_every_other_name() {
+fn the_name_is_case_sensitive_like_every_other_name() {
     is_true(
         r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
-           (equal (format false "~/SHOUT/" "hi") "hi!")"#,
+           (equal (format false "~/shout/" "hi") "hi!")"#,
     );
+    let e = check_err(
+        r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
+           (format false "~/SHOUT/" "hi")"#,
+    );
+    assert!(e.contains("SHOUT"), "{}", e);
 }
 
 #[test]
@@ -413,15 +418,15 @@ fn print_object_reaches_a_builtin_generic_type() {
 /// instantiation.
 ///
 /// Variant names are registered per enum *type* (`option`), while the key a
-/// value carries names an instantiation (`option<int>`). Looking one up
+/// value carries names an instantiation (`Option<int>`). Looking one up
 /// without splitting the base off printed every `Option` as
 /// `(<unknown-variant> 1)` — 28 tests across nine suites, and none of them was
 /// about printing an `Option`, which is why the whole class only showed up in
 /// the serial full run.
 #[test]
 fn an_enum_variant_name_survives_an_instantiated_key() {
-    is_true(r#"(equal (format false "~a" (option::some 1)) "(some 1)")"#);
-    is_true(r#"(equal (format false "~a" (the Option<int> (option::none))) "none")"#);
+    is_true(r#"(equal (format false "~a" (Option::some 1)) "(some 1)")"#);
+    is_true(r#"(equal (format false "~a" (the Option<int> (Option::none))) "none")"#);
     is_true(
         r#"(defenum box<T> (full T) (empty))
            (equal (format false "~a" (the box<string> (box::full "x"))) "(full x)")"#,
@@ -512,7 +517,7 @@ fn an_array_of_a_type_with_no_print_object_still_builds() {
              (progn (push d 1)
                (let ((a (Array::new d (make-instance 'plain :n 1))))
                  (equal (format false "~a" a)
-                        "#<array<plain> dims: #(1) data: #(#<plain n: 1>) fill-pointer: none>"))))"##,
+                        "#<Array<plain> dims: #(1) data: #(#<plain n: 1>) fill-pointer: none>"))))"##,
     );
 }
 

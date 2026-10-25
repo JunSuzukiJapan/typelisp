@@ -114,11 +114,6 @@ pub struct PrintVars {
     /// `#x`/`#NNr`, or a trailing `.` in base 10), so the printed form reads
     /// back as the same number whatever `*read-base*` is.
     pub radix: bool,
-    /// `*print-case*`: how a symbol's name is rendered. CL stores symbol names
-    /// upcased and defaults to `:upcase`; this language's reader stores them
-    /// downcased, so the default is [`PrintCase::Downcase`] — both mean "as
-    /// stored".
-    pub case: PrintCase,
     /// `*print-readably*`: print so the result reads back as an equal object.
     /// Here that means escapes on and the `*print-level*`/`*print-length*`
     /// cuts off, which is what CL says it overrides. CL additionally signals
@@ -128,7 +123,7 @@ pub struct PrintVars {
     /// is deliberately absent — see `docs/ja/reference/functions/printing.md` §6.2.
     pub readably: bool,
     /// `*print-array*`: show a vector's elements, as `#(1 2 3)`. When false
-    /// a vector prints as `#<vector<int> 3>` — its type and length, not its
+    /// a vector prints as `#<Vector<int> 3>` — its type and length, not its
     /// contents. (`Array<T>`'s own `print-object` reads the same variable.)
     pub array: bool,
 }
@@ -141,21 +136,10 @@ impl Default for PrintVars {
             length: None,
             base: 10,
             radix: false,
-            case: PrintCase::Downcase,
             readably: false,
             array: true,
         }
     }
-}
-
-/// `*print-case*`'s three values, written in typelisp as CL's own keywords
-/// `:upcase` / `:downcase` / `:capitalize` — self-evaluating `symbol`s whose
-/// interned name keeps the colon, not a type of their own.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum PrintCase {
-    Upcase,
-    Downcase,
-    Capitalize,
 }
 
 impl PrintVars {
@@ -170,34 +154,6 @@ impl PrintVars {
         }
     }
 
-    /// A symbol name rendered under `*print-case*`. Never applied under
-    /// `*print-readably*`: changing the case would change which symbol reads
-    /// back (this language's reader folds to lower case, so an upcased name
-    /// still reads back equal — but `:capitalize` on a name containing a
-    /// digit does not round-trip in CL either, and printing readably is not
-    /// the place to find out).
-    pub fn render_symbol(&self, name: &str) -> String {
-        if self.readably {
-            return name.to_string();
-        }
-        match self.case {
-            PrintCase::Downcase => name.to_string(),
-            PrintCase::Upcase => name.to_ascii_uppercase(),
-            PrintCase::Capitalize => name
-                .split_inclusive(|c: char| !c.is_ascii_alphanumeric())
-                .map(|word| {
-                    let mut cs = word.chars();
-                    match cs.next() {
-                        Some(first) => {
-                            first.to_ascii_uppercase().to_string()
-                                + &cs.as_str().to_ascii_lowercase()
-                        }
-                        None => String::new(),
-                    }
-                })
-                .collect(),
-        }
-    }
 }
 
 /// Turns a finished buffer into text: a buffer with no pretty-printer op in it
@@ -629,7 +585,7 @@ fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Nod
                     return Err("format: ~// names nothing to call".to_string());
                 }
                 head.validate('/', &format!("/{}/", name))?;
-                nodes.push(Node::Call { head, name: name.to_ascii_lowercase(), span: (start, end) });
+                nodes.push(Node::Call { head, name, span: (start, end) });
             }
             '^' => {
                 head.validate('^', "^")?;
@@ -2533,7 +2489,7 @@ enum ShareState {
 /// they are deliberately *not* keys: two references to one float box are not
 /// interesting sharing, and labelling them `#1=` would be noise. Hash tables
 /// are excluded for the same practical reason — they render as
-/// `#<hashtable<K,V> count=N>` without recursing, so they can neither cycle nor
+/// `#<HashTable<K,V> count=N>` without recursing, so they can neither cycle nor
 /// usefully be labelled.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum NodeKey {
@@ -2840,18 +2796,16 @@ impl Renderer {
 
     /// A symbol as CL's printer writes it. With escaping (`~s`, `prin1`), a
     /// keyword gets its colon and a name the reader would take for something
-    /// else goes between `|`s; without (`~a`, `princ`), the name alone. Only
-    /// what is outside the bars follows `*print-case*`.
-    fn symbol_text(ctx: RenderCtx<'_>, id: typelisp_mem::SymRef, standard: bool) -> String {
+    /// else goes between `|`s; without (`~a`, `princ`), the name alone.
+    fn symbol_text(id: typelisp_mem::SymRef, standard: bool) -> String {
         let name = id.name();
         if id.is_keyword() {
-            let name = ctx.print_vars.render_symbol(name);
-            return if standard { format!(":{}", name) } else { name };
+            return if standard { format!(":{}", name) } else { name.to_string() };
         }
         if standard && Self::name_needs_bars(name) {
             return format!("|{}|", name);
         }
-        ctx.print_vars.render_symbol(name)
+        name.to_string()
     }
 
     /// Whether `name`, written bare, would read back as something other than
@@ -2930,12 +2884,12 @@ impl Renderer {
                     out.push_str(&heap.string(id));
                 }
             }
-            Value::Symbol(id) => out.push_str(&Self::symbol_text(ctx, id, standard)),
+            Value::Symbol(id) => out.push_str(&Self::symbol_text(id, standard)),
             Value::Path(id) => {
                 let segs: Vec<String> = heap
                     .path_segments(id)
                     .iter()
-                    .map(|s| Self::symbol_text(ctx, *s, standard))
+                    .map(|s| Self::symbol_text(*s, standard))
                     .collect();
                 out.push_str(&segs.join("::"));
             }
@@ -3071,7 +3025,7 @@ impl Renderer {
                 }
             }
             // Named by its whole type, as a `Vector<T>` is: the table carries
-            // its instantiation (`hashtable<string,int>`) from `HashTable::new`.
+            // its instantiation (`HashTable<string,int>`) from `HashTable::new`.
             Value::Boxed(id) if heap.is_hashtable(id) => out.push_str(&format!(
                 "#<{} count={}>",
                 crate::shared::name_view().type_name(heap.struct_type_key(id)),
@@ -3136,7 +3090,7 @@ impl Renderer {
             // than mis-rendered as a float.
             Value::Boxed(_) => return Err("print: unprintable boxed object".to_string()),
             Value::Cons(_) if type_syntax(heap, v).is_some() => {
-                // `(%type-apply vector int)` is `vector<int>`, and
+                // `(%type-apply vector int)` is `Vector<int>`, and
                 // `(%type-member T m)` is `T::m`: the reader's structure for
                 // a generic type, written back the way it is read.
                 match type_syntax(heap, v).expect("checked just above") {

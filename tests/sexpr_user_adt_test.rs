@@ -59,8 +59,8 @@ fn list_of_a_struct_instance_and_an_int_type_checks_as_an_option_sexpr() {
     assert_eq!(
         check(src).expect("check failed"),
         Some(Type::Named(
-            typelisp::Path::std("option"),
-            vec![Type::Named(typelisp::Path::std("sexpr"), vec![])]
+            typelisp::Path::std("Option"),
+            vec![Type::Named(typelisp::Path::std("Sexpr"), vec![])]
         ))
     );
 }
@@ -320,7 +320,7 @@ fn equalp_distinguishes_structs_by_type_name_inside_sexpr_data() {
 #[test]
 fn a_generic_downcast_pattern_head_is_a_type_error() {
     let src = "(defstruct box<T> (v T))
-         (defun f ((s sexpr)) int
+         (defun f ((s Sexpr)) int
            (match s ((box :v) 0) (_ 1)))";
     let err = check(src).unwrap_err();
     let msg = format!("{:?}", err);

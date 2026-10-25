@@ -85,7 +85,7 @@ pub const SOURCE: &str = r##"
 ;; content, which is the departure `docs/dev/cl-equivalence-catalog.md` records
 ;; under eq/eql/equal/equalp. Defined before its caller because definitions are
 ;; checked in source order.
-(module %internal (pub defun case-key-atom-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun case-key-atom-test ((key-form symbol) (key Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-symp key)
       (list (quote equal) key-form (list (quote quote) key))
       (list (quote equal) key-form key))))
@@ -117,7 +117,7 @@ pub const SOURCE: &str = r##"
 ;;
 ;; Iterates with `loop`/`break`/`setf` rather than `while`: `while` and `not`
 ;; are prelude definitions, and this layer loads before the prelude.
-(module %internal (pub defun case-key-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun case-key-test ((key-form symbol) (key Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp key)
       (if (if (sexpr-symp (sexpr-car key)) (equal (sexpr-sym-name (sexpr-car key)) "quote") false)
           (panic "case: a quoted key is not a key list -- write the bare symbol, not 'sym")
@@ -140,7 +140,7 @@ pub const SOURCE: &str = r##"
 ;; here anyway: it is a prelude `defun` (it owns CL's `*gensym-counter*` and
 ;; formats the name through `format`), and this layer loads before the prelude.
 (defmacro case (expr &rest clauses)
-  (let ((tmp (string->symbol " case-key")) (out (quote ())) (rest clauses))
+  (let ((tmp (intern " case-key")) (out (quote ())) (rest clauses))
     (loop
       (if (sexpr-null rest) (break) ())
       (let ((c (sexpr-car rest)))

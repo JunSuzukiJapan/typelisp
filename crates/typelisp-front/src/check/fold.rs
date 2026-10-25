@@ -78,11 +78,7 @@ fn has_literal_node(ty: &Type) -> bool {
 /// of their arguments' values: the same set as [`has_literal_node`], read off
 /// the registry's spelling of the type.
 fn foldable_receiver(type_name: &Path) -> bool {
-    crate::types::INT_TYPE_NAMES
-        .iter()
-        .chain(crate::types::FLOAT_TYPE_NAMES.iter())
-        .chain(["int", "ratio", "rational", "char", "bool"].iter())
-        .any(|n| crate::types::path_is_builtin(type_name, n))
+    crate::types::scalar_type(type_name).is_some_and(|t| has_literal_node(&t))
 }
 
 /// Fold a builtin method call whose arguments are all literals.

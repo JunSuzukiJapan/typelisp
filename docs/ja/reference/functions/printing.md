@@ -224,8 +224,8 @@ pretty printer とも合成される（4 章）。`*print-pretty*` が真なら�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`、`#("a" "b")` | `#(1 2 3)`、`#(a b)` |
 | タプル `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | 同左 |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>`（数字は処理系内の番号） | 同左 |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | 同左 |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>`（数字は処理系内の番号） | 同左 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | 整数（CL の `get-universal-time` / `get-internal-real-time` の値） | 同左 |
 | エラー型（`ParseIntError`、`SimpleError` など） | `#<simpleerror "boom">` | メッセージだけ（`boom`） |
@@ -317,29 +317,26 @@ CL は「無制限」を `nil` で表すが、この言語に `nil` は無いの
 共有が1つも無い値では**ラベルは一切現れない**ので、この変数を真にしたまま普段のコードを動かしても
 出力は変わらない。
 
-### 6.2 基数・大小・読み戻し
+### 6.2 基数・読み戻し
 
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | 整数（固定幅と `int`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
 | `*print-radix*` | `bool` | `false` | 真なら基数の印を付ける。`#b`/`#o`/`#x`、それ以外は `#NNr`、基数 10 は末尾の `.`。印は符号の**前**（`#x-ff`） |
-| `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り）。それ以外のシンボルは印字エラー |
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
 | `*print-lines*` | `int` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 は無制限。負の値は印字エラー |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` が `prin1` と `princ` のどちらをするか。**これを読むのはその 2 つだけ** |
-| `*print-array*` | `bool` | `true` | `Vector<T>` と `Array<T>` が中身を見せるか。真なら CL の配列構文（`#(1 2 3)` / `#2A((1 2) (3 4))`）、偽なら型と形だけの `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` と `Array<T>` が中身を見せるか。真なら CL の配列構文（`#(1 2 3)` / `#2A((1 2) (3 4))`）、偽なら型と形だけの `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 `*print-radix*` が付ける印はリーダが読み戻せる（[構文リファレンス](../syntax.md#1-字句要素)の radix 表記）。
 
-**`*print-case*` の既定が CL と違う理由**: CL の既定は `:upcase` だが、それは CL のリーダが
-シンボル名を大文字で格納するから——つまり「格納されているまま」の意味。このリーダは小文字で
-格納するので、同じ意味になる既定は `:downcase`。
+**`*print-case*` が無い理由**: シンボル名は大文字と小文字を区別し、印字は書かれた綴りのままなので、
+大小を変えて印字すると別のシンボルとして読み戻される。
 
 **`*print-readably*` に無い半分**: CL は読み戻せない値に `print-not-readable` を上げるが、
 この言語には上げるコンディションが無く、`print-object` が何でも印字しうるユーザ型について

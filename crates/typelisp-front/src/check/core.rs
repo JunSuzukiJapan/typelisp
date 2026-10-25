@@ -601,7 +601,7 @@ pub fn field(heap: &Heap, form: Value, i: usize) -> Option<Value> {
 /// printed and read back in any module names the same definitions: a bare
 /// name is read as the reading module's own symbol.
 pub fn path_form(heap: &mut Heap, p: &crate::Path) -> Value {
-    let mut segs = vec![typelisp_mem::symbols::intern_exact(typelisp_mem::NsId::ROOT, "")];
+    let mut segs = vec![typelisp_mem::symbols::intern_in(typelisp_mem::NsId::ROOT, "")];
     segs.extend(typelisp_mem::symbols::ns_names(p.ns()));
     segs.push(p.name_symbol());
     heap.intern_path(&segs)
@@ -849,8 +849,8 @@ mod tests {
             Type::Unit,
             Type::Never,
             Type::Named(point.clone(), vec![]),
-            Type::Named(Path::std("vector"), vec![Type::Named(point.clone(), vec![Type::Char])]),
-            Type::Named(Path::std("hashtable"), vec![Type::Str, Type::I32]),
+            Type::Named(Path::std("Vector"), vec![Type::Named(point.clone(), vec![Type::Char])]),
+            Type::Named(Path::std("HashTable"), vec![Type::Str, Type::I32]),
             Type::Dyn(Path::root("shape"), vec![]),
             Type::Fn(vec![Type::I32, Type::Str], Some(Box::new(Type::Int)), Box::new(Type::Bool)),
             Type::Fn(vec![], None, Box::new(Type::Unit)),

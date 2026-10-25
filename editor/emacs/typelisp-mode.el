@@ -217,7 +217,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "int->int" "ratio->int" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
     "ratio->rational" "rational->int" "try-rational->int" "rational->ratio" "rational->float"
-    "symbol->string" "string->symbol" "intern"
+    "symbol->string" "intern"
     ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate
     ;; via (setf p::car v)/(setf p::cdr v) instead
     "cons" "car" "cdr"
@@ -393,7 +393,7 @@ PRNG stream (CLHS 12.1.6).
     "socket-stream" "socket-byte-stream" "socket-listener" "udp-socket"
     "datagram" "NetError"
     ;; builtin generic/abstract types
-    "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
+    "Option" "Result" "Sexpr" "HashTable" "Vector" "Scope" "Self"
     ;; collections the prelude builds on `HashTable' and `Vector'
     "HashSet" "SortedTable" "Deque"
     ;; the handles `task' and `thread' hand back, the channel tasks talk over,

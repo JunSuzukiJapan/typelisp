@@ -54,7 +54,7 @@ fn equal_values_hash_equal() {
     assert_eq!(eval_ok("(= (sxhash \"hi\") (sxhash \"hi\"))"), Value::Bool(true));
     assert_eq!(eval_ok("(= (sxhash #\\a) (sxhash #\\a))"), Value::Bool(true));
     assert_eq!(eval_ok("(= (sxhash true) (sxhash true))"), Value::Bool(true));
-    assert_eq!(eval_ok("(= (sxhash (string->symbol \"s\")) (sxhash (string->symbol \"s\")))"), Value::Bool(true));
+    assert_eq!(eval_ok("(= (sxhash (intern \"s\")) (sxhash (intern \"s\")))"), Value::Bool(true));
 }
 
 #[test]

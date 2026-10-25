@@ -21,7 +21,7 @@
 //!
 //! ```text
 //! (let ((acc (Vector::new))) (progn (push acc 5) (len acc)))
-//! => type error: cannot infer type argument `t` for `vector::new`
+//! => type error: cannot infer type argument `t` for `Vector::new`
 //! ```
 //!
 //! `Vector::new`'s type argument comes from the *expected* type, forwards; a
@@ -920,12 +920,12 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: &str) -> Result<
 
             let cmp = b.call(op, &[tmp_sym, best_sym])?;
             let pick = b.if_(cmp, tmp_sym, best_sym)?;
-            let some_pick = b.call_member(&crate::Path::std("option"), "some", &[pick])?;
+            let some_pick = b.call_member(&crate::Path::std("Option"), "some", &[pick])?;
             let some_head = b.sym("some");
             let some_pat = b.list(&[some_head, best_sym])?;
             let some_arm = b.list(&[some_pat, some_pick])?;
 
-            let some_tmp = b.call_member(&crate::Path::std("option"), "some", &[tmp_sym])?;
+            let some_tmp = b.call_member(&crate::Path::std("Option"), "some", &[tmp_sym])?;
             let none_head = b.sym("none");
             let none_pat = b.list(&[none_head])?;
             let none_arm = b.list(&[none_pat, some_tmp])?;

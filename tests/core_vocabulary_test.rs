@@ -209,7 +209,7 @@ fn binding_and_control() {
 /// `assoc` carries one more: its own *result* representation, ahead of the
 /// argument list. That is what tells the bridge which of the island's builtin
 /// operations a call is, in the case where the receiver is absent —
-/// `(vector::new)` is a `vector-op` and `(scope::new)` over LLVM handles is a
+/// `(Vector::new)` is a `vector-op` and `(Scope::new)` over LLVM handles is a
 /// `native-scope` op, and with no receiver to look at, the result is the only
 /// place that says so.
 ///
@@ -256,7 +256,7 @@ fn calls() {
         // name, a type key, a field kind) with one form each. The channel
         // expressions are `var`s: the checker bound every operand in a `let`
         // around this node, so nothing here evaluates anything that can stop.
-        "(select (\"recv\" v \"option<int>\" (var c) (var v)) (\"else\" (int-any-width 0)))",
+        "(select (\"recv\" v \"Option<int>\" (var c) (var v)) (\"else\" (int-any-width 0)))",
         "(select (\"send\" 1 (var c) (var x) (int-any-width 0)))",
     ]);
     // `compile-fn`'s two payload shapes, standalone for the same reason the

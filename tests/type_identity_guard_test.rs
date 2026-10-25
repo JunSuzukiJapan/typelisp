@@ -211,23 +211,23 @@ fn the_runtimes_fixed_types_are_the_checkers() {
     use typelisp::TypeId;
 
     for (id, path) in [
-        (TypeId::OPTION, Path::std("option")),
-        (TypeId::RESULT, Path::std("result")),
-        (TypeId::FILE_ERROR, Path::std(typelisp::check::registry::FILE_ERROR)),
-        (TypeId::READ_ERROR, Path::std(typelisp::check::registry::READ_ERROR)),
-        (TypeId::PARSE_INT_ERROR, Path::std(typelisp::check::registry::PARSE_INT_ERROR)),
-        (TypeId::PARSE_FLOAT_ERROR, Path::std(typelisp::check::registry::PARSE_FLOAT_ERROR)),
+        (TypeId::OPTION, Path::std("Option")),
+        (TypeId::RESULT, Path::std("Result")),
+        (TypeId::FILE_ERROR, Path::std("FileError")),
+        (TypeId::READ_ERROR, Path::std("ReadError")),
+        (TypeId::PARSE_INT_ERROR, Path::std("ParseIntError")),
+        (TypeId::PARSE_FLOAT_ERROR, Path::std("ParseFloatError")),
         // `file-list-directory` builds a `Vector<string>` box directly, and
         // `read-datum-at` pairs its datum with its end index in a
         // `cons-cell<Sexpr, int>` box (CL's second return value, which this
         // language has no multiple values to carry) — both on the runtime's
         // own side of the boundary, so both need the identity too.
-        (TypeId::VECTOR, Path::std("vector")),
+        (TypeId::VECTOR, Path::std("Vector")),
         (TypeId::CONS_CELL, Path::std("cons-cell")),
         // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
         // `Scope<V>` is made of.
-        (TypeId::HASHTABLE, Path::std("hashtable")),
-        (TypeId::SCOPE, Path::std("scope")),
+        (TypeId::HASHTABLE, Path::std("HashTable")),
+        (TypeId::SCOPE, Path::std("Scope")),
         (TypeId::SCOPE_FRAME, Path::std("scope-frame")),
         // Three prelude `defstruct`s the runtime builds itself, because the
         // facts in them belong to the runtime and not to the checker: two
@@ -238,8 +238,8 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         (TypeId::INTERNAL_TIME, Path::in_ns(typelisp::std_module("time"), "internal-time")),
         (TypeId::HEAP_INFO, Path::in_ns(typelisp::std_module("repl"), "heap-info")),
         // The socket layer's error type, built by `net_builtin`.
-        (TypeId::NET_ERROR, Path::std("neterror")),
-        (TypeId::SEXPR, Path::std("sexpr")),
+        (TypeId::NET_ERROR, Path::std("NetError")),
+        (TypeId::SEXPR, Path::std("Sexpr")),
     ] {
         assert_eq!(
             id,
@@ -340,7 +340,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     use typelisp::TypeId;
 
     let reg = Registry::with_builtins();
-    let sexpr = reg.type_def(&Path::std("sexpr")).expect("sexpr is registered");
+    let sexpr = reg.type_def(&Path::std("Sexpr")).expect("sexpr is registered");
     let payload = |variant: usize| -> TypeId {
         let fields = &sexpr.variants[variant].fields;
         assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);
@@ -350,7 +350,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     assert_eq!(TypeId::SEXPR_ARRAY, payload(sexpr_variant::ARRAY));
     assert_eq!(
         typelisp_mem::intern_spec(&typelisp_read::ARRAY_DIMS_TYPE),
-        typelisp::type_key::type_id(&typelisp::Type::Named(Path::std("vector"), vec![typelisp::Type::Int]))
+        typelisp::type_key::type_id(&typelisp::Type::Named(Path::std("Vector"), vec![typelisp::Type::Int]))
     );
 }
 
@@ -363,7 +363,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
 fn the_read_tuple_type_is_the_checkers_tuple_of_data() {
     use typelisp::types::{tuple_path, Path};
     use typelisp::Type;
-    let data = Type::Named(Path::std("option"), vec![Type::Named(Path::std("sexpr"), vec![])]);
+    let data = Type::Named(Path::std("Option"), vec![Type::Named(Path::std("Sexpr"), vec![])]);
     for n in 1..=typelisp::TUPLE_MAX_ARITY {
         let ty = Type::Named(tuple_path(n), vec![data.clone(); n]);
         assert_eq!(typelisp::sexpr_tuple_type(n), typelisp::type_key::type_id(&ty), "arity {}", n);
@@ -399,15 +399,12 @@ fn the_builtin_type_constants_are_what_the_table_interns() {
 /// recognized (`&rest` read as an ordinary parameter, `pub` as a definition
 /// name), and nothing about the spelling would look wrong.
 ///
-/// Each name must also already be canonical — interning folds to lowercase, so
-/// a name spelled otherwise would intern under a different one.
 #[test]
 fn the_builtin_symbols_report_their_own_wk_constant() {
     use typelisp::{Value, BUILTIN_SYMBOLS};
 
     let mut heap = typelisp::Heap::with_capacity(64);
     for (i, name) in BUILTIN_SYMBOLS.iter().enumerate() {
-        assert_eq!(*name, name.to_lowercase(), "`{}` is not the canonical form it interns under", name);
         // Each entry is interned in the module that owns it: a colon-spelled
         // one is the keyword of that name, a standard library name `std`'s,
         // an IR name `%core`'s, every other one a reserved word every module
@@ -439,7 +436,7 @@ fn the_builtin_symbols_report_their_own_wk_constant() {
 ///
 /// In `%core` a member of its own vocabulary reads as itself, before what the
 /// library offers, so such a spelling there would name the IR tag where the
-/// island means the definition: `scope<v>` named no type at all. A tag
+/// island means the definition: `Scope<v>` named no type at all. A tag
 /// spelled like an offered name belongs to `std`'s vocabulary, where the tag
 /// and the name are one symbol.
 #[test]

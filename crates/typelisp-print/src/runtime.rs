@@ -84,13 +84,12 @@ const NO_PROGRAM_FOR_METHODS: &str = "printing needs a program to look up `print
 /// Every printer control variable the renderer reads, as the prelude names
 /// them: what [`read_print_vars`] and [`read_opts`] ask for between them, and
 /// what an AOT executable's startup registers (`typelisp_print::aot`).
-pub const PRINTER_GLOBALS: [&str; 12] = [
+pub const PRINTER_GLOBALS: [&str; 11] = [
     "*print-circle*",
     "*print-level*",
     "*print-length*",
     "*print-base*",
     "*print-radix*",
-    "*print-case*",
     "*print-readably*",
     "*print-array*",
     "*print-pretty*",
@@ -135,29 +134,12 @@ pub fn read_print_vars(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, Strin
         b if (2..=36).contains(&b) => b as u32,
         b => return Err(format!("*print-base* must be between 2 and 36, got {}", b)),
     };
-    // A keyword is a symbol, not a type of its own — so the checker lets any
-    // symbol through and the three keywords CL defines are checked here.
-    let case = match global("*print-case*")? {
-        Value::Symbol(id) => match id.well_known() {
-            wk::UPCASE => format::PrintCase::Upcase,
-            wk::KW_DOWNCASE => format::PrintCase::Downcase,
-            wk::CAPITALIZE => format::PrintCase::Capitalize,
-            _ => {
-                return Err(format!(
-                    "*print-case* must be :upcase, :downcase or :capitalize, got {}",
-                    heap.symbol_spelling(id)
-                ))
-            }
-        },
-        other => return Err(format!("internal error: *print-case* holds {:?}, not a symbol", other)),
-    };
     Ok(PrintVars {
         circle: read_bool(global, "*print-circle*")?,
         level: read_limit(heap, global, "*print-level*")?,
         length: read_limit(heap, global, "*print-length*")?,
         base,
         radix: read_bool(global, "*print-radix*")?,
-        case,
         readably: read_bool(global, "*print-readably*")?,
         array: read_bool(global, "*print-array*")?,
     })
@@ -686,7 +668,7 @@ mod tests {
         let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
         let args = heap.cons(boxed, Value::Empty).expect("heap has room");
         let err = build_format(&mut heap, "~a", args).expect_err("an unregistered enum");
-        assert!(err.contains("option"), "{}", err);
+        assert!(err.contains("Option"), "{}", err);
 
         set_print_hooks(None);
     }

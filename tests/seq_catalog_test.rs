@@ -313,14 +313,14 @@ fn concatenate_joins_into_the_named_result_type() {
     assert_eq!(show("(concatenate 'string \"ab\" \"c\" \"de\")"), "abcde");
     assert_eq!(show("(length (concatenate 'string))"), "0");
     assert_eq!(show("(concatenate 'string \"only\")"), "only");
-    assert_eq!(with_fixtures("(concatenate 'vector (iter a) (iter b))"), "#(1 2 2 3 2 3 4)");
-    assert_eq!(with_fixtures("(concatenate 'vector (iter b))"), "#(2 3 4)");
+    assert_eq!(with_fixtures("(concatenate 'Vector (iter a) (iter b))"), "#(1 2 2 3 2 3 4)");
+    assert_eq!(with_fixtures("(concatenate 'Vector (iter b))"), "#(2 3 4)");
 }
 
 #[test]
 fn concatenate_refuses_what_it_cannot_type() {
     assert!(check_err("(concatenate 'list 1)").contains("unknown result type `list`"));
-    assert!(check_err("(concatenate 'vector)").contains("needs at least one sequence"));
+    assert!(check_err("(concatenate 'Vector)").contains("needs at least one sequence"));
     assert!(check_err("(concatenate \"string\" \"a\")").contains("must be a quoted symbol"));
     // Every operand has to fit the result type.
     assert!(!check_err("(concatenate 'string \"a\" 1)").is_empty());

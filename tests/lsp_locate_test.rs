@@ -118,7 +118,7 @@ fn goto_definition_on_a_labels_function_and_parameter_resolves_to_their_bindings
 
 #[test]
 fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() {
-    let src = "(defun f ((o Option<int>)) int (match o ((Some x) x) (_ 0)))\n";
+    let src = "(defun f ((o Option<int>)) int (match o ((some x) x) (_ 0)))\n";
     let (h, body, def_locs, _docs) = program(src);
     // Column 51 is the arm body's `x` reference; its pattern binding — the
     // `x` inside `(Some x)` — is at column 48 (`check_ctor_pattern`'s
@@ -128,18 +128,6 @@ fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() 
     assert_eq!(&*target.file, FILE);
     assert_eq!(target.line, 1);
     assert_eq!(target.col, 48);
-}
-
-#[test]
-fn goto_definition_on_a_whole_arm_bind_pattern_reference_resolves_to_the_pattern() {
-    let src = "(defun g ((o Option<int>)) Option<int> (match o (v v)))\n";
-    let (h, body, def_locs, _docs) = program(src);
-    // Column 52 is the arm body's `v` reference; the whole-arm variable
-    // pattern `v` (the arm's own first element) is at column 50.
-    let node = locate_node(&h, &body, FILE, 1, 52).expect("expected a located node");
-    let target = definition_target(&h, node, &def_locs).expect("expected a resolvable reference");
-    assert_eq!(target.line, 1);
-    assert_eq!(target.col, 50);
 }
 
 #[test]

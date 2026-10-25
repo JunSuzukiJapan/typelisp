@@ -18,7 +18,7 @@
 ```
 
 失敗しないと分かっている場面や、失敗したら止まってよい小さなスクリプトでは `unwrap` で
-取り出せます。`Err` だった場合は `panic` します。
+取り出せます。`err` だった場合は `panic` します。
 
 ## 2. ファイル全体を読み書きする
 
@@ -171,7 +171,7 @@
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; 次の読みに時計をかける
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; 次の読みに時計をかける
 ```
 
 ### 相手が切断したとき
@@ -186,7 +186,7 @@
 渡せば、その中で解決されます。解決は別のスレッドで行われるので、待っている間も他のタスクは
 走ります。名前が複数のアドレスを持つ場合は順に接続を試します。
 
-解決できなかった場合は `Err` が返ります。
+解決できなかった場合は `err` が返ります。
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -243,5 +243,5 @@ UDP はストリームではなく、データグラムを 1 つずつ送受信�
 ## 9. Unix ドメインソケット
 
 `unix-listen` / `unix-connect` にソケットファイルのパスを渡します。得られる値は TCP と同じ
-`socket-stream` です。`unix-listen` はファイルが既にあると `Err` を返します。待ち受けを
+`socket-stream` です。`unix-listen` はファイルが既にあると `err` を返します。待ち受けを
 `close` するとファイルは消えます。

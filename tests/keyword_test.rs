@@ -75,8 +75,8 @@ fn the_same_keyword_read_twice_is_the_same_object() {
 }
 
 #[test]
-fn keywords_are_case_folded_like_every_other_symbol() {
-    assert_eq!(eval_ok("(eq :foo :FOO)"), Value::Bool(true));
+fn keywords_are_case_sensitive_like_every_other_symbol() {
+    assert_eq!(eval_ok("(eq :foo :FOO)"), Value::Bool(false));
 }
 
 #[test]
@@ -92,8 +92,8 @@ fn a_keyword_can_be_stored_in_a_sexpr_datum() {
 #[test]
 fn keywordp_distinguishes_keywords_from_ordinary_symbols() {
     assert_eq!(eval_ok("(keywordp :foo)"), Value::Bool(true));
-    assert_eq!(eval_ok("(keywordp (string->symbol \"foo\"))"), Value::Bool(false));
-    assert_eq!(eval_ok("(keywordp (string->symbol \"\"))"), Value::Bool(false));
+    assert_eq!(eval_ok("(keywordp (intern \"foo\"))"), Value::Bool(false));
+    assert_eq!(eval_ok("(keywordp (intern \"\"))"), Value::Bool(false));
 }
 
 // ---- one namespace, CL's names ------------------------------------------
@@ -113,7 +113,7 @@ fn intern_into_the_keyword_namespace_makes_the_keyword() {
 #[test]
 fn a_name_starting_with_a_colon_does_not_make_a_keyword() {
     // CL's `(intern ":foo")`: an ordinary symbol whose name has a colon.
-    assert_eq!(eval_ok("(keywordp (string->symbol \":foo\"))"), Value::Bool(false));
+    assert_eq!(eval_ok("(keywordp (intern \":foo\"))"), Value::Bool(false));
     assert_eq!(eval_ok("(eq (intern \":foo\") :foo)"), Value::Bool(false));
     assert_eq!(eval_ok("(eq (quote |:foo|) (intern \":foo\"))"), Value::Bool(true));
 }

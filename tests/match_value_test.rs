@@ -10,7 +10,8 @@
 //! * **`(:= expr)`** — an arbitrary expression, for the types with no literal
 //!   syntax at all (a `defstruct` instance, a global, a computed value).
 //! * **A bare variant name** — `(match c (red 1) (blue 2))`, which used to
-//!   bind a variable called `red` that matched everything.
+//!   bind a variable called `red` that matched everything. A bare name in an
+//!   arm is now always a variant; only `_` matches every value.
 //!
 //! The first two lower to the same `Pattern::Guard`: a checked `bool`
 //! expression, `(equals $match-scrut EXPR)`, resolved through the ordinary
@@ -114,8 +115,8 @@ fn a_string_pattern_matches_a_separately_built_string() {
 fn a_symbol_literal_pattern_compares_the_interned_symbol() {
     both(
         "(defun f ((s symbol)) int (match s ('foo 1) ('bar 2) (_ 0)))",
-        r#"(+ (* 100 (f (string->symbol "foo")))
-              (+ (* 10 (f (string->symbol "bar"))) (f (string->symbol "zz"))))"#,
+        r#"(+ (* 100 (f (intern "foo")))
+              (+ (* 10 (f (intern "bar"))) (f (intern "zz"))))"#,
         digits(1, 2, 0),
     );
 }
@@ -299,17 +300,19 @@ fn a_bare_name_for_a_variant_with_fields_is_an_arity_error() {
     assert!(e.contains("field"), "{}", e);
 }
 
-/// A name that is *not* a variant of the scrutinee's type is still a binding,
-/// which is what keeps every existing `(match v (x ...))` meaning what it did.
+/// A bare name that is *not* a variant of the scrutinee's type is an error,
+/// not a variable: only `_` matches every value, so a misspelled variant
+/// cannot turn into an arm that matches everything.
 #[test]
-fn a_bare_name_that_names_no_variant_still_binds() {
-    both(
+fn a_bare_name_that_names_no_variant_is_an_error() {
+    let e = err(
         "(defenum color (red) (blue))\
          \n(use color)\
-         \n(defun f ((n int)) int (match n (blues (+ blues 1))))",
-        "(f 41)",
-        42,
+         \n(defun f ((n int)) int (match n (blues 1)))",
     );
+    assert!(e.contains("`blues` is not a variant of `int`"), "{}", e);
+    let e = err("(defun f ((o Option<int>)) int (match o (None 0) ((some v) v)))");
+    assert!(e.contains("`None` is not a variant of `Option<int>`"), "{}", e);
 }
 
 // ---- scrutinees with no variants -----------------------------------------

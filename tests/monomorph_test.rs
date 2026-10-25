@@ -278,7 +278,7 @@ fn a_generic_method_with_a_match_body_specializes() {
         (impl cell<T>
           (unwrap2 (self) T
             (match self::o ((some x) x) ((none) (panic "none")))))
-        (unwrap2 (make-instance 'cell :o (option::some 9)))
+        (unwrap2 (make-instance 'cell :o (Option::some 9)))
     "#;
     assert_eq!(eval_ok(src), Value::Int(9));
 }
@@ -451,7 +451,7 @@ fn polymorphic_recursion_is_a_type_error_not_a_hang() {
     // one, so the drain budget must cut it off with a TypeError.
     let src = r#"
         (defun f<T> ((n int) (x T)) int
-          (if (= n 0) n (f (- n 1) (option::some x))))
+          (if (= n 0) n (f (- n 1) (Option::some x))))
         (f 3 1)
     "#;
     match check_all(src) {

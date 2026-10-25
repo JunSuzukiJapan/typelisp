@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn an_instantiated_type_is_spelled_with_its_arguments() {
-        assert_eq!(N::instantiated_type("gen", &["i32", "vector<cons-cell<int,int>>"]), "gen<i32,vector<cons-cell<int,int>>>");
+        assert_eq!(N::instantiated_type("gen", &["i32", "Vector<cons-cell<int,int>>"]), "gen<i32,Vector<cons-cell<int,int>>>");
         assert_eq!(N::instantiated_type::<&str>("point", &[]), "point");
     }
 

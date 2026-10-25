@@ -60,7 +60,7 @@ use crate::types::Path;
 /// process-wide LLVM `Context` must never happen.
 pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-    if crate::types::path_is_builtin(type_name, "llvm-module") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::LLVM_MODULE) {
         return match method {
             "create" => Some(llvm_module_create(heap, args)),
             "add-function" => Some(llvm_module_add_function(heap, args)),
@@ -72,14 +72,14 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "llvm-function") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::LLVM_FUNCTION) {
         return match method {
             "append-block" => Some(llvm_function_append_block(heap, args)),
             "function-param" => Some(llvm_function_param(args)),
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "llvm-builder") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::LLVM_BUILDER) {
         return match method {
             "create" => Some(llvm_builder_create()),
             "position-at-end" => Some(llvm_builder_position_at_end(args)),
@@ -2432,7 +2432,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         // is the one builtin here that returns a generic box.
         let ty = typelisp_front::type_key::type_id(
             &crate::types::Type::Named(
-                crate::Path::std("option"),
+                crate::Path::std("Option"),
                 vec![crate::types::Type::Named(crate::Path::std("llvm-value"), vec![])],
             ),
         );

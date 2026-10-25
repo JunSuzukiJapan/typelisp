@@ -9,14 +9,14 @@
 /// arity up to this.
 pub const TUPLE_MAX_ARITY: usize = 12;
 
-use crate::symbols::{child_ns, intern_exact, NsId};
+use crate::symbols::{child_ns, intern_in, NsId};
 use crate::{TypeId, TypeShape};
 
 /// The definition of the tuple type of `arity` elements: its module and its
 /// symbol there.
 fn tuple_definition(arity: usize) -> (NsId, crate::SymRef) {
     let internal = child_ns(NsId::STD, "%internal");
-    (internal, intern_exact(internal, &format!("tuple{}", arity)))
+    (internal, intern_in(internal, &format!("tuple{}", arity)))
 }
 
 /// The type of the `#{..}` datum of `arity` elements.

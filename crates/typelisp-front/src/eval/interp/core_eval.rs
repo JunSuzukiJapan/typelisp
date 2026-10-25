@@ -1234,7 +1234,7 @@ pub(super) fn match_core_pattern(
             let inner = core::field(heap, pat, 2)
                 .ok_or_else(|| EvalError::Internal("eval: (pat-typetest ..) has no sub-pattern".to_string()))?;
             // `(the sexpr p)` tests nothing: every value is a `Sexpr`.
-            if crate::types::path_is_builtin(&path, "sexpr") {
+            if crate::types::path_is_builtin(&path, typelisp_mem::wk::SEXPR) {
                 return match_core_pattern(it, heap, env, inner, v);
             }
             match v {
@@ -1307,7 +1307,7 @@ fn match_ctor(
             }
             Ok(Some(binds))
         }
-        sv if crate::types::path_is_builtin(path, "sexpr") => match_sexpr_core(it, heap, env, variant, subs, sv),
+        sv if crate::types::path_is_builtin(path, typelisp_mem::wk::SEXPR) => match_sexpr_core(it, heap, env, variant, subs, sv),
         _ => Ok(None),
     }
 }
@@ -2777,16 +2777,16 @@ mod tests {
         }
     }
 
-    /// `(construct ::std::sexpr N ...)` builds a datum rather than a box. The
+    /// `(construct ::std::Sexpr N ...)` builds a datum rather than a box. The
     /// pass-through arms are the interesting ones: the argument box *is* the
     /// datum, which is what makes `eq` hold across the construction.
     #[test]
     fn constructing_a_sexpr_datum() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::sexpr (type-named ::std::sexpr) {NIL} false ())")), Value::Empty);
-        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::sexpr (type-named ::std::sexpr) {INT} false (int-any-width) (int-any-width 3))")), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {NIL} false ())")), Value::Empty);
+        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {INT} false (int-any-width) (int-any-width 3))")), Value::Int(3));
 
-        let v = eval_ok(&mut h, &format!("(construct ::std::sexpr (type-named ::std::sexpr) {CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"));
+        let v = eval_ok(&mut h, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"));
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
@@ -2794,7 +2794,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            &format!(r#"(let ((s sexpr (str "hi"))) (call ::std::sexpr-cons (sexpr sexpr) (var s) (construct ::std::sexpr (type-named ::std::sexpr) {STR} false (str) (var s))))"#),
+            &format!(r#"(let ((s sexpr (str "hi"))) (call ::std::sexpr-cons (sexpr sexpr) (var s) (construct ::std::Sexpr (type-named ::std::Sexpr) {STR} false (str) (var s))))"#),
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -2897,13 +2897,13 @@ mod tests {
             eval_ok(
                 &mut h,
                 &format!("(match (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
-                   ((pat-ctor ::std::sexpr (type-named ::std::sexpr) {NIL} false ()) (int-any-width 100))
-                   ((pat-ctor ::std::sexpr (type-named ::std::sexpr) {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
+                   ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {NIL} false ()) (int-any-width 100))
+                   ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
             ),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, &format!("(match (unit) unit ((pat-ctor ::std::sexpr (type-named ::std::sexpr) {NIL} false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))")),
+            eval_ok(&mut h, &format!("(match (unit) unit ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {NIL} false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))")),
             Value::Int(100)
         );
     }
@@ -2939,7 +2939,7 @@ mod tests {
 
         let form = read1(
             &mut h,
-            &format!("(match (var p) sexpr ((pat-ctor ::std::sexpr (type-named ::std::sexpr) {PATH} false (sexpr) (pat-bind segs))
+            &format!("(match (var p) sexpr ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {PATH} false (sexpr) (pat-bind segs))
                (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))"),
         );
         h.push_root(form);
@@ -2986,9 +2986,9 @@ mod tests {
         let form = read1(
             &mut h,
             &format!("(match (var v) sexpr
-               ((pat-ctor ::std::sexpr (type-named ::std::sexpr) {CONS} false (sexpr sexpr)
-                  (pat-ctor ::std::sexpr (type-named ::std::sexpr) {PATH} false (sexpr) (pat-bind l))
-                  (pat-ctor ::std::sexpr (type-named ::std::sexpr) {PATH} false (sexpr) (pat-bind r)))
+               ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {CONS} false (sexpr sexpr)
+                  (pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {PATH} false (sexpr) (pat-bind l))
+                  (pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {PATH} false (sexpr) (pat-bind r)))
                  (call ::std::sexpr-cons (sexpr sexpr) (var l) (var r))))"),
         );
         h.push_root(form);

@@ -48,6 +48,7 @@ use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, Int
 
 use typelisp_front::eval::interp::{CompiledBody, FfiDecl, Interp};
 use typelisp_front::ffi_callback::CallbackSig;
+use typelisp_front::Type;
 use typelisp_mem::{ConcreteNames, NsId, TypeId, TypeShape};
 
 use crate::compile::llvm_builtins::compiled_fn_type;
@@ -90,7 +91,7 @@ enum CType {
 impl CType {
     /// The C type a declared typelisp type means, or `None` if it means none.
     fn from_type(ty: TypeId) -> Option<CType> {
-        let name = match typelisp_mem::type_shape(ty) {
+        let scalar = match typelisp_mem::type_shape(ty) {
             // A callback parameter: what crosses is the address of the entry
             // C calls (`typelisp_front::ffi_callback`), so to the thunk it is
             // a pointer. Whether the callback's own types can be spelled is
@@ -101,20 +102,22 @@ impl CType {
             TypeShape::Ptr(_) => return Some(CType::Ptr),
             TypeShape::Unit => return Some(CType::Void),
             // The primitives are the standard library's types without arguments.
-            TypeShape::Named(ns, name, args) if ns == NsId::STD && args.is_empty() => name.name(),
+            TypeShape::Named(ns, name, args) if ns == NsId::STD && args.is_empty() => {
+                typelisp_front::types::scalar_of_symbol(name)?
+            }
             _ => return None,
         };
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
         // answers 64 for — the one place the LP64 assumption is written down.
-        if let Some((bits, signed)) = typelisp_front::types::int_width_signed(name) {
+        if let Some((bits, signed)) = typelisp_front::types::int_width_signed(&scalar) {
             return Some(CType::Int { bits, signed });
         }
-        match name {
-            "f32" => Some(CType::F32),
-            "f64" => Some(CType::F64),
-            "bool" => Some(CType::Bool),
-            "string" => Some(CType::Str),
-            "ptr" => Some(CType::Ptr),
+        match scalar {
+            Type::F32 => Some(CType::F32),
+            Type::F64 => Some(CType::F64),
+            Type::Bool => Some(CType::Bool),
+            Type::Str => Some(CType::Str),
+            Type::Ptr => Some(CType::Ptr),
             _ => None,
         }
     }

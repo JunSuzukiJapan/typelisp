@@ -36,7 +36,7 @@ fn both(defs: &str, names: &[&str], expr: &str) -> String {
 #[test]
 fn the_type_side_and_the_id_side_agree_on_what_niches() {
     let named = |n: &str, args: Vec<Type>| Type::Named(Path::root(n), args);
-    let option = |t: Type| named("option", vec![t]);
+    let option = |t: Type| named("Option", vec![t]);
     let payloads = vec![
         Type::Int,
         Type::I32,
@@ -54,15 +54,15 @@ fn the_type_side_and_the_id_side_agree_on_what_niches() {
         Type::Ptr,
         Type::CLong,
         Type::CULong,
-        named("sexpr", vec![]),
-        named("vector", vec![Type::Int]),
-        named("hashtable", vec![Type::Str, Type::Int]),
-        named("result", vec![Type::Int, named("parseinterror", vec![])]),
+        named("Sexpr", vec![]),
+        named("Vector", vec![Type::Int]),
+        named("HashTable", vec![Type::Str, Type::Int]),
+        named("Result", vec![Type::Int, named("ParseIntError", vec![])]),
         named("llvm-value", vec![]),
         Type::Fn(vec![Type::Int, Type::Str], None, Box::new(Type::Int)),
         Type::Dyn(Path::root("shape"), vec![]),
         option(Type::Int),
-        option(named("sexpr", vec![])),
+        option(named("Sexpr", vec![])),
         option(option(Type::Int)),
     ];
     for payload in payloads {
@@ -79,7 +79,7 @@ fn the_type_side_and_the_id_side_agree_on_what_niches() {
 #[test]
 fn option_of_int_is_a_fixnum_or_nil_with_no_allocation() {
     let mut s = Session::new(Load::Prelude);
-    s.eval("(defun s () Option<int> (option::some 5))\n(defun n () Option<int> (option::none))").expect("defs");
+    s.eval("(defun s () Option<int> (Option::some 5))\n(defun n () Option<int> (Option::none))").expect("defs");
     let before = s.heap.box_count();
     assert_eq!(s.eval("(s)").expect("some"), Value::Int(5));
     assert_eq!(s.eval("(n)").expect("none"), Value::Empty);
@@ -91,7 +91,7 @@ fn option_of_int_is_a_fixnum_or_nil_with_no_allocation() {
 #[test]
 fn option_of_f64_carries_the_float_box_directly() {
     let mut s = Session::new(Load::Prelude);
-    s.eval("(defun s () Option<f64> (option::some 1.5))").expect("defs");
+    s.eval("(defun s () Option<f64> (Option::some 1.5))").expect("defs");
     let Value::Boxed(id) = s.eval("(s)").expect("some") else { panic!("expected the float box") };
     assert!(s.heap.is_f64(id));
     assert_eq!(s.heap.f64_value(id), 1.5);
@@ -103,9 +103,9 @@ fn option_of_f64_carries_the_float_box_directly() {
 fn option_of_option_still_boxes_and_its_two_nones_differ() {
     let mut s = Session::new(Load::Prelude);
     s.eval(
-        "(defun outer-none () Option<Option<int>> (option::none))\n\
-         (defun inner-none () Option<Option<int>> (option::some (option::none)))\n\
-         (defun both () Option<Option<int>> (option::some (option::some 7)))",
+        "(defun outer-none () Option<Option<int>> (Option::none))\n\
+         (defun inner-none () Option<Option<int>> (Option::some (Option::none)))\n\
+         (defun both () Option<Option<int>> (Option::some (Option::some 7)))",
     )
     .expect("defs");
     let Value::Boxed(outer) = s.eval("(outer-none)").expect("outer") else { panic!("the outer none is a box") };
@@ -118,7 +118,7 @@ fn option_of_option_still_boxes_and_its_two_nones_differ() {
     let Value::Boxed(some) = s.eval("(both)").expect("both") else { panic!("boxed") };
     assert_eq!(s.heap.enum_field(some, 0), Value::Int(7));
     assert_eq!(
-        eval_string("(defun f ((o Option<Option<int>>)) int (match o ((some (some n)) n) ((some (none)) -1) ((none) -2)))\n(format false \"~a ~a ~a\" (f (option::some (option::some 7))) (f (option::some (option::none))) (f (option::none)))"),
+        eval_string("(defun f ((o Option<Option<int>>)) int (match o ((some (some n)) n) ((some (none)) -1) ((none) -2)))\n(format false \"~a ~a ~a\" (f (Option::some (Option::some 7))) (f (Option::some (Option::none))) (f (Option::none)))"),
         "7 -1 -2"
     );
 }
@@ -127,7 +127,7 @@ fn option_of_option_still_boxes_and_its_two_nones_differ() {
 #[test]
 fn option_of_unit_still_boxes() {
     let mut s = Session::new(Load::Prelude);
-    s.eval("(defun s () Option<()> (option::some ()))\n(defun n () Option<()> (option::none))").expect("defs");
+    s.eval("(defun s () Option<()> (Option::some ()))\n(defun n () Option<()> (Option::none))").expect("defs");
     let Value::Boxed(some) = s.eval("(s)").expect("some") else { panic!("boxed") };
     assert_eq!(s.heap.enum_variant(some), 0);
     let Value::Boxed(none) = s.eval("(n)").expect("none") else { panic!("boxed") };
@@ -154,15 +154,15 @@ fn some_and_none_round_trip_through_compiled_and_interpreted_code_for_every_nich
         (defun str-of ((o Option<string>)) string (match o ((some v) v) ((none) "-")))
         (defun pt-of ((o Option<pt>)) int (match o ((some p) p::x) ((none) -1)))
         (defun sexpr-of ((o Option<Sexpr>)) Sexpr (match o ((some v) v) ((none) 0)))
-        (defun mk-u8 ((b bool)) Option<u8> (if b (option::some (the u8 200)) (option::none)))
-        (defun mk-int ((b bool)) Option<int> (if b (option::some 100000000000000000000) (option::none)))
-        (defun mk-f64 ((b bool)) Option<f64> (if b (option::some 2.5) (option::none)))
-        (defun mk-f32 ((b bool)) Option<f32> (if b (option::some (as f32 0.5)) (option::none)))
-        (defun mk-char ((b bool)) Option<char> (if b (option::some #\z) (option::none)))
-        (defun mk-bool ((b bool)) Option<bool> (if b (option::some false) (option::none)))
-        (defun mk-str ((b bool)) Option<string> (if b (option::some "hi") (option::none)))
-        (defun mk-pt ((b bool)) Option<pt> (if b (option::some (make-instance 'pt :x 9)) (option::none)))
-        (defun mk-sexpr ((b bool)) Option<Sexpr> (if b (option::some (unwrap (list 1 2))) (option::none)))
+        (defun mk-u8 ((b bool)) Option<u8> (if b (Option::some (the u8 200)) (Option::none)))
+        (defun mk-int ((b bool)) Option<int> (if b (Option::some 100000000000000000000) (Option::none)))
+        (defun mk-f64 ((b bool)) Option<f64> (if b (Option::some 2.5) (Option::none)))
+        (defun mk-f32 ((b bool)) Option<f32> (if b (Option::some (as f32 0.5)) (Option::none)))
+        (defun mk-char ((b bool)) Option<char> (if b (Option::some #\z) (Option::none)))
+        (defun mk-bool ((b bool)) Option<bool> (if b (Option::some false) (Option::none)))
+        (defun mk-str ((b bool)) Option<string> (if b (Option::some "hi") (Option::none)))
+        (defun mk-pt ((b bool)) Option<pt> (if b (Option::some (make-instance 'pt :x 9)) (Option::none)))
+        (defun mk-sexpr ((b bool)) Option<Sexpr> (if b (Option::some (unwrap (list 1 2))) (Option::none)))
     "#;
     const NAMES: &[&str] = &[
         "u8-of", "int-of", "f64-of", "f32-of", "char-of", "bool-of", "str-of", "pt-of", "sexpr-of", "mk-u8",
@@ -201,9 +201,9 @@ fn a_literal_under_some_compares_the_untagged_payload() {
         (defun is-a ((o Option<char>)) bool (match o ((some #\a) true) (_ false)))
     "#;
     const NAMES: &[&str] = &["is-seven", "is-half", "is-a"];
-    assert_eq!(both(DEFS, NAMES, "(list (is-seven (option::some (the u8 7))) (is-seven (option::some (the u8 8))) (is-seven (option::none)))"), "(true false false)");
-    assert_eq!(both(DEFS, NAMES, "(list (is-half (option::some 0.5)) (is-half (option::some 0.25)) (is-half (option::none)))"), "(true false false)");
-    assert_eq!(both(DEFS, NAMES, "(list (is-a (option::some #\\a)) (is-a (option::some #\\b)) (is-a (option::none)))"), "(true false false)");
+    assert_eq!(both(DEFS, NAMES, "(list (is-seven (Option::some (the u8 7))) (is-seven (Option::some (the u8 8))) (is-seven (Option::none)))"), "(true false false)");
+    assert_eq!(both(DEFS, NAMES, "(list (is-half (Option::some 0.5)) (is-half (Option::some 0.25)) (is-half (Option::none)))"), "(true false false)");
+    assert_eq!(both(DEFS, NAMES, "(list (is-a (Option::some #\\a)) (is-a (Option::some #\\b)) (is-a (Option::none)))"), "(true false false)");
 }
 
 /// The builtins that answer an `Option` from Rust — `HashTable::get`,
@@ -221,7 +221,7 @@ fn builtin_option_results_use_the_niche_in_both_tiers() {
         (defun table () HashTable<string,int> (let ((h (the HashTable<string,int> (HashTable::new)))) (set h "a" 1) h))
         (defun vec () Vector<int> (let ((v (the Vector<int> (Vector::new)))) (push v 5) v))
         (defun nested-table () HashTable<string,Option<int>>
-          (let ((h (the HashTable<string,Option<int>> (HashTable::new)))) (set h "a" (option::some 1)) (set h "b" (option::none)) h))
+          (let ((h (the HashTable<string,Option<int>> (HashTable::new)))) (set h "a" (Option::some 1)) (set h "b" (Option::none)) h))
     "#;
     const NAMES: &[&str] = &["lookup", "popped", "narrow", "nested", "table", "vec", "nested-table"];
     assert_eq!(both(DEFS, NAMES, "(list (lookup (table) \"a\") (lookup (table) \"z\"))"), "(1 -1)");
@@ -261,21 +261,21 @@ fn a_niched_option_still_prints_as_some_and_none() {
         (defstruct pair (a Option<int>) (b Option<string>))
         (defstruct gen<T> (v T))
         (defenum shape (circle Option<f64>) (dot))
-        (defun mk-pair () pair (make-instance 'pair :a (option::some 1) :b (option::none)))
-        (defun mk-gen () gen<Option<int>> (make-instance 'gen :v (option::some 3)))
-        (defun mk-gen-none () gen<Option<int>> (make-instance 'gen :v (option::none)))
-        (defun mk-shape () shape (shape::circle (option::some 1.5)))
-        (defun mk-vec () Vector<Option<int>> (let ((v (the Vector<Option<int>> (Vector::new)))) (push v (option::some 1)) (push v (option::none)) v))
-        (defun mk-nested () Option<Option<int>> (option::some (option::none)))
-        (defun mk-ok () Result<Option<int>,ParseIntError> (result::ok (option::some 4)))
-        (defun opt ((b bool)) Option<int> (if b (option::some 5) (option::none)))
+        (defun mk-pair () pair (make-instance 'pair :a (Option::some 1) :b (Option::none)))
+        (defun mk-gen () gen<Option<int>> (make-instance 'gen :v (Option::some 3)))
+        (defun mk-gen-none () gen<Option<int>> (make-instance 'gen :v (Option::none)))
+        (defun mk-shape () shape (shape::circle (Option::some 1.5)))
+        (defun mk-vec () Vector<Option<int>> (let ((v (the Vector<Option<int>> (Vector::new)))) (push v (Option::some 1)) (push v (Option::none)) v))
+        (defun mk-nested () Option<Option<int>> (Option::some (Option::none)))
+        (defun mk-ok () Result<Option<int>,ParseIntError> (Result::ok (Option::some 4)))
+        (defun opt ((b bool)) Option<int> (if b (Option::some 5) (Option::none)))
     "#;
     const NAMES: &[&str] = &["mk-pair", "mk-gen", "mk-gen-none", "mk-shape", "mk-vec", "mk-nested", "mk-ok", "opt"];
     assert_eq!(both(DEFS, NAMES, "(opt true)"), "(some 5)");
     assert_eq!(both(DEFS, NAMES, "(opt false)"), "none");
     assert_eq!(both(DEFS, NAMES, "(mk-pair)"), "#<pair a: (some 1) b: none>");
-    assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<option<int>> v: (some 3)>");
-    assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<option<int>> v: none>");
+    assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<Option<int>> v: (some 3)>");
+    assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<Option<int>> v: none>");
     assert_eq!(both(DEFS, NAMES, "(mk-shape)"), "(circle (some 1.5))");
     assert_eq!(both(DEFS, NAMES, "(mk-vec)"), "#((some 1) none)");
     assert_eq!(both(DEFS, NAMES, "(mk-nested)"), "(some none)");
@@ -299,7 +299,7 @@ fn macroexpand_1_result_uses_the_niche() {
     typelisp::load_prelude(&mut s.heap, &mut chk.borrow_mut(), &mut interp);
     interp.set_checker(std::rc::Rc::clone(&chk));
     let r = typelisp::Reader::new();
-    let vs = r.read_all(&mut s.heap, "(match (macroexpand-1 '(+ 1 2)) ((ok o) o) ((err _) (option::some 0)))").expect("read");
+    let vs = r.read_all(&mut s.heap, "(match (macroexpand-1 '(+ 1 2)) ((ok o) o) ((err _) (Option::some 0)))").expect("read");
     let mut last = Value::Bool(false);
     for v in vs {
         let tl = chk.borrow_mut().check_form(&mut s.heap, &interp, v).expect("check");
@@ -317,10 +317,10 @@ fn a_traced_call_prints_a_niched_option_by_its_declared_type() {
     let out = eval_string(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
-         (defun opt ((o Option<int>)) Option<int> (match o ((some n) (option::some (+ n 1))) ((none) (option::none))))\n\
+         (defun opt ((o Option<int>)) Option<int> (match o ((some n) (Option::some (+ n 1))) ((none) (Option::none))))\n\
          (trace opt)\n\
-         (opt (option::some 5))\n\
-         (opt (option::none))\n\
+         (opt (Option::some 5))\n\
+         (opt (Option::none))\n\
          (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
     );
     assert!(out.contains("(opt (some 5))"), "{:?}", out);
@@ -337,7 +337,7 @@ fn a_niched_option_cannot_be_boxed_as_a_trait_object() {
         "(deftrait Speak () (say ((self Self)) string))\n\
          (impl Speak Option<int> (say ((self Self)) string \"opt\"))\n\
          (defun hear ((s :dyn Speak)) string (say s))\n\
-         (hear (the Option<int> (option::some 1)))",
+         (hear (the Option<int> (Option::some 1)))",
     );
     assert!(msg.contains("niche-represented Option"), "{}", msg);
 }
@@ -349,7 +349,7 @@ fn a_niched_option_cannot_be_boxed_as_a_trait_object() {
 #[test]
 fn a_downcast_out_of_a_sexpr_reads_the_box_through_a_constructor() {
     const DEFS: &str = r#"
-        (defun opt ((b bool)) Option<int> (if b (option::some 5) (option::none)))
+        (defun opt ((b bool)) Option<int> (if b (Option::some 5) (Option::none)))
         (defun back ((s Sexpr)) int
           (match s ((the Option<int> (some n)) n) ((the Option<int> (none)) -1) (_ -2)))
     "#;
@@ -366,7 +366,7 @@ fn a_downcast_out_of_a_sexpr_reads_the_box_through_a_constructor() {
 /// word, and `none` is never a `some`.
 #[test]
 fn equality_on_a_niched_option_compares_the_payload() {
-    assert_eq!(eval_ok("(equal (the Option<int> (option::some 1)) (the Option<int> (option::some 1)))"), Value::Bool(true));
-    assert_eq!(eval_ok("(equal (the Option<int> (option::some 1)) (the Option<int> (option::none)))"), Value::Bool(false));
-    assert_eq!(eval_ok("(equal (the Option<string> (option::some \"a\")) (the Option<string> (option::some \"a\")))"), Value::Bool(true));
+    assert_eq!(eval_ok("(equal (the Option<int> (Option::some 1)) (the Option<int> (Option::some 1)))"), Value::Bool(true));
+    assert_eq!(eval_ok("(equal (the Option<int> (Option::some 1)) (the Option<int> (Option::none)))"), Value::Bool(false));
+    assert_eq!(eval_ok("(equal (the Option<string> (Option::some \"a\")) (the Option<string> (Option::some \"a\")))"), Value::Bool(true));
 }

@@ -1144,8 +1144,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; release decisions on.
 (defun name-is-borrowed? ((env Scope<llvm-value>) (nm string)) bool
   (match (get env nm)
-    ((Some _) true)
-    (None false)))
+    ((some _) true)
+    (none false)))
 
 ;; The general-expression-form counterpart of `name-is-borrowed?`: a `var`
 ;; node is borrowed exactly when its name is (`compile-call-args`'s own
@@ -1307,19 +1307,19 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; lowering that serves `i32` serves `u8` only up to that one constant. Kept
 ;; as their own predicates rather than inlined at the dispatch so the two
 ;; lists read next to each other.
-(defun int-receiver-type? ((name string)) bool
+(defun int-receiver-type? ((name Option<Sexpr>)) bool
   (case name
-    (("i8" "i16" "i32" "u8" "u16" "u32") true)
+    ((i8 i16 i32 u8 u16 u32) true)
     ;; The C-boundary words are 64-bit integers as far as *lowering* is
     ;; concerned. What sets them apart is written down elsewhere: the checker
     ;; gives them no arithmetic and refuses to store them, so only the
     ;; conversions ever arrive here.
-    (("c-long" "c-ulong") true)
+    ((c-long c-ulong) true)
     (:else false)))
 
-(defun float-receiver-type? ((name string)) bool
+(defun float-receiver-type? ((name Option<Sexpr>)) bool
   (case name
-    (("f32" "f64") true)
+    ((f32 f64) true)
     (:else false)))
 
 ;; The receiver type's width and signedness as one number,
@@ -1327,15 +1327,30 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; side, and the third operand every `rt_int_*` shim takes. A type name says
 ;; how many bits and whether the top one is a sign, and nothing else; this is
 ;; where the island reads both off.
-(defun int-wsig ((name string)) int
+(defun int-wsig ((name Option<Sexpr>)) int
   (case name
-    ("i8" 17) ("i16" 33) ("i32" 65)
-    ("u8" 16) ("u16" 32) ("u32" 64)
+    (i8 17) (i16 33) (i32 65)
+    (u8 16) (u16 32) (u32 64)
     ;; 64 bits under LP64. `build-normalize-int` shifts by `64 - 64`, so a
     ;; cast to one of these is the identity — which is what a cast to the
     ;; register's own width should be.
-    ("c-long" 129) ("c-ulong" 128)
-    (:else (panic (append "int-wsig: not an integer type: " name)))))
+    (c-long 129) (c-ulong 128)
+    (:else (panic (append "int-wsig: not an integer type: " (sexpr-sym-name name))))))
+
+;; The type a width cast converts to, read off its method name (`int->u8`,
+;; `try-int->u8`): the one place the target is written. A method is still
+;; named by its spelling; the type it names is the type's symbol.
+(defun width-cast-target ((method string)) Option<Sexpr>
+  (case method
+    (("int->i8" "try-int->i8") (quote i8))
+    (("int->i16" "try-int->i16") (quote i16))
+    (("int->i32" "try-int->i32") (quote i32))
+    (("int->u8" "try-int->u8") (quote u8))
+    (("int->u16" "try-int->u16") (quote u16))
+    (("int->u32" "try-int->u32") (quote u32))
+    (("int->c-long" "try-int->c-long") (quote c-long))
+    (("int->c-ulong" "try-int->c-ulong") (quote c-ulong))
+    (:else (panic (append "width-cast-target: not a width cast: " method)))))
 
 ;; `v` cut back to the type's width and re-extended into the 64-bit register
 ;; every compiled integer lives in: `shl` then `ashr` (signed) or `lshr`
@@ -1563,8 +1578,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; is a float — what makes `f32` arithmetic binary32 arithmetic rather than
 ;; `f64` arithmetic under another name (`docs/ja/reference/functions/numbers.md` §1). Every other
 ;; case returns `v` untouched.
-(defun round-f32-if ((builder llvm-builder) (type-name string) (method string) (v llvm-value)) llvm-value
-  (if (if (equal type-name "f32") (float-result-method? method) false)
+(defun round-f32-if ((builder llvm-builder) (type-name Option<Sexpr>) (method string) (v llvm-value)) llvm-value
+  (if (if (equal type-name (quote f32)) (float-result-method? method) false)
       (build-fround32 builder v)
       v))
 
@@ -1845,7 +1860,7 @@ const SOURCE_TEMPLATE: &str = r#"
               (nm (sexpr-sym-name (sexpr-car name-pair)))
               (kind (sexpr-int (sexpr-cdr name-pair))))
          (match (get acc nm)
-         ((Some slot) (let ((v (load-raw builder slot 0)))
+         ((some slot) (let ((v (load-raw builder slot 0)))
                      (if (>= kind 10)
                          (let ((tagged (compile-tag-struct-field builder m v (- kind 10))))
                            ;; As in `bind-params`: the slot is what holds
@@ -1858,7 +1873,7 @@ const SOURCE_TEMPLATE: &str = r#"
                                (store-arg builder slot 0 cell-ref))))
                          ())
                      (set env nm slot)))
-         (None (panic "bind-let-values: missing computed value")))
+         (none (panic "bind-let-values: missing computed value")))
        (bind-let-values builder m env rest acc)))
       ()))
 
@@ -2435,13 +2450,13 @@ const SOURCE_TEMPLATE: &str = r#"
     (let* ((name (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (match (get env name)
-        ((Some slot)
+        ((some slot)
          (let* ((cell-ref (load-raw builder slot 0))
                 (args-ptr (alloca-args builder 1)))
            (store-arg builder args-ptr 0 cell-ref)
            (let ((raw (build-call builder (get-function m "rt_cell_get") args-ptr 1)))
              (compile-sexpr-field builder m raw kind 0))))
-        (None (panic (append "compile-cellvar: unbound variable " name))))))
+        (none (panic (append "compile-cellvar: unbound variable " name))))))
 
 ;; Resolves `name` to a value two ways, in order:
 ;; (1) an ordinary binding in `env` (a parameter, or a
@@ -2504,14 +2519,14 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; them back out at on the other side.
 (defun resolve-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (name string))llvm-value
     (match (get env name)
-      ((Some slot) (load-raw builder slot 0))
-      (None (match (get fn-env name)
-              ((Some target)
+      ((some slot) (load-raw builder slot 0))
+      (none (match (get fn-env name)
+              ((some target)
                (let* ((env-len (sexpr-list-length captured))
                       (env-ptr (alloca-args builder env-len)))
                  (compile-escaping-env-args m fn-name builder env fn-env captured env-ptr captured 0)
                  (build-make-closure builder m target env-ptr env-len (compute-sexpr-mask-part captured 0 0) (compute-sexpr-mask-part captured 0 32))))
-              (None (panic (append "compile-var: unbound variable " name)))))))
+              (none (panic (append "compile-var: unbound variable " name)))))))
 
 ;; Fills `env-ptr` for a *direct* (non-escaping)
 ;; call's env array — `compile-apply`'s sibling-to-
@@ -2632,7 +2647,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; and `get-function` panics clearly there if it was
 ;; never compiled.
 (defun compile-assoc ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((type-name (sexpr-str (sexpr-car (sexpr-cdr e))))
+    (let* ((type-name (sexpr-car (sexpr-cdr e)))
            (method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
            (callee (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
            (rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
@@ -2655,7 +2670,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (if (block-terminated? builder)
           (const-word builder 0)
       (cond
-        ((if (equal type-name "sexpr") (sexpr-native-method? method) false)
+        ((if (equal type-name (quote Sexpr)) (sexpr-native-method? method) false)
          (let* ((a (load-raw builder ops 0))
                 (b (load-raw builder ops 1)))
            (if (equal method "eq")
@@ -2664,7 +2679,7 @@ const SOURCE_TEMPLATE: &str = r#"
                  (store-arg builder args-ptr 0 a)
                  (store-arg builder args-ptr 1 b)
                  (build-call builder (get-function m "rt_sexpr_eql") args-ptr 2)))))
-        ((if (equal type-name "string") (string-native-method? method) false)
+        ((if (equal type-name (quote string)) (string-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (if (equal method "length")
                (let ((args-ptr (alloca-args builder 1)))
@@ -2767,7 +2782,7 @@ const SOURCE_TEMPLATE: &str = r#"
              ;; the *target*'s width and re-extend. `int-wsig` reads the target
              ;; out of the method name, which is the only place it is written.
              (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
-              (build-normalize-int builder a (int-wsig (substring method 5 (length method)))))
+              (build-normalize-int builder a (int-wsig (width-cast-target method))))
              ;; The `Option`-returning halves of those two. `rt_int_fits*`
              ;; answers the question and nothing else: a value that fits its
              ;; target is *unchanged* by the cast, so the `some` payload is
@@ -2780,7 +2795,7 @@ const SOURCE_TEMPLATE: &str = r#"
              (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong")
               (let ((fits-args (alloca-args builder 2)))
                 (store-arg builder fits-args 0 a)
-                (store-arg builder fits-args 1 (const-word builder (int-wsig (substring method 9 (length method)))))
+                (store-arg builder fits-args 1 (const-word builder (int-wsig (width-cast-target method))))
                 (build-try-option builder m cur-fn
                   (build-call builder (get-function m "rt_int_fits") fits-args 2) a 1)))
              ("logcount"
@@ -2852,7 +2867,7 @@ const SOURCE_TEMPLATE: &str = r#"
                         ("logbitp"
                          (int-binop-shim-call builder m "rt_int_logbitp" a (untag-int-value builder m cur-fn b2) wsig))
                         (:else (panic (append "compile-assoc: unsupported method " method)))))))))
-        ((if (equal type-name "char") (char-native-method? method) false)
+        ((if (equal type-name (quote char)) (char-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            ;; `char->int` is unary (receiver only) and the
            ;; identity at the compiled level — return the
@@ -2891,11 +2906,11 @@ const SOURCE_TEMPLATE: &str = r#"
         ;; `compile-assoc` with the type name the checker spells
         ;; (`prim_type_path`), so neither can be folded into the `sexpr`
         ;; arm above even though `symbol`'s lowering is identical to it.
-        ((if (equal type-name "bool") (bool-native-method? method) false)
+        ((if (equal type-name (quote bool)) (bool-native-method? method) false)
          (let* ((a (load-raw builder ops 0))
                 (b2 (load-raw builder ops 1)))
            (build-icmp-eq builder a b2)))
-        ((if (equal type-name "symbol") (symbol-native-method? method) false)
+        ((if (equal type-name (quote symbol)) (symbol-native-method? method) false)
          (let* ((a (load-raw builder ops 0))
                 (b2 (load-raw builder ops 1)))
            (build-icmp-eq builder a b2)))
@@ -2999,7 +3014,7 @@ const SOURCE_TEMPLATE: &str = r#"
                         ("min"
                          (build-fminnum builder m a b2))
                         (:else (build-fcmp-eq builder a b2)))))))))
-        ((if (equal type-name "int") (integer-native-method? method) false)
+        ((if (equal type-name (quote int)) (integer-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method
              ("int->float" (integer-unary-call builder m "rt_integer_to_float" a))
@@ -3012,9 +3027,9 @@ const SOURCE_TEMPLATE: &str = r#"
               (build-try-option builder m cur-fn
                 (integer-unary-call builder m "rt_integer_fits_char" a) (untag-fixnum builder a) 3))
              (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
-              (integer-word-call builder m "rt_integer_narrow" a (int-wsig (substring method 5 (length method)))))
+              (integer-word-call builder m "rt_integer_narrow" a (int-wsig (width-cast-target method))))
              (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong")
-              (let ((wsig (int-wsig (substring method 9 (length method)))))
+              (let ((wsig (int-wsig (width-cast-target method))))
                 (build-try-option builder m cur-fn
                   (integer-word-call builder m "rt_integer_fits" a wsig)
                   (integer-word-call builder m "rt_integer_narrow" a wsig) 1)))
@@ -3049,7 +3064,7 @@ const SOURCE_TEMPLATE: &str = r#"
                        ("ash" (raising-binop-call builder m "rt_integer_ash" a (untag-int-value builder m cur-fn b2)))
                        ("logbitp" (raising-binop-call builder m "rt_integer_logbitp" a (untag-int-value builder m cur-fn b2)))
                        (:else (panic (append "compile-assoc: unsupported int method " method)))))))))
-        ((if (equal type-name "ratio") (ratio-native-method? method) false)
+        ((if (equal type-name (quote ratio)) (ratio-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method
              ("ratio->int"
@@ -3089,7 +3104,7 @@ const SOURCE_TEMPLATE: &str = r#"
                         ("min"
                          (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-word builder 0)) a b2))
                         (:else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-word builder 0)))))))))
-        ((if (equal type-name "rational") (rational-native-method? method) false)
+        ((if (equal type-name (quote rational)) (rational-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method
              ("rational->int" (ratio-unary-call builder m "rt_rational_to_int" a))
@@ -3307,8 +3322,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; it turns into.
 (defun install-handler ((builder llvm-builder) (m llvm-module) (protect Option<llvm-basic-block>)) ()
     (match protect
-      ((Some pad) (frame-set-handler builder m pad))
-      (None (frame-clear-handler builder m))))
+      ((some pad) (frame-set-handler builder m pad))
+      (none (frame-clear-handler builder m))))
 
 ;; Says where an unwind this frame declares a handler for goes when the
 ;; handler declines it: to the enclosing region's dispatch block, which is a
@@ -3320,8 +3335,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; gets here: each pad installs it on entry. So there is nothing to restore.
 (defun emit-unwind-onward ((builder llvm-builder) (m llvm-module) (protect Option<llvm-basic-block>)) ()
     (match protect
-      ((Some outer) (build-br builder outer))
-      (None (coroutine-unwind builder m))))
+      ((some outer) (build-br builder outer))
+      (none (coroutine-unwind builder m))))
 
 ;; Leaves an `unwind-protect`'s cleanup on the *static* exit path — the one a
 ;; `break`/`return` took — once that cleanup has run.
@@ -3338,11 +3353,11 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; walker between the two would be the very conflation this design avoids.
 (defun emit-static-exit-onward ((builder llvm-builder) (loop-exit Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>)) ()
     (match exit-cleanup
-      ((Some outer) (build-br builder outer))
-      (None
+      ((some outer) (build-br builder outer))
+      (none
        (match loop-exit
-         ((Some eb) (build-br builder eb))
-         (None (panic "emit-static-exit-onward: not inside a loop"))))))
+         ((some eb) (build-br builder eb))
+         (none (panic "emit-static-exit-onward: not inside a loop"))))))
 
 
 
@@ -3400,7 +3415,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0)))
       (match (get fn-env nm)
-        ((Some target)
+        ((some target)
          (let ((env-len (sexpr-list-length captured)))
            (if (eq env-len 0)
                (let ((result (coroutine-call builder m (build-fn-address builder target) args-ptr argc)))
@@ -3409,7 +3424,7 @@ const SOURCE_TEMPLATE: &str = r#"
                  (compile-env-args m fn-name builder env fn-env captured env-ptr captured 0)
                  (let ((result (coroutine-call-env builder m (build-fn-address builder target) args-ptr argc env-ptr env-len)))
                    result)))))
-        (None (panic (append "compile-apply: no direct-callable function named " nm))))))
+        (none (panic (append "compile-apply: no direct-callable function named " nm))))))
 
 ;; `(call name (is-fn . arg-form)...)` — `Expr::Call`,
 ;; labels/closures Stage 3: a call to a *top-level*
@@ -3456,7 +3471,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (store-arg builder args-ptr idx (load-raw builder slot 0))))
 
 ;; `(suspend NAME KIND TAG-AT TAG-KIND (kind . arg)...)` — a builtin that
-;; **puts the task down** (`yield`, `sleep`, `task::wait`, every `Chan<T>`
+;; **puts the task down** (`yield`, `sleep`, `Task::wait`, every `Chan<T>`
 ;; operation).
 ;;
 ;; Two halves, and neither is a blocking call: `NAME` is a shim that writes
@@ -3836,7 +3851,7 @@ const SOURCE_TEMPLATE: &str = r#"
           ;; enclosing loop at all, regardless
           ;; of whatever loop (if any) the
           ;; `lambda` form itself sits inside.
-          (let ((v (compile-value m fn-name nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) lbody)))
+          (let ((v (compile-value m fn-name nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::none) (Option::none) "" (Scope::new) (Scope::new) (Option::none) (Option::none) lbody)))
             (coroutine-end nested-builder m v))))
       (let* ((env-len (sexpr-list-length lcaptured))
              (env-ptr (alloca-args builder env-len)))
@@ -3907,7 +3922,7 @@ const SOURCE_TEMPLATE: &str = r#"
                 (param-syms (sexpr-car (sexpr-cdr def)))
                 (def-body (sexpr-car (sexpr-cdr (sexpr-cdr def)))))
            (match (get inner-fn-env nm)
-           ((Some sib-fn)
+           ((some sib-fn)
             (let* ((sib-block (append-block sib-fn "entry"))
                    (sib-builder (llvm-builder::create)))
               (position-at-end sib-builder sib-block)
@@ -3943,10 +3958,10 @@ const SOURCE_TEMPLATE: &str = r#"
                 ;; comment), so no enclosing loop
                 ;; here either.
                 (let* ((sib-fn-env (clone-frames inner-fn-env))
-                       (v (compile-value m fn-name sib-builder sib-env sib-fn-env captured sib-fn (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) def-body)))
+                       (v (compile-value m fn-name sib-builder sib-env sib-fn-env captured sib-fn (Option::none) (Option::none) "" (Scope::new) (Scope::new) (Option::none) (Option::none) def-body)))
                   (coroutine-end sib-builder m v)
                   (compile-labels-bodies m fn-name inner-fn-env captured rest)))))
-           (None (panic (append "compile-labels-bodies: missing declaration for " nm))))))
+           (none (panic (append "compile-labels-bodies: missing declaration for " nm))))))
         ()))
 
 ;; `(labels ((captured . kind)...) ((name
@@ -4214,14 +4229,14 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn value-form)))
       (match (get block-exits name)
-        ((Some eb)
+        ((some eb)
          (match (get block-slots name)
-           ((Some slot)
+           ((some slot)
             (let ((stored (store-arg builder slot 0 v)))
               (build-br builder eb)
               v))
-           (None (panic "compile-return-from: no enclosing block of that name"))))
-        (None (panic "compile-return-from: no enclosing block of that name")))))
+           (none (panic "compile-return-from: no enclosing block of that name"))))
+        (none (panic "compile-return-from: no enclosing block of that name")))))
 
 ;; Rebinds every enclosing `block` name to a fresh cleanup block of this
 ;; `unwind-protect`'s own, and answers with the names it actually rebound (a
@@ -4238,8 +4253,8 @@ const SOURCE_TEMPLATE: &str = r#"
         ""
         (let ((name (names-head names)) (rest (names-tail names)))
           (match (get cleanups name)
-            ((Some seen) (install-block-cleanups cur-fn rest block-exits cleanups))
-            (None
+            ((some seen) (install-block-cleanups cur-fn rest block-exits cleanups))
+            (none
              (let ((cx (append-block cur-fn "cleanup-block-exit")))
                (set cleanups name cx)
                (set block-exits name cx)
@@ -4256,7 +4271,7 @@ const SOURCE_TEMPLATE: &str = r#"
         ()
         (let ((name (names-head names)) (rest (names-tail names)))
           (match (get cleanups name)
-            ((Some cx)
+            ((some cx)
              (progn
                (position-at-end builder cx)
                (install-handler builder m protect)
@@ -4267,9 +4282,9 @@ const SOURCE_TEMPLATE: &str = r#"
                  (if (block-terminated? builder)
                      ()
                      (match (get block-exits name)
-                       ((Some outer) (build-br builder outer))
-                       (None (panic "emit-block-cleanups: the block left its own scope")))))))
-            (None ()))
+                       ((some outer) (build-br builder outer))
+                       (none (panic "emit-block-cleanups: the block left its own scope")))))))
+            (none ()))
           (emit-block-cleanups m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup root-base-slot cleanups rest cleanup-form))))
 
 ;; `(break)` — unconditionally jumps to the nearest
@@ -4304,17 +4319,17 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; own doc comment.
 (defun compile-break ((m llvm-module) (fn-name string) (builder llvm-builder) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (exit-cleanup Option<llvm-basic-block>))llvm-value
     (match loop-exit
-      ((Some eb)
+      ((some eb)
        (match loop-slot
-         ((Some slot)
+         ((some slot)
           (let ((zero (const-word builder 0)))
             (store-arg builder slot 0 zero)
             (match exit-cleanup
-              ((Some xe) (build-br builder xe))
-              (None (build-br builder eb)))
+              ((some xe) (build-br builder xe))
+              (none (build-br builder eb)))
             zero))
-         (None (panic "compile-break: not inside a loop"))))
-      (None (panic "compile-break: not inside a loop"))))
+         (none (panic "compile-break: not inside a loop"))))
+      (none (panic "compile-break: not inside a loop"))))
 
 ;; `(return is-fn value-form)` — `Expr::Return`,
 ;; including the implicit `Unit` `core_bridge` already
@@ -4343,17 +4358,17 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn value-form)))
       (match loop-exit
-        ((Some eb)
+        ((some eb)
          (match loop-slot
-           ((Some slot)
+           ((some slot)
             (progn
               (store-arg builder slot 0 v)
               (match exit-cleanup
-                ((Some xe) (build-br builder xe))
-                (None (build-br builder eb)))
+                ((some xe) (build-br builder xe))
+                (none (build-br builder eb)))
               v))
-           (None (panic "compile-return: not inside a loop"))))
-        (None (panic "compile-return: not inside a loop")))))
+           (none (panic "compile-return: not inside a loop"))))
+        (none (panic "compile-return: not inside a loop")))))
 
 ;; `(set name-str kind value-form)` — `Expr::Set`
 ;; (`setf`). Reuses `compile-if-branch`'s retain logic
@@ -4406,10 +4421,10 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn value-form)))
       (match (get env nm)
-        ((Some slot)
+        ((some slot)
          (store-arg builder slot 0 v)
          v)
-        (None (panic (append "compile-set: unbound variable " nm))))))
+        (none (panic (append "compile-set: unbound variable " nm))))))
 
 ;; `(cellset name kind value-form)` — `setf` on a
 ;; cell-boxed name (closure-representation unification
@@ -4445,7 +4460,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup value-form)))
       (match (get env nm)
-        ((Some slot)
+        ((some slot)
          (let* ((cell-ref (load-raw builder slot 0))
                 (tagged (compile-tag-struct-field builder m v kind))
                 (args-ptr (alloca-args builder 2)))
@@ -4453,7 +4468,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (store-arg builder args-ptr 1 tagged)
            (let ((ignored (build-call builder (get-function m "rt_cell_set") args-ptr 2)))
              v)))
-        (None (panic (append "compile-cellset: unbound variable " nm))))))
+        (none (panic (append "compile-cellset: unbound variable " nm))))))
 
 ;; Tests `v` against pattern `pat`; on failure
 ;; branches to `fail-block` (jumping straight to
@@ -5708,11 +5723,11 @@ const SOURCE_TEMPLATE: &str = r#"
            (pad (append-block cur-fn "cleanup-pad"))
            (merge (append-block cur-fn "cleanup-merge"))
            (xexit (match loop-exit
-                               ((Some eb) (Option::some (append-block cur-fn "cleanup-exit")))
-                               (None (Option::none))))
+                               ((some eb) (Option::some (append-block cur-fn "cleanup-exit")))
+                               (none (Option::none))))
            ;; One `xexit` serves the single `break`/`return` target; a named
            ;; block needs one apiece, because each resumes somewhere else.
-           (cleanups (the Scope<llvm-basic-block> (scope::new)))
+           (cleanups (the Scope<llvm-basic-block> (Scope::new)))
            (pushed (push-frame block-exits))
            (rebound (install-block-cleanups cur-fn block-names block-exits cleanups))
            ;; `compile-catch`'s install, for the protected body.
@@ -5743,7 +5758,7 @@ const SOURCE_TEMPLATE: &str = r#"
           ()
           (emit-unwind-onward builder m protect)))
     (match xexit
-      ((Some xe)
+      ((some xe)
        (let* ((ignored5 (position-at-end builder xe))
               (restored2 (install-handler builder m protect)))
          (let ((xargs (alloca-args builder 1)))
@@ -5753,7 +5768,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (if (block-terminated? builder)
                ()
                (emit-static-exit-onward builder loop-exit exit-cleanup)))))
-      (None ()))
+      (none ()))
     (emit-block-cleanups m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup root-base-slot cleanups rebound cleanup-form)
     (position-at-end builder merge)
     (load-raw builder slot 0)))
@@ -6047,12 +6062,12 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun opt-arg-node ((arg Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp arg) (sexpr-cdr arg) ()))
 
-;; `(assoc "int" METHOD INSTANCE SYMBOL (KIND . A) (KIND . B))` with two
+;; `(assoc int METHOD INSTANCE SYMBOL (KIND . A) (KIND . B))` with two
 ;; literal operands, computed.
 (defun opt-fold-int ((e Option<Sexpr>)) Option<Sexpr>
   (let ((rest (sexpr-cdr e)))
     (if (and (opt-length-p rest 6)
-             (match (sexpr-car rest) ((str s) (equal s "int")) (_ false)))
+             (equal (sexpr-car rest) (quote int)))
         (let* ((args (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr rest)))))
                (a (opt-arg-node (sexpr-car args)))
                (b (opt-arg-node (sexpr-car (sexpr-cdr args)))))
@@ -6181,7 +6196,7 @@ const SOURCE_TEMPLATE: &str = r#"
         (coroutine-begin builder m f)
         (bind-params env builder m f param-names 0)
         (let* ((fn-env (new-fn-env))
-               (v (compile-value m name builder env fn-env '() f (Option::none) (Option::none) "" (scope::new) (scope::new) (Option::none) (Option::none) body)))
+               (v (compile-value m name builder env fn-env '() f (Option::none) (Option::none) "" (Scope::new) (Scope::new) (Option::none) (Option::none) body)))
           (coroutine-end builder m v)
 m))))
 

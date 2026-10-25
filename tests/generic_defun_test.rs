@@ -124,7 +124,7 @@ fn unwrap_option_propagates_bound_type_through_match() {
     let src = r#"
         (defun unwrap<T> ((opt Option<T>)) T
           (match opt ((some x) x) ((none) (panic "unwrap: None"))))
-        (unwrap (option::some 5))
+        (unwrap (Option::some 5))
     "#;
     assert_eq!(eval_ok(src), Value::Int(5));
 }
@@ -132,7 +132,7 @@ fn unwrap_option_propagates_bound_type_through_match() {
 #[test]
 fn generic_defun_returning_option() {
     let src = r#"
-        (defun wrap<T> ((x T)) Option<T> (option::some x))
+        (defun wrap<T> ((x T)) Option<T> (Option::some x))
         (match (wrap 9) ((some x) x) ((none) 0))
     "#;
     assert_eq!(eval_ok(src), Value::Int(9));
@@ -145,7 +145,7 @@ fn unused_type_param_is_uninferable() {
     // `T` appears only in the return type, with no argument and no expected
     // type to seed it from — `check_construct` has the same "cannot infer"
     // failure mode for an ADT's unconstrained params.
-    assert_type_error("(defun make-none<T> () Option<T> (option::none)) (make-none)");
+    assert_type_error("(defun make-none<T> () Option<T> (Option::none)) (make-none)");
 }
 
 #[test]
@@ -199,8 +199,8 @@ fn a_bounded_generic_can_delegate_with_a_structured_associated_type_pin() {
         eval_ok_with_prelude(
             "(defun firstkey<I,K,V> ((it I)) Option<K> (:where (Iter I (Item cons-cell<K,V>)))
                (match (find-if it (lambda ((p cons-cell<K,V>)) bool true))
-                 ((some p) (option::some (car p)))
-                 ((none) (option::none))))
+                 ((some p) (Option::some (car p)))
+                 ((none) (Option::none))))
              (let ((al (the Vector<cons-cell<int,int>> (Vector::new))))
                (push al (cons 7 8))
                (unwrap (firstkey (iter al))))"

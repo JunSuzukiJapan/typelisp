@@ -114,7 +114,7 @@ fn div_names_its_output() {
         "(defun halve<T> ((a T) (b T)) T (:where (Number T) (Div T (Output T))) (/ a b))
          (halve 7 2)",
     );
-    assert!(msg.contains("associated type `output` is `rational`"), "{}", msg);
+    assert!(msg.contains("associated type `Output` is `rational`"), "{}", msg);
     assert_eq!(
         eval_string("(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T)) (+ a b c)) (format false \"~a\" (sum3 (/ 1 2) (/ 1 3) 1))"),
         "11/6"

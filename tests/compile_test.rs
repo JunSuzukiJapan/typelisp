@@ -469,7 +469,7 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i32" "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc i32 "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false)))"#,
     ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
     // call, even from a test driving the raw builtins directly rather than
@@ -530,7 +530,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_std::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc i32 "+" true "tl_std::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -960,7 +960,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"
         (let ((m (llvm-module::create "mod")))
-          (compile-function m "double" '((x . 0)) '(assoc "i32" "+" true "tl_std::i32''+" (0 var "x" false) (0 var "x" false)))
+          (compile-function m "double" '((x . 0)) '(assoc i32 "+" true "tl_std::i32''+" (0 var "x" false) (0 var "x" false)))
           (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
         "#,
     ));
@@ -1262,8 +1262,8 @@ fn compile_dispatches_a_lambda_that_captures_a_match_arm_binding() {
         (defun try-it ((o Option<int>) (a int)) int (if ((mk o) a) 1 0))
         (compile mk)
         (compile try-it)
-        (+ (* 100 (try-it (option::some 5) 3))
-           (+ (* 10 (try-it (option::some 5) 7)) (try-it (option::none) 1)))
+        (+ (* 100 (try-it (Option::some 5) 3))
+           (+ (* 10 (try-it (Option::some 5) 7)) (try-it (Option::none) 1)))
         "#,
     );
     match v {
@@ -1311,7 +1311,7 @@ fn a_captured_match_arm_binding_is_shared_not_copied() {
           (let ((f (counter o))) (+ (f) (+ (f) (f)))))
         (compile counter)
         (compile run-three)
-        (run-three (option::some 10))
+        (run-three (Option::some 10))
         "#,
     );
     match v {
@@ -1335,7 +1335,7 @@ fn a_niched_option_sexpr_pattern_binds_inside_an_enclosing_closure() {
         (defun hit ((o Option<Sexpr>)) int (if (equal ((pick o)) (quote hi)) 1 0))
         (compile pick)
         (compile hit)
-        (+ (* 10 (hit (option::some (quote hi)))) (hit (option::none)))
+        (+ (* 10 (hit (Option::some (quote hi)))) (hit (Option::none)))
         "#,
     );
     match v {
@@ -1598,7 +1598,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_std::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc i32 "+" true "tl_std::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
@@ -1902,7 +1902,7 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
 fn the_compiler_body_compiles_an_integer_comparison() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
-              '(assoc "i32" "<" true "tl_i32''<" (0 var "a" false) (0 var "b" false)))"#,
+              '(assoc i32 "<" true "tl_i32''<" (0 var "a" false) (0 var "b" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -1917,7 +1917,7 @@ fn the_compiler_body_compiles_an_integer_comparison() {
 
 // (Removed `compile_assoc_panics_on_an_unsupported_receiver_type` in
 // interp-closure removal Stage 8a.) It hand-fed `compile-function` a raw
-// `(assoc "i32" "int->char" ...)` node — deliberately bypassing
+// `(assoc i32 "int->char" ...)` node — deliberately bypassing
 // `Interp::compile_function`'s up-front check — so the only thing left to catch
 // the non-native `i32::int->char` was the island's `get-function` failing to
 // find it in the module. Under the AOT-native island that failure is an
@@ -1942,7 +1942,7 @@ fn the_compiler_body_compiles_an_if_expression() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "maxab" '((a . 0) (b . 0))
               '(if false
-                   (assoc "i32" ">" true "tl_i32''>" (0 var "a" false) (0 var "b" false))
+                   (assoc i32 ">" true "tl_i32''>" (0 var "a" false) (0 var "b" false))
                    (var "a" false)
                    (var "b" false)))"#,
     ));
@@ -1966,7 +1966,7 @@ fn the_compiler_body_compiles_an_if_expression() {
 fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
-              '(assoc "i32" "+" true "tl_i32''+"
+              '(assoc i32 "+" true "tl_i32''+"
                  (0 let (((x . 0) . (int-any-width 0 99))) (var "x" false))
                  (0 var "x" false)))"#,
     ));
@@ -2304,7 +2304,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 
 // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
 
-/// `Expr::Construct` over `Sexpr` itself: `(int n)`/`(Bool b)`/`()` all
+/// `Expr::Construct` over `Sexpr` itself: `(int n)`/`(bool b)`/`()` all
 /// compile to `compile-construct-sexpr`'s pure bit-tagging path (no heap
 /// allocation at all), round-tripping through `Expr::Call`'s existing
 /// `Sexpr` decode step (Stage 5) with no further bridging needed. Every
@@ -2313,7 +2313,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 /// already-existing gap (`Interp::eval`'s compiled-call dispatch only
 /// special-cases `Sexpr`-vs-`i64` parameters — same family as Stage 5's
 /// documented `bool`-*return* gap, just for arguments instead), not
-/// something this stage touches. `(Char c)` is exercised at the
+/// something this stage touches. `(char c)` is exercised at the
 /// `ast_bridge`/`compile-construct-sexpr` level only, not here — compiling
 /// a bare `char` *literal* at all (`compile-value`'s dispatch has no
 /// `"char"` arm, only `compile-construct-sexpr`'s own variant-3 encoding,
@@ -2333,7 +2333,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
 
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-true () Sexpr (Bool true))
+        (defun make-true () Sexpr (bool true))
         (compile make-true)
         (make-true)
         "#,
@@ -2356,7 +2356,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
 /// builds a brand-new string at run time (not something `compile-str`'s
 /// compile-time character embedding could produce) and `length`s the result,
 /// exercising `rt_str_append`'s own fresh allocation. (The former
-/// `(match (Str "hi") ((Str content) (eq content "hi")))` string-content-eq
+/// `(match (str "hi") ((str content) (eq content "hi")))` string-content-eq
 /// sub-cases were dropped when Symbol/Sexpr redesign Phase 5 fenced `match`
 /// off `Sexpr`; the fence has since been lifted — see the "compiled `match`
 /// on a `Sexpr` scrutinee" section at the end of this file.)
@@ -2427,7 +2427,7 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
         r#"
         (defun make-some ((n int)) Option<int> (Option::some n))
         (compile make-some)
-        (match (make-some 42) ((Some x) x) ((None) -1))
+        (match (make-some 42) ((some x) x) ((none) -1))
         "#,
     )
     .expect("eval failed");
@@ -2457,7 +2457,7 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
 fn compile_dispatches_a_function_taking_an_enum_typed_argument_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun unwrap-or-zero ((o Option<int>)) int (match o ((Some x) x) ((None) 0)))
+        (defun unwrap-or-zero ((o Option<int>)) int (match o ((some x) x) ((none) 0)))
         (compile unwrap-or-zero)
         (unwrap-or-zero (Option::some 99))
         "#,
@@ -2512,8 +2512,8 @@ fn compile_dispatches_a_function_constructing_a_nested_option_to_native_code() {
         (defun wrap ((n int)) Option<Option<int>> (Option::some (Option::some n)))
         (compile wrap)
         (match (wrap 7)
-          ((Some inner) (match inner ((Some x) x) ((None) -1)))
-          ((None) -2))
+          ((some inner) (match inner ((some x) x) ((none) -1)))
+          ((none) -2))
         "#,
     )
     .expect("eval failed");
@@ -2530,7 +2530,7 @@ fn compile_dispatches_a_function_constructing_a_user_defenum_with_an_option_fiel
         (defenum wrapper (w Option<int>))
         (defun mk ((n int)) wrapper (wrapper::w (Option::some n)))
         (compile mk)
-        (match (mk 5) ((w o) (match o ((Some x) x) ((None) -1))))
+        (match (mk 5) ((w o) (match o ((some x) x) ((none) -1))))
         "#,
     )
     .expect("eval failed");
@@ -2549,7 +2549,7 @@ fn compile_dispatches_vector_push_and_get_of_an_option_element_to_native_code() 
           (let ((v (the Vector<Option<int>> (Vector::new))))
             (push v (Option::some 3))
             (push v (Option::none))
-            (match (get v 0) ((Some x) x) ((None) -1))))
+            (match (get v 0) ((some x) x) ((none) -1))))
         (compile f)
         (f)
         "#,
@@ -2571,8 +2571,8 @@ fn compile_dispatches_hashtable_get_of_an_option_typed_value_to_native_code() {
           (let ((ht (the HashTable<int,Option<int>> (HashTable::new))))
             (set ht 1 (Option::some 42))
             (match (get ht 1)
-              ((Some inner) (match inner ((Some x) x) ((None) -1)))
-              ((None) -2))))
+              ((some inner) (match inner ((some x) x) ((none) -1)))
+              ((none) -2))))
         (compile run)
         (run)
         "#,
@@ -2591,7 +2591,7 @@ fn compile_dispatches_a_defstruct_field_of_option_type_to_native_code() {
         (defstruct holder (val Option<int>))
         (defun mk ((n int)) holder (make-instance 'holder :val (Option::some n)))
         (compile mk)
-        (match (val (mk 8)) ((Some x) x) ((None) -1))
+        (match (val (mk 8)) ((some x) x) ((none) -1))
         "#,
     )
     .expect("eval failed");
@@ -2614,7 +2614,7 @@ fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many
               (if (eq n 0) (break) ())
               (push scratch n)
               (setf n (- n 1)))
-            (match (Option::some (the int 123)) ((Some x) x) ((None) -1))))
+            (match (Option::some (the int 123)) ((some x) x) ((none) -1))))
         (compile sum-after-gc)
         (sum-after-gc 5000)
         "#,
@@ -3682,7 +3682,7 @@ fn compile_and_interpret_agree_on_a_defenum_match() {
 fn compile_matches_a_builtin_option() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun u ((n int)) int (match (option::some n) ((Some v) v) ((None) n)))
+        (defun u ((n int)) int (match (Option::some n) ((some v) v) ((none) n)))
         (compile u)
         (u 5)
         "#,
@@ -3768,7 +3768,7 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
             ((cons (int a) _) a)
             (_ 0)))
         (compile f)
-        (+ (f (int 40)) (f (sexpr-cons (int 2) (Str "tail"))))
+        (+ (f (int 40)) (f (sexpr-cons (int 2) (str "tail"))))
         "#,
     );
     assert_eq!(v, Value::Int(42));
@@ -3951,7 +3951,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
             (_ 0)))
         (compile tag)
         (+ (+ (tag ()) (* (the int 10) (tag (quote foo))))
-           (+ (* (the int 100) (tag (Str "s"))) (* (the int 1000) (tag (Bool false)))))
+           (+ (* (the int 100) (tag (str "s"))) (* (the int 1000) (tag (bool false)))))
         "#,
     );
     assert_eq!(v, Value::Int(4321));
@@ -3969,7 +3969,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
 fn compile_match_binds_and_returns_a_sym_payload() {
     let v = eval_string_with_compiler(
         r#"
-        (defun get-sym ((s Option<Sexpr>)) Symbol
+        (defun get-sym ((s Option<Sexpr>)) symbol
           (match s ((sym x) x) (_ (panic "not a sym"))))
         (compile get-sym)
         (symbol->string (get-sym (quote hello)))
@@ -4001,7 +4001,7 @@ fn compile_match_dispatches_and_extracts_the_path_variant() {
     assert_eq!(v, Value::Bool(true));
 }
 
-/// `(Path segs)` construction, the inverse of the extraction test above: a
+/// `(path segs)` construction, the inverse of the extraction test above: a
 /// compiled `Sexpr` list of `sym`s becomes a genuine `Value::Path` through
 /// the new `rt_list_to_path` runtime shim (`compile-construct-sexpr` variant
 /// `10`). The result crosses back out as an ordinary `Sexpr` (already
@@ -4013,7 +4013,7 @@ fn compile_construct_and_round_trips_the_path_variant() {
     let v = eval_ok_with_compiler(
         r#"
         (defun make-path ((segs Option<Sexpr>)) Option<Sexpr>
-          (Path segs))
+          (path segs))
         (compile make-path)
         (match (make-path (list (quote a) (quote b)))
           ((path segs) (equal segs (list (quote a) (quote b))))
@@ -4094,7 +4094,7 @@ fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
     let v = run_with_compiler(
         r#"
         (defvar (maybe Option<int>) (Option::some 42))
-        (defun read-maybe () int (match maybe ((Some x) x) ((None) 0)))
+        (defun read-maybe () int (match maybe ((some x) x) ((none) 0)))
         (compile read-maybe)
         (read-maybe)
         "#,
@@ -4113,7 +4113,7 @@ fn compile_of_a_function_referencing_a_none_typed_global_round_trips() {
     let v = run_with_compiler(
         r#"
         (defvar (maybe Option<int>) (Option::none))
-        (defun read-maybe () int (match maybe ((Some x) x) ((None) -1)))
+        (defun read-maybe () int (match maybe ((some x) x) ((none) -1)))
         (compile read-maybe)
         (read-maybe)
         "#,
@@ -4138,7 +4138,7 @@ fn compile_can_set_an_option_typed_global_and_the_interpreter_sees_the_write() {
         (defun set-maybe () int (progn (setf maybe (Option::some 7)) 0))
         (compile set-maybe)
         (set-maybe)
-        (match maybe ((Some x) x) ((None) -1))
+        (match maybe ((some x) x) ((none) -1))
         "#,
     )
     .expect("eval failed");
@@ -4261,7 +4261,7 @@ fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
     let v = eval_string_with_compiler_and_capacity(
         r#"
         (defvar (maybe Option<string>) (Option::some "hello"))
-        (defun touch-maybe () string (match maybe ((Some s) s) ((None) "")))
+        (defun touch-maybe () string (match maybe ((some s) s) ((none) "")))
         (compile touch-maybe)
         (defvar (scratch Vector<int>) (Vector::new))
         (defvar (n int) 20000)
@@ -4269,7 +4269,7 @@ fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
           (if (eq n 0)
               (break)
               (progn (push scratch n) (setf n (- n 1)))))
-        (match maybe ((Some s) s) ((None) ""))
+        (match maybe ((some s) s) ((none) ""))
         "#,
         1 << 14,
     );
@@ -4326,7 +4326,7 @@ fn compile_dispatches_a_function_with_an_untaken_panic_branch_to_native_code() {
 /// A bare `char` literal now has a real compiled representation
 /// (`compile-char`/`sexpr-char`) — an oversight discovered while
 /// implementing `Expr::Quote`'s `Char` leaf (a real `Sexpr::Char`
-/// construction, e.g. `(Char c)`, already routed through `compile-value` on
+/// construction, e.g. `(char c)`, already routed through `compile-value` on
 /// its own literal-`char` argument form, which previously had no dispatch
 /// tag at all). This keeps the literal entirely inside the compiled
 /// function, comparing it via the native `char` `equal` (`compile-assoc`'s
@@ -4424,7 +4424,7 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
 }
 
 /// `(quote (1 2 3))` compiles to the same `compile-construct-sexpr`
-/// machinery an ordinary `(Cons (int 1) ...)` construction already uses
+/// machinery an ordinary `(cons (int 1) ...)` construction already uses
 /// (`ast_bridge::translate_quote`) — a compiled function can build a quoted
 /// literal, and an ordinary compiled `match`-based `sum` (already proven
 /// correct against `Sexpr` scrutinees elsewhere in this file) can consume it.
@@ -4613,7 +4613,7 @@ fn compile_dispatches_vector_pop_to_native_code() {
             (push v 10)
             (push v 20)
             (push v 30)
-            (match (pop v) ((Some x) x) ((None) -1))))
+            (match (pop v) ((some x) x) ((none) -1))))
         (compile f)
         (f)
         "#,
@@ -4632,7 +4632,7 @@ fn compile_dispatches_vector_pop_shrinks_len_to_native_code() {
           (let ((v (the Vector<int> (Vector::new))))
             (push v 10)
             (push v 20)
-            (match (pop v) ((Some x) x) ((None) -1))
+            (match (pop v) ((some x) x) ((none) -1))
             (as int (len v))))
         (compile f)
         (f)
@@ -4651,7 +4651,7 @@ fn compile_dispatches_vector_pop_of_an_empty_vector_returns_none() {
         r#"
         (defun f () int
           (let ((v (the Vector<int> (Vector::new))))
-            (match (pop v) ((Some x) x) ((None) -1))))
+            (match (pop v) ((some x) x) ((none) -1))))
         (compile f)
         (f)
         "#,
@@ -4708,7 +4708,7 @@ fn compile_of_a_vector_summing_function_agrees_with_the_interpreter() {
 // `(compile fn)` now transitively compiles the monomorphized method/function
 // instantiations `fn` calls (`Interp::compile_function_rec`), so a caller that
 // iterates a `Vector` — `doiter`, or a prelude combinator like `map`/`member`
-// — pulls in `vector::iter <T>` / `vector-iter::next <T>` (and any `Eq`
+// — pulls in `Vector::iter <T>` / `vector-iter::next <T>` (and any `Eq`
 // instance the combinator needs) automatically, even though those
 // whitespace-mangled names can't be `(compile ...)`d by hand. This is the
 // real proof that "an `Iter` over a `Vector` compiles": closures + `Option`
@@ -4785,7 +4785,7 @@ fn compile_transitively_compiles_the_map_combinator_over_a_vector() {
 // `HashTable::iter` builds via `entries`. With Stage C's `rt_hashtable_*`
 // primitives (`new`/`set`/`entries`/...) and Stage B's transitive driver,
 // `(compile fn)` for a function that builds, populates, and iterates a map
-// compiles the whole chain (`hashtable::iter`, `hashtable-iter::next`,
+// compiles the whole chain (`HashTable::iter`, `hashtable-iter::next`,
 // `cons-cell` accessors) automatically.
 
 /// Build + populate + iterate a `HashTable<i64,i64>`, summing its values —
@@ -5633,7 +5633,7 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
         (deftrait Base ()
           (base-a ((self Self)) int)
           (base-b ((self Self)) int))
-        (shadow sub)
+        (shadow Sub)
         (deftrait Sub (Base)
           (sub-c ((self Self)) int))
         (defstruct tri (n int))
@@ -5856,7 +5856,7 @@ fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
           (let ((n 0))
             (loop
               (match (next it)
-                ((Some x) (setf n (+ n x)))
+                ((some x) (setf n (+ n x)))
                 (_ (break))))
             n))
         (defun make-v () Vector<int> (Vector::new))
@@ -5882,9 +5882,9 @@ fn compile_dispatches_a_result_carrying_a_user_error_type() {
         r#"
         (defstruct io-err (code int))
         (defun open-it ((ok bool)) Result<int,io-err>
-          (if ok (result::ok 7) (result::err (make-instance 'io-err :code 42))))
+          (if ok (Result::ok 7) (Result::err (make-instance 'io-err :code 42))))
         (defun code ((ok bool)) int
-          (match (open-it ok) ((Ok v) v) ((Err e) e::code)))
+          (match (open-it ok) ((ok v) v) ((err e) e::code)))
         (compile code)
         (+ (* 100 (code true)) (code false))
         "#,
@@ -5903,7 +5903,7 @@ fn compile_dispatches_a_match_on_a_builtin_error_type() {
     let v = run_readback(
         r#"
         (defun classify ((r Result<int,ParseIntError>)) string
-          (match r ((Ok _) "ok") ((Err e) (message e))))
+          (match r ((ok _) "ok") ((err e) (message e))))
         (compile classify)
         (append (classify (parse-int "12")) (classify (parse-int "xy")))
         "#,
@@ -5923,7 +5923,7 @@ fn compile_dispatches_message_on_a_dyn_error() {
         (defstruct app-err (why string))
         (impl Error app-err
           (message ((self Self)) string self::why)
-          (source ((self Self)) Option<:dyn Error> (option::none)))
+          (source ((self Self)) Option<:dyn Error> (Option::none)))
         (defun describe ((e :dyn Error)) string (message e))
         (defun both () string
           (append (describe (make-instance 'app-err :why "mine"))
@@ -5986,7 +5986,7 @@ fn compile_handles_a_result_with_a_unit_ok_payload() {
     let v = run_readback(
         r#"
         (defun check ((n int)) Result<(), string>
-          (if (> n 0) (result::ok ()) (result::err "negative")))
+          (if (> n 0) (Result::ok ()) (Result::err "negative")))
         (defun describe ((n int)) string
           (match (check n) ((ok _) "ok") ((err e) e)))
         (compile check)
@@ -6021,7 +6021,7 @@ fn compile_round_trips_a_vector_of_units() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defun two-units () int
-          (let ((v (the Vector<()> (vector::new))))
+          (let ((v (the Vector<()> (Vector::new))))
             (push v ())
             (push v ())
             (len v)))
@@ -6047,12 +6047,12 @@ fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (shadow vector)
-          (pub defstruct vector (pub a int))
-          (impl vector (pub len (self) int (* 100 self::a)))
-          (pub defun call-len ((v vector)) int (len v)))
+          (shadow Vector)
+          (pub defstruct Vector (pub a int))
+          (impl Vector (pub len (self) int (* 100 self::a)))
+          (pub defun call-len ((v Vector)) int (len v)))
         (compile m::call-len)
-        (m::call-len (make-instance 'm::vector :a 3))
+        (m::call-len (make-instance 'm::Vector :a 3))
         "#,
     )
     .expect("eval failed");
@@ -6066,12 +6066,12 @@ fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (shadow hashtable)
-          (pub defstruct hashtable (pub a int) (pub b int))
-          (impl hashtable (pub count (self) int (+ self::a self::b)))
-          (pub defun call-count ((h hashtable)) int (count h)))
+          (shadow HashTable)
+          (pub defstruct HashTable (pub a int) (pub b int))
+          (impl HashTable (pub count (self) int (+ self::a self::b)))
+          (pub defun call-count ((h HashTable)) int (count h)))
         (compile m::call-count)
-        (m::call-count (make-instance 'm::hashtable :a 20 :b 22))
+        (m::call-count (make-instance 'm::HashTable :a 20 :b 22))
         "#,
     )
     .expect("eval failed");
@@ -6090,7 +6090,7 @@ fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
               (while (< i (len v)) (setf sum (+ sum (get v i))) (setf i (+ i 1)))
               sum)))
         (compile m::total)
-        (let ((v (the Vector<int> (vector::new))))
+        (let ((v (the Vector<int> (Vector::new))))
           (push v 10)
           (push v 32)
           (m::total v))
@@ -6281,7 +6281,7 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
-    assert_eq!(body, r#"(assoc "i32" "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#);
+    assert_eq!(body, r#"(assoc i32 "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#);
 
     let module = expect_llvm_module(eval_ok_in_island(&format!(
         r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '{})"#,
@@ -6573,7 +6573,7 @@ fn compile_reads_a_hashtable_field_out_of_a_struct() {
           (let ((c (make-instance 'cache :table (the HashTable<int,int> (HashTable::new)))))
             (let ((t c::table))
               (set t 1 41)
-              (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
+              (match (get t 1) ((some n) (+ n 1)) (none 0)))))
         (compile probe)
         (probe)
         "#,
@@ -6596,7 +6596,7 @@ fn compile_captures_a_hashtable_in_a_closure() {
         (defun probe () int
           (let ((t (the HashTable<int,int> (HashTable::new))))
             (set t 1 41)
-            (let ((f (lambda () int (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
+            (let ((f (lambda () int (match (get t 1) ((some n) (+ n 1)) (none 0)))))
               (f))))
         (compile probe)
         (probe)
@@ -6912,7 +6912,7 @@ fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
 }
 
 /// A module-qualified type argument in a specialization's name. The name a
-/// specialization is registered under embeds its type arguments — `hashtable::get
+/// specialization is registered under embeds its type arguments — `HashTable::get
 /// <m::pt,int>` — and the split that finds the method in it used to take the
 /// *last* `::` in the string, which lands inside the type argument. Nothing at
 /// the top level could show it, because a type there has one segment.

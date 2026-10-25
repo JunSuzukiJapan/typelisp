@@ -24,7 +24,6 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::check::registry::EVAL_ERROR;
 use crate::type_key::alloc_typed_enum;
 use typelisp_mem::RootScope;
 
@@ -759,12 +758,12 @@ impl Interp {
         // or a pattern to read here.
         // Its elements do print, though, and they are all of the one type
         // argument: a uniform template says so.
-        let vector = Path::std("vector");
+        let vector = Path::std("Vector");
         root.get_or_create(&vector.parent()).types.insert(
             vector.last_segment().to_string(),
             scope::TypeEntry::Struct {
                 reprs: Vec::new(),
-                templates: scope::FieldTemplates::Uniform(crate::type_key::field_template(&["t".to_string()], &crate::Type::Var("t".to_string()))),
+                templates: scope::FieldTemplates::Uniform(crate::type_key::field_template(&["T".to_string()], &crate::Type::Var("T".to_string()))),
                 names: Vec::new(),
             },
         );
@@ -772,7 +771,7 @@ impl Interp {
         // (`registry::task_def` and friends): a handle box holding the
         // scheduler's id and nothing else, built by the runtime
         // (`typelisp_rt::sched::task_handle`). Nothing constructs or matches
-        // one either, but it prints as its type and the id (`#<chan<int> 3>`),
+        // one either, but it prints as its type and the id (`#<Chan<int> 3>`),
         // so the printer has to find it here — positionally, with no names.
         use crate::check::registry::{chan_of, task_of, thread_of};
         for handle_of in [task_of, thread_of, chan_of] {
@@ -2135,11 +2134,11 @@ impl Interp {
                 Ok(code) => std::process::exit(code as i32),
                 Err(e) => Some(Err(e)),
             },
-            // `symbol->string`/`string->symbol`: the `Symbol`<->`Str` bridges.
-            // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
-            // `Sexpr::Sym` (a `Value::Symbol(id)`), so
-            // `symbol->string` reads its interned name and `string->symbol`
-            // interns a fresh one — the same intern table `gensym`/`read` use.
+            // `symbol->string`/`intern`: the `symbol`<->`string` bridges.
+            // `intern` reads the name in the module the way the reader would
+            // there (`Names::read`), so it hands back the symbol a source
+            // spelling of it in that module is, creating one only when the
+            // module sees none — CL's `intern`.
             "symbol->string" => Some(match args[0] {
                 Value::Symbol(id) => {
                     let name = id.name().to_string();
@@ -2147,14 +2146,12 @@ impl Interp {
                 }
                 _ => Err(EvalError::Panic("symbol->string: not a symbol".into())),
             }),
-            "string->symbol" => Some(match rt_str(heap, &args[0]) {
-                Ok(s) => Ok(heap.intern_symbol(&s)),
-                Err(e) => Err(e),
-            }),
             "intern" => Some((|| {
                 let name = rt_str(heap, &args[0])?;
-                let ns = typelisp_mem::symbols::ns_named(&rt_str(heap, &args[1])?);
-                Ok(heap.intern_symbol_in(ns, &name))
+                let module = rt_str(heap, &args[1])?;
+                let ns = typelisp_mem::symbols::ns_named(&module)
+                    .ok_or_else(|| EvalError::Panic(format!("intern: no module named `{}`", module)))?;
+                Ok(Value::Symbol(heap.names().read(ns, &name)))
             })()),
             "keywordp" => Some(match args[0] {
                 Value::Symbol(id) => Ok(Value::Bool(id.is_keyword())),
@@ -2443,8 +2440,8 @@ impl Interp {
     }
 
     /// The registered definition's field template, instantiated by the
-    /// type's own arguments — `gen<option<int>>`'s field `$0` is
-    /// `option<int>`, a niche. See [`typelisp_print::PrintEnv`].
+    /// type's own arguments — `gen<Option<int>>`'s field `$0` is
+    /// `Option<int>`, a niche. See [`typelisp_print::PrintEnv`].
     fn field_is_niched_option(&self, ty: crate::TypeId, variant: Option<usize>, index: usize) -> Result<bool, String> {
         let template = self.root.borrow().field_template(&printed_definition(ty)?, variant, index)?;
         let typelisp_mem::TypeShape::Named(_, _, args) = typelisp_mem::type_shape(ty) else {
@@ -2530,7 +2527,7 @@ impl Interp {
                 heap.pop_root();
                 Ok(out)
             }
-            Err(msg) => Ok(result_err(heap, &MACROEXPAND_RESULT_TYPE, EVAL_ERROR, msg)),
+            Err(msg) => Ok(result_err(heap, &MACROEXPAND_RESULT_TYPE, wk::EVAL_ERROR, msg)),
         }
     }
 
@@ -2550,7 +2547,7 @@ impl Interp {
                 Ok(None) => break,
                 Err(msg) => {
                     heap.truncate_roots(mark);
-                    return Ok(result_err(heap, &MACROEXPAND_RESULT_TYPE, EVAL_ERROR, msg));
+                    return Ok(result_err(heap, &MACROEXPAND_RESULT_TYPE, wk::EVAL_ERROR, msg));
                 }
             }
         }
@@ -2674,7 +2671,7 @@ impl Interp {
     pub fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
         let checker = match &self.checker {
             Some(c) => Rc::clone(c),
-            None => return Ok(result_err(heap, &EVAL_RESULT_TYPE, EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
+            None => return Ok(result_err(heap, &EVAL_RESULT_TYPE, wk::EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
         };
         let form = *arg;
         // Root the form across type-checking (which allocates), then pop back
@@ -2688,7 +2685,7 @@ impl Interp {
         }
         let tl = match checked {
             Ok(tl) => tl,
-            Err(e) => return Ok(result_err(heap, &EVAL_RESULT_TYPE, EVAL_ERROR, e.to_string())),
+            Err(e) => return Ok(result_err(heap, &EVAL_RESULT_TYPE, wk::EVAL_ERROR, e.to_string())),
         };
         // Decide the CL-style return before `exec` consumes `tl`: a definition
         // returns its own name symbol; an expression returns its value below.
@@ -2823,7 +2820,7 @@ impl Default for Interp {
 /// Whether `type_name` is the built-in `Sexpr` type, whose values are
 /// represented as a heap box rather than a Rust-side value.
 fn is_sexpr_type(type_name: &Path) -> bool {
-    crate::types::path_is_builtin(type_name, "sexpr")
+    crate::types::path_is_builtin(type_name, typelisp_mem::wk::SEXPR)
 }
 
 pub(crate) fn rt_i64(v: &Value) -> Result<i64, EvalError> {
@@ -3203,9 +3200,16 @@ fn try_int_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, r
 
 /// The target width and signedness a `int->W`/`try-int->W` method name
 /// carries, or `None` for any other method — the `W` is the only place a
-/// width cast's target can be written (`registry::int_assoc`).
+/// width cast's target can be written (`registry::int_assoc`, which builds
+/// the names from the same lists). A method is still named by its spelling
+/// (stage 7 of the explicit-symbols plan makes it a symbol).
 fn width_cast_target(method: &str, prefix: &str) -> Option<(u32, bool)> {
-    method.strip_prefix(prefix).and_then(crate::types::int_width_signed)
+    let target = method.strip_prefix(prefix)?;
+    crate::types::INT_TYPES
+        .iter()
+        .chain(crate::types::C_WORD_TYPES.iter())
+        .find(|t| t.scalar_name() == Some(target))
+        .and_then(crate::types::int_width_signed)
 }
 
 /// The `BigRational` behind a `ratio` value — see [`expect_bignum`] for why
@@ -3779,17 +3783,13 @@ impl Interp {
 /// this returns is what `eval_int_builtin` cuts every result back to. `None`
 /// for anything that is not an integer type.
 fn int_receiver_width(type_name: &Path) -> Option<(u32, bool)> {
-    crate::types::INT_TYPE_NAMES
-        .iter()
-        .chain(crate::types::C_WORD_TYPE_NAMES.iter())
-        .find(|n| crate::types::path_is_builtin(type_name, n))
-        .and_then(|n| crate::types::int_width_signed(n))
+    crate::types::scalar_type(type_name).and_then(|t| crate::types::int_width_signed(&t))
 }
 
 /// [`int_receiver_width`]'s float counterpart: `f32` and `f64` are one
 /// `Value::Float` (an `f64`) apart from which type labels them.
 fn is_float_receiver(type_name: &Path) -> bool {
-    crate::types::FLOAT_TYPE_NAMES.iter().any(|n| crate::types::path_is_builtin(type_name, n))
+    crate::types::scalar_type(type_name).is_some_and(|t| t.is_float())
 }
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
@@ -3829,7 +3829,7 @@ pub(crate) fn eval_builtin_method(
     args: &[Value],
     ret_type: TypeId,
 ) -> Option<Result<Value, EvalError>> {
-    if crate::types::path_is_builtin(type_name, "hashtable") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::HASHTABLE) {
         return match method {
             // `ret_type` is the *result's* runtime identity, spelled by the
             // checker (`Checker::assoc_form`): these builders have no field to
@@ -3852,7 +3852,7 @@ pub(crate) fn eval_builtin_method(
         };
     }
     // `join` is intercepted before this, as `Task<T>::wait` is.
-    if crate::types::path_is_builtin(type_name, "thread") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::THREAD_TYPE) {
         return match method {
             "current-id" => Some(Ok(Value::Int(typelisp_rt::sys_builtin::thread_current_id()))),
             "available-parallelism" => {
@@ -3861,7 +3861,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "vector") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::VECTOR) {
         return match method {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
             "new" => Some(Ok(crate::type_key::alloc_struct_of(heap, ret_type, Vec::new()))),
@@ -3873,7 +3873,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "scope") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::SCOPE) {
         // One representation: every `Scope<V>` is a `StructPayload::Frames`
         // heap box, and the element needs no encode or decode, so `V` never
         // enters into it — see this function's doc comment.
@@ -3889,7 +3889,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "string") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::STRING) {
         return match method {
             "upcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_uppercase()).map(|s| str_rt(heap, s))),
             "downcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_lowercase()).map(|s| str_rt(heap, s))),
@@ -3911,7 +3911,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "char") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::CHAR) {
         return match method {
             "upcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_uppercase()))),
             "downcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_lowercase()))),
@@ -3960,7 +3960,7 @@ pub(crate) fn eval_builtin_method(
     if is_float_receiver(type_name) {
         // `f32` is binary32 and `f64` binary64: the receiver's own width says
         // what each result is rounded to (`float_at`).
-        let single = crate::types::path_is_builtin(type_name, "f32");
+        let single = crate::types::path_is_builtin(type_name, typelisp_mem::wk::F32);
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_float_builtin(heap, method, args, single)
@@ -3999,7 +3999,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "int") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::INT) {
         return match method {
             "+" | "-" | "*" | "truncate" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
             | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_integer_builtin(heap, method, args),
@@ -4021,7 +4021,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "ratio") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::RATIO) {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_ratio_builtin(heap, method, args)
@@ -4035,7 +4035,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "rational") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::REPR_RATIONAL) {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_rational_builtin(heap, method, args)
@@ -4046,13 +4046,13 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "bool") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::BOOL) {
         return match method {
             "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "symbol") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::SYMBOL) {
         // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
         // `Sexpr::Sym`, so `eq`/`eql` reuse the `Sexpr` comparisons (interned
         // id identity — same name => same id => `eq`).
@@ -4062,7 +4062,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if crate::types::path_is_builtin(type_name, "sexpr") {
+    if crate::types::path_is_builtin(type_name, typelisp_mem::wk::SEXPR) {
         return match method {
             // `eq`/`eql` now diverge, as anticipated by this arm's own prior
             // history (see `sexpr_eql`'s doc comment): `Sexpr::f64` became
@@ -4329,8 +4329,8 @@ const READER_MACRO_GLUE: &str = "call-reader-macro";
 /// `Option<Sexpr>` is [`TypeId::OPTION_SEXPR`].
 pub const MACROEXPAND_RESULT_TYPE: TypeSpec = TypeSpec::Named(
     StdModule::STD,
-    "result",
-    &[TypeSpec::Named(StdModule::STD, "option", &[spec::SEXPR]), TypeSpec::Named(StdModule::STD, "evalerror", &[])],
+    "Result",
+    &[TypeSpec::Named(StdModule::STD, "Option", &[spec::SEXPR]), TypeSpec::Named(StdModule::STD, "EvalError", &[])],
 );
 
 /// `eval`'s result type — the same as `macroexpand`'s, and the same fixed
@@ -4351,13 +4351,13 @@ fn result_ok(heap: &mut Heap, ty: &TypeSpec, v: Value) -> Value {
 /// exactly that string, before wrapping *that* in `Result`'s `err` variant.
 /// `err_type` must name one of those four — its variant index is 0, the only
 /// one each has. `result` is the *whole* result type
-/// (`result<option<sexpr>,evalerror>`), which is what the caller's patterns
+/// (`Result<Option<sexpr>,evalerror>`), which is what the caller's patterns
 /// test against.
-fn result_err(heap: &mut Heap, result: &TypeSpec, err_type: &str, msg: String) -> Value {
+fn result_err(heap: &mut Heap, result: &TypeSpec, err_type: u32, msg: String) -> Value {
     let msg_val = str_rt(heap, msg);
-    let err_val = alloc_typed_enum(heap, &Path::std(err_type), 0, vec![msg_val]);
+    let err_val = alloc_typed_enum(heap, &Path::builtin(err_type), 0, vec![msg_val]);
     // The `Result`'s own type, not the bare path: a value's identity carries
-    // its instantiation, and `result` matches no `result<option<sexpr>,
+    // its instantiation, and `result` matches no `Result<Option<sexpr>,
     // evalerror>` pattern. `err_type` needs no such treatment — a concrete
     // error type has no type arguments — but the wrapper does, which is why
     // this takes two rather than one.
@@ -4447,7 +4447,7 @@ fn hashtable_entries(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Resul
     // argument.
     let cell_type = match typelisp_mem::type_shape(ret_type) {
         typelisp_mem::TypeShape::Named(_, _, args) if args.len() == 1 => args[0],
-        _ => panic!("hashtable::entries: `{}` is not a one-argument container type", &*typelisp_mem::type_name(ret_type)),
+        _ => panic!("HashTable::entries: `{}` is not a one-argument container type", &*typelisp_mem::type_name(ret_type)),
     };
     // Each cell is a new box that nothing points at until the vector is built,
     // so each is rooted as it is made: building the next one can collect.

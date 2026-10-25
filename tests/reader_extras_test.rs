@@ -124,7 +124,7 @@ fn unreadable_text_is_an_err() {
 fn read_sexpr_consumes_the_whitespace_that_ended_the_datum() {
     is_true(
         r#"(let ((s (make-string-input-stream "1 2")))
-             (progn (read-sexpr s) (equalp (read-char s) (option::some #\2))))"#,
+             (progn (read-sexpr s) (equalp (read-char s) (Option::some #\2))))"#,
     );
 }
 
@@ -133,7 +133,7 @@ fn read_sexpr_preserving_whitespace_leaves_it() {
     is_true(
         r#"(let ((s (make-string-input-stream "1 2")))
              (progn (read-sexpr-preserving-whitespace s)
-                    (equalp (read-char s) (option::some #\space))))"#,
+                    (equalp (read-char s) (Option::some #\space))))"#,
     );
 }
 
@@ -141,7 +141,7 @@ fn read_sexpr_preserving_whitespace_leaves_it() {
 fn only_one_whitespace_character_is_consumed() {
     is_true(
         r#"(let ((s (make-string-input-stream "1  2")))
-             (progn (read-sexpr s) (equalp (read-char s) (option::some #\space))))"#,
+             (progn (read-sexpr s) (equalp (read-char s) (Option::some #\space))))"#,
     );
 }
 
@@ -149,7 +149,7 @@ fn only_one_whitespace_character_is_consumed() {
 fn a_non_whitespace_terminator_is_left_alone() {
     is_true(
         r#"(let ((s (make-string-input-stream "1)2")))
-             (progn (read-sexpr s) (equalp (read-char s) (option::some #\)))))"#,
+             (progn (read-sexpr s) (equalp (read-char s) (Option::some #\)))))"#,
     );
 }
 
@@ -182,7 +182,7 @@ fn a_delimited_list_stops_at_its_terminator() {
 fn the_terminator_is_consumed() {
     is_true(&format!(
         r#"(let ((s {}))
-             (progn (read-delimited-list #\] s) (equalp (read-char s) (option::some #\x))))"#,
+             (progn (read-delimited-list #\] s) (equalp (read-char s) (Option::some #\x))))"#,
         over("1]x")
     ));
 }

@@ -145,13 +145,13 @@ fn optimized(level: i64, ir: &str) -> String {
 fn the_island_rewrites_only_at_level_one_and_up() {
     let cases = [
         // Level 0: nothing.
-        (0, r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false)))"#,
-            r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false)))"#),
-        (1, r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false)))"#,
-            r#"(let () (assoc "int" "+" true "f" (2 var "n" false) (2 int 0 10)))"#),
-        (1, r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "k" false) (2 var "k" false)))"#,
+        (0, r#"(let (((k . 2) int 0 10)) (assoc int "+" true "f" (2 var "n" false) (2 var "k" false)))"#,
+            r#"(let (((k . 2) int 0 10)) (assoc int "+" true "f" (2 var "n" false) (2 var "k" false)))"#),
+        (1, r#"(let (((k . 2) int 0 10)) (assoc int "+" true "f" (2 var "n" false) (2 var "k" false)))"#,
+            r#"(let () (assoc int "+" true "f" (2 var "n" false) (2 int 0 10)))"#),
+        (1, r#"(let (((k . 2) int 0 10)) (assoc int "+" true "f" (2 var "k" false) (2 var "k" false)))"#,
             r#"(let () (int 0 20))"#),
-        (1, r#"(if false (assoc "int" "<" true "f" (2 int 0 1) (2 int 0 2)) (int 0 1) (int 0 2))"#,
+        (1, r#"(if false (assoc int "<" true "f" (2 int 0 1) (2 int 0 2)) (int 0 1) (int 0 2))"#,
             r#"(int 0 1)"#),
         // The branch taken leaves its block.
         (1, r#"(if false (bool true) (break) (int 0 1))"#, r#"(if false (bool true) (break) (int 0 1))"#),
@@ -165,8 +165,8 @@ fn the_island_rewrites_only_at_level_one_and_up() {
         (1, r#"(let (((k . 2) int 0 1) ((j . 2) var "k" false)) (var "k" false))"#,
             r#"(let (((k . 2) int 0 1) ((j . 2) var "k" false)) (var "k" false))"#),
         // The sum is past the fixnum range.
-        (1, r#"(let (((k . 2) int 1073741823 -1)) (assoc "int" "+" true "f" (2 var "k" false) (2 int 0 1)))"#,
-            r#"(let () (assoc "int" "+" true "f" (2 int 1073741823 -1) (2 int 0 1)))"#),
+        (1, r#"(let (((k . 2) int 1073741823 -1)) (assoc int "+" true "f" (2 var "k" false) (2 int 0 1)))"#,
+            r#"(let () (assoc int "+" true "f" (2 int 1073741823 -1) (2 int 0 1)))"#),
     ];
     for (level, ir, expected) in cases {
         assert_eq!(optimized(level, ir), expected, "-O{} of {}", level, ir);

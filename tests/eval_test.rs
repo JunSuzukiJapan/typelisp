@@ -62,26 +62,26 @@ fn defun_and_call() {
 #[test]
 fn unwrap_or_some() {
     let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
-                 (match o ((Some v) v) ((None) d))) \
-               (unwrap-or (option::some 5) 0)";
+                 (match o ((some v) v) ((none) d))) \
+               (unwrap-or (Option::some 5) 0)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
 fn unwrap_or_none() {
     let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
-                 (match o ((Some v) v) ((None) d))) \
-               (unwrap-or (option::none) 9)";
+                 (match o ((some v) v) ((none) d))) \
+               (unwrap-or (Option::none) 9)";
     assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn result_match() {
     let prog = "(defun unwrap-i ((r Result<int,ParseIntError>)) int \
-                  (match r ((Ok v) v) ((Err e) (panic \"err\")))) ";
-    assert_eq!(eval_ok(&format!("{} (unwrap-i (result::ok 9))", prog)), Value::Int(9));
+                  (match r ((ok v) v) ((err e) (panic \"err\")))) ";
+    assert_eq!(eval_ok(&format!("{} (unwrap-i (Result::ok 9))", prog)), Value::Int(9));
     assert_eq!(
-        run(&format!("{} (unwrap-i (result::err (ParseIntError::ParseIntError \"boom\")))", prog)),
+        run(&format!("{} (unwrap-i (Result::err (ParseIntError::ParseIntError \"boom\")))", prog)),
         Err(EvalError::Panic("err".into()))
     );
 }

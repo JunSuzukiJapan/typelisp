@@ -856,15 +856,16 @@ fn symbols_intern_by_name() {
 }
 
 #[test]
-fn symbols_are_case_insensitive() {
+fn symbols_are_case_sensitive() {
     let mut h = Heap::with_capacity(8);
     let lower = h.intern_symbol("foo");
     let upper = h.intern_symbol("FOO");
     let mixed = h.intern_symbol("Foo");
-    assert_eq!(lower, upper);
-    assert_eq!(lower, mixed);
+    assert_ne!(lower, upper);
+    assert_ne!(lower, mixed);
+    assert_ne!(upper, mixed);
     if let Value::Symbol(id) = mixed {
-        assert_eq!(h.symbol_spelling(id), "foo"); // canonical lowercase
+        assert_eq!(h.symbol_spelling(id), "Foo");
     } else {
         panic!("expected a symbol");
     }
@@ -1118,7 +1119,7 @@ fn as_boxed(v: Value) -> BoxId {
 /// and an empty table says nothing about which it is. At *this* layer the type
 /// is only an id nobody reads back, so one type serves every test here.
 fn new_hashtable(h: &mut Heap) -> Value {
-    let key = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::STD, "hashtable", &[spec::INT, spec::INT]));
+    let key = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::STD, "HashTable", &[spec::INT, spec::INT]));
     h.alloc_hashtable(key)
 }
 

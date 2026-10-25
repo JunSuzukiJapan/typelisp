@@ -86,13 +86,13 @@ pub fn specialized(sym: SymRef) -> Option<(Generic, Vec<TypeId>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbols::{child_ns, find_exact, intern_exact};
+    use crate::symbols::{child_ns, find_exact, intern_in};
     use crate::TypeShape;
 
     #[test]
     fn a_specialization_is_one_symbol_no_table_holds() {
         let m = child_ns(NsId::ROOT, "specialization-test");
-        let f = intern_exact(m, "pick");
+        let f = intern_in(m, "pick");
         let int = crate::intern_type(TypeShape::named(NsId::STD, "int", &[]));
         let s = specialization(Generic::Fn(m, f), &[int]);
         assert_eq!(specialization(Generic::Fn(m, f), &[int]), s);

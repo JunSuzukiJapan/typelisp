@@ -131,22 +131,22 @@ fn match_refines_a_float_payload_to_f64() {
 
 #[test]
 fn match_refines_a_str_payload_to_str() {
-    assert_eq!(eval_string("(match (Str \"hello\") ((str s) s) (_ \"no\"))"), "hello");
+    assert_eq!(eval_string("(match (str \"hello\") ((str s) s) (_ \"no\"))"), "hello");
 }
 
 #[test]
 fn match_refines_a_sym_payload_to_symbol() {
-    // `(Sym 'foo)`, matching the `(Str ...)`/`(Char ...)` spelling of its
+    // `(sym 'foo)`, matching the `(str ...)`/`(char ...)` spelling of its
     // siblings: `'foo` on its own is a `Symbol` now, and a `Symbol` has no
     // variant to refine — the `sym` payload only exists once it is wrapped
     // into S-expression data.
-    assert_eq!(eval_string("(match (Sym (quote foo)) ((sym s) (symbol->string s)) (_ \"no\"))"), "foo");
+    assert_eq!(eval_string("(match (sym (quote foo)) ((sym s) (symbol->string s)) (_ \"no\"))"), "foo");
 }
 
 #[test]
 fn match_refines_char_and_bool_payloads() {
-    assert_eq!(eval_ok("(match (Char #\\a) ((char c) c) (_ #\\z))"), Value::Char('a'));
-    assert_eq!(eval_ok("(match (Bool true) ((bool b) b) (_ false))"), Value::Bool(true));
+    assert_eq!(eval_ok("(match (char #\\a) ((char c) c) (_ #\\z))"), Value::Char('a'));
+    assert_eq!(eval_ok("(match (bool true) ((bool b) b) (_ false))"), Value::Bool(true));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn match_dispatches_int_and_ratio_arms() {
         eval_ok("(match (int 99999999999999999999999999) ((int n) (= n (- 100000000000000000000000000 1))) (_ false))"),
         Value::Bool(true)
     );
-    assert_eq!(eval_ok("(match (Ratio 2/3) ((ratio _) 1) (_ 0))"), Value::Int(1));
+    assert_eq!(eval_ok("(match (ratio 2/3) ((ratio _) 1) (_ 0))"), Value::Int(1));
 }
 
 /// `bignum` is no longer a `Sexpr` shape: writing it is refused with a
@@ -187,7 +187,7 @@ fn match_dispatches_a_runtime_chosen_variant() {
             ((path _) 10) ((f32 _) 11)
             ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)
             ((vector _) 18) ((array _) 19) ((tuple _) 20)))
-        (+ (+ (tag (int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons () ()))))
+        (+ (+ (tag (int 1)) (* 10 (tag (str "s")))) (* 100 (tag (sexpr-cons () ()))))
     "#;
     // 1 + 60 + 700: int=1, str=6, cons=7 — and the match above is
     // exhaustive without a wildcard, exercising full variant coverage: every
@@ -220,7 +220,7 @@ fn match_dispatches_and_destructures_the_path_arm() {
     // the match arm above.
     assert_eq!(
         eval_ok(
-            "(match (Path (list (quote a) (quote b) (quote c)))
+            "(match (path (list (quote a) (quote b) (quote c)))
                ((path s) (equal s (list (quote a) (quote b) (quote c))))
                (_ false))"
         ),
@@ -235,7 +235,7 @@ fn match_dispatches_and_destructures_the_path_arm() {
 #[test]
 fn match_destructures_a_cons_with_nested_patterns() {
     assert_eq!(
-        eval_ok("(match (sexpr-cons (i32 7) (Str \"tail\")) ((cons (i32 a) (str t)) a) (_ 0))"),
+        eval_ok("(match (sexpr-cons (i32 7) (str \"tail\")) ((cons (i32 a) (str t)) a) (_ 0))"),
         Value::Int(7)
     );
 }
@@ -246,7 +246,7 @@ fn match_nested_pattern_mismatch_falls_through_to_the_next_arm() {
     // nested (int a) fails and the second arm catches the same cons.
     assert_eq!(
         eval_ok(
-            "(match (sexpr-cons (Str \"car\") ())
+            "(match (sexpr-cons (str \"car\") ())
                ((cons (i32 a) _) a)
                ((cons (str _) _) -1)
                (_ 0))"
@@ -287,7 +287,7 @@ fn match_walks_a_quoted_list() {
 #[test]
 fn if_let_binds_a_sexpr_pattern() {
     assert_eq!(eval_ok_with_prelude("(if-let ((i32 n) (i32 41)) (+ n 1) 0)"), Value::Int(42));
-    assert_eq!(eval_ok_with_prelude("(if-let ((i32 n) (Str \"x\")) (+ n 1) 0)"), Value::Int(0));
+    assert_eq!(eval_ok_with_prelude("(if-let ((i32 n) (str \"x\")) (+ n 1) 0)"), Value::Int(0));
 }
 
 #[test]

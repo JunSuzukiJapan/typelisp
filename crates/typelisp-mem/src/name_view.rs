@@ -91,7 +91,7 @@ impl NameView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbols::{child_ns, intern_exact};
+    use crate::symbols::{child_ns, intern_in};
     use crate::TypeShape;
 
     fn module(path: &[&str]) -> NsId {
@@ -104,7 +104,7 @@ mod tests {
 
     fn def(at: &[&str], name: &str) -> (NsId, SymRef) {
         let ns = module(at);
-        (ns, intern_exact(ns, name))
+        (ns, intern_in(ns, name))
     }
 
     fn written(v: &NameView, (ns, sym): (NsId, SymRef)) -> String {
@@ -153,7 +153,7 @@ mod tests {
         let shape = def(&["nv-m"], "shape");
         let dyn_shape = crate::intern_type(TypeShape::Dyn(shape.0, shape.1, Vec::new()));
         assert_eq!(v.type_name(named(array, &[point])), "array<point>");
-        assert_eq!(v.type_name(named(def(&[], "hashtable"), &[int, cell])), "hashtable<int,n::cell>");
+        assert_eq!(v.type_name(named(def(&[], "HashTable"), &[int, cell])), "HashTable<int,n::cell>");
         assert_eq!(v.type_name(crate::intern_type(TypeShape::Fn(vec![point, int], None, dyn_shape))), "(fn (point,int) dyn shape)");
     }
 }

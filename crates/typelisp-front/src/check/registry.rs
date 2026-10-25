@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::{Loc, Path, Type};
 use typelisp_mem::symbols::{self, NsId, SymRef};
-use typelisp_mem::ConcreteNames;
+use typelisp_mem::{wk, ConcreteNames};
 
 /// One constructor of a data type: a name and its field types. Field types may
 /// reference the enclosing type's parameters as `Type::Named(param, [])`.
@@ -170,7 +170,7 @@ pub fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
     if has_default {
         decl_ty.clone()
     } else {
-        Type::Named(Path::std("option"), vec![decl_ty.clone()])
+        Type::Named(Path::std("Option"), vec![decl_ty.clone()])
     }
 }
 
@@ -245,7 +245,7 @@ pub enum AdtKind {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AdtDef {
     pub name: Path,
-    /// Type-parameter names (lowercase), e.g. `["t"]` for `Option<T>`.
+    /// Type-parameter names, e.g. `["T"]` for `Option<T>`.
     pub params: Vec<String>,
     pub variants: Vec<Variant>,
     /// Associated functions / methods, keyed by (unqualified) name.
@@ -361,7 +361,7 @@ pub struct TraitDef {
     pub assoc_types: Vec<String>,
     /// Method signature templates, keyed by (unqualified) method name. Each
     /// signature's `params`/`ret` may mention `Self` and `assoc_types` as
-    /// type variables (`Type::Var("self")` etc.).
+    /// type variables (`Type::Var("Self")` etc.).
     pub methods: BTreeMap<String, FnSig>,
     /// This trait's *own* method names in `deftrait` source order. Always the
     /// same length as `methods`. Not the vtable layout — see
@@ -580,7 +580,7 @@ pub struct Namespace {
 }
 
 /// One of a [`Namespace`]'s tables: definitions keyed by the symbol their
-/// name reads as in the module ([`symbols::intern_exact`]), the same symbol a
+/// name reads as in the module ([`symbols::intern_in`]), the same symbol a
 /// [`Path`] to the definition holds.
 ///
 /// Looked up by a name as written, too: [`Names::get`] finds the symbol
@@ -615,7 +615,7 @@ impl<T> Names<T> {
     }
 
     pub fn insert(&mut self, name: impl AsRef<str>, value: T) -> Option<T> {
-        self.map.insert(symbols::intern_exact(self.ns, name.as_ref()), value)
+        self.map.insert(symbols::intern_in(self.ns, name.as_ref()), value)
     }
 
     pub fn remove(&mut self, name: &str) -> Option<T> {
@@ -624,7 +624,7 @@ impl<T> Names<T> {
     }
 
     pub fn entry(&mut self, name: impl AsRef<str>) -> std::collections::hash_map::Entry<'_, SymRef, T> {
-        self.map.entry(symbols::intern_exact(self.ns, name.as_ref()))
+        self.map.entry(symbols::intern_in(self.ns, name.as_ref()))
     }
 
     /// The symbols the definitions are keyed by, in no particular order.
@@ -959,7 +959,7 @@ impl Registry {
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
-        num.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR))));
+        num.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(wk::PARSE_FLOAT_ERROR))));
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
@@ -967,7 +967,7 @@ impl Registry {
         register_net_builtins(&mut internal);
         register_system_builtins(&mut env, &mut thread, &mut time, &mut internal);
         register_readtable_builtins(&mut reader);
-        reader.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
+        reader.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(wk::READ_ERROR))));
         // `read-datum-at`: one datum from a string starting at a character
         // index, paired with where reading stopped — CL's `read-from-string`
         // and its second return value, which this language has no multiple
@@ -977,14 +977,14 @@ impl Registry {
         // name of its own because the CL one is the prelude's.
         internal.fns.insert(
             "read-datum-at".to_string(),
-            FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::std("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(READ_ERROR), )),
+            FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::std("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(wk::READ_ERROR), )),
         );
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
         // but not the caller's lexical locals; a definition form registers
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
-        eval.fns.insert("eval".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        eval.fns.insert("eval".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(wk::EVAL_ERROR))));
         // `macroexpand-1`/`macroexpand`: what the checker does to a macro
         // call, made available to a program (CL's own, and the only way to
         // see a `defmacro`'s output without reading the checker's mind).
@@ -995,8 +995,8 @@ impl Registry {
         // strictly more than CL's boolean, since the caller cannot mistake a
         // macro that expands to itself for a non-macro. `macroexpand` repeats
         // until `none` and answers the final form, as CL's does.
-        eval.fns.insert("macroexpand-1".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
-        eval.fns.insert("macroexpand".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        eval.fns.insert("macroexpand-1".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(wk::EVAL_ERROR))));
+        eval.fns.insert("macroexpand".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(wk::EVAL_ERROR))));
         // The pretty printer's user-callable layout operators (CLHS 22.2.1),
         // minus the stream argument typelisp has no streams for. They act on
         // the logical block the `pprint-logical-block` special form opened
@@ -1097,8 +1097,8 @@ impl Registry {
         // comment) — the runtime already compares `Value`s structurally
         // whatever they hold, so nothing downstream changes.
         let eq_generic = || FnSig {
-            type_params: vec!["t".to_string()],
-            ..FnSig::builtin(vec![tvar("t"), tvar("t")], Type::Bool)
+            type_params: vec!["T".to_string()],
+            ..FnSig::builtin(vec![tvar("T"), tvar("T")], Type::Bool)
         };
         cmp.fns.insert("equal".to_string(), eq_generic());
         cmp.fns.insert("equalp".to_string(), eq_generic());
@@ -1106,18 +1106,17 @@ impl Registry {
         // that CL's `*gensym-counter*` could be a real variable a program can
         // read and set. A builtin's counter lived on the `Heap` and nothing
         // could name it.
-        // `symbol->string`/`string->symbol`: the only bridges between the
-        // interned `Symbol` handle and its textual name. They are Rust builtins
+        // `symbol->string`/`intern`: the only bridges between the interned
+        // `symbol` handle and its textual name. They are Rust builtins
         // (`Interp::eval_builtin`) rather than typelisp because they touch the
-        // symbol intern table directly; `Sexpr::Sym` now wraps `Symbol` (not
-        // `Str`), so the old prelude `(match s (Sym name) name)` /
-        // `(Sym s)` definitions no longer type-check.
+        // symbol intern table directly.
         symbol.fns.insert("symbol->string".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Str));
-        symbol.fns.insert("string->symbol".to_string(), FnSig::builtin(vec![Type::Str], Type::Symbol));
-        // CL's `intern`: `(intern NAME NAMESPACE)` is the symbol `NAME` in the
-        // module `NAMESPACE` names (`"keyword"` for a keyword). Written with
-        // one argument, it interns in the module the call is written in —
-        // CL's current package — which `Checker::check_call` fills in.
+        // CL's `intern`: `(intern NAME NAMESPACE)` is the symbol `NAME` reads
+        // as in the module `NAMESPACE` names (`"keyword"` for a keyword) — an
+        // existing one when the module can see one, a new one of that module
+        // otherwise. Written with one argument, it interns in the module the
+        // call is written in, which `Checker::check_call` fills in: there is no
+        // `*package*` for CL's default to read.
         symbol.fns.insert("intern".to_string(), FnSig::builtin(vec![Type::Str, Type::Str], Type::Symbol));
         // CL's `keywordp`: owned by the keyword module. A Rust builtin because
         // the owner is not reachable from the language — a keyword's name says
@@ -1339,17 +1338,17 @@ fn builtin_adt(
 
 /// `Option<T> = Some(T) | None`.
 fn option_def() -> AdtDef {
-    builtin_adt(Path::std("option"), &["t"], AdtKind::Sum, vec![
-        Variant { name: "some".to_string(), fields: vec![tvar("t")] },
+    builtin_adt(Path::std("Option"), &["T"], AdtKind::Sum, vec![
+        Variant { name: "some".to_string(), fields: vec![tvar("T")] },
         Variant { name: "none".to_string(), fields: vec![] },
     ], BTreeMap::new())
 }
 
 /// `Result<T, E> = Ok(T) | Err(E)`.
 fn result_def() -> AdtDef {
-    builtin_adt(Path::std("result"), &["t", "e"], AdtKind::Sum, vec![
-        Variant { name: "ok".to_string(), fields: vec![tvar("t")] },
-        Variant { name: "err".to_string(), fields: vec![tvar("e")] },
+    builtin_adt(Path::std("Result"), &["T", "E"], AdtKind::Sum, vec![
+        Variant { name: "ok".to_string(), fields: vec![tvar("T")] },
+        Variant { name: "err".to_string(), fields: vec![tvar("E")] },
     ], BTreeMap::new())
 }
 
@@ -1370,34 +1369,30 @@ pub(crate) fn builtin_sum_defs() -> Vec<AdtDef> {
     defs
 }
 
-/// The four concrete built-in error types, by (case-folded) type name — the
-/// one list every layer reads: [`builtin_error_defs`] registers them, the
-/// interpreter builds their values (`crate::eval::interp`'s `result_err`),
-/// and both the interpreter and `core_bridge` classify a type as an enum by
-/// consulting [`is_builtin_error_type`]. Like `Option`/`Result` they must be
-/// recognizable by name outside the registry, since neither of those two
+/// The concrete built-in error types, by the vocabulary symbol each is named
+/// by — the one list every layer reads: [`builtin_error_defs`] registers
+/// them, the interpreter builds their values (`crate::eval::interp`'s
+/// `result_err`), and both the interpreter and `core_bridge` classify a type
+/// as an enum by consulting [`is_builtin_error_type`]. Like `Option`/`Result`
+/// they must be recognizable outside the registry, since neither of those two
 /// layers holds a `Registry` to look a definition up in.
-pub const PARSE_INT_ERROR: &str = "parseinterror";
-pub const PARSE_FLOAT_ERROR: &str = "parsefloaterror";
-pub const READ_ERROR: &str = "readerror";
-pub const EVAL_ERROR: &str = "evalerror";
-/// CLHS's `file-error`, covering every failure the stream/file layer can
-/// report: `open` on a missing file, `delete-file` on a read-only directory,
-/// and the wrong-direction/closed-stream program errors that reach a
-/// `Result`-typed entry point. CL splits these across
+///
+/// `FileError` is CLHS's `file-error`, covering every failure the stream/file
+/// layer can report: `open` on a missing file, `delete-file` on a read-only
+/// directory, and the wrong-direction/closed-stream program errors that reach
+/// a `Result`-typed entry point. CL splits these across
 /// `file-error`/`stream-error`; one concrete type is enough here because the
 /// *message* is what a program can act on — dispatching on a condition
 /// *class* would need a condition system, which this language deliberately
 /// does not have.
-pub const FILE_ERROR: &str = "fileerror";
-/// What every `net-*` builtin fails with: a refused connect, an unknown
-/// host, a reset connection. Its own type rather than `FileError` because a
-/// program handling both — a server that serves files — wants to tell a
-/// missing file from a dropped client, and the *type* is how it does that
-/// without parsing a message.
-pub const NET_ERROR: &str = "neterror";
-pub const BUILTIN_ERROR_TYPES: [&str; 6] =
-    [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR, FILE_ERROR, NET_ERROR];
+///
+/// `NetError` is what every `net-*` builtin fails with: a refused connect, an
+/// unknown host, a reset connection. Its own type rather than `FileError`
+/// because a program handling both — a server that serves files — wants to
+/// tell a missing file from a dropped client, and the *type* is how it does
+/// that without parsing a message.
+pub const BUILTIN_ERROR_TYPES: [u32; 6] =
+    [wk::PARSE_INT_ERROR, wk::PARSE_FLOAT_ERROR, wk::READ_ERROR, wk::EVAL_ERROR, wk::FILE_ERROR, wk::NET_ERROR];
 
 /// The `stream-*` / `file-*` primitives (`eval::interp::Interp::
 /// eval_stream_builtin`). Deliberately minimal and untyped-looking: a stream
@@ -1409,7 +1404,7 @@ pub const BUILTIN_ERROR_TYPES: [&str; 6] =
 /// Anything that can fail returns `Result<_, FileError>`; a missing file or a
 /// closed stream is something programs handle, not a bug.
 fn register_stream_builtins(ns: &mut Namespace) {
-    let file_err = error_ty(FILE_ERROR);
+    let file_err = error_ty(wk::FILE_ERROR);
     let mut native = |name: &str, params: Vec<Type>, ret: Type| {
         ns.fns.insert(
             name.to_string(),
@@ -1490,7 +1485,7 @@ fn register_stream_builtins(ns: &mut Namespace) {
     native(
         "file-list-directory",
         vec![Type::Str],
-        result_of(Type::Named(Path::std("vector"), vec![Type::Str]), file_err.clone()),
+        result_of(Type::Named(Path::std("Vector"), vec![Type::Str]), file_err.clone()),
     );
     native("file-create-directories", vec![Type::Str], unit_or_err);
     // CL's `file-author`, spelled with the routing prefix. `Option` inside
@@ -1519,7 +1514,7 @@ fn register_stream_builtins(ns: &mut Namespace) {
 /// evaluator, because only a `State` can say "stop here". Its `interest` is
 /// `0` for readable and `1` for writable — `typelisp_rt::os::Interest`.
 fn register_net_builtins(ns: &mut Namespace) {
-    let net_err = error_ty(NET_ERROR);
+    let net_err = error_ty(wk::NET_ERROR);
     let mut native = |name: &str, params: Vec<Type>, ret: Type| {
         ns.fns.insert(
             name.to_string(),
@@ -1540,7 +1535,7 @@ fn register_net_builtins(ns: &mut Namespace) {
     native(
         "net-resolve-finish",
         vec![h.clone()],
-        result_of(option_of(Type::Named(Path::std("vector"), vec![Type::Str])), net_err.clone()),
+        result_of(option_of(Type::Named(Path::std("Vector"), vec![Type::Str])), net_err.clone()),
     );
     native("net-connect-begin", vec![Type::Str], result_of(h.clone(), net_err.clone()));
     native("net-connect-finish", vec![h.clone()], unit_or_err.clone());
@@ -1572,13 +1567,13 @@ fn register_net_builtins(ns: &mut Namespace) {
     native("net-udp-bind", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
     native(
         "net-udp-send-to",
-        vec![h.clone(), Type::Str, Type::Named(Path::std("vector"), vec![Type::Int])],
+        vec![h.clone(), Type::Str, Type::Named(Path::std("Vector"), vec![Type::Int])],
         result_of(Type::Bool, net_err.clone()),
     );
     native(
         "net-udp-recv",
         vec![h.clone()],
-        result_of(option_of(Type::Named(Path::std("vector"), vec![Type::Int])), net_err.clone()),
+        result_of(option_of(Type::Named(Path::std("Vector"), vec![Type::Int])), net_err.clone()),
     );
     native("net-udp-last-sender", vec![h.clone()], result_of(Type::Str, net_err.clone()));
     native("net-listen", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
@@ -1648,7 +1643,7 @@ fn register_system_builtins(env: &mut Namespace, thread: &mut Namespace, time: &
     // `typl`, the executable under AOT — so one source file can be run either
     // way and index its arguments identically. See
     // `sys_builtin::COMMAND_LINE_ARGS` for how the two are made to agree.
-    native(env, "command-line-args", vec![], Type::Named(Path::std("vector"), vec![Type::Str]));
+    native(env, "command-line-args", vec![], Type::Named(Path::std("Vector"), vec![Type::Str]));
     // `none` covers both "unset" and "not valid Unicode": a `string` here is
     // Rust's, so bytes that aren't UTF-8 have no value to hand back.
     native(env, "getenv", vec![Type::Str], option_of(Type::Str));
@@ -1690,7 +1685,7 @@ fn register_system_builtins(env: &mut Namespace, thread: &mut Namespace, time: &
     // interpreter-only special forms, the same category `compile`/
     // `compile-file`/`dump` are in. These are ordinary builtins, so a `defun`
     // that calls them still compiles.
-    let file_err = error_ty(FILE_ERROR);
+    let file_err = error_ty(wk::FILE_ERROR);
     // `dribble` itself is a prelude `defun` with an `&optional` path; these
     // two are the halves it dispatches to. Both `Result`, since both touch a
     // file — and stopping *flushes*, which is where a full disk is found.
@@ -1756,7 +1751,7 @@ fn register_readtable_builtins(reader: &mut Namespace) {
 
 /// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].
 pub fn is_builtin_error_type(p: &Path) -> bool {
-    p.is_std() && BUILTIN_ERROR_TYPES.contains(&p.last_segment())
+    crate::types::path_is_builtin_any(p, &BUILTIN_ERROR_TYPES)
 }
 
 /// The concrete error type of every fallible built-in, one per failure
@@ -1775,13 +1770,17 @@ pub fn is_builtin_error_type(p: &Path) -> bool {
 /// would have: nothing about a built-in error type is privileged.
 ///
 /// Type name and variant name coincide, so `(match e ((ParseIntError m) m))`
-/// reads as one name — the reader case-folds both to `parseinterror`.
+/// reads as one name.
 /// [`crate::eval::interp`]'s `result_err` builds these values at run time and
 /// must agree with the variant order (a single variant, index 0).
 fn builtin_error_defs() -> Vec<AdtDef> {
     BUILTIN_ERROR_TYPES
         .iter()
-        .map(|&name| builtin_adt(Path::std(name), &[], AdtKind::Sum, vec![Variant { name: name.to_string(), fields: vec![Type::Str] }], BTreeMap::new()))
+        .map(|&ty| {
+            let path = Path::builtin(ty);
+            let variant = Variant { name: path.last_segment().to_string(), fields: vec![Type::Str] };
+            builtin_adt(path, &[], AdtKind::Sum, vec![variant], BTreeMap::new())
+        })
         .collect()
 }
 
@@ -1812,7 +1811,7 @@ fn sexpr_def() -> AdtDef {
     let variants = (0..sv::COUNT)
         .map(|v| Variant { name: sv::NAMES[v].to_string(), fields: sexpr_variant_fields(v) })
         .collect();
-    builtin_adt(Path::std("sexpr"), &[], AdtKind::Sum, variants, sexpr_assoc())
+    builtin_adt(Path::std("Sexpr"), &[], AdtKind::Sum, variants, sexpr_assoc())
 }
 
 /// The fields of `Sexpr`'s variant number `v`.
@@ -1877,11 +1876,11 @@ fn sexpr_variant_fields(v: usize) -> Vec<Type> {
         sv::I32 => vec![Type::I32],
         // `#(..)` and `#nA(..)`. The payload is the collection box itself,
         // so construction and extraction are both the identity, like `str`.
-        sv::VECTOR => vec![Type::Named(Path::std("vector"), vec![option_of(sexpr())])],
-        sv::ARRAY => vec![Type::Named(Path::std("array"), vec![option_of(sexpr())])],
+        sv::VECTOR => vec![Type::Named(Path::std("Vector"), vec![option_of(sexpr())])],
+        sv::ARRAY => vec![Type::Named(Path::std("Array"), vec![option_of(sexpr())])],
         // `#{..}`. A tuple's type depends on its arity, so the payload is a
         // fresh vector of the elements rather than the box itself.
-        sv::TUPLE => vec![Type::Named(Path::std("vector"), vec![option_of(sexpr())])],
+        sv::TUPLE => vec![Type::Named(Path::std("Vector"), vec![option_of(sexpr())])],
         _ => unreachable!("Sexpr has {} variants, not {}", sv::COUNT, v + 1),
     }
 }
@@ -1939,7 +1938,7 @@ fn symbol_assoc() -> BTreeMap<String, AssocFn> {
 }
 
 fn sexpr() -> Type {
-    Type::Named(Path::std("sexpr"), vec![])
+    Type::Named(Path::std("Sexpr"), vec![])
 }
 
 /// `universal-time` (a prelude `defstruct`): a CL universal time split into
@@ -1965,22 +1964,22 @@ pub fn heap_info() -> Type {
 }
 
 fn hashtable_ty() -> Type {
-    Type::Named(Path::std("hashtable"), vec![tvar("k"), tvar("v")])
+    Type::Named(Path::std("HashTable"), vec![tvar("K"), tvar("V")])
 }
 
 pub(super) fn option_of(t: Type) -> Type {
-    Type::Named(Path::std("option"), vec![t])
+    Type::Named(Path::std("Option"), vec![t])
 }
 
 /// One of [`builtin_error_defs`]' concrete error types, as a `Type` — the
 /// `E` in the `Result<T, E>` returned by the fallible Rust builtin that
 /// raises it (`parse-int`/`parse-float`/`read`/`eval`).
-fn error_ty(name: &str) -> Type {
-    Type::Named(Path::std(name), vec![])
+fn error_ty(ty: u32) -> Type {
+    Type::Named(Path::builtin(ty), vec![])
 }
 
 fn result_of(t: Type, e: Type) -> Type {
-    Type::Named(Path::std("result"), vec![t, e])
+    Type::Named(Path::std("Result"), vec![t, e])
 }
 
 /// `HashTable<K, V>`: a builtin (Rust-implemented) mutable hash map, with no
@@ -2021,11 +2020,11 @@ fn hashtable_def() -> AdtDef {
         builtin: true,
     };
     assoc.insert("bucket-count".to_string(), bucket(vec![hashtable_ty(), Type::Int], Type::Int));
-    assoc.insert("bucket-key".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], tvar("k")));
-    assoc.insert("bucket-value".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], tvar("v")));
+    assoc.insert("bucket-key".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], tvar("K")));
+    assoc.insert("bucket-value".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], tvar("V")));
     assoc.insert(
         "bucket-put".to_string(),
-        bucket(vec![hashtable_ty(), Type::Int, Type::Int, tvar("k"), tvar("v")], Type::Unit),
+        bucket(vec![hashtable_ty(), Type::Int, Type::Int, tvar("K"), tvar("V")], Type::Unit),
     );
     assoc.insert("bucket-delete".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], Type::Unit));
     assoc.insert(
@@ -2049,25 +2048,25 @@ fn hashtable_def() -> AdtDef {
     // this snapshot, the same way `vector-iter<T>` walks `Vector<T>`.
     assoc.insert(
         "keys".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("vector"), vec![tvar("k")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("Vector"), vec![tvar("K")])), instance: true, builtin: true },
     );
     assoc.insert(
         "values".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("vector"), vec![tvar("v")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("Vector"), vec![tvar("V")])), instance: true, builtin: true },
     );
     assoc.insert(
         "entries".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("vector"), vec![Type::Named(Path::std("cons-cell"), vec![tvar("k"), tvar("v")])])),
+            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("Vector"), vec![Type::Named(Path::std("cons-cell"), vec![tvar("K"), tvar("V")])])),
             instance: true,
             builtin: true,
         },
     );
-    builtin_adt(Path::std("hashtable"), &["k", "v"], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::std("HashTable"), &["K", "V"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 fn vector_ty() -> Type {
-    Type::Named(Path::std("vector"), vec![tvar("t")])
+    Type::Named(Path::std("Vector"), vec![tvar("T")])
 }
 
 /// `Vector<T>`: a builtin growable sequence. Reuses the same boxed-struct
@@ -2087,7 +2086,7 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "push".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![vector_ty(), tvar("t")], Type::Unit),
+            sig: FnSig::builtin(vec![vector_ty(), tvar("T")], Type::Unit),
             instance: true,
             builtin: true,
         },
@@ -2095,7 +2094,7 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![vector_ty(), Type::Int], tvar("t")),
+            sig: FnSig::builtin(vec![vector_ty(), Type::Int], tvar("T")),
             instance: true,
             builtin: true,
         },
@@ -2103,7 +2102,7 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![vector_ty(), Type::Int, tvar("t")], Type::Unit),
+            sig: FnSig::builtin(vec![vector_ty(), Type::Int, tvar("T")], Type::Unit),
             instance: true,
             builtin: true,
         },
@@ -2114,9 +2113,9 @@ fn vector_def() -> AdtDef {
     );
     assoc.insert(
         "pop".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![vector_ty()], option_of(tvar("t"))), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![vector_ty()], option_of(tvar("T"))), instance: true, builtin: true },
     );
-    builtin_adt(Path::std("vector"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::std("Vector"), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Task<T>`, the type `(task (f ...))` yields.
@@ -2124,7 +2123,7 @@ fn vector_def() -> AdtDef {
 /// Spelled once, here, rather than at the checker's `task` — a type's identity is
 /// its whole path, and two places writing it is two places to get it wrong.
 pub fn task_of(t: Type) -> Type {
-    Type::Named(Path::in_ns(crate::types::std_module("thread"), "task"), vec![t])
+    Type::Named(Path::in_ns(crate::types::std_module("thread"), "Task"), vec![t])
 }
 
 /// `Task<T>`: a handle on a task that is running — what `(task (f ...))` returns.
@@ -2151,18 +2150,18 @@ fn task_def() -> AdtDef {
     assoc.insert(
         "wait".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![task_of(tvar("t"))], tvar("t")),
+            sig: FnSig::builtin(vec![task_of(tvar("T"))], tvar("T")),
             instance: true,
             builtin: true,
         },
     );
-    builtin_adt(Path::in_ns(crate::types::std_module("thread"), "task"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::in_ns(crate::types::std_module("thread"), "Task"), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Thread<T>`, the type `(thread (f ...))` yields — spelled once, here, for
 /// [`task_of`]'s reason.
 pub fn thread_of(t: Type) -> Type {
-    Type::Named(Path::in_ns(crate::types::std_module("thread"), "thread"), vec![t])
+    Type::Named(Path::in_ns(crate::types::std_module("thread"), "Thread"), vec![t])
 }
 
 /// `Thread<T>`: a handle on a task that runs on an OS thread of its own —
@@ -2181,7 +2180,7 @@ fn thread_def() -> AdtDef {
     // and it stops the asking *task*, not the OS thread under it.
     assoc.insert(
         "join".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![thread_of(tvar("t"))], tvar("t")), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![thread_of(tvar("T"))], tvar("T")), instance: true, builtin: true },
     );
     // `(Thread::current-id)` — a number naming the OS thread running the
     // caller, unique within the process.
@@ -2195,7 +2194,7 @@ fn thread_def() -> AdtDef {
         "available-parallelism".to_string(),
         AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
     );
-    builtin_adt(Path::in_ns(crate::types::std_module("thread"), "thread"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::in_ns(crate::types::std_module("thread"), "Thread"), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Chan<T>`, the channel type.
@@ -2203,7 +2202,7 @@ fn thread_def() -> AdtDef {
 /// Spelled once, here, for the same reason [`task_of`] is: a type's identity
 /// is its whole path.
 pub fn chan_of(t: Type) -> Type {
-    Type::Named(Path::in_ns(crate::types::std_module("sync"), "chan"), vec![t])
+    Type::Named(Path::in_ns(crate::types::std_module("sync"), "Chan"), vec![t])
 }
 
 /// `Chan<T>`: a channel between tasks — Go's `chan T`.
@@ -2223,7 +2222,7 @@ pub fn chan_of(t: Type) -> Type {
 /// and `send`/`recv` to park the task as well.
 fn chan_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
-    let chan = chan_of(tvar("t"));
+    let chan = chan_of(tvar("T"));
     let sig = FnSig::builtin;
     // `(the Chan<i32> (Chan::new 0))` — unbuffered; `(Chan::new 16)` buffers
     // 16. The capacity is **required**, where the plan wrote `&optional`: an
@@ -2240,14 +2239,14 @@ fn chan_def() -> AdtDef {
     // §7.1 draws (and Go's own).
     assoc.insert(
         "send".to_string(),
-        AssocFn { sig: sig(vec![chan.clone(), tvar("t")], Type::Unit), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan.clone(), tvar("T")], Type::Unit), instance: true, builtin: true },
     );
     // `none` once the channel is closed **and** drained — which is what makes
     // this the same shape as `Iter::next`, and so what lets `doiter` run a
     // channel with no new machinery (`impl Iter Chan<T>` in the prelude).
     assoc.insert(
         "recv".to_string(),
-        AssocFn { sig: sig(vec![chan.clone()], option_of(tvar("t"))), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan.clone()], option_of(tvar("T"))), instance: true, builtin: true },
     );
     // Closing twice is a panic, again Go's rule and for the same reason.
     // Resolved by receiver type, so it does not collide with the `Stream`
@@ -2266,11 +2265,11 @@ fn chan_def() -> AdtDef {
         "cap".to_string(),
         AssocFn { sig: sig(vec![chan], Type::Int), instance: true, builtin: true },
     );
-    builtin_adt(Path::in_ns(crate::types::std_module("sync"), "chan"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::in_ns(crate::types::std_module("sync"), "Chan"), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 fn scope_ty() -> Type {
-    Type::Named(Path::std("scope"), vec![tvar("v")])
+    Type::Named(Path::std("Scope"), vec![tvar("V")])
 }
 
 /// `Scope<V>`: a builtin (Rust-implemented) stack of `String`-keyed frames —
@@ -2307,7 +2306,7 @@ fn scope_def() -> AdtDef {
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![scope_ty(), Type::Str], option_of(tvar("v"))),
+            sig: FnSig::builtin(vec![scope_ty(), Type::Str], option_of(tvar("V"))),
             instance: true,
             builtin: true,
         },
@@ -2315,12 +2314,12 @@ fn scope_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![scope_ty(), Type::Str, tvar("v")], Type::Unit),
+            sig: FnSig::builtin(vec![scope_ty(), Type::Str, tvar("V")], Type::Unit),
             instance: true,
             builtin: true,
         },
     );
-    builtin_adt(Path::std("scope"), &["v"], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::std("Scope"), &["V"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 
@@ -3002,15 +3001,15 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // The C words are targets as well as the six widths: `(as c-ulong n)` is
     // how a size is made for a C function, and without it a `c-ulong`
     // parameter could be declared and never passed anything.
-    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
-        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
+    for to in crate::types::INT_TYPES.iter().chain(crate::types::C_WORD_TYPES.iter()) {
+        let target = to.scalar_name().expect("the widths are scalar types");
         m.insert(
             format!("int->{}", target),
             AssocFn { sig: FnSig::builtin(vec![ty.clone()], to.clone()), instance: true, builtin: true },
         );
         m.insert(
             format!("try-int->{}", target),
-            AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(to)), instance: true, builtin: true },
+            AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(to.clone())), instance: true, builtin: true },
         );
     }
     m
@@ -3036,10 +3035,10 @@ fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
         instance: true,
         builtin: true,
     };
-    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
-        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
+    for to in crate::types::INT_TYPES.iter().chain(crate::types::C_WORD_TYPES.iter()) {
+        let target = to.scalar_name().expect("the widths are scalar types");
         m.insert(format!("int->{}", target), conv(to.clone()));
-        m.insert(format!("try-int->{}", target), conv(option_of(to)));
+        m.insert(format!("try-int->{}", target), conv(option_of(to.clone())));
     }
     // Always exact, which is what makes it the honest way to read a `size_t`
     // that does not fit in an `i32`.
@@ -3157,10 +3156,10 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
     m.insert("int->int".to_string(), conv(Type::Int));
     m.insert("int->char".to_string(), conv(Type::Char));
     m.insert("try-int->char".to_string(), conv(option_of(Type::Char)));
-    for target in crate::types::INT_TYPE_NAMES.iter().chain(crate::types::C_WORD_TYPE_NAMES.iter()) {
-        let to = crate::types::primitive_by_name(target).expect("the width names are primitive types");
+    for to in crate::types::INT_TYPES.iter().chain(crate::types::C_WORD_TYPES.iter()) {
+        let target = to.scalar_name().expect("the widths are scalar types");
         m.insert(format!("int->{}", target), conv(to.clone()));
-        m.insert(format!("try-int->{}", target), conv(option_of(to)));
+        m.insert(format!("try-int->{}", target), conv(option_of(to.clone())));
     }
     m
 }

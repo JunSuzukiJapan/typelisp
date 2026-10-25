@@ -520,13 +520,13 @@ fn if_let_binds_in_then_branch_and_falls_through_to_else() {
     // against `f`'s own declared `u16` parameter type, so it adopts `u16`
     // directly with no such conflict.
     let (v, _) = eval_ok_with_prelude(
-        "(defun f ((o Option<int>) (default int)) int (if-let ((Some x) o) (+ x 1) default))
-         (f (option::some 41) -1)",
+        "(defun f ((o Option<int>) (default int)) int (if-let ((some x) o) (+ x 1) default))
+         (f (Option::some 41) -1)",
     );
     assert_eq!(v, Value::Int(42));
     let (v2, _) = eval_ok_with_prelude(
-        "(defun f ((o Option<int>) (default int)) int (if-let ((Some x) o) (+ x 1) default))
-         (f (option::none) -1)",
+        "(defun f ((o Option<int>) (default int)) int (if-let ((some x) o) (+ x 1) default))
+         (f (Option::none) -1)",
     );
     assert_eq!(v2, Value::Int(-1));
 }

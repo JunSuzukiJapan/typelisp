@@ -47,12 +47,12 @@ fn one_name_is_one_symbol_in_every_heap() {
 }
 
 #[test]
-fn interning_is_case_insensitive() {
+fn interning_is_case_sensitive() {
     let mut h = Heap::with_capacity(64);
     let lower = h.intern_symbol("foldcase");
-    assert_eq!(lower, h.intern_symbol("FOLDCASE"));
-    assert_eq!(lower, h.intern_symbol("FoldCase"));
-    assert_eq!(sym(lower).name(), "foldcase", "the canonical form is the lowercase one");
+    assert_ne!(lower, h.intern_symbol("FOLDCASE"));
+    assert_ne!(lower, h.intern_symbol("FoldCase"));
+    assert_eq!(sym(h.intern_symbol("FoldCase")).name(), "FoldCase", "a name is kept as spelled");
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn a_keyword_is_one_symbol_in_every_module() {
     assert_ne!(colon_named, at_root);
     assert!(!colon_named.is_keyword());
     assert_eq!(symbols::ns_path(NsId::KEYWORD), vec!["keyword".to_string()]);
-    assert_eq!(symbols::ns_named("keyword"), NsId::KEYWORD);
+    assert_eq!(symbols::ns_named("keyword"), Some(NsId::KEYWORD));
 }
 
 #[test]

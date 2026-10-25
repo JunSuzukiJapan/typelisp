@@ -79,8 +79,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | シンボル名を取り出す。キーワードの名前にコロンは含まれない（`:foo` → `"foo"`） |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | 文字列からシンボルを作る（ルートのモジュールに intern） |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 名前空間 `namespace` に `name` のシンボルを作る（CL の `intern`）。`namespace` はルートからのモジュールパス（`"geometry::shapes"`）で、`"keyword"` はキーワード、`""` はルート。省略すると呼び出しを書いたモジュール |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 名前空間 `namespace` で `name` と読まれるシンボルを返す（CL の `intern`）。その名前空間から見えるシンボル（自前のもの、`use` したもの、標準ライブラリのもの）があればそれを返し、無ければその名前空間に新しく作る。`namespace` はルートからのモジュールパス（`"geometry::shapes"`）で、`"keyword"` はキーワード、`""` はルート。存在しない名前空間はエラー。省略すると呼び出しを書いたモジュール（`*package*` は無い）。CL の第 2 値（`:internal` などの状態）は返さない |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | キーワードか——キーワード用の名前空間に属するか（[構文リファレンス](../syntax.md#1-字句要素)） |
 
 `gensym` は [マクロ](system.md#8-マクロ) を参照。
@@ -104,7 +103,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 条件を満たす最初の位置 |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 条件を満たす個数 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 全要素が条件を満たすか |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` に当たる。`Some` 構成子と衝突しない名前） |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` に当たる。`some` 構成子と衝突しない名前） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左畳み込み |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右畳み込み |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 残りの要素をすべて集める。下の `lazy` の関数の結果を `Vector` にするのに使う |
@@ -115,9 +114,9 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | 要素数 |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | イテレータを連結。3 個以上も書ける |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL の `concatenate`。結果の型は**引用したシンボルのリテラル**で書く（CL は実行時の型指定子）。`'vector` は 1 個以上、`'string` は 0 個以上（0 個なら `""`）。`Sexpr` のリストは対象外（`sexpr-append`） |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL の `concatenate`。結果の型は**引用したシンボルのリテラル**で書く（CL は実行時の型指定子）。`'vector` は 1 個以上、`'string` は 0 個以上（0 個なら `""`）。`Sexpr` のリストは対象外（`sexpr-append`） |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反転（非破壊） |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `None`） |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `none`） |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` の引数順違い版 |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 先頭 `n` 個 |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`（`end` は長さでクランプ） |

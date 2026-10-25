@@ -569,7 +569,7 @@ fn handle_completion(
         let chars: Vec<char> = text.chars().collect();
         let offset = char_offset(&chars, pos);
         let prefix_start = prefix_start(&chars, offset);
-        let prefix: String = chars[prefix_start..offset].iter().collect::<String>().to_lowercase();
+        let prefix: String = chars[prefix_start..offset].iter().collect();
         let mut truncated: String = chars[..prefix_start].iter().collect();
         // The cursor's own (1-based) position within `text` — computed
         // *before* `truncated` gains the placeholder below, so it names the

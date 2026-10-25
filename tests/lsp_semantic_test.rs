@@ -148,7 +148,7 @@ fn a_file_defining_its_own_types_still_works() {
 #[test]
 fn trait_and_struct_kinds_are_reported() {
     let (uses, _, _) = analyze("examples/projects/shape-canvas/src/shapes.typl");
-    assert!(uses.iter().any(|u| u.path.last_segment() == "shape" && u.kind == TypeKind::Trait));
+    assert!(uses.iter().any(|u| u.path.last_segment() == "Shape" && u.kind == TypeKind::Trait));
     assert!(uses.iter().any(|u| u.path.last_segment() == "rect" && u.kind == TypeKind::Struct));
 }
 

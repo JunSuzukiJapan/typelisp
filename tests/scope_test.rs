@@ -96,7 +96,7 @@ fn new_scope_supports_set_then_get() {
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 42)
-                   (match (get s \"x\") ((Some v) v) ((None) 0))))
+                   (match (get s \"x\") ((some v) v) ((none) 0))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -106,7 +106,7 @@ fn get_missing_key_returns_none() {
     let src = "(defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
-                   (match (get s \"missing\") ((Some v) v) ((None) -1))))
+                   (match (get s \"missing\") ((some v) v) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(-1));
 }
@@ -119,7 +119,7 @@ fn push_frame_shadows_the_same_name_in_the_new_top_frame() {
                    (set s \"x\" 1)
                    (push-frame s)
                    (set s \"x\" 2)
-                   (match (get s \"x\") ((Some v) v) ((None) 0))))
+                   (match (get s \"x\") ((some v) v) ((none) 0))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
@@ -133,7 +133,7 @@ fn pop_frame_reveals_the_shadowed_outer_binding_again() {
                    (push-frame s)
                    (set s \"x\" 2)
                    (pop-frame s)
-                   (match (get s \"x\") ((Some v) v) ((None) 0))))
+                   (match (get s \"x\") ((some v) v) ((none) 0))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -146,7 +146,7 @@ fn pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
                    (push-frame s)
                    (set s \"y\" 9)
                    (pop-frame s)
-                   (match (get s \"y\") ((Some v) v) ((None) -1))))
+                   (match (get s \"y\") ((some v) v) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(-1));
 }
@@ -161,8 +161,8 @@ fn set_always_writes_into_the_most_recently_pushed_frame() {
                    (set s \"a\" 1)
                    (push-frame s)
                    (set s \"b\" 2)
-                   (+ (match (get s \"a\") ((Some v) v) ((None) 0))
-                      (match (get s \"b\") ((Some v) v) ((None) 0)))))
+                   (+ (match (get s \"a\") ((some v) v) ((none) 0))
+                      (match (get s \"b\") ((some v) v) ((none) 0)))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
@@ -177,7 +177,7 @@ fn clone_frames_shares_existing_frames_without_copying_their_entries() {
                  (let ((s (make-s)))
                    (set s \"x\" 7)
                    (let ((s2 (clone-frames s)))
-                     (match (get s2 \"x\") ((Some v) v) ((None) -1)))))
+                     (match (get s2 \"x\") ((some v) v) ((none) -1)))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
@@ -193,7 +193,7 @@ fn clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
                    (set s \"x\" 1)
                    (let ((s2 (clone-frames s)))
                      (set s2 \"x\" 2)
-                     (match (get s \"x\") ((Some v) v) ((None) -1)))))
+                     (match (get s \"x\") ((some v) v) ((none) -1)))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
@@ -210,7 +210,7 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
                    (let ((s2 (clone-frames s)))
                      (push-frame s2)
                      (set s2 \"only-in-clone\" 5))
-                   (match (get s \"only-in-clone\") ((Some v) v) ((None) -1))))
+                   (match (get s \"only-in-clone\") ((some v) v) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(-1));
 }
@@ -230,8 +230,8 @@ fn heap_scope_set_then_get_roundtrips() {
                  (let ((s (make-s)))
                    (set s \"x\" (quote 42))
                    (match (get s \"x\")
-                     ((Some v) (sexpr-int v))
-                     ((None) -1))))
+                     ((some v) (sexpr-int v))
+                     ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -241,7 +241,7 @@ fn heap_scope_get_missing_key_returns_none() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
-                   (match (get s \"missing\") ((Some v) 0) ((None) -1))))
+                   (match (get s \"missing\") ((some v) 0) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(-1));
 }
@@ -251,8 +251,8 @@ fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun as-int ((o Option<Option<Sexpr>>)) int
                  (match o
-                   ((Some v) (sexpr-int v))
-                   ((None) -1)))
+                   ((some v) (sexpr-int v))
+                   ((none) -1)))
                (defun f () bool
                  (let ((s (make-s)))
                    (set s \"x\" (quote 1))
@@ -274,7 +274,7 @@ fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
                    (push-frame s)
                    (set s \"y\" (quote 9))
                    (pop-frame s)
-                   (match (get s \"y\") ((Some v) 0) ((None) -1))))
+                   (match (get s \"y\") ((some v) 0) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(-1));
 }
@@ -287,8 +287,8 @@ fn heap_scope_clone_frames_shares_existing_frames() {
                    (set s \"x\" (quote 7))
                    (let ((s2 (clone-frames s)))
                      (match (get s2 \"x\")
-                       ((Some v) (sexpr-int v))
-                       ((None) -1)))))
+                       ((some v) (sexpr-int v))
+                       ((none) -1)))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
@@ -302,8 +302,8 @@ fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both(
                    (let ((s2 (clone-frames s)))
                      (set s2 \"x\" (quote 2))
                      (match (get s \"x\")
-                       ((Some v) (sexpr-int v))
-                       ((None) -1)))))
+                       ((some v) (sexpr-int v))
+                       ((none) -1)))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
@@ -316,7 +316,7 @@ fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
                    (let ((s2 (clone-frames s)))
                      (push-frame s2)
                      (set s2 \"only-in-clone\" (quote 5)))
-                   (match (get s \"only-in-clone\") ((Some v) 0) ((None) -1))))
+                   (match (get s \"only-in-clone\") ((some v) 0) ((none) -1))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(-1));
 }
@@ -353,8 +353,8 @@ fn heap_scope_stores_a_boxed_struct_element_by_reference() {
                      (push v 10)
                      (set s \"v\" v)
                      (match (get s \"v\")
-                       ((Some w) (push w 20))
-                       ((None) ()))
+                       ((some w) (push w 20))
+                       ((none) ()))
                      (len v))))
                (f)";
     assert_eq!(eval_ok(src), Value::Int(2));
@@ -375,7 +375,7 @@ fn heap_scope_sexpr_values_survive_gc_pressure() {
                    (set s \"keep\" (quote (a b c d e)))
                    (dotimes (i 500)
                      (set s \"churn\" (quote (x y z))))
-                   (match (get s \"keep\") ((Some v) v) ((None) (quote boom)))))
+                   (match (get s \"keep\") ((some v) v) ((none) (quote boom)))))
                (f)";
     let (v, h) = run_with_prelude_under_gc_stress(src).expect("eval failed");
     assert_eq!(sexpr_to_string(&h, v), "(a b c d e)");

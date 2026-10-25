@@ -144,14 +144,14 @@ impl Checker {
         let ret = &self.info.cur_ns().fns.get(&name).expect("check_defun registered the function").ret;
         let returns = match ret {
             Type::Unit => TestReturn::Unit,
-            Type::Named(p, args) if crate::types::path_is_builtin(p, "result") && args.len() == 2 && args[0] == Type::Unit => {
+            Type::Named(p, args) if crate::types::path_is_builtin(p, typelisp_mem::wk::RESULT) && args.len() == 2 && args[0] == Type::Unit => {
                 // The error is printed when the test fails, as Rust asks a
                 // test's error type for `Debug`. An `Error` says what went
                 // wrong in its own words, and is the only way a `:dyn Error`
                 // can be shown at all: a trait object carries its trait's
                 // methods and nothing else.
                 let bound = |trait_path: Path| TraitBound { trait_path, assoc: BTreeMap::new() };
-                if self.type_implements(&args[1], &bound(Path::in_ns(crate::types::std_module("error"), "error")), 0) {
+                if self.type_implements(&args[1], &bound(Path::in_ns(crate::types::std_module("error"), "Error")), 0) {
                     TestReturn::ResultError
                 } else if self.type_implements(&args[1], &bound(Path::in_ns(crate::types::std_module("fmt"), "print-object")), 0) {
                     TestReturn::ResultPrinted

@@ -220,12 +220,12 @@ fn generic_optional_where_bound_is_validated() {
 #[test]
 fn generic_key_default_referencing_type_param_is_rejected() {
     // `x`'s declared type `Option<T>` mentions `f`'s own type parameter, and
-    // it has a default (`(option::none)`) — rejected by `Checker::
+    // it has a default (`(Option::none)`) — rejected by `Checker::
     // check_defun_opt_key`'s `type_has_param` restriction (see the module's
     // doc comment for why: a call site that omits `x` would splice this
     // default's checked `Typed` node in verbatim, and its `.ty` would stay
     // the abstract `Option<T>` instead of the call's concrete instantiation).
-    let msg = check_err("(defun f<T> (&key (x Option<T> (option::none))) Option<T> x)");
+    let msg = check_err("(defun f<T> (&key (x Option<T> (Option::none))) Option<T> x)");
     assert!(msg.contains("may not default"), "unexpected message: {}", msg);
 }
 

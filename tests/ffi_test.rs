@@ -497,7 +497,7 @@ fn a_library_that_is_not_there_lists_what_was_tried() {
 #[test]
 fn a_type_c_cannot_be_given_is_refused() {
     // `sexpr` is a perfectly good typelisp type and no C type at all.
-    let e = err(r#"(defffi (c-nope "abs") (sexpr) i32)"#);
+    let e = err(r#"(defffi (c-nope "abs") (Sexpr) i32)"#);
     assert!(e.contains("cannot spell"), "unexpected error: {}", e);
 }
 

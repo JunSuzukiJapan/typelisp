@@ -231,19 +231,6 @@ fn a_base_outside_two_to_thirty_six_is_a_printing_error() {
 }
 
 #[test]
-fn print_case_renders_symbol_names() {
-    shows(r#"(format false "~a" (quote hello))"#, "hello");
-    shows(
-        r#"(dlet ((*print-case* :upcase)) (format false "~a" (quote hello)))"#,
-        "HELLO",
-    );
-    shows(
-        r#"(dlet ((*print-case* :capitalize)) (format false "~a" (quote hello-world)))"#,
-        "Hello-World",
-    );
-}
-
-#[test]
 fn print_readably_turns_escaping_on() {
     // `~a` is the unescaped directive; printing readably overrides it.
     shows(r#"(format false "~a" "hi")"#, "hi");
@@ -285,9 +272,9 @@ fn with_standard_io_syntax_pins_every_printer_variable() {
     // Whatever the surrounding program set, the body prints the standard way.
     let src = r#"(progn
                    (setf *print-base* 16)
-                   (setf *print-case* :upcase)
-                   (with-standard-io-syntax (format false "~a ~a" 255 (quote hi))))"#;
-    shows(src, "255 hi");
+                   (setf *print-length* 1)
+                   (with-standard-io-syntax (format false "~a ~a" 255 (quote (hi ho)))))"#;
+    shows(src, "255 (hi ho)");
 }
 
 #[test]

@@ -6,7 +6,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 ## 1. 字句要素
 
-- **大文字小文字は区別しない**。シンボルは読み取り時にすべて小文字へ正規化される。
+- **大文字小文字を区別する**。`foo` と `Foo` は別のシンボル。型名は大文字で始まる（`Option`、`Vector` など。`int` や `string` などの基本型は小文字）。
 - **コメント**: `;` で始まり行末まで（行コメント）。`#| ... |#`（ネスト可能なブロックコメント）。
 - **読み込み時評価**: `#.(式)` は続くフォームを**読みながら実行**し、その値を読んだことにする。
   リーダがテキストだけの関数でなくなる唯一の場所。届く範囲は読み込み経路で変わり、これは
@@ -137,7 +137,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   位置にもそのまま渡せる（アップキャスト）。継承関係の無いトレイトへは渡せない。
   `:dyn` にできるトレイトの条件は [3.9 deftrait / impl](#39-deftrait--impl--トレイト機構) を参照。
   `:dyn` を型位置以外に書くとエラー。
-- 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
+- 組み込みジェネリック型: `Option<T>`（`(some T)` / `none`）、`Result<T,E>`（`(ok T)` / `(err E)`）、
   `HashTable<K,V>`、`Vector<T>`、並行機構の `Task<T>` / `Thread<T>` / `Chan<T>`（[12 章](#12-並行機構タスク)）。
   S 式データの型 `Sexpr` もある。組み込みの具象エラー型は `ParseIntError` /
   `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`、標準ライブラリの構造体として
@@ -775,8 +775,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 
 ; ジェネリック
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - 各バリアントは `(VariantName FieldType...)` の形。フィールドは位置指定のみ（名前は持たない）。
@@ -786,8 +786,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 - `match` / `if-let` で分解できる。`match` は網羅性を検査する（全バリアントを尽くすか `_` が必要）:
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - メソッドと静的メソッドは `defstruct` と同じく `impl`（3.5）に書く。
 - 列挙型自体を `pub` にするには `(pub defenum ...)` と書く。
@@ -944,7 +944,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 
 - `module` は名前空間を作る。**型は名前空間ではない**（Rust と同様、型は静的メソッドとメソッドを持つのみ）。
 - `use` で型を導入すると、列挙型の変種と、その型の公開された静的メソッドも裸名で使えるように
-  なる（例: `(use option)` の後は `some`/`none` を `option::some`/`option::none` なしで呼べる）。
+  なる（例: `(use Option)` の後は `some`/`none` を `Option::some`/`Option::none` なしで呼べる）。
 - **1 つの名前は 1 つの意味を持つ**。関数・グローバル変数・マクロは 1 つの名前空間に入り、
   同じモジュールで 2 つに同じ名前は付けられない（どの順に定義してもエラー）。CL のように
   関数と変数で名前空間が分かれてはいない。別のモジュールの同じ名前なら、近いほうが見える。
@@ -1245,7 +1245,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   （`defstruct` インスタンス、グローバル、計算結果）を比較する唯一の書き方であり、
   ユーザ定義の `Eq` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
   参照できる（引数、外側の束縛、グローバル）
-- `(Ctor sub-pattern...)` — コンストラクタパターン（`Some x` `None` `Cons a d` `Ok v` など）
+- `(Ctor sub-pattern...)` — コンストラクタパターン（`(some x)` `(none)` `(cons a d)` `(ok v)` など）
 - `(Type :slot pattern... :slot...)` — 構造体のパターン。型名の後にスロットをキーワードで書く。
   キーワードの次がパターンならそのスロットをそのパターンで照合し、次がキーワードか終わりなら
   スロットを同じ名前の変数に束縛する。書かなかったスロットは照合しない（フィールドの数や順序に
@@ -1359,7 +1359,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 **腕どうしの型推論**: 全ての腕は同じ型でなければならない（`panic` 等で発散する腕は除く）。
 期待型が無い位置に書かれた `match` では、腕が**互いに**足りない型引数を埋め合う——
-`(result::ok v)` は `T` だけ、`(result::err e)` は `E` だけを決めるが、両方を並べれば
+`(Result::ok v)` は `T` だけ、`(Result::err e)` は `E` だけを決めるが、両方を並べれば
 `Result<T,E>` が決まる。片方の腕だけでは決まらない型引数が最後まで残った場合は、
 その腕自身のエラー（`cannot infer type argument ...`）になる。`match` の外では、
 決まらない型引数はその場でエラー。
@@ -1560,7 +1560,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 (unreachable)                       ; (panic "unreachable") に展開。defmacro
 (todo)                              ; (panic "todo") に展開。defmacro
 (as Type expr)                      ; 数値/文字の型変換。失敗しうる変換は失敗時に panic
-(try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は None）
+(try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は none）
 (print control args...)             ; 書式展開して標準出力へ（改行なし）
 (println control args...)           ; 同上（末尾に改行）
 (format dest control args...)       ; CL の format。展開結果の string を返す
@@ -1579,7 +1579,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 間）。同一型は無変換。**整数の幅どうし（`int` を含む）・`f32`↔`f64` は本物の変換**——`as` は
 切り詰め／丸め、`try-as` はその幅（精度）に入るかどうかを答える。`(as int x)` は固定幅からの正確な
 拡大、`(as i32 n)` は `int` からの切り詰め。整数→`char` は範囲外で失敗しうるので `as` は panic・
-`try-as` は `None`。それ以外（拡大変換や `float->int`/`ratio->int` の切り捨て）は常に成功する。
+`try-as` は `none`。それ以外（拡大変換や `float->int`/`ratio->int` の切り捨て）は常に成功する。
 `float->int`/`ratio->int`/`char->int` は `int` に着地し、より狭い幅を頼まれれば `int->W` を
 続けて呼ぶ。`rational` からは `int`（`as` は切り捨て、`try-as` は整数のときだけ成功）・`ratio`・`f64` へ、
 `int`/`ratio` からは `rational` へ変換できる。対応する変換メソッド（[数値](functions/numbers.md)の `int->char`/`int->int`/`int->W` 等）へ
@@ -1671,7 +1671,7 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 コンパイルできる。
 
 コンパイル**できる**もの: ストリーム・ファイル I/O、`random`、`gensym`、
-`symbol->string`/`string->symbol`、`parse-int`/`parse-float`、`get-universal-time`/
+`symbol->string`/`intern`、`parse-int`/`parse-float`、`get-universal-time`/
 `get-internal-real-time`、`exit`、超越関数、ビット演算、`catch`/`throw`/`unwind-protect`、
 `eq`/`eql`/`equal`/`equalp` の4つ全部（`case` もこれで全型でコンパイルできる）、
 `print`/`println`/`format`/`pprint` と `pprint-logical-block` を含む印字一式、`read`、

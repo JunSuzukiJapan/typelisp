@@ -143,8 +143,8 @@ fn completion_locals_does_not_leak_a_sibling_lets_binding() {
 
 #[test]
 fn completion_locals_offers_a_match_pattern_binding_in_its_own_arm() {
-    let (h, body) = program("(defun f ((o Option<int>)) int (match o ((Some x) x) (_ 0)))\n");
-    // Column 51 is the `(Some x)` arm's body (`x` reference) — see
+    let (h, body) = program("(defun f ((o Option<int>)) int (match o ((some x) x) (_ 0)))\n");
+    // Column 51 is the `(some x)` arm's body (`x` reference) — see
     // `lsp_locate_test.rs`'s goto-definition test at the same position.
     let locals = completion_locals(&h, &body, FILE, 1, 51);
     assert!(locals.contains(&"o".to_string()));
@@ -153,9 +153,9 @@ fn completion_locals_offers_a_match_pattern_binding_in_its_own_arm() {
 
 #[test]
 fn completion_locals_does_not_leak_a_match_pattern_binding_into_a_sibling_arm() {
-    let (h, body) = program("(defun f ((o Option<int>)) int (match o ((Some x) x) (_ 0)))\n");
+    let (h, body) = program("(defun f ((o Option<int>)) int (match o ((some x) x) (_ 0)))\n");
     // Column 57 is the `_` arm's body (the literal `0`) — `x` belongs to the
-    // sibling `(Some x)` arm only (`scope_typed`'s per-arm truncate).
+    // sibling `(some x)` arm only (`scope_typed`'s per-arm truncate).
     let locals = completion_locals(&h, &body, FILE, 1, 57);
     assert!(locals.contains(&"o".to_string()));
     assert!(!locals.contains(&"x".to_string()));
@@ -215,16 +215,16 @@ fn recover_mode_records_multiple_form_errors_and_keeps_checking_the_rest() {
 #[test]
 fn recover_mode_offers_locals_inside_a_non_catchall_match_arm() {
     // The motivating bug: `handle_completion` truncates the source after the
-    // cursor, so a completion request inside `(Some x)`'s arm deletes the
+    // cursor, so a completion request inside `(some x)`'s arm deletes the
     // catchall arm that followed and leaves a *non-exhaustive* match. Strict
     // checking errored out and dropped every local; recover mode records the
     // non-exhaustiveness (B1) but still returns the fully-typed `Match`, so the
     // arm's binding `x` and the parameter `o` are offered. This is the exact
     // patched shape (placeholder `(panic "")` where the identifier was typed).
     let (h, body, errors) =
-        program_recover("(defun f ((o Option<int>)) int (match o ((Some x) (panic \"\"))))\n");
+        program_recover("(defun f ((o Option<int>)) int (match o ((some x) (panic \"\"))))\n");
     assert_eq!(errors.len(), 1, "exactly the non-exhaustive-match error");
-    // Column 51 is the placeholder inside the `(Some x)` arm body.
+    // Column 51 is the placeholder inside the `(some x)` arm body.
     let locals = completion_locals(&h, &body, FILE, 1, 51);
     assert!(locals.contains(&"o".to_string()));
     assert!(locals.contains(&"x".to_string()), "the arm's pattern binding is offered");
@@ -233,13 +233,13 @@ fn recover_mode_offers_locals_inside_a_non_catchall_match_arm() {
 #[test]
 fn recover_mode_skips_a_bad_arm_but_keeps_the_good_arms_bindings() {
     // An arm with an unknown constructor pattern is recorded and skipped (B2);
-    // the surviving `(Some x)` arm's binding is still reachable, and the skip
+    // the surviving `(some x)` arm's binding is still reachable, and the skip
     // suppresses the exhaustiveness check so no spurious cascade is added.
     let (h, body, errors) = program_recover(
-        "(defun f ((o Option<int>)) int (match o ((Some x) x) ((Bogus y) 0) (_ 0)))\n",
+        "(defun f ((o Option<int>)) int (match o ((some x) x) ((Bogus y) 0) (_ 0)))\n",
     );
     assert!(!errors.is_empty(), "the unknown-constructor arm is recorded");
-    // Column 51 is the `(Some x)` arm body (`x` reference).
+    // Column 51 is the `(some x)` arm body (`x` reference).
     let locals = completion_locals(&h, &body, FILE, 1, 51);
     assert!(locals.contains(&"x".to_string()));
 }

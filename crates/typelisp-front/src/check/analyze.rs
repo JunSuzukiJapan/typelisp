@@ -597,9 +597,9 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
     let data = is_option_of_sexpr(elem_ty);
     let mut s = RootScope::new(heap);
     let var = s.intern_symbol(VECTOR_LITERAL_VAR);
-    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::std("vector"), vec![elem_ty.clone()]))?;
+    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::std("Vector"), vec![elem_ty.clone()]))?;
     s.push_root(vec_ty);
-    let new = forms::member_form(&mut s, &Path::std("vector"), "new")?;
+    let new = forms::member_form(&mut s, &Path::std("Vector"), "new")?;
     s.push_root(new);
     let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
     s.push_root(new_call);
@@ -661,12 +661,12 @@ const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty l
 
 /// Is `(adt, variant)` the retired `Sexpr::nil`?
 fn is_retired_nil(adt: &Path, variant: usize) -> bool {
-    variant == SEXPR_RESERVED_VARIANT && crate::types::path_is_builtin(adt, "sexpr")
+    variant == SEXPR_RESERVED_VARIANT && crate::types::path_is_builtin(adt, typelisp_mem::wk::SEXPR)
 }
 
 /// Is `(adt, variant)` the retired `Sexpr::bignum`?
 fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
-    variant == SEXPR_RETIRED_BIGNUM && crate::types::path_is_builtin(adt, "sexpr")
+    variant == SEXPR_RETIRED_BIGNUM && crate::types::path_is_builtin(adt, typelisp_mem::wk::SEXPR)
 }
 
 /// Whether a Rust-implemented builtin method's `int`-typed parameters and
@@ -696,10 +696,10 @@ pub(super) fn int_boundary_raw(type_name: &Path, method: &str) -> bool {
     use crate::types::path_is_builtin;
     // `rational`'s shims (`typelisp_rt::rational`) speak tagged words
     // throughout, the `int` answers included.
-    if path_is_builtin(type_name, "int") || path_is_builtin(type_name, "rational") {
+    if path_is_builtin(type_name, typelisp_mem::wk::INT) || path_is_builtin(type_name, typelisp_mem::wk::REPR_RATIONAL) {
         return false;
     }
-    if path_is_builtin(type_name, "chan") && matches!(method, "len" | "cap") {
+    if path_is_builtin(type_name, typelisp_mem::wk::CHAN) && matches!(method, "len" | "cap") {
         return false;
     }
     !matches!(method, "float->int" | "ratio->int" | "numerator" | "denominator" | "int->int" | "ash" | "logbitp")
@@ -1089,7 +1089,7 @@ pub struct Checker {
     place_tmp_counter: Cell<u32>,
     /// Set while [`Self::check_match`] *probes* an arm body that has no
     /// expected type to offer it yet. A constructor call whose type argument
-    /// nothing determines — `(result::ok v)`, where no argument mentions
+    /// nothing determines — `(Result::ok v)`, where no argument mentions
     /// `E` — then yields [`Type::Never`] in that slot (an *inference hole*)
     /// instead of failing, so the arm still reports the half of its type it
     /// does know and its siblings can supply the rest ([`merge_holes`]).
@@ -4115,14 +4115,14 @@ impl Checker {
         let Type::Named(name, targs) = ty else {
             return Err(Error::TypeError(format!("option_value: `{}` is not an Option type", ty)));
         };
-        if !crate::types::path_is_builtin(name, "option") || targs.len() != 1 {
+        if !crate::types::path_is_builtin(name, typelisp_mem::wk::OPTION) || targs.len() != 1 {
             return Err(Error::TypeError(format!("option_value: `{}` is not an Option type", ty)));
         }
         let node = if self.info.repr(ty).niche_payload().is_some() {
             match payload {
                 Some(value) => Node::SomeOf { ty: ty.clone(), value: Box::new(value) },
                 None => Node::Construct {
-                    owner: Path::std("sexpr"),
+                    owner: Path::std("Sexpr"),
                     targs: Vec::new(),
                     variant: SEXPR_RESERVED_VARIANT,
                     mutable: false,
@@ -4172,8 +4172,8 @@ impl Checker {
     /// type the evaluator can't read off its own AST node).
     fn is_heap_repr(&self, ty: &Type) -> bool {
         match ty {
-            Type::Named(p, args) if crate::types::path_is_builtin(p, "scope") && args.len() == 1 => true,
-            Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") || crate::types::path_is_builtin(p, "hashtable") => true,
+            Type::Named(p, args) if crate::types::path_is_builtin(p, typelisp_mem::wk::SCOPE) && args.len() == 1 => true,
+            Type::Named(p, _) if crate::types::path_is_builtin(p, typelisp_mem::wk::SEXPR) || crate::types::path_is_builtin(p, typelisp_mem::wk::HASHTABLE) => true,
             Type::Named(p, _) => match self.info.reg.type_def(p) {
                 Some(d) if d.kind == AdtKind::Struct => true,
                 Some(d) if d.kind == AdtKind::Sum && !d.variants.is_empty() => true,
@@ -5101,7 +5101,7 @@ impl Checker {
         def_loc: Option<Loc>,
     ) -> Result<TopLevelForm, Error> {
         self.refuse_offered_name(heap, parts.first(), "deftrait")?;
-        let mut vars = vec!["self".to_string()];
+        let mut vars = vec![SELF_TYPE_VAR.to_string()];
         for item in parts.iter().skip(2) {
             let Ok(elems) = heap.list_to_vec(*item) else { continue };
             if let [Value::Symbol(head), Value::Symbol(name)] = elems.as_slice() {
@@ -5382,7 +5382,7 @@ impl Checker {
             )));
         }
         let mut subst: HashMap<String, Value> = HashMap::new();
-        subst.insert("self".to_string(), parts[0]);
+        subst.insert(SELF_TYPE_VAR.to_string(), parts[0]);
         let mut item_start = 1;
         let mut impl_where: Option<Value> = None;
         if let Some(form) = parts.get(1) {
@@ -5442,9 +5442,10 @@ impl Checker {
         let mut params = params;
         if let Some((v @ Value::Symbol(_), l)) = params.first().cloned() {
             if is_self(heap, v) {
-                // `self` names both the parameter and, as a type, the
-                // target (the `Self` key of the substitution).
-                let pair = forms::list_from_vec_locs(heap, &[(v, l.clone()), (v, l.clone())])?;
+                // `self` alone is the parameter `(self Self)`, `Self` being
+                // the target (the key of the substitution).
+                let self_ty = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::SELF_TYPE));
+                let pair = forms::list_from_vec_locs(heap, &[(v, l.clone()), (self_ty, l.clone())])?;
                 params[0] = (forms::rooted(heap, pair), l);
             }
         }
@@ -5518,7 +5519,7 @@ impl Checker {
         // binding adds one more substitution, keyed by the trait's
         // associated type name.
         let mut subst: HashMap<String, Value> = HashMap::new();
-        subst.insert("self".to_string(), parts[1]);
+        subst.insert(SELF_TYPE_VAR.to_string(), parts[1]);
         // Parsed (not just textual) parallel of `subst`'s `(:type AssocName
         // Type)` bindings, for `AdtDef::trait_assoc` — lets
         // `Checker::check_call`/`resolve_trait_assoc_type` later recover
@@ -5971,7 +5972,7 @@ impl Checker {
         // The *parsed* target type, not one rebuilt from `target_fq`: a
         // primitive target is `Type::I32`, never `Named("i32")`, and the two
         // do not compare equal even though they print the same.
-        subst.insert("self".to_string(), target_ty.clone());
+        subst.insert(SELF_TYPE_VAR.to_string(), target_ty.clone());
         let targs = match target_ty {
             Type::Named(_, args) => args.as_slice(),
             _ => &[],
@@ -6098,7 +6099,7 @@ impl Checker {
             Error::TypeError(format!("`{}` is not a method of `{}`", method, trait_path))
         })?;
         let mut subst: BTreeMap<String, Type> = BTreeMap::new();
-        subst.insert("self".to_string(), receiver.ty.clone());
+        subst.insert(SELF_TYPE_VAR.to_string(), receiver.ty.clone());
         let want = sig.params.len() - 1;
         if args.len() != want {
             return Err(Error::TypeError(format!(
@@ -6497,7 +6498,7 @@ impl Checker {
         // -> what this impl binds it to (which may itself mention the target
         // variable) — the abstract counterpart of `check_impl`'s `subst`.
         let mut subst: HashMap<String, Value> = HashMap::new();
-        subst.insert("self".to_string(), heap.intern_symbol(target_var));
+        subst.insert(SELF_TYPE_VAR.to_string(), heap.intern_symbol(target_var));
         let mut pins: BTreeMap<String, Type> = BTreeMap::new();
         for (aname, written) in assoc {
             subst.insert(aname.clone(), *written);
@@ -6586,9 +6587,8 @@ impl Checker {
             let MethodSig {
                 method, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
             } = sig;
-            // Keyed by the type variable's name, which for `Self` is `"self"`
-            // once the reader has case-folded it — what `is_self_tvar` matches.
-            bounds.entry("self".to_string()).or_default().push(self_bound.clone());
+            // Keyed by the type variable's name — what `is_self_tvar` matches.
+            bounds.entry(SELF_TYPE_VAR.to_string()).or_default().push(self_bound.clone());
             let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
             if let Some(s) = &self_name {
                 binds.push((s.clone(), recv_ty.clone(), self_name_loc));
@@ -6723,7 +6723,7 @@ impl Checker {
     /// through its vtable and falling back to the `Sexpr` catalog.
     fn sexpr_has_instance_method(&self, method: &str) -> bool {
         self.info.reg
-            .type_def(&Path::std("sexpr"))
+            .type_def(&Path::std("Sexpr"))
             .and_then(|d| d.assoc.get(method))
             .is_some_and(|af| af.instance)
     }
@@ -8888,8 +8888,8 @@ impl Checker {
             // in a type-annotation position, e.g. `(x Option)` — see
             // `resolve_type_name`), this snapshots the type's *current*
             // constructors and public static methods as bare names in the
-            // current namespace — e.g. `(use option)` makes `some`/`none`
-            // callable bare, exactly like `option::some`/`option::none` (see
+            // current namespace — e.g. `(use Option)` makes `some`/`none`
+            // callable bare, exactly like `Option::some`/`Option::none` (see
             // `check_path_call`, which already treats a variant and a
             // non-instance `assoc` entry as the same kind of "static member").
             Some(UseTarget::Type(target)) => {
@@ -9131,7 +9131,7 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
         let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
-        let elem_ty = match literal_element_type(expected, &Path::std("vector")) {
+        let elem_ty = match literal_element_type(expected, &Path::std("Vector")) {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &elems, "#(..)", "Vector<T>")?,
         };
@@ -9200,7 +9200,7 @@ impl Checker {
         };
         let dims: Vec<Value> = (0..heap.struct_field_count(dims_id)).map(|i| heap.struct_field(dims_id, i)).collect();
         let data: Vec<Value> = (0..heap.struct_field_count(data_id)).map(|i| heap.struct_field(data_id, i)).collect();
-        let elem_ty = match literal_element_type(expected, &Path::std("array")) {
+        let elem_ty = match literal_element_type(expected, &Path::std("Array")) {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &data, "#nA(..)", "Array<T>")?,
         };
@@ -9457,7 +9457,7 @@ impl Checker {
                 // option type is expected, the `Nil` value of `Sexpr` when a
                 // `Sexpr` is expected, and otherwise the unit value.
                 if let Some(Type::Named(n, _)) = expected {
-                    if crate::types::path_is_builtin(n, "option") {
+                    if crate::types::path_is_builtin(n, typelisp_mem::wk::OPTION) {
                         // `Option`'s constructors moved to `Option::`/`use
                         // option` (no more bare `none`), but `()` denoting
                         // `None` is a language-core inference rule, not a
@@ -9465,7 +9465,7 @@ impl Checker {
                         // regardless of `use` status, so this bypasses
                         // `resolve_ctor` and goes straight to the known
                         // builtin path/variant index.
-                        return self.check_construct(heap, interp, env, (&Path::std("option"), OPTION_NONE), &[], &[], expected);
+                        return self.check_construct(heap, interp, env, (&Path::std("Option"), OPTION_NONE), &[], &[], expected);
                     }
                     // The `Sexpr::nil` branch that used to sit here is gone:
                     // the empty list is `Option<Sexpr>`'s `none` now, which
@@ -10573,7 +10573,7 @@ impl Checker {
     /// [`Self::receiver_method`].
     fn sexpr_has_method(&self, method: &str) -> bool {
         self.info.reg
-            .type_def(&Path::std("sexpr"))
+            .type_def(&Path::std("Sexpr"))
             .is_some_and(|d| d.assoc.get(method).is_some_and(|af| af.instance))
     }
 
@@ -10596,7 +10596,7 @@ impl Checker {
     /// `Sexpr` scrutinee while quietly failing on an `Option<Sexpr>` one.
     fn assoc_receiver_path(&self, ty: &Type, method: &str) -> Option<Path> {
         match ty {
-            t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::std("sexpr")),
+            t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::std("Sexpr")),
             other => nominal_path(other),
         }
     }
@@ -10736,7 +10736,7 @@ impl Checker {
             }
             MethodTarget::DynSexpr => {
                 let recv = Checked::of(Node::DynValue { value: Box::new(recv) }, sexpr_ty());
-                let type_fq = Path::std("sexpr");
+                let type_fq = Path::std("Sexpr");
                 self.check_assoc_call(
                     heap,
                     interp,
@@ -10802,7 +10802,7 @@ impl Checker {
                 // `Self` in the template *is* this bounded type variable, so a
                 // trait method declared to return `Self` — `(add ((self Self)
                 // (other Self)) Self)` — returns the receiver's type.
-                assoc.insert("self".to_string(), recv.ty.clone());
+                assoc.insert(SELF_TYPE_VAR.to_string(), recv.ty.clone());
                 let ret_ty = subst_apply(&sig.ret, &assoc);
                 Ok(Checked::of(Node::ErasedGeneric { what: method.as_str().into() }, ret_ty))
             }
@@ -11582,7 +11582,7 @@ impl Checker {
     /// `T` of a `Chan<T>`, or a type error naming the operation.
     fn chan_element(&self, ty: &Type, what: &str) -> Result<Type, Error> {
         match ty {
-            Type::Named(p, args) if crate::types::path_is_builtin(p, "chan") && args.len() == 1 => Ok(args[0].clone()),
+            Type::Named(p, args) if crate::types::path_is_builtin(p, typelisp_mem::wk::CHAN) && args.len() == 1 => Ok(args[0].clone()),
             other => Err(Error::TypeError(format!(
                 "select: `{}` needs a Chan<T>, and this is `{}`",
                 what, other
@@ -12221,7 +12221,7 @@ impl Checker {
                 wrap_some(self, inner, Type::Str)
             }
             None => {
-                let ty = Type::Named(Path::std("option"), vec![Type::Str]);
+                let ty = Type::Named(Path::std("Option"), vec![Type::Str]);
                 option_none(self, ty)
             }
         }
@@ -12249,7 +12249,7 @@ impl Checker {
         // *only* literal syntax is the quote, so typing `'foo` as data is
         // the same mistake as typing `42` as data would be: it throws away
         // what the program said. It also made equality order-dependent —
-        // `(equal (string->symbol "foo") 'foo)` failed to check while the
+        // `(equal (intern "foo") 'foo)` failed to check while the
         // reverse checked — because only one side had lost its type.
         //
         // Nothing is closed off by this: a `Symbol` widens into an
@@ -13077,7 +13077,7 @@ impl Checker {
         let Err(err) = result else { return result };
         // The rewritten form is not what the user wrote, so a type error
         // inside it names types they never mentioned — `expected I32, found
-        // vector<I32>` for `(aref v 0)` on a `Vector<T>`, pointing at a
+        // Vector<I32>` for `(aref v 0)` on a `Vector<T>`, pointing at a
         // `get` call that is not in their source. Re-check the receiver
         // alone (only here, on the way out with an error already in hand)
         // to say which type they actually indexed. Not a second meaning for
@@ -13085,7 +13085,7 @@ impl Checker {
         let Ok(recv_ty) = self.check_at(heap, interp, env, recv, None, None).map(|c| c.ty.clone()) else {
             return Err(err);
         };
-        if matches!(&recv_ty, Type::Named(p, _) if crate::types::path_is_builtin(p, "array")) {
+        if matches!(&recv_ty, Type::Named(p, _) if crate::types::path_is_builtin(p, typelisp_mem::wk::ARRAY)) {
             return Err(err);
         }
         Err(Error::TypeError(format!(
@@ -13108,7 +13108,7 @@ impl Checker {
     ) -> Result<Value, Error> {
         let a = heap.intern_symbol(&self.gensym_place());
         let idx = heap.intern_symbol(&self.gensym_place());
-        let empty = self.the_form(heap, "vector", &Type::Int, "new")?;
+        let empty = self.the_form(heap, &Path::std("Vector"), &Type::Int, "new")?;
         let empty = forms::rooted(heap, empty);
         let push = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "push"));
         let progn = heap.intern_symbol("progn");
@@ -13199,13 +13199,14 @@ impl Checker {
     }
 
     /// CL's `concatenate`: `(concatenate 'string s ...)` joins strings into a
-    /// string and `(concatenate 'vector seq ...)` joins sequences into a
+    /// string and `(concatenate 'Vector seq ...)` joins sequences into a
     /// `Vector<A>`. The result type is a literal quoted symbol, read here —
     /// CL's is a type designator evaluated at run time, which a static
     /// language answers before then. Each spelling rewrites to what already
     /// does the job: [`Self::append_fold`] for two or more operands,
     /// `(the string s)` / `(copy-seq seq)` for one, `""` for no strings.
-    /// `(concatenate 'vector)` has no operand to take an element type from
+    /// The result type is told by its symbol, the built-in type's name.
+    /// `(concatenate 'Vector)` has no operand to take an element type from
     /// and is refused, as is a `Sexpr` list result (`'list`), which is not a
     /// sequence here (`sexpr-append` joins those).
     fn check_concatenate(
@@ -13216,41 +13217,42 @@ impl Checker {
         args: &[Value],
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
-        let usage = "concatenate: (concatenate 'string s ...) or (concatenate 'vector seq ...)";
+        let usage = "concatenate: (concatenate 'string s ...) or (concatenate 'Vector seq ...)";
         let result_type = args
             .first()
             .and_then(|&form| heap.list_to_vec(form).ok())
             .filter(|elems| elems.len() == 2)
             .filter(|elems| matches!(elems[0], Value::Symbol(id) if id.is(wk::QUOTE)))
             .and_then(|elems| match elems[1] {
-                Value::Symbol(id) => Some(heap.symbol_spelling(id).to_string()),
+                Value::Symbol(id) => Some(id),
                 _ => None,
             })
             .ok_or_else(|| Error::TypeError(format!("{} — the result type must be a quoted symbol", usage)))?;
         let seqs = &args[1..];
-        let form = match (result_type.as_str(), seqs.len()) {
-            ("string", 0) => heap.alloc_string(String::new()),
-            ("string", 1) => {
+        let form = match (result_type.well_known(), seqs.len()) {
+            (wk::STRING, 0) => heap.alloc_string(String::new()),
+            (wk::STRING, 1) => {
                 let the = heap.intern_symbol("the");
                 let string = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "string"));
                 forms::list_from_vec_locs(heap, &[(the, None), (string, None), (seqs[0], None)])?
             }
-            ("string", _) => self.append_fold(heap, seqs, true)?,
-            ("vector", 0) => {
+            (wk::STRING, _) => self.append_fold(heap, seqs, true)?,
+            (wk::VECTOR, 0) => {
                 return Err(Error::TypeError(format!(
-                    "{} — `(concatenate 'vector)` needs at least one sequence to take the element type from",
+                    "{} — `(concatenate 'Vector)` needs at least one sequence to take the element type from",
                     usage
                 )))
             }
-            ("vector", 1) => {
+            (wk::VECTOR, 1) => {
                 let copy = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "copy-seq"));
                 forms::list_from_vec_locs(heap, &[(copy, None), (seqs[0], None)])?
             }
-            ("vector", _) => self.append_fold(heap, seqs, false)?,
-            (other, _) => {
+            (wk::VECTOR, _) => self.append_fold(heap, seqs, false)?,
+            _ => {
                 return Err(Error::TypeError(format!(
                     "{} — unknown result type `{}` (a `Sexpr` list is joined with `sexpr-append`)",
-                    usage, other
+                    usage,
+                    heap.symbol_spelling(result_type)
                 )))
             }
         };
@@ -13613,11 +13615,11 @@ impl Checker {
                 let Type::Named(p, targs) = &ty else {
                     return Err(loop_thereis_error(&ty));
                 };
-                if p.last_segment() != "option" || targs.len() != 1 {
+                if !crate::types::path_is_builtin(p, wk::OPTION) || targs.len() != 1 {
                     return Err(loop_thereis_error(&ty));
                 }
                 let elem = targs[0].clone();
-                Some(self.the_form(heap, "option", &elem, "none")?)
+                Some(self.the_form(heap, p, &elem, "none")?)
             }
             None => None,
         };
@@ -13647,24 +13649,24 @@ impl Checker {
         let probe = forms::rooted(heap, probe);
         let ty = self.check_at(heap, interp, env, probe, None, None)?.ty.clone();
         match acc.acc {
-            Acc::Collect | Acc::Append => self.the_form(heap, "vector", &ty, "new"),
+            Acc::Collect | Acc::Append => self.the_form(heap, &Path::std("Vector"), &ty, "new"),
             Acc::Sum => Ok(forms::numeric_identity_literal(heap, Some(&ty), 0)),
-            Acc::Maximize | Acc::Minimize => self.the_form(heap, "option", &ty, "none"),
+            Acc::Maximize | Acc::Minimize => self.the_form(heap, &Path::std("Option"), &ty, "none"),
             Acc::Count => unreachable!("handled above"),
         }
     }
 
     /// `(the OUTER<ELEM> (OUTER::CTOR))` with the type written out — the
     /// checker putting a type it worked out into the tree it is building,
-    /// since nothing downstream can rederive it. `outer` is a built-in type at
-    /// the root and `ctor` its static constructor.
+    /// since nothing downstream can rederive it. `outer` is a built-in type
+    /// and `ctor` its static constructor.
     ///
     /// The written form is [`forms::type_to_form`]'s, and the round trip
     /// through [`Self::parse_type_here_at`] is *checked* rather than assumed,
     /// so a type that cannot be written is refused here instead of emitting a
     /// form that fails somewhere less legible.
-    fn the_form(&self, heap: &mut Heap, outer: &str, elem: &Type, ctor: &str) -> Result<Value, Error> {
-        let ty = Type::Named(Path::std(outer), vec![elem.clone()]);
+    fn the_form(&self, heap: &mut Heap, outer: &Path, elem: &Type, ctor: &str) -> Result<Value, Error> {
+        let ty = Type::Named(*outer, vec![elem.clone()]);
         let ty_form = forms::type_to_form(heap, &ty)?;
         let ty_form = forms::rooted(heap, ty_form);
         let ok = match self.parse_type_here_at(heap, ty_form, None) {
@@ -13678,7 +13680,7 @@ impl Checker {
             )));
         }
         let the = heap.intern_symbol("the");
-        let ctor = forms::member_form(heap, &Path::std(outer), ctor)?;
+        let ctor = forms::member_form(heap, outer, ctor)?;
         let ctor = forms::rooted(heap, ctor);
         let call = forms::list_from_vec_locs(heap, &[(ctor, None)])?;
         let call = forms::rooted(heap, call);
@@ -14194,7 +14196,7 @@ impl Checker {
                     // A diverging argument never reaches the directive.
                     Type::Never => ArgKind::Unknown,
                     t if *t == option_of_sexpr() => ArgKind::List,
-                    Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") => ArgKind::Sexpr,
+                    Type::Named(p, _) if crate::types::path_is_builtin(p, typelisp_mem::wk::SEXPR) => ArgKind::Sexpr,
                     // A type variable: no definition to ask until this body is
                     // specialized, and the specialization is checked again.
                     Type::Var(_) => ArgKind::Unknown,
@@ -14472,7 +14474,7 @@ impl Checker {
         if concrete
             // Lowercase: symbol names are interned case-folded, so that is how
             // the prelude's `CharOutput` is spelled in the registry.
-            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::in_ns(crate::types::std_module("io"), "charoutput"), assoc: BTreeMap::new() }, 0)
+            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::in_ns(crate::types::std_module("io"), "CharOutput"), assoc: BTreeMap::new() }, 0)
         {
             return Err(Error::TypeError(format!(
                 "format: the destination must be `true` (stdout), `false` (build the string only), \
@@ -15450,7 +15452,7 @@ impl Checker {
             match subst.get(p) {
                 Some(t) => result_args.push(t.clone()),
                 // Nothing here determines `p`: no field mentions it and no
-                // expected type supplied it. `(result::ok v)` is the standard
+                // expected type supplied it. `(Result::ok v)` is the standard
                 // case — `Ok` carries a `T` and says nothing about `E`.
                 //
                 // Under a `match`-arm probe ([`Self::infer_probe`]) that is
@@ -15484,7 +15486,7 @@ impl Checker {
         // Here is where the instantiation is known, the same reason
         // `field_tys` is computed here rather than at the definition.
         let result_ty = Type::Named(adt_name.clone(), result_args.clone());
-        if crate::types::path_is_builtin(adt_name, "option") {
+        if crate::types::path_is_builtin(adt_name, typelisp_mem::wk::OPTION) {
             let payload = if variant == OPTION_SOME { typed_args.into_iter().next() } else { None };
             return self.option_value(&result_ty, payload);
         }
@@ -15573,7 +15575,7 @@ impl Checker {
         // `variants.len()` with nothing subtracted.
         let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
         let sexpr_variants =
-            || self.info.reg.type_def(&Path::std("sexpr")).expect("sexpr is always registered").variants.len();
+            || self.info.reg.type_def(&Path::std("Sexpr")).expect("sexpr is always registered").variants.len();
         // The retired `bignum` slot (`SEXPR_RETIRED_BIGNUM`) is neither writable
         // nor matchable, so it too is off the universe — one less than the
         // table says, in both the flat and the plain form.
@@ -15582,7 +15584,7 @@ impl Checker {
         } else {
             adt_name.as_ref().map_or(0, |n| {
                 let all = self.info.reg.type_def(n).expect("adt exists").variants.len();
-                if crate::types::path_is_builtin(n, "sexpr") { all - 2 } else { all }
+                if crate::types::path_is_builtin(n, typelisp_mem::wk::SEXPR) { all - 2 } else { all }
             })
         };
 
@@ -15667,7 +15669,7 @@ impl Checker {
             let alternatives = recover_arm!(expand_or_patterns(heap, parts[0]));
             let mut first_binds: Option<PatternBindings> = None;
             for alt in alternatives {
-            let (pat, binds) = recover_arm!(self.check_pattern(
+            let (pat, binds) = recover_arm!(self.check_arm_pattern(
                 heap,
                 interp,
                 env,
@@ -15696,7 +15698,7 @@ impl Checker {
                 // because under the sugar both of them would answer, and
                 // answer with the wrong index space.
                 Pattern::Ctor { type_name, variant, .. }
-                    if sexpr_sugar && crate::types::path_is_builtin(type_name, "sexpr") =>
+                    if sexpr_sugar && crate::types::path_is_builtin(type_name, typelisp_mem::wk::SEXPR) =>
                 {
                     covered.insert(*variant);
                 }
@@ -15726,7 +15728,7 @@ impl Checker {
                 // `option` ctor pattern. They cover `option`'s own variants,
                 // so exhaustiveness counts them as such — otherwise a
                 // complete `((some x) ..) ((none) ..)` would be rejected.
-                Pattern::Empty if adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, "option")) == Some(true) => {
+                Pattern::Empty if adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, typelisp_mem::wk::OPTION)) == Some(true) => {
                     covered.insert(OPTION_NONE);
                 }
                 // `(some P)` covers `some` only when `P` itself matches
@@ -15734,7 +15736,7 @@ impl Checker {
                 // uncovered, exactly as a nested ctor pattern would.
                 Pattern::Some(_, sub)
                     if matches!(**sub, Pattern::Wildcard | Pattern::Bind(..))
-                        && adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, "option")) == Some(true) =>
+                        && adt_name.as_ref().map(|p| crate::types::path_is_builtin(p, typelisp_mem::wk::OPTION)) == Some(true) =>
                 {
                     covered.insert(OPTION_SOME);
                 }
@@ -15744,7 +15746,7 @@ impl Checker {
                 Pattern::Bool(b) if scrut.ty == Type::Bool => {
                     bools_covered.insert(*b);
                 }
-                Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
+                Pattern::Wildcard => catchall = true,
                 _ => {}
             }
             // Diverging arms don't constrain the result type; concrete arms must
@@ -15753,7 +15755,7 @@ impl Checker {
             let body_locs: Vec<Option<Loc>> = parts_locs[body_start..].iter().map(|(_, l)| l.clone()).collect();
             // Probe boundary (B4): with no result type agreed yet there is no
             // expectation to hand this body, and a body that needs one —
-            // `(result::ok v)`, whose `E` only the sibling `(err e)` arm
+            // `(Result::ok v)`, whose `E` only the sibling `(err e)` arm
             // names — cannot type itself. So check it with inference holes
             // allowed ([`Self::infer_probe`]), and if it made one (or failed
             // outright, which a sibling's type may equally well fix), keep
@@ -15905,6 +15907,37 @@ impl Checker {
             body.push(d);
         }
         (body, joined)
+    }
+
+    /// A `match` arm's whole pattern. A bare name there is always a variant
+    /// of the scrutinee's type, never a variable: `_` is the one pattern
+    /// that matches every value, so a misspelled variant — `None` for
+    /// `none` — is an error rather than an arm that binds a variable called
+    /// `None`, matches everything and leaves the arms after it unreachable.
+    /// Inside a constructor pattern a bare name still binds the field.
+    fn check_arm_pattern(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        expected: &Type,
+        v: Value,
+        loc: Option<Loc>,
+    ) -> Result<(Pattern, PatternBindings), Error> {
+        if let Value::Symbol(id) = v {
+            if !id.is(wk::UNDERSCORE) && !id.is_keyword() {
+                return match self.check_bare_ctor_pattern(heap, interp, env, expected, v, loc.as_ref())? {
+                    Some(pat) => Ok(pat),
+                    None => Err(Error::TypeError(format!(
+                        "pattern: `{}` is not a variant of `{}` — a bare name in a `match` arm is a variant; \
+                         only `_` matches every value",
+                        heap.symbol_spelling(id),
+                        expected
+                    ))),
+                };
+            }
+        }
+        self.check_pattern(heap, interp, env, expected, v, loc)
     }
 
     /// Check a pattern against the type of the value it matches, returning the
@@ -16402,7 +16435,7 @@ impl Checker {
                     }
                 }
                 if let Some((adt, idx)) = self.info.resolve_ctor(id) {
-                    if !crate::types::path_is_builtin(&adt, "sexpr") {
+                    if !crate::types::path_is_builtin(&adt, typelisp_mem::wk::SEXPR) {
                         let def = self.info.reg.type_def(&adt).expect("resolved ctor's type is registered");
                         no_generics(&adt, def)?;
                         return Ok(Some((adt, Vec::new(), idx)));
@@ -16545,7 +16578,7 @@ impl Checker {
         // Not under a downcast: `(the Option<T> (some x))` reads a *boxed*
         // `Option` back out of a `Sexpr` slot (`box-option` put it there),
         // and a ctor pattern over that box is the right shape for it.
-        if !downcast && crate::types::path_is_builtin(&adt_name, "option") && targs.len() == 1 {
+        if !downcast && crate::types::path_is_builtin(&adt_name, typelisp_mem::wk::OPTION) && targs.len() == 1 {
             if let Some(payload) = self.info.repr(&Type::Named(adt_name.clone(), targs.clone())).niche_payload() {
                 return Ok((
                     match variant {
@@ -16882,7 +16915,7 @@ pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<V
 /// `Some(inner)` as a [`Checked`] — `Checker::check_as`'s `try-as` wrapper for a
 /// total conversion's already-computed result.
 fn wrap_some(checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
-    let ty = Type::Named(Path::std("option"), vec![target.clone()]);
+    let ty = Type::Named(Path::std("Option"), vec![target.clone()]);
     checker.option_value(&ty, Some(inner))
 }
 
@@ -16967,8 +17000,8 @@ fn disagreeing_if(c: Checked, what: Option<Disagreement>) -> Checked {
 /// disagree on anything that is not a hole.
 ///
 /// A hole is the [`Type::Never`] a probed `match` arm left where it could not
-/// infer a type argument (`Checker::infer_probe`): `(result::ok text)` probes
-/// to `Result<string, !>` and its sibling `(result::err e)` to
+/// infer a type argument (`Checker::infer_probe`): `(Result::ok text)` probes
+/// to `Result<string, !>` and its sibling `(Result::err e)` to
 /// `Result<!, FileError>`, and merging the two yields the
 /// `Result<string, FileError>` that neither arm knew on its own — the
 /// arm-to-arm unification a constraint solver would do, done structurally
@@ -17040,13 +17073,13 @@ fn has_open_hole(t: &Type) -> bool {
 /// check (below) that every individual variadic argument satisfies the
 /// declared element type before it's wrapped into the list.
 fn sexpr_ty() -> Type {
-    Type::Named(Path::std("sexpr"), vec![])
+    Type::Named(Path::std("Sexpr"), vec![])
 }
 
 /// `Option<Sexpr>` — the type an S-expression datum has once the empty list
 /// is `none` (see [`is_option_of_sexpr`]).
 fn option_of_sexpr() -> Type {
-    Type::Named(Path::std("option"), vec![sexpr_ty()])
+    Type::Named(Path::std("Option"), vec![sexpr_ty()])
 }
 
 /// Does an expected type ask for an S-expression?
@@ -17072,9 +17105,9 @@ fn is_sexpr_expectation(ty: &Type) -> bool {
 /// empty-list word as the inner one and the two `none`s would collide.
 fn is_option_of_sexpr(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, args)
-        if crate::types::path_is_builtin(p, "option")
+        if crate::types::path_is_builtin(p, typelisp_mem::wk::OPTION)
             && args.len() == 1
-            && matches!(&args[0], Type::Named(a, _) if crate::types::path_is_builtin(a, "sexpr")))
+            && matches!(&args[0], Type::Named(a, _) if crate::types::path_is_builtin(a, typelisp_mem::wk::SEXPR)))
 }
 
 /// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
@@ -17164,7 +17197,7 @@ fn int_lit_ty(expected: Option<&Type>) -> Type {
 /// with. Rejected here rather than silently cut, because a cut is a thing the
 /// caller can ask for and mean — that request is spelled `(as u8 300)`.
 fn int_lit_in_range(n: i64, ty: &Type) -> bool {
-    match ty.scalar_name().and_then(crate::types::int_width_signed) {
+    match crate::types::int_width_signed(ty) {
         Some((width, signed)) => crate::types::normalize_int(n, width, signed) == n,
         None => true,
     }
@@ -17180,7 +17213,7 @@ fn int_lit_in_range(n: i64, ty: &Type) -> bool {
 /// so suggesting `as` for one would send the caller at a second failure.
 fn int_lit_range_error(n: &str, ty: &Type, castable: bool) -> Error {
     let name = ty.to_string();
-    let range = match ty.scalar_name().and_then(crate::types::int_width_signed) {
+    let range = match crate::types::int_width_signed(ty) {
         Some((width, true)) => format!("{}..={}", -(1i64 << (width - 1)), (1i64 << (width - 1)) - 1),
         Some((width, false)) => format!("0..={}", (1i64 << width) - 1),
         None => String::new(),
@@ -17283,10 +17316,12 @@ pub(crate) fn subst_apply(t: &Type, subst: &BTreeMap<String, Type>) -> Type {
 /// the same `params`-zip `Checker::check_assoc_call` already does for method
 /// signatures. `None` if `def` has no recorded binding for that trait/name
 /// pair.
-/// Whether `t` is a trait signature template's `Self` type variable. Written
-/// `Self` in source; the reader case-folds it to `self`.
+/// The name of a trait's or an impl's implicit type variable, `Self`.
+const SELF_TYPE_VAR: &str = "Self";
+
+/// Whether `t` is a trait signature template's `Self` type variable.
 fn is_self_tvar(t: &Type) -> bool {
-    matches!(t, Type::Var(name) if name == "self")
+    matches!(t, Type::Var(name) if name == SELF_TYPE_VAR)
 }
 
 /// Whether `t` mentions `Self` anywhere — [`is_self_tvar`] applied
@@ -17663,6 +17698,6 @@ mod header_tests {
 
     #[test]
     fn a_type_parameter_must_be_a_plain_name() {
-        assert!(header("pair<vector<t>>").is_err());
+        assert!(header("pair<Vector<t>>").is_err());
     }
 }

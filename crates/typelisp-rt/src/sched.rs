@@ -262,7 +262,7 @@ pub enum SelectOp {
 #[derive(Clone, PartialEq, Debug)]
 pub enum ChanOp {
     /// `(Chan::new cap)` — answers with the handle, built under the
-    /// channel's type (`chan<int>`), which the site wrote.
+    /// channel's type (`Chan<int>`), which the site wrote.
     New(i64, TypeId),
     /// `(len ch)` — how many values are buffered.
     Len(ChanId),
@@ -318,24 +318,24 @@ struct Chan {
 // ---- handles -----------------------------------------------------------------
 
 /// The runtime value of a `Task<T>`: a boxed struct holding the scheduler's id,
-/// under the handle's own type (`task<int>`).
+/// under the handle's own type (`Task<int>`).
 ///
 /// The type is the one the checker wrote for this `task` node and every
 /// layer below passed along: nothing here has a type to read the
-/// instantiation off, and a handle prints as its type (`#<task<int> 1>`),
+/// instantiation off, and a handle prints as its type (`#<Task<int> 1>`),
 /// the way a `Vector<T>` does. The id is not a number a program may read.
 pub fn task_handle(heap: &mut Heap, id: TaskId, ty: TypeId) -> Value {
     heap.alloc_struct(ty, vec![Value::Int(id.0 as i64)])
 }
 
 /// The runtime value of a `Chan<T>`: a boxed struct holding the scheduler's
-/// id, under the channel's type (`chan<int>`) — [`task_handle`]'s
+/// id, under the channel's type (`Chan<int>`) — [`task_handle`]'s
 /// arrangement, the type coming from the `Chan::new` site.
 pub fn chan_handle(heap: &mut Heap, id: ChanId, ty: TypeId) -> Value {
     heap.alloc_struct(ty, vec![Value::Int(id.0 as i64)])
 }
 
-/// The runtime value of a `Thread<T>`: a [`task_handle`] under a `thread<T>`
+/// The runtime value of a `Thread<T>`: a [`task_handle`] under a `Thread<T>`
 /// type. `join` reads it with [`task_id_of`], because a thread *is* a task to
 /// the scheduler — one it runs on an OS thread of its own.
 pub fn thread_handle(heap: &mut Heap, id: TaskId, ty: TypeId) -> Value {

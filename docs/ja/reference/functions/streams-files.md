@@ -87,7 +87,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` は `direction-input` / `direction-output` / `direction-append` の3定数。
-`open-file` は開けなければ `Err(FileError)` を返す（存在しないファイルは普通の結果であって
+`open-file` は開けなければ `(err FileError)` を返す（存在しないファイルは普通の結果であって
 panic ではない）。ファイル名は文字列でも `pathname` でもよい（9 章の `Pathish`）。
 
 `(get-output-stream-string s)` は `string-output-stream` に書かれた内容を返して空にする。
@@ -134,18 +134,18 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部転送 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 残り全行 |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `Ok(eof)`、読めたときは `Ok(datum d)`、データでなければ `Err`。datum を終わらせた**空白1文字を消費する**（CL と同じ）。`ReadOutcome` が `Option<Sexpr>` でないのは、空リスト `()` を読んだことと入力末尾とを同じ値で表さないため |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `(ok eof)`、読めたときは `(ok (datum d))`、データでなければ `err`。datum を終わらせた**空白1文字を消費する**（CL と同じ）。`ReadOutcome` が `Option<Sexpr>` でないのは、空リスト `()` を読んだことと入力末尾とを同じ値で表さないため |
 | `read-sexpr-preserving-whitespace` | 同上 | 同上 | 同上だが空白を残す（CL の `read-preserving-whitespace`） |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `Err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 全内容 |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 全行 |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | 書き出す |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 存在するか |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名（引数は `Pathish`） |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | シンボリックリンクと `.`/`..` を解いた絶対パス。存在しなければ `Err` |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | シンボリックリンクと `.`/`..` を解いた絶対パス。存在しなければ `err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 最終更新時刻。**万国時**なので `decode-universal-time`（[時間](system.md#2-日時への分解合成)）が読める |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者のログイン名。ファイルが無ければ `Err`、所有者の uid にパスワードデータベースの項目が無ければ `Ok(none)`——CL が分けている2つをそのまま分けている |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者のログイン名。ファイルが無ければ `err`、所有者の uid にパスワードデータベースの項目が無ければ `(ok none)`——CL が分けている2つをそのまま分けている |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | ディレクトリか。**無い場合も `false`** ——両者を分けるのは `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 中身を truename（`truename` と同じく、シンボリックリンクを解いた絶対パス）で並べる。リンク先の無いシンボリックリンクは入らない。`.`/`..` は入らない。順序は OS のまま |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 親ごと作る。既にあれば成功 |

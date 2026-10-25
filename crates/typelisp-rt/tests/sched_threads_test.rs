@@ -82,7 +82,7 @@ impl TaskBody for Probe {
             Probe::Parent { children, spawned, handles, waited, sum } => {
                 if *spawned < *children {
                     *spawned += 1;
-                    let task_int = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::THREAD, "task", &[spec::INT]));
+                    let task_int = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::THREAD, "Task", &[spec::INT]));
                     return Progress::Blocked(Waiting::Spawn(Value::Int(*spawned), task_int));
                 }
                 if *waited < handles.len() {

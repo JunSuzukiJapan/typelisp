@@ -43,7 +43,7 @@ fn an_alias_is_the_same_type_as_its_body() {
 fn an_alias_abbreviates_a_compound_type() {
     let src = "
         (deftype answer Result<int,string>)
-        (defun ok-42 () answer (result::ok 42))
+        (defun ok-42 () answer (Result::ok 42))
         (match (ok-42) ((ok n) n) ((err _) 0))
     ";
     assert_eq!(eval_ok(src), Value::Int(42));
@@ -65,7 +65,7 @@ fn an_alias_abbreviates_a_function_type() {
 fn a_generic_alias_substitutes_its_argument() {
     let src = "
         (deftype fallible<T> Result<T,string>)
-        (defun ok-str () fallible<string> (result::ok \"hi\"))
+        (defun ok-str () fallible<string> (Result::ok \"hi\"))
         (match (ok-str) ((ok s) (length s)) ((err _) 0))
     ";
     assert_eq!(eval_ok(src), Value::Int(2));
@@ -75,7 +75,7 @@ fn a_generic_alias_substitutes_its_argument() {
 fn a_generic_alias_takes_several_parameters() {
     let src = "
         (deftype swapped<A,B> Result<B,A>)
-        (defun f () swapped<string,int> (result::ok 5))
+        (defun f () swapped<string,int> (Result::ok 5))
         (match (f) ((ok n) n) ((err _) 0))
     ";
     assert_eq!(eval_ok(src), Value::Int(5));
@@ -97,7 +97,7 @@ fn a_generic_alias_may_be_used_inside_another_alias() {
     let src = "
         (deftype fallible<T> Result<T,string>)
         (deftype counter fallible<int>)
-        (defun c () counter (result::ok 3))
+        (defun c () counter (Result::ok 3))
         (match (c) ((ok n) n) ((err _) 0))
     ";
     assert_eq!(eval_ok(src), Value::Int(3));

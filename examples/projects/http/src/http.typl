@@ -25,25 +25,25 @@
 
 ;; Header names are case-insensitive (RFC 9110 §5.1).
 (pub defun header-value ((headers Vector<header>) (wanted string)) Option<string>
-  (let ((found (the Option<string> (option::none))))
+  (let ((found (the Option<string> (Option::none))))
     (doiter (h (iter headers))
-      (when (equalp (name h) wanted) (setf found (option::some (value h)))))
+      (when (equalp (name h) wanted) (setf found (Option::some (value h)))))
     found))
 
 (defun parse-header-line ((line string)) Option<header>
   (match (search line ":")
-    ((none) (option::none))
+    ((none) (Option::none))
     ((some i)
-     (option::some (make-instance 'header :name (trim (substring line 0 i))
+     (Option::some (make-instance 'header :name (trim (substring line 0 i))
                                   :value (trim (substring line (+ i 1) (length line))))))))
 
 ;; A line without its trailing CR (lines end in CRLF; `read-line` stops at LF).
 (defun read-crlf-line ((c socket-stream)) Option<string>
   (match (read-line c)
-    ((none) (option::none))
+    ((none) (Option::none))
     ((some line)
      (let ((n (length line)))
-       (option::some (if (and (> n 0) (equal (ref line (- n 1)) #\Return))
+       (Option::some (if (and (> n 0) (equal (ref line (- n 1)) #\Return))
                          (substring line 0 (- n 1))
                          line))))))
 
@@ -114,13 +114,13 @@
 (pub defun read-request ((c socket-stream)) Option<request>
   "One request from a connection, or `none` if the client sent nothing."
   (match (read-crlf-line c)
-    ((none) (option::none))
+    ((none) (Option::none))
     ((some line)
      (let ((parts (split line " ")))
        (if (< (len parts) 2)
-           (option::none)
+           (Option::none)
            (let ((headers (read-headers c)))
-             (option::some (make-instance 'request :method (get parts 0) :target (get parts 1) :headers headers
+             (Option::some (make-instance 'request :method (get parts 0) :target (get parts 1) :headers headers
                                           :body (read-body c headers false)))))))))
 
 (pub defun write-response ((c socket-stream) (r response)) ()
@@ -154,45 +154,45 @@
        ())
       (:else ()))
     (if (equal rest "")
-        (result::err (simple-error (append "not an http(s) URL: " s)))
+        (Result::err (simple-error (append "not an http(s) URL: " s)))
         (let ((slash (unwrap-or (search rest "/") (length rest))))
           (let ((authority (substring rest 0 slash))
                 (target (if (eq slash (length rest)) "/" (substring rest slash (length rest)))))
             (match (search authority ":")
               ((some i)
                (match (parse-int (substring authority (+ i 1) (length authority)))
-                 ((ok port) (result::ok (make-instance 'url :tls tls :host (substring authority 0 i) :port port :target target)))
-                 ((err e) (result::err (simple-error (append "bad port in " s))))))
+                 ((ok port) (Result::ok (make-instance 'url :tls tls :host (substring authority 0 i) :port port :target target)))
+                 ((err e) (Result::err (simple-error (append "bad port in " s))))))
               ((none)
-               (result::ok (make-instance 'url :tls tls :host authority :port (if tls 443 80) :target target)))))))))
+               (Result::ok (make-instance 'url :tls tls :host authority :port (if tls 443 80) :target target)))))))))
 
 (pub defun read-response ((c socket-stream)) Option<response>
   (match (read-crlf-line c)
-    ((none) (option::none))
+    ((none) (Option::none))
     ((some line)
      (let ((parts (split line " ")))
        (if (< (len parts) 2)
-           (option::none)
+           (Option::none)
            (let ((status (unwrap-or (parse-int (get parts 1)) 0))
                  (reason (if (> (len parts) 2)
                              (substring line (+ (length (get parts 0)) (length (get parts 1)) 2) (length line))
                              ""))
                  (headers (read-headers c)))
-             (option::some (make-instance 'response :status status :reason reason :headers headers :body (read-body c headers true)))))))))
+             (Option::some (make-instance 'response :status status :reason reason :headers headers :body (read-body c headers true)))))))))
 
 (pub defun http-get ((address string)) Result<response, :dyn Error>
   "GET `address`. Plain HTTP or TLS by the scheme; the connection is closed
    after one exchange."
   (match (parse-url address)
-    ((err e) (result::err (as :dyn Error e)))
+    ((err e) (Result::err (as :dyn Error e)))
     ((ok u)
      (match (if (tls u) (tls-connect (host u) (port u) :timeout 30.0) (tcp-connect (host u) (port u) :timeout 30.0))
-       ((err e) (result::err (as :dyn Error e)))
+       ((err e) (Result::err (as :dyn Error e)))
        ((ok c)
         (write-string c (format false "GET ~a HTTP/1.1\r\nHost: ~a\r\nUser-Agent: typelisp-http\r\nConnection: close\r\n\r\n"
                                 (target u) (host u)))
         (let ((r (read-response c)))
           (close c)
           (match r
-            ((some resp) (result::ok resp))
-            ((none) (result::err (as :dyn Error (simple-error "empty response")))))))))))
+            ((some resp) (Result::ok resp))
+            ((none) (Result::err (as :dyn Error (simple-error "empty response")))))))))))

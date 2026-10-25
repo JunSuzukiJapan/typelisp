@@ -1373,7 +1373,7 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
 /// The `Vector<int>` box an array's dimensions are kept in. Written here
 /// because the reader has no checker to ask; `tests/type_identity_guard_test.rs`
 /// checks it against the type the checker gives it.
-pub const ARRAY_DIMS_TYPE: TypeSpec = TypeSpec::Named(StdModule::STD, "vector", &[spec::INT]);
+pub const ARRAY_DIMS_TYPE: TypeSpec = TypeSpec::Named(StdModule::STD, "Vector", &[spec::INT]);
 
 /// `#(a b c)`: the elements, read as data, in a `Vector<Option<Sexpr>>` box —
 /// the `Sexpr` `vector` variant. The cursor is on the `(`.
@@ -1858,7 +1858,7 @@ fn token_value(heap: &mut Heap, ns: NsId, tok: &str, escaped: bool) -> Result<Va
     if let Some(v) = parse_number(heap, tok)? {
         return Ok(v);
     }
-    match tok.to_lowercase().as_str() {
+    match tok {
         "true" => Ok(Value::Bool(true)),
         "false" => Ok(Value::Bool(false)),
         _ => {

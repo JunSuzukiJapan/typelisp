@@ -73,7 +73,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i` 番目を読む。範囲外は panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic。`(setf (get v i) x)` とも書ける |
 | `len` | `(len v)` | `Vector<T>→int` | 要素数 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `None`（`get`/`set` と異なり panic しない） |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `none`（`get`/`set` と異なり panic しない） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` を実装するイテレータを作る |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | `x` と等しい要素が無ければ末尾に追加（CL `pushnew`。場所を書き換える必要が無いのでマクロではなくメソッド） |
 

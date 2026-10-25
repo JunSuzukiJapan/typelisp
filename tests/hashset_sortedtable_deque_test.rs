@@ -73,7 +73,7 @@ fn a_sortedtable_key_type_must_implement_ord() {
     let msg = check_err(
         "(defstruct p (x int))\n(defun f () () (let ((t (the SortedTable<p,int> (SortedTable::new)))) (set t (make-instance 'p :x 1) 1)))",
     );
-    assert!(msg.contains("ord"), "{}", msg);
+    assert!(msg.contains("Ord"), "{}", msg);
 }
 
 #[test]

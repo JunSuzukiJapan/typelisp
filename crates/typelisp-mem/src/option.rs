@@ -19,7 +19,7 @@
 use crate::symbols::NsId;
 use crate::{Heap, TypeId, TypeShape, Value};
 
-/// The payload `P` of `ty` when `ty` is an `option<P>`.
+/// The payload `P` of `ty` when `ty` is an `Option<P>`.
 fn option_payload(ty: TypeId) -> Option<TypeId> {
     let TypeShape::Named(ns, sym, args) = crate::type_shape(ty) else { return None };
     let TypeShape::Named(option_ns, option_sym, _) = crate::type_shape(TypeId::OPTION) else {
@@ -51,7 +51,7 @@ pub fn option_payload_niches(payload: TypeId) -> bool {
     }
 }
 
-/// Whether `ty` is a niche-represented `Option`: an `option<P>` whose `P`
+/// Whether `ty` is a niche-represented `Option`: an `Option<P>` whose `P`
 /// passes [`option_payload_niches`].
 pub fn is_niched_option(ty: TypeId) -> bool {
     option_payload(ty).is_some_and(option_payload_niches)
@@ -69,7 +69,7 @@ pub fn option_prints_wrapped(ty: TypeId) -> bool {
 }
 
 impl Heap {
-    /// An `Option` value of the type `ty` (`option<P>`): the niche when `P`
+    /// An `Option` value of the type `ty` (`Option<P>`): the niche when `P`
     /// allows one — `v` itself for `some`, [`Value::Empty`] for `none` — and a
     /// `BoxedObj::Enum` box (`some` = variant 0, `none` = variant 1,
     /// `option_def`'s order) otherwise. **The one producer** for Rust code
@@ -77,7 +77,7 @@ impl Heap {
     /// forms are its typed twin.
     pub fn alloc_option(&mut self, ty: TypeId, v: Option<Value>) -> Value {
         let Some(payload) = option_payload(ty) else {
-            panic!("alloc_option: `{}` is not an `option<P>` type", &*crate::type_name(ty))
+            panic!("alloc_option: `{}` is not an `Option<P>` type", &*crate::type_name(ty))
         };
         if option_payload_niches(payload) {
             return v.unwrap_or(Value::Empty);
@@ -106,32 +106,32 @@ mod tests {
             named("f64", &[]),
             named("string", &[]),
             TypeId::SEXPR,
-            named("vector", &[int]),
+            named("Vector", &[int]),
             intern_type(TypeShape::Fn(vec![int], None, int)),
             intern_type(TypeShape::Ptr(int)),
         ];
         for p in niching {
             assert!(option_payload_niches(p), "{}", &*crate::type_name(p));
-            assert!(is_niched_option(named("option", &[p])), "option<{}>", &*crate::type_name(p));
+            assert!(is_niched_option(named("Option", &[p])), "Option<{}>", &*crate::type_name(p));
         }
-        let not_niching = [named("option", &[int]), TypeId::OPTION_SEXPR, intern_type(TypeShape::Unit), intern_type(TypeShape::Never), named("ptr", &[]), named("c-long", &[]), named("c-ulong", &[])];
+        let not_niching = [named("Option", &[int]), TypeId::OPTION_SEXPR, intern_type(TypeShape::Unit), intern_type(TypeShape::Never), named("ptr", &[]), named("c-long", &[]), named("c-ulong", &[])];
         for p in not_niching {
             assert!(!option_payload_niches(p), "{}", &*crate::type_name(p));
-            assert!(!is_niched_option(named("option", &[p])), "option<{}>", &*crate::type_name(p));
+            assert!(!is_niched_option(named("Option", &[p])), "Option<{}>", &*crate::type_name(p));
         }
         assert!(!is_niched_option(int));
-        assert!(!is_niched_option(named("vector", &[named("option", &[int])])));
-        assert!(option_prints_wrapped(named("option", &[int])));
+        assert!(!is_niched_option(named("Vector", &[named("Option", &[int])])));
+        assert!(option_prints_wrapped(named("Option", &[int])));
         assert!(!option_prints_wrapped(TypeId::OPTION_SEXPR));
-        assert!(!option_prints_wrapped(named("option", &[named("option", &[int])])));
+        assert!(!option_prints_wrapped(named("Option", &[named("Option", &[int])])));
     }
 
     #[test]
     fn alloc_option_niches_or_boxes_by_the_type() {
         let mut h = Heap::with_capacity(64);
-        let option_int = named("option", &[named("int", &[])]);
-        let option_option_int = named("option", &[option_int]);
-        let option_unit = named("option", &[intern_type(TypeShape::Unit)]);
+        let option_int = named("Option", &[named("int", &[])]);
+        let option_option_int = named("Option", &[option_int]);
+        let option_unit = named("Option", &[intern_type(TypeShape::Unit)]);
         assert_eq!(h.alloc_option(option_int, Some(Value::Int(5))), Value::Int(5));
         assert_eq!(h.alloc_option(option_int, None), Value::Empty);
         assert_eq!(h.box_count(), 0);

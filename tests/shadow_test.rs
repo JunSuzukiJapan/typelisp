@@ -11,8 +11,8 @@ use typelisp::{Heap, Reader, Value};
 #[test]
 fn defining_an_offered_name_without_shadow_is_an_error() {
     let msg = check_err("(defstruct Error (message str))");
-    assert!(msg.contains("defstruct: `error` is a name the standard library offers every module"), "{}", msg);
-    assert!(msg.contains("(shadow error)"), "{}", msg);
+    assert!(msg.contains("defstruct: `Error` is a name the standard library offers every module"), "{}", msg);
+    assert!(msg.contains("(shadow Error)"), "{}", msg);
     let msg = check_err("(defun map ((x int)) int x)");
     assert!(msg.contains("defun: `map` is a name the standard library offers every module"), "{}", msg);
     let msg = check_err("(defvar (length int) 3)");
@@ -26,7 +26,7 @@ fn defining_an_offered_name_without_shadow_is_an_error() {
 #[test]
 fn a_shadowed_name_can_be_defined_and_means_the_modules_own() {
     assert_eq!(eval_ok("(shadow map)\n(defun map ((x int)) int (* x 2))\n(map 21)"), Value::Int(42));
-    assert_eq!(eval_ok("(shadow error)\n(defstruct Error (code int))\n(let ((e (make-instance 'Error :code 7))) e::code)"), Value::Int(7));
+    assert_eq!(eval_ok("(shadow Error)\n(defstruct Error (code int))\n(let ((e (make-instance 'Error :code 7))) e::code)"), Value::Int(7));
 }
 
 /// A module's `shadow` is that module's: outside it, the name is still the

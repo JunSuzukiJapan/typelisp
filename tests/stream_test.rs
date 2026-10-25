@@ -322,7 +322,7 @@ fn with_open_file_closes_and_yields_the_bodys_value() {
 
 #[test]
 fn with_open_file_types_itself_where_nothing_expects_a_type() {
-    // The expansion's `ok` arm is a bare `(result::ok ...)`, whose `FileError`
+    // The expansion's `ok` arm is a bare `(Result::ok ...)`, whose `FileError`
     // only the sibling `err` arm knows. Bound to a `let` there is no expected
     // type to supply it either, so this checks only because the two arms pool
     // what they know (`Checker::check_match`'s probe) — before that, the
@@ -751,10 +751,10 @@ fn a_user_defined_input_stream_can_be_read_from() {
              (:type Item char)
              (read-item ((self Self)) Option<char>
                (if (>= self::at (length self::text))
-                   (option::none)
+                   (Option::none)
                    (let ((c (ref self::text self::at)))
                      (setf self::at (+ self::at 1))
-                     (option::some c)))))
+                     (Option::some c)))))
            (impl CharInput fixed)
            (let ((p (make-peek-stream (make-instance 'fixed :text "(from a user stream)" :at 0))))
              (match (read-sexpr p)

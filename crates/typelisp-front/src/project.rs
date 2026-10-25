@@ -114,14 +114,15 @@ fn parse_manifest_src(text: &str) -> Option<String> {
 
 /// Derive a file's module path segments from its location under `src_root`:
 /// each directory is one segment, the basename (minus `.typl`) is the last,
-/// all lowercased (the reader's own symbol normalization). A file outside
+/// each spelled as the file system spells it (symbols are case-sensitive, so
+/// `Geo.typl` is the module `Geo`). A file outside
 /// `src_root` falls back to just its basename — a single root-level segment —
 /// so running a stray script still works.
 pub fn module_segs_for(file: &FsPath, src_root: &FsPath) -> Result<Vec<String>, Error> {
     let rel = file.strip_prefix(src_root).unwrap_or_else(|_| FsPath::new(file.file_name().unwrap_or_default()));
     let mut segs = Vec::new();
     for comp in rel.components() {
-        let s = comp.as_os_str().to_string_lossy().to_lowercase();
+        let s = comp.as_os_str().to_string_lossy().into_owned();
         segs.push(s);
     }
     if let Some(last) = segs.last_mut() {

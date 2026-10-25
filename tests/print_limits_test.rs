@@ -62,14 +62,6 @@ fn a_negative_limit_is_a_printing_error() {
     }
 }
 
-#[test]
-fn an_unknown_print_case_is_a_printing_error() {
-    // `*print-case*` is a `symbol`, so the checker lets any keyword in; the
-    // printer takes only CL's three and says so for anything else.
-    let err = eval_err(r#"(setf *print-case* :bogus) (format false "~a" 1)"#);
-    assert!(err.contains("*print-case*") && err.contains(":bogus"), "{}", err);
-}
-
 // ---------------------------------------------------------------------------
 // `*print-level*`
 // ---------------------------------------------------------------------------

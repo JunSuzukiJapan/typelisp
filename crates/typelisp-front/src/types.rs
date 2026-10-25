@@ -56,7 +56,7 @@ pub struct Path {
 impl Path {
     /// `name` in the module `ns`.
     pub fn in_ns(ns: NsId, name: &str) -> Path {
-        Path { ns, name: symbols::intern_exact(ns, name) }
+        Path { ns, name: symbols::intern_in(ns, name) }
     }
 
     /// The definition `name` names in the module `ns`: `name` is a symbol
@@ -85,6 +85,12 @@ impl Path {
     /// `name` inside the library's internal module (`std::%internal`).
     pub fn internal(name: &str) -> Path {
         Path::in_ns(internal_ns(), name)
+    }
+
+    /// The built-in type whose name is the vocabulary symbol `ty`
+    /// (`wk::OPTION` ...), in the standard library's module.
+    pub fn builtin(ty: u32) -> Path {
+        Path { ns: NsId::STD, name: symbols::well_known_symbol(ty) }
     }
 
     /// `name` inside the standard library's module, `std::name`.
@@ -273,51 +279,56 @@ impl fmt::Display for Path {
     }
 }
 
-/// Whether `p` is the built-in type `name`.
+/// Whether `p` is the built-in type whose name is the vocabulary symbol `ty`
+/// (`wk::VECTOR`, `wk::INT` ...): compared by symbol, never by spelling.
 ///
-/// Every built-in (`vector`/`hashtable`/`option`/`result`/`llvm-*`/`scope`/the
-/// primitives) is registered in the standard library's module
+/// Every built-in (`Vector`/`HashTable`/`Option`/`Result`/`llvm-*`/`Scope`/the
+/// primitives) is registered in the standard library
 /// (`Registry::with_builtins`), so a path anywhere else can never be one
-/// however its last segment reads — which is the whole point of the `is_std`
-/// half. Redefining a built-in type name there is rejected
-/// (`Checker::check_redef`), but nothing stops `(defstruct vector ...)` in
-/// another module, and compiled code that recognized the built-in by last segment
-/// alone lowered *that* type's methods to `vector-op`, reading a user struct
-/// as if it were a `Vector` — silently wrong for `vector`, a `BoxId does not
-/// hold a HashTable` abort for `hashtable` (fixed 2026-08-04).
-pub fn path_is_builtin(p: &Path, name: &str) -> bool {
-    p.is_std() && p.last_segment() == name
+/// however its name reads — which is the whole point of the `is_std` half: a
+/// `(shadow Vector)` module's own `Vector` is another symbol, and compiled
+/// code that took it for the built-in would lower its methods to
+/// `vector-op`, reading a user struct as if it were a `Vector`.
+pub fn path_is_builtin(p: &Path, ty: u32) -> bool {
+    builtin_type(p) == Some(ty)
 }
 
-/// [`path_is_builtin`] against a set of names — for the "one of the natively
-/// lowered built-ins" tests, whose name lists live as consts below so every
-/// site reads the same list instead of spelling its own.
-pub fn path_is_builtin_any(p: &Path, names: &[&str]) -> bool {
-    p.is_std() && names.contains(&p.last_segment())
+/// The vocabulary symbol (`wk::VECTOR`, `wk::INT` ...) of the built-in type
+/// `p` names, or `None` when `p` names none of them. What a table of
+/// per-type behaviour is keyed by, so that no type is told by its spelling.
+pub fn builtin_type(p: &Path) -> Option<u32> {
+    let ty = p.name_symbol().well_known();
+    (p.is_std() && ty != symbols::NOT_WELL_KNOWN).then_some(ty)
+}
+
+/// [`path_is_builtin`] against a set of types — for the "one of the natively
+/// lowered built-ins" tests, whose lists live as consts below so every site
+/// reads the same list instead of spelling its own.
+pub fn path_is_builtin_any(p: &Path, tys: &[u32]) -> bool {
+    builtin_type(p).is_some_and(|ty| tys.contains(&ty))
 }
 
 /// The LLVM handle *types* (`crate::compile::Repr::Handle`):
 /// values compiled code passes around as raw handles rather than heap boxes.
 /// A superset of [`LLVM_METHOD_RECEIVER_TYPES`] — `llvm-basic-block` and
 /// `llvm-value` are handles that carry no methods of their own.
-pub const LLVM_HANDLE_TYPES: [&str; 5] =
-    ["llvm-module", "llvm-function", "llvm-builder", "llvm-basic-block", "llvm-value"];
+pub const LLVM_HANDLE_TYPES: [u32; 5] =
+    [wk::LLVM_MODULE, wk::LLVM_FUNCTION, wk::LLVM_BUILDER, wk::LLVM_BASIC_BLOCK, wk::LLVM_VALUE];
 
 /// The LLVM handle types that *have* methods, i.e. the receivers whose
 /// `assoc` lowers to an `llvm-op` node (`llvm_assoc_key`) and is
 /// therefore never a real call target (`Interp::compile_scc`'s filters).
 /// Deliberately not [`LLVM_HANDLE_TYPES`]: the two lists answer different
 /// questions and used to differ only by accident.
-pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
-    ["llvm-module", "llvm-function", "llvm-builder", "scope"];
+pub const LLVM_METHOD_RECEIVER_TYPES: [u32; 4] = [wk::LLVM_MODULE, wk::LLVM_FUNCTION, wk::LLVM_BUILDER, wk::SCOPE];
 
 /// The primitive receivers whose built-in methods `compile-assoc` turns into
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 18] = [
-    "i32", "i8", "i16", "u8", "u16", "u32", "int",
-    "char", "string", "f64", "f32", "ratio", "rational", "sexpr", "bool", "symbol",
+pub const NATIVE_LOWERED_PRIMITIVES: [u32; 18] = [
+    wk::I32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32, wk::INT,
+    wk::CHAR, wk::STRING, wk::F64, wk::F32, wk::RATIO, wk::REPR_RATIONAL, wk::SEXPR, wk::BOOL, wk::SYMBOL,
     // The two C-boundary words are integer receivers to `compile-assoc`
     // (`int-receiver-type?`), so their conversions are lowered the same way.
     // Listing the *methods* is not enough: a receiver missing from here makes
@@ -325,7 +336,7 @@ pub const NATIVE_LOWERED_PRIMITIVES: [&str; 18] = [
     // body then fails the `has_method` check with "no compiled
     // implementation" — which is exactly what a compiled `(as int ...)` on
     // a `c-ulong` did.
-    "c-long", "c-ulong",
+    wk::C_LONG, wk::C_ULONG,
 ];
 
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
@@ -373,8 +384,8 @@ pub enum Type {
     /// The `Symbol` type: an interned symbol handle, distinct from `Str`.
     /// Its runtime value is a `Value::Symbol(SymRef)` (the same carrier a
     /// `Sexpr::Sym` holds), but statically it is its own primitive type so
-    /// `gensym`/`string->symbol` can be typed precisely instead of as the
-    /// heterogeneous `Sexpr`. `symbol->string`/`string->symbol` are the only
+    /// `gensym`/`intern` can be typed precisely instead of as the
+    /// heterogeneous `Sexpr`. `symbol->string`/`intern` are the only
     /// bridges to/from `Str`.
     Symbol,
     /// The unit type `()`.
@@ -494,11 +505,7 @@ impl fmt::Display for Type {
                 write!(f, "}}")
             }
             Type::Named(p, ts) => {
-                let written = if p.is_std() { builtin_spelling(p.last_segment()) } else { None };
-                match written {
-                    Some(w) => write!(f, "{}", w)?,
-                    None => write!(f, "{}", view.definition(p.ns(), p.name_symbol()))?,
-                }
+                write!(f, "{}", view.definition(p.ns(), p.name_symbol()))?;
                 if ts.is_empty() { Ok(()) } else { args(f, ts) }
             }
             Type::Var(name) => write!(f, "{}", name),
@@ -561,20 +568,6 @@ pub fn tuple_arity(path: &Path) -> Option<usize> {
 /// that as an integer.
 pub fn tuple_field(index: usize) -> String {
     format!("%{}", index)
-}
-
-fn builtin_spelling(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "option" => "Option",
-        "result" => "Result",
-        "sexpr" => "Sexpr",
-        "vector" => "Vector",
-        "hashtable" => "HashTable",
-        "chan" => "Chan",
-        "task" => "Task",
-        "thread" => "Thread",
-        _ => return None,
-    })
 }
 
 impl Type {
@@ -647,23 +640,22 @@ impl Type {
     }
 }
 
-/// Every integer type's registry name, in the one order the whole codebase
-/// spells them. The list exists because "which types share the integer
-/// catalog" is asked in four places that must not drift apart: the registry
-/// (which methods a receiver has), the interpreter (which arm runs them), the
-/// compile bridge's native-method table, and the island's own dispatch
-/// predicate.
-pub const INT_TYPE_NAMES: [&str; 6] = ["i8", "i16", "i32", "u8", "u16", "u32"];
+/// Every integer type, in the one order the whole codebase lists them. The
+/// list exists because "which types share the integer catalog" is asked in
+/// places that must not drift apart: the registry (which methods a receiver
+/// has), the interpreter (which arm runs them), the compile bridge's
+/// native-method table, and the island's own dispatch predicate.
+pub const INT_TYPES: [Type; 6] = [Type::I8, Type::I16, Type::I32, Type::U8, Type::U16, Type::U32];
 
 /// The two C-boundary word types, which are 64 bits wide and deliberately
-/// *not* in [`INT_TYPE_NAMES`]: they have no arithmetic, only conversions.
+/// *not* in [`INT_TYPES`]: they have no arithmetic, only conversions.
 /// Kept as their own list so the places that mean "an integer of this
 /// language" and the places that mean "a machine word of a known width" stay
 /// distinguishable.
-pub const C_WORD_TYPE_NAMES: [&str; 2] = ["c-long", "c-ulong"];
+pub const C_WORD_TYPES: [Type; 2] = [Type::CLong, Type::CULong];
 
-/// The bit width and signedness `name` claims, for the integer type names in
-/// [`INT_TYPE_NAMES`].
+/// The bit width and signedness an integer type claims ([`INT_TYPES`] and
+/// [`C_WORD_TYPES`]).
 ///
 /// A type name says exactly two things and nothing else — how many bits, and
 /// whether the top one is a sign — and this is where both are read off. Both
@@ -674,24 +666,21 @@ pub const C_WORD_TYPE_NAMES: [&str; 2] = ["c-long", "c-ulong"];
 /// lets a comparison, a division and a remainder stay ordinary *signed*
 /// 64-bit instructions for the unsigned types too — every width here is at
 /// most 32, so a normalized unsigned value is a non-negative `i64`.
-pub fn int_width_signed(name: &str) -> Option<(u32, bool)> {
-    // The C words first: 64 bits under LP64, which is every platform this
-    // workspace builds for. They are not in `INT_TYPE_NAMES`, so the callers
-    // that ask "is this an integer of this language" still say no — but the
-    // ones that ask "how wide is this word" need an answer, because the width
-    // casts and the FFI thunk are both driven by it.
-    match name {
-        "c-long" => return Some((64, true)),
-        "c-ulong" => return Some((64, false)),
-        _ => {}
-    }
-    Some(match name {
-        "i8" => (8, true),
-        "i16" => (16, true),
-        "i32" => (32, true),
-        "u8" => (8, false),
-        "u16" => (16, false),
-        "u32" => (32, false),
+pub fn int_width_signed(ty: &Type) -> Option<(u32, bool)> {
+    Some(match ty {
+        // The C words: 64 bits under LP64, which is every platform this
+        // workspace builds for. They are not in `INT_TYPES`, so the callers
+        // that ask "is this an integer of this language" still say no — but
+        // the ones that ask "how wide is this word" need an answer, because
+        // the width casts and the FFI thunk are both driven by it.
+        Type::CLong => (64, true),
+        Type::CULong => (64, false),
+        Type::I8 => (8, true),
+        Type::I16 => (16, true),
+        Type::I32 => (32, true),
+        Type::U8 => (8, false),
+        Type::U16 => (16, false),
+        Type::U32 => (32, false),
         _ => return None,
     })
 }
@@ -705,8 +694,6 @@ pub fn int_width_signed(name: &str) -> Option<(u32, bool)> {
 /// invariant with two statements of it has two chances to drift.
 pub use typelisp_mem::normalize_int;
 
-/// [`INT_TYPE_NAMES`]'s float counterpart.
-pub const FLOAT_TYPE_NAMES: [&str; 2] = ["f32", "f64"];
 
 /// All primitive value types that can be a `defmethod` receiver (every
 /// variant [`prim_type_path`] maps to a `Path`). Used to pre-register each
@@ -790,7 +777,7 @@ pub fn parse_type_spanned(
 ) -> Result<Type, Error> {
     match v {
         Value::Empty => Ok(Type::Unit),
-        Value::Symbol(sym) => match primitive_by_name(sym.name()) {
+        Value::Symbol(sym) => match scalar_of_symbol(sym) {
             Some(t) => Ok(t),
             None => Ok(Type::Named(record_name(Path::of_symbol(ns, sym), loc, false, out), Vec::new())),
         },
@@ -849,7 +836,7 @@ fn parse_ptr_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) 
 }
 
 /// Parse the *applied* spelling of a generic type — `(vector char)`, the
-/// list form of `vector<char>`.
+/// list form of `Vector<char>`.
 ///
 /// The two spell the same type and parse to the same [`Type`]. The name form
 /// is what a program is normally written in; this one exists because a type
@@ -1059,37 +1046,45 @@ fn parse_type_application(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNam
     Ok(Type::Named(head, args))
 }
 
-/// The primitive type a bare name denotes, if any — the one authoritative
-/// name table behind [`parse_type`]'s "is this a nominal name at all" test.
-///
-/// Public because the registry builds the width-conversion methods
-/// (`int->u8` and friends) by walking [`INT_TYPE_NAMES`]: those names have to
-/// become `Type`s, and this is where a name becomes a type.
-pub fn primitive_by_name(name: &str) -> Option<Type> {
-    Some(match name {
-        "i8" => Type::I8,
-        "i16" => Type::I16,
-        "i32" => Type::I32,
-        "u8" => Type::U8,
-        "u16" => Type::U16,
-        "u32" => Type::U32,
-        "f32" => Type::F32,
-        "f64" => Type::F64,
-        "int" => Type::Int,
-        "ratio" => Type::Ratio,
-        "rational" => Type::Rational,
-        "random-state" => Type::RandomState,
-        "bool" => Type::Bool,
-        "char" => Type::Char,
-        "string" => Type::Str,
-        "symbol" => Type::Symbol,
-        "!" => Type::Never,
+/// The primitive type the symbol `sym` names, if any — the one authoritative
+/// table behind [`parse_type`]'s "is this a nominal name at all" test, told
+/// by the vocabulary symbol and never by its spelling: a module that
+/// `shadow`s `int` has a symbol of its own, which names no primitive.
+pub fn scalar_of_symbol(sym: SymRef) -> Option<Type> {
+    Some(match sym.well_known() {
+        wk::I8 => Type::I8,
+        wk::I16 => Type::I16,
+        wk::I32 => Type::I32,
+        wk::U8 => Type::U8,
+        wk::U16 => Type::U16,
+        wk::U32 => Type::U32,
+        wk::F32 => Type::F32,
+        wk::F64 => Type::F64,
+        wk::INT => Type::Int,
+        wk::RATIO => Type::Ratio,
+        wk::REPR_RATIONAL => Type::Rational,
+        wk::REPR_RANDOM_STATE => Type::RandomState,
+        wk::BOOL => Type::Bool,
+        wk::CHAR => Type::Char,
+        wk::STRING => Type::Str,
+        wk::SYMBOL => Type::Symbol,
+        wk::NEVER => Type::Never,
         // The FFI's raw words. Spellable anywhere a type is, and usable only
         // inside `(unsafe ...)` — that check is the checker's, not the
         // parser's, because it is about the expression and not the spelling.
-        "ptr" => Type::Ptr,
-        "c-long" => Type::CLong,
-        "c-ulong" => Type::CULong,
+        wk::PTR => Type::Ptr,
+        wk::C_LONG => Type::CLong,
+        wk::C_ULONG => Type::CULong,
         _ => return None,
     })
+}
+
+/// The primitive type `p` names, when it names one of the standard
+/// library's: [`scalar_of_symbol`] for a path.
+pub fn scalar_type(p: &Path) -> Option<Type> {
+    if p.is_std() {
+        scalar_of_symbol(p.name_symbol())
+    } else {
+        None
+    }
 }

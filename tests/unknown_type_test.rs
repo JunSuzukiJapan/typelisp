@@ -57,13 +57,13 @@ fn type_variables_declared_in_the_name_are_not_unknown() {
 #[test]
 fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
     assert_unknown("(defstruct box<T> (v T)) (impl box<T>
-  (bad (self (x U)) T self::v))", "u");
+  (bad (self (x U)) T self::v))", "U");
     assert_unknown("(defstruct pt (x int)) (impl pt
   (m (self (y nosuch)) int 1))", "nosuch");
     assert_unknown("(defstruct pt (x int)) (impl pt
   (m (self) int (the nosuch 1)))", "nosuch");
     assert_unknown("(defstruct box<T> (v T)) (impl box<T>
-  (mk ((x U)) box<T> (make-instance 'box :v x)))", "u");
+  (mk ((x U)) box<T> (make-instance 'box :v x)))", "U");
     let src = "(defstruct box<T> (v T))
                (impl box<T>
   (get-v (self) T self::v)
@@ -75,8 +75,8 @@ fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
 #[test]
 fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
     let defs = "(defstruct box<T> (v T)) (deftrait Show () (show ((self Self)) string))";
-    assert_unknown(&format!("{defs} (impl Show box<T> (show ((self Self)) string (let ((y (the U 1))) \"b\")))"), "u");
-    assert_unknown(&format!("{defs} (impl<T> Show Vector<T> (show ((self Self)) string (let ((y (the U 1))) \"v\")))"), "u");
+    assert_unknown(&format!("{defs} (impl Show box<T> (show ((self Self)) string (let ((y (the U 1))) \"b\")))"), "U");
+    assert_unknown(&format!("{defs} (impl<T> Show Vector<T> (show ((self Self)) string (let ((y (the U 1))) \"v\")))"), "U");
     let src = format!(
         "{defs}
          (impl Show box<T> (show ((self Self)) string (let ((x (the T self::v))) \"b\")))
@@ -90,7 +90,7 @@ fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
 
 #[test]
 fn a_trait_s_type_variables_are_self_and_its_associated_types() {
-    assert_unknown("(deftrait Shape () (:type Unit2) (area ((self Self)) Unit2) (bad ((self Self)) Oops))", "oops");
+    assert_unknown("(deftrait Shape () (:type Unit2) (area ((self Self)) Unit2) (bad ((self Self)) Oops))", "Oops");
 }
 
 #[test]
@@ -110,9 +110,11 @@ fn a_mismatch_names_types_as_they_are_written() {
 
 #[test]
 fn types_display_in_source_syntax() {
+    // No session is installed here, so nothing is written from a module that
+    // sees the standard library's names: a `std` type is its whole path.
     let named = |n: &str, args: Vec<Type>| Type::Named(Path::std(n), args);
-    assert_eq!(named("vector", vec![named("option", vec![Type::Int])]).to_string(), "Vector<Option<int>>");
-    assert_eq!(named("hashtable", vec![Type::Str, Type::I32]).to_string(), "HashTable<string,i32>");
+    assert_eq!(named("Vector", vec![named("Option", vec![Type::Int])]).to_string(), "std::Vector<std::Option<int>>");
+    assert_eq!(named("HashTable", vec![Type::Str, Type::I32]).to_string(), "std::HashTable<string,i32>");
     assert_eq!(Type::Named(Path::of(&["geo", "point"]), vec![]).to_string(), "geo::point");
     assert_eq!(Type::Dyn(Path::root("error"), vec![]).to_string(), ":dyn error");
     assert_eq!(Type::Fn(vec![Type::Int, Type::Char], None, Box::new(Type::Bool)).to_string(), "(fn (int char) bool)");

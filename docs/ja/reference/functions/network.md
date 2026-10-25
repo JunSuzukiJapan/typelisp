@@ -20,7 +20,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 | `socket-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | ——（`bytes`: `Vector<int>`、`from`: `string`） | `recv-from` |
-| `NetError` | `Error` | 下の関数の `Err` |
+| `NetError` | `Error` | 下の関数の `err` |
 
 ストリームの要素型は型ごとに 1 つなので（`file-stream`/`binary-file-stream` と同じ理由）
 文字とバイトは別の型。`byte-stream-of`/`char-stream-of` は**同じ接続**を指す値を返し、
@@ -31,16 +31,16 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`:timeout` 秒の超過は `Err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect` の後に TLS。証明書は `host` 名（繋ぐ先と検証する名前が違うなら `:server-name`）に対して Mozilla のルート証明書で検証——`:ca-file`（PEM）を渡せば**その中の証明書だけ**を信頼する（私設 CA、または自分の `tls-listen` が出す証明書そのもの）。`:cert-file`/`:key-file`（両方か無しか）はサーバに求められたとき出すこちらの証明書（相互 TLS）。握手はここで済ませるので、サーバの証明書が通らなければこの呼び出しの `Err`。結果は普通の `socket-stream` |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | 接続する。`host` は名前でもアドレスでも。名前が複数のアドレスを持てば順に試す（`localhost` は `::1` と `127.0.0.1`）。名前解決失敗・接続拒否・`:timeout` 秒の超過は `err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect` の後に TLS。証明書は `host` 名（繋ぐ先と検証する名前が違うなら `:server-name`）に対して Mozilla のルート証明書で検証——`:ca-file`（PEM）を渡せば**その中の証明書だけ**を信頼する（私設 CA、または自分の `tls-listen` が出す証明書そのもの）。`:cert-file`/`:key-file`（両方か無しか）はサーバに求められたとき出すこちらの証明書（相互 TLS）。握手はここで済ませるので、サーバの証明書が通らなければこの呼び出しの `err`。結果は普通の `socket-stream` |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Unix ドメインソケット `path` に接続。ローカルなので握手待ちは無く、タイムアウトも無い |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | 待ち受ける。`"127.0.0.1"` はこの機械だけ、`"0.0.0.0"` は全インタフェース。`port` に `0` を渡すと OS が選ぶ |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen` の TLS 版。`cert-file` は証明書チェーン（PEM、自分のものが先頭）、`key-file` は秘密鍵。両方ここで読んで検査するので、鍵が合わなければ最初のクライアントでなくこの呼び出しの `Err`。`accept` は**握手の前に**返り、接続を担当するタスクの最初の読み書きが握手を済ませる（Go の `tls.Conn` と同じ）——握手の遅いクライアントが他の `accept` を止めない。`:client-ca`（PEM）を渡すと、その中の CA が発行した証明書を**全クライアントに要求**する（相互 TLS）。無ければ求めない |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path` で待ち受ける。**ファイルが既にあれば `Err`**（走っている別プロセスのものかもしれないので黙って置き換えない）。`close` がファイルを消す |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 次の接続。来るまでタスクを止める。`:timeout` 秒で諦めると `Err` |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen` の TLS 版。`cert-file` は証明書チェーン（PEM、自分のものが先頭）、`key-file` は秘密鍵。両方ここで読んで検査するので、鍵が合わなければ最初のクライアントでなくこの呼び出しの `err`。`accept` は**握手の前に**返り、接続を担当するタスクの最初の読み書きが握手を済ませる（Go の `tls.Conn` と同じ）——握手の遅いクライアントが他の `accept` を止めない。`:client-ca`（PEM）を渡すと、その中の CA が発行した証明書を**全クライアントに要求**する（相互 TLS）。無ければ求めない |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path` で待ち受ける。**ファイルが既にあれば `err`**（走っている別プロセスのものかもしれないので黙って置き換えない）。`close` がファイルを消す |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 次の接続。来るまでタスクを止める。`:timeout` 秒で諦めると `err` |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | 待たずに読めるようになるまで、または `secs` 秒。`true` なら前者（バッファ済みも含む）。読みに時計を付ける手段：`(if (wait-readable c 5.0) (read-line c) ...)`。約束するのは**次の読みが止まらない**ことで、`read-line` は行の残りを待ちうる |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | 書けるようになるまで、または `secs` 秒 |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | `tls-listen` の listener にもう 1 枚、`name` を求めた（SNI）クライアントに出す証明書を足す——1 つの listener で複数サイト。チェーンが `name` 用かはここで検査し、違えばこの呼び出しの `Err`。誰も足していない名前・名前無しのクライアントには `tls-listen` の証明書を出す |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | `tls-listen` の listener にもう 1 枚、`name` を求めた（SNI）クライアントに出す証明書を足す——1 つの listener で複数サイト。チェーンが `name` 用かはここで検査し、違えばこの呼び出しの `err`。誰も足していない名前・名前無しのクライアントには `tls-listen` の証明書を出す |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | 相手の証明書の subject（`CN=client,O=Example,C=JP`、RFC 4514 形式・具体的なものが先）。相互 TLS のサーバが「誰が繋いだか」を知る手段（握手を済ませる最初の読みの後）。クライアント側ならサーバ証明書の名前。平文・握手前・相手が証明書を出していなければ `none` |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | サーバ側 TLS 接続で、クライアントが求めた名前（SNI）。`tls-add-certificate` で複数サイトを持つサーバが「どのサイトか」を知る。平文・クライアント側・名前無し（アドレスで繋いだ）なら `none` |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | Nagle を切る（`TCP_NODELAY`）。`write-string` は毎回ソケットまで届くので、Nagle が効いているとヘッダと本体を 2 回に分けて書いた応答が相手の遅延 ACK を待つ——要求/応答型のプロトコルは `true` に。Unix ドメインには Nagle が無く、そのまま成功 |
@@ -120,7 +120,7 @@ UDP はストリームでなくデータグラム（`udp-socket`）。
 ```
 
 相互 TLS で証明書を出さない（または通らない）クライアントは、TLS 1.3 ではクライアント側の握手が
-サーバの判定より先に終わるため、`tls-connect` は `Ok` で返り**最初の読みが `none`**（`socket-error`
+サーバの判定より先に終わるため、`tls-connect` は `ok` で返り**最初の読みが `none`**（`socket-error`
 にアラートが載る）。サーバ側の同じ接続も最初の読みが `none`。どちらの側も panic しない。
 
 ## 3. UDP

@@ -30,7 +30,7 @@ fn a_simple_error_is_the_root_of_its_chain() {
 #[test]
 fn a_simple_error_travels_as_a_dyn_error() {
     let src = r#"(defun f () Result<int, :dyn Error>
-                   (as-dyn-error (the Result<int,SimpleError> (result::err (simple-error "no")))))
+                   (as-dyn-error (the Result<int,SimpleError> (Result::err (simple-error "no")))))
                  (equal (match (f) ((ok _) "?") ((err e) (message e))) "no")"#;
     is_true(src);
 }

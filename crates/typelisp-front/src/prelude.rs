@@ -207,12 +207,9 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; builtins (`registry.rs`). The island navigates `Sexpr` with the `sexpr-*`
 ;; layer and uses `string` methods (`append`/`equal`/`length`) for name work.
 
-;; `symbol->string`/`string->symbol` (`docs/language-design.md` §4.1's
-;; conversion catalog) are now Rust builtins (`Interp::eval_builtin`) rather
-;; than prelude `defun`s: `Sexpr::Sym` wraps the first-class `Symbol` type (not
-;; a `string`), so the old `(match s (Sym name) name)` / `(Sym s)` definitions
-;; no longer type-check. They bridge the interned `Symbol` handle to/from its
-;; textual name directly against the intern table.
+;; `symbol->string`/`intern` are Rust builtins (`Interp::eval_builtin`)
+;; rather than prelude `defun`s: they bridge the interned `symbol` handle
+;; to/from its textual name directly against the intern table.
 
 ;; `unreachable`/`todo` (cl-equivalence-catalog.md §1.2): placeholders for
 ;; "this branch can't be reached" / "not implemented yet", each a
@@ -235,7 +232,6 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (pub defvar (*print-length* int) 0)
 (pub defvar (*print-base* int) 10)
 (pub defvar (*print-radix* bool) false)
-(pub defvar (*print-case* symbol) :downcase)
 (pub defvar (*print-readably* bool) false)
 (pub defvar (*print-lines* int) 0)
 (pub defvar (*print-array* bool) true))
@@ -338,12 +334,12 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module symbol
 (pub defvar (*gensym-counter* int) 0)
 
-(pub defun gensym (&optional (prefix string "g")) Symbol
+(pub defun gensym (&optional (prefix string "g")) symbol
   "A fresh symbol, named from `prefix` and `*gensym-counter*`. CL's `gensym`."
   (let ((n *gensym-counter*))
     (progn
       (setf *gensym-counter* (+ n 1))
-      (string->symbol (format false " ~a~a" prefix n))))))
+      (intern (format false " ~a~a" prefix n))))))
 
 ;; `dotimes`: `gensym` replaces the old `check_dotimes`'s "leading-space,
 ;; unwritable-in-source" hidden binding trick with the macro system's own
@@ -847,7 +843,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
                   ((and (>= n 97) (<= n 122)) (+ (- n 97) 10))
                   ((and (>= n 65) (<= n 90)) (+ (- n 65) 10))
                   (:else -1))))
-    (if (and (>= w 0) (< w radix)) (option::some w) (option::none))))
+    (if (and (>= w 0) (< w radix)) (Option::some w) (Option::none))))
 ;; CL's `digit-char`: the inverse — the character standing for `weight` in
 ;; `radix`, or `none` when the weight is out of range. Digits use `0`-`9` and
 ;; the rest upper-case letters, as CL specifies (so `radix` tops out at 36).
@@ -855,8 +851,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; keeps this off `int->char`, per this section's header.
 (pub defun digit->char ((weight int) &optional (radix int 10)) Option<char>
   (if (or (< weight 0) (>= weight radix))
-      (option::none)
-      (option::some (ref "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" weight)))))
+      (Option::none)
+      (Option::some (ref "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" weight)))))
 ;; CL's `char-name`/`name-char`, over exactly the characters this language's
 ;; reader spells by name (`read::reader`'s named-character table). Anything
 ;; else gets `none`, which is what CL says for every graphic character.
@@ -864,26 +860,26 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; case-insensitive because the reader's own lookup is.
 (impl char
   (pub char->name (self) Option<string>
-    (cond ((equal self #\newline)   (option::some "newline"))
-          ((equal self #\space)     (option::some "space"))
-          ((equal self #\tab)       (option::some "tab"))
-          ((equal self #\return)    (option::some "return"))
-          ((equal self #\page)      (option::some "page"))
-          ((equal self #\nul)       (option::some "nul"))
-          ((equal self #\backspace) (option::some "backspace"))
-          (:else (option::none)))))
+    (cond ((equal self #\newline)   (Option::some "newline"))
+          ((equal self #\space)     (Option::some "space"))
+          ((equal self #\tab)       (Option::some "tab"))
+          ((equal self #\return)    (Option::some "return"))
+          ((equal self #\page)      (Option::some "page"))
+          ((equal self #\nul)       (Option::some "nul"))
+          ((equal self #\backspace) (Option::some "backspace"))
+          (:else (Option::none)))))
 (module char
 (pub defun name->char ((name string)) Option<char>
-  (cond ((equalp name "space")     (option::some #\space))
-        ((equalp name "newline")   (option::some #\newline))
-        ((equalp name "linefeed")  (option::some #\newline))
-        ((equalp name "tab")       (option::some #\tab))
-        ((equalp name "return")    (option::some #\return))
-        ((equalp name "page")      (option::some #\page))
-        ((equalp name "nul")       (option::some #\nul))
-        ((equalp name "null")      (option::some #\nul))
-        ((equalp name "backspace") (option::some #\backspace))
-        (:else (option::none)))))
+  (cond ((equalp name "space")     (Option::some #\space))
+        ((equalp name "newline")   (Option::some #\newline))
+        ((equalp name "linefeed")  (Option::some #\newline))
+        ((equalp name "tab")       (Option::some #\tab))
+        ((equalp name "return")    (Option::some #\return))
+        ((equalp name "page")      (Option::some #\page))
+        ((equalp name "nul")       (Option::some #\nul))
+        ((equalp name "null")      (Option::some #\nul))
+        ((equalp name "backspace") (Option::some #\backspace))
+        (:else (Option::none)))))
 
 ;; CL's string catalog beyond the primitives in `registry::string_assoc`
 ;; (`upcase`/`downcase`/`length`/`ref`/`substring`/`append`/`equal`/`<`).
@@ -1016,14 +1012,14 @@ pub const SOURCE_TEMPLATE: &str = r##"
         (let ((e (%internal::seq-window-end end (length self)))
               (ps (%internal::seq-window-start sub-start))
               (last (%internal::seq-flag from-end))
-              (found (the Option<int> (option::none)))
+              (found (the Option<int> (Option::none)))
               (i (%internal::seq-window-start start)))
           (let ((m (- (%internal::seq-window-end sub-end (length sub)) ps)))
             (progn
               (while (if (<= (+ i m) e) (if last true (is-none found)) false)
                 (progn
                   (when (%internal::string-window-equal self i sub ps m same)
-                    (setf found (option::some i)))
+                    (setf found (Option::some i)))
                   (setf i (+ i 1))))
               found)))))))
 ;; `mismatch`: the index of the first position where the two differ, or `none`
@@ -1051,7 +1047,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
         (let ((s1 (%internal::seq-window-start start1)) (e1 (%internal::seq-window-end end1 (length self)))
               (s2 (%internal::seq-window-start start2)) (e2 (%internal::seq-window-end end2 (length b))))
           (let ((n (min (- e1 s1) (- e2 s2)))
-                (found (the Option<int> (option::none)))
+                (found (the Option<int> (Option::none)))
                 (k 0))
             (if (%internal::seq-flag from-end)
                 (progn
@@ -1059,19 +1055,19 @@ pub const SOURCE_TEMPLATE: &str = r##"
                     (progn
                       (setf k (+ k 1))
                       (unless (same (ref b (- e2 k)) (ref self (- e1 k)))
-                        (setf found (option::some (+ (- e1 k) 1))))))
+                        (setf found (Option::some (+ (- e1 k) 1))))))
                   (match found
-                    ((some j) (option::some j))
-                    ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (- e1 n))))))
+                    ((some j) (Option::some j))
+                    ((none) (if (= (- e1 s1) (- e2 s2)) (Option::none) (Option::some (- e1 n))))))
                 (progn
                   (while (if (is-none found) (< k n) false)
                     (progn
                       (unless (same (ref b (+ s2 k)) (ref self (+ s1 k)))
-                        (setf found (option::some (+ s1 k))))
+                        (setf found (Option::some (+ s1 k))))
                       (setf k (+ k 1))))
                   (match found
-                    ((some j) (option::some j))
-                    ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (+ s1 n))))))))))))) 
+                    ((some j) (Option::some j))
+                    ((none) (if (= (- e1 s1) (- e2 s2)) (Option::none) (Option::some (+ s1 n))))))))))))) 
 
 ;; The `string-trim` family. `bag` is the set of characters to strip, spelled
 ;; as a string (CL takes any character sequence; a string *is* the character
@@ -1131,9 +1127,9 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (while (and (< i n) (std::%internal::char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1))))
         (if (or (= digits 0) (and (not junk-allowed) (< i n)))
             (the Result<int, ParseIntError>
-              (result::err (ParseIntError::ParseIntError
+              (Result::err (ParseIntError::ParseIntError
                              (format false "parse-int: invalid integer literal: ~s" s))))
-            (result::ok (if neg (- 0 acc) acc))))))))
+            (Result::ok (if neg (- 0 acc) acc))))))))
 
 ;; `string-capitalize`: each word's first character up, the rest down, where a
 ;; word is a maximal run of alphanumerics — CL's own definition.
@@ -1376,10 +1372,10 @@ pub const SOURCE_TEMPLATE: &str = r##"
       (match rest
         ((cons v more)
           (if (match k ((sym s) (eq s (%internal::dbind-keyword name))) (_ false))
-              (option::some v)
+              (Option::some v)
               (%internal::dbind-key-lookup more name)))
         (_ (panic "destructuring-bind: the &key part has an odd number of elements"))))
-    (_ (option::none)))))
+    (_ (Option::none)))))
 
 (module %internal (pub defun dbind-name-memberp ((kw symbol) (params Option<Sexpr>)) bool
   "Whether the keyword `kw` is the one some parameter of `params` is passed under."
@@ -2086,7 +2082,7 @@ user-visible capacity."
 ;; `Self` here is `Sexpr` — the *non-empty* S-expression — while `eq` takes
 ;; `Option<Sexpr>`, the type an S-expression datum has. Wrapping is what
 ;; bridges the two, and it is free: under the niche `(Option::some x)` is `x`.
-(impl Eq sexpr  (equals ((self Self) (other Self)) bool (eq (Option::some self) (Option::some other))))
+(impl Eq Sexpr  (equals ((self Self) (other Self)) bool (eq (Option::some self) (Option::some other))))
 
 ;; Scalar `Ord` impls — only the core `less`; the other three come from `Ord`'s
 ;; default bodies. Every scalar here has the overloaded `<` builtin (numbers
@@ -2606,7 +2602,7 @@ user-visible capacity."
   (source ((self Self)) Option<:dyn Error>
     "The error this one wraps, if any. Defaults to `none` — most error types
      are leaves, so only a wrapping type needs to override this."
-    (option::none)))
+    (Option::none)))
 
 ;; The built-in error types' impls. Each carries one message string in its
 ;; single variant (type name and variant name coincide), and none of them
@@ -2631,8 +2627,8 @@ user-visible capacity."
 ;; site's concrete `E` specializes this body (`Checker::coerce_to_dyn`).
 (pub defun as-dyn-error<T,E> ((r Result<T,E>)) Result<T, :dyn Error> (:where (Error E))
   (match r
-    ((ok v) (result::ok v))
-    ((err e) (result::err (as :dyn Error e))))))
+    ((ok v) (Result::ok v))
+    ((err e) (Result::err (as :dyn Error e))))))
 
 ;; Sequence operations over `Iter` (redesign Phase 6.5) — the typed rebuild
 ;; of the `Sexpr` list library removed in Phase 5 (`length`/`append`/`nth`/
@@ -2887,14 +2883,14 @@ user-visible capacity."
       (let ((e (std::%internal::seq-window-end end (len hay)))
             (ps (std::%internal::seq-window-start sub-start))
             (last (std::%internal::seq-flag from-end))
-            (found (the Option<int> (option::none)))
+            (found (the Option<int> (Option::none)))
             (i (std::%internal::seq-window-start start)))
         (let ((m (- (std::%internal::seq-window-end sub-end (len pat)) ps)))
           (progn
             (while (if (<= (+ i m) e) (if last true (is-none found)) false)
               (progn
                 (when (std::%internal::vector-window-equal hay i pat ps m same)
-                  (setf found (option::some i)))
+                  (setf found (Option::some i)))
                 (setf i (+ i 1))))
             found))))))
 (pub defun mismatch<I,J,A> ((it I) (other J)
@@ -2915,7 +2911,7 @@ user-visible capacity."
       (let ((s1 (std::%internal::seq-window-start start1)) (e1 (std::%internal::seq-window-end end1 (len a)))
             (s2 (std::%internal::seq-window-start start2)) (e2 (std::%internal::seq-window-end end2 (len b))))
         (let ((n (min (- e1 s1) (- e2 s2)))
-              (found (the Option<int> (option::none)))
+              (found (the Option<int> (Option::none)))
               (k 0))
           (if (std::%internal::seq-flag from-end)
               (progn
@@ -2923,19 +2919,19 @@ user-visible capacity."
                   (progn
                     (setf k (+ k 1))
                     (unless (same (get b (- e2 k)) (get a (- e1 k)))
-                      (setf found (option::some (+ (- e1 k) 1))))))
+                      (setf found (Option::some (+ (- e1 k) 1))))))
                 (match found
-                  ((some j) (option::some j))
-                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (- e1 n))))))
+                  ((some j) (Option::some j))
+                  ((none) (if (= (- e1 s1) (- e2 s2)) (Option::none) (Option::some (- e1 n))))))
               (progn
                 (while (if (is-none found) (< k n) false)
                   (progn
                     (unless (same (get b (+ s2 k)) (get a (+ s1 k)))
-                      (setf found (option::some (+ s1 k))))
+                      (setf found (Option::some (+ s1 k))))
                     (setf k (+ k 1))))
                 (match found
-                  ((some j) (option::some j))
-                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (+ s1 n))))))))))))
+                  ((some j) (Option::some j))
+                  ((none) (if (= (- e1 s1) (- e2 s2)) (Option::none) (Option::some (+ s1 n))))))))))))
 ;; CL's `revappend`: `a` reversed, then `b`.
 (pub defun revappend<I,J,A> ((a I) (b J)) Vector<A>
   (:where (Iter I (Item A)) (Iter J (Item A)))
@@ -4249,8 +4245,8 @@ user-visible capacity."
 ;; field, e.g.
 ;;
 ;;   (defstruct node (val i32) (next Option<node>))
-;;   (let ((a (node::new 1 (option::none))))
-;;     (setf a::next (option::some a))
+;;   (let ((a (node::new 1 (Option::none))))
+;;     (setf a::next (Option::some a))
 ;;     (setf *print-circle* true)
 ;;     (println "~a" a))            ; => #1=#<node 1 (some #1#)>
 
@@ -4263,13 +4259,6 @@ user-visible capacity."
 ;; the marker that makes the result read back as the same number whatever
 ;; `*read-base*` is: `#b`/`#o`/`#x` or `#NNr` before the sign, and a trailing
 ;; `.` in base 10.
-
-;; `*print-case*` takes CL's own spelling: the keywords `:upcase`,
-;; `:downcase` and `:capitalize`, which are self-evaluating `symbol`s here
-;; (`Checker::check_symbol`). CL defaults to `:upcase` because its reader
-;; stores symbol names upcased; this reader stores them downcased, so the
-;; default that means the same thing ("print them as stored") is `:downcase`.
-;; Any other symbol is a printing error.
 
 ;; `*print-readably*` prints so the result reads back as an equal object:
 ;; escapes on whatever the caller asked for, and the `*print-level*`/
@@ -4287,7 +4276,7 @@ user-visible capacity."
 ;; chooses whether a `Vector<T>` or an `Array<T>` shows its contents. True
 ;; (CL's default) prints CL's own array syntax -- `#(1 2 3)` for a vector or a
 ;; rank-1 array, `#2A((1 2) (3 4))` for any other rank; false prints just the
-;; type and shape, `#<vector<int> 3>` and `#<array 2x3>`, which is what CL's
+;; type and shape, `#<Vector<int> 3>` and `#<array 2x3>`, which is what CL's
 ;; "in a way that does not reveal the contents" comes to here. A vector is
 ;; printed by the built-in printer, an array by `Array<T>`'s own
 ;; `print-object` method below, because the array is a prelude type and its
@@ -4607,11 +4596,11 @@ user-visible capacity."
       (make-instance 'pathname
         :directory dirs
         :name (if (equal file "")
-            (option::none)
+            (Option::none)
             (let ((at (std::%internal::name-type-dot file)))
-              (if (< at 0) (option::some file) (option::some (substring file 0 at)))))
+              (if (< at 0) (Option::some file) (Option::some (substring file 0 at)))))
         :extension (let ((at (std::%internal::name-type-dot file)))
-          (if (< at 0) (option::none) (option::some (substring file (+ at 1) (length file)))))
+          (if (< at 0) (Option::none) (Option::some (substring file (+ at 1) (length file)))))
         :absolutep (and (> (length s) 0) (equal (ref s 0) #\/)))))))
 
 (module %internal (pub defun pathname-file-part ((p pathname)) string
@@ -4702,8 +4691,8 @@ user-visible capacity."
               (doiter (d (iter b::directory)) (push dirs d))
               (doiter (d (iter a::directory)) (push dirs d))
               dirs)))
-      :name (match a::name ((some x) (option::some x)) ((none) b::name))
-      :extension (match a::extension ((some x) (option::some x)) ((none) b::extension))
+      :name (match a::name ((some x) (Option::some x)) ((none) b::name))
+      :extension (match a::extension ((some x) (Option::some x)) ((none) b::extension))
       :absolutep (if a::absolutep true b::absolutep))))
 
 (pub defun enough-namestring<P,D> ((p P) (default D)) string (:where (Pathish P) (Pathish D))
@@ -4791,7 +4780,7 @@ user-visible capacity."
   (read-char-no-hang ((self Self)) Option<char>
     "The next character, but only if it is already there: `none` rather than
      a wait. Answers `none` for a stream whose `listen` is the default."
-    (if (listen self) (read-char self) (option::none)))
+    (if (listen self) (read-char self) (Option::none)))
   (read-sequence ((self Self) (into Vector<char>) (n int)) int
     "Read up to `n` characters, pushing each onto `into`; the count actually
      read, which is short of `n` only at end of input. CL's `read-sequence`
@@ -4810,7 +4799,7 @@ user-visible capacity."
     "Up to (and consuming) the next newline. `none` only at end of input, so
      a final line with no newline is still returned."
     (match (read-item self)
-      ((none) (option::none))
+      ((none) (Option::none))
       ((some first)
        (let ((out "") (c first) (going true))
          (while going
@@ -4821,7 +4810,7 @@ user-visible capacity."
                  (match (read-item self)
                    ((none) (progn (setf going false) ()))
                    ((some next) (progn (setf c next) ()))))))
-         (option::some out)))))
+         (Option::some out)))))
   (read-all ((self Self)) string
     "Everything left, as one string."
     (let ((out ""))
@@ -4847,8 +4836,8 @@ user-visible capacity."
   (peek-char ((self Self)) Option<char>
     "The next character, without consuming it."
     (match (read-char self)
-      ((none) (option::none))
-      ((some c) (progn (unread-char self c) (option::some c))))))
+      ((none) (Option::none))
+      ((some c) (progn (unread-char self c) (Option::some c))))))
 
 (pub deftrait CharOutput ((OutputStream (Item char)))
   "A character output stream. Every method has a default body."
@@ -5122,19 +5111,19 @@ user-visible capacity."
 (module %internal (pub defun tcp-read-char ((h i32)) Option<char>
   (loop
     (match (%internal::unwrap-net (%internal::net-pop-char h))
-      ((some c) (return (option::some c)))
+      ((some c) (return (Option::some c)))
       ((none)
        (match (%internal::unwrap-net (%internal::net-fill h))
-         ((some n) (when (eq n 0) (return (option::none))))
+         ((some n) (when (eq n 0) (return (Option::none))))
          ((none) (%internal::net-wait h %internal::net-readable))))))))
 
 (module %internal (pub defun tcp-read-byte ((h i32)) Option<int>
   (loop
     (match (%internal::unwrap-net (%internal::net-pop-byte h))
-      ((some b) (return (option::some b)))
+      ((some b) (return (Option::some b)))
       ((none)
        (match (%internal::unwrap-net (%internal::net-fill h))
-         ((some n) (when (eq n 0) (return (option::none))))
+         ((some n) (when (eq n 0) (return (Option::none))))
          ((none) (%internal::net-wait h %internal::net-readable))))))))
 
 ;; Closing drains first: what was written must reach the peer before the
@@ -5200,42 +5189,42 @@ user-visible capacity."
 ;; host refused, or nobody answered in time.
 (module %internal (pub defun tcp-wait-within ((h i32) (interest int) (timeout Option<f64>) (what string)) Result<(), NetError>
   (match timeout
-    ((none) (progn (%internal::net-wait h interest) (result::ok ())))
+    ((none) (progn (%internal::net-wait h interest) (Result::ok ())))
     ((some secs)
      (if (%internal::net-wait-for h interest secs)
-         (result::ok ())
-         (result::err (NetError::NetError (append what ": timed out"))))))))
+         (Result::ok ())
+         (Result::err (NetError::NetError (append what ": timed out"))))))))
 
 ;; The two steps every connect starts with: resolve the name on its thread,
 ;; then wait for the answer -- every address the name has, in the resolver's
 ;; order. A resolution handle is used once and closes itself when read.
 (module %internal (pub defun tcp-resolve ((host string) (port int) (timeout Option<f64>)) Result<Vector<string>, NetError>
   (match (%internal::net-resolve-begin host port)
-    ((err e) (result::err e))
+    ((err e) (Result::err e))
     ((ok r)
      (loop
        (match (%internal::tcp-wait-within r %internal::net-readable timeout "resolve")
          ;; `the` on the first `return` the checker meets: a loop's type is
          ;; the join of its returns, and this one would fix `T` as `!`.
-         ((err e) (progn (%internal::unwrap-io (%internal::stream-close r)) (return (the Result<Vector<string>, NetError> (result::err e)))))
+         ((err e) (progn (%internal::unwrap-io (%internal::stream-close r)) (return (the Result<Vector<string>, NetError> (Result::err e)))))
          ((ok _)
           (match (%internal::net-resolve-finish r)
-            ((ok (some addrs)) (return (result::ok addrs)))
+            ((ok (some addrs)) (return (Result::ok addrs)))
             ((ok (none)) ())
-            ((err e) (return (result::err e)))))))))))
+            ((err e) (return (Result::err e)))))))))))
 
 (module %internal (pub defun tcp-connect-one ((addr string) (timeout Option<f64>)) Result<i32, NetError>
   (match (%internal::net-connect-begin addr)
-    ((err e) (result::err e))
+    ((err e) (Result::err e))
     ((ok h)
      (match (%internal::tcp-wait-within h %internal::net-writable timeout "tcp-connect")
-       ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (result::err e)))
+       ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (Result::err e)))
        ((ok _)
         (match (%internal::net-connect-finish h)
-          ((ok _) (result::ok h))
+          ((ok _) (Result::ok h))
           ((err e)
            (%internal::unwrap-io (%internal::stream-close h))
-           (result::err e)))))))))
+           (Result::err e)))))))))
 
 ;; Each address in turn until one answers -- `localhost` is `::1` before
 ;; `127.0.0.1` on most machines, and a server listening on only one of them
@@ -5244,10 +5233,10 @@ user-visible capacity."
   (let ((i 0) (n (len addrs)))
     (loop
       (match (%internal::tcp-connect-one (get addrs i) timeout)
-        ((ok h) (return (the Result<i32, NetError> (result::ok h))))
+        ((ok h) (return (the Result<i32, NetError> (Result::ok h))))
         ((err e)
          (setf i (+ i 1))
-         (when (>= i n) (return (result::err e)))))))))
+         (when (>= i n) (return (Result::err e)))))))))
 
 (module net
 (pub defun tcp-connect ((host string) (port int) &key (timeout f64)) Result<socket-stream, NetError>
@@ -5256,11 +5245,11 @@ user-visible capacity."
    given -- nobody answers in time: ordinary outcomes, not panics. The task
    waits for the name and the handshake; other tasks keep running."
   (match (std::%internal::tcp-resolve host port timeout)
-    ((err e) (result::err e))
+    ((err e) (Result::err e))
     ((ok addrs)
      (match (std::%internal::tcp-connect-addr addrs timeout)
-       ((ok h) (result::ok (make-instance 'socket-stream :h h)))
-       ((err e) (result::err e))))))
+       ((ok h) (Result::ok (make-instance 'socket-stream :h h)))
+       ((err e) (Result::err e))))))
 
 (pub defun tls-connect ((host string) (port int)
                         &key (timeout f64) (ca-file string) (cert-file string) (key-file string) (server-name string))
@@ -5275,44 +5264,44 @@ user-visible capacity."
    `socket-stream`; what crosses the socket is ciphertext. The handshake is
    done here, so a certificate that does not check out is this call's `Err`."
   (match (std::%internal::tcp-resolve host port timeout)
-    ((err e) (result::err e))
+    ((err e) (Result::err e))
     ((ok addrs)
      (match (std::%internal::tcp-connect-addr addrs timeout)
-       ((err e) (result::err e))
+       ((err e) (Result::err e))
        ((ok h)
         (match (std::%internal::net-tls-start h (match server-name ((some n) n) ((none) host)) ca-file cert-file key-file)
-          ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (result::err e)))
+          ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (Result::err e)))
           ((ok _)
            (loop
              (match (std::%internal::net-tls-handshake h)
-               ((ok (none)) (return (the Result<socket-stream, NetError> (result::ok (make-instance 'socket-stream :h h)))))
+               ((ok (none)) (return (the Result<socket-stream, NetError> (Result::ok (make-instance 'socket-stream :h h)))))
                ((ok (some interest))
                 (match (std::%internal::tcp-wait-within h interest timeout "tls-connect")
                   ((ok _) ())
-                  ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (return (result::err e))))))
-               ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (return (result::err e)))))))))))))
+                  ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (return (Result::err e))))))
+               ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (return (Result::err e)))))))))))))
 
 (pub defun unix-connect ((path string)) Result<socket-stream, NetError>
   "Connect to the Unix-domain socket at `path`. A local connect completes
    at once or is refused -- there is nothing to wait for -- so no timeout."
   (match (std::%internal::net-unix-connect path)
-    ((ok h) (result::ok (make-instance 'socket-stream :h h)))
-    ((err e) (result::err e))))
+    ((ok h) (Result::ok (make-instance 'socket-stream :h h)))
+    ((err e) (Result::err e))))
 
 (pub defun unix-listen ((path string)) Result<socket-listener, NetError>
   "Listen on a Unix-domain socket at `path`, which must not exist yet; a
    leftover file is refused rather than replaced. `close` removes the file."
   (match (std::%internal::net-unix-listen path)
-    ((ok h) (result::ok (make-instance 'socket-listener :h h)))
-    ((err e) (result::err e))))
+    ((ok h) (Result::ok (make-instance 'socket-listener :h h)))
+    ((err e) (Result::err e))))
 
 (pub defun tcp-listen ((host string) (port int)) Result<socket-listener, NetError>
   "Listen on `host`:`port` -- 127.0.0.1 for this machine only, 0.0.0.0 for
    every interface. Port `0` lets the OS pick a free one; `local-address`
    says which."
   (match (std::%internal::net-listen host port)
-    ((ok h) (result::ok (make-instance 'socket-listener :h h)))
-    ((err e) (result::err e))))
+    ((ok h) (Result::ok (make-instance 'socket-listener :h h)))
+    ((err e) (Result::err e))))
 
 (pub defun tls-listen ((host string) (port int) (cert-file string) (key-file string) &key (client-ca string))
     Result<socket-listener, NetError>
@@ -5328,8 +5317,8 @@ user-visible capacity."
    present a certificate issued by one in that file, and one that does not
    fails the same way; without it, clients are not asked for one."
   (match (std::%internal::net-tls-listen host port cert-file key-file client-ca)
-    ((ok h) (result::ok (make-instance 'socket-listener :h h)))
-    ((err e) (result::err e))))
+    ((ok h) (Result::ok (make-instance 'socket-listener :h h)))
+    ((err e) (Result::err e))))
 
 (impl socket-listener
   (pub tls-add-certificate (self (name string) (cert-file string) (key-file string)) Result<(), NetError>
@@ -5350,12 +5339,12 @@ user-visible capacity."
       (match (std::%internal::net-accept self::h)
         ;; `the`: a loop's type is the join of its `return`s, and this one is
         ;; seen first with its `E` still a hole.
-        ((ok (some h)) (return (the Result<socket-stream, NetError> (result::ok (make-instance 'socket-stream :h h)))))
+        ((ok (some h)) (return (the Result<socket-stream, NetError> (Result::ok (make-instance 'socket-stream :h h)))))
         ((ok (none))
          (match (std::%internal::tcp-wait-within self::h std::%internal::net-readable timeout "accept")
            ((ok _) ())
-           ((err e) (return (result::err e)))))
-        ((err e) (return (result::err e)))))))
+           ((err e) (return (Result::err e)))))
+        ((err e) (return (Result::err e)))))))
 
 (impl socket-stream
   (pub wait-readable (self (secs f64)) bool
@@ -5379,15 +5368,15 @@ user-visible capacity."
    and writes go nowhere, so this is how to tell a client that finished
    from one that broke off, the way Go's `bufio.Scanner.Err` is."
     (match (std::%internal::unwrap-net (std::%internal::net-socket-error self::h))
-      ((some m) (option::some (NetError::NetError m)))
-      ((none) (option::none)))))
+      ((some m) (Option::some (NetError::NetError m)))
+      ((none) (Option::none)))))
 
 (impl socket-byte-stream
   (pub socket-error (self) Option<NetError>
     "`socket-error` of the same connection, seen as bytes."
     (match (std::%internal::unwrap-net (std::%internal::net-socket-error self::h))
-      ((some m) (option::some (NetError::NetError m)))
-      ((none) (option::none)))))
+      ((some m) (Option::some (NetError::NetError m)))
+      ((none) (Option::none)))))
 
 (impl socket-stream
   (pub peer-subject (self) Option<string>
@@ -5470,8 +5459,8 @@ user-visible capacity."
        ((ok ,s)
         (let ((,var ,s))
           (let ((,result (progn ,@body)))
-            (progn (close ,var) (result::ok ,result)))))
-       ((err ,e) (result::err ,e)))))
+            (progn (close ,var) (Result::ok ,result)))))
+       ((err ,e) (Result::err ,e)))))
 
 ;; ---- UDP -------------------------------------------------------------------
 ;;
@@ -5490,8 +5479,8 @@ user-visible capacity."
   "A UDP socket on `host`:`port` (`0`: any free port; `local-address` says
    which). Sending needs one too -- bind to port `0`."
   (match (std::%internal::net-udp-bind host port)
-    ((ok h) (result::ok (make-instance 'udp-socket :h h)))
-    ((err e) (result::err e))))
+    ((ok h) (Result::ok (make-instance 'udp-socket :h h)))
+    ((err e) (Result::err e))))
 
 (impl Stream udp-socket
   (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
@@ -5505,13 +5494,13 @@ user-visible capacity."
     "Send `bytes` as one datagram to `host`:`port`. Resolves the name (waiting
    for it), then sends -- waiting only if the socket's own buffer is full.
    Delivery is not confirmed; that is UDP."
-    (match (std::%internal::tcp-resolve host port (option::none))
-      ((err e) (result::err e))
+    (match (std::%internal::tcp-resolve host port (Option::none))
+      ((err e) (Result::err e))
       ((ok addrs)
        (loop
          (match (std::%internal::net-udp-send-to self::h (get addrs 0) bytes)
-           ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (std::%internal::net-wait self::h std::%internal::net-writable)))
-           ((err e) (return (result::err e))))))))
+           ((ok sent) (if sent (return (the Result<(), NetError> (Result::ok ()))) (std::%internal::net-wait self::h std::%internal::net-writable)))
+           ((err e) (return (Result::err e))))))))
   (pub recv-from (self &key (timeout f64)) Result<datagram, NetError>
     "The next datagram, waiting for one -- at most `:timeout` seconds if given.
    `from` is the sender as `ip:port`, which `send-to` accepts back."
@@ -5519,12 +5508,12 @@ user-visible capacity."
       (match (std::%internal::net-udp-recv self::h)
         ((ok (some bytes))
          (return (the Result<datagram, NetError>
-                      (result::ok (make-instance 'datagram :bytes bytes :from (std::%internal::unwrap-net (std::%internal::net-udp-last-sender self::h)))))))
+                      (Result::ok (make-instance 'datagram :bytes bytes :from (std::%internal::unwrap-net (std::%internal::net-udp-last-sender self::h)))))))
         ((ok (none))
          (match (std::%internal::tcp-wait-within self::h std::%internal::net-readable timeout "recv-from")
            ((ok _) ())
-           ((err e) (return (result::err e)))))
-        ((err e) (return (result::err e))))))))
+           ((err e) (return (Result::err e)))))
+        ((err e) (return (Result::err e))))))))
 
 ;; ---- Bytes and text ----------------------------------------------------------
 
@@ -5580,7 +5569,7 @@ user-visible capacity."
                     ((none) (progn (setf bad true) ()))))
                 (setf i (+ i width))
                 ())))))
-    (if bad (option::none) (option::some out)))))
+    (if bad (Option::none) (Option::some out)))))
 
 ;; CL's standard streams. Ordinary assignable globals rather than dynamically
 ;; bound specials — `(setf *standard-output* s)` does globally what CL's
@@ -5706,8 +5695,8 @@ user-visible capacity."
   (:type Item char)
   (read-item ((self Self)) Option<char>
     (match (read-char self::in)
-      ((some c) (progn (write-char self::out c) (option::some c)))
-      ((none) (option::none))))
+      ((some c) (progn (write-char self::out c) (Option::some c)))
+      ((none) (Option::none))))
   (listen ((self Self)) bool (listen self::in)))
 (impl CharInput echo-stream)
 
@@ -5720,12 +5709,12 @@ user-visible capacity."
 (impl InputStream concatenated-stream
   (:type Item char)
   (read-item ((self Self)) Option<char>
-    (let ((answer (the Option<char> (option::none))) (going true))
+    (let ((answer (the Option<char> (Option::none))) (going true))
       (while going
         (if (>= self::at (len self::parts))
             (progn (setf going false) ())
             (match (read-char (get self::parts self::at))
-              ((some c) (progn (setf answer (option::some c)) (setf going false) ()))
+              ((some c) (progn (setf answer (Option::some c)) (setf going false) ()))
               ((none) (progn (setf self::at (+ self::at 1)) ())))))
       answer))
   ;; Only about the component being read now: whether a *later* one is ready
@@ -5760,7 +5749,7 @@ user-visible capacity."
   (:type Item char)
   (read-item ((self Self)) Option<char>
     (match self::pending
-      ((some c) (progn (setf self::pending (option::none)) (option::some c)))
+      ((some c) (progn (setf self::pending (Option::none)) (Option::some c)))
       ((none) (read-char self::inner))))
   ;; A pushed-back character is already in hand.
   (listen ((self Self)) bool
@@ -5770,7 +5759,7 @@ user-visible capacity."
   ;; A second `unread-char` without a read in between overwrites the first --
   ;; the one-character promise, and what a program that keeps to it never
   ;; notices.
-  (unread-char ((self Self) (c char)) () (progn (setf self::pending (option::some c)) ())))
+  (unread-char ((self Self) (c char)) () (progn (setf self::pending (Option::some c)) ())))
 
 ;; ---------------------------------------------------------------------------
 ;; Constructors and the CL-shaped surface.
@@ -5804,7 +5793,7 @@ user-visible capacity."
 (pub defun make-peek-stream ((in :dyn CharInput)) peek-stream
   "`in` with one character of pushback added, so it can be `read-sexpr`-ed.
    The built-in leaf streams already have pushback and need no wrapping."
-  (make-instance 'peek-stream :inner in :pending (option::none))))
+  (make-instance 'peek-stream :inner in :pending (Option::none))))
 
 ;; `open`'s direction, as named constants rather than as CL's `:direction`
 ;; keyword argument: the direction is required, and three constants read at
@@ -5821,8 +5810,8 @@ user-visible capacity."
    `direction-output` / `direction-append`. `Err` if the file cannot be
    opened: a missing file is an ordinary outcome, not a panic."
   (match (std::%internal::stream-open-file (namestring name) direction)
-    ((ok h) (result::ok (make-instance 'file-stream :h h)))
-    ((err e) (result::err e))))
+    ((ok h) (Result::ok (make-instance 'file-stream :h h)))
+    ((err e) (Result::err e))))
 
 (pub defun open-input<P> ((name P)) Result<file-stream, FileError> (:where (Pathish P))
   (open-file name direction-input))
@@ -5834,8 +5823,8 @@ user-visible capacity."
   "Open `name` for byte I/O in one of `direction-input` / `direction-output` /
    `direction-append`."
   (match (std::%internal::stream-open-file (namestring name) direction)
-    ((ok h) (result::ok (make-instance 'binary-file-stream :h h)))
-    ((err e) (result::err e))))
+    ((ok h) (Result::ok (make-instance 'binary-file-stream :h h)))
+    ((err e) (Result::err e))))
 
 (pub defun open-binary-input<P> ((name P)) Result<binary-file-stream, FileError> (:where (Pathish P))
   (open-binary name direction-input))
@@ -6013,7 +6002,7 @@ user-visible capacity."
 
 (module %internal (pub defun reader-scan-atom<S> ((s S)) string (:where (PeekInput S))
   "An atom's characters, with only the reader's own delimiters ending it."
-  (%internal::reader-scan-atom-until s (the Option<char> (option::none)))))
+  (%internal::reader-scan-atom-until s (the Option<char> (Option::none)))))
 
 (module %internal (pub defun reader-scan-name<S> ((s S)) string (:where (PeekInput S))
   "The rest of a `#\\newline`-style character name: alphanumerics and `-`."
@@ -6170,7 +6159,7 @@ user-visible capacity."
 
 (module %internal (pub defun reader-scan-datum<S> ((s S)) string (:where (PeekInput S))
   "The next datum's text, with only the reader's own delimiters ending it."
-  (%internal::reader-scan-datum-until s (the Option<char> (option::none)))))
+  (%internal::reader-scan-datum-until s (the Option<char> (Option::none)))))
 
 ;; `read-sexpr` とその仲間は「データが無かった」を `Ok(none)` ではなく専用の
 ;; バリアントで報告する。S 式リーダはデータ `()` を返せなければならず、空リストが
@@ -6190,20 +6179,20 @@ user-visible capacity."
    datum."
   (let ((text (std::%internal::reader-scan-datum s)))
     (if (equal text "")
-        (result::ok (ReadOutcome::eof))
+        (Result::ok (ReadOutcome::eof))
         (match (read text)
-          ((ok v) (result::ok (ReadOutcome::datum v)))
-          ((err e) (result::err e)))))))
+          ((ok v) (Result::ok (ReadOutcome::datum v)))
+          ((err e) (Result::err e)))))))
 
 (module %internal (pub defun reader-read-one-until<S> ((s S) (stop Option<char>)) Result<ReadOutcome, ReadError> (:where (PeekInput S))
   "`read-sexpr-preserving-whitespace` with an extra delimiter -- what
    `read-delimited-list` reads each element with."
   (let ((text (%internal::reader-scan-datum-until s stop)))
     (if (equal text "")
-        (result::ok (ReadOutcome::eof))
+        (Result::ok (ReadOutcome::eof))
         (match (read text)
-          ((ok v) (result::ok (ReadOutcome::datum v)))
-          ((err e) (result::err e)))))))
+          ((ok v) (Result::ok (ReadOutcome::datum v)))
+          ((err e) (Result::err e)))))))
 
 (module reader
 (pub defun read-sexpr<S> ((s S)) Result<ReadOutcome, ReadError> (:where (PeekInput S))
@@ -6296,7 +6285,7 @@ user-visible capacity."
 (pub defun read-delimited-list<S> ((terminator char) (s S)) Result<Option<Sexpr>, ReadError> (:where (PeekInput S))
   "Every datum on `s` up to `terminator`, as a list. The terminator is
    consumed; reaching end of input first is an `Err`."
-  (let ((acc (the Vector<Option<Sexpr>> (Vector::new))) (failed (the Option<ReadError> (option::none))) (going true))
+  (let ((acc (the Vector<Option<Sexpr>> (Vector::new))) (failed (the Option<ReadError> (Option::none))) (going true))
     (progn
       (while going
         (progn
@@ -6304,27 +6293,27 @@ user-visible capacity."
           (match (peek-char s)
             ((none)
              (progn
-               (setf failed (option::some (ReadError::ReadError
+               (setf failed (Option::some (ReadError::ReadError
                  (format false "read-delimited-list: end of input before the closing ~a" terminator))))
                (setf going false)
                ()))
             ((some c)
              (if (equal c terminator)
                  (progn (std::%internal::reader-skip-one s) (setf going false) ())
-                 (match (std::%internal::reader-read-one-until s (option::some terminator))
-                   ((err e) (progn (setf failed (option::some e)) (setf going false) ()))
+                 (match (std::%internal::reader-read-one-until s (Option::some terminator))
+                   ((err e) (progn (setf failed (Option::some e)) (setf going false) ()))
                    ((ok found)
                     (match found
                       ((eof)
                        (progn
-                         (setf failed (option::some (ReadError::ReadError
+                         (setf failed (Option::some (ReadError::ReadError
                            (format false "read-delimited-list: end of input before the closing ~a" terminator))))
                          (setf going false)
                          ()))
                       ((datum v) (progn (push acc v) ()))))))))))
       (match failed
-        ((some e) (result::err e))
-        ((none) (result::ok (std::%internal::sexpr-list-from acc))))))))
+        ((some e) (Result::err e))
+        ((none) (Result::ok (std::%internal::sexpr-list-from acc))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The `with-...` macros, which are the reason `close` rarely appears in user
@@ -6347,8 +6336,8 @@ user-visible capacity."
        ((ok ,s)
         (let ((,var ,s))
           (let ((,result (progn ,@body)))
-            (progn (close ,var) (result::ok ,result)))))
-       ((err ,e) (result::err ,e))))))
+            (progn (close ,var) (Result::ok ,result)))))
+       ((err ,e) (Result::err ,e))))))
 
 (module io
 (pub defmacro with-input-from-string (spec &rest body)
@@ -6372,20 +6361,20 @@ user-visible capacity."
 (pub defun read-file-string<P> ((name P)) Result<string, FileError> (:where (Pathish P))
   "The entire contents of `name`."
   (match (open-input name)
-    ((ok s) (let ((text (read-all s))) (progn (close s) (result::ok text))))
-    ((err e) (result::err e))))
+    ((ok s) (let ((text (read-all s))) (progn (close s) (Result::ok text))))
+    ((err e) (Result::err e))))
 
 (pub defun read-file-lines<P> ((name P)) Result<Vector<string>, FileError> (:where (Pathish P))
   (match (open-input name)
-    ((ok s) (let ((ls (read-lines s))) (progn (close s) (result::ok ls))))
-    ((err e) (result::err e))))
+    ((ok s) (let ((ls (read-lines s))) (progn (close s) (Result::ok ls))))
+    ((err e) (Result::err e))))
 
 (pub defun write-file-string<P> ((name P) (text string)) Result<(), FileError> (:where (Pathish P))
   "Write `text` to `name`, replacing it. `Ok(())` on success -- the write is
    done for its effect, so there is no value to carry back."
   (match (open-output name)
-    ((ok s) (progn (write-string s text) (close s) (result::ok ())))
-    ((err e) (result::err e))))
+    ((ok s) (progn (write-string s text) (close s) (Result::ok ())))
+    ((err e) (Result::err e))))
 
 (pub defun probe-file<P> ((name P)) bool (:where (Pathish P))
   "Whether `name` exists."
@@ -6394,14 +6383,14 @@ user-visible capacity."
 (pub defun delete-file<P> ((name P)) Result<(), FileError> (:where (Pathish P))
   "Remove `name`. `Ok(())` on success."
   (match (std::%internal::file-delete (namestring name))
-    ((ok _) (result::ok ()))
-    ((err e) (result::err e))))
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
 
 (pub defun rename-file<P,Q> ((from P) (to Q)) Result<(), FileError> (:where (Pathish P) (Pathish Q))
   "Rename `from` to `to`. `Ok(())` on success."
   (match (std::%internal::file-rename (namestring from) (namestring to))
-    ((ok _) (result::ok ()))
-    ((err e) (result::err e))))
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
 
 ;; The rest of CLHS 20.1: questions about a file that need no open stream.
 ;; Each is one call to the `file-*` primitive, with `Pathish` in front so a
@@ -6446,8 +6435,8 @@ user-visible capacity."
   "Create directory `name` and any missing parent. `Ok(())` if it already
    exists -- that is what `ensure` means."
   (match (std::%internal::file-create-directories (namestring name))
-    ((ok _) (result::ok ()))
-    ((err e) (result::err e)))))
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The environment the program is running in (CLHS 25.1), plus the two things
@@ -6467,19 +6456,19 @@ user-visible capacity."
    that a program asking gets CL's answer rather than `no such function`,
    and it is `none` rather than an invented constant because there is no
    fact to report."
-  (option::none))
+  (Option::none))
 
 (pub defun long-site-name () Option<string>
   "The site's long name (CLHS 25.1), or `none`. `none` for the same reason
    `short-site-name` is."
-  (option::none))
+  (Option::none))
 
 (pub defun user-homedir-pathname () Option<pathname>
   "The user's home directory, or `none` when `$HOME` is unset. CL allows
    `NIL` here for exactly this case, so the `Option` is not an extra."
   (match (home-directory)
-    ((none) (option::none))
-    ((some h) (option::some (to-pathname h))))))
+    ((none) (Option::none))
+    ((some h) (Option::some (to-pathname h))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The REPL tool layer (CLHS 25.2): `room` and `dribble`.
@@ -7382,9 +7371,8 @@ user-visible capacity."
 ;; the surrounding program happened to `setf`. Nothing but a `dlet` over the
 ;; whole set.
 ;;
-;; Two departures from CL's list. `*print-case*` is `:downcase` rather than
-;; `:upcase` — CL's standard value means "as stored", and this reader stores
-;; symbol names downcased (see `*print-case*`'s own note). And the reader
+;; Two departures from CL's list. There is no `*print-case*`: symbol names
+;; are case-sensitive and print as spelled. And the reader
 ;; variables CL also binds are not in this language except `*read-eval*`
 ;; (`*read-base*`, `*read-default-float-format*` and `*read-suppress*` are
 ;; not), so that is the one reader variable here; `*package*` and
@@ -7394,7 +7382,6 @@ user-visible capacity."
   `(dlet ((*read-eval* true)
           (*print-base* 10)
           (*print-radix* false)
-          (*print-case* :downcase)
           (*print-circle* false)
           (*print-level* 0)
           (*print-length* 0)

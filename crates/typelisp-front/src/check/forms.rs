@@ -221,9 +221,9 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 /// a closure that makes the call and hands the result to the scheduler
 /// **tagged**, and only the representation says how to tag a raw word.
 ///
-/// `key` is the handle's own type key (`task<int>`): the handle is built by
+/// `key` is the handle's own type key (`Task<int>`): the handle is built by
 /// the scheduler, which has no type of its own to read an instantiation off,
-/// and a handle prints as its type (`#<task<int> 1>`).
+/// and a handle prints as its type (`#<Task<int> 1>`).
 ///
 /// `tag` is `"task"` or `"thread"`: `(thread RET-R KEY CALL)` is the same node
 /// for a task that runs on an OS thread of its own.
@@ -583,7 +583,7 @@ pub(super) fn hole_form(heap: &mut Heap, loc: Option<Loc>) -> Result<Value, Erro
 /// [`crate::types::parse_applied_type`]'s list spelling of a generic exists.
 ///
 /// A generic comes out applied (`(vector char)`) rather than as the name
-/// `vector<char>`, because the arguments here are arbitrary `Type`s and the
+/// `Vector<char>`, because the arguments here are arbitrary `Type`s and the
 /// name grammar cannot spell all of them: `Vector<(fn (i32) i32)>` has no
 /// written form at all. Emitting the list form makes the round trip total,
 /// which is what `Checker::subst_value` needs to substitute a trait's

@@ -50,8 +50,8 @@ pub fn is_llvm_handle_ty(ty: &Type) -> bool {
 /// them still classifies them correctly.
 pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> bool {
     match ty {
-        Type::Named(p, args) if path_is_builtin(p, "option") && args.len() == 1 => true,
-        Type::Named(p, args) if path_is_builtin(p, "result") && args.len() == 2 => true,
+        Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::OPTION) && args.len() == 1 => true,
+        Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::RESULT) && args.len() == 2 => true,
         Type::Named(p, _) if crate::check::registry::is_builtin_error_type(p) => true,
         Type::Named(p, _) => kind_of(p) == Some(AdtKind::Sum),
         _ => false,
@@ -257,7 +257,7 @@ impl Repr {
             Type::Ratio => Repr::Ratio,
             Type::Rational => Repr::Rational,
             Type::RandomState => Repr::RandomState,
-            Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") => Repr::Sexpr,
+            Type::Named(p, _) if crate::types::path_is_builtin(p, typelisp_mem::wk::SEXPR) => Repr::Sexpr,
             // `Option<T>` is a niche whenever `T`'s values can be told from
             // the empty-list immediate: `none` is that immediate, `some v`
             // is `v`'s tagged word, and no box is built. Decided from the
@@ -270,12 +270,12 @@ impl Repr {
             // is an existing, tested shape (`tests/compile_test.rs`) and
             // `HashTable<K,Option<V>>::get` produces one, so this is
             // reachable, not hypothetical.
-            Type::Named(p, args) if path_is_builtin(p, "option") && args.len() == 1 => {
+            Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::OPTION) && args.len() == 1 => {
                 // Any `Option` payload boxes the outer one, a niched *or a
                 // boxed* one alike: the rule is stated on the payload's type
                 // so the key-side twin can state it the same way, and
                 // `Option<Option<Option<T>>>` is not worth a third case.
-                let nested = matches!(&args[0], Type::Named(a, aa) if path_is_builtin(a, "option") && aa.len() == 1);
+                let nested = matches!(&args[0], Type::Named(a, aa) if path_is_builtin(a, typelisp_mem::wk::OPTION) && aa.len() == 1);
                 let payload = Repr::of_by(&args[0], kind_of);
                 if !nested && payload.niches() {
                     Repr::Niche(Box::new(payload))
@@ -292,13 +292,13 @@ impl Repr {
             // respectively. Their being ahead is also what keeps a
             // registry-backed `kind_of` (which *does* know `hashtable`/`scope`
             // are `Sum`) answering the same as the pre-resolved set form.
-            Type::Named(p, args) if path_is_builtin(p, "scope") && args.len() == 1 => {
+            Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::SCOPE) && args.len() == 1 => {
                 Repr::Scope(Box::new(Repr::of_by(&args[0], kind_of)))
             }
-            Type::Named(p, args) if path_is_builtin(p, "vector") && args.len() == 1 => {
+            Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::VECTOR) && args.len() == 1 => {
                 Repr::Vector(Box::new(Repr::of_by(&args[0], kind_of)))
             }
-            Type::Named(p, args) if path_is_builtin(p, "hashtable") && args.len() == 2 => {
+            Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::HASHTABLE) && args.len() == 2 => {
                 Repr::HashTable(Box::new(Repr::of_by(&args[0], kind_of)), Box::new(Repr::of_by(&args[1], kind_of)))
             }
             Type::Named(p, _) if kind_of(p) == Some(AdtKind::Struct) => Repr::Struct,
@@ -775,37 +775,37 @@ mod tests {
         assert_eq!(of(Type::Str), Repr::Str);
         assert_eq!(of(Type::Symbol), Repr::Sym);
         assert_eq!(of(Type::Ratio), Repr::Ratio);
-        assert_eq!(of(Type::Named(Path::std("sexpr"), vec![])), Repr::Sexpr);
+        assert_eq!(of(Type::Named(Path::std("Sexpr"), vec![])), Repr::Sexpr);
         assert_eq!(of(Type::Named(Path::root("point"), vec![])), Repr::Struct);
         assert_eq!(of(Type::Named(Path::root("my-enum"), vec![])), Repr::Enum);
         // The parametric builtins classify their elements too — the whole
         // reason they have variants of their own.
         assert_eq!(
-            of(Type::Named(Path::std("vector"), vec![Type::U32])),
+            of(Type::Named(Path::std("Vector"), vec![Type::U32])),
             Repr::Vector(Box::new(Repr::Narrow))
         );
         assert_eq!(
-            of(Type::Named(Path::std("hashtable"), vec![Type::Str, Type::Bool])),
+            of(Type::Named(Path::std("HashTable"), vec![Type::Str, Type::Bool])),
             Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Bool))
         );
         // Recognized structurally rather than through the set — passing an
         // empty one must not turn `Option`/`Result` into `Repr::None`.
         let none: HashSet<Path> = HashSet::new();
         assert_eq!(
-            Repr::of(&Type::Named(Path::std("option"), vec![Type::I32]), &none, &none),
+            Repr::of(&Type::Named(Path::std("Option"), vec![Type::I32]), &none, &none),
             Repr::Niche(Box::new(Repr::Narrow))
         );
         // The niche stops where the payload could be the empty word.
-        let option = |t: Type| Type::Named(Path::std("option"), vec![t]);
+        let option = |t: Type| Type::Named(Path::std("Option"), vec![t]);
         assert_eq!(of(option(option(Type::I32))), Repr::Enum);
         assert_eq!(of(option(Type::Unit)), Repr::Enum);
         assert_eq!(of(option(Type::Ptr)), Repr::Enum);
         assert_eq!(of(option(Type::Named(Path::root("T"), vec![]))), Repr::Enum);
-        assert_eq!(of(option(Type::Named(Path::std("sexpr"), vec![]))), Repr::Niche(Box::new(Repr::Sexpr)));
+        assert_eq!(of(option(Type::Named(Path::std("Sexpr"), vec![]))), Repr::Niche(Box::new(Repr::Sexpr)));
         assert_eq!(of(option(Type::Named(Path::root("point"), vec![]))), Repr::Niche(Box::new(Repr::Struct)));
         assert_eq!(of(option(Type::F64)), Repr::Niche(Box::new(Repr::F64)));
         assert_eq!(
-            Repr::of(&Type::Named(Path::std("result"), vec![Type::I32, Type::Str]), &none, &none),
+            Repr::of(&Type::Named(Path::std("Result"), vec![Type::I32, Type::Str]), &none, &none),
             Repr::Enum
         );
         assert_eq!(of(Type::Fn(vec![], None, Box::new(Type::Unit))), Repr::Fn);

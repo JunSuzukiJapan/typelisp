@@ -663,7 +663,7 @@ fn a_default_body_is_checked_against_the_traits_associated_types() {
            (unwrap ((self Self)) Item)
            (unwrap-again ((self Self)) Item 1))",
     );
-    assert!(m.contains("item"), "{}", m);
+    assert!(m.contains("Item"), "{}", m);
 }
 
 #[test]
@@ -806,8 +806,8 @@ fn an_inherited_self_returning_trait_method_resolves_to_the_bounded_type_variabl
 /// The reader reads `Vector<Item>` as a single symbol (the same reason
 /// `impl<T>` is one), so `Checker::subst_value`'s whole-name lookup never
 /// reached the `Item` inside it: the inherited signature stayed
-/// `(holder vector<item>)` while the trait's own declaration substituted to
-/// `(holder vector<char>)`, and the two failed to match. `Option<Item>` had
+/// `(holder Vector<item>)` while the trait's own declaration substituted to
+/// `(holder Vector<char>)`, and the two failed to match. `Option<Item>` had
 /// never shown it because no default body's signature used an associated
 /// type until Stage 9d's stream layering did.
 const SINK: &str = "

@@ -19,6 +19,8 @@
 //! evaluator asks any of these questions: they are asked while *compiling*,
 //! by `symbols`, `core_bridge`, `driver`, `aot` and the two bootstrappers.
 
+use typelisp_mem::wk;
+
 /// The `typelisp_rt` shim a *free* builtin call lowers to, or
 /// `None` for an ordinary function whose name gets mangled instead.
 ///
@@ -76,11 +78,6 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // type rather than `sexpr`'s — the same shim, since both spellings
         // carry the same interned `Value::Symbol`.
         "symbol->string" => "rt_sym_name",
-        // `string->symbol` is the other direction, and is likewise a shim
-        // that already existed: `rt_intern_symbol` is what a compiled quoted
-        // symbol literal already goes through, and interning a `Str` is the
-        // whole of this builtin.
-        "string->symbol" => "rt_intern_symbol",
         "intern" => "rt_intern",
         "keywordp" => "rt_keywordp",
         // The small system builtins (`sys_builtin`): parsing, the clock, and
@@ -264,21 +261,22 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
 /// spelled in `core_bridge` so that "which builtins suspend" stays a question
 /// this module answers — the free functions are already decided by the
 /// `rt_suspend_` prefix in [`rt_builtin_symbol`].
-pub(crate) fn rt_suspend_method_symbol(type_local: &str, method: &str) -> Option<&'static str> {
-    match (type_local, method) {
-        ("task", "wait") => Some("rt_suspend_wait"),
+pub(crate) fn rt_suspend_method_symbol(type_name: &crate::Path, method: &str) -> Option<&'static str> {
+    let ty = typelisp_front::types::builtin_type(type_name)?;
+    match (ty, method) {
+        (wk::TASK_TYPE, "wait") => Some("rt_suspend_wait"),
         // A thread is a task to the scheduler, and `join` is `wait`.
-        ("thread", "join") => Some("rt_suspend_wait"),
+        (wk::THREAD_TYPE, "join") => Some("rt_suspend_wait"),
         // Every channel operation, including the four that never wait: the
         // table of channels is the scheduler's, and the driver is the only
         // way to it (`typelisp_abi::call_state::SUSPEND_CHAN_NEW` says why
         // it cannot live anywhere lower).
-        ("chan", "new") => Some("rt_suspend_chan_new"),
-        ("chan", "len") => Some("rt_suspend_chan_len"),
-        ("chan", "cap") => Some("rt_suspend_chan_cap"),
-        ("chan", "close") => Some("rt_suspend_chan_close"),
-        ("chan", "send") => Some("rt_suspend_chan_send"),
-        ("chan", "recv") => Some("rt_suspend_chan_recv"),
+        (wk::CHAN, "new") => Some("rt_suspend_chan_new"),
+        (wk::CHAN, "len") => Some("rt_suspend_chan_len"),
+        (wk::CHAN, "cap") => Some("rt_suspend_chan_cap"),
+        (wk::CHAN, "close") => Some("rt_suspend_chan_close"),
+        (wk::CHAN, "send") => Some("rt_suspend_chan_send"),
+        (wk::CHAN, "recv") => Some("rt_suspend_chan_recv"),
         _ => None,
     }
 }
@@ -287,10 +285,11 @@ pub(crate) fn rt_suspend_method_symbol(type_local: &str, method: &str) -> Option
 /// `None`. The free-function table is keyed by bare name, and these need
 /// their owner type too — the same reason [`rt_suspend_method_symbol`] is a
 /// table of its own.
-pub(crate) fn rt_static_method_symbol(type_local: &str, method: &str) -> Option<&'static str> {
-    match (type_local, method) {
-        ("thread", "current-id") => Some("rt_thread_current_id"),
-        ("thread", "available-parallelism") => Some("rt_thread_available_parallelism"),
+pub(crate) fn rt_static_method_symbol(type_name: &crate::Path, method: &str) -> Option<&'static str> {
+    let ty = typelisp_front::types::builtin_type(type_name)?;
+    match (ty, method) {
+        (wk::THREAD_TYPE, "current-id") => Some("rt_thread_current_id"),
+        (wk::THREAD_TYPE, "available-parallelism") => Some("rt_thread_available_parallelism"),
         _ => None,
     }
 }
@@ -384,8 +383,8 @@ fn builtin_homes() -> &'static std::collections::HashMap<String, typelisp_mem::N
 /// `rt_llvm_call` process abort rather than a catchable error. Catching them
 /// here keeps `(compile bad-fn)` a clean `EvalError` — the behavior the
 /// interpreted island used to give from `get-function` directly.
-pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str) -> bool {
-    native_lowered_primitive_methods(type_local).contains(&method)
+pub(crate) fn is_native_lowered_primitive_method(type_name: &crate::Path, method: &str) -> bool {
+    typelisp_front::types::builtin_type(type_name).is_some_and(|ty| native_lowered_primitive_methods(ty).contains(&method))
 }
 
 /// The methods [`is_native_lowered_primitive_method`] answers `true` for, as
@@ -397,8 +396,8 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// Rust claims and the island does not lower — is unaskable of a predicate,
 /// because there is nothing to enumerate. That gap is not hypothetical; it is
 /// how `char->string` survived here.
-pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'static str] {
-    match type_local {
+pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [&'static str] {
+    match ty {
         // `eq`/`eql`/`equal`/`equalp` are four names for `=` on an integer
         // (`registry::int_assoc`'s doc comment: same-type operands, nothing to
         // fold or recurse into), so all four are the same `icmp eq`. Only
@@ -408,7 +407,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // receivers like any other (`int-receiver-type?`), and what makes them
         // different is upstream — the checker registers only conversions for
         // them, so the arithmetic listed here can never be asked for.
-        "i32" | "i8" | "i16" | "u8" | "u16" | "u32" | "c-long" | "c-ulong" => &[
+        wk::I32 | wk::I8 | wk::I16 | wk::U8 | wk::U16 | wk::U32 | wk::C_LONG | wk::C_ULONG => &[
             "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
             "int->int", "int->ratio", "int->float", "int->char",
             "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
@@ -425,7 +424,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // `eq`/`eql` are `StrId` identity (`string_identity_eq`) and lower to
         // an `icmp eq` on the two tagged words; `equal`/`equalp` are content
         // comparisons and go through `rt_str_eq`/`rt_str_equalp`.
-        "string" => &[
+        wk::STRING => &[
             "length", "ref", "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "append", "substring",
             // `upcase`/`downcase` are one `rt_str_*` call each, ASCII-only on
             // both tiers because both tiers run the same shim's rule — the
@@ -446,11 +445,11 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // one of them could not be compiled at all — which is why the whole
         // `char`/`string` catalog in the prelude is written on code points
         // and `string::ref` instead (cl-parity-plan.md Phase 2's note 1).
-        "char" => &[
+        wk::CHAR => &[
             "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "char->int", "char->string",
             "upcase", "downcase", "alphap", "digitp",
         ],
-        "f64" | "f32" => &[
+        wk::F64 | wk::F32 => &[
             "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
             "float->int", "float->ratio", "float->f32", "float->f64",
             // Same reason as the integer `try-*` group above: no prelude
@@ -464,7 +463,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // lowered — the arithmetic and comparisons as an overflow-checked
         // fast path over two fixnum words with an `rt_integer_*` slow path,
         // the rest as one `rt_integer_*` call each.
-        "int" => &[
+        wk::INT => &[
             "+", "-", "*", "/", "truncate", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
@@ -474,12 +473,12 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
             "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
             "try-int->c-long", "try-int->c-ulong",
         ],
-        "ratio" => &[
+        wk::RATIO => &[
             "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
             "ratio->int", "ratio->float", "numerator", "denominator", "max", "min", "ratio->rational",
         ],
         // `rational` (`int` ∪ `ratio`): one `rt_rational_*` call each.
-        "rational" => &[
+        wk::REPR_RATIONAL => &[
             "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp", "max", "min",
             "rational->int", "try-rational->int", "rational->ratio", "rational->float", "numerator", "denominator",
         ],
@@ -493,16 +492,16 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // `typelisp_rt::equality` the interpreter uses. The free-function
         // `equal`/`equalp` reach their shims through `rt_builtin_symbol`
         // instead, being calls rather than methods.
-        "sexpr" => &["eq", "eql"],
+        wk::SEXPR => &["eq", "eql"],
         // `bool`'s four comparison names are one operation
         // (`registry::bool_assoc`: two immediate values, nothing to fold or
         // recurse into), and a compiled `bool` is a raw `0`/`1`, so all four
         // are the same `icmp eq`.
-        "bool" => &["eq", "eql", "equal", "equalp"],
+        wk::BOOL => &["eq", "eql", "equal", "equalp"],
         // A compiled `symbol` is the interned `Value::Symbol` handle, so
         // identity *is* handle equality — the same `icmp eq` as `sexpr`'s
         // `eq`. `registry::symbol_assoc` registers only these two.
-        "symbol" => &["eq", "eql"],
+        wk::SYMBOL => &["eq", "eql"],
         _ => &[],
     }
 }
@@ -1145,20 +1144,21 @@ mod scc_tests {
 #[cfg(test)]
 mod native_method_list_tests {
     use super::native_lowered_primitive_methods;
+    use typelisp_mem::wk;
 
     /// Every primitive receiver whose builtin methods either side lowers, with
     /// the island predicate that decides for it.
-    const PRIMITIVES: &[(&str, &[&str])] = &[
-        ("int", &["i32", "i8", "i16", "u8", "u16", "u32", "c-long", "c-ulong"]),
-        ("integer", &["int"]),
-        ("string", &["string"]),
-        ("char", &["char"]),
-        ("float", &["f64", "f32"]),
-        ("ratio", &["ratio"]),
-        ("rational", &["rational"]),
-        ("bool", &["bool"]),
-        ("symbol", &["symbol"]),
-        ("sexpr", &["sexpr"]),
+    const PRIMITIVES: &[(&str, &[u32])] = &[
+        ("int", &[wk::I32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32, wk::C_LONG, wk::C_ULONG]),
+        ("integer", &[wk::INT]),
+        ("string", &[wk::STRING]),
+        ("char", &[wk::CHAR]),
+        ("float", &[wk::F64, wk::F32]),
+        ("ratio", &[wk::RATIO]),
+        ("rational", &[wk::REPR_RATIONAL]),
+        ("bool", &[wk::BOOL]),
+        ("symbol", &[wk::SYMBOL]),
+        ("sexpr", &[wk::SEXPR]),
     ];
 
     /// Every method-name key inside the island's `<name>-native-method?`
@@ -1232,9 +1232,10 @@ mod native_method_list_tests {
         for (island_name, type_locals) in PRIMITIVES {
             let island = island_methods(island_name);
             assert!(!island.is_empty(), "`{}-native-method?` parsed as empty — the scan is broken", island_name);
-            for type_local in *type_locals {
+            for &ty in *type_locals {
+                let type_local = typelisp_mem::symbols::well_known_symbol(ty).name();
                 let mut rust: Vec<String> =
-                    native_lowered_primitive_methods(type_local).iter().map(|m| m.to_string()).collect();
+                    native_lowered_primitive_methods(ty).iter().map(|m| m.to_string()).collect();
                 rust.sort();
                 let island_only: Vec<&String> = island.iter().filter(|m| !rust.contains(m)).collect();
                 let rust_only: Vec<&String> = rust.iter().filter(|m| !island.contains(m)).collect();
@@ -1265,18 +1266,19 @@ mod native_method_list_tests {
         let registry = typelisp_front::check::registry::Registry::with_builtins();
         let mut gaps: Vec<String> = Vec::new();
         for (_, type_locals) in PRIMITIVES {
-            for type_local in *type_locals {
+            for &ty in *type_locals {
+                let type_local = typelisp_mem::symbols::well_known_symbol(ty).name();
                 let def = registry
                     .module_at(typelisp_mem::NsId::STD)
                     .expect("the registry always has the standard library's module")
                     .types
-                    .get(*type_local)
+                    .get_sym(typelisp_mem::symbols::well_known_symbol(ty))
                     .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));
                 for (method, f) in &def.assoc {
                     if !f.builtin {
                         continue;
                     }
-                    if !native_lowered_primitive_methods(type_local).contains(&method.as_str()) {
+                    if !native_lowered_primitive_methods(ty).contains(&method.as_str()) {
                         gaps.push(format!("{}::{}", type_local, method));
                     }
                 }

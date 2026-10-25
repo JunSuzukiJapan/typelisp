@@ -74,7 +74,7 @@ pub fn type_id(ty: &Type) -> TypeId {
 
 /// A field's declared type as a *template*: its type with each of the owning
 /// type's parameters (`params`, in declaration order) as a
-/// [`TypeShape::Param`] — `Option<T>` in a `gen<T>` is `option<$0>`.
+/// [`TypeShape::Param`] — `Option<T>` in a `gen<T>` is `Option<$0>`.
 /// [`typelisp_mem::instantiate`] gives back the type a particular
 /// instantiation's field has, from the value's own type; that is how the
 /// printer, which sees a struct only through its box, learns that a field is

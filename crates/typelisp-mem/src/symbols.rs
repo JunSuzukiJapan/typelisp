@@ -111,9 +111,6 @@ macro_rules! well_known_symbols {
         /// that gives each name meaning, because the table itself does. The
         /// crate does not interpret the names; it interns them, the way it
         /// interns any other string.
-        ///
-        /// Names must already be lowercase: interning folds case, so a name
-        /// spelled otherwise would intern under a different one.
         pub const BUILTIN_SYMBOLS: &[&str] = &[$($($name,)+)+];
 
         /// One constant per [`BUILTIN_SYMBOLS`] entry: the value
@@ -266,8 +263,9 @@ well_known_symbols! {
     DO => "do"
 
     "Values a well-known global may hold, compared against as symbols."
-    UPCASE => ":upcase"
-    CAPITALIZE => ":capitalize"
+    // Retired 2026-10-25 with `*print-case*`: symbols print as spelled.
+    RETIRED_UPCASE => ":upcase"
+    RETIRED_CAPITALIZE => ":capitalize"
 
     "The synthetic module `check_program` collects monomorphized specializations into."
     MONO_BUNDLE => "<monomorph specializations>"
@@ -516,7 +514,8 @@ well_known_symbols! {
     KW_PREFIX => ":prefix"
     KW_PER_LINE_PREFIX => ":per-line-prefix"
     KW_SUFFIX => ":suffix"
-    KW_DOWNCASE => ":downcase"
+    // Retired 2026-10-25 with `*print-case*`.
+    RETIRED_KW_DOWNCASE => ":downcase"
     KW_LINEAR => ":linear"
     KW_FILL => ":fill"
     KW_MISER => ":miser"
@@ -633,6 +632,38 @@ well_known_symbols! {
      handed to a builtin as a value, `(type-value TYPE)` — the id of the
      type `TYPE` writes."
     TYPE_VALUE => "type-value"
+
+    "Appended for case-sensitive names (2026-10-25): the built-in types'
+     names, so every module reads each as one symbol and a type is told
+     from another by that symbol rather than by its spelling — the island
+     included, which compares a receiver's type with `(eq ty 'Sexpr)`."
+    OPTION => "Option"
+    RESULT => "Result"
+    SEXPR => "Sexpr"
+    VECTOR => "Vector"
+    HASHTABLE => "HashTable"
+    SCOPE => "Scope"
+    CHAN => "Chan"
+    TASK_TYPE => "Task"
+    THREAD_TYPE => "Thread"
+    ARRAY => "Array"
+    STRING => "string"
+    SYMBOL => "symbol"
+    PARSE_INT_ERROR => "ParseIntError"
+    PARSE_FLOAT_ERROR => "ParseFloatError"
+    READ_ERROR => "ReadError"
+    EVAL_ERROR => "EvalError"
+    FILE_ERROR => "FileError"
+    NET_ERROR => "NetError"
+    LLVM_MODULE => "llvm-module"
+    LLVM_FUNCTION => "llvm-function"
+    LLVM_BUILDER => "llvm-builder"
+    LLVM_BASIC_BLOCK => "llvm-basic-block"
+    LLVM_VALUE => "llvm-value"
+    C_LONG => "c-long"
+    C_ULONG => "c-ulong"
+    NEVER => "!"
+    SELF_TYPE => "Self"
 }
 
 
@@ -648,7 +679,7 @@ well_known_symbols! {
 /// Every field is immutable once written, and the header is never freed.
 #[repr(C, align(8))]
 pub struct Symbol {
-    /// The canonical (lowercase) spelling: the name, with a colon in front
+    /// The spelling: the name, with a colon in front
     /// for a keyword. One allocation serves [`SymRef::name`] and
     /// [`SymRef::spelling`], which differ only by that colon.
     spelling: Box<str>,
@@ -700,7 +731,7 @@ impl SymRef {
         unsafe { &*self.0 }
     }
 
-    /// The symbol's canonical (lowercase) name — CL's `symbol-name`, so a
+    /// The symbol's name — CL's `symbol-name`, so a
     /// keyword's has no colon: `:foo`'s name is `foo`.
     ///
     /// `'static` for real, not asserted: headers are leaked. Reading a name is
@@ -835,6 +866,10 @@ pub const STD_VOCABULARY: &[u32] = &[
     wk::CONS, wk::PATH, wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32,
     wk::REPR_RATIONAL, wk::REPR_RANDOM_STATE, wk::REPR_SEXPR, wk::REPR_SCOPE, wk::REPR_VECTOR,
     wk::REPR_HASHTABLE,
+    wk::OPTION, wk::RESULT, wk::SEXPR, wk::VECTOR, wk::HASHTABLE, wk::SCOPE, wk::CHAN, wk::TASK_TYPE,
+    wk::THREAD_TYPE, wk::ARRAY, wk::STRING, wk::SYMBOL, wk::PARSE_INT_ERROR, wk::PARSE_FLOAT_ERROR,
+    wk::READ_ERROR, wk::EVAL_ERROR, wk::FILE_ERROR, wk::NET_ERROR, wk::LLVM_MODULE, wk::LLVM_FUNCTION,
+    wk::LLVM_BUILDER, wk::LLVM_BASIC_BLOCK, wk::LLVM_VALUE, wk::C_LONG, wk::C_ULONG,
 ];
 
 /// The vocabulary members owned by [`NsId::CORE`]: core-IR tags with no
@@ -996,7 +1031,7 @@ impl SymTable {
     }
 
     /// What `name` reads as in `ns` — [`intern_in`]'s rule, with the lock
-    /// already held. `name` is already lowercase.
+    /// already held.
     fn read(&mut self, ns: NsId, name: &str) -> SymRef {
         match self.find(ns, name) {
             Some(s) => s,
@@ -1109,8 +1144,7 @@ fn table() -> MutexGuard<'static, SymTable> {
 
 /// Intern `name` in module `ns`.
 ///
-/// Names are **case-insensitive**: they fold to a canonical lowercase form, so
-/// `Foo`, `FOO` and `foo` all intern to one symbol.
+/// Names are case-sensitive: `Foo`, `FOO` and `foo` are three symbols.
 ///
 /// The name means, in order: the symbol `ns`'s own table holds (one it
 /// created, a reserved word every module holds, or one it declared its own
@@ -1124,7 +1158,7 @@ fn table() -> MutexGuard<'static, SymTable> {
 /// else — `":foo"` interned in a module is a symbol of that module whose name
 /// starts with a colon, as CL's `intern` makes.
 pub fn intern_in(ns: NsId, name: &str) -> SymRef {
-    table().read(ns, &name.to_lowercase())
+    table().read(ns, name)
 }
 
 /// The symbol named `name` whose home is `ns`, creating it there if `ns`
@@ -1134,21 +1168,11 @@ pub fn intern_in(ns: NsId, name: &str) -> SymRef {
 /// re-interning a quoted symbol): the home is the answer, and consulting
 /// `std`'s exports could hand back a different symbol of the same name.
 pub fn intern_at_home(ns: NsId, name: &str) -> SymRef {
-    let key = name.to_lowercase();
     let mut t = table();
-    if let Some(s) = t.lookup(ns, &key) {
+    if let Some(s) = t.lookup(ns, name) {
         return s;
     }
-    t.create(ns, &key, NOT_WELL_KNOWN)
-}
-
-/// What `name` reads as in `ns` by [`intern_in`]'s rule, with `name` taken
-/// exactly as given rather than folded to lowercase.
-///
-/// For a definition's name, which the compiler may build with characters a
-/// reader never produces: folding would turn two definitions into one.
-pub fn intern_exact(ns: NsId, name: &str) -> SymRef {
-    table().read(ns, name)
+    t.create(ns, name, NOT_WELL_KNOWN)
 }
 
 /// A new symbol of `home` that no table holds: nothing reads as it, so a
@@ -1174,17 +1198,19 @@ pub fn intern_keyword(name: &str) -> SymRef {
     intern_in(NsId::KEYWORD, name)
 }
 
-/// The module a namespace name names — the second argument of `intern`.
-/// A name is a module path from the root with `::` between its segments
+/// The module a namespace name names — the second argument of `intern` —
+/// or `None` when there is no such module: CL's `intern` signals an error
+/// for a package that does not exist rather than making one. A name is a
+/// module path from the root with `::` between its segments
 /// (`"geometry::shapes"`), `"keyword"` is the keyword module, and `""` is the
-/// root. Segments fold to lowercase as module names do.
-pub fn ns_named(name: &str) -> NsId {
+/// root.
+pub fn ns_named(name: &str) -> Option<NsId> {
     let name = name.strip_prefix("::").unwrap_or(name);
     if name.is_empty() {
-        return NsId::ROOT;
+        return Some(NsId::ROOT);
     }
     let segments: Vec<String> = name.split("::").map(str::to_string).collect();
-    ns_of(&segments)
+    find_ns(&segments)
 }
 
 /// The keyword module's segment under the root — CL's `KEYWORD` package,
@@ -1193,8 +1219,7 @@ pub const KEYWORD_MODULE: &str = "keyword";
 
 /// [`intern_in`] at the root module — for every caller with no lexical module
 /// to work from: the prelude and the island (which *are* root), the checker
-/// building core-IR tags, and the runtime's `string->symbol`/`gensym`, whose
-/// symbols are made while the program runs rather than while it is read.
+/// building core-IR tags.
 pub fn intern(name: &str) -> SymRef {
     intern_in(NsId::ROOT, name)
 }
@@ -1210,10 +1235,10 @@ pub fn import(into: NsId, sym: SymRef) {
 
 /// The module reached from `parent` by `segment`, creating it if new.
 pub fn child_ns(parent: NsId, segment: &str) -> NsId {
-    table().child(parent, &segment.to_lowercase())
+    table().child(parent, segment)
 }
 
-/// What [`intern_exact`] would return, without creating a symbol when there
+/// What [`intern_in`] would return, without creating a symbol when there
 /// is none: for looking a written name up in a table keyed by symbols, where
 /// a name nothing defined must not leave a symbol behind.
 pub fn find_exact(ns: NsId, name: &str) -> Option<SymRef> {
@@ -1237,7 +1262,7 @@ pub fn child_ns_named(parent: NsId, name: SymRef) -> Option<NsId> {
 /// was not written from the tree.
 pub fn definition_of_path(segments: &[SymRef]) -> Option<(NsId, SymRef)> {
     let (root, segs) = segments.split_first()?;
-    if *root != intern_exact(NsId::ROOT, "") {
+    if *root != intern_in(NsId::ROOT, "") {
         return None;
     }
     let (name, modules) = segs.split_last()?;
@@ -1259,7 +1284,7 @@ pub fn find_ns(segments: &[String]) -> Option<NsId> {
     let t = table();
     let mut ns = NsId::ROOT;
     for s in segments {
-        ns = t.find_child(ns, &s.to_lowercase())?;
+        ns = t.find_child(ns, s)?;
     }
     Some(ns)
 }
@@ -1375,12 +1400,11 @@ impl SessionNames {
     /// leads to neither (a definition, or a module not loaded yet), which
     /// the `use` registers once it has resolved the path itself.
     pub fn import_written(&mut self, ns: NsId, segments: &[&str]) -> bool {
-        let lower: Vec<String> = segments.iter().map(|s| s.to_lowercase()).collect();
-        let Some(last) = lower.last() else { return false };
+        let Some(last) = segments.last() else { return false };
         let (local, what) = {
             let mut t = table();
             let mut at: Option<PathStep> = None;
-            for (i, seg) in lower.iter().enumerate() {
+            for (i, seg) in segments.iter().enumerate() {
                 let here = match at {
                     None if i == 0 && seg.is_empty() => {
                         at = Some(PathStep::Module(NsId::ROOT));
@@ -1428,14 +1452,13 @@ impl SessionNames {
     /// A reserved word cannot be shadowed: every module holds the same one,
     /// which is what lets a definition form mean the same thing everywhere.
     pub fn shadow(&mut self, ns: NsId, name: &str) -> Result<SymRef, String> {
-        let key = name.to_lowercase();
         let mut t = table();
-        let own = match t.lookup(ns, &key) {
+        let own = match t.lookup(ns, name) {
             Some(s) if s.home() == NsId::SYSTEM => {
-                return Err(format!("shadow: `{}` is a reserved word, which every module shares", key));
+                return Err(format!("shadow: `{}` is a reserved word, which every module shares", name));
             }
             Some(s) if s.home() == ns => s,
-            _ => t.create(ns, &key, NOT_WELL_KNOWN),
+            _ => t.create(ns, name, NOT_WELL_KNOWN),
         };
         self.shadowed.insert(own);
         Ok(own)
@@ -1450,19 +1473,18 @@ impl SessionNames {
     /// it there earlier, which is no reason for it to stand in front of the
     /// library's.
     pub fn read(&self, ns: NsId, name: &str) -> SymRef {
-        let key = name.to_lowercase();
         let mut t = table();
         if ns != NsId::KEYWORD {
-            if let Some(own) = t.lookup(ns, &key) {
+            if let Some(own) = t.lookup(ns, name) {
                 if own.well_known() != NOT_WELL_KNOWN || self.shadowed.contains(&own) || self.imports.contains_key(&(ns, own)) {
                     return own;
                 }
             }
-            if let Some(sym) = self.exports.get(key.as_str()) {
+            if let Some(sym) = self.exports.get(name) {
                 return *sym;
             }
         }
-        t.read(ns, &key)
+        t.read(ns, name)
     }
 
     /// What `local` stands for in `ns` by a `use`, if anything.
@@ -1488,9 +1510,8 @@ impl SessionNames {
     /// the path reached, or the type whose member it names.
     pub fn follow_path(&self, ns: NsId, segments: &[&str]) -> Result<(Vec<SymRef>, PathStep), String> {
         let mut t = table();
-        let lower: Vec<String> = segments.iter().map(|s| s.to_lowercase()).collect();
-        let (last, steps) = lower.split_last().ok_or_else(|| "an empty path".to_string())?;
-        let mut out = Vec::with_capacity(lower.len());
+        let (last, steps) = segments.split_last().ok_or_else(|| "an empty path".to_string())?;
+        let mut out = Vec::with_capacity(segments.len());
         let mut at: Option<PathStep> = None;
         for (i, seg) in steps.iter().enumerate() {
             let here = match at {
@@ -1517,7 +1538,7 @@ impl SessionNames {
         let reached = at.expect("a path has at least two segments");
         let last_sym = match reached {
             PathStep::Module(m) => t.read(m, last),
-            PathStep::Type(ty) => *self.types[&ty].get(last.as_str()).ok_or_else(|| {
+            PathStep::Type(ty) => *self.types[&ty].get(*last).ok_or_else(|| {
                 format!("`{}`: type `{}` has no member `{}`", segments.join("::"), ty.name(), last)
             })?,
         };
@@ -1578,7 +1599,7 @@ impl SessionNames {
     /// Where `name`, read in `ns` as the first segment of a path, leads
     /// ([`Self::read_path`]): a module or a type, if either.
     pub fn first_segment(&self, ns: NsId, name: &str) -> Option<PathStep> {
-        table().first_step(self, ns, &name.to_lowercase()).map(|(_, step)| step)
+        table().first_step(self, ns, name).map(|(_, step)| step)
     }
 }
 
