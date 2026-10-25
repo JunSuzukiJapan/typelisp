@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.30
+# ABI バージョン 0.3.31
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.30 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.31 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `73d3950b1aec558f`
+内容ハッシュ (FNV-1a 64): `2ff7902efef30d91`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1816,6 +1816,8 @@
 | `std::%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> Result<(),std::fileerror>` |
 | `std::%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> Result<(),std::fileerror>` |
 | `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> Result<(),std::fileerror>` |
+| `std::cmp::equal` | `rt_sexpr_equal` | `<t> (t, t) -> bool` |
+| `std::cmp::equalp` | `rt_sexpr_equalp` | `<t> (t, t) -> bool` |
 | `std::compile-file` |  | `(string, string) -> bool` |
 | `std::dump` |  | `(string) -> bool` |
 | `std::env::command-line-args` | `rt_command_line_args` | `() -> Vector<string>` |
@@ -1827,8 +1829,6 @@
 | `std::env::machine-version` | `rt_machine_version` | `() -> Option<string>` |
 | `std::env::software-type` | `rt_software_type` | `() -> string` |
 | `std::env::software-version` | `rt_software_version` | `() -> Option<string>` |
-| `std::equal` | `rt_sexpr_equal` | `<t> (t, t) -> bool` |
-| `std::equalp` | `rt_sexpr_equalp` | `<t> (t, t) -> bool` |
 | `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
 | `std::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |

@@ -2011,12 +2011,13 @@ user-visible capacity."
 ;; see `registry.rs`). Method names avoid the builtin operator/
 ;; `eq`/`lt` names on purpose: builtins cannot be redefined, and `?`/`!` name
 ;; suffixes are banned project-wide (so no `eq?`/`less?`).
-(deftrait Eq ()
+(module cmp
+(pub deftrait Eq ()
   (equals ((self Self) (other Self)) bool)
   (not-equals ((self Self) (other Self)) bool
     "The negation of `equals` — Rust's `PartialEq::ne` default."
     (not (equals self other))))
-(deftrait Ord (Eq)
+(pub deftrait Ord (Eq)
   (less ((self Self) (other Self)) bool)
   (less-equal ((self Self) (other Self)) bool
     "`a<=b` iff not `b<a`."
@@ -2026,7 +2027,7 @@ user-visible capacity."
     (less other self))
   (greater-equal ((self Self) (other Self)) bool
     "`a>=b` iff not `a<b`."
-    (not (less self other))))
+    (not (less self other)))))
 
 ;; Scalar `Eq` impls. Numbers delegate to `=`/`/=`; `string`/`char`/`bool` to
 ;; `equal` (content comparison — a `string`'s `eq` is `Rc` identity, which
@@ -2238,16 +2239,17 @@ user-visible capacity."
 ;; There is no `Neg`: `(- x)` desugars to `(- (- x x) x)`
 ;; (`check_unary_negate_or_invert`), so negation on a type variable needs
 ;; `Sub` and nothing more.
-(deftrait Add ()
+(module ops
+(pub deftrait Add ()
   (add ((self Self) (other Self)) Self))
-(deftrait Sub ()
+(pub deftrait Sub ()
   (sub ((self Self) (other Self)) Self))
-(deftrait Mul ()
+(pub deftrait Mul ()
   (mul ((self Self) (other Self)) Self))
 ;; `Div` names its result type: CL's `/` on two integers is a `rational`, so
 ;; `int`'s `Output` is `rational` while every other number divides into
 ;; itself. The others name it `Self`'s own type.
-(deftrait Div ()
+(pub deftrait Div ()
   (:type Output)
   (div ((self Self) (other Self)) Output))
 ;; `remainder`, not `rem`: `rem` is already a method on every numeric type
@@ -2255,11 +2257,11 @@ user-visible capacity."
 ;; define. The impls delegate to it, and `(rem a b)` on a bounded type
 ;; variable resolves here through the same operator spelling as `+`, so
 ;; the short name is still what generic code writes.
-(deftrait Rem ()
+(pub deftrait Rem ()
   (remainder ((self Self) (other Self)) Self))
 ;; The bitwise catalog, spelled apart from the `logand`/`logior`/`logxor`/
 ;; `lognot` builtins for the same reason `add` is spelled apart from `+`.
-(deftrait Bits ()
+(pub deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
   (bit-or ((self Self) (other Self)) Self)
   (bit-xor ((self Self) (other Self)) Self)
@@ -2277,7 +2279,7 @@ user-visible capacity."
 ;; differs between the numbers (an `int` divides into a `rational`), and a
 ;; supertrait must pin every associated type. Generic code that divides adds
 ;; `(Div T)`, or `(Div T (Output T))` to divide within `T`.
-(deftrait Number (Add Sub Mul Rem Ord))
+(pub deftrait Number (Add Sub Mul Rem Ord)))
 
 ;; `mod`/`rem` for the widths that did not have them. Same bodies the
 ;; `i32` (integer) and `f64` (float) methods above carry — floored for

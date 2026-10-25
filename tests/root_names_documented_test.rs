@@ -1,5 +1,5 @@
-//! Every free function, macro and global the standard library defines in its
-//! module `std` is named in the reference (`docs/ja/reference/`).
+//! Every free function, macro and global the standard library defines in
+//! `std` and its modules is named in the reference (`docs/ja/reference/`).
 //!
 //! What sits there is in every program's scope. A helper the library needs
 //! but a user never writes belongs in the internal module (`std::%internal`)
@@ -16,14 +16,19 @@ use std::path::Path as FsPath;
 
 use typelisp::{load_prelude, Checker, Heap, Interp};
 
-/// `std`'s own free functions, macros and globals once the prelude is in.
+/// The free functions, macros and globals of `std` and its modules but the
+/// internal one, once the prelude is in.
 fn root_names() -> BTreeSet<String> {
     let mut heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
-    let root = chk.registry().module_at(typelisp::NsId::STD).expect("the standard library's module");
-    root.fns.keys().chain(root.macros.keys()).chain(root.vars.keys()).map(str::to_string).collect()
+    chk.registry()
+        .namespaces()
+        .filter(|m| typelisp::in_std(m.ns) && m.ns != typelisp::internal_ns())
+        .flat_map(|m| m.fns.keys().chain(m.macros.keys()).chain(m.vars.keys()))
+        .map(str::to_string)
+        .collect()
 }
 
 fn markdown_under(dir: &FsPath, out: &mut String) {

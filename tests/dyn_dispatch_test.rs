@@ -563,10 +563,10 @@ fn a_where_bound_is_checked_against_a_trait_object() {
         "{}(match (as-dyn-error (parse-int \"x\")) ((ok _) false) ((err e) (same e e)))",
         same
     ));
-    assert!(err.contains("type `:dyn error` does not implement trait `std::eq`"), "{}", err);
+    assert!(err.contains("type `:dyn error` does not implement trait `std::cmp::eq`"), "{}", err);
     // `()` has no name either, and is refused at the call, not inside `same`.
     let err = common::check_err(&format!("{}(same () ())", same));
-    assert!(err.contains("type `()` does not implement trait `std::eq`"), "{}", err);
+    assert!(err.contains("type `()` does not implement trait `std::cmp::eq`"), "{}", err);
     // Its own trait is a bound it meets.
     assert_eq!(
         eval_string("(match (as-dyn-error (parse-int \"x\")) ((ok _) \"\") ((err e) (describe-error e)))"),

@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -821,6 +821,7 @@ impl Registry {
         let mut sync = Namespace::new(crate::types::std_module("sync"));
         let mut symbol = Namespace::new(crate::types::std_module("symbol"));
         let mut process = Namespace::new(crate::types::std_module("process"));
+        let mut cmp = Namespace::new(crate::types::std_module("cmp"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -1095,8 +1096,8 @@ impl Registry {
             type_params: vec!["t".to_string()],
             ..FnSig::builtin(vec![tvar("t"), tvar("t")], Type::Bool)
         };
-        std_ns.fns.insert("equal".to_string(), eq_generic());
-        std_ns.fns.insert("equalp".to_string(), eq_generic());
+        cmp.fns.insert("equal".to_string(), eq_generic());
+        cmp.fns.insert("equalp".to_string(), eq_generic());
         // `gensym` is *not* here: it moved into the prelude in Phase 4c, so
         // that CL's `*gensym-counter*` could be a real variable a program can
         // read and set. A builtin's counter lived on the `Heap` and nothing
@@ -1148,7 +1149,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
