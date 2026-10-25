@@ -31,11 +31,11 @@ use crate::reader::Reader;
 ///
 /// `Option<Sexpr>` inside them is niche-represented — `some v` *is* `v` — so
 /// it builds no box of its own.
-const OPTION_SEXPR: TypeSpec = TypeSpec::Named(StdModule::STD, "Option", &[spec::SEXPR]);
+const OPTION_SEXPR: TypeSpec = TypeSpec::Named(StdModule::OPTION, "Option", &[spec::SEXPR]);
 const READ_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "ReadError", &[]);
-pub const READ_RESULT_TYPE: TypeSpec = TypeSpec::Named(StdModule::STD, "Result", &[OPTION_SEXPR, READ_ERROR]);
+pub const READ_RESULT_TYPE: TypeSpec = TypeSpec::Named(StdModule::RESULT, "Result", &[OPTION_SEXPR, READ_ERROR]);
 pub const READ_DATUM_PAIR_TYPE: TypeSpec = TypeSpec::Named(StdModule::STD, "cons-cell", &[OPTION_SEXPR, spec::INT]);
-pub const READ_DATUM_RESULT_TYPE: TypeSpec = TypeSpec::Named(StdModule::STD, "Result", &[READ_DATUM_PAIR_TYPE, READ_ERROR]);
+pub const READ_DATUM_RESULT_TYPE: TypeSpec = TypeSpec::Named(StdModule::RESULT, "Result", &[READ_DATUM_PAIR_TYPE, READ_ERROR]);
 
 /// The evaluator these two builtins read *with*, so `#.` and macro characters
 /// work the same way in a program's own `read` as they do in the loader's —

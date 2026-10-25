@@ -1269,10 +1269,7 @@ mod native_method_list_tests {
             for &ty in *type_locals {
                 let type_local = typelisp_mem::symbols::well_known_symbol(ty).name();
                 let def = registry
-                    .module_at(typelisp_mem::NsId::STD)
-                    .expect("the registry always has the standard library's module")
-                    .types
-                    .get_sym(typelisp_mem::symbols::well_known_symbol(ty))
+                    .type_def(&crate::Path::builtin(ty))
                     .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));
                 for (method, f) in &def.assoc {
                     if !f.builtin {

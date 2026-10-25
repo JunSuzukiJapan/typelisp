@@ -597,9 +597,9 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
     let data = is_option_of_sexpr(elem_ty);
     let mut s = RootScope::new(heap);
     let var = s.intern_symbol(VECTOR_LITERAL_VAR);
-    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::std("Vector"), vec![elem_ty.clone()]))?;
+    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![elem_ty.clone()]))?;
     s.push_root(vec_ty);
-    let new = forms::member_form(&mut s, &Path::std("Vector"), "new")?;
+    let new = forms::member_form(&mut s, &Path::builtin(typelisp_mem::wk::VECTOR), "new")?;
     s.push_root(new);
     let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
     s.push_root(new_call);
@@ -4122,7 +4122,7 @@ impl Checker {
             match payload {
                 Some(value) => Node::SomeOf { ty: ty.clone(), value: Box::new(value) },
                 None => Node::Construct {
-                    owner: Path::std("Sexpr"),
+                    owner: Path::builtin(typelisp_mem::wk::SEXPR),
                     targs: Vec::new(),
                     variant: SEXPR_RESERVED_VARIANT,
                     mutable: false,
@@ -6723,7 +6723,7 @@ impl Checker {
     /// through its vtable and falling back to the `Sexpr` catalog.
     fn sexpr_has_instance_method(&self, method: &str) -> bool {
         self.info.reg
-            .type_def(&Path::std("Sexpr"))
+            .type_def(&Path::builtin(typelisp_mem::wk::SEXPR))
             .and_then(|d| d.assoc.get(method))
             .is_some_and(|af| af.instance)
     }
@@ -9131,7 +9131,7 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
         let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
-        let elem_ty = match literal_element_type(expected, &Path::std("Vector")) {
+        let elem_ty = match literal_element_type(expected, &Path::builtin(typelisp_mem::wk::VECTOR)) {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &elems, "#(..)", "Vector<T>")?,
         };
@@ -9200,7 +9200,7 @@ impl Checker {
         };
         let dims: Vec<Value> = (0..heap.struct_field_count(dims_id)).map(|i| heap.struct_field(dims_id, i)).collect();
         let data: Vec<Value> = (0..heap.struct_field_count(data_id)).map(|i| heap.struct_field(data_id, i)).collect();
-        let elem_ty = match literal_element_type(expected, &Path::std("Array")) {
+        let elem_ty = match literal_element_type(expected, &Path::in_ns(crate::types::std_module("array"), "Array")) {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &data, "#nA(..)", "Array<T>")?,
         };
@@ -9465,7 +9465,7 @@ impl Checker {
                         // regardless of `use` status, so this bypasses
                         // `resolve_ctor` and goes straight to the known
                         // builtin path/variant index.
-                        return self.check_construct(heap, interp, env, (&Path::std("Option"), OPTION_NONE), &[], &[], expected);
+                        return self.check_construct(heap, interp, env, (&Path::builtin(typelisp_mem::wk::OPTION), OPTION_NONE), &[], &[], expected);
                     }
                     // The `Sexpr::nil` branch that used to sit here is gone:
                     // the empty list is `Option<Sexpr>`'s `none` now, which
@@ -10573,7 +10573,7 @@ impl Checker {
     /// [`Self::receiver_method`].
     fn sexpr_has_method(&self, method: &str) -> bool {
         self.info.reg
-            .type_def(&Path::std("Sexpr"))
+            .type_def(&Path::builtin(typelisp_mem::wk::SEXPR))
             .is_some_and(|d| d.assoc.get(method).is_some_and(|af| af.instance))
     }
 
@@ -10596,7 +10596,7 @@ impl Checker {
     /// `Sexpr` scrutinee while quietly failing on an `Option<Sexpr>` one.
     fn assoc_receiver_path(&self, ty: &Type, method: &str) -> Option<Path> {
         match ty {
-            t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::std("Sexpr")),
+            t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::builtin(typelisp_mem::wk::SEXPR)),
             other => nominal_path(other),
         }
     }
@@ -10736,7 +10736,7 @@ impl Checker {
             }
             MethodTarget::DynSexpr => {
                 let recv = Checked::of(Node::DynValue { value: Box::new(recv) }, sexpr_ty());
-                let type_fq = Path::std("Sexpr");
+                let type_fq = Path::builtin(typelisp_mem::wk::SEXPR);
                 self.check_assoc_call(
                     heap,
                     interp,
@@ -12221,7 +12221,7 @@ impl Checker {
                 wrap_some(self, inner, Type::Str)
             }
             None => {
-                let ty = Type::Named(Path::std("Option"), vec![Type::Str]);
+                let ty = Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![Type::Str]);
                 option_none(self, ty)
             }
         }
@@ -13108,7 +13108,7 @@ impl Checker {
     ) -> Result<Value, Error> {
         let a = heap.intern_symbol(&self.gensym_place());
         let idx = heap.intern_symbol(&self.gensym_place());
-        let empty = self.the_form(heap, &Path::std("Vector"), &Type::Int, "new")?;
+        let empty = self.the_form(heap, &Path::builtin(typelisp_mem::wk::VECTOR), &Type::Int, "new")?;
         let empty = forms::rooted(heap, empty);
         let push = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "push"));
         let progn = heap.intern_symbol("progn");
@@ -13649,9 +13649,9 @@ impl Checker {
         let probe = forms::rooted(heap, probe);
         let ty = self.check_at(heap, interp, env, probe, None, None)?.ty.clone();
         match acc.acc {
-            Acc::Collect | Acc::Append => self.the_form(heap, &Path::std("Vector"), &ty, "new"),
+            Acc::Collect | Acc::Append => self.the_form(heap, &Path::builtin(typelisp_mem::wk::VECTOR), &ty, "new"),
             Acc::Sum => Ok(forms::numeric_identity_literal(heap, Some(&ty), 0)),
-            Acc::Maximize | Acc::Minimize => self.the_form(heap, &Path::std("Option"), &ty, "none"),
+            Acc::Maximize | Acc::Minimize => self.the_form(heap, &Path::builtin(typelisp_mem::wk::OPTION), &ty, "none"),
             Acc::Count => unreachable!("handled above"),
         }
     }
@@ -15575,7 +15575,7 @@ impl Checker {
         // `variants.len()` with nothing subtracted.
         let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
         let sexpr_variants =
-            || self.info.reg.type_def(&Path::std("Sexpr")).expect("sexpr is always registered").variants.len();
+            || self.info.reg.type_def(&Path::builtin(typelisp_mem::wk::SEXPR)).expect("sexpr is always registered").variants.len();
         // The retired `bignum` slot (`SEXPR_RETIRED_BIGNUM`) is neither writable
         // nor matchable, so it too is off the universe — one less than the
         // table says, in both the flat and the plain form.
@@ -16915,7 +16915,7 @@ pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<V
 /// `Some(inner)` as a [`Checked`] — `Checker::check_as`'s `try-as` wrapper for a
 /// total conversion's already-computed result.
 fn wrap_some(checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
-    let ty = Type::Named(Path::std("Option"), vec![target.clone()]);
+    let ty = Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![target.clone()]);
     checker.option_value(&ty, Some(inner))
 }
 
@@ -17073,13 +17073,13 @@ fn has_open_hole(t: &Type) -> bool {
 /// check (below) that every individual variadic argument satisfies the
 /// declared element type before it's wrapped into the list.
 fn sexpr_ty() -> Type {
-    Type::Named(Path::std("Sexpr"), vec![])
+    Type::Named(Path::builtin(typelisp_mem::wk::SEXPR), vec![])
 }
 
 /// `Option<Sexpr>` — the type an S-expression datum has once the empty list
 /// is `none` (see [`is_option_of_sexpr`]).
 fn option_of_sexpr() -> Type {
-    Type::Named(Path::std("Option"), vec![sexpr_ty()])
+    Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![sexpr_ty()])
 }
 
 /// Does an expected type ask for an S-expression?

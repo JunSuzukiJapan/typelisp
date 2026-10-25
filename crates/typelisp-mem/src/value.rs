@@ -181,11 +181,11 @@ pub struct TypeId(pub(crate) u32);
 /// type is interned on first use like any other; only these need to be
 /// nameable from Rust as constants.
 pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
-    (StdModule::STD, "Option", &[]),
-    (StdModule::STD, "Result", &[]),
-    (StdModule::STD, "Vector", &[]),
+    (StdModule::OPTION, "Option", &[]),
+    (StdModule::RESULT, "Result", &[]),
+    (StdModule::VEC, "Vector", &[]),
     (StdModule::STD, "cons-cell", &[]),
-    (StdModule::STD, "HashTable", &[]),
+    (StdModule::COLLECTIONS, "HashTable", &[]),
     (StdModule::STD, "Scope", &[]),
     (StdModule::STD, "scope-frame", &[]),
     (StdModule::STD, "ReadError", &[]),
@@ -196,10 +196,10 @@ pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
     (StdModule::TIME, "internal-time", &[]),
     (StdModule::REPL, "heap-info", &[]),
     (StdModule::STD, "NetError", &[]),
-    (StdModule::STD, "Sexpr", &[]),
-    (StdModule::STD, "Option", &[TypeId::SEXPR]),
-    (StdModule::STD, "Vector", &[TypeId::OPTION_SEXPR]),
-    (StdModule::STD, "Array", &[TypeId::OPTION_SEXPR]),
+    (StdModule::SEXPR, "Sexpr", &[]),
+    (StdModule::OPTION, "Option", &[TypeId::SEXPR]),
+    (StdModule::VEC, "Vector", &[TypeId::OPTION_SEXPR]),
+    (StdModule::ARRAY, "Array", &[TypeId::OPTION_SEXPR]),
 ];
 
 impl TypeId {

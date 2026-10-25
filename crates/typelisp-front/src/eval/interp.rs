@@ -758,7 +758,7 @@ impl Interp {
         // or a pattern to read here.
         // Its elements do print, though, and they are all of the one type
         // argument: a uniform template says so.
-        let vector = Path::std("Vector");
+        let vector = Path::builtin(typelisp_mem::wk::VECTOR);
         root.get_or_create(&vector.parent()).types.insert(
             vector.last_segment().to_string(),
             scope::TypeEntry::Struct {
@@ -4328,9 +4328,9 @@ const READER_MACRO_GLUE: &str = "call-reader-macro";
 /// `tests/type_identity_guard_test.rs` checks against the registry. Its inner
 /// `Option<Sexpr>` is [`TypeId::OPTION_SEXPR`].
 pub const MACROEXPAND_RESULT_TYPE: TypeSpec = TypeSpec::Named(
-    StdModule::STD,
+    StdModule::RESULT,
     "Result",
-    &[TypeSpec::Named(StdModule::STD, "Option", &[spec::SEXPR]), TypeSpec::Named(StdModule::STD, "EvalError", &[])],
+    &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::SEXPR]), TypeSpec::Named(StdModule::STD, "EvalError", &[])],
 );
 
 /// `eval`'s result type — the same as `macroexpand`'s, and the same fixed

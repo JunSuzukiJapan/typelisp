@@ -3242,6 +3242,10 @@ mod tests {
     fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
         h.names().declare_module(typelisp_mem::symbols::ns_of(&["m".to_string()]));
         h.names().declare_module(typelisp_front::types::std_module("symbol"));
+        use typelisp_mem::StdModule;
+        for m in [StdModule::OPTION, StdModule::RESULT, StdModule::VEC, StdModule::SEXPR, StdModule::COLLECTIONS] {
+            h.names().declare_module(m.ns());
+        }
         Ok(crate::Reader::new()
             .read_all_in_spanned_within(h, "<core>", src, typelisp_mem::NsId::CORE)?
             .into_iter()
@@ -3349,7 +3353,7 @@ mod tests {
 
     /// A `point` with two int fields and an `option` over a `sexpr`, which is
     /// enough to show both a struct's and an enum's field kinds.
-    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::Option (none some) (() (sexpr)))"];
+    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::option::Option (none some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
@@ -3479,19 +3483,19 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc ::std::Vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::i32) (var v) (int-any-width 0))"),
+            bridged("(assoc ::std::vec::Vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::i32) (var v) (int-any-width 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
-            bridged("(assoc ::std::Vector push true unit ((vector sexpr) sexpr) (type-unit) (var v) (var x))"),
+            bridged("(assoc ::std::vec::Vector push true unit ((vector sexpr) sexpr) (type-unit) (var v) (var x))"),
             r#"(vector-op "push" 6 (var "v" false) (var "x" false))"#
         );
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc ::std::Vector new false (vector int-any-width) () (type-named ::std::Vector (type-named ::std::i32)))"),
-            format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::Vector (type-named ::std::i32))"))
+            bridged("(assoc ::std::vec::Vector new false (vector int-any-width) () (type-named ::std::vec::Vector (type-named ::std::i32)))"),
+            format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::vec::Vector (type-named ::std::i32))"))
         );
     }
 
@@ -3502,13 +3506,13 @@ mod tests {
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc ::std::HashTable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
+            bridged("(assoc ::std::collections::HashTable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
             r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc ::std::HashTable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::i32) (var h) (var n) (var i))"),
+            bridged("(assoc ::std::collections::HashTable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::i32) (var h) (var n) (var i))"),
             r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
@@ -3534,10 +3538,10 @@ mod tests {
     /// `Repr::Scope` carries one.
     #[test]
     fn a_scope_routes_on_what_it_holds() {
-        let printed = bridged("(assoc ::std::Scope get true enum ((scope handle) str) (type-named ::std::Option (type-named ::std::llvm-value)) (var e) (var n))");
+        let printed = bridged("(assoc ::std::Scope get true enum ((scope handle) str) (type-named ::std::option::Option (type-named ::std::llvm-value)) (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc ::std::Scope get true enum ((scope int-any-width) str) (type-named ::std::Option (type-named ::std::i32)) (var e) (var n))"),
+            bridged("(assoc ::std::Scope get true enum ((scope int-any-width) str) (type-named ::std::option::Option (type-named ::std::i32)) (var e) (var n))"),
             r#"(assoc Scope "get" true "tl_std::Scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -3556,13 +3560,13 @@ mod tests {
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
-            bridged_with(&DEFS, "(construct ::std::Option (type-named ::std::Option (type-named ::std::Sexpr)) 1 false (sexpr) (var x))"),
-            format!(r#"(construct false false {} 1 (6 var "x" false))"#, type_nodes("(type-named ::std::Option (type-named ::std::Sexpr))"))
+            bridged_with(&DEFS, "(construct ::std::option::Option (type-named ::std::option::Option (type-named ::std::sexpr::Sexpr)) 1 false (sexpr) (var x))"),
+            format!(r#"(construct false false {} 1 (6 var "x" false))"#, type_nodes("(type-named ::std::option::Option (type-named ::std::sexpr::Sexpr))"))
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
         assert_eq!(
-            bridged_with(&DEFS, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
+            bridged_with(&DEFS, &format!("(construct ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
             format!("(construct true false () {SEXPR_CONS} (int-any-width 0 1) (int-any-width 0 2))")
         );
     }
@@ -3622,7 +3626,7 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::std::Option (type-named ::std::Option (type-named ::std::Sexpr)) 0 false ()) (int-any-width 0)) ((pat-ctor ::std::Option (type-named ::std::Option (type-named ::std::Sexpr)) 1 false (sexpr) (pat-bind x)) (var x)))"),
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::std::option::Option (type-named ::std::option::Option (type-named ::std::sexpr::Sexpr)) 0 false ()) (int-any-width 0)) ((pat-ctor ::std::option::Option (type-named ::std::option::Option (type-named ::std::sexpr::Sexpr)) 1 false (sexpr) (pat-bind x)) (var x)))"),
             r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x" 2)) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from

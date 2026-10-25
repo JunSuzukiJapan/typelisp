@@ -59,8 +59,8 @@ fn list_of_a_struct_instance_and_an_int_type_checks_as_an_option_sexpr() {
     assert_eq!(
         check(src).expect("check failed"),
         Some(Type::Named(
-            typelisp::Path::std("Option"),
-            vec![Type::Named(typelisp::Path::std("Sexpr"), vec![])]
+            typelisp::Path::builtin(typelisp::mem::wk::OPTION),
+            vec![Type::Named(typelisp::Path::builtin(typelisp::mem::wk::SEXPR), vec![])]
         ))
     );
 }

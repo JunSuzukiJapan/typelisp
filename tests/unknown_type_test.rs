@@ -112,9 +112,10 @@ fn a_mismatch_names_types_as_they_are_written() {
 fn types_display_in_source_syntax() {
     // No session is installed here, so nothing is written from a module that
     // sees the standard library's names: a `std` type is its whole path.
-    let named = |n: &str, args: Vec<Type>| Type::Named(Path::std(n), args);
-    assert_eq!(named("Vector", vec![named("Option", vec![Type::Int])]).to_string(), "std::Vector<std::Option<int>>");
-    assert_eq!(named("HashTable", vec![Type::Str, Type::I32]).to_string(), "std::HashTable<string,i32>");
+    use typelisp::mem::wk;
+    let named = |ty: u32, args: Vec<Type>| Type::Named(Path::builtin(ty), args);
+    assert_eq!(named(wk::VECTOR, vec![named(wk::OPTION, vec![Type::Int])]).to_string(), "std::vec::Vector<std::option::Option<int>>");
+    assert_eq!(named(wk::HASHTABLE, vec![Type::Str, Type::I32]).to_string(), "std::collections::HashTable<string,i32>");
     assert_eq!(Type::Named(Path::of(&["geo", "point"]), vec![]).to_string(), "geo::point");
     assert_eq!(Type::Dyn(Path::root("error"), vec![]).to_string(), ":dyn error");
     assert_eq!(Type::Fn(vec![Type::Int, Type::Char], None, Box::new(Type::Bool)).to_string(), "(fn (int char) bool)");

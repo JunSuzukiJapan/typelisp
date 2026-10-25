@@ -88,9 +88,10 @@ impl Path {
     }
 
     /// The built-in type whose name is the vocabulary symbol `ty`
-    /// (`wk::OPTION` ...), in the standard library's module.
+    /// (`wk::OPTION` ...), in the module of the standard library that defines
+    /// it (`StdModule::of_builtin_type`).
     pub fn builtin(ty: u32) -> Path {
-        Path { ns: NsId::STD, name: symbols::well_known_symbol(ty) }
+        Path { ns: typelisp_mem::StdModule::of_builtin_type(ty).ns(), name: symbols::well_known_symbol(ty) }
     }
 
     /// `name` inside the standard library's module, `std::name`.

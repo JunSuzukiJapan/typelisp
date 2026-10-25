@@ -170,7 +170,7 @@ pub fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
     if has_default {
         decl_ty.clone()
     } else {
-        Type::Named(Path::std("Option"), vec![decl_ty.clone()])
+        Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![decl_ty.clone()])
     }
 }
 
@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections", "array", "option", "result", "vec", "sexpr"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -826,12 +826,19 @@ impl Registry {
         let mut eval = Namespace::new(crate::types::std_module("eval"));
         let mut num = Namespace::new(crate::types::std_module("num"));
         let mut fmt = Namespace::new(crate::types::std_module("fmt"));
-        for def in builtin_sum_defs() {
+        let mut option = Namespace::new(typelisp_mem::StdModule::OPTION.ns());
+        let mut result = Namespace::new(typelisp_mem::StdModule::RESULT.ns());
+        let mut vec = Namespace::new(typelisp_mem::StdModule::VEC.ns());
+        let mut sexpr_ns = Namespace::new(typelisp_mem::StdModule::SEXPR.ns());
+        let mut collections = Namespace::new(typelisp_mem::StdModule::COLLECTIONS.ns());
+        option.add_type(option_def());
+        result.add_type(result_def());
+        for def in builtin_error_defs() {
             std_ns.add_type(def);
         }
-        // `Sexpr` is the one type whose data constructors (`nil`/`int`/`str`/
-        // ...) stay reachable as bare names without a `use` — so `(Int 5)`/
-        // `(Nil)` datum literals stay writable. `Option`/`Result`/the error
+        // `Sexpr` is the one type whose data constructors (`int`/`str`/...)
+        // are reachable as bare names without a `use` — so `(int 5)` datum
+        // literals stay writable. `Option`/`Result`/the error
         // types' constructors are `Type::ctor` (or `use`d) only — see
         // `Checker::check_use`. The one exception is the `cons` variant: its
         // bare name is removed here so `(cons a b)` resolves to the free
@@ -839,12 +846,17 @@ impl Registry {
         // `Sexpr` cons cell. Internal `Sexpr` cons construction (`list`/
         // quasiquote/`&rest`) goes through `Checker::sexpr_cons_ctor`/
         // `sexpr-cons` directly instead of this bare name.
+        // The constructors are `std`'s own while the type is `std::sexpr`'s:
+        // several are spelled as the primitive types they hold
+        // (`int`, `f64`, `char` ...), and a name `std::prelude` offers is one
+        // path, so the constructor and the primitive type have to be one
+        // module's two definitions of it.
         let def = sexpr_def();
         std_ns.register_ctors(&def.name, &def.variants);
         std_ns.ctors.remove("cons");
-        std_ns.add_type(def);
-        std_ns.add_type(hashtable_def());
-        std_ns.add_type(vector_def());
+        sexpr_ns.add_type(def);
+        collections.add_type(hashtable_def());
+        vec.add_type(vector_def());
         thread.add_type(task_def());
         thread.add_type(thread_def());
         sync.add_type(chan_def());
@@ -1152,7 +1164,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result, vec, sexpr_ns, collections].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
@@ -1338,7 +1350,7 @@ fn builtin_adt(
 
 /// `Option<T> = Some(T) | None`.
 fn option_def() -> AdtDef {
-    builtin_adt(Path::std("Option"), &["T"], AdtKind::Sum, vec![
+    builtin_adt(Path::builtin(typelisp_mem::wk::OPTION), &["T"], AdtKind::Sum, vec![
         Variant { name: "some".to_string(), fields: vec![tvar("T")] },
         Variant { name: "none".to_string(), fields: vec![] },
     ], BTreeMap::new())
@@ -1346,7 +1358,7 @@ fn option_def() -> AdtDef {
 
 /// `Result<T, E> = Ok(T) | Err(E)`.
 fn result_def() -> AdtDef {
-    builtin_adt(Path::std("Result"), &["T", "E"], AdtKind::Sum, vec![
+    builtin_adt(Path::builtin(typelisp_mem::wk::RESULT), &["T", "E"], AdtKind::Sum, vec![
         Variant { name: "ok".to_string(), fields: vec![tvar("T")] },
         Variant { name: "err".to_string(), fields: vec![tvar("E")] },
     ], BTreeMap::new())
@@ -1485,7 +1497,7 @@ fn register_stream_builtins(ns: &mut Namespace) {
     native(
         "file-list-directory",
         vec![Type::Str],
-        result_of(Type::Named(Path::std("Vector"), vec![Type::Str]), file_err.clone()),
+        result_of(Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Str]), file_err.clone()),
     );
     native("file-create-directories", vec![Type::Str], unit_or_err);
     // CL's `file-author`, spelled with the routing prefix. `Option` inside
@@ -1535,7 +1547,7 @@ fn register_net_builtins(ns: &mut Namespace) {
     native(
         "net-resolve-finish",
         vec![h.clone()],
-        result_of(option_of(Type::Named(Path::std("Vector"), vec![Type::Str])), net_err.clone()),
+        result_of(option_of(Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Str])), net_err.clone()),
     );
     native("net-connect-begin", vec![Type::Str], result_of(h.clone(), net_err.clone()));
     native("net-connect-finish", vec![h.clone()], unit_or_err.clone());
@@ -1567,13 +1579,13 @@ fn register_net_builtins(ns: &mut Namespace) {
     native("net-udp-bind", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
     native(
         "net-udp-send-to",
-        vec![h.clone(), Type::Str, Type::Named(Path::std("Vector"), vec![Type::Int])],
+        vec![h.clone(), Type::Str, Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Int])],
         result_of(Type::Bool, net_err.clone()),
     );
     native(
         "net-udp-recv",
         vec![h.clone()],
-        result_of(option_of(Type::Named(Path::std("Vector"), vec![Type::Int])), net_err.clone()),
+        result_of(option_of(Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Int])), net_err.clone()),
     );
     native("net-udp-last-sender", vec![h.clone()], result_of(Type::Str, net_err.clone()));
     native("net-listen", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
@@ -1643,7 +1655,7 @@ fn register_system_builtins(env: &mut Namespace, thread: &mut Namespace, time: &
     // `typl`, the executable under AOT — so one source file can be run either
     // way and index its arguments identically. See
     // `sys_builtin::COMMAND_LINE_ARGS` for how the two are made to agree.
-    native(env, "command-line-args", vec![], Type::Named(Path::std("Vector"), vec![Type::Str]));
+    native(env, "command-line-args", vec![], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Str]));
     // `none` covers both "unset" and "not valid Unicode": a `string` here is
     // Rust's, so bytes that aren't UTF-8 have no value to hand back.
     native(env, "getenv", vec![Type::Str], option_of(Type::Str));
@@ -1811,7 +1823,7 @@ fn sexpr_def() -> AdtDef {
     let variants = (0..sv::COUNT)
         .map(|v| Variant { name: sv::NAMES[v].to_string(), fields: sexpr_variant_fields(v) })
         .collect();
-    builtin_adt(Path::std("Sexpr"), &[], AdtKind::Sum, variants, sexpr_assoc())
+    builtin_adt(Path::builtin(typelisp_mem::wk::SEXPR), &[], AdtKind::Sum, variants, sexpr_assoc())
 }
 
 /// The fields of `Sexpr`'s variant number `v`.
@@ -1876,11 +1888,11 @@ fn sexpr_variant_fields(v: usize) -> Vec<Type> {
         sv::I32 => vec![Type::I32],
         // `#(..)` and `#nA(..)`. The payload is the collection box itself,
         // so construction and extraction are both the identity, like `str`.
-        sv::VECTOR => vec![Type::Named(Path::std("Vector"), vec![option_of(sexpr())])],
-        sv::ARRAY => vec![Type::Named(Path::std("Array"), vec![option_of(sexpr())])],
+        sv::VECTOR => vec![Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![option_of(sexpr())])],
+        sv::ARRAY => vec![Type::Named(Path::in_ns(crate::types::std_module("array"), "Array"), vec![option_of(sexpr())])],
         // `#{..}`. A tuple's type depends on its arity, so the payload is a
         // fresh vector of the elements rather than the box itself.
-        sv::TUPLE => vec![Type::Named(Path::std("Vector"), vec![option_of(sexpr())])],
+        sv::TUPLE => vec![Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![option_of(sexpr())])],
         _ => unreachable!("Sexpr has {} variants, not {}", sv::COUNT, v + 1),
     }
 }
@@ -1938,7 +1950,7 @@ fn symbol_assoc() -> BTreeMap<String, AssocFn> {
 }
 
 fn sexpr() -> Type {
-    Type::Named(Path::std("Sexpr"), vec![])
+    Type::Named(Path::builtin(typelisp_mem::wk::SEXPR), vec![])
 }
 
 /// `universal-time` (a prelude `defstruct`): a CL universal time split into
@@ -1964,11 +1976,11 @@ pub fn heap_info() -> Type {
 }
 
 fn hashtable_ty() -> Type {
-    Type::Named(Path::std("HashTable"), vec![tvar("K"), tvar("V")])
+    Type::Named(Path::builtin(typelisp_mem::wk::HASHTABLE), vec![tvar("K"), tvar("V")])
 }
 
 pub(super) fn option_of(t: Type) -> Type {
-    Type::Named(Path::std("Option"), vec![t])
+    Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![t])
 }
 
 /// One of [`builtin_error_defs`]' concrete error types, as a `Type` — the
@@ -1979,7 +1991,7 @@ fn error_ty(ty: u32) -> Type {
 }
 
 fn result_of(t: Type, e: Type) -> Type {
-    Type::Named(Path::std("Result"), vec![t, e])
+    Type::Named(Path::builtin(typelisp_mem::wk::RESULT), vec![t, e])
 }
 
 /// `HashTable<K, V>`: a builtin (Rust-implemented) mutable hash map, with no
@@ -2048,25 +2060,25 @@ fn hashtable_def() -> AdtDef {
     // this snapshot, the same way `vector-iter<T>` walks `Vector<T>`.
     assoc.insert(
         "keys".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("Vector"), vec![tvar("K")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![tvar("K")])), instance: true, builtin: true },
     );
     assoc.insert(
         "values".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("Vector"), vec![tvar("V")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![tvar("V")])), instance: true, builtin: true },
     );
     assoc.insert(
         "entries".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("Vector"), vec![Type::Named(Path::std("cons-cell"), vec![tvar("K"), tvar("V")])])),
+            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Named(Path::std("cons-cell"), vec![tvar("K"), tvar("V")])])),
             instance: true,
             builtin: true,
         },
     );
-    builtin_adt(Path::std("HashTable"), &["K", "V"], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::builtin(typelisp_mem::wk::HASHTABLE), &["K", "V"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 fn vector_ty() -> Type {
-    Type::Named(Path::std("Vector"), vec![tvar("T")])
+    Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![tvar("T")])
 }
 
 /// `Vector<T>`: a builtin growable sequence. Reuses the same boxed-struct
@@ -2115,7 +2127,7 @@ fn vector_def() -> AdtDef {
         "pop".to_string(),
         AssocFn { sig: FnSig::builtin(vec![vector_ty()], option_of(tvar("T"))), instance: true, builtin: true },
     );
-    builtin_adt(Path::std("Vector"), &["T"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::builtin(typelisp_mem::wk::VECTOR), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Task<T>`, the type `(task (f ...))` yields.

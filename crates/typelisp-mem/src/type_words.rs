@@ -277,7 +277,7 @@ mod tests {
         let m = child_ns(NsId::STD, "type-words-test");
         let int = crate::intern_type(TypeShape::named(NsId::STD, "int", &[]));
         let gen = crate::intern_type(TypeShape::named(m, "gen", &[int, TypeId::OPTION_SEXPR]));
-        let template = crate::intern_type(TypeShape::named(NsId::STD, "Option", &[crate::intern_type(TypeShape::Param(1))]));
+        let template = crate::intern_type(TypeShape::named(crate::StdModule::OPTION.ns(), "Option", &[crate::intern_type(TypeShape::Param(1))]));
         let f = crate::intern_type(TypeShape::Fn(vec![gen], Some(int), crate::intern_type(TypeShape::Unit)));
         let ptr = crate::intern_type(TypeShape::Ptr(gen));
         let mut list = TypeWords::default();

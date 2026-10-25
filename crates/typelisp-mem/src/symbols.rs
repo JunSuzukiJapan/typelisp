@@ -845,10 +845,66 @@ impl StdModule {
     pub const REPL: StdModule = StdModule(&["repl"]);
     pub const THREAD: StdModule = StdModule(&["thread"]);
     pub const IO: StdModule = StdModule(&["io"]);
+    pub const ARRAY: StdModule = StdModule(&["array"]);
+    pub const OPTION: StdModule = StdModule(&["option"]);
+    pub const RESULT: StdModule = StdModule(&["result"]);
+    pub const VEC: StdModule = StdModule(&["vec"]);
+    pub const SEXPR: StdModule = StdModule(&["sexpr"]);
+    pub const COLLECTIONS: StdModule = StdModule(&["collections"]);
+    pub const SYNC: StdModule = StdModule(&["sync"]);
 
     /// The module, found one segment at a time from `std`.
     pub fn ns(self) -> NsId {
         self.0.iter().fold(NsId::STD, |ns, segment| child_ns(ns, segment))
+    }
+
+    /// The module that defines the built-in type named by the vocabulary
+    /// symbol `ty` (`wk::OPTION` ...). Panics for a symbol that names no
+    /// built-in type.
+    pub fn of_builtin_type(ty: u32) -> StdModule {
+        match ty {
+            wk::OPTION => StdModule::OPTION,
+            wk::RESULT => StdModule::RESULT,
+            wk::VECTOR => StdModule::VEC,
+            wk::SEXPR => StdModule::SEXPR,
+            wk::HASHTABLE => StdModule::COLLECTIONS,
+            wk::ARRAY => StdModule::ARRAY,
+            wk::TASK_TYPE | wk::THREAD_TYPE => StdModule::THREAD,
+            wk::CHAN => StdModule::SYNC,
+            wk::I8
+            | wk::I16
+            | wk::I32
+            | wk::U8
+            | wk::U16
+            | wk::U32
+            | wk::F32
+            | wk::F64
+            | wk::INT
+            | wk::RATIO
+            | wk::REPR_RATIONAL
+            | wk::REPR_RANDOM_STATE
+            | wk::BOOL
+            | wk::CHAR
+            | wk::NEVER
+            | wk::PTR
+            | wk::C_LONG
+            | wk::C_ULONG
+            | wk::SCOPE
+            | wk::STRING
+            | wk::SYMBOL
+            | wk::PARSE_INT_ERROR
+            | wk::PARSE_FLOAT_ERROR
+            | wk::READ_ERROR
+            | wk::FILE_ERROR
+            | wk::EVAL_ERROR
+            | wk::NET_ERROR
+            | wk::LLVM_MODULE
+            | wk::LLVM_FUNCTION
+            | wk::LLVM_BUILDER
+            | wk::LLVM_BASIC_BLOCK
+            | wk::LLVM_VALUE => StdModule::STD,
+            _ => panic!("`{}` names no built-in type", well_known_symbol(ty).name()),
+        }
     }
 }
 

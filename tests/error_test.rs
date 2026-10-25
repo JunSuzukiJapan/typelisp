@@ -99,7 +99,7 @@ fn parses_never_type_annotation() {
 #[test]
 fn result_ok_infers_from_return_type() {
     let src = "(defun mk () Result<int,ParseIntError> (Result::ok 1))";
-    assert_eq!(ret_of(src, "mk"), Type::Named(Path::std("Result"), vec![Type::Int, error_ty()]));
+    assert_eq!(ret_of(src, "mk"), Type::Named(Path::builtin(typelisp::mem::wk::RESULT), vec![Type::Int, error_ty()]));
 }
 
 #[test]

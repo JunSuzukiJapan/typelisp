@@ -775,37 +775,37 @@ mod tests {
         assert_eq!(of(Type::Str), Repr::Str);
         assert_eq!(of(Type::Symbol), Repr::Sym);
         assert_eq!(of(Type::Ratio), Repr::Ratio);
-        assert_eq!(of(Type::Named(Path::std("Sexpr"), vec![])), Repr::Sexpr);
+        assert_eq!(of(Type::Named(Path::builtin(typelisp_mem::wk::SEXPR), vec![])), Repr::Sexpr);
         assert_eq!(of(Type::Named(Path::root("point"), vec![])), Repr::Struct);
         assert_eq!(of(Type::Named(Path::root("my-enum"), vec![])), Repr::Enum);
         // The parametric builtins classify their elements too — the whole
         // reason they have variants of their own.
         assert_eq!(
-            of(Type::Named(Path::std("Vector"), vec![Type::U32])),
+            of(Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::U32])),
             Repr::Vector(Box::new(Repr::Narrow))
         );
         assert_eq!(
-            of(Type::Named(Path::std("HashTable"), vec![Type::Str, Type::Bool])),
+            of(Type::Named(Path::builtin(typelisp_mem::wk::HASHTABLE), vec![Type::Str, Type::Bool])),
             Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Bool))
         );
         // Recognized structurally rather than through the set — passing an
         // empty one must not turn `Option`/`Result` into `Repr::None`.
         let none: HashSet<Path> = HashSet::new();
         assert_eq!(
-            Repr::of(&Type::Named(Path::std("Option"), vec![Type::I32]), &none, &none),
+            Repr::of(&Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![Type::I32]), &none, &none),
             Repr::Niche(Box::new(Repr::Narrow))
         );
         // The niche stops where the payload could be the empty word.
-        let option = |t: Type| Type::Named(Path::std("Option"), vec![t]);
+        let option = |t: Type| Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![t]);
         assert_eq!(of(option(option(Type::I32))), Repr::Enum);
         assert_eq!(of(option(Type::Unit)), Repr::Enum);
         assert_eq!(of(option(Type::Ptr)), Repr::Enum);
         assert_eq!(of(option(Type::Named(Path::root("T"), vec![]))), Repr::Enum);
-        assert_eq!(of(option(Type::Named(Path::std("Sexpr"), vec![]))), Repr::Niche(Box::new(Repr::Sexpr)));
+        assert_eq!(of(option(Type::Named(Path::builtin(typelisp_mem::wk::SEXPR), vec![]))), Repr::Niche(Box::new(Repr::Sexpr)));
         assert_eq!(of(option(Type::Named(Path::root("point"), vec![]))), Repr::Niche(Box::new(Repr::Struct)));
         assert_eq!(of(option(Type::F64)), Repr::Niche(Box::new(Repr::F64)));
         assert_eq!(
-            Repr::of(&Type::Named(Path::std("Result"), vec![Type::I32, Type::Str]), &none, &none),
+            Repr::of(&Type::Named(Path::builtin(typelisp_mem::wk::RESULT), vec![Type::I32, Type::Str]), &none, &none),
             Repr::Enum
         );
         assert_eq!(of(Type::Fn(vec![], None, Box::new(Type::Unit))), Repr::Fn);

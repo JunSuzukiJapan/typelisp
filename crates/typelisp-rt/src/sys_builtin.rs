@@ -32,18 +32,18 @@ const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "ParseFloatE
 /// (a type's identity includes its instantiation, and this crate has no
 /// checker to ask), checked against the registry by the same guard test.
 pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
-    ("parse-float", TypeSpec::Named(StdModule::STD, "Result", &[spec::F64, PARSE_FLOAT_ERROR])),
-    ("command-line-args", TypeSpec::Named(StdModule::STD, "Vector", &[spec::STRING])),
-    ("getenv", TypeSpec::Named(StdModule::STD, "Option", &[spec::STRING])),
-    ("home-directory", TypeSpec::Named(StdModule::STD, "Option", &[spec::STRING])),
-    ("machine-instance", TypeSpec::Named(StdModule::STD, "Option", &[spec::STRING])),
-    ("machine-version", TypeSpec::Named(StdModule::STD, "Option", &[spec::STRING])),
-    ("software-version", TypeSpec::Named(StdModule::STD, "Option", &[spec::STRING])),
-    ("timezone-offset-seconds", TypeSpec::Named(StdModule::STD, "Option", &[spec::INT])),
-    ("timezone-daylight-p", TypeSpec::Named(StdModule::STD, "Option", &[spec::BOOL])),
-    ("dribble-start", TypeSpec::Named(StdModule::STD, "Result", &[spec::UNIT, FILE_ERROR])),
-    ("dribble-stop", TypeSpec::Named(StdModule::STD, "Result", &[spec::UNIT, FILE_ERROR])),
-    ("ed-open", TypeSpec::Named(StdModule::STD, "Result", &[spec::UNIT, FILE_ERROR])),
+    ("parse-float", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::F64, PARSE_FLOAT_ERROR])),
+    ("command-line-args", TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])),
+    ("getenv", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    ("home-directory", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    ("machine-instance", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    ("machine-version", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    ("software-version", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    ("timezone-offset-seconds", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
+    ("timezone-daylight-p", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::BOOL])),
+    ("dribble-start", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
+    ("dribble-stop", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
+    ("ed-open", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
 ];
 
 fn type_of(name: &str) -> TypeId {

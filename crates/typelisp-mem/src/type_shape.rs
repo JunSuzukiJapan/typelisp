@@ -115,7 +115,7 @@ pub mod spec {
     pub const BOOL: TypeSpec = Named(StdModule::STD, "bool", &[]);
     pub const CHAR: TypeSpec = Named(StdModule::STD, "char", &[]);
     pub const STRING: TypeSpec = Named(StdModule::STD, "string", &[]);
-    pub const SEXPR: TypeSpec = Named(StdModule::STD, "Sexpr", &[]);
+    pub const SEXPR: TypeSpec = Named(StdModule::SEXPR, "Sexpr", &[]);
     pub const UNIT: TypeSpec = TypeSpec::Unit;
 }
 

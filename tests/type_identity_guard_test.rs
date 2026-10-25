@@ -211,8 +211,8 @@ fn the_runtimes_fixed_types_are_the_checkers() {
     use typelisp::TypeId;
 
     for (id, path) in [
-        (TypeId::OPTION, Path::std("Option")),
-        (TypeId::RESULT, Path::std("Result")),
+        (TypeId::OPTION, Path::builtin(typelisp::mem::wk::OPTION)),
+        (TypeId::RESULT, Path::builtin(typelisp::mem::wk::RESULT)),
         (TypeId::FILE_ERROR, Path::std("FileError")),
         (TypeId::READ_ERROR, Path::std("ReadError")),
         (TypeId::PARSE_INT_ERROR, Path::std("ParseIntError")),
@@ -222,11 +222,11 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         // `cons-cell<Sexpr, int>` box (CL's second return value, which this
         // language has no multiple values to carry) — both on the runtime's
         // own side of the boundary, so both need the identity too.
-        (TypeId::VECTOR, Path::std("Vector")),
+        (TypeId::VECTOR, Path::builtin(typelisp::mem::wk::VECTOR)),
         (TypeId::CONS_CELL, Path::std("cons-cell")),
         // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
         // `Scope<V>` is made of.
-        (TypeId::HASHTABLE, Path::std("HashTable")),
+        (TypeId::HASHTABLE, Path::builtin(typelisp::mem::wk::HASHTABLE)),
         (TypeId::SCOPE, Path::std("Scope")),
         (TypeId::SCOPE_FRAME, Path::std("scope-frame")),
         // Three prelude `defstruct`s the runtime builds itself, because the
@@ -239,7 +239,7 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         (TypeId::HEAP_INFO, Path::in_ns(typelisp::std_module("repl"), "heap-info")),
         // The socket layer's error type, built by `net_builtin`.
         (TypeId::NET_ERROR, Path::std("NetError")),
-        (TypeId::SEXPR, Path::std("Sexpr")),
+        (TypeId::SEXPR, Path::builtin(typelisp::mem::wk::SEXPR)),
     ] {
         assert_eq!(
             id,
@@ -340,7 +340,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     use typelisp::TypeId;
 
     let reg = Registry::with_builtins();
-    let sexpr = reg.type_def(&Path::std("Sexpr")).expect("sexpr is registered");
+    let sexpr = reg.type_def(&Path::builtin(typelisp::mem::wk::SEXPR)).expect("sexpr is registered");
     let payload = |variant: usize| -> TypeId {
         let fields = &sexpr.variants[variant].fields;
         assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);
@@ -350,7 +350,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     assert_eq!(TypeId::SEXPR_ARRAY, payload(sexpr_variant::ARRAY));
     assert_eq!(
         typelisp_mem::intern_spec(&typelisp_read::ARRAY_DIMS_TYPE),
-        typelisp::type_key::type_id(&typelisp::Type::Named(Path::std("Vector"), vec![typelisp::Type::Int]))
+        typelisp::type_key::type_id(&typelisp::Type::Named(Path::builtin(typelisp::mem::wk::VECTOR), vec![typelisp::Type::Int]))
     );
 }
 
@@ -363,7 +363,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
 fn the_read_tuple_type_is_the_checkers_tuple_of_data() {
     use typelisp::types::{tuple_path, Path};
     use typelisp::Type;
-    let data = Type::Named(Path::std("Option"), vec![Type::Named(Path::std("Sexpr"), vec![])]);
+    let data = Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Named(Path::builtin(typelisp::mem::wk::SEXPR), vec![])]);
     for n in 1..=typelisp::TUPLE_MAX_ARITY {
         let ty = Type::Named(tuple_path(n), vec![data.clone(); n]);
         assert_eq!(typelisp::sexpr_tuple_type(n), typelisp::type_key::type_id(&ty), "arity {}", n);

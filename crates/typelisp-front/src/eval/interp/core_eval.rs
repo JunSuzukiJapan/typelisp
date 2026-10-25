@@ -2344,6 +2344,12 @@ mod tests {
     /// under `gc_stress` when the heap is one of ours.
     fn read1(heap: &mut Heap, src: &str) -> Value {
         // Core IR, read in the core IR's module so its tags are the IR's own.
+        // The standard library's modules its paths name are declared first,
+        // since a path is read one segment at a time.
+        use typelisp_mem::StdModule;
+        for m in [StdModule::OPTION, StdModule::RESULT, StdModule::VEC, StdModule::SEXPR, StdModule::COLLECTIONS] {
+            heap.names().declare_module(m.ns());
+        }
         let mut vs: Vec<Value> = crate::Reader::new()
             .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
             .expect("read failed")
@@ -2777,16 +2783,16 @@ mod tests {
         }
     }
 
-    /// `(construct ::std::Sexpr N ...)` builds a datum rather than a box. The
+    /// `(construct ::std::sexpr::Sexpr N ...)` builds a datum rather than a box. The
     /// pass-through arms are the interesting ones: the argument box *is* the
     /// datum, which is what makes `eq` hold across the construction.
     #[test]
     fn constructing_a_sexpr_datum() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {NIL} false ())")), Value::Empty);
-        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {INT} false (int-any-width) (int-any-width 3))")), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {NIL} false ())")), Value::Empty);
+        assert_eq!(eval_ok(&mut h, &format!("(construct ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {INT} false (int-any-width) (int-any-width 3))")), Value::Int(3));
 
-        let v = eval_ok(&mut h, &format!("(construct ::std::Sexpr (type-named ::std::Sexpr) {CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"));
+        let v = eval_ok(&mut h, &format!("(construct ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"));
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
@@ -2794,7 +2800,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            &format!(r#"(let ((s sexpr (str "hi"))) (call ::std::sexpr-cons (sexpr sexpr) (var s) (construct ::std::Sexpr (type-named ::std::Sexpr) {STR} false (str) (var s))))"#),
+            &format!(r#"(let ((s sexpr (str "hi"))) (call ::std::sexpr-cons (sexpr sexpr) (var s) (construct ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {STR} false (str) (var s))))"#),
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -2897,13 +2903,13 @@ mod tests {
             eval_ok(
                 &mut h,
                 &format!("(match (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
-                   ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {NIL} false ()) (int-any-width 100))
-                   ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
+                   ((pat-ctor ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {NIL} false ()) (int-any-width 100))
+                   ((pat-ctor ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
             ),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, &format!("(match (unit) unit ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {NIL} false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))")),
+            eval_ok(&mut h, &format!("(match (unit) unit ((pat-ctor ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {NIL} false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))")),
             Value::Int(100)
         );
     }
@@ -2939,7 +2945,7 @@ mod tests {
 
         let form = read1(
             &mut h,
-            &format!("(match (var p) sexpr ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {PATH} false (sexpr) (pat-bind segs))
+            &format!("(match (var p) sexpr ((pat-ctor ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {PATH} false (sexpr) (pat-bind segs))
                (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))"),
         );
         h.push_root(form);
@@ -2986,9 +2992,9 @@ mod tests {
         let form = read1(
             &mut h,
             &format!("(match (var v) sexpr
-               ((pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {CONS} false (sexpr sexpr)
-                  (pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {PATH} false (sexpr) (pat-bind l))
-                  (pat-ctor ::std::Sexpr (type-named ::std::Sexpr) {PATH} false (sexpr) (pat-bind r)))
+               ((pat-ctor ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {CONS} false (sexpr sexpr)
+                  (pat-ctor ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {PATH} false (sexpr) (pat-bind l))
+                  (pat-ctor ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {PATH} false (sexpr) (pat-bind r)))
                  (call ::std::sexpr-cons (sexpr sexpr) (var l) (var r))))"),
         );
         h.push_root(form);

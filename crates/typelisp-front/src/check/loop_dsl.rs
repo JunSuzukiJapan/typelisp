@@ -920,12 +920,12 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: &str) -> Result<
 
             let cmp = b.call(op, &[tmp_sym, best_sym])?;
             let pick = b.if_(cmp, tmp_sym, best_sym)?;
-            let some_pick = b.call_member(&crate::Path::std("Option"), "some", &[pick])?;
+            let some_pick = b.call_member(&crate::Path::builtin(typelisp_mem::wk::OPTION), "some", &[pick])?;
             let some_head = b.sym("some");
             let some_pat = b.list(&[some_head, best_sym])?;
             let some_arm = b.list(&[some_pat, some_pick])?;
 
-            let some_tmp = b.call_member(&crate::Path::std("Option"), "some", &[tmp_sym])?;
+            let some_tmp = b.call_member(&crate::Path::builtin(typelisp_mem::wk::OPTION), "some", &[tmp_sym])?;
             let none_head = b.sym("none");
             let none_pat = b.list(&[none_head])?;
             let none_arm = b.list(&[none_pat, some_tmp])?;

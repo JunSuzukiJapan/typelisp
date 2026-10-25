@@ -95,7 +95,12 @@ mod tests {
     use crate::intern_type;
 
     fn named(name: &str, args: &[TypeId]) -> TypeId {
-        intern_type(TypeShape::named(NsId::STD, name, args))
+        let ns = match name {
+            "Option" => crate::StdModule::OPTION.ns(),
+            "Vector" => crate::StdModule::VEC.ns(),
+            _ => NsId::STD,
+        };
+        intern_type(TypeShape::named(ns, name, args))
     }
 
     #[test]

@@ -2432,7 +2432,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         // is the one builtin here that returns a generic box.
         let ty = typelisp_front::type_key::type_id(
             &crate::types::Type::Named(
-                crate::Path::std("Option"),
+                crate::Path::builtin(typelisp_mem::wk::OPTION),
                 vec![crate::types::Type::Named(crate::Path::std("llvm-value"), vec![])],
             ),
         );

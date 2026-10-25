@@ -434,7 +434,7 @@ impl Info {
     /// The `Sexpr` variant `name` — the one a value of a type with a `Sexpr`
     /// encoding is wrapped in — as `(type path, variant index)`.
     pub(super) fn sexpr_variant(&self, name: &str) -> (Path, usize) {
-        let path = Path::std("Sexpr");
+        let path = Path::builtin(typelisp_mem::wk::SEXPR);
         let def = self.reg.type_def(&path).expect("sexpr is built in");
         let idx = def.variants.iter().position(|v| v.name == name).expect("sexpr has the variant");
         (path, idx)

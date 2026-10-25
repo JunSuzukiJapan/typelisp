@@ -6801,11 +6801,12 @@ user-visible capacity."
 ;;
 ;; Row-major order throughout, as in CL: the last subscript varies fastest.
 
+(module array
 (pub defstruct Array<T>
   "A multi-dimensional array of `T`, stored in row-major order."
   (dims Vector<int>)
   (data Vector<T>)
-  (pub fill-pointer Option<int>))
+  (pub fill-pointer Option<int>)))
 
 ;; The array a `#nA(..)` literal in source evaluates to
 ;; (`Checker::check_array_literal`): its dimensions and its row-major elements
@@ -6816,6 +6817,7 @@ user-visible capacity."
 
 ;; CL's `make-array`. `dims` is copied, so a later `push` to the caller's own
 ;; vector cannot change the array's shape behind its back.
+(module array
 (impl Array<T>
   (pub new ((dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>
     (let ((d (the Vector<int> (Vector::new))) (n 1))
@@ -6944,7 +6946,7 @@ user-visible capacity."
            (Option::none)
            (let ((v (get self::data (- n 1))))
              (setf self::fill-pointer (Option::some (- n 1)))
-             (Option::some v)))))))
+             (Option::some v))))))))
 
 ;; Decode a row-major offset back into subscripts, into `out` (which must
 ;; already have one slot per dimension). The inverse of `row-major-index`'s
@@ -6976,6 +6978,7 @@ user-visible capacity."
 ;; Mutates and returns `()`, where CL returns the array; CL has to, because a
 ;; non-adjustable CL array may come back as a *different* array. Every array
 ;; here is adjustable, so there is never a second one to return.
+(module array
 (impl Array<T>
   (pub adjust (self (newdims Vector<int>) (init T)) ()
     (let ((nd (the Vector<int> (Vector::new))) (n 1))
@@ -7006,7 +7009,7 @@ user-visible capacity."
             (setf self::data moved)
             (match self::fill-pointer
               ((none) ())
-              ((some f) (setf self::fill-pointer (Option::some (min f n)))))))))))
+              ((some f) (setf self::fill-pointer (Option::some (min f n))))))))))))
 
 
 ;; CL's array syntax (CLHS 22.1.3.4), written as the type's own
@@ -7071,6 +7074,7 @@ user-visible capacity."
           (setf i (+ i 1))))
       out))))
 
+(module array
 (impl print-object Array<T> (:where (print-object T))
   (print-object ((self Self) (escape bool)) string
     (if *print-array*
@@ -7141,7 +7145,7 @@ user-visible capacity."
 ;; a distinction this language's single bit-vector type does not have.
 (impl BitVector
   (pub sbit (self (i int)) bool (get self i))
-  (pub set-sbit (self (i int) (b bool)) () (set self i b)))
+  (pub set-sbit (self (i int) (b bool)) () (set self i b))))
 
 ;; Put the words back in canonical form. Two things can put them out of it,
 ;; and both have to be undone or two bit vectors holding the same bits stop
@@ -7184,6 +7188,7 @@ user-visible capacity."
           (%internal::bitvector-trim out)
           out)))))
 
+(module array
 (impl BitVector
   (pub bit-and (self (other BitVector)) BitVector
     (%internal::bitvector-zip self other "bit-and" (lambda ((x int) (y int)) int (logand x y))))
@@ -7216,7 +7221,7 @@ user-visible capacity."
             (set out::words i (lognot (get self::words i)))
             (setf i (+ i 1))))
         (%internal::bitvector-trim out)
-        out))))
+        out)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Errors: the general-purpose type, wrapping, and the two things CL had that

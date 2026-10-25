@@ -682,6 +682,12 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      決定）。`intern` は CL に合わせ、その名前空間でリーダーがその名前を読むのと同じシンボルを返す
      （`Names::read`。見えるシンボルがあれば作らない）。存在しない名前空間はエラー。多値が無いので
      CL の第 2 値は返さず、`*package*` が無いので省略時は呼び出しを書いたモジュール。ABI は 0.3.36。
+     その後、`Array` `BitVector` を `std::array` へ、`Option` を `std::option`、`Result` を `std::result`、
+     `Vector` を `std::vec`、`HashTable` を `std::collections`、`Sexpr` を `std::sexpr` へ移した。組み込み型の
+     置き場所を答えるのは `StdModule::of_builtin_type(wk::X)` の 1 か所で、`Path::builtin(wk::X)` がそこから
+     パスを作る（`Path::std("Vector")` の組み立ては無くした）。`Sexpr` の構成子は `std` に残した。`int`
+     `f64` `char` などが基本型と同じ綴りで、`std::prelude` が公開する名前は 1 つのパスなので、構成子と基本型は
+     同じモジュールの 2 つの定義でなければならない。ABI は 0.3.37。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。
