@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.32
+# ABI バージョン 0.3.33
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.32 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.33 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `85ef135b7f92dd96`
+内容ハッシュ (FNV-1a 64): `5a21282fee6a1342`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1832,7 +1832,7 @@
 | `std::eval::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::eval::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::eval::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
-| `std::parse-float` | `rt_parse_float` | `(string) -> Result<f64,std::parsefloaterror>` |
+| `std::num::parse-float` | `rt_parse_float` | `(string) -> Result<f64,std::parsefloaterror>` |
 | `std::pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
 | `std::pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
 | `std::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |

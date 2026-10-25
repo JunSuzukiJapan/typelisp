@@ -643,6 +643,8 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      子モジュール（`std::%internal` を除く）を数える。ABI は 0.3.31。
      次に `read` とリーダーマクロ・`read-sexpr` などを `std::reader` へ、`eval` `macroexpand` を `std::eval` へ
      移した。評価器が読む `*read-eval*` も `std::reader` で名指しする。ABI は 0.3.32。
+     次に `pi` `parse-int` `parse-float`、バイト指定子の関数（`byte` `ldb` `dpb` など）、`boole` とその定数、
+     数値の限界の定数を `std::num` へ移した。型ごとのメソッド（`abs` `gcd` など）は型の impl に残す。ABI は 0.3.33。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

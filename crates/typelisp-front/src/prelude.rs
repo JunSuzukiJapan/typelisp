@@ -723,7 +723,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 
 ;; `pi`: CL's `long-float` circle-ratio constant, `f64`-valued here (this
 ;; language's only floating-point type).
-(defconstant (pi f64) 3.141592653589793 "The ratio of a circle's circumference to its diameter.")
+(module num
+(pub defconstant (pi f64) 3.141592653589793 "The ratio of a circle's circumference to its diameter."))
 
 ;; The rest of CL's bitwise catalog (CLHS 12.10), all defined in terms of the
 ;; `logand`/`logior`/`logxor`/`lognot` primitives above (`registry.rs`) —
@@ -1099,7 +1100,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; value, the index reading stopped at, is not returned.
 ;;
 ;; A radix outside 2..36 is the caller's mistake, not the text's, so it panics.
-(defun parse-int ((s string) &key (radix int 10) (junk-allowed bool false)) Result<int, ParseIntError>
+(module num
+(pub defun parse-int ((s string) &key (radix int 10) (junk-allowed bool false)) Result<int, ParseIntError>
   "The integer written in `s` in base `radix` (default 10), skipping
    surrounding whitespace. `Err` unless all of `s` is that integer -- or, with
    `:junk-allowed true`, unless it at least begins with one."
@@ -1108,7 +1110,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
       (panic (format false "parse-int: radix ~a is not between 2 and 36" radix)))
     (let ((n (length s)) (i 0) (neg false) (acc 0) (digits 0) (going true))
       (progn
-        (while (and (< i n) (%internal::char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1)))
+        (while (and (< i n) (std::%internal::char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1)))
         (when (< i n)
           (cond ((equal (ref s i) #\-) (progn (setf neg true) (setf i (+ i 1)) ()))
                 ((equal (ref s i) #\+) (progn (setf i (+ i 1)) ()))
@@ -1118,12 +1120,12 @@ pub const SOURCE_TEMPLATE: &str = r##"
             ((some w) (progn (setf acc (+ (* acc radix) w)) (setf digits (+ digits 1)) (setf i (+ i 1)) ()))
             ((none) (progn (setf going false) ()))))
         (unless junk-allowed
-          (while (and (< i n) (%internal::char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1))))
+          (while (and (< i n) (std::%internal::char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1))))
         (if (or (= digits 0) (and (not junk-allowed) (< i n)))
             (the Result<int, ParseIntError>
               (result::err (ParseIntError::ParseIntError
                              (format false "parse-int: invalid integer literal: ~s" s))))
-            (result::ok (if neg (- 0 acc) acc)))))))
+            (result::ok (if neg (- 0 acc) acc))))))))
 
 ;; `string-capitalize`: each word's first character up, the rest down, where a
 ;; word is a maximal run of alphanumerics — CL's own definition.
@@ -2441,7 +2443,8 @@ user-visible capacity."
 (impl cons-cell<int,int>
   (pub byte-size (self) int (car self))
   (pub byte-position (self) int (cdr self)))
-(defun byte ((size int) (position int)) cons-cell<int,int> (cons size position))
+(module num
+(pub defun byte ((size int) (position int)) cons-cell<int,int> (cons size position)))
 
 ;; The low `size` bits set, in `sample`'s own type.
 ;;
@@ -2458,9 +2461,10 @@ user-visible capacity."
 
 ;; `(ldb integer bytespec)`: extract the `size`-bit field starting at
 ;; `position`, right-justified.
+(module num
 (pub defun ldb<T> ((n T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (bit-and (shift n (* -1 (byte-position spec))) (%internal::bits-mask n (byte-size spec))))
+  (bit-and (shift n (* -1 (byte-position spec))) (std::%internal::bits-mask n (byte-size spec))))
 ;; `(ldb-test integer bytespec)`: does that field have any 1 bits?
 (pub defun ldb-test<T> ((n T) (spec cons-cell<int,int>)) bool
   (:where (Bits T) (Eq T))
@@ -2469,12 +2473,12 @@ user-visible capacity."
 ;; right-justified.
 (pub defun mask-field<T> ((n T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (bit-and n (shift (%internal::bits-mask n (byte-size spec)) (byte-position spec))))
+  (bit-and n (shift (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
 ;; `(dpb integer newbyte bytespec)`: deposit `newbyte`'s low `size` bits into
 ;; that field of `integer`, leaving every other bit of `integer` untouched.
 (pub defun dpb<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (let ((mask (shift (%internal::bits-mask n (byte-size spec)) (byte-position spec))))
+  (let ((mask (shift (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
     (bit-or (bit-and n (bit-not mask))
             (bit-and (shift newbyte (byte-position spec)) mask))))
 ;; `(deposit-field integer newbyte bytespec)`: like `dpb`, but `newbyte` is
@@ -2482,7 +2486,7 @@ user-visible capacity."
 ;; right-justified.
 (pub defun deposit-field<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (let ((mask (shift (%internal::bits-mask n (byte-size spec)) (byte-position spec))))
+  (let ((mask (shift (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
     (bit-or (bit-and n (bit-not mask)) (bit-and newbyte mask))))
 
 ;; `(boole op a b)`: CL's 16-way generic bitwise-op selector. `op` is one of
@@ -2531,7 +2535,7 @@ user-visible capacity."
   (if (= op boole-andc2) (bit-and a (bit-not b))
   (if (= op boole-orc1) (bit-or (bit-not a) b)
   (if (= op boole-orc2) (bit-or a (bit-not b))
-      (panic "boole: unknown op code"))))))))))))))))))
+      (panic "boole: unknown op code")))))))))))))))))))
 
 ;; `cons-cell<A,B>`'s Eq/Ord: recursive (structural) comparison. The field
 ;; comparisons go through the methods' own `where` bounds — checked as
@@ -3693,6 +3697,7 @@ user-visible capacity."
 ;; `int` that fits its 63-bit immediate word; past these bounds an `int` is
 ;; a bignum box (`typelisp-mem`'s `FIXNUM_MAX`/`FIXNUM_MIN`), and the
 ;; arithmetic goes on unchanged.
+(module num
 (pub defconstant (most-positive-fixnum int) 4611686018427387903)
 (pub defconstant (most-negative-fixnum int) -4611686018427387904)
 (pub defconstant (most-positive-double-float f64) 1.7976931348623157e308)
@@ -3705,7 +3710,7 @@ user-visible capacity."
 ;; `(/= (+ 1 e) 1)`, which is one ULP *above* 2^-53 rather than 2^-53 itself:
 ;; 2^-53 rounds back to 1.0 under round-to-nearest-even.
 (pub defconstant (double-float-epsilon f64) 1.1102230246251568e-16)
-(pub defconstant (double-float-negative-epsilon f64) 5.551115123125784e-17)
+(pub defconstant (double-float-negative-epsilon f64) 5.551115123125784e-17))
 
 ;; ---------------------------------------------------------------------------
 ;; The control forms of CL's chapter 5 that need no new machinery —

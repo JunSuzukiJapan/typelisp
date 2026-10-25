@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -824,6 +824,7 @@ impl Registry {
         let mut cmp = Namespace::new(crate::types::std_module("cmp"));
         let mut reader = Namespace::new(crate::types::std_module("reader"));
         let mut eval = Namespace::new(crate::types::std_module("eval"));
+        let mut num = Namespace::new(crate::types::std_module("num"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -957,7 +958,7 @@ impl Registry {
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
-        std_ns.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR))));
+        num.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR))));
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
@@ -1151,7 +1152,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
