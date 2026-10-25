@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Рядки, знаки та колекції
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` і `Deque<T>`.
@@ -77,7 +77,7 @@ ASCII.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Читає елемент `i`. Panic поза межами |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Змінює елемент `i`. Panic поза межами. Можна також писати `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Кількість елементів |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Вилучає останній елемент і повертає його. `None`, якщо порожньо (на відміну від `get`/`set`, panic не виникає) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Вилучає останній елемент і повертає його. `none`, якщо порожньо (на відміну від `get`/`set`, panic не виникає) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Створює ітератор, що реалізує `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Додає `x`, якщо рівного елемента немає (`pushnew` з CL. Йому не треба переписувати place, тож це метод, а не макрос) |
 

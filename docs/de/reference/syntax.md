@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -7,8 +7,7 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
 
 ## 1. Lexikalische Elemente
 
-- **Groß-/Kleinschreibung wird nicht unterschieden.** Symbole werden beim Lesen alle in Kleinbuchstaben
-  normalisiert.
+- **Groß-/Kleinschreibung wird unterschieden.** `foo` und `Foo` sind verschiedene Symbole. Typnamen beginnen mit einem Großbuchstaben (`Option`, `Vector` usw.; Grundtypen wie `int` und `string` werden klein geschrieben).
 - **Kommentare**: von `;` bis zum Zeilenende (Zeilenkommentare). `#| ... |#` (Blockkommentare, die sich
   verschachteln lassen).
 - **Auswertung zur Lesezeit**: `#.(expr)` **führt die folgende Form während des Lesens aus** und behandelt ihren
@@ -160,7 +159,7 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
   Die Bedingungen, die ein Trait für die Verwendung mit `:dyn` erfüllen muss, stehen in
   [3.9 deftrait / impl](#39-deftrait--impl--traits). `:dyn` außerhalb einer Typstelle zu schreiben, ist ein
   Fehler.
-- Eingebaute generische Typen: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Eingebaute generische Typen: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>` und die Nebenläufigkeitstypen `Task<T>` / `Thread<T>` / `Chan<T>`
   ([Kapitel 12](#12-nebenläufigkeit-tasks)). Außerdem gibt es `Sexpr`, den Typ von S-Ausdrucksdaten. Die
   eingebauten konkreten Fehlertypen sind `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -858,8 +857,8 @@ Eine Liste `(Name option...)` an der Stelle des Namens gibt Optionen an (dieselb
 
 ; generisch
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Jede Variante hat die Form `(VariantName FieldType...)`. Felder sind nur positionell (sie haben keine Namen).
@@ -870,8 +869,8 @@ Eine Liste `(Name option...)` an der Stelle des Namens gibt Optionen an (dieselb
   abdecken oder ein `_` haben):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Methoden und statische Methoden werden wie bei `defstruct` in `impl` (3.5) geschrieben.
 - Um das Enum selbst `pub` zu machen, schreibt man `(pub defenum ...)`.
@@ -1044,8 +1043,8 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
 - `module` erzeugt einen Namensraum. **Typen sind keine Namensräume** (wie in Rust hat ein Typ nur statische
   Methoden und Methoden).
 - Ein `use` eines Typs macht die Varianten eines Enums und die öffentlichen statischen Methoden des Typs
-  auch unter dem bloßen Namen verfügbar (zum Beispiel lassen sich nach `(use option)` `some`/`none` ohne
-  `option::some`/`option::none` aufrufen).
+  auch unter dem bloßen Namen verfügbar (zum Beispiel lassen sich nach `(use Option)` `some`/`none` ohne
+  `Option::some`/`Option::none` aufrufen).
 - **Ein Name hat eine Bedeutung.** Funktionen, globale Variablen und Makros teilen sich einen
   Namensraum, und innerhalb eines Moduls können keine zwei von ihnen denselben Namen haben (ein Fehler,
   egal welcher zuerst definiert wird). Funktionen und Variablen haben keine getrennten Namensräume wie in
@@ -1356,7 +1355,7 @@ Arten von Mustern:
   Typen ohne Literalsyntax zu vergleichen (`defstruct`-Instanzen, globale Variablen, berechnete Ergebnisse), und
   eine benutzerdefinierte `Eq`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
   beziehen, was von der Position des Zweigs aus sichtbar ist (Argumente, äußere Bindungen, globale Variablen)
-- `(Ctor sub-pattern...)` — Konstruktormuster (`Some x` `None` `Cons a d` `Ok v` usw.)
+- `(Ctor sub-pattern...)` — Konstruktormuster (`(some x)` `(none)` `(cons a d)` `(ok v)` usw.)
 - `(Type :slot pattern... :slot...)` — Strukturmuster. Schreibe die Slots nach dem Typnamen als
   Schlüsselwörter. Folgt auf ein Schlüsselwort ein Muster, wird dieser Slot gegen das Muster geprüft;
   folgt ein Schlüsselwort oder nichts, wird der Slot an eine Variable seines eigenen Namens gebunden.
@@ -1482,7 +1481,7 @@ kann es nie vollständig sein, und `_` ist Pflicht:
 
 **Typableitung über Zweige hinweg**: Alle Zweige müssen denselben Typ haben (außer Zweigen, die divergieren, wie
 mit `panic`). In einem `match`, das dort steht, wo kein Typ erwartet wird, ergänzen die Zweige gegenseitig ihre
-fehlenden Typargumente: `(result::ok v)` legt nur `T` fest und `(result::err e)` nur `E`, aber zusammen legen sie
+fehlenden Typargumente: `(Result::ok v)` legt nur `T` fest und `(Result::err e)` nur `E`, aber zusammen legen sie
 `Result<T,E>` fest. Ein Typargument, das bis zum Ende kein Zweig festlegen kann, ist ein Fehler dieses Zweigs
 (`cannot infer type argument ...`). Außerhalb von `match` ist ein nicht festlegbares Typargument dort ein Fehler.
 
@@ -1690,7 +1689,7 @@ usw.).
 (unreachable)                       ; expandiert zu (panic "unreachable"). defmacro
 (todo)                              ; expandiert zu (panic "todo"). defmacro
 (as Type expr)                      ; Umwandlung numerischer/Zeichentypen. Umwandlungen, die fehlschlagen können, lösen dann einen Panic aus
-(try-as Type expr)                  ; wie as, gibt das Ergebnis aber als Option<Type> zurück (None bei Fehlschlag)
+(try-as Type expr)                  ; wie as, gibt das Ergebnis aber als Option<Type> zurück (none bei Fehlschlag)
 (print control args...)             ; expandiert das Format und schreibt auf die Standardausgabe (ohne Zeilenumbruch)
 (println control args...)           ; dasselbe (mit einem Zeilenumbruch am Ende)
 (format dest control args...)       ; CLs format. gibt die expandierte Zeichenkette zurück
@@ -1711,7 +1710,7 @@ Breite, `f32`/`f64`/`ratio`/`char`). Derselbe Typ ist keine Umwandlung. **Umwand
 Ganzzahlbreiten (einschließlich `int`) und zwischen `f32`↔`f64` sind echte Umwandlungen**: `as` schneidet ab /
 rundet, und `try-as` beantwortet, ob es in diese Breite (Genauigkeit) passt. `(as int x)` ist die exakte
 Erweiterung von einer festen Breite, und `(as i32 n)` das Abschneiden von `int`. Ganzzahl → `char` kann außerhalb
-des Bereichs fehlschlagen, daher löst `as` einen Panic aus und `try-as` liefert `None`. Alles andere (Erweiterung
+des Bereichs fehlschlagen, daher löst `as` einen Panic aus und `try-as` liefert `none`. Alles andere (Erweiterung
 und das Abschneiden von `float->int`/`ratio->int`) gelingt immer. `float->int`/`ratio->int`/`char->int` landen
 bei `int`, und wird eine schmalere Breite verlangt, wird danach `int->W` aufgerufen. Das ist Zucker, der zu den
 entsprechenden Umwandlungsmethoden expandiert (`int->char`/`int->int`/`int->W` usw. unter
@@ -1814,7 +1813,7 @@ ist die Umgebung des Interpreters selbst, die ein AOT-Programm nicht hat; was `t
 anhält, sind die Aufrufwege des laufenden Interpreters; und `disassemble` verwendet den Compiler selbst).
 `room`/`dribble`/`ed` gehören nicht dazu und lassen sich normal kompilieren.
 
-Was sich kompilieren **lässt**: Stream- und Datei-E/A, `random`, `gensym`, `symbol->string`/`string->symbol`,
+Was sich kompilieren **lässt**: Stream- und Datei-E/A, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, die transzendenten Funktionen,
 Bitoperationen, `catch`/`throw`/`unwind-protect`, alle vier von `eq`/`eql`/`equal`/`equalp` (wodurch sich `case`
 für jeden Typ kompilieren lässt), die ganze Ausgabefamilie einschließlich `print`/`println`/`format`/`pprint` und

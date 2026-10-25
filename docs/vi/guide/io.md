@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Vào/ra tệp, stream và mạng
 
 Tài liệu này trình bày những điều cơ bản về đọc và ghi tệp, pathname, và giao tiếp qua socket. Danh sách
@@ -19,7 +19,7 @@ thiếu không phải là sai sót của chương trình, nên nó không `panic
 ```
 
 Khi bạn biết một thao tác không thể thất bại, hoặc trong một script nhỏ mà dừng lại khi thất bại là
-chấp nhận được, `unwrap` lấy giá trị ra. Nếu là `Err`, nó panic.
+chấp nhận được, `unwrap` lấy giá trị ra. Nếu là `err`, nó panic.
 
 ## 2. Đọc và ghi toàn bộ một tệp
 
@@ -173,7 +173,7 @@ mạng. Về task, xem [Tham chiếu cú pháp chương 12](../reference/syntax.
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; đặt đồng hồ cho lần đọc tiếp theo
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; đặt đồng hồ cho lần đọc tiếp theo
 ```
 
 ### Khi phía bên kia ngắt kết nối
@@ -188,7 +188,7 @@ Không có hàm riêng để phân giải tên. Truyền một tên host cho `tc
 `send-to` thì việc phân giải diễn ra bên trong chúng. Việc phân giải diễn ra trên một thread khác, nên
 các task khác vẫn chạy trong lúc chờ. Nếu một tên có nhiều địa chỉ, chúng được thử lần lượt.
 
-Nếu không phân giải được tên, một `Err` được trả về.
+Nếu không phân giải được tên, một `err` được trả về.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -246,5 +246,5 @@ chuyển đổi qua lại với chuỗi bằng `string->utf8` / `utf8->string`.
 ## 9. Unix domain socket
 
 Hãy truyền đường dẫn của tệp socket cho `unix-listen` / `unix-connect`. Giá trị bạn nhận được là cùng
-`socket-stream` như với TCP. `unix-listen` trả về một `Err` nếu tệp đã tồn tại. Đóng listener sẽ xóa
+`socket-stream` như với TCP. `unix-listen` trả về một `err` nếu tệp đã tồn tại. Đóng listener sẽ xóa
 tệp.

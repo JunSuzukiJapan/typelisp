@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -34,9 +34,9 @@ Tabel di bawah untuk enam tipe berlebar tetap (tabel untuk `int` ada di bab 3).
 | `int->int` | `(int->int x)` | `T→int` | Konversi pelebaran ke `int` (selalu tepat). Yang dilakukan `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Konversi pelebaran ke `ratio` (selalu tepat) |
 | `int->char` | `(int->char x)` | `T→char` | Menafsirkan nilai sebagai nilai skalar Unicode. Panic pada nilai yang tidak sah |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Versi `int->char` yang mengembalikan `None` saat gagal |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Versi `int->char` yang mengembalikan `none` saat gagal |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Konversi lebar. Nilai yang tidak muat dipotong (seperti `as` pada Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Konversi yang sama sebagai pertanyaan. `None` jika nilai tidak muat pada lebar itu |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Konversi yang sama sebagai pertanyaan. `none` jika nilai tidak muat pada lebar itu |
 
 Konversi ini juga yang dilakukan bentuk khusus `(as Type x)`/`(try-as Type x)`
 ([Referensi Sintaks](../syntax.md#7-bentuk-khusus-lainnya)). Operasi bit (`logand`/`ash`/`ldb` dan

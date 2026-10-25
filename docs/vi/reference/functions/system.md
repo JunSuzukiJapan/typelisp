@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -131,7 +131,7 @@ Các lệnh của `step` là `s` (bước vào lời gọi này; một dòng tr�
 nhắc mà không ai trả lời được.
 
 `$VISUAL` / `$EDITOR` của `ed` được tách tại khoảng trắng, nên `EDITOR="code -w"` hoạt động. Nếu cả hai đều
-chưa đặt, kết quả là `Err`: nó không đoán `vi`. Số dòng được truyền đầu tiên, dưới dạng `+N`.
+chưa đặt, kết quả là `err`: nó không đoán `vi`. Số dòng được truyền đầu tiên, dưới dạng `+N`.
 
 `dribble` ghi lại cả ba cách mà đầu ra của phiên rời khỏi tiến trình: những gì `print`/`println`/`format` ghi,
 những gì được ghi vào các stream nối với đầu ra chuẩn, và các dòng gõ vào REPL cùng với các giá trị mà REPL in
@@ -140,14 +140,14 @@ trả lại.
 ## 6. Phân tích và đánh giá
 
 Tất cả các hàm này xử lý văn bản và dữ liệu từ lúc chạy (mà chính chương trình không kiểm soát), nên khi thất
-bại chúng trả về `Err` của một `Result` thay vì panic. Các kiểu lỗi là các kiểu cụ thể theo từng phép toán
+bại chúng trả về `err` của một `Result` thay vì panic. Các kiểu lỗi là các kiểu cụ thể theo từng phép toán
 ([Các kiểu lỗi](option-result.md#3-các-kiểu-lỗi-và-trait-error)).
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` của CL. Bỏ qua khoảng trắng ở đầu và cuối (cùng tập như `trim`), đọc tối đa một dấu `+`/`-`, rồi các chữ số theo cơ số `radix` (mặc định 10, 2 đến 36; các chữ số trên 10 ở dạng hoa hoặc thường đều được). Không có giới hạn về số chữ số (`int`). Bất kỳ ký tự nào khác còn lại cho `Err`. Với `:junk-allowed true`, nó dừng ở ký tự không phải chữ số đầu tiên và bỏ qua phần còn lại, nhưng cho `Err` nếu không có một chữ số nào (tương ứng với `nil` của CL). Nó không trả về giá trị thứ hai của CL (vị trí nơi việc đọc kết thúc). Một `radix` ngoài phạm vi sẽ panic (sai sót của bên gọi, không phải của văn bản) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` của CL. Bỏ qua khoảng trắng ở đầu và cuối (cùng tập như `trim`), đọc tối đa một dấu `+`/`-`, rồi các chữ số theo cơ số `radix` (mặc định 10, 2 đến 36; các chữ số trên 10 ở dạng hoa hoặc thường đều được). Không có giới hạn về số chữ số (`int`). Bất kỳ ký tự nào khác còn lại cho `err`. Với `:junk-allowed true`, nó dừng ở ký tự không phải chữ số đầu tiên và bỏ qua phần còn lại, nhưng cho `err` nếu không có một chữ số nào (tương ứng với `nil` của CL). Nó không trả về giá trị thứ hai của CL (vị trí nơi việc đọc kết thúc). Một `radix` ngoài phạm vi sẽ panic (sai sót của bên gọi, không phải của văn bản) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Một số dấu phẩy động. Cũng chấp nhận `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Đọc một `Sexpr` từ `s` (bằng cùng reader đọc mã nguồn). Ngoặc không cân bằng, chuỗi không kết thúc và những thứ tương tự cho `Err`. Đọc từ một stream là `read-sexpr` ([Stream](streams-files.md#6-hàm-generic-và-thao-tác-tệp)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Đọc một `Sexpr` từ `s` (bằng cùng reader đọc mã nguồn). Ngoặc không cân bằng, chuỗi không kết thúc và những thứ tương tự cho `err`. Đọc từ một stream là `read-sexpr` ([Stream](streams-files.md#6-hàm-generic-và-thao-tác-tệp)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` cộng **vị trí nơi việc đọc kết thúc**. `(car r)` là giá trị và `(cdr r)` là vị trí của ký tự tiếp theo cần đọc. `start` mặc định là 0 |
 | `read-from-string-preserving-whitespace` | Như trên | Như trên | Giống vậy, nhưng không tiêu thụ khoảng trắng đã kết thúc datum. Sự khác biệt thể hiện ở vị trí được trả về |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Kiểm tra kiểu `form` lúc chạy và đánh giá nó. Theo `eval` của CL |
@@ -170,7 +170,7 @@ trắng đã kết thúc datum, còn `read-preserving-whitespace` để lại n�
 trí 3, và phiên bản preserving trả về 2.
 
 Cú pháp số mà reader chấp nhận nằm ở [Tham chiếu cú pháp chương 1](../syntax.md#1-cú-pháp-từ-vựng). Những gì
-`*print-radix*` ([In](printing.md#62-cơ-số-hoa-thường-và-khả-năng-đọc-lại)) in ra có thể đọc ngược lại nguyên trạng. Không
+`*print-radix*` ([In](printing.md#62-cơ-số-và-khả-năng-đọc-lại)) in ra có thể đọc ngược lại nguyên trạng. Không
 có `*read-base*` của CL.
 
 ### 6.1 `eval` có nghĩa là gì
@@ -198,7 +198,7 @@ ngay lập tức và vĩnh viễn vào môi trường toàn cục.
   tra trước khi `eval` định nghĩa `sq` chạy, và là "chưa định nghĩa". Tuy nhiên, **các `eval` sau đó thì thấy
   được** (việc kiểm tra kiểu của chúng chạy lúc chạy, sau định nghĩa). REPL kiểm tra và chạy từng dòng một,
   nên một tên được định nghĩa bằng `eval` có thể được gọi trực tiếp từ dòng tiếp theo.
-- **Lỗi**: lỗi kiểu và lỗi cú pháp trả về `Err` (chúng không panic). **Panic lúc chạy** trong mã được đánh
+- **Lỗi**: lỗi kiểu và lỗi cú pháp trả về `err` (chúng không panic). **Panic lúc chạy** trong mã được đánh
   giá (chia cho không, v.v.) lan truyền như từ mã viết trực tiếp. Phần dọn dẹp của mọi `unwind-protect` ở giữa
   đều chạy ([Tham chiếu cú pháp chương 8](../syntax.md#8-lối-thoát-phi-cục-bộ-catch--throw--unwind-protect)).
 - **Không gian tên**: khi chạy bằng `typl file.typl` và bên trong một tệp thực thi AOT, `eval` đánh giá trong

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -144,7 +144,7 @@ diizinkan CLHS, agar skrip dan pengujian tidak menggantung pada prompt yang tida
 pun.
 
 `$VISUAL` / `$EDITOR` pada `ed` dipecah pada spasi putih, sehingga `EDITOR="code -w"` berfungsi.
-Jika keduanya tidak disetel, hasilnya `Err`: ia tidak menebak `vi`. Nomor baris diserahkan lebih
+Jika keduanya tidak disetel, hasilnya `err`: ia tidak menebak `vi`. Nomor baris diserahkan lebih
 dulu, dalam bentuk `+N`.
 
 `dribble` merekam ketiga cara keluaran sesi meninggalkan proses: apa yang ditulis
@@ -154,14 +154,14 @@ yang diketik ke REPL beserta nilai yang dicetak balik REPL.
 ## 6. Parsing dan evaluasi
 
 Semuanya menangani teks dan data dari saat dijalankan (yang tidak dikendalikan program itu sendiri),
-sehingga saat gagal mereka mengembalikan `Err` dari `Result` dan bukan panic. Tipe kesalahannya
+sehingga saat gagal mereka mengembalikan `err` dari `Result` dan bukan panic. Tipe kesalahannya
 adalah tipe konkret per operasi ([Tipe kesalahan](option-result.md#3-tipe-kesalahan-dan-trait-error)).
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` pada CL. Melewati spasi putih di awal dan akhir (himpunan yang sama seperti `trim`), membaca paling banyak satu tanda `+`/`-`, lalu digit pada basis `radix` (bawaan 10, 2 sampai 36; digit di atas 10 dalam huruf besar atau kecil). Tidak ada batas jumlah digit (`int`). Karakter lain yang tersisa menghasilkan `Err`. Dengan `:junk-allowed true`, ia berhenti pada non-digit pertama dan mengabaikan sisanya, tetapi menghasilkan `Err` jika tidak ada satu digit pun (sepadan dengan `nil` pada CL). Ia tidak mengembalikan nilai kedua CL (posisi tempat pembacaan berakhir). `radix` di luar rentang melakukan panic (kesalahan pemanggil, bukan pada teks) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` pada CL. Melewati spasi putih di awal dan akhir (himpunan yang sama seperti `trim`), membaca paling banyak satu tanda `+`/`-`, lalu digit pada basis `radix` (bawaan 10, 2 sampai 36; digit di atas 10 dalam huruf besar atau kecil). Tidak ada batas jumlah digit (`int`). Karakter lain yang tersisa menghasilkan `err`. Dengan `:junk-allowed true`, ia berhenti pada non-digit pertama dan mengabaikan sisanya, tetapi menghasilkan `err` jika tidak ada satu digit pun (sepadan dengan `nil` pada CL). Ia tidak mengembalikan nilai kedua CL (posisi tempat pembacaan berakhir). `radix` di luar rentang melakukan panic (kesalahan pemanggil, bukan pada teks) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Bilangan floating-point. Juga menerima `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Membaca satu `Sexpr` dari `s` (dengan reader yang sama yang membaca kode sumber). Tanda kurung tidak seimbang, string yang tidak tertutup, dan sejenisnya menghasilkan `Err`. Membaca dari stream adalah `read-sexpr` ([Stream](streams-files.md#6-fungsi-generik-dan-operasi-berkas)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Membaca satu `Sexpr` dari `s` (dengan reader yang sama yang membaca kode sumber). Tanda kurung tidak seimbang, string yang tidak tertutup, dan sejenisnya menghasilkan `err`. Membaca dari stream adalah `read-sexpr` ([Stream](streams-files.md#6-fungsi-generik-dan-operasi-berkas)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` ditambah **posisi tempat pembacaan berakhir**. `(car r)` adalah nilainya dan `(cdr r)` posisi karakter berikutnya yang akan dibaca. `start` bawaannya 0 |
 | `read-from-string-preserving-whitespace` | Sama seperti di atas | Sama seperti di atas | Sama, tetapi tidak mengonsumsi spasi putih yang mengakhiri datum. Perbedaannya terlihat pada posisi yang dikembalikan |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Memeriksa tipe `form` saat dijalankan dan mengevaluasinya. Mengikuti `eval` pada CL |
@@ -184,7 +184,7 @@ mengonsumsi spasi putih yang mengakhiri datum, dan `read-preserving-whitespace` 
 `(read-from-string "12 34")` mengembalikan posisi 3, dan versi preserving mengembalikan 2.
 
 Sintaks bilangan yang diterima reader ada di [Referensi Sintaks bab 1](../syntax.md#1-unsur-leksikal).
-Apa yang dicetak `*print-radix*` ([Pencetakan](printing.md#62-basis-huruf-besar-kecil-dan-keterbacaan))
+Apa yang dicetak `*print-radix*` ([Pencetakan](printing.md#62-basis-dan-keterbacaan))
 dapat dibaca kembali apa adanya. Tidak ada `*read-base*` CL.
 
 ### 6.1 Arti `eval`
@@ -214,7 +214,7 @@ langsung didaftarkan ke lingkungan global secara permanen.
   (pemeriksaan tipenya berjalan saat dijalankan, setelah definisi). REPL memeriksa dan menjalankan
   satu baris sekali waktu, sehingga nama yang didefinisikan dengan `eval` dapat dipanggil langsung
   dari baris berikutnya.
-- **Kesalahan**: kesalahan tipe dan kesalahan sintaks mengembalikan `Err` (tidak melakukan panic).
+- **Kesalahan**: kesalahan tipe dan kesalahan sintaks mengembalikan `err` (tidak melakukan panic).
   **Panic saat dijalankan** pada kode yang dievaluasi (pembagian dengan nol dan sebagainya)
   merambat seperti pada kode yang ditulis langsung. Pembersihan `unwind-protect` di antaranya
   dijalankan ([Referensi Sintaks bab 8](../syntax.md#8-keluar-non-lokal-catch--throw--unwind-protect)).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -35,9 +35,9 @@ voor `int` staat in hoofdstuk 3).
 | `int->int` | `(int->int x)` | `T→int` | Verbredende conversie naar `int` (altijd exact). Wat `(as int x)` doet |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Verbredende conversie naar `ratio` (altijd exact) |
 | `int->char` | `(int->char x)` | `T→char` | Interpreteert de waarde als een Unicode-scalarwaarde. Geeft een panic bij een ongeldige waarde |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Een versie van `int->char` die bij mislukking `None` teruggeeft |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Een versie van `int->char` die bij mislukking `none` teruggeeft |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Breedteconversie. Waarden die niet passen worden afgekapt (zoals `as` van Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dezelfde conversie als vraag. `None` als de waarde niet in die breedte past |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dezelfde conversie als vraag. `none` als de waarde niet in die breedte past |
 
 Deze conversies zijn ook wat de speciale vormen `(as Type x)`/`(try-as Type x)`
 ([Syntaxreferentie](../syntax.md#7-overige-speciale-vormen)) doen. Bitbewerkingen

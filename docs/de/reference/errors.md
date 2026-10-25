@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Fehlermeldungen
 
 Was die wichtigsten Fehlermeldungen von `typl` bedeuten und wie man sie behebt.
@@ -45,7 +45,7 @@ Fehler, die vor der Ausführung gefunden werden. Die Form wird erst ausgeführt,
 | ``type mismatch: expected `T`, found `U` `` | Ein Ausdruck vom Typ `U` steht dort, wo der Typ `T` gebraucht wird. Es gibt keine impliziten Umwandlungen; Zahlen wandelt man mit `(as T x)` um. Auch `int` und `i32` sind verschiedene Typen |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Das Literal passt nicht in den Typ. Wer es abschneiden will, schreibt `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Es gibt keinen Typ dieses Namens. Einen Typ definiert man vor der ersten Form, die ihn verwendet (Typen haben keine Vorwärtsdeklaration). War eine Typvariable gemeint, schreibt man sie an eine Deklarationsstelle wie `<foo>` nach dem Funktionsnamen ([Syntaxreferenz 3.6](syntax.md#36-defstruct--strukturen-benutzerdefinierte-typen)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Ein Typargument lässt sich nicht bestimmen. Man schreibt den Typ mit `the`, wie in `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Ein Typargument lässt sich nicht bestimmen. Man schreibt den Typ mit `the`, wie in `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | Das `match` behandelt nicht alle Varianten. Man ergänzt Zweige für die fehlenden Varianten oder einen `_`-Zweig |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Die Funktion verlangt einen Trait, den der übergebene Typ nicht implementiert. Man schreibt `(impl Eq pt ...)` ([Standard-Traits](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Ein Wert eines Typs, der den Trait nicht implementiert, wurde dort übergeben, wo ein `:dyn` erwartet wird. Man schreibt das `impl` |

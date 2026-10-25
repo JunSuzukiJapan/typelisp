@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # I/O Berkas, Stream, dan Jaringan
 
 Panduan ini menunjukkan dasar-dasar membaca dan menulis berkas, pathname, dan komunikasi socket.
@@ -20,7 +20,7 @@ Pisahkan hasilnya dengan `match`.
 ```
 
 Ketika Anda tahu operasinya tidak mungkin gagal, atau pada skrip kecil yang berhenti saat gagal
-tidak masalah, `unwrap` mengambil nilainya. Jika berupa `Err`, ia melakukan panic.
+tidak masalah, `unwrap` mengambil nilainya. Jika berupa `err`, ia melakukan panic.
 
 ## 2. Membaca dan menulis seluruh berkas
 
@@ -176,7 +176,7 @@ Untuk memberi batas waktu pada suatu operasi, berikan `:timeout` (dalam detik).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
 ```
 
 ### Ketika pihak seberang terputus
@@ -192,7 +192,7 @@ atau `send-to` menyelesaikannya di dalamnya. Resolusi berlangsung di thread lain
 terus berjalan selama menunggu. Jika sebuah nama memiliki beberapa alamat, alamat-alamat itu dicoba
 bergiliran.
 
-Jika nama tidak dapat diselesaikan, `Err` dikembalikan.
+Jika nama tidak dapat diselesaikan, `err` dikembalikan.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -250,5 +250,5 @@ UDP bukan stream; ia mengirim dan menerima satu datagram sekali waktu. Datanya a
 ## 9. Socket domain Unix
 
 Berikan path berkas socket ke `unix-listen` / `unix-connect`. Nilai yang Anda peroleh adalah
-`socket-stream` yang sama seperti pada TCP. `unix-listen` mengembalikan `Err` jika berkasnya sudah
+`socket-stream` yang sama seperti pada TCP. `unix-listen` mengembalikan `err` jika berkasnya sudah
 ada. Menutup listener menghapus berkasnya.

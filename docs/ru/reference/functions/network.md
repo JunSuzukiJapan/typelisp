@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Сеть (TCP / TLS / Unix-сокеты / UDP)
 
 Сокеты входят в число [потоков](streams-files.md). Соединение видно в **двух представлениях одного и того же
@@ -21,7 +21,7 @@
 | `socket-listener` | `Stream` (`close` / `open-stream-p`) | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | — (`bytes`: `Vector<int>`, `from`: `string`) | `recv-from` |
-| `NetError` | `Error` | `Err` функций ниже |
+| `NetError` | `Error` | `err` функций ниже |
 
 У типа потока один тип элементов (по той же причине, что у `file-stream`/`binary-file-stream`), поэтому символы и
 байты — разные типы. `byte-stream-of`/`char-stream-of` возвращают значения, указывающие на **то же соединение** и
@@ -32,16 +32,16 @@
 
 | Имя | Использование | Тип | Смысл |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Подключается. `host` может быть именем или адресом. Если у имени несколько адресов, они пробуются по очереди (`localhost` — это `::1` и `127.0.0.1`). Неудачное разрешение имени, отказ в соединении или превышение `:timeout` секунд дают `Err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS после `tcp-connect`. Сертификат проверяется по имени `host` (`:server-name`, если проверяемое имя отличается от адреса подключения) с корневыми сертификатами Mozilla. С `:ca-file` (PEM) доверяет **только сертификатам в нём** (частный центр сертификации или тот самый сертификат, который предъявляет ваш собственный `tls-listen`). `:cert-file`/`:key-file` (оба или ни одного) — наш сертификат, предъявляемый, когда сервер его запрашивает (взаимный TLS). Рукопожатие завершается здесь, поэтому если сертификат сервера не проходит проверку, этот вызов возвращает `Err`. Результат — обычный `socket-stream` |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Подключается. `host` может быть именем или адресом. Если у имени несколько адресов, они пробуются по очереди (`localhost` — это `::1` и `127.0.0.1`). Неудачное разрешение имени, отказ в соединении или превышение `:timeout` секунд дают `err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS после `tcp-connect`. Сертификат проверяется по имени `host` (`:server-name`, если проверяемое имя отличается от адреса подключения) с корневыми сертификатами Mozilla. С `:ca-file` (PEM) доверяет **только сертификатам в нём** (частный центр сертификации или тот самый сертификат, который предъявляет ваш собственный `tls-listen`). `:cert-file`/`:key-file` (оба или ни одного) — наш сертификат, предъявляемый, когда сервер его запрашивает (взаимный TLS). Рукопожатие завершается здесь, поэтому если сертификат сервера не проходит проверку, этот вызов возвращает `err`. Результат — обычный `socket-stream` |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Подключается к Unix-сокету `path`. Он локальный, поэтому нет ни ожидания рукопожатия, ни тайм-аута |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | Слушает. `"127.0.0.1"` — только эта машина, `"0.0.0.0"` — все интерфейсы. Если передать `0` как `port`, порт выберет ОС |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | TLS-версия `tcp-listen`. `cert-file` — цепочка сертификатов (PEM, свой сертификат первым), `key-file` — закрытый ключ. Оба читаются и проверяются здесь, поэтому несовпадающий ключ даёт `Err` уже от этого вызова, а не при первом клиенте. `accept` возвращается **до рукопожатия**, и первое чтение или запись задачи, обрабатывающей соединение, завершает рукопожатие (как `tls.Conn` в Go), так что клиент, медленно выполняющий рукопожатие, не задерживает другие `accept`. С `:client-ca` (PEM) **требует от каждого клиента** сертификат, выданный центром сертификации из него (взаимный TLS). Без него сертификаты не запрашиваются |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | Слушает на `path`. **`Err`, если файл уже существует** (он может принадлежать другому работающему процессу, поэтому молча не заменяется). `close` удаляет файл |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Следующее соединение. Останавливает задачу, пока оно не придёт. По истечении `:timeout` секунд сдаётся с `Err` |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | TLS-версия `tcp-listen`. `cert-file` — цепочка сертификатов (PEM, свой сертификат первым), `key-file` — закрытый ключ. Оба читаются и проверяются здесь, поэтому несовпадающий ключ даёт `err` уже от этого вызова, а не при первом клиенте. `accept` возвращается **до рукопожатия**, и первое чтение или запись задачи, обрабатывающей соединение, завершает рукопожатие (как `tls.Conn` в Go), так что клиент, медленно выполняющий рукопожатие, не задерживает другие `accept`. С `:client-ca` (PEM) **требует от каждого клиента** сертификат, выданный центром сертификации из него (взаимный TLS). Без него сертификаты не запрашиваются |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | Слушает на `path`. **`err`, если файл уже существует** (он может принадлежать другому работающему процессу, поэтому молча не заменяется). `close` удаляет файл |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Следующее соединение. Останавливает задачу, пока оно не придёт. По истечении `:timeout` секунд сдаётся с `err` |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | Пока можно читать без ожидания, или `secs` секунд. `true` означает первое (включая уже буферизованные данные). Способ поставить таймер на чтение: `(if (wait-readable c 5.0) (read-line c) ...)`. Обещается, что **следующее чтение не остановится**; `read-line` может ждать остаток строки |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | Пока можно писать, или `secs` секунд |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Добавляет слушателю `tls-listen` ещё один сертификат, предъявляемый клиентам, запросившим `name` (SNI): несколько сайтов на одном слушателе. Здесь проверяется, подходит ли цепочка для `name`, и если нет, этот вызов возвращает `Err`. Клиенты, запросившие имя, которое никто не добавлял, или не указавшие имя, получают сертификат `tls-listen` |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Добавляет слушателю `tls-listen` ещё один сертификат, предъявляемый клиентам, запросившим `name` (SNI): несколько сайтов на одном слушателе. Здесь проверяется, подходит ли цепочка для `name`, и если нет, этот вызов возвращает `err`. Клиенты, запросившие имя, которое никто не добавлял, или не указавшие имя, получают сертификат `tls-listen` |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | Субъект сертификата собеседника (`CN=client,O=Example,C=JP`, форма RFC 4514, от наиболее конкретного). Так сервер со взаимным TLS узнаёт, «кто подключился» (после первого чтения, которое завершает рукопожатие). На стороне клиента — имя сертификата сервера. `none` для обычных соединений, до рукопожатия или если собеседник не предъявил сертификат |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | На серверной стороне TLS-соединения — имя, запрошенное клиентом (SNI). Так сервер с несколькими сайтами, добавленными через `tls-add-certificate`, узнаёт, «какой сайт». `none` для обычных соединений, на стороне клиента или без имени (подключение по адресу) |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | Отключает Nagle (`TCP_NODELAY`). `write-string` каждый раз доходит до сокета, поэтому при включённом Nagle ответ, записанный в две части — заголовок и тело, — ждёт отложенного ACK собеседника: для протоколов запрос/ответ используйте `true`. У Unix-сокетов нет Nagle, и вызов просто завершается успешно |
@@ -120,7 +120,7 @@
 ```
 
 При взаимном TLS клиент, не предъявивший сертификат (или предъявивший непроходящий), в TLS 1.3 завершает свою часть
-рукопожатия до того, как решит сервер, поэтому `tls-connect` возвращает `Ok`, а **первое чтение возвращает `none`** (с
+рукопожатия до того, как решит сервер, поэтому `tls-connect` возвращает `ok`, а **первое чтение возвращает `none`** (с
 предупреждением в `socket-error`). На стороне сервера первое чтение того же соединения тоже возвращает `none`. Ни одна
 сторона не вызывает panic.
 

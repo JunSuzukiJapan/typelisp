@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Yazdırma
 
 `print`/`println`/`format`, tek bağımsız değişkenli yazıcılar, pretty printer, `print-object` ve
@@ -232,8 +232,8 @@ yazdırılır. REPL bir sonuç gösterdiğinde `~s` ile aynı gösterimi kullan�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Demet `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Aynısı |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (sayı bir iç seri numarasıdır) | Aynısı |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Aynısı |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (sayı bir iç seri numarasıdır) | Aynısı |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Bir tamsayı (CL'nin `get-universal-time` / `get-internal-real-time` değeri) | Aynısı |
 | Hata türleri (`ParseIntError`, `SimpleError` vb.) | `#<simpleerror "boom">` | Yalnızca mesaj (`boom`) |
@@ -329,30 +329,27 @@ korur:
 Paylaşımı olmayan bir değer **hiç etiket göstermez**; bu yüzden bu değişkeni true bırakmak gündelik
 kodun çıktısını değiştirmez.
 
-### 6.2 Taban, harf büyüklüğü ve okunabilirlik
+### 6.2 Taban ve okunabilirlik
 
 | Değişken | Tür | Varsayılan | Anlamı |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | Tamsayıları (sabit genişlikli ve `int`) yazdırma tabanı. 2 ile 36 dışında bir **yazdırma hatasıdır** (CL de aralığı belirtir) |
 | `*print-radix*` | `bool` | `false` | True ise bir taban işareti ekler: `#b`/`#o`/`#x`, diğer tabanlar için `#NNr` ve 10 tabanı için sondaki `.`. İşaret, işaretin **önüne** gelir (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | Sembol adlarının harf büyüklüğü: `:upcase` / `:downcase` / `:capitalize` (CL ile aynı yazımlar). Başka herhangi bir sembol yazdırma hatasıdır |
 | `*print-readably*` | `bool` | `false` | True ise geri okunabilen bir biçimde yazdırır. Kaçışı zorlar ve `*print-level*`/`*print-length*` kesmelerini devre dışı bırakır |
 | `*print-lines*` | `int` | `0` | Pretty printer'ın kullanabileceği satır sayısı. Fazlası kesilir ve CL'deki gibi sonda `..` olur. 0 sınırsız demektir. Negatif bir değer yazdırma hatasıdır |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string`'in `prin1` mi `princ` mi yapacağı. **Yalnızca bu ikisi onu okur** |
-| `*print-array*` | `bool` | `true` | `Vector<T>` ve `Array<T>`'nin içeriğini gösterip göstermediği. Doğruysa CL'nin dizi sözdizimi (`#(1 2 3)` / `#2A((1 2) (3 4))`); yanlışsa yalnızca tür ve şekil, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` ve `Array<T>`'nin içeriğini gösterip göstermediği. Doğruysa CL'nin dizi sözdizimi (`#(1 2 3)` / `#2A((1 2) (3 4))`); yanlışsa yalnızca tür ve şekil, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 `*print-radix*`'in eklediği işaretler okuyucu tarafından geri okunabilir
 ([Sözdizimi Başvurusu](../syntax.md#1-sözcüksel-öğeler)'ndaki taban gösterimi).
 
-**`*print-case*`'in varsayılanının CL'den neden farklı olduğu**: CL'nin varsayılanı `:upcase`'tir; çünkü
-CL'nin okuyucusu sembol adlarını büyük harfle saklar, yani "saklandığı gibi" anlamına gelir. Bu okuyucu
-onları küçük harfle saklar; bu yüzden aynı anlama gelen varsayılan `:downcase`'tir.
+**Neden `*print-case*` yok**: sembol adları büyük/küçük harf duyarlıdır ve yazıldığı gibi basılır; başka harf
+büyüklüğüyle basmak, geri okunduğunda başka bir sembol verirdi.
 
 **`*print-readably*`'in eksik yarısı**: CL, geri okunamayan değerler için `print-not-readable` bildirir,
 ancak bu dilde bildirilecek bir koşul yoktur ve `print-object`'in istediği gibi yazdırabildiği kullanıcı

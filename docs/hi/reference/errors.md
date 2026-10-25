@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # त्रुटि संदेश
 
 `typl` के मुख्य त्रुटि संदेशों का अर्थ और उन्हें कैसे ठीक करें।
@@ -42,7 +42,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | जहाँ टाइप `T` चाहिए वहाँ टाइप `U` का एक्सप्रेशन है। कोई अंतर्निहित रूपांतरण नहीं हैं; संख्याओं के लिए `(as T x)` से बदलें। `int` और `i32` भी अलग टाइप हैं |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | लिटरल टाइप में नहीं समाता। यदि आप चाहते हैं कि उसे काट दिया जाए, तो `(as u8 300)` लिखें |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | उस नाम का कोई टाइप नहीं है। टाइप को उसका उपयोग करने वाले पहले फ़ॉर्म से पहले परिभाषित करें (टाइप की फ़ॉरवर्ड घोषणा नहीं होती)। यदि आपका आशय टाइप वेरिएबल था, तो उसे फ़ंक्शन के नाम के बाद `<foo>` जैसी घोषित करने वाली स्थिति में लिखें ([सिंटैक्स संदर्भ 3.6](syntax.md#36-defstruct--struct-उपयोगकर्ता-परिभाषित-टाइप)) |
-| ``cannot infer type argument `t` for `vector::new` `` | टाइप आर्ग्युमेंट निर्धारित नहीं किया जा सकता। टाइप को `the` से लिखें, जैसे `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | टाइप आर्ग्युमेंट निर्धारित नहीं किया जा सकता। टाइप को `the` से लिखें, जैसे `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` हर variant को नहीं संभालता। छूटे हुए variant के लिए शाखाएँ, या `_` शाखा जोड़ें |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | फ़ंक्शन को ऐसा trait चाहिए जिसे आपका पास किया हुआ टाइप लागू नहीं करता। `(impl Eq pt ...)` लिखें ([स्टैंडर्ड trait](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | जहाँ `:dyn` अपेक्षित था वहाँ ऐसे टाइप का मान पास किया गया जो trait को लागू नहीं करता। `impl` लिखें |

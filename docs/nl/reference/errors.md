@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Foutmeldingen
 
 Wat de belangrijkste foutmeldingen van `typl` betekenen en hoe je ze oplost.
@@ -45,7 +45,7 @@ Fouten die vóór het uitvoeren worden gevonden. De vorm wordt niet uitgevoerd t
 | ``type mismatch: expected `T`, found `U` `` | Een expressie van het type `U` staat waar type `T` nodig is. Er zijn geen impliciete conversies; converteer getallen met `(as T x)`. `int` en `i32` zijn ook verschillende types |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | De literal past niet in het type. Wil je hem afkappen, schrijf dan `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Er is geen type met die naam. Definieer een type vóór de eerste vorm die het gebruikt (types hebben geen voorwaartse declaratie). Bedoelde je een typevariabele, schrijf hem dan op een declarerende plek zoals `<foo>` na de functienaam ([Syntaxreferentie 3.6](syntax.md#36-defstruct--structs-door-de-gebruiker-gedefinieerde-types)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Een typeargument kan niet worden bepaald. Schrijf het type met `the`, zoals in `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Een typeargument kan niet worden bepaald. Schrijf het type met `the`, zoals in `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | De `match` handelt niet elke variant af. Voeg takken toe voor de ontbrekende varianten, of een `_`-tak |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | De functie eist een trait die het type dat je doorgaf niet implementeert. Schrijf `(impl Eq pt ...)` ([Standaardtraits](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Een waarde van een type dat de trait niet implementeert werd doorgegeven waar een `:dyn` wordt verwacht. Schrijf de `impl` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # ข้อความแสดงข้อผิดพลาด
 
 ความหมายของข้อความแสดงข้อผิดพลาดหลักจาก `typl` และวิธีแก้ไข
@@ -44,7 +44,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | นิพจน์ชนิด `U` อยู่ในที่ที่ต้องการชนิด `T` ไม่มีการแปลงโดยปริยาย สำหรับตัวเลข ให้แปลงด้วย `(as T x)` `int` และ `i32` ก็เป็นคนละชนิดเช่นกัน |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | literal ไม่พอดีกับชนิด หากต้องการให้ตัดทอน ให้เขียน `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | ไม่มีชนิดชื่อนั้น ให้นิยามชนิดก่อนฟอร์มแรกที่ใช้มัน (ชนิดไม่มีการประกาศล่วงหน้า) หากหมายถึงตัวแปรชนิด ให้เขียนในตำแหน่งที่ประกาศ เช่น `<foo>` หลังชื่อฟังก์ชัน ([เอกสารอ้างอิงไวยากรณ์ 3.6](syntax.md#36-defstruct--struct-ชนิดที่ผู้ใช้นิยาม)) |
-| ``cannot infer type argument `t` for `vector::new` `` | ไม่สามารถกำหนดอาร์กิวเมนต์ชนิดได้ ให้เขียนชนิดด้วย `the` เช่น `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | ไม่สามารถกำหนดอาร์กิวเมนต์ชนิดได้ ให้เขียนชนิดด้วย `the` เช่น `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` ไม่จัดการทุก variant ให้เพิ่มกิ่งสำหรับ variant ที่ขาด หรือกิ่ง `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | ฟังก์ชันต้องการ trait ที่ชนิดที่คุณส่งไม่ได้ implement ให้เขียน `(impl Eq pt ...)` ([Trait มาตรฐาน](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | ค่าของชนิดที่ไม่ได้ implement trait ถูกส่งในที่ที่คาดหวัง `:dyn` ให้เขียน `impl` |

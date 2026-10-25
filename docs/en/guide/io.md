@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # File I/O, Streams and Networking
 
 This guide shows the basics of reading and writing files, pathnames, and socket communication. The
@@ -20,7 +20,7 @@ outcomes with `match`.
 ```
 
 When you know an operation cannot fail, or in a small script where stopping on failure is fine,
-`unwrap` takes out the value. If it is an `Err`, it panics.
+`unwrap` takes out the value. If it is an `err`, it panics.
 
 ## 2. Reading and writing a whole file
 
@@ -174,7 +174,7 @@ To put a time limit on an operation, pass `:timeout` (in seconds).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
 ```
 
 ### When the other side disconnects
@@ -189,7 +189,7 @@ There is no dedicated function for name resolution. Passing a host name to `tcp-
 `tls-connect` or `send-to` resolves it inside them. Resolution happens on another thread, so other
 tasks keep running while it waits. If a name has several addresses, they are tried in turn.
 
-If the name cannot be resolved, an `Err` is returned.
+If the name cannot be resolved, an `err` is returned.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -247,5 +247,5 @@ UDP is not a stream; it sends and receives one datagram at a time. The data is a
 ## 9. Unix domain sockets
 
 Pass the path of the socket file to `unix-listen` / `unix-connect`. The value you get is the same
-`socket-stream` as with TCP. `unix-listen` returns an `Err` if the file already exists. Closing the
+`socket-stream` as with TCP. `unix-listen` returns an `err` if the file already exists. Closing the
 listener removes the file.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Fil-I/O, strömmar och nätverk
 
 Den här guiden visar grunderna i att läsa och skriva filer, pathnames och socketkommunikation.
@@ -19,7 +19,7 @@ Operationer som kan misslyckas beroende på miljön, som att öppna en fil eller
 ```
 
 När du vet att en operation inte kan misslyckas, eller i ett litet skript där det är i sin ordning att
-stoppa vid misslyckande, tar `unwrap` ut värdet. Om det är ett `Err` ger det panic.
+stoppa vid misslyckande, tar `unwrap` ut värdet. Om det är ett `err` ger det panic.
 
 ## 2. Läsa och skriva en hel fil
 
@@ -173,7 +173,7 @@ För att sätta en tidsgräns på en operation skickar man `:timeout` (i sekunde
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; sätt en klocka på nästa läsning
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; sätt en klocka på nästa läsning
 ```
 
 ### När andra sidan kopplar ner
@@ -188,7 +188,7 @@ Det finns ingen dedikerad funktion för namnuppslagning. Att skicka ett värdnam
 `tls-connect` eller `send-to` löser upp det inuti dem. Uppslagningen sker på en annan tråd, så andra
 tasks fortsätter köra medan den väntar. Om ett namn har flera adresser prövas de i tur och ordning.
 
-Om namnet inte kan lösas upp returneras ett `Err`.
+Om namnet inte kan lösas upp returneras ett `err`.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -246,5 +246,5 @@ UDP är inte en ström; det skickar och tar emot ett datagram i taget. Datan är
 ## 9. Unix-domänsocketar
 
 Skicka sökvägen till socketfilen till `unix-listen` / `unix-connect`. Värdet du får är samma
-`socket-stream` som med TCP. `unix-listen` returnerar ett `Err` om filen redan finns. Att stänga
+`socket-stream` som med TCP. `unix-listen` returnerar ett `err` om filen redan finns. Att stänga
 lyssnaren tar bort filen.

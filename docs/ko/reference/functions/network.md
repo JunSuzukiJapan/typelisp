@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 네트워크 (TCP / TLS / Unix 도메인 / UDP)
 
 소켓은 [스트림](streams-files.md)의 일원이다. 연결은 `socket-stream`(문자)과 `socket-byte-stream`(바이트)이라는
@@ -19,7 +19,7 @@
 | `socket-listener` | `Stream`(`close` / `open-stream-p`) | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | —(`bytes`: `Vector<int>`, `from`: `string`) | `recv-from` |
-| `NetError` | `Error` | 아래 함수들의 `Err` |
+| `NetError` | `Error` | 아래 함수들의 `err` |
 
 스트림 타입은 요소 타입을 하나 가지므로(`file-stream`/`binary-file-stream`과 같은 이유) 문자와 바이트는 다른 타입이다.
 `byte-stream-of`/`char-stream-of`는 **같은 연결**을 가리키며 받기 버퍼를 공유하는 값을 반환한다. 헤더는 문자로, 본문은
@@ -29,16 +29,16 @@
 
 | 이름 | 쓰는 법 | 타입 | 의미 |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | 연결한다. `host`는 이름이든 주소든 된다. 이름에 주소가 여러 개 있으면 차례로 시도한다(`localhost`는 `::1`과 `127.0.0.1`). 이름 조회 실패, 연결 거부, `:timeout`초 초과는 `Err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect` 뒤에 TLS. 인증서는 `host` 이름(검증할 이름이 연결할 곳과 다르면 `:server-name`)에 대해 Mozilla의 루트 인증서로 검증된다. `:ca-file`(PEM)을 주면 **그 안의 인증서만** 신뢰한다(사설 CA, 또는 자신의 `tls-listen`이 제시하는 바로 그 인증서). `:cert-file`/`:key-file`(둘 다 주거나 둘 다 주지 않는다)은 이쪽의 인증서이며, 서버가 요구하면 제시한다(상호 TLS). 핸드셰이크는 여기서 완료되므로 서버의 인증서가 통과하지 못하면 이 호출이 `Err`을 반환한다. 결과는 보통의 `socket-stream` |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | 연결한다. `host`는 이름이든 주소든 된다. 이름에 주소가 여러 개 있으면 차례로 시도한다(`localhost`는 `::1`과 `127.0.0.1`). 이름 조회 실패, 연결 거부, `:timeout`초 초과는 `err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect` 뒤에 TLS. 인증서는 `host` 이름(검증할 이름이 연결할 곳과 다르면 `:server-name`)에 대해 Mozilla의 루트 인증서로 검증된다. `:ca-file`(PEM)을 주면 **그 안의 인증서만** 신뢰한다(사설 CA, 또는 자신의 `tls-listen`이 제시하는 바로 그 인증서). `:cert-file`/`:key-file`(둘 다 주거나 둘 다 주지 않는다)은 이쪽의 인증서이며, 서버가 요구하면 제시한다(상호 TLS). 핸드셰이크는 여기서 완료되므로 서버의 인증서가 통과하지 못하면 이 호출이 `err`을 반환한다. 결과는 보통의 `socket-stream` |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Unix 도메인 소켓 `path`에 연결한다. 로컬이므로 핸드셰이크 대기도 타임아웃도 없다 |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | 기다린다. `"127.0.0.1"`은 이 기기만, `"0.0.0.0"`은 모든 인터페이스. `port`에 `0`을 주면 OS가 고른다 |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen`의 TLS판. `cert-file`은 인증서 체인(PEM, 자신의 인증서가 먼저), `key-file`은 개인 키. 둘 다 여기서 읽고 검사하므로 맞지 않는 키는 첫 클라이언트 때가 아니라 이 호출에서 `Err`이 된다. `accept`는 **핸드셰이크 전에** 반환하며, 연결을 처리하는 태스크의 첫 읽기나 쓰기가 핸드셰이크를 완료한다(Go의 `tls.Conn`처럼). 그래서 핸드셰이크가 느린 클라이언트가 다른 `accept`를 붙잡지 않는다. `:client-ca`(PEM)를 주면 **모든 클라이언트에게** 그 안의 CA가 발행한 인증서의 제시를 요구한다(상호 TLS). 없으면 요구하지 않는다 |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path`에서 기다린다. **파일이 이미 있으면 `Err`**(실행 중인 다른 프로세스의 것일 수 있으므로 조용히 바꾸지 않는다). `close`하면 파일이 지워진다 |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 다음 연결. 올 때까지 태스크를 멈춘다. `:timeout`초가 지나면 `Err`로 포기한다 |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen`의 TLS판. `cert-file`은 인증서 체인(PEM, 자신의 인증서가 먼저), `key-file`은 개인 키. 둘 다 여기서 읽고 검사하므로 맞지 않는 키는 첫 클라이언트 때가 아니라 이 호출에서 `err`이 된다. `accept`는 **핸드셰이크 전에** 반환하며, 연결을 처리하는 태스크의 첫 읽기나 쓰기가 핸드셰이크를 완료한다(Go의 `tls.Conn`처럼). 그래서 핸드셰이크가 느린 클라이언트가 다른 `accept`를 붙잡지 않는다. `:client-ca`(PEM)를 주면 **모든 클라이언트에게** 그 안의 CA가 발행한 인증서의 제시를 요구한다(상호 TLS). 없으면 요구하지 않는다 |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path`에서 기다린다. **파일이 이미 있으면 `err`**(실행 중인 다른 프로세스의 것일 수 있으므로 조용히 바꾸지 않는다). `close`하면 파일이 지워진다 |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 다음 연결. 올 때까지 태스크를 멈춘다. `:timeout`초가 지나면 `err`로 포기한다 |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | 기다리지 않고 읽을 수 있게 될 때까지, 또는 `secs`초. `true`는 전자(이미 버퍼에 있는 데이터 포함). 읽기에 시계를 붙이는 방법: `(if (wait-readable c 5.0) (read-line c) ...)`. 약속하는 것은 **다음 읽기가 멈추지 않는다**는 것이며, `read-line`은 줄의 나머지를 기다릴 수 있다 |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | 쓸 수 있게 될 때까지, 또는 `secs`초 |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | `tls-listen`의 리스너에 인증서를 하나 더 추가하고, `name`을 요구하는 클라이언트(SNI)에게 제시한다. 하나의 리스너로 여러 사이트. 체인이 `name`의 것인지 여기서 검사하고, 아니면 이 호출이 `Err`을 반환한다. 아무도 추가하지 않은 이름을 요구하거나 이름을 요구하지 않는 클라이언트는 `tls-listen`의 인증서를 받는다 |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | `tls-listen`의 리스너에 인증서를 하나 더 추가하고, `name`을 요구하는 클라이언트(SNI)에게 제시한다. 하나의 리스너로 여러 사이트. 체인이 `name`의 것인지 여기서 검사하고, 아니면 이 호출이 `err`을 반환한다. 아무도 추가하지 않은 이름을 요구하거나 이름을 요구하지 않는 클라이언트는 `tls-listen`의 인증서를 받는다 |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | 상대 인증서의 주체(`CN=client,O=Example,C=JP`, RFC 4514 형식, 가장 구체적인 것이 먼저). 상호 TLS 서버가 "누가 연결했는지" 아는 방법(핸드셰이크를 완료하는 첫 읽기 뒤에). 클라이언트 쪽에서는 서버 인증서의 이름. 평문 연결, 핸드셰이크 전, 상대가 인증서를 제시하지 않았으면 `none` |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | 서버 쪽 TLS 연결에서 클라이언트가 요구한 이름(SNI). `tls-add-certificate`로 여러 사이트를 둔 서버가 "어느 사이트인지" 아는 방법. 평문 연결, 클라이언트 쪽, 이름이 없으면(주소로 연결) `none` |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | Nagle을 끈다(`TCP_NODELAY`). `write-string`은 매번 소켓까지 가므로 Nagle이 켜져 있으면 헤더와 본문 두 번에 나누어 쓴 응답이 상대의 지연 ACK를 기다리게 된다. 요청/응답 프로토콜에서는 `true`로 한다. Unix 도메인 소켓에는 Nagle이 없으며 그냥 성공한다 |
@@ -116,7 +116,7 @@
 ```
 
 상호 TLS에서 인증서를 제시하지 않는(또는 통과하지 못하는) 클라이언트는 TLS 1.3에서는 서버가 판단하기 전에 자기 쪽
-핸드셰이크를 마치므로 `tls-connect`는 `Ok`를 반환하고 **첫 읽기가 `none`을 반환한다**(경고는 `socket-error`에 있다).
+핸드셰이크를 마치므로 `tls-connect`는 `ok`를 반환하고 **첫 읽기가 `none`을 반환한다**(경고는 `socket-error`에 있다).
 서버 쪽에서도 같은 연결의 첫 읽기가 `none`을 반환한다. 어느 쪽도 panic하지 않는다.
 
 ## 3. UDP

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -85,8 +85,7 @@ automatiskt i den andra riktningen.
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Tar ut symbolens namn. Ett keywords namn har inget kolon (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Skapar en symbol från en sträng (internerar den i rotmodulen) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Skapar symbolen `name` i namnrymden `namespace` (CL:s `intern`). `namespace` är en modulsökväg från roten (`"geometry::shapes"`); `"keyword"` är keywordens och `""` roten. Utelämnad är det modulen där anropet står |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Returnerar den symbol som `name` läses som i namnrymden `namespace` (CL:s `intern`). Finns en symbol som syns från namnrymden (dess egen, en som hämtats in med `use` eller standardbibliotekets) returneras den; annars skapas en ny i namnrymden. `namespace` är en modulsökväg från roten (`"geometry::shapes"`); `"keyword"` är nyckelordens och `""` roten. En namnrymd som inte finns är ett fel. Utelämnad är det modulen där anropet står (det finns ingen `*package*`). CL:s andra värde (ett tillstånd som `:internal`) returneras inte |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Om det är ett keyword, det vill säga om den hör till keyword-namnrymden ([Syntaxreferens](../syntax.md#1-lexikaliska-element)) |
 
 För `gensym`, se [Makron](system.md#8-makron).
@@ -110,7 +109,7 @@ Funktioner som tar ett predikat (motsvarar CL:s `-if`-familj):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Den första position som uppfyller predikatet |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Hur många som uppfyller predikatet |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om varje element uppfyller predikatet |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om något element uppfyller predikatet (motsvarar CL:s `some`; ett namn som inte krockar med konstruktorn `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om något element uppfyller predikatet (motsvarar CL:s `some`; ett namn som inte krockar med konstruktorn `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Vänstervikning |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Högervikning |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Samlar alla återstående element. Används för att göra en `Vector` av resultatet från en `lazy`-funktion nedan |
@@ -121,9 +120,9 @@ Indexering, längd och delning:
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Antal element |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Konkatenerar iteratorer. Tre eller fler kan anges |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL:s `concatenate`. Resultattypen skrivs som **en citerad symbolliteral** (CL använder en typspecificerare vid körning). `'vector` tar en eller fler, `'string` noll eller fler (`""` för noll). `Sexpr`-listor omfattas inte (använd `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL:s `concatenate`. Resultattypen skrivs som **en citerad symbolliteral** (CL använder en typspecificerare vid körning). `'vector` tar en eller fler, `'string` noll eller fler (`""` för noll). `Sexpr`-listor omfattas inte (använd `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Omvändning (icke-destruktiv) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` utanför intervallet) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` utanför intervallet) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` med argumenten tvärtom |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | De första `n` elementen |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` begränsas till längden) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.
@@ -75,8 +75,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | 심볼의 이름을 꺼낸다. 키워드의 이름에는 콜론이 들어가지 않는다(`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | 문자열에서 심볼을 만든다(루트 모듈에 인턴한다) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 이름공간 `namespace`에 `name` 심볼을 만든다(CL의 `intern`). `namespace`는 루트로부터의 모듈 경로(`"geometry::shapes"`)이며 `"keyword"`는 키워드, `""`는 루트이다. 생략하면 호출을 쓴 모듈 |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 이름공간 `namespace`에서 `name`이 읽히는 심볼을 돌려준다(CL의 `intern`). 그 이름공간에서 보이는 심볼(자신의 것, `use`로 가져온 것, 표준 라이브러리의 것)이 있으면 그것을 돌려주고, 없으면 그 이름공간에 새로 만든다. `namespace`는 루트부터의 모듈 경로(`"geometry::shapes"`)이고, `"keyword"`는 키워드, `""`는 루트다. 존재하지 않는 이름공간은 오류. 생략하면 호출을 쓴 모듈(`*package*`는 없다). CL의 두 번째 값(`:internal` 같은 상태)은 돌려주지 않는다 |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | 키워드인지, 즉 키워드용 이름공간에 속하는지 ([문법 레퍼런스](../syntax.md#1-어휘-요소)) |
 
 `gensym`은 [매크로](system.md#8-매크로)를 참고한다.
@@ -99,7 +98,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 술어를 만족하는 첫 위치 |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 술어를 만족하는 개수 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 모든 요소가 술어를 만족하는지 |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 술어를 만족하는 요소가 있는지(CL의 `some`에 해당. `Some` 생성자와 겹치지 않는 이름) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 술어를 만족하는 요소가 있는지(CL의 `some`에 해당. `some` 생성자와 겹치지 않는 이름) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 왼쪽 접기 |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 오른쪽 접기 |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 남은 요소를 모두 모은다. 아래 `lazy` 함수의 결과를 `Vector`로 만들 때 쓴다 |
@@ -110,9 +109,9 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | 요소 수 |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | 이터레이터를 잇는다. 세 개 이상도 줄 수 있다 |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL의 `concatenate`. 결과 타입은 **인용한 심볼 리터럴**로 쓴다(CL은 실행 시의 타입 지정자). `'vector`는 하나 이상, `'string`은 0개 이상(0개면 `""`). `Sexpr` 리스트는 대상이 아니다(`sexpr-append`를 쓴다) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL의 `concatenate`. 결과 타입은 **인용한 심볼 리터럴**로 쓴다(CL은 실행 시의 타입 지정자). `'vector`는 하나 이상, `'string`은 0개 이상(0개면 `""`). `Sexpr` 리스트는 대상이 아니다(`sexpr-append`를 쓴다) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 뒤집기(비파괴적) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`번째 요소(범위를 벗어나면 `None`) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`번째 요소(범위를 벗어나면 `none`) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | 인수 순서가 반대인 `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 앞의 `n`개 |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`(`end`는 길이로 잘린다) |

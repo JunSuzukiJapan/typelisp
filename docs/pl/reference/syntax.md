@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -7,7 +7,7 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
 
 ## 1. Elementy leksykalne
 
-- **Bez rozróżniania wielkości liter.** Symbole są przy wczytaniu normalizowane do małych liter.
+- **Z rozróżnianiem wielkości liter.** `foo` i `Foo` to różne symbole. Nazwy typów zaczynają się wielką literą (`Option`, `Vector` itd.; typy podstawowe, jak `int` i `string`, małą).
 - **Komentarze**: od `;` do końca linii (komentarze liniowe). `#| ... |#` (komentarze blokowe, które można
   zagnieżdżać).
 - **Obliczanie w czasie czytania**: `#.(expr)` **wykonuje następującą po nim formę w trakcie czytania** i traktuje jej wartość jako
@@ -152,7 +152,7 @@ W kodzie źródłowym typy zapisuje się jako zwykłe symbole lub listy.
   co dziedziczy, przechodnio) (rzutowanie w górę). Nie można jej przekazać do niepowiązanego traitu.
   Warunki, które trait musi spełniać, by używać go z `:dyn`, opisano w
   [3.9 deftrait / impl](#39-deftrait--impl--traity). Zapisanie `:dyn` poza pozycją typu jest błędem.
-- Wbudowane typy generyczne: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Wbudowane typy generyczne: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>` oraz typy współbieżności `Task<T>` / `Thread<T>` / `Chan<T>`
   ([rozdział 12](#12-współbieżność-zadania)). Jest też `Sexpr`, typ danych w postaci S-wyrażeń.
   Wbudowane konkretne typy błędów to `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -829,8 +829,8 @@ Lista `(Name option...)` w miejscu nazwy określa opcje (to samo miejsce co w CL
 
 ; generyczna
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Każdy wariant ma postać `(VariantName FieldType...)`. Pola są tylko pozycyjne (nie mają
@@ -841,8 +841,8 @@ Lista `(Name option...)` w miejscu nazwy określa opcje (to samo miejsce co w CL
   wariant lub mieć `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Metody i metody statyczne pisze się w `impl` (3.5), tak jak dla `defstruct`.
 - Aby samą enumerację uczynić `pub`, napisz `(pub defenum ...)`.
@@ -1013,7 +1013,7 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
 - `module` tworzy przestrzeń nazw. **Typy nie są przestrzeniami nazw** (jak w Rust, typ ma tylko metody
   statyczne i metody).
 - `use` typu udostępnia pod gołą nazwą także warianty enumu oraz publiczne metody statyczne typu (na
-  przykład po `(use option)` można wywoływać `some`/`none` bez `option::some`/`option::none`).
+  przykład po `(use Option)` można wywoływać `some`/`none` bez `Option::some`/`Option::none`).
 - **Nazwa ma jedno znaczenie.** Funkcje, zmienne globalne i makra dzielą jedną przestrzeń nazw i w jednym
   module żadne dwie z nich nie mogą mieć tej samej nazwy (błąd bez względu na kolejność definicji).
   Funkcje i zmienne nie mają osobnych przestrzeni nazw jak w CL. Dla tej samej nazwy w różnych modułach
@@ -1315,7 +1315,7 @@ Rodzaje wzorców:
   które nie mają składni literałów (instancje `defstruct`, zmienne globalne, obliczone wyniki), a zdefiniowana przez użytkownika
   implementacja `Eq` staje się regułą porównania bez zmian. `expr` może odwoływać się do wszystkiego, co jest widoczne z
   pozycji ramienia (argumenty, zewnętrzne wiązania, zmienne globalne)
-- `(Ctor sub-pattern...)` — wzorce konstruktorów (`Some x` `None` `Cons a d` `Ok v` i tak dalej)
+- `(Ctor sub-pattern...)` — wzorce konstruktorów (`(some x)` `(none)` `(cons a d)` `(ok v)` i tak dalej)
 - `(Type :slot pattern... :slot...)` — wzorce struktur. Po nazwie typu zapisz sloty jako słowa kluczowe.
   Jeśli po słowie kluczowym następuje wzorzec, slot jest dopasowywany do tego wzorca; jeśli następuje inne
   słowo kluczowe lub nic, slot jest wiązany ze zmienną o tej samej nazwie. Niezapisane sloty nie są
@@ -1438,7 +1438,7 @@ wymagane:
 
 **Wnioskowanie typów między ramionami**: wszystkie ramiona muszą mieć ten sam typ (poza ramionami, które nie wracają, jak
 z `panic`). W `match` zapisanym tam, gdzie nie oczekuje się typu, ramiona uzupełniają nawzajem brakujące argumenty
-typu: `(result::ok v)` ustala tylko `T`, a `(result::err e)` tylko `E`, ale razem ustalają
+typu: `(Result::ok v)` ustala tylko `T`, a `(Result::err e)` tylko `E`, ale razem ustalają
 `Result<T,E>`. Argument typu, którego żadne ramię nie potrafi ustalić do końca, jest błędem tego ramienia
 (`cannot infer type argument ...`). Poza `match` argument typu, którego nie da się ustalić, jest błędem
 na miejscu.
@@ -1644,7 +1644,7 @@ dalej).
 (unreachable)                       ; rozwija się do (panic "unreachable"). defmacro
 (todo)                              ; rozwija się do (panic "todo"). defmacro
 (as Type expr)                      ; konwersja typu liczbowego/znakowego. konwersje, które mogą się nie powieść, powodują panic przy porażce
-(try-as Type expr)                  ; jak as, ale zwraca wynik jako Option<Type> (None przy porażce)
+(try-as Type expr)                  ; jak as, ale zwraca wynik jako Option<Type> (none przy porażce)
 (print control args...)             ; rozwija format i zapisuje na standardowe wyjście (bez nowej linii)
 (println control args...)           ; to samo (z nową linią na końcu)
 (format dest control args...)       ; format z CL. zwraca rozwinięty łańcuch
@@ -1665,7 +1665,7 @@ obiekt dla rodziny `pprint`) są opakowywane w `Sexpr` z własnymi typami, zanim
 (w tym `int`) oraz między `f32`↔`f64` są prawdziwymi konwersjami**: `as` obcina / zaokrągla, a `try-as`
 odpowiada, czy mieści się w tej szerokości (precyzji). `(as int x)` to dokładne rozszerzenie ze stałej szerokości,
 a `(as i32 n)` to obcięcie z `int`. Liczba całkowita → `char` może się nie powieść poza zakresem, więc `as` powoduje panic, a
-`try-as` daje `None`. Wszystko inne (rozszerzanie oraz obcięcie z `float->int`/`ratio->int`) zawsze
+`try-as` daje `none`. Wszystko inne (rozszerzanie oraz obcięcie z `float->int`/`ratio->int`) zawsze
 się udaje. `float->int`/`ratio->int`/`char->int` lądują na `int`, a jeśli żądana jest węższa szerokość,
 po nich wywoływane jest `int->W`. Jest to lukier rozwijający się do odpowiednich metod konwersji
 (`int->char`/`int->int`/`int->W` i tak dalej w [Liczbach](functions/numbers.md)).
@@ -1763,7 +1763,7 @@ interpretera, którego plik wykonywalny AOT nie ma; to, co obserwuje `trace` i g
 `step`, to ścieżki wywołań działającego interpretera; a `disassemble` używa samego kompilatora).
 `room`/`dribble`/`ed` do nich nie należą i można je kompilować normalnie.
 
-To, co **można** skompilować: wejście/wyjście strumieni i plików, `random`, `gensym`, `symbol->string`/`string->symbol`,
+To, co **można** skompilować: wejście/wyjście strumieni i plików, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, funkcje przestępne,
 operacje bitowe, `catch`/`throw`/`unwind-protect`, wszystkie cztery `eq`/`eql`/`equal`/`equalp`
 (dzięki czemu `case` kompiluje się dla każdego typu), całą rodzinę wypisywania, w tym `print`/`println`/

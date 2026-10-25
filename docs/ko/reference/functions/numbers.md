@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -30,9 +30,9 @@
 | `int->int` | `(int->int x)` | `T→int` | `int`로의 확대 변환(항상 정확). `(as int x)`가 하는 일 |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio`로의 확대 변환(항상 정확) |
 | `int->char` | `(int->char x)` | `T→char` | 값을 Unicode 스칼라 값으로 해석한다. 잘못된 값이면 panic |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 실패하면 `None`을 반환하는 `int->char` |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 실패하면 `none`을 반환하는 `int->char` |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | 폭 변환. 들어가지 않는 값은 잘린다(Rust의 `as`처럼) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 같은 변환을 질문으로. 값이 그 폭에 들어가지 않으면 `None` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 같은 변환을 질문으로. 값이 그 폭에 들어가지 않으면 `none` |
 
 이 변환들은 특수 형식 `(as Type x)`/`(try-as Type x)`([문법 레퍼런스](../syntax.md#7-기타-특수-형식))가 하는 일이기도
 하다. 비트 연산(`logand`/`ash`/`ldb` 등)과 술어(`zerop`/`evenp` 등)는 타입에 걸쳐 같은 모양이므로 11장과 9장에 모았다.

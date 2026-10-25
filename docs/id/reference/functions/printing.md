@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -236,8 +236,8 @@ Ketika REPL menampilkan hasil, ia memakai representasi yang sama seperti `~s`.
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Sama |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (angkanya nomor seri internal) | Sama |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Sama |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (angkanya nomor seri internal) | Sama |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Bilangan bulat (nilai `get-universal-time` / `get-internal-real-time` pada CL) | Sama |
 | Tipe kesalahan (`ParseIntError`, `SimpleError`, dan sebagainya) | `#<simpleerror "boom">` | Hanya pesannya (`boom`) |
@@ -336,30 +336,27 @@ bahwa "kedua ini adalah objek yang sama", sebagaimana ditetapkan CL:
 Nilai tanpa pembagian **tidak menampilkan label sama sekali**, sehingga membiarkan variabel ini benar
 tidak mengubah keluaran kode sehari-hari.
 
-### 6.2 Basis, huruf besar-kecil, dan keterbacaan
+### 6.2 Basis dan keterbacaan
 
 | Variabel | Tipe | Bawaan | Arti |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | Basis untuk mencetak bilangan bulat (berlebar tetap dan `int`). Di luar 2 sampai 36 ia adalah **kesalahan cetak** (CL juga menetapkan rentangnya) |
 | `*print-radix*` | `bool` | `false` | Jika benar, menambahkan penanda radix: `#b`/`#o`/`#x`, `#NNr` untuk basis lain, dan `.` di akhir untuk basis 10. Penanda ditaruh **sebelum** tanda (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | Huruf besar-kecil nama simbol: `:upcase` / `:downcase` / `:capitalize` (ejaan sama seperti CL). Simbol lain adalah kesalahan cetak |
 | `*print-readably*` | `bool` | `false` | Jika benar, mencetak dalam bentuk yang dapat dibaca kembali. Ia memaksa escaping dan menonaktifkan pemotongan `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Jumlah baris yang boleh dipakai pretty printer. Kelebihannya dipotong, dengan `..` di akhir seperti di CL. 0 berarti tak terbatas. Nilai negatif adalah kesalahan cetak |
 | `*print-escape*` | `bool` | `true` | Apakah `write`/`write-to-string` melakukan `prin1` atau `princ`. **Hanya keduanya yang membacanya** |
-| `*print-array*` | `bool` | `true` | Apakah `Vector<T>` dan `Array<T>` menampilkan isinya. Jika benar, sintaks array CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); jika salah, hanya tipe dan bentuknya, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Apakah `Vector<T>` dan `Array<T>` menampilkan isinya. Jika benar, sintaks array CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); jika salah, hanya tipe dan bentuknya, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 Penanda yang ditambahkan `*print-radix*` dapat dibaca kembali oleh reader (notasi radix pada
 [Referensi Sintaks](../syntax.md#1-unsur-leksikal)).
 
-**Mengapa bawaan `*print-case*` berbeda dari CL**: bawaan CL adalah `:upcase` karena reader CL
-menyimpan nama simbol dalam huruf besar, yaitu berarti "sebagaimana disimpan". Reader ini
-menyimpannya dalam huruf kecil, sehingga bawaan dengan makna yang sama adalah `:downcase`.
+**Mengapa tidak ada `*print-case*`**: nama simbol peka huruf besar-kecil dan dicetak sesuai ejaannya, sehingga mencetaknya
+dengan huruf lain akan terbaca kembali sebagai simbol yang berbeda.
 
 **Separuh `*print-readably*` yang hilang**: CL memberi sinyal `print-not-readable` untuk nilai yang
 tidak dapat dibaca kembali, tetapi bahasa ini tidak memiliki kondisi untuk disinyalkan, dan tidak ada

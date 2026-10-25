@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # I/O su file, stream e rete
 
 Questa guida mostra le basi della lettura e scrittura di file, dei pathname e della comunicazione
@@ -20,7 +20,7 @@ Separa gli esiti con `match`.
 ```
 
 Quando sai che un'operazione non può fallire, o in un piccolo script in cui va bene fermarsi in caso di
-fallimento, `unwrap` estrae il valore. Se è un `Err`, va in panic.
+fallimento, `unwrap` estrae il valore. Se è un `err`, va in panic.
 
 ## 2. Leggere e scrivere un intero file
 
@@ -176,7 +176,7 @@ Per porre un limite di tempo a un'operazione, passa `:timeout` (in secondi).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
 ```
 
 ### Quando l'altro lato si disconnette
@@ -192,7 +192,7 @@ Non esiste una funzione dedicata alla risoluzione dei nomi. Passando un nome di 
 thread, quindi gli altri task continuano a funzionare mentre si attende. Se un nome ha più indirizzi,
 vengono provati a turno.
 
-Se il nome non può essere risolto, viene restituito un `Err`.
+Se il nome non può essere risolto, viene restituito un `err`.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -250,5 +250,5 @@ UDP non è uno stream; invia e riceve un datagramma alla volta. I dati sono una 
 ## 9. Socket di dominio Unix
 
 Passa il percorso del file del socket a `unix-listen` / `unix-connect`. Il valore ottenuto è lo stesso
-`socket-stream` di TCP. `unix-listen` restituisce un `Err` se il file esiste già. Chiudere il listener
+`socket-stream` di TCP. `unix-listen` restituisce un `err` se il file esiste già. Chiudere il listener
 rimuove il file.

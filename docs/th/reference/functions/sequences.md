@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # คู่ S-expression และลำดับ
 
 คู่ generic `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับที่เขียนบน
@@ -81,8 +81,7 @@
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | ดึงชื่อของสัญลักษณ์ออกมา ชื่อของคีย์เวิร์ดไม่มีทวิภาค (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | สร้างสัญลักษณ์จากสตริง (intern ในมอดูลราก) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | สร้างสัญลักษณ์ `name` ในเนมสเปซ `namespace` (`intern` ของ CL) `namespace` คือพาธของมอดูลจากราก (`"geometry::shapes"`) `"keyword"` คือของคีย์เวิร์ด และ `""` คือราก ถ้าละไว้คือมอดูลที่เขียนการเรียกนั้น |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | คืนสัญลักษณ์ที่ `name` ถูกอ่านเป็นในเนมสเปซ `namespace` (`intern` ของ CL) ถ้ามีสัญลักษณ์ที่มองเห็นได้จากเนมสเปซนั้น (ของตัวเอง ที่นำเข้ามาด้วย `use` หรือของไลบรารีมาตรฐาน) จะคืนตัวนั้น ถ้าไม่มีจะสร้างใหม่ในเนมสเปซนั้น `namespace` คือพาธโมดูลจากราก (`"geometry::shapes"`) `"keyword"` คือของคีย์เวิร์ด และ `""` คือราก เนมสเปซที่ไม่มีอยู่เป็นข้อผิดพลาด ถ้าละไว้คือโมดูลที่เขียนการเรียก (ไม่มี `*package*`) ไม่คืนค่าที่สองของ CL (สถานะอย่าง `:internal`) |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | เป็นคีย์เวิร์ดหรือไม่ คืออยู่ในเนมสเปซของคีย์เวิร์ดหรือไม่ ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)) |
 
 สำหรับ `gensym` ดู[แมโคร](system.md#8-แมโคร)
@@ -106,7 +105,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | ตำแหน่งแรกที่ตรงตาม predicate |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | มีกี่ตัวที่ตรงตาม predicate |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | ทุกสมาชิกตรงตาม predicate หรือไม่ |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | มีสมาชิกใดตรงตาม predicate หรือไม่ (สอดคล้องกับ `some` ของ CL; ชื่อที่ไม่ชนกับตัวสร้าง `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | มีสมาชิกใดตรงตาม predicate หรือไม่ (สอดคล้องกับ `some` ของ CL; ชื่อที่ไม่ชนกับตัวสร้าง `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | การพับซ้าย |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | การพับขวา |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | รวบรวมสมาชิกที่เหลือทั้งหมด ใช้เปลี่ยนผลของฟังก์ชัน `lazy` ข้างล่างให้เป็น `Vector` |
@@ -117,9 +116,9 @@
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | จำนวนสมาชิก |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | ต่อตัววนซ้ำ ให้ได้ตั้งแต่สามตัวขึ้นไป |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` ของ CL ชนิดผลลัพธ์เขียนเป็น **literal สัญลักษณ์ที่ quote** (CL ใช้ type specifier ตอนรัน) `'vector` รับหนึ่งตัวขึ้นไป `'string` รับศูนย์ตัวขึ้นไป (`""` เมื่อศูนย์) ไม่ครอบคลุมลิสต์ `Sexpr` (ใช้ `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` ของ CL ชนิดผลลัพธ์เขียนเป็น **literal สัญลักษณ์ที่ quote** (CL ใช้ type specifier ตอนรัน) `'vector` รับหนึ่งตัวขึ้นไป `'string` รับศูนย์ตัวขึ้นไป (`""` เมื่อศูนย์) ไม่ครอบคลุมลิสต์ `Sexpr` (ใช้ `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | การกลับลำดับ (แบบไม่ทำลาย) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | สมาชิกตัวที่ `n` (`None` เมื่อเกินช่วง) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | สมาชิกตัวที่ `n` (`none` เมื่อเกินช่วง) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` ที่อาร์กิวเมนต์สลับกัน |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | `n` สมาชิกแรก |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` ถูกจำกัดที่ความยาว) |

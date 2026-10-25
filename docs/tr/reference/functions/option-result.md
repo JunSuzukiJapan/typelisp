@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Option, Result ve Hata Türleri
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-Yapıcılar: `Option<T>`'nin `Some(T)` / `None`'ı vardır. `Result<T,E>`'nin `Ok(T)` / `Err(E)`'si vardır.
+Yapıcılar: `Option<T>`'nin `(some T)` / `none`'ı vardır. `Result<T,E>`'nin `(ok T)` / `(err E)`'si vardır.
 `E` herhangi bir tür olabilir: yerleşik somut hata türleri ve `defstruct`/`defenum` ile kendi yazdığınız
 türler oraya aynı şekilde uyar (3. bölüm).
 
 | Ad | Biçim | Option | Result | Açıklama |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Değeri çıkarır. `None`/`Err` durumunda panic olur |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Değeri çıkarır. `none`/`err` durumunda panic olur |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | Değer ya da varsayılan |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `Some` olup olmadığı |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `None` olup olmadığı |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `Ok` olup olmadığı |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `Err` olup olmadığı |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Değeri çıkarır. `None`/`Err` ise `msg` ile panic olur |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Değer ya da `f`'nin sonucu. `f` yalnızca `None`/`Err` iken çağrılır |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok` içeriğine `f` uygular |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err` içeriğine `f` uygular |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok` ise içeriği `f`'ye verir ve onun sonucunu döndürür |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err` ise `f`'nin sonucunu döndürür |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)`'yi `Ok(v)`'ye, `None`'ı `Err(e)`'ye çevirir |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `some` olup olmadığı |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `none` olup olmadığı |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `ok` olup olmadığı |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `err` olup olmadığı |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Değeri çıkarır. `none`/`err` ise `msg` ile panic olur |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Değer ya da `f`'nin sonucu. `f` yalnızca `none`/`err` iken çağrılır |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `some`/`ok` içeriğine `f` uygular |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `err` içeriğine `f` uygular |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `some`/`ok` ise içeriği `f`'ye verir ve onun sonucunu döndürür |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err` ise `f`'nin sonucunu döndürür |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)`'yi `(ok v)`'ye, `none`'ı `(err e)`'ye çevirir |
 
 Yapıcılar `Option::some`/`Option::none`/`Result::ok`/`Result::err`'dır (ya da
-`(use option)`/`(use result)`'tan sonra çıplak `some`/`none`/`ok`/`err` adları).
+`(use Option)`/`(use Result)`'tan sonra çıplak `some`/`none`/`ok`/`err` adları).
 
 Dallanma `match` ile açıkça yazılır ya da yukarıdaki `map`/`and-then` ve diğerleriyle zincirlenir.
 Rust'taki `?`'ye karşılık gelen bir sözdizimi yoktur.
@@ -38,9 +38,9 @@ alınır. Bir metodun ilk argümanı alıcısıdır; bu yüzden birleştiriciler
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
-(-> (option::some 8)
+(-> (Option::some 8)
     (and-then half)                          ; (some 4)
     (and-then half)                          ; (some 2)
     (map (lambda ((x int)) int (* x 10)))    ; (some 20)
@@ -101,7 +101,7 @@ yazdığınız kendi hata türleriniz gibi aynen ele alınırlar.
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | Hata mesajı (`Error` trait'inin bir metodu) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | Bu hatanın sardığı neden ya da yoksa `None` (Rust'ın `Error::source`'u) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | Bu hatanın sardığı neden ya da yoksa `none` (Rust'ın `Error::source`'u) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E`, `Error`'ı gerçekleştirir) | Somut bir hata türünü trait nesnesine genişletir |
 | `describe-error` | `(describe-error e)` | `E→string` (`E`, `Error`'ı gerçekleştirir) | Mesaj ve `source` izlenerek bulunan nedenler zinciri; her satırda bir neden. CL'de karşılığı yoktur (Rust'ın "caused by"'ı) |
 
@@ -112,10 +112,10 @@ alınabilir:
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (option::none)))
+  (source ((self Self)) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; the concrete type goes into E as it is
-  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
+  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; handle any kind uniformly
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -130,7 +130,7 @@ dönüşüm açıkça yazılır:
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (result::err e))))
+    ((err e) (Result::err e))))
 ```
 
 **Türler ve trait'ler tek bir ad alanını paylaşır** (Rust'taki gibi). Tek bir modül içinde bir

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -140,7 +140,7 @@ terminal is, evalueert `step` gewoon `form`**: een gedegenereerd gedrag dat CLHS
 zodat scripts en tests niet blijven hangen op een prompt die niemand kan beantwoorden.
 
 De `$VISUAL` / `$EDITOR` van `ed` wordt bij witruimte gesplitst, dus `EDITOR="code -w"` werkt. Als
-geen van beide is gezet, is het resultaat `Err`: hij raadt niet `vi`. Het regelnummer wordt eerst
+geen van beide is gezet, is het resultaat `err`: hij raadt niet `vi`. Het regelnummer wordt eerst
 doorgegeven, in de vorm `+N`.
 
 `dribble` neemt alle drie de manieren op waarop de uitvoer van de sessie het proces verlaat: wat
@@ -150,14 +150,14 @@ verbonden, en de regels die in de REPL worden getypt samen met de waarden die de
 ## 6. Parsen en evalueren
 
 Dit alles behandelt tekst en gegevens uit runtime (die het programma zelf niet beheerst), dus bij
-mislukking geven ze de `Err` van een `Result` terug in plaats van een panic. De foutentypes zijn concrete
+mislukking geven ze de `err` van een `Result` terug in plaats van een panic. De foutentypes zijn concrete
 types per bewerking ([Foutentypes](option-result.md#3-foutentypes-en-de-trait-error)).
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` van CL. Slaat voorloop- en volgwitruimte over (dezelfde verzameling als `trim`), leest hoogstens één teken `+`/`-`, dan cijfers in grondtal `radix` (standaard 10, 2 tot en met 36; cijfers boven 10 in beide hoofdlettergebruiken). Er is geen limiet aan het aantal cijfers (`int`). Alle andere overgebleven tekens geven `Err`. Met `:junk-allowed true` stopt het bij het eerste niet-cijfer en negeert de rest, maar geeft `Err` als er niet één cijfer is (komt overeen met `nil` van CL). Het geeft de tweede waarde van CL (de positie waar het lezen eindigde) niet terug. Een `radix` buiten het bereik geeft een panic (een fout van de aanroeper, niet in de tekst) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` van CL. Slaat voorloop- en volgwitruimte over (dezelfde verzameling als `trim`), leest hoogstens één teken `+`/`-`, dan cijfers in grondtal `radix` (standaard 10, 2 tot en met 36; cijfers boven 10 in beide hoofdlettergebruiken). Er is geen limiet aan het aantal cijfers (`int`). Alle andere overgebleven tekens geven `err`. Met `:junk-allowed true` stopt het bij het eerste niet-cijfer en negeert de rest, maar geeft `err` als er niet één cijfer is (komt overeen met `nil` van CL). Het geeft de tweede waarde van CL (de positie waar het lezen eindigde) niet terug. Een `radix` buiten het bereik geeft een panic (een fout van de aanroeper, niet in de tekst) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Een drijvendekommagetal. Accepteert ook `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Leest één `Sexpr` uit `s` (met dezelfde reader die broncode leest). Ongebalanceerde haakjes, niet afgesloten strings en dergelijke geven `Err`. Lezen uit een stream is `read-sexpr` ([Streams](streams-files.md#6-generieke-functies-en-bestandsbewerkingen)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Leest één `Sexpr` uit `s` (met dezelfde reader die broncode leest). Ongebalanceerde haakjes, niet afgesloten strings en dergelijke geven `err`. Lezen uit een stream is `read-sexpr` ([Streams](streams-files.md#6-generieke-functies-en-bestandsbewerkingen)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **de positie waar het lezen eindigde**. `(car r)` is de waarde en `(cdr r)` de positie van het volgende te lezen teken. `start` is standaard 0 |
 | `read-from-string-preserving-whitespace` | Idem | Idem | Hetzelfde, maar verbruikt de witruimte die het datum beëindigde niet. Het verschil blijkt uit de teruggegeven positie |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Typecheckt `form` tijdens runtime en evalueert hem. Volgt `eval` van CL |
@@ -181,7 +181,7 @@ witruimte die het datum beëindigde, en `read-preserving-whitespace` laat hem st
 
 De getalsyntaxis die de reader accepteert staat in
 [Syntaxreferentie hoofdstuk 1](../syntax.md#1-lexicale-elementen). Wat `*print-radix*`
-([Afdrukken](printing.md#62-grondtal-hoofdlettergebruik-en-leesbaarheid)) afdrukt kan zoals het is weer
+([Afdrukken](printing.md#62-grondtal-en-leesbaarheid)) afdrukt kan zoals het is weer
 worden ingelezen. Er is geen `*read-base*` van CL.
 
 ### 6.1 Wat `eval` betekent
@@ -211,7 +211,7 @@ geëvalueerd, en definities worden onmiddellijk en permanent in de globale omgev
   echter zien** (hun typecontrole draait tijdens runtime, na de definitie). De REPL controleert en
   voert één regel per keer uit, dus een naam die met `eval` is gedefinieerd kan vanaf de volgende regel
   rechtstreeks worden aangeroepen.
-- **Fouten**: typefouten en syntaxisfouten geven `Err` terug (ze geven geen panic). **Runtime-panics**
+- **Fouten**: typefouten en syntaxisfouten geven `err` terug (ze geven geen panic). **Runtime-panics**
   in de geëvalueerde code (deling door nul enzovoort) planten zich voort zoals bij rechtstreeks
   geschreven code. De opruiming van elke `unwind-protect` daartussen wordt uitgevoerd
   ([Syntaxreferentie hoofdstuk 8](../syntax.md#8-niet-lokale-uitgangen-catch--throw--unwind-protect)).

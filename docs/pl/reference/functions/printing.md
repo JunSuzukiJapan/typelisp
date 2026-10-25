@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Wypisywanie
 
 `print`/`println`/`format`, drukarki jednoargumentowe, pretty printer, `print-object` oraz
@@ -231,8 +231,8 @@ jak w SBCL. Gdy REPL pokazuje wynik, używa tej samej reprezentacji co `~s`.
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Krotka `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | To samo |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (liczba to wewnętrzny numer seryjny) | To samo |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | To samo |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (liczba to wewnętrzny numer seryjny) | To samo |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Liczba całkowita (wartość `get-universal-time` / `get-internal-real-time` z CL) | To samo |
 | Typy błędów (`ParseIntError`, `SimpleError` i tak dalej) | `#<simpleerror "boom">` | Tylko komunikat (`boom`) |
@@ -329,30 +329,27 @@ ten sam obiekt", jak określa CL:
 Wartość bez współdzielenia **nie pokazuje żadnych etykiet**, więc pozostawienie tej zmiennej jako prawdy nie zmienia
 wyjścia codziennego kodu.
 
-### 6.2 Podstawa, wielkość liter i czytelność
+### 6.2 Podstawa i czytelność
 
 | Zmienna | Typ | Domyślnie | Znaczenie |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | Podstawa do wypisywania liczb całkowitych (o stałej szerokości i `int`). Poza zakresem od 2 do 36 jest to **błąd wypisywania** (CL też określa ten zakres) |
 | `*print-radix*` | `bool` | `false` | Jeśli prawda, dodaje znacznik podstawy: `#b`/`#o`/`#x`, `#NNr` dla innych podstaw i końcową `.` dla podstawy 10. Znacznik stoi **przed** znakiem (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | Wielkość liter nazw symboli: `:upcase` / `:downcase` / `:capitalize` (te same zapisy co w CL). Każdy inny symbol jest błędem wypisywania |
 | `*print-readably*` | `bool` | `false` | Jeśli prawda, wypisuje w postaci możliwej do wczytania z powrotem. Wymusza cytowanie i wyłącza odcinanie z `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Liczba linii, których może użyć pretty printer. Nadmiar jest obcinany, z `..` na końcu jak w CL. 0 oznacza bez limitu. Wartość ujemna jest błędem wypisywania |
 | `*print-escape*` | `bool` | `true` | Czy `write`/`write-to-string` robią `prin1`, czy `princ`. **Tylko te dwie go odczytują** |
-| `*print-array*` | `bool` | `true` | Czy `Vector<T>` i `Array<T>` pokazują zawartość. Gdy prawda, składnia tablic z CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); gdy fałsz, tylko typ i kształt, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Czy `Vector<T>` i `Array<T>` pokazują zawartość. Gdy prawda, składnia tablic z CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); gdy fałsz, tylko typ i kształt, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 Znaczniki dodawane przez `*print-radix*` czytnik może wczytać z powrotem (notacja podstawy w
 [Referencji składni](../syntax.md#1-elementy-leksykalne)).
 
-**Dlaczego wartość domyślna `*print-case*` różni się od CL**: domyślne w CL jest `:upcase`, ponieważ czytnik CL
-przechowuje nazwy symboli wielkimi literami, czyli oznacza „tak jak przechowano". Ten czytnik przechowuje je
-małymi literami, więc wartością domyślną o tym samym znaczeniu jest `:downcase`.
+**Dlaczego nie ma `*print-case*`**: nazwy symboli rozróżniają wielkość liter i są drukowane tak, jak je zapisano,
+więc wydrukowanie ich inną wielkością liter wczytałoby je z powrotem jako inny symbol.
 
 **Brakująca połowa `*print-readably*`**: CL sygnalizuje `print-not-readable` dla wartości, których nie można
 wczytać z powrotem, ale ten język nie ma kondycji do sygnalizowania ani sposobu rozstrzygania czytelności dla typów

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # E/S de fichiers, flux et réseau
 
 Ce guide présente les bases de la lecture et de l'écriture de fichiers, des noms de chemin et de la communication
@@ -20,7 +20,7 @@ issues avec `match`.
 ```
 
 Quand on sait qu'une opération ne peut pas échouer, ou dans un petit script où s'arrêter en cas d'échec convient,
-`unwrap` extrait la valeur. Si c'est un `Err`, c'est un panic.
+`unwrap` extrait la valeur. Si c'est un `err`, c'est un panic.
 
 ## 2. Lire et écrire un fichier entier
 
@@ -175,7 +175,7 @@ Pour limiter la durée d'une opération, passez `:timeout` (en secondes).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; mettre une horloge sur la prochaine lecture
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; mettre une horloge sur la prochaine lecture
 ```
 
 ### Quand l'autre côté se déconnecte
@@ -190,7 +190,7 @@ Il n'existe pas de fonction dédiée à la résolution de noms. Passer un nom d'
 `send-to` le résout à l'intérieur de ces fonctions. La résolution a lieu sur un autre thread ; les autres tâches
 continuent donc de s'exécuter pendant l'attente. Si un nom a plusieurs adresses, elles sont essayées tour à tour.
 
-Si le nom ne peut pas être résolu, un `Err` est renvoyé.
+Si le nom ne peut pas être résolu, un `err` est renvoyé.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -248,5 +248,5 @@ UDP n'est pas un flux ; il envoie et reçoit un datagramme à la fois. Les donn�
 ## 9. Sockets du domaine Unix
 
 Passez le chemin du fichier de socket à `unix-listen` / `unix-connect`. La valeur obtenue est le même
-`socket-stream` qu'avec TCP. `unix-listen` renvoie un `Err` si le fichier existe déjà. Fermer le listener supprime
+`socket-stream` qu'avec TCP. `unix-listen` renvoie un `err` si le fichier existe déjà. Fermer le listener supprime
 le fichier.

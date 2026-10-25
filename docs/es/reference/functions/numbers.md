@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Números
 
 Operaciones sobre enteros, números de coma flotante, racionales, números complejos y booleanos, y otras
@@ -34,9 +34,9 @@ ancho fijo (la tabla de `int` está en el capítulo 3).
 | `int->int` | `(int->int x)` | `T→int` | Conversión ampliadora a `int` (siempre exacta). Lo que hace `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Conversión ampliadora a `ratio` (siempre exacta) |
 | `int->char` | `(int->char x)` | `T→char` | Interpreta el valor como un valor escalar Unicode. Panic con un valor no válido |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Una versión de `int->char` que devuelve `None` si falla |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Una versión de `int->char` que devuelve `none` si falla |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Conversión de ancho. Los valores que no caben se truncan (como el `as` de Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | La misma conversión como pregunta. `None` si el valor no cabe en ese ancho |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | La misma conversión como pregunta. `none` si el valor no cabe en ese ancho |
 
 Estas conversiones son también lo que hacen las formas especiales `(as Type x)`/`(try-as Type x)`
 ([Referencia de sintaxis](../syntax.md#7-otras-formas-especiales)). Las operaciones de bits

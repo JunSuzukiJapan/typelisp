@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Ağ (TCP / TLS / Unix Domain / UDP)
 
 Soketler [akışların](streams-files.md) üyeleridir. Bir bağlantı, aynı bağlantının **iki görünümü**
@@ -22,7 +22,7 @@ biçimde yazılabilir ([Sözdizimi Başvurusu 12.5](../syntax.md#125-tasklerin-g
 | `socket-listener` | `Stream` (`close` / `open-stream-p`) | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | — (`bytes`: `Vector<int>`, `from`: `string`) | `recv-from` |
-| `NetError` | `Error` | Aşağıdaki fonksiyonların `Err`'i |
+| `NetError` | `Error` | Aşağıdaki fonksiyonların `err`'i |
 
 Bir akış türünün tek bir eleman türü vardır (`file-stream`/`binary-file-stream` ile aynı nedenle); bu
 yüzden karakterler ve baytlar farklı türlerdir. `byte-stream-of`/`char-stream-of`, **aynı bağlantıyı**
@@ -34,16 +34,16 @@ bayt okumak hatadır (dosyalardaki kuralın aynısı).
 
 | Ad | Kullanım | Tür | Anlamı |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Bağlanır. `host` bir ad ya da adres olabilir. Bir adın birden çok adresi varsa sırayla denenirler (`localhost` için `::1` ve `127.0.0.1`). Başarısız bir ad araması, reddedilen bir bağlantı ya da `:timeout` saniyenin aşılması `Err` verir |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect`'ten sonra TLS. Sertifika, Mozilla'nın kök sertifikalarıyla `host` adına karşı doğrulanır (doğrulanacak ad bağlandığınız yerden farklıysa `:server-name`). `:ca-file` (PEM) verilirse **yalnızca içindeki sertifikalara** güvenir (özel bir CA ya da kendi `tls-listen`'inizin sunduğu sertifikanın kendisi). `:cert-file`/`:key-file` (ikisi birden ya da hiçbiri) bizim sertifikamızdır ve sunucu istediğinde sunulur (karşılıklı TLS). El sıkışma burada tamamlanır; bu yüzden sunucunun sertifikası geçmezse bu çağrı `Err` döndürür. Sonuç sıradan bir `socket-stream`'dir |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Bağlanır. `host` bir ad ya da adres olabilir. Bir adın birden çok adresi varsa sırayla denenirler (`localhost` için `::1` ve `127.0.0.1`). Başarısız bir ad araması, reddedilen bir bağlantı ya da `:timeout` saniyenin aşılması `err` verir |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect`'ten sonra TLS. Sertifika, Mozilla'nın kök sertifikalarıyla `host` adına karşı doğrulanır (doğrulanacak ad bağlandığınız yerden farklıysa `:server-name`). `:ca-file` (PEM) verilirse **yalnızca içindeki sertifikalara** güvenir (özel bir CA ya da kendi `tls-listen`'inizin sunduğu sertifikanın kendisi). `:cert-file`/`:key-file` (ikisi birden ya da hiçbiri) bizim sertifikamızdır ve sunucu istediğinde sunulur (karşılıklı TLS). El sıkışma burada tamamlanır; bu yüzden sunucunun sertifikası geçmezse bu çağrı `err` döndürür. Sonuç sıradan bir `socket-stream`'dir |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | `path` Unix domain soketine bağlanır. Yereldir; bu yüzden el sıkışma beklemesi ve zaman aşımı yoktur |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | Dinler. `"127.0.0.1"` yalnızca bu makine, `"0.0.0.0"` her arayüzdür. `port` olarak `0` geçirmek seçimi işletim sistemine bırakır |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen`'in TLS sürümü. `cert-file` sertifika zinciridir (PEM, önce kendi sertifikası), `key-file` özel anahtardır. İkisi de burada okunur ve denetlenir; bu yüzden eşleşmeyen bir anahtar, ilk istemcide değil, bu çağrıdan `Err` verir. `accept` **el sıkışmadan önce** döner ve bağlantıyı işleyen task'in ilk okuması ya da yazması el sıkışmayı tamamlar (Go'nun `tls.Conn`'u gibi); bu yüzden el sıkışması yavaş bir istemci diğer `accept`'leri tutmaz. `:client-ca` (PEM) verilirse **her istemcinin** içindeki bir CA'nın verdiği bir sertifika sunmasını **ister** (karşılıklı TLS). Verilmezse hiçbiri istenmez |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path`'te dinler. **Dosya zaten varsa `Err`** (çalışan başka bir sürece ait olabilir; bu yüzden sessizce değiştirilmez). `close` dosyayı kaldırır |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Sıradaki bağlantı. Biri gelene kadar task'i durdurur. `:timeout` saniye sonra `Err` ile vazgeçer |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen`'in TLS sürümü. `cert-file` sertifika zinciridir (PEM, önce kendi sertifikası), `key-file` özel anahtardır. İkisi de burada okunur ve denetlenir; bu yüzden eşleşmeyen bir anahtar, ilk istemcide değil, bu çağrıdan `err` verir. `accept` **el sıkışmadan önce** döner ve bağlantıyı işleyen task'in ilk okuması ya da yazması el sıkışmayı tamamlar (Go'nun `tls.Conn`'u gibi); bu yüzden el sıkışması yavaş bir istemci diğer `accept`'leri tutmaz. `:client-ca` (PEM) verilirse **her istemcinin** içindeki bir CA'nın verdiği bir sertifika sunmasını **ister** (karşılıklı TLS). Verilmezse hiçbiri istenmez |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | `path`'te dinler. **Dosya zaten varsa `err`** (çalışan başka bir sürece ait olabilir; bu yüzden sessizce değiştirilmez). `close` dosyayı kaldırır |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Sıradaki bağlantı. Biri gelene kadar task'i durdurur. `:timeout` saniye sonra `err` ile vazgeçer |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | Beklemeden okunabilene ya da `secs` saniyeye kadar. `true`, ilkini ifade eder (tamponda zaten bulunan veri dahil). Bir okumaya saat koymanın yolu: `(if (wait-readable c 5.0) (read-line c) ...)`. Verdiği söz, **bir sonraki okumanın durmayacağıdır**; `read-line` satırın geri kalanını bekleyebilir |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | Yazılabilene ya da `secs` saniyeye kadar |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Bir `tls-listen` dinleyicisine, `name` isteyen istemcilere (SNI) sunulan bir sertifika daha ekler: tek dinleyicide birkaç site. Zincirin `name` için olup olmadığı burada denetlenir ve değilse bu çağrı `Err` döndürür. Kimsenin eklemediği bir ad isteyen ya da hiç ad istemeyen istemciler `tls-listen`'in sertifikasını alır |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Bir `tls-listen` dinleyicisine, `name` isteyen istemcilere (SNI) sunulan bir sertifika daha ekler: tek dinleyicide birkaç site. Zincirin `name` için olup olmadığı burada denetlenir ve değilse bu çağrı `err` döndürür. Kimsenin eklemediği bir ad isteyen ya da hiç ad istemeyen istemciler `tls-listen`'in sertifikasını alır |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | Karşı tarafın sertifikasının konusu (`CN=client,O=Example,C=JP`, RFC 4514 biçimi, en özelden başlayarak). Karşılıklı TLS sunucusunun "kim bağlandı"yı öğrenme yolu (el sıkışmayı tamamlayan ilk okumadan sonra). İstemci tarafında sunucu sertifikasının adı. Düz bağlantılar, el sıkışmadan önce ya da karşı taraf sertifika sunmadıysa `none` |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | Sunucu tarafı bir TLS bağlantısında, istemcinin istediği ad (SNI). `tls-add-certificate` ile eklenen birkaç siteli bir sunucunun "hangi site"yi öğrenme yolu. Düz bağlantılar, istemci tarafı ya da ad yoksa (adresle bağlanılmışsa) `none` |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | Nagle'ı kapatır (`TCP_NODELAY`). `write-string` her seferinde soketin ta kendisine gider; bu yüzden Nagle açıkken, başlık ve gövde olmak üzere iki parça yazılan bir yanıt karşı tarafın gecikmeli ACK'ini bekler: istek/yanıt protokolleri için `true` kullanın. Unix domain soketlerinde Nagle yoktur ve çağrı yalnızca başarılı olur |
@@ -125,7 +125,7 @@ etme ve "sıradaki okuma"; her birinin bunun için bir bağımsız değişkeni v
 ```
 
 Karşılıklı TLS'de, sertifika sunmayan (ya da geçmeyen) bir istemci, TLS 1.3 altında sunucu karar
-vermeden önce el sıkışmanın kendi tarafını bitirir; bu yüzden `tls-connect` `Ok` döndürür ve **ilk okuma
+vermeden önce el sıkışmanın kendi tarafını bitirir; bu yüzden `tls-connect` `ok` döndürür ve **ilk okuma
 `none` döndürür** (uyarı `socket-error` içindedir). Sunucu tarafında aynı bağlantının ilk okuması da
 `none` döndürür. Hiçbir taraf panic olmaz.
 

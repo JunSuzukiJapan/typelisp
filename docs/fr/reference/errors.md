@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Messages d'erreur
 
 Ce que signifient les principaux messages d'erreur de `typl` et comment les corriger.
@@ -45,7 +45,7 @@ Les erreurs trouvées avant l'exécution. La forme n'est pas exécutée tant qu'
 | ``type mismatch: expected `T`, found `U` `` | Une expression de type `U` se trouve là où le type `T` est nécessaire. Il n'y a pas de conversions implicites ; pour les nombres, convertissez avec `(as T x)`. `int` et `i32` sont aussi des types différents |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Le littéral ne tient pas dans le type. Si vous voulez le tronquer, écrivez `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Il n'existe pas de type de ce nom. Définissez un type avant la première forme qui l'utilise (les types n'ont pas de déclaration anticipée). Si vous vouliez une variable de type, écrivez-la à une position de déclaration comme `<foo>` après le nom de la fonction ([Référence de la syntaxe 3.6](syntax.md#36-defstruct--structures-types-définis-par-lutilisateur)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Un argument de type ne peut pas être déterminé. Écrivez le type avec `the`, comme dans `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Un argument de type ne peut pas être déterminé. Écrivez le type avec `the`, comme dans `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | Le `match` ne traite pas toutes les variantes. Ajoutez des branches pour les variantes manquantes, ou une branche `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | La fonction exige un trait que le type passé n'implémente pas. Écrivez `(impl Eq pt ...)` ([Traits standard](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Une valeur d'un type qui n'implémente pas le trait a été passée là où un `:dyn` est attendu. Écrivez l'`impl` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Числа
 
 Операции над целыми, числами с плавающей точкой, рациональными, комплексными числами и логическими значениями, а
@@ -32,9 +32,9 @@
 | `int->int` | `(int->int x)` | `T→int` | Расширяющее преобразование в `int` (всегда точное). То, что делает `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Расширяющее преобразование в `ratio` (всегда точное) |
 | `int->char` | `(int->char x)` | `T→char` | Трактует значение как скалярное значение Unicode. На недопустимом значении — panic |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Версия `int->char`, возвращающая `None` при неудаче |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Версия `int->char`, возвращающая `none` при неудаче |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Преобразование ширины. Не помещающиеся значения усекаются (как `as` в Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | То же преобразование в виде вопроса. `None`, если значение не помещается в эту ширину |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | То же преобразование в виде вопроса. `none`, если значение не помещается в эту ширину |
 
 Эти преобразования — также то, что делают специальные формы `(as Type x)`/`(try-as Type x)`
 ([Справочник по синтаксису](../syntax.md#7-прочие-специальные-формы)). Битовые операции (`logand`/`ash`/`ldb` и т. д.)

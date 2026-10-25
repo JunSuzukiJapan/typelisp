@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Utskrift
 
 `print`/`println`/`format`, utskriftsfunktionerna med ett argument, den snygga skrivaren (pretty printer),
@@ -231,8 +231,8 @@ SBCL. När REPL visar ett resultat använder den samma representation som `~s`.
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tupel `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Samma |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (numret är ett internt serienummer) | Samma |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Samma |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (numret är ett internt serienummer) | Samma |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Ett heltal (värdet av CL:s `get-universal-time` / `get-internal-real-time`) | Samma |
 | Feltyper (`ParseIntError`, `SimpleError` och så vidare) | `#<simpleerror "boom">` | Bara meddelandet (`boom`) |
@@ -328,30 +328,27 @@ objekt", som CL specificerar:
 Ett värde utan delning **visar inga etiketter alls**, så att låta den här variabeln vara sann ändrar inte
 utdata för vardaglig kod.
 
-### 6.2 Bas, skiftläge och läsbarhet
+### 6.2 Bas och läsbarhet
 
 | Variabel | Typ | Standard | Betydelse |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | Basen för utskrift av heltal (med fast bredd och `int`). Utanför 2 till 36 är det ett **utskriftsfel** (CL specificerar också intervallet) |
 | `*print-radix*` | `bool` | `false` | Om sant läggs en basmarkör till: `#b`/`#o`/`#x`, `#NNr` för andra baser och en avslutande `.` för bas 10. Markören hamnar **före** tecknet (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | Skiftläget för symbolnamn: `:upcase` / `:downcase` / `:capitalize` (samma stavningar som CL). Vilken annan symbol som helst är ett utskriftsfel |
 | `*print-readably*` | `bool` | `false` | Om sant skrivs det ut i en form som kan läsas tillbaka. Det tvingar fram escape-tecken och stänger av avskärningarna i `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Antalet rader den snygga skrivaren får använda. Överskottet kapas, med `..` på slutet som i CL. 0 betyder obegränsat. Ett negativt värde är ett utskriftsfel |
 | `*print-escape*` | `bool` | `true` | Om `write`/`write-to-string` gör `prin1` eller `princ`. **Bara de två läser den** |
-| `*print-array*` | `bool` | `true` | Om `Vector<T>` och `Array<T>` visar sitt innehåll. Om sant, CL:s arraysyntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); om falskt, bara typ och form, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Om `Vector<T>` och `Array<T>` visar sitt innehåll. Om sant, CL:s arraysyntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); om falskt, bara typ och form, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 Markörerna som `*print-radix*` lägger till kan läsas tillbaka av läsaren (basnotationen i
 [Syntaxreferensen](../syntax.md#1-lexikaliska-element)).
 
-**Varför standardvärdet för `*print-case*` skiljer sig från CL**: CL:s standard är `:upcase` eftersom CL:s
-läsare lagrar symbolnamn med versaler, det vill säga det betyder "som lagrat". Den här läsaren lagrar dem
-med gemener, så standardvärdet med samma betydelse är `:downcase`.
+**Varför det inte finns någon `*print-case*`**: symbolnamn skiljer på stora och små bokstäver och skrivs ut som de stavas,
+så att skriva ut dem i ett annat skiftläge skulle läsa tillbaka dem som en annan symbol.
 
 **Den saknade halvan av `*print-readably*`**: CL signalerar `print-not-readable` för värden som inte kan
 läsas tillbaka, men det här språket har inget condition att signalera, och inget sätt att avgöra

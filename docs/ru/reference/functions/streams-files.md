@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Потоки и файлы
 
 Трейты и методы потоков, конкретные типы потоков, операции с файлами и пути. Сетевые сокеты тоже являются потоками и
@@ -89,7 +89,7 @@
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` — одна из трёх констант `direction-input` / `direction-output` / `direction-append`. `open-file`
-возвращает `Err(FileError)`, если файл не удаётся открыть (отсутствующий файл — обычный результат, а не panic). Имя
+возвращает `(err FileError)`, если файл не удаётся открыть (отсутствующий файл — обычный результат, а не panic). Имя
 файла может быть строкой или `pathname` (`Pathish` в главе 9).
 
 `(get-output-stream-string s)` возвращает то, что было записано в `string-output-stream`, и очищает его. Как в CL,
@@ -136,18 +136,18 @@ CL определяет тип элементов **в вызове**, как `(
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Переносит всё |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Все оставшиеся строки |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читает один `Sexpr` (`read` из CL). `Ok(eof)` в конце ввода, `Ok(datum d)`, когда данное прочитано, `Err`, если это не данные. Он **потребляет один пробельный символ**, завершивший данное (как в CL). `ReadOutcome` — не `Option<Sexpr>`, чтобы чтение пустого списка `()` и конец ввода не были одним и тем же значением |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читает один `Sexpr` (`read` из CL). `(ok eof)` в конце ввода, `(ok (datum d))`, когда данное прочитано, `err`, если это не данные. Он **потребляет один пробельный символ**, завершивший данное (как в CL). `ReadOutcome` — не `Option<Sexpr>`, чтобы чтение пустого списка `()` и конец ввода не были одним и тем же значением |
 | `read-sexpr-preserving-whitespace` | То же | То же | То же, но оставляет пробельный символ (`read-preserving-whitespace` из CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читает до `ch` и составляет список. `ch` потребляется. `Err`, если ввод заканчивается |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читает до `ch` и составляет список. `ch` потребляется. `err`, если ввод заканчивается |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Пишет по одной строке |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Всё содержимое |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Все строки |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Записывает |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Существует ли |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Удалить, переименовать (аргументы — `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютный путь с разрешёнными символическими ссылками и `.`/`..`. `Err`, если не существует |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютный путь с разрешёнными символическими ссылками и `.`/`..`. `err`, если не существует |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Время последнего изменения. Это **универсальное время**, поэтому его может прочитать `decode-universal-time` ([Время](system.md#2-разбор-и-сборка-дат)) |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Имя входа владельца. `Err`, если файла нет, `Ok(none)`, если для uid владельца нет записи в базе паролей: два случая, которые различает CL, остаются раздельными |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Имя входа владельца. `err`, если файла нет, `(ok none)`, если для uid владельца нет записи в базе паролей: два случая, которые различает CL, остаются раздельными |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Является ли каталогом. **Тоже `false`, если не существует**; чтобы различить эти случаи, используйте `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Перечисляет содержимое по truename (абсолютный путь с разрешёнными символическими ссылками, как у `truename`). Символические ссылки с отсутствующей целью пропускаются. `.`/`..` пропускаются. Порядок — тот, что даёт ОС |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Создаёт вместе с родительскими. Успешно, если уже существует |

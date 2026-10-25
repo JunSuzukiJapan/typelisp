@@ -1,27 +1,27 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Option, Result और त्रुटि टाइप
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-कंस्ट्रक्टर: `Option<T>` में `Some(T)` / `None` हैं। `Result<T,E>` में `Ok(T)` / `Err(E)` हैं। `E` कोई भी टाइप हो सकता है: बिल्ट-इन ठोस त्रुटि टाइप, और जो टाइप आप स्वयं `defstruct`/`defenum` से लिखते हैं, वे भी वहाँ ठीक उसी तरह फ़िट होते हैं (अध्याय 3)।
+कंस्ट्रक्टर: `Option<T>` में `(some T)` / `none` हैं। `Result<T,E>` में `(ok T)` / `(err E)` हैं। `E` कोई भी टाइप हो सकता है: बिल्ट-इन ठोस त्रुटि टाइप, और जो टाइप आप स्वयं `defstruct`/`defenum` से लिखते हैं, वे भी वहाँ ठीक उसी तरह फ़िट होते हैं (अध्याय 3)।
 
 | नाम | फ़ॉर्म | Option | Result | विवरण |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | मान बाहर निकालता है। `None`/`Err` पर panic करता है |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | मान बाहर निकालता है। `none`/`err` पर panic करता है |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | मान, या डिफ़ॉल्ट |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | क्या यह `Some` है |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | क्या यह `None` है |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | क्या यह `Ok` है |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | क्या यह `Err` है |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | मान निकालता है। `None`/`Err` पर `msg` के साथ panic |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | मान, या `f` का परिणाम। `f` केवल `None`/`Err` पर बुलाया जाता है |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok` की सामग्री पर `f` लागू करता है |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err` की सामग्री पर `f` लागू करता है |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok` पर सामग्री `f` को देता है और उसका परिणाम लौटाता है |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err` पर `f` का परिणाम लौटाता है |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)` को `Ok(v)` में और `None` को `Err(e)` में बदलता है |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | क्या यह `some` है |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | क्या यह `none` है |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | क्या यह `ok` है |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | क्या यह `err` है |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | मान निकालता है। `none`/`err` पर `msg` के साथ panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | मान, या `f` का परिणाम। `f` केवल `none`/`err` पर बुलाया जाता है |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `some`/`ok` की सामग्री पर `f` लागू करता है |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `err` की सामग्री पर `f` लागू करता है |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `some`/`ok` पर सामग्री `f` को देता है और उसका परिणाम लौटाता है |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err` पर `f` का परिणाम लौटाता है |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)` को `(ok v)` में और `none` को `(err e)` में बदलता है |
 
-कंस्ट्रक्टर `Option::some`/`Option::none`/`Result::ok`/`Result::err` हैं (या `(use option)`/`(use result)` के बाद, नंगे नाम `some`/`none`/`ok`/`err`)।
+कंस्ट्रक्टर `Option::some`/`Option::none`/`Result::ok`/`Result::err` हैं (या `(use Option)`/`(use Result)` के बाद, नंगे नाम `some`/`none`/`ok`/`err`)।
 
 शाखा `match` से स्पष्ट रूप से लिखी जाती है, या ऊपर के `map`/`and-then` आदि से जोड़ी जाती है। Rust के `?` के समकक्ष कोई सिंटैक्स नहीं है।
 
@@ -31,9 +31,9 @@
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
-(-> (option::some 8)
+(-> (Option::some 8)
     (and-then half)                          ; (some 4)
     (and-then half)                          ; (some 2)
     (map (lambda ((x int)) int (* x 10)))    ; (some 20)
@@ -82,7 +82,7 @@ Rust के `std::error::Error` का अनुसरण करते हुए
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | त्रुटि संदेश (`Error` trait का मेथड) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | वह कारण जिसे यह त्रुटि लपेटती है, या यदि कोई नहीं तो `None` (Rust का `Error::source`) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | वह कारण जिसे यह त्रुटि लपेटती है, या यदि कोई नहीं तो `none` (Rust का `Error::source`) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` `Error` लागू करता है) | ठोस त्रुटि टाइप को trait ऑब्जेक्ट तक चौड़ा करता है |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` `Error` लागू करता है) | संदेश और `source` का अनुसरण करके मिली कारणों की शृंखला, हर पंक्ति में एक कारण। CL में कोई समकक्ष नहीं है (Rust का "caused by") |
 
@@ -92,10 +92,10 @@ Rust के `std::error::Error` का अनुसरण करते हुए
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (option::none)))
+  (source ((self Self)) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; ठोस टाइप जस का तस E में जाता है
-  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
+  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; किसी भी प्रकार को एकसमान रूप से संभालें
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -108,7 +108,7 @@ Rust के `std::error::Error` का अनुसरण करते हुए
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (result::err e))))
+    ((err e) (Result::err e))))
 ```
 
 **टाइप और trait एक नेमस्पेस साझा करते हैं** (Rust की तरह)। एक मॉड्यूल के भीतर, `defstruct`/`defenum` और trait का नाम समान नहीं हो सकता, और टाइप के स्थान पर trait का नाम लिखना "`error` is a trait, not a type — write `:dyn error`" के रूप में रिपोर्ट होता है।

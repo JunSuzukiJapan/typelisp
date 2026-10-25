@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Operacje na plikach, strumienie i sieć
 
 Ten przewodnik pokazuje podstawy odczytu i zapisu plików, nazw ścieżek oraz komunikacji przez gniazda. Listy
@@ -20,7 +20,7 @@ za pomocą `match`.
 ```
 
 Gdy wiesz, że operacja nie może się nie udać, albo w małym skrypcie, w którym zatrzymanie przy porażce jest w porządku,
-`unwrap` wyjmuje wartość. Jeśli jest to `Err`, następuje panic.
+`unwrap` wyjmuje wartość. Jeśli jest to `err`, następuje panic.
 
 ## 2. Odczyt i zapis całego pliku
 
@@ -174,7 +174,7 @@ Aby nałożyć limit czasu na operację, podaj `:timeout` (w sekundach).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; zegar na następny odczyt
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; zegar na następny odczyt
 ```
 
 ### Gdy druga strona się rozłącza
@@ -189,7 +189,7 @@ Nie ma dedykowanej funkcji do rozwiązywania nazw. Przekazanie nazwy hosta do `t
 `tls-connect` lub `send-to` rozwiązuje ją wewnątrz nich. Rozwiązywanie odbywa się na innym wątku, więc inne
 zadania działają dalej w czasie oczekiwania. Jeśli nazwa ma kilka adresów, są próbowane po kolei.
 
-Jeśli nazwy nie da się rozwiązać, zwracany jest `Err`.
+Jeśli nazwy nie da się rozwiązać, zwracany jest `err`.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -247,5 +247,5 @@ UDP nie jest strumieniem; wysyła i odbiera po jednym datagramie. Dane to ciąg 
 ## 9. Gniazda domeny Unix
 
 Przekaż ścieżkę pliku gniazda do `unix-listen` / `unix-connect`. Otrzymywana wartość to ten sam
-`socket-stream` co w TCP. `unix-listen` zwraca `Err`, jeśli plik już istnieje. Zamknięcie
+`socket-stream` co w TCP. `unix-listen` zwraca `err`, jeśli plik już istnieje. Zamknięcie
 nasłuchiwacza usuwa plik.

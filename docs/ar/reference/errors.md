@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # رسائل الخطأ
 
 معنى أهم رسائل الخطأ الصادرة من `typl` وكيفية إصلاحها.
@@ -44,7 +44,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | تعبير من النوع `U` في موضع يلزم فيه النوع `T`. لا توجد تحويلات ضمنية؛ وللأعداد حوّل بـ `(as T x)`. و`int` و`i32` نوعان مختلفان أيضًا |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | لا يتسع الثابت في النوع. وإذا أردت قصّه فاكتب `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | لا يوجد نوع بهذا الاسم. عرّف النوع قبل أول صيغة تستخدمه (لا يوجد إعلان مسبق للأنواع). وإذا كنت تقصد متغير نوع فاكتبه في موضع إعلان مثل `<foo>` بعد اسم الدالة ([مرجع الصياغة 3.6](syntax.md#36-defstruct--البنى-أنواع-يعرفها-المستخدم)) |
-| ``cannot infer type argument `t` for `vector::new` `` | لا يمكن تحديد وسيط نوع. اكتب النوع بـ `the` كما في `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | لا يمكن تحديد وسيط نوع. اكتب النوع بـ `the` كما في `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | لا يعالج `match` كل المتغايرات. أضف فروعًا للمتغايرات الناقصة أو فرع `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | تشترط الدالة سمة لا ينفّذها النوع الذي مرّرته. اكتب `(impl Eq pt ...)` ([السمات القياسية](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | مُرِّرت قيمة من نوع لا ينفّذ السمة حيث يُتوقَّع `:dyn`. اكتب `impl` |

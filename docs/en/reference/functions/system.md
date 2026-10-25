@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -135,7 +135,7 @@ just evaluates `form`**: a degenerate behavior CLHS explicitly allows, so that s
 hang on a prompt no one can answer.
 
 The `$VISUAL` / `$EDITOR` of `ed` is split at whitespace, so `EDITOR="code -w"` works. If neither is
-set, the result is `Err`: it does not guess `vi`. The line number is passed first, in the form `+N`.
+set, the result is `err`: it does not guess `vi`. The line number is passed first, in the form `+N`.
 
 `dribble` records all three ways the session's output leaves the process: what
 `print`/`println`/`format` write, what is written to streams connected to standard output, and the
@@ -144,14 +144,14 @@ lines typed into the REPL along with the values the REPL prints back.
 ## 6. Parsing and evaluation
 
 All of these handle text and data from run time (which the program itself does not control), so on
-failure they return the `Err` of a `Result` rather than panicking. The error types are concrete types
+failure they return the `err` of a `Result` rather than panicking. The error types are concrete types
 per operation ([Error types](option-result.md#3-error-types-and-the-error-trait)).
 
 | Name | Form | Type | Description |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL's `parse-integer`. Skips leading and trailing whitespace (the same set as `trim`), reads at most one sign `+`/`-`, then digits in base `radix` (default 10, 2 to 36; digits above 10 in either case). There is no limit on the number of digits (`int`). Any other characters left over give `Err`. With `:junk-allowed true`, it stops at the first non-digit and ignores the rest, but gives `Err` if there is not a single digit (corresponding to CL's `nil`). It does not return CL's second value (the position where reading ended). A `radix` out of range panics (a mistake by the caller, not in the text) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL's `parse-integer`. Skips leading and trailing whitespace (the same set as `trim`), reads at most one sign `+`/`-`, then digits in base `radix` (default 10, 2 to 36; digits above 10 in either case). There is no limit on the number of digits (`int`). Any other characters left over give `err`. With `:junk-allowed true`, it stops at the first non-digit and ignores the rest, but gives `err` if there is not a single digit (corresponding to CL's `nil`). It does not return CL's second value (the position where reading ended). A `radix` out of range panics (a mistake by the caller, not in the text) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | A floating-point number. Also accepts `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Reads one `Sexpr` from `s` (with the same reader that reads source code). Unbalanced parentheses, unterminated strings and the like give `Err`. Reading from a stream is `read-sexpr` ([Streams](streams-files.md#6-generic-functions-and-file-operations)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Reads one `Sexpr` from `s` (with the same reader that reads source code). Unbalanced parentheses, unterminated strings and the like give `err`. Reading from a stream is `read-sexpr` ([Streams](streams-files.md#6-generic-functions-and-file-operations)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **the position where reading ended**. `(car r)` is the value and `(cdr r)` the position of the next character to read. `start` defaults to 0 |
 | `read-from-string-preserving-whitespace` | Same as above | Same as above | The same, but does not consume the whitespace that ended the datum. The difference shows in the returned position |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Type-checks `form` at run time and evaluates it. Follows CL's `eval` |
@@ -174,7 +174,7 @@ the whitespace that ended the datum, and `read-preserving-whitespace` leaves it.
 returns position 3, and the preserving version returns 2.
 
 The number syntax the reader accepts is in [Syntax Reference chapter 1](../syntax.md#1-lexical-elements).
-What `*print-radix*` ([Printing](printing.md#62-base-case-and-readability)) prints can be read back as it
+What `*print-radix*` ([Printing](printing.md#62-base-and-readability)) prints can be read back as it
 is. There is no CL `*read-base*`.
 
 ### 6.1 What `eval` means
@@ -202,7 +202,7 @@ registered in the global environment immediately and permanently.
   directly in a file is checked before the `eval` that defines `sq` runs, and is "undefined". However,
   **later `eval`s can see it** (their type check runs at run time, after the definition). The REPL checks
   and runs one line at a time, so a name defined with `eval` can be called directly from the next line.
-- **Errors**: type errors and syntax errors return `Err` (they do not panic). **Run-time panics** in the
+- **Errors**: type errors and syntax errors return `err` (they do not panic). **Run-time panics** in the
   evaluated code (division by zero and so on) propagate as they would from code written directly. The
   cleanup of any `unwind-protect` in between runs
   ([Syntax Reference chapter 8](../syntax.md#8-non-local-exits-catch--throw--unwind-protect)).

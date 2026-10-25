@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Stream và tệp
 
 Các trait và phương thức của stream, các kiểu stream cụ thể, thao tác tệp và pathname. Socket mạng cũng là
@@ -89,7 +89,7 @@ không biết về các dòng mới mà `println` đã ghi. Hãy chỉ dùng m�
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` là một trong ba hằng số `direction-input` / `direction-output` / `direction-append`. `open-file`
-trả về `Err(FileError)` nếu không mở được tệp (một tệp bị thiếu là một kết quả bình thường, không phải
+trả về `(err FileError)` nếu không mở được tệp (một tệp bị thiếu là một kết quả bình thường, không phải
 panic). Tên tệp có thể là một chuỗi hoặc một `pathname` (`Pathish` ở chương 9).
 
 `(get-output-stream-string s)` trả về những gì đã được ghi vào một `string-output-stream` và làm rỗng nó.
@@ -136,18 +136,18 @@ Tất cả là các `defstruct` trong thư viện chuẩn và có thể lồng n
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` với `CharInput I`,`CharOutput O` | Chuyển mọi thứ |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` với `CharInput S` | Tất cả các dòng còn lại |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` với `PeekInput S` | Đọc một `Sexpr` (`read` của CL). `Ok(eof)` ở cuối đầu vào, `Ok(datum d)` khi đọc được một cái, `Err` nếu không phải dữ liệu. Nó **tiêu thụ một ký tự khoảng trắng** đã kết thúc datum (như trong CL). `ReadOutcome` không phải là `Option<Sexpr>` để việc đọc danh sách rỗng `()` và cuối đầu vào không phải cùng một giá trị |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` với `PeekInput S` | Đọc một `Sexpr` (`read` của CL). `(ok eof)` ở cuối đầu vào, `(ok (datum d))` khi đọc được một cái, `err` nếu không phải dữ liệu. Nó **tiêu thụ một ký tự khoảng trắng** đã kết thúc datum (như trong CL). `ReadOutcome` không phải là `Option<Sexpr>` để việc đọc danh sách rỗng `()` và cuối đầu vào không phải cùng một giá trị |
 | `read-sexpr-preserving-whitespace` | Như trên | Như trên | Giống vậy, nhưng để lại khoảng trắng (`read-preserving-whitespace` của CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` với `PeekInput S` | Đọc đến `ch` và tạo một danh sách. `ch` được tiêu thụ. `Err` nếu đầu vào hết |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` với `PeekInput S` | Đọc đến `ch` và tạo một danh sách. `ch` được tiêu thụ. `err` nếu đầu vào hết |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` với `CharOutput S`,`Iter I (Item string)` | Ghi từng dòng một |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` với `Pathish P` | Toàn bộ nội dung |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` với `Pathish P` | Tất cả các dòng |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` với `Pathish P` | Ghi ra |
 | `probe-file` | `(probe-file name)` | `(P)→bool` với `Pathish P` | Nó có tồn tại không |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Xóa, đổi tên (các đối số là `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` với `Pathish P` | Đường dẫn tuyệt đối với liên kết tượng trưng và `.`/`..` đã được phân giải. `Err` nếu nó không tồn tại |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` với `Pathish P` | Đường dẫn tuyệt đối với liên kết tượng trưng và `.`/`..` đã được phân giải. `err` nếu nó không tồn tại |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` với `Pathish P` | Thời điểm sửa đổi cuối cùng. Đó là **universal time**, nên `decode-universal-time` ([Thời gian](system.md#2-giải-mã-và-mã-hóa-ngày-tháng)) đọc được nó |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` với `Pathish P` | Tên đăng nhập của chủ sở hữu. `Err` nếu tệp không tồn tại, `Ok(none)` nếu uid của chủ sở hữu không có mục trong cơ sở dữ liệu mật khẩu: hai trường hợp mà CL phân biệt được giữ tách bạch |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` với `Pathish P` | Tên đăng nhập của chủ sở hữu. `err` nếu tệp không tồn tại, `(ok none)` nếu uid của chủ sở hữu không có mục trong cơ sở dữ liệu mật khẩu: hai trường hợp mà CL phân biệt được giữ tách bạch |
 | `directory-p` | `(directory-p name)` | `(P)→bool` với `Pathish P` | Có phải thư mục không. **Cũng là `false` nếu nó không tồn tại**; hãy dùng `probe-file` để phân biệt hai trường hợp |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` với `Pathish P` | Liệt kê nội dung theo truename (đường dẫn tuyệt đối với liên kết tượng trưng đã phân giải, như `truename`). Các liên kết tượng trưng có đích bị thiếu bị bỏ qua. `.`/`..` bị bỏ qua. Thứ tự là bất cứ thứ gì HĐH đưa ra |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` với `Pathish P` | Tạo nó cùng với các thư mục cha. Thành công nếu nó đã tồn tại |

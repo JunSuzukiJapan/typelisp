@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Felmeddelanden
 
 Vad de viktigaste felmeddelandena från `typl` betyder och hur man åtgärdar dem.
@@ -44,7 +44,7 @@ Fel som hittas före körning. Formen körs inte förrän de är åtgärdade.
 | ``type mismatch: expected `T`, found `U` `` | Ett uttryck av typen `U` står där typen `T` behövs. Det finns inga implicita konverteringar; för tal konverterar man med `(as T x)`. `int` och `i32` är också olika typer |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Literalen ryms inte i typen. Om du vill att den ska kapas, skriv `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Det finns ingen typ med det namnet. Definiera en typ före den första form som använder den (typer har ingen framåtdeklaration). Om du menade en typvariabel, skriv den på en deklarerande plats som `<foo>` efter funktionsnamnet ([Syntaxreferens 3.6](syntax.md#36-defstruct--structs-användardefinierade-typer)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Ett typargument kan inte avgöras. Skriv typen med `the`, som i `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Ett typargument kan inte avgöras. Skriv typen med `the`, som i `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` hanterar inte alla varianter. Lägg till grenar för de saknade varianterna, eller en `_`-gren |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Funktionen kräver ett trait som typen du skickade inte implementerar. Skriv `(impl Eq pt ...)` ([Standardtraits](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Ett värde av en typ som inte implementerar traitet skickades där en `:dyn` förväntas. Skriv `impl` |

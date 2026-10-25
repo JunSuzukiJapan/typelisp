@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Tempo, ambiente e implementação
 
 Funções de tempo, consultas sobre o ambiente de execução, ferramentas da implementação, análise e avaliação de
@@ -134,7 +134,7 @@ simplesmente avalia `form`**: um comportamento degenerado que o CLHS permite exp
 testes não fiquem presos em um prompt que ninguém pode responder.
 
 O `$VISUAL` / `$EDITOR` de `ed` é dividido nos espaços em branco, então `EDITOR="code -w"` funciona. Se nenhum
-estiver definido, o resultado é `Err`: ele não adivinha `vi`. O número da linha é passado primeiro, na forma
+estiver definido, o resultado é `err`: ele não adivinha `vi`. O número da linha é passado primeiro, na forma
 `+N`.
 
 `dribble` grava as três vias pelas quais a saída da sessão sai do processo: o que `print`/`println`/`format`
@@ -144,14 +144,14 @@ valores que o REPL imprime de volta.
 ## 6. Análise e avaliação
 
 Todas estas lidam com texto e dados do tempo de execução (que o próprio programa não controla), então em caso
-de falha devolvem o `Err` de um `Result` em vez de entrar em panic. Os tipos de erro são tipos concretos por
+de falha devolvem o `err` de um `Result` em vez de entrar em panic. Os tipos de erro são tipos concretos por
 operação ([Tipos de erro](option-result.md#3-tipos-de-erro-e-o-trait-error)).
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | O `parse-integer` do CL. Pula os espaços em branco iniciais e finais (o mesmo conjunto de `trim`), lê no máximo um sinal `+`/`-` e depois dígitos na base `radix` (10 por padrão, de 2 a 36; os dígitos acima de 10 em maiúsculas ou minúsculas). Não há limite de dígitos (`int`). Quaisquer outros caracteres sobrando dão `Err`. Com `:junk-allowed true`, para no primeiro não dígito e ignora o resto, mas dá `Err` se não houver nem um dígito (corresponde ao `nil` do CL). Não devolve o segundo valor do CL (a posição em que a leitura terminou). Um `radix` fora do intervalo causa panic (um erro de quem chama, não do texto) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | O `parse-integer` do CL. Pula os espaços em branco iniciais e finais (o mesmo conjunto de `trim`), lê no máximo um sinal `+`/`-` e depois dígitos na base `radix` (10 por padrão, de 2 a 36; os dígitos acima de 10 em maiúsculas ou minúsculas). Não há limite de dígitos (`int`). Quaisquer outros caracteres sobrando dão `err`. Com `:junk-allowed true`, para no primeiro não dígito e ignora o resto, mas dá `err` se não houver nem um dígito (corresponde ao `nil` do CL). Não devolve o segundo valor do CL (a posição em que a leitura terminou). Um `radix` fora do intervalo causa panic (um erro de quem chama, não do texto) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Um número de ponto flutuante. Também aceita `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Lê um `Sexpr` de `s` (com o mesmo leitor que lê o código-fonte). Parênteses desbalanceados, strings não terminadas e afins dão `Err`. Ler de um stream é `read-sexpr` ([Streams](streams-files.md#6-funções-genéricas-e-operações-com-arquivos)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Lê um `Sexpr` de `s` (com o mesmo leitor que lê o código-fonte). Parênteses desbalanceados, strings não terminadas e afins dão `err`. Ler de um stream é `read-sexpr` ([Streams](streams-files.md#6-funções-genéricas-e-operações-com-arquivos)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` mais **a posição em que a leitura terminou**. `(car r)` é o valor e `(cdr r)` a posição do próximo caractere a ler. `start` é 0 por padrão |
 | `read-from-string-preserving-whitespace` | Igual ao acima | Igual ao acima | O mesmo, mas não consome o espaço em branco que terminou o dado. A diferença aparece na posição devolvida |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Verifica os tipos de `form` em tempo de execução e a avalia. Segue o `eval` do CL |
@@ -174,7 +174,7 @@ espaço que terminou o dado, e `read-preserving-whitespace` o deixa. `(read-from
 posição 3, e a versão que preserva devolve 2.
 
 A sintaxe numérica que o leitor aceita está no [capítulo 1 da Referência de sintaxe](../syntax.md#1-elementos-léxicos).
-O que `*print-radix*` ([Impressão](printing.md#62-base-caixa-e-legibilidade)) imprime pode ser lido de volta
+O que `*print-radix*` ([Impressão](printing.md#62-base-e-legibilidade)) imprime pode ser lido de volta
 como está. Não existe o `*read-base*` do CL.
 
 ### 6.1 O que `eval` significa
@@ -202,7 +202,7 @@ ambiente global imediatamente e de forma permanente.
   executado, e fica "indefinido". No entanto, **os `eval` posteriores o enxergam** (a verificação de tipos deles
   roda em tempo de execução, depois da definição). O REPL verifica e executa uma linha por vez, então um nome
   definido com `eval` pode ser chamado diretamente na linha seguinte.
-- **Erros**: os erros de tipo e de sintaxe devolvem `Err` (não causam panic). Os **panics em tempo de execução**
+- **Erros**: os erros de tipo e de sintaxe devolvem `err` (não causam panic). Os **panics em tempo de execução**
   do código avaliado (divisão por zero etc.) se propagam como fariam a partir de código escrito diretamente. A
   limpeza de qualquer `unwind-protect` no meio é executada
   ([capítulo 8 da Referência de sintaxe](../syntax.md#8-saídas-não-locais-catch--throw--unwind-protect)).

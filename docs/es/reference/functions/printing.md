@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Impresión
 
 `print`/`println`/`format`, las impresoras de un argumento, el pretty printer, `print-object` y las variables
@@ -232,8 +232,8 @@ se imprimen igual que en SBCL. Cuando el REPL muestra un resultado, usa la misma
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tupla `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Igual |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (el número es un número de serie interno) | Igual |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Igual |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (el número es un número de serie interno) | Igual |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Un entero (el valor de `get-universal-time` / `get-internal-real-time` de CL) | Igual |
 | Tipos de error (`ParseIntError`, `SimpleError`, etc.) | `#<simpleerror "boom">` | Solo el mensaje (`boom`) |
@@ -330,31 +330,27 @@ dos son el mismo objeto", como especifica CL:
 Un valor sin compartición **no muestra ninguna etiqueta**, así que dejar esta variable a verdadero no cambia
 la salida del código cotidiano.
 
-### 6.2 Base, mayúsculas y legibilidad
+### 6.2 Base y legibilidad
 
 | Variable | Tipo | Valor por defecto | Significado |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | La base para imprimir enteros (de ancho fijo e `int`). Fuera de 2 a 36 es un **error de impresión** (CL también especifica el rango) |
 | `*print-radix*` | `bool` | `false` | Si es verdadero, añade una marca de base: `#b`/`#o`/`#x`, `#NNr` para otras bases, y un `.` final para la base 10. La marca va **antes** del signo (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | Las mayúsculas de los nombres de símbolo: `:upcase` / `:downcase` / `:capitalize` (las mismas escrituras que CL). Cualquier otro símbolo es un error de impresión |
 | `*print-readably*` | `bool` | `false` | Si es verdadero, imprime en una forma que se puede volver a leer. Fuerza el escape y desactiva los recortes de `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | El número de líneas que puede usar el pretty printer. El exceso se corta, con `..` al final como en CL. 0 significa ilimitado. Un valor negativo es un error de impresión |
 | `*print-escape*` | `bool` | `true` | Si `write`/`write-to-string` hacen `prin1` o `princ`. **Solo esas dos lo leen** |
-| `*print-array*` | `bool` | `true` | Si `Vector<T>` y `Array<T>` muestran su contenido. Si es verdadero, la sintaxis de arrays de CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); si es falso, solo el tipo y la forma, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Si `Vector<T>` y `Array<T>` muestran su contenido. Si es verdadero, la sintaxis de arrays de CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); si es falso, solo el tipo y la forma, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 Las marcas que añade `*print-radix*` las puede volver a leer el lector (la notación de base de la
 [Referencia de sintaxis](../syntax.md#1-elementos-léxicos)).
 
-**Por qué el valor por defecto de `*print-case*` difiere del de CL**: el valor por defecto de CL es
-`:upcase` porque el lector de CL guarda los nombres de símbolo en mayúsculas, es decir, significa "tal como
-se guardaron". Este lector los guarda en minúsculas, así que el valor por defecto con el mismo significado
-es `:downcase`.
+**Por qué no hay `*print-case*`**: los nombres de símbolo distinguen mayúsculas y minúsculas y se imprimen tal como
+se escriben, así que imprimirlos con otra capitalización los leería de vuelta como otro símbolo.
 
 **La mitad que falta de `*print-readably*`**: CL señala `print-not-readable` para los valores que no se
 pueden volver a leer, pero este lenguaje no tiene condición que señalar, ni forma de decidir la legibilidad

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -7,7 +7,7 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
 
 ## 1. Unsur leksikal
 
-- **Tidak peka huruf besar-kecil.** Simbol semuanya dinormalisasi menjadi huruf kecil saat dibaca.
+- **Peka huruf besar-kecil.** `foo` dan `Foo` adalah simbol yang berbeda. Nama tipe diawali huruf besar (`Option`, `Vector`, dan seterusnya; tipe primitif seperti `int` dan `string` huruf kecil).
 - **Komentar**: dari `;` sampai akhir baris (komentar baris). `#| ... |#` (komentar blok, yang dapat
   bersarang).
 - **Evaluasi saat pembacaan**: `#.(expr)` **menjalankan bentuk yang menyusul saat membaca** dan
@@ -157,7 +157,7 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
   tidak dapat diserahkan ke trait yang tidak berkaitan. Untuk syarat yang harus dipenuhi sebuah trait
   agar dapat dipakai dengan `:dyn`, lihat [3.9 deftrait / impl](#39-deftrait--impl--trait). Menulis
   `:dyn` di luar posisi tipe adalah kesalahan.
-- Tipe generik bawaan: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Tipe generik bawaan: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>`, dan tipe konkurensi `Task<T>` / `Thread<T>` / `Chan<T>`
   ([bab 12](#12-konkurensi-task)). Ada juga `Sexpr`, tipe data S-expression. Tipe kesalahan konkret
   bawaan adalah `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` /
@@ -861,8 +861,8 @@ Menulis list `(Name option...)` di posisi nama menentukan opsi (posisi yang sama
 
 ; generic
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Setiap varian berbentuk `(VariantName FieldType...)`. Field hanya posisional (tidak memiliki nama).
@@ -873,8 +873,8 @@ Menulis list `(Name option...)` di posisi nama menentukan opsi (posisi yang sama
   setiap varian atau memiliki `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Metode dan metode statis ditulis di `impl` (3.5), sama seperti `defstruct`.
 - Untuk menjadikan enum itu sendiri `pub`, tulis `(pub defenum ...)`.
@@ -1052,8 +1052,8 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 - `module` membuat ruang nama. **Tipe bukan ruang nama** (seperti di Rust, tipe hanya memiliki metode statis
   dan metode).
 - Melakukan `use` pada sebuah tipe membuat varian enum dan metode statis publik tipe itu juga tersedia
-  dengan nama polos (misalnya, setelah `(use option)`, `some`/`none` dapat dipanggil tanpa
-  `option::some`/`option::none`).
+  dengan nama polos (misalnya, setelah `(use Option)`, `some`/`none` dapat dipanggil tanpa
+  `Option::some`/`Option::none`).
 - **Sebuah nama hanya punya satu arti.** Fungsi, variabel global, dan makro berbagi satu ruang nama, dan
   dalam satu modul tidak boleh ada dua di antaranya yang bernama sama (galat, mana pun yang didefinisikan
   lebih dulu). Fungsi dan variabel tidak punya ruang nama terpisah seperti di CL. Untuk nama yang sama di
@@ -1366,7 +1366,7 @@ Jenis pola:
   membandingkan tipe yang tidak memiliki sintaks literal (instans `defstruct`, variabel global, hasil
   komputasi), dan implementasi `Eq` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
-- `(Ctor sub-pattern...)` — pola konstruktor (`Some x` `None` `Cons a d` `Ok v` dan sebagainya)
+- `(Ctor sub-pattern...)` — pola konstruktor (`(some x)` `(none)` `(cons a d)` `(ok v)` dan sebagainya)
 - `(Type :slot pattern... :slot...)` — pola struct. Tulis slot setelah nama tipe sebagai kata kunci. Jika
   sebuah kata kunci diikuti pola, slot itu dicocokkan dengan pola tersebut; jika diikuti kata kunci lain
   atau tidak ada apa-apa, slot diikat ke variabel bernama sama. Slot yang tidak ditulis tidak dicocokkan
@@ -1492,8 +1492,8 @@ sintaks tambahan. Himpunan tipe pengimplementasi terbuka, sehingga tidak pernah 
 
 **Inferensi tipe lintas cabang**: semua cabang harus bertipe sama (kecuali cabang yang diverge,
 seperti dengan `panic`). Pada `match` yang ditulis di tempat tidak ada tipe yang diharapkan, cabang
-saling mengisi argumen tipe yang hilang: `(result::ok v)` hanya menetapkan `T`, dan
-`(result::err e)` hanya `E`, tetapi bersama-sama keduanya menetapkan `Result<T,E>`. Argumen tipe yang
+saling mengisi argumen tipe yang hilang: `(Result::ok v)` hanya menetapkan `T`, dan
+`(Result::err e)` hanya `E`, tetapi bersama-sama keduanya menetapkan `Result<T,E>`. Argumen tipe yang
 tidak dapat ditetapkan cabang mana pun sampai akhir adalah kesalahan pada cabang itu
 (`cannot infer type argument ...`). Di luar `match`, argumen tipe yang tidak dapat ditetapkan adalah
 kesalahan saat itu juga.
@@ -1704,7 +1704,7 @@ dan sebagainya).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1726,7 +1726,7 @@ berlebar tetap, `f32`/`f64`/`ratio`/`char`). Tipe yang sama bukan konversi. **Ko
 bilangan bulat (termasuk `int`) dan antara `f32`↔`f64` adalah konversi sungguhan**: `as` memotong /
 membulatkan, dan `try-as` menjawab apakah muat pada lebar (presisi) itu. `(as int x)` adalah pelebaran
 tepat dari lebar tetap, dan `(as i32 n)` pemotongan dari `int`. Bilangan bulat → `char` dapat gagal di
-luar rentang, sehingga `as` melakukan panic dan `try-as` menghasilkan `None`. Semua yang lain
+luar rentang, sehingga `as` melakukan panic dan `try-as` menghasilkan `none`. Semua yang lain
 (pelebaran, dan pemotongan `float->int`/`ratio->int`) selalu berhasil. `float->int`/`ratio->int`/
 `char->int` mendarat pada `int`, dan jika lebar yang lebih sempit diminta, `int->W` dipanggil
 setelahnya. Ini adalah gula sintaks yang diekspansi menjadi metode konversi yang sesuai
@@ -1831,7 +1831,7 @@ interpreter itu sendiri, yang tidak dimiliki berkas eksekusi AOT; yang diawasi `
 itu sendiri). `room`/`dribble`/`ed` bukan bagian dari ini dan dapat dikompilasi secara normal.
 
 Yang **dapat** dikompilasi: I/O stream dan berkas, `random`, `gensym`,
-`symbol->string`/`string->symbol`, `parse-int`/`parse-float`,
+`symbol->string`/`intern`, `parse-int`/`parse-float`,
 `get-universal-time`/`get-internal-real-time`, `exit`, fungsi transendental, operasi bit,
 `catch`/`throw`/`unwind-protect`, keempat `eq`/`eql`/`equal`/`equalp` (yang membuat `case` dapat
 dikompilasi untuk setiap tipe), seluruh keluarga pencetakan termasuk

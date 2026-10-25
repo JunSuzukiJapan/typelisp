@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 串流與檔案
 
 串流的 trait 與方法、具體串流型別、檔案操作、路徑名稱。網路 socket 也是串流的一員，見[網路](network.md)。
@@ -81,7 +81,7 @@ CL 以類別階層表示的東西，在這裡以 **trait 階層**表示。方向
 | `standard-stream` | `*standard-input*` `*standard-output*` `*error-output*` | `CharInput` `PeekInput` `CharOutput` |
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
-`direction` 是 `direction-input` / `direction-output` / `direction-append` 三個常數。`open-file` 無法開啟時回傳 `Err(FileError)`（不存在的
+`direction` 是 `direction-input` / `direction-output` / `direction-append` 三個常數。`open-file` 無法開啟時回傳 `(err FileError)`（不存在的
 檔案是一般的結果，不是 panic）。檔名可以是字串也可以是 `pathname`（第 9 章的 `Pathish`）。
 
 `(get-output-stream-string s)` 回傳寫入 `string-output-stream` 的內容並清空。與 CL 一樣，`close` 之後也能取出。
@@ -125,18 +125,18 @@ CL 在**呼叫**中決定元素型別，如 `(open name :element-type '(unsigned
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部轉送 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 剩下的所有行 |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | 讀取一個 `Sexpr`（CL 的 `read`）。輸入結尾為 `Ok(eof)`，讀到時為 `Ok(datum d)`，不是資料時為 `Err`。**消耗結束該 datum 的一個空白字元**（與 CL 相同）。`ReadOutcome` 不是 `Option<Sexpr>`，是為了不讓「讀到空串列 `()`」與「輸入結尾」以同一個值表示 |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | 讀取一個 `Sexpr`（CL 的 `read`）。輸入結尾為 `(ok eof)`，讀到時為 `(ok (datum d))`，不是資料時為 `err`。**消耗結束該 datum 的一個空白字元**（與 CL 相同）。`ReadOutcome` 不是 `Option<Sexpr>`，是為了不讓「讀到空串列 `()`」與「輸入結尾」以同一個值表示 |
 | `read-sexpr-preserving-whitespace` | 同上 | 同上 | 同上，但保留空白（CL 的 `read-preserving-whitespace`） |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | 讀到 `ch` 為止並組成串列。`ch` 被消耗。輸入用盡時為 `Err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | 讀到 `ch` 為止並組成串列。`ch` 被消耗。輸入用盡時為 `err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 逐行寫出 |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 全部內容 |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 所有行 |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | 寫出 |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 是否存在 |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 刪除、重新命名（引數是 `Pathish`） |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | 解析了符號連結與 `.`/`..` 的絕對路徑。不存在時為 `Err` |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | 解析了符號連結與 `.`/`..` 的絕對路徑。不存在時為 `err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 最後修改時間。是**世界時**，所以 `decode-universal-time`（[時間](system.md#2-日期的分解與合成)）可以讀取 |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 擁有者的登入名稱。檔案不存在時為 `Err`，擁有者的 uid 在密碼資料庫中沒有項目時為 `Ok(none)`——把 CL 區分的兩種情況照樣區分 |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 擁有者的登入名稱。檔案不存在時為 `err`，擁有者的 uid 在密碼資料庫中沒有項目時為 `(ok none)`——把 CL 區分的兩種情況照樣區分 |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | 是否為目錄。**不存在時也為 `false`**——區分兩者用 `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 以 truename（與 `truename` 一樣是解析了符號連結的絕對路徑）列出內容。沒有目標的符號連結不包括在內。`.`/`..` 不包括在內。順序依 OS 而定 |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 連同上層目錄一起建立。已存在時成功 |

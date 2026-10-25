@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 錯誤訊息
 
 `typl` 提供的主要錯誤訊息的意義與修正方式。
@@ -43,7 +43,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | 需要 `T` 型別的位置是 `U` 型別的運算式。沒有隱式型別轉換，數值請以 `(as T x)` 轉換。`int` 與 `i32` 也是不同的型別 |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | 字面值放不進該型別。想要截斷時寫 `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | 沒有該名稱的型別。型別要在第一次使用它的形式之前定義（型別沒有前置宣告）。如果本意是型別變數，請寫在函式名稱的 `<foo>` 等宣告位置（[語法參考 3.6](syntax.md#36-defstruct--結構使用者定義型別)） |
-| ``cannot infer type argument `t` for `vector::new` `` | 無法決定型別引數。像 `(the Vector<int> (Vector::new))` 這樣以 `the` 寫出型別 |
+| ``cannot infer type argument `t` for `Vector::new` `` | 無法決定型別引數。像 `(the Vector<int> (Vector::new))` 這樣以 `the` 寫出型別 |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` 沒有處理所有變體。加上缺少的變體分支或 `_` 分支 |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | 函式要求某個 trait，但傳入的型別沒有實作。寫 `(impl Eq pt ...)`（[標準 trait](functions/traits.md)） |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | 在 `:dyn` 的位置傳入了沒有實作該 trait 的型別的值。寫 `impl` |

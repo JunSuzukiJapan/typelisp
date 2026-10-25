@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -136,7 +136,7 @@ atla), `c` (buradan sonra sormayı bırak) ve `q`'dur (iptal). **Standart girdi 
 betikler ve testler kimsenin yanıtlayamayacağı bir istemde takılmaz.
 
 `ed`'in `$VISUAL` / `$EDITOR`'ı boşluklardan bölünür; bu yüzden `EDITOR="code -w"` çalışır. İkisi de
-ayarlı değilse sonuç `Err`'dir: `vi`'yi tahmin etmez. Satır numarası, `+N` biçiminde ilk olarak geçirilir.
+ayarlı değilse sonuç `err`'dir: `vi`'yi tahmin etmez. Satır numarası, `+N` biçiminde ilk olarak geçirilir.
 
 `dribble`, oturumun çıktısının süreçten çıktığı üç yolun hepsini kaydeder: `print`/`println`/`format`'ın
 yazdıkları, standart çıktıya bağlı akışlara yazılanlar ve REPL'e yazılan satırlar ile REPL'in geri
@@ -145,14 +145,14 @@ yazdırdığı değerler.
 ## 6. Ayrıştırma ve değerlendirme
 
 Bunların hepsi çalışma zamanından gelen metni ve veriyi ele alır (programın kendisinin denetlemediği);
-bu yüzden başarısızlıkta panic olmak yerine bir `Result`'ın `Err`'ini döndürürler. Hata türleri işlem
+bu yüzden başarısızlıkta panic olmak yerine bir `Result`'ın `err`'ini döndürürler. Hata türleri işlem
 başına somut türlerdir ([Hata türleri](option-result.md#3-hata-türleri-ve-error-traiti)).
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL'nin `parse-integer`'ı. Baştaki ve sondaki boşlukları atlar (`trim` ile aynı küme), en çok bir `+`/`-` işareti, sonra `radix` tabanında (varsayılan 10, 2 ile 36; 10'un üzerindeki basamaklar iki harf büyüklüğünde de) basamakları okur. Basamak sayısına sınır yoktur (`int`). Artakalan diğer karakterler `Err` verir. `:junk-allowed true` ile ilk basamak olmayan karakterde durur ve geri kalanı yok sayar, ancak tek bir basamak bile yoksa `Err` verir (CL'nin `nil`'ine karşılık gelir). CL'nin ikinci değerini (okumanın bittiği konum) döndürmez. Aralık dışı bir `radix` panic olur (metindeki değil, çağıranın hatası) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL'nin `parse-integer`'ı. Baştaki ve sondaki boşlukları atlar (`trim` ile aynı küme), en çok bir `+`/`-` işareti, sonra `radix` tabanında (varsayılan 10, 2 ile 36; 10'un üzerindeki basamaklar iki harf büyüklüğünde de) basamakları okur. Basamak sayısına sınır yoktur (`int`). Artakalan diğer karakterler `err` verir. `:junk-allowed true` ile ilk basamak olmayan karakterde durur ve geri kalanı yok sayar, ancak tek bir basamak bile yoksa `err` verir (CL'nin `nil`'ine karşılık gelir). CL'nin ikinci değerini (okumanın bittiği konum) döndürmez. Aralık dışı bir `radix` panic olur (metindeki değil, çağıranın hatası) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Bir kayan noktalı sayı. `inf`/`nan` de kabul eder |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`'den bir `Sexpr` okur (kaynak kodu okuyanla aynı okuyucuyla). Dengesiz parantezler, sonlandırılmamış string'ler vb. `Err` verir. Bir akıştan okumak `read-sexpr`'dir ([Akışlar](streams-files.md#6-jenerik-fonksiyonlar-ve-dosya-işlemleri)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`'den bir `Sexpr` okur (kaynak kodu okuyanla aynı okuyucuyla). Dengesiz parantezler, sonlandırılmamış string'ler vb. `err` verir. Bir akıştan okumak `read-sexpr`'dir ([Akışlar](streams-files.md#6-jenerik-fonksiyonlar-ve-dosya-işlemleri)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` artı **okumanın bittiği konum**. `(car r)` değer, `(cdr r)` okunacak sonraki karakterin konumudur. `start` varsayılan olarak 0'dır |
 | `read-from-string-preserving-whitespace` | Yukarıdakiyle aynı | Yukarıdakiyle aynı | Aynısı, ancak veriyi bitiren boşluğu tüketmez. Fark döndürülen konumda görünür |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | `form`'un türlerini çalışma zamanında denetler ve değerlendirir. CL'nin `eval`'ini izler |
@@ -175,7 +175,7 @@ boşluğu tüketir ve `read-preserving-whitespace` onu bırakır. `(read-from-st
 döndürür ve koruyan sürüm 2 döndürür.
 
 Okuyucunun kabul ettiği sayı sözdizimi [Sözdizimi Başvurusu 1. bölüm](../syntax.md#1-sözcüksel-öğeler)'dedir.
-`*print-radix*`'in ([Yazdırma](printing.md#62-taban-harf-büyüklüğü-ve-okunabilirlik)) yazdırdığı şey olduğu
+`*print-radix*`'in ([Yazdırma](printing.md#62-taban-ve-okunabilirlik)) yazdırdığı şey olduğu
 gibi geri okunabilir. CL'nin `*read-base*`'i yoktur.
 
 ### 6.1 `eval` ne demektir
@@ -204,7 +204,7 @@ kalıcı olarak kaydedilir.
   Ancak **sonraki `eval`'ler onu görebilir** (tür denetimleri çalışma zamanında, tanımdan sonra çalışır).
   REPL her seferinde bir satırı denetler ve çalıştırır; bu yüzden `eval` ile tanımlanan bir ad sonraki
   satırdan doğrudan çağrılabilir.
-- **Hatalar**: tür hataları ve sözdizimi hataları `Err` döndürür (panic olmaz). Değerlendirilen koddaki
+- **Hatalar**: tür hataları ve sözdizimi hataları `err` döndürür (panic olmaz). Değerlendirilen koddaki
   **çalışma zamanı panic'leri** (sıfıra bölme vb.) doğrudan yazılmış koddaki gibi yayılır. Aradaki
   herhangi bir `unwind-protect` temizliği çalışır
   ([Sözdizimi Başvurusu 8. bölüm](../syntax.md#8-yerel-olmayan-çıkışlar-catch--throw--unwind-protect)).

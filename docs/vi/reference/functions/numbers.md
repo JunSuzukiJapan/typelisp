@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -32,9 +32,9 @@ nhất ở đâu đó. `int` trở thành bignum khi vượt qua 63 bit đó, n�
 | `int->int` | `(int->int x)` | `T→int` | Chuyển đổi mở rộng sang `int` (luôn chính xác). Việc `(as int x)` làm |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Chuyển đổi mở rộng sang `ratio` (luôn chính xác) |
 | `int->char` | `(int->char x)` | `T→char` | Diễn giải giá trị như một giá trị vô hướng Unicode. Panic với giá trị không hợp lệ |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Một phiên bản của `int->char` trả về `None` khi thất bại |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Một phiên bản của `int->char` trả về `none` khi thất bại |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Chuyển đổi độ rộng. Các giá trị không vừa bị cắt cụt (như `as` của Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `None` nếu giá trị không vừa độ rộng đó |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `none` nếu giá trị không vừa độ rộng đó |
 
 Các phép chuyển đổi này cũng là những gì các dạng đặc biệt `(as Type x)`/`(try-as Type x)`
 ([Tham chiếu cú pháp](../syntax.md#7-các-dạng-đặc-biệt-khác)) làm. Các phép toán bit (`logand`/`ash`/`ldb`, v.v.)

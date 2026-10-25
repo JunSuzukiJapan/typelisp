@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Dosya G/Ç, Akışlar ve Ağ
 
 Bu kılavuz, dosya okuma ve yazmanın, yol adlarının ve soket iletişiminin temellerini gösterir.
@@ -20,7 +20,7 @@ ayırın.
 ```
 
 Bir işlemin başarısız olamayacağını bildiğinizde ya da başarısızlıkta durmanın sakıncasız olduğu
-küçük bir betikte, `unwrap` değeri çıkarır. Bir `Err` ise panic olur.
+küçük bir betikte, `unwrap` değeri çıkarır. Bir `err` ise panic olur.
 
 ## 2. Bir dosyanın tamamını okuma ve yazma
 
@@ -177,7 +177,7 @@ Bir işleme zaman sınırı koymak için `:timeout` (saniye cinsinden) geçirin.
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
 ```
 
 ### Karşı taraf bağlantıyı kopardığında
@@ -192,7 +192,7 @@ Ad çözümleme için ayrılmış bir fonksiyon yoktur. `tcp-connect`, `tls-conn
 host adı geçirmek, adı bunların içinde çözümler. Çözümleme başka bir thread'de yapılır; bu yüzden
 beklerken diğer task'ler çalışmaya devam eder. Bir adın birden çok adresi varsa sırayla denenirler.
 
-Ad çözümlenemezse bir `Err` döner.
+Ad çözümlenemezse bir `err` döner.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -251,5 +251,5 @@ kullanılabilir.
 ## 9. Unix domain soketleri
 
 `unix-listen` / `unix-connect`'e soket dosyasının yolunu geçirin. Elde ettiğiniz değer, TCP'dekiyle
-aynı `socket-stream`'dir. Dosya zaten varsa `unix-listen` bir `Err` döndürür. Dinleyiciyi kapatmak
+aynı `socket-stream`'dir. Dosya zaten varsa `unix-listen` bir `err` döndürür. Dinleyiciyi kapatmak
 dosyayı kaldırır.

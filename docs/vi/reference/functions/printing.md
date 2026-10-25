@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -229,8 +229,8 @@ SBCL. Khi REPL hiển thị một kết quả, nó dùng cùng biểu diễn nh�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Giống vậy |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (con số là một số thứ tự nội bộ) | Giống vậy |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Giống vậy |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (con số là một số thứ tự nội bộ) | Giống vậy |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Một số nguyên (giá trị của `get-universal-time` / `get-internal-real-time` của CL) | Giống vậy |
 | Các kiểu lỗi (`ParseIntError`, `SimpleError`, v.v.) | `#<simpleerror "boom">` | Chỉ thông điệp (`boom`) |
@@ -325,30 +325,27 @@ tượng xuất hiện hai lần thì nó nhận `#1=`/`#1#`, giữ lại trong 
 Một giá trị không có chia sẻ **không hiển thị nhãn nào**, nên để biến này là true không làm thay đổi đầu ra
 của mã hằng ngày.
 
-### 6.2 Cơ số, hoa thường và khả năng đọc lại
+### 6.2 Cơ số và khả năng đọc lại
 
 | Biến | Kiểu | Mặc định | Ý nghĩa |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | Cơ số để in số nguyên (độ rộng cố định và `int`). Ngoài 2 đến 36 là **lỗi in** (CL cũng quy định phạm vi) |
 | `*print-radix*` | `bool` | `false` | Nếu true, thêm một dấu cơ số: `#b`/`#o`/`#x`, `#NNr` cho các cơ số khác, và một dấu `.` ở cuối cho cơ số 10. Dấu đứng **trước** dấu âm/dương (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | Hoa thường của tên symbol: `:upcase` / `:downcase` / `:capitalize` (cùng cách viết như CL). Symbol khác là lỗi in |
 | `*print-readably*` | `bool` | `false` | Nếu true, in ở dạng có thể đọc ngược lại. Nó ép escape và tắt các giới hạn cắt của `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Số dòng mà pretty printer được dùng. Phần thừa bị cắt, với `..` ở cuối như trong CL. 0 nghĩa là không giới hạn. Giá trị âm là lỗi in |
 | `*print-escape*` | `bool` | `true` | Việc `write`/`write-to-string` làm `prin1` hay `princ`. **Chỉ hai hàm đó đọc nó** |
-| `*print-array*` | `bool` | `true` | `Vector<T>` và `Array<T>` có hiển thị nội dung hay không. Nếu đúng, dùng cú pháp mảng của CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); nếu sai, chỉ kiểu và hình dạng, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` và `Array<T>` có hiển thị nội dung hay không. Nếu đúng, dùng cú pháp mảng của CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); nếu sai, chỉ kiểu và hình dạng, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 Các dấu mà `*print-radix*` thêm vào có thể được reader đọc ngược lại (ký hiệu cơ số trong
 [Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng)).
 
-**Vì sao mặc định của `*print-case*` khác CL**: mặc định của CL là `:upcase` vì reader của CL lưu tên symbol
-bằng chữ hoa, tức là nó có nghĩa "như đã lưu". Reader này lưu chúng bằng chữ thường, nên mặc định có cùng ý
-nghĩa là `:downcase`.
+**Vì sao không có `*print-case*`**: tên symbol phân biệt hoa thường và được in đúng như cách viết, nên in theo kiểu chữ khác
+sẽ đọc lại thành một symbol khác.
 
 **Nửa còn thiếu của `*print-readably*`**: CL báo `print-not-readable` cho các giá trị không thể đọc ngược
 lại, nhưng ngôn ngữ này không có condition để báo, và không có cách quyết định khả năng đọc lại cho các kiểu

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -7,7 +7,7 @@ and for reading error messages, [errors.md](errors.md).
 
 ## 1. Lexical elements
 
-- **Case-insensitive.** Symbols are all normalized to lower case when read.
+- **Case-sensitive.** `foo` and `Foo` are different symbols. Type names start with a capital letter (`Option`, `Vector` and so on; primitive types such as `int` and `string` are lowercase).
 - **Comments**: from `;` to the end of the line (line comments). `#| ... |#` (block comments, which can
   nest).
 - **Read-time evaluation**: `#.(expr)` **runs the following form while reading** and treats its value as
@@ -150,7 +150,7 @@ In source, types are written as ordinary symbols or lists.
   it inherits, transitively) is required (upcasting). It cannot be passed to an unrelated trait.
   For the conditions a trait must meet to be used with `:dyn`, see
   [3.9 deftrait / impl](#39-deftrait--impl--traits). Writing `:dyn` outside a type position is an error.
-- Built-in generic types: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Built-in generic types: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>`, and the concurrency types `Task<T>` / `Thread<T>` / `Chan<T>`
   ([chapter 12](#12-concurrency-tasks)). There is also `Sexpr`, the type of S-expression data. The
   built-in concrete error types are `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -827,8 +827,8 @@ Writing a list `(Name option...)` in the name position specifies options (the sa
 
 ; generic
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Each variant has the form `(VariantName FieldType...)`. Fields are positional only (they have no
@@ -839,8 +839,8 @@ Writing a list `(Name option...)` in the name position specifies options (the sa
   variant or have a `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Methods and static methods are written in `impl` (3.5), as for `defstruct`.
 - To make the enum itself `pub`, write `(pub defenum ...)`.
@@ -1011,8 +1011,8 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
 - `module` creates a namespace. **Types are not namespaces** (as in Rust, a type only has static methods
   and methods).
 - `use`-ing a type makes an enum's variants and the type's public static methods available by bare
-  name too (for example, after `(use option)`, `some`/`none` can be called without
-  `option::some`/`option::none`).
+  name too (for example, after `(use Option)`, `some`/`none` can be called without
+  `Option::some`/`Option::none`).
 - **A name has one meaning.** Functions, global variables and macros share one namespace, and within
   one module no two of them can have the same name (an error whichever is defined first). Functions and
   variables do not have separate namespaces as in CL. For the same name in different modules, the
@@ -1315,7 +1315,7 @@ Kinds of patterns:
   that have no literal syntax (`defstruct` instances, globals, computed results), and a user-defined `Eq`
   implementation becomes the comparison rule as it is. `expr` can refer to anything visible from the
   arm's position (arguments, outer bindings, globals)
-- `(Ctor sub-pattern...)` — constructor patterns (`Some x` `None` `Cons a d` `Ok v` and so on)
+- `(Ctor sub-pattern...)` — constructor patterns (`(some x)` `(none)` `(cons a d)` `(ok v)` and so on)
 - `(Type :slot pattern... :slot...)` — struct patterns. Write the slots after the type name as
   keywords. If a keyword is followed by a pattern, that slot is matched against the pattern; if it is
   followed by a keyword or nothing, the slot is bound to a variable of its own name. Slots not written
@@ -1438,7 +1438,7 @@ required:
 
 **Type inference across arms**: all arms must have the same type (except arms that diverge, such as with
 `panic`). In a `match` written where no type is expected, the arms fill in each other's missing type
-arguments: `(result::ok v)` fixes only `T`, and `(result::err e)` only `E`, but together they fix
+arguments: `(Result::ok v)` fixes only `T`, and `(Result::err e)` only `E`, but together they fix
 `Result<T,E>`. A type argument that no arm can fix by the end is an error of that arm
 (`cannot infer type argument ...`). Outside `match`, a type argument that cannot be fixed is an error on
 the spot.
@@ -1644,7 +1644,7 @@ on).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1665,7 +1665,7 @@ types, `f32`/`f64`/`ratio`/`char`). The same type is no conversion. **Conversion
 (including `int`) and between `f32`↔`f64` are real conversions**: `as` truncates / rounds, and `try-as`
 answers whether it fits that width (precision). `(as int x)` is the exact widening from a fixed width,
 and `(as i32 n)` the truncation from `int`. Integer → `char` can fail out of range, so `as` panics and
-`try-as` gives `None`. Everything else (widening, and the truncation of `float->int`/`ratio->int`) always
+`try-as` gives `none`. Everything else (widening, and the truncation of `float->int`/`ratio->int`) always
 succeeds. `float->int`/`ratio->int`/`char->int` land on `int`, and if a narrower width is asked for,
 `int->W` is called after them. This is sugar that expands to the corresponding conversion methods
 (`int->char`/`int->int`/`int->W` and so on in [Numbers](functions/numbers.md)).
@@ -1763,7 +1763,7 @@ interpreter's environment itself, which an AOT executable does not have; what `t
 `step` stops are the call paths of the running interpreter; and `disassemble` uses the compiler itself).
 `room`/`dribble`/`ed` are not among them and can be compiled normally.
 
-What **can** be compiled: stream and file I/O, `random`, `gensym`, `symbol->string`/`string->symbol`,
+What **can** be compiled: stream and file I/O, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, the transcendental
 functions, bit operations, `catch`/`throw`/`unwind-protect`, all four of `eq`/`eql`/`equal`/`equalp`
 (which lets `case` compile for every type), the whole printing family including `print`/`println`/

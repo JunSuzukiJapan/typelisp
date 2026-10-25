@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Потоки та файли
 
 Трейти й методи потоків, конкретні типи потоків, файлові операції та шляхи. Мережеві сокети теж є
@@ -89,7 +89,7 @@
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` — одна з трьох констант `direction-input` / `direction-output` /
-`direction-append`. `open-file` повертає `Err(FileError)`, якщо файл не вдається відкрити (відсутній файл —
+`direction-append`. `open-file` повертає `(err FileError)`, якщо файл не вдається відкрити (відсутній файл —
 це звичайний результат, а не panic). Ім'ям файлу може бути рядок або `pathname` (`Pathish` у розділі 9).
 
 `(get-output-stream-string s)` повертає те, що записано в `string-output-stream`, і спорожнює його. Як у
@@ -136,18 +136,18 @@ CL визначає тип елемента **у виклику**, як у `(ope
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Переносить усе |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Усі рядки, що залишилися |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читає один `Sexpr` (`read` з CL). `Ok(eof)` наприкінці вводу, `Ok(datum d)`, коли щось прочитано, `Err`, якщо це не дані. Він **споживає один пробільний знак**, що завершив дані (як у CL). `ReadOutcome` — це не `Option<Sexpr>`, щоб читання порожнього списку `()` і кінець вводу не були тим самим значенням |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читає один `Sexpr` (`read` з CL). `(ok eof)` наприкінці вводу, `(ok (datum d))`, коли щось прочитано, `err`, якщо це не дані. Він **споживає один пробільний знак**, що завершив дані (як у CL). `ReadOutcome` — це не `Option<Sexpr>`, щоб читання порожнього списку `()` і кінець вводу не були тим самим значенням |
 | `read-sexpr-preserving-whitespace` | Так само | Так само | Те саме, але лишає пробільний знак (`read-preserving-whitespace` з CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читає до `ch` і створює список. `ch` споживається. `Err`, якщо ввід закінчився |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читає до `ch` і створює список. `ch` споживається. `err`, якщо ввід закінчився |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Записує по одному рядку |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Увесь вміст |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Усі рядки |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Записує |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Чи існує |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Видалити, перейменувати (аргументи — `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютний шлях із розв'язаними символічними посиланнями та `.`/`..`. `Err`, якщо не існує |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютний шлях із розв'язаними символічними посиланнями та `.`/`..`. `err`, якщо не існує |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Час останньої зміни. Це **універсальний час**, тож його вміє читати `decode-universal-time` ([Час](system.md#2-розкодування-та-кодування-дат)) |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ім'я власника для входу. `Err`, якщо файлу не існує, `Ok(none)`, якщо uid власника не має запису в базі паролів: два випадки, які розрізняє CL, лишаються розділеними |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ім'я власника для входу. `err`, якщо файлу не існує, `(ok none)`, якщо uid власника не має запису в базі паролів: два випадки, які розрізняє CL, лишаються розділеними |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Чи це каталог. **Також `false`, якщо не існує**; щоб їх розрізнити, використовуйте `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Перелічує вміст за truename (абсолютний шлях із розв'язаними символічними посиланнями, як у `truename`). Символічні посилання з відсутньою ціллю пропускаються. `.`/`..` пропускаються. Порядок — той, що дає ОС |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Створює його разом із батьківськими. Успішно, якщо вже існує |

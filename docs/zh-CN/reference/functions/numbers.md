@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -28,9 +28,9 @@
 | `int->int` | `(int->int x)` | `T→int` | 扩展转换为 `int`（总是精确的）。`(as int x)` 的实质 |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | 扩展转换为 `ratio`（总是精确的） |
 | `int->char` | `(int->char x)` | `T→char` | 解释为 Unicode 标量值。非法值时 panic |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 用 `None` 返回 `int->char` 失败的版本 |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 用 `none` 返回 `int->char` 失败的版本 |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | 宽度转换。放不下的值被截断（与 Rust 的 `as` 相同） |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 把同样的转换作为询问。值放不进该宽度时为 `None` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 把同样的转换作为询问。值放不进该宽度时为 `none` |
 
 这些转换也是特殊形式 `(as Type x)`/`(try-as Type x)`（[语法参考](../syntax.md#7-其他特殊形式)）的实质。位运算
 （`logand`/`ash`/`ldb` 等）和谓词（`zerop`/`evenp` 等）在各类型间形式相同，所以归到第 11 章和第 9 章。

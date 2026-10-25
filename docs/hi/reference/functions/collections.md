@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -76,7 +76,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | तत्व `i` पढ़ता है। सीमा से बाहर panic करता है |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | तत्व `i` बदलता है। सीमा से बाहर panic करता है। `(setf (get v i) x)` भी लिखा जा सकता है |
 | `len` | `(len v)` | `Vector<T>→int` | तत्वों की संख्या |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | अंतिम तत्व हटाकर लौटाता है। खाली हो तो `None` (`get`/`set` के विपरीत, यह panic नहीं करता) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | अंतिम तत्व हटाकर लौटाता है। खाली हो तो `none` (`get`/`set` के विपरीत, यह panic नहीं करता) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` लागू करने वाला इटरेटर बनाता है |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | यदि कोई बराबर तत्व मौजूद न हो तो `x` जोड़ता है (CL का `pushnew`। इसे place को दोबारा लिखने की ज़रूरत नहीं, इसलिए यह macro की बजाय मेथड है) |
 

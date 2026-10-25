@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -116,7 +116,7 @@
 `step` 的命令是 `s`（进入这次调用；空行也一样）、`n`（跳过这次调用）、`c`（之后不再询问）、`q`（中止）。**标准输入不是终端时，
 `step` 只是求值 `form`**——这是 CLHS 明确允许的退化，以免脚本或测试在无法回答的提示处卡住。
 
-`ed` 的 `$VISUAL`／`$EDITOR` 按空白分割，所以也可以写 `EDITOR="code -w"`。两者都未设置时为 `Err`——不会猜测 `vi`。行号以
+`ed` 的 `$VISUAL`／`$EDITOR` 按空白分割，所以也可以写 `EDITOR="code -w"`。两者都未设置时为 `err`——不会猜测 `vi`。行号以
 `+N` 的形式放在最前面传入。
 
 `dribble` 记录会话输出离开进程的全部 3 条途径：`print`/`println`/`format` 写出的内容、写到连接标准输出的流的内容，以及在 REPL
@@ -124,14 +124,14 @@
 
 ## 6. 解析与求值
 
-这些都处理运行时的（程序本身无法控制的）文本和数据，所以失败时不 panic，而是返回 `Result` 的 `Err`。错误类型是每种操作各自的
+这些都处理运行时的（程序本身无法控制的）文本和数据，所以失败时不 panic，而是返回 `Result` 的 `err`。错误类型是每种操作各自的
 具体类型（[错误类型](option-result.md#3-错误类型与-error-trait)）。
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL 的 `parse-integer`。跳过前后空白（与 `trim` 相同的集合），读取至多一个符号 `+`/`-`，再读取 `radix` 进制（默认 10，2〜36。10 以上的数字大小写均可）的数字。位数没有上限（`int`）。剩下其他字符时为 `Err`。`:junk-allowed true` 时在第一个非数字处停止并忽略其余——但一个数字都没有时为 `Err`（相当于 CL 的 `nil`）。不返回 CL 的第 2 个值（读取结束位置）。超出范围的 `radix` 会 panic（是调用方的错误，不是文本的） |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL 的 `parse-integer`。跳过前后空白（与 `trim` 相同的集合），读取至多一个符号 `+`/`-`，再读取 `radix` 进制（默认 10，2〜36。10 以上的数字大小写均可）的数字。位数没有上限（`int`）。剩下其他字符时为 `err`。`:junk-allowed true` 时在第一个非数字处停止并忽略其余——但一个数字都没有时为 `err`（相当于 CL 的 `nil`）。不返回 CL 的第 2 个值（读取结束位置）。超出范围的 `radix` 会 panic（是调用方的错误，不是文本的） |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮点数。也接受 `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | 从 `s` 读取一个 `Sexpr`（与读取源代码的是同一个读取器）。括号不完整、字符串未结束等为 `Err`。从流读取用 `read-sexpr`（[流](streams-files.md#6-泛型函数与文件操作)） |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | 从 `s` 读取一个 `Sexpr`（与读取源代码的是同一个读取器）。括号不完整、字符串未结束等为 `err`。从流读取用 `read-sexpr`（[流](streams-files.md#6-泛型函数与文件操作)） |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | 在 `read` 的基础上附上**读取结束的位置**。`(car r)` 是值，`(cdr r)` 是下一个要读的字符位置。`start` 省略时为 0 |
 | `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上，但不消耗结束 datum 的空白。区别体现在返回的位置上 |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 在运行时对 `form` 进行类型检查并求值。遵循 CL 的 `eval` |
@@ -151,7 +151,7 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 `preserving-whitespace` 的区别只是**一个空白字符**——CL 的 `read` 消耗结束 datum 的空白，`read-preserving-whitespace` 保留它。
 `(read-from-string "12 34")` 返回位置 3，preserving 版本返回 2。
 
-读取器接受的数值记法见[语法参考第 1 章](../syntax.md#1-词法元素)。`*print-radix*`（[打印](printing.md#62-基数大小写与可读回)）
+读取器接受的数值记法见[语法参考第 1 章](../syntax.md#1-词法元素)。`*print-radix*`（[打印](printing.md#62-基数与可读回)）
 打印的记法可以原样读回。没有 CL 的 `*read-base*`。
 
 ### 6.1 `eval` 的含义
@@ -174,7 +174,7 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
   **静态书写的代码不能前向引用 `eval` 在运行时定义的名字**——直接写在文件中的 `(sq 9)` 会在定义 `sq` 的 `eval` 运行之前被检查，
   成为"未定义"。不过**之后的 `eval` 能看到它**（那个 `eval` 的类型检查在运行时、定义之后进行）。REPL 逐行检查和执行，所以用
   `eval` 定义的名字可以从下一行直接调用。
-- **错误的处理**：类型错误、语法错误返回 `Err`（不会 panic）。求值的代码中的**运行时 panic**（除以零等）与直接书写的代码一样原样
+- **错误的处理**：类型错误、语法错误返回 `err`（不会 panic）。求值的代码中的**运行时 panic**（除以零等）与直接书写的代码一样原样
   传播。中途的 `unwind-protect` 的 cleanup 会执行（[语法参考第 8 章](../syntax.md#8-非局部退出catch--throw--unwind-protect)）。
 - **命名空间**：在 `typl file.typl` 的运行中以及 AOT 可执行文件中，`eval` 在该脚本模块的命名空间中求值（能看到脚本自身的全局
   变量）。REPL 在根命名空间中求值。

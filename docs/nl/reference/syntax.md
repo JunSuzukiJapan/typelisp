@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -7,7 +7,7 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
 
 ## 1. Lexicale elementen
 
-- **Niet hoofdlettergevoelig.** Symbolen worden bij het lezen allemaal naar kleine letters genormaliseerd.
+- **Hoofdlettergevoelig.** `foo` en `Foo` zijn verschillende symbolen. Typenamen beginnen met een hoofdletter (`Option`, `Vector` enzovoort; primitieve typen zoals `int` en `string` zijn kleine letters).
 - **Commentaar**: van `;` tot het einde van de regel (regelcommentaar). `#| ... |#` (blokcommentaar, dat
   kan nesten).
 - **Evaluatie tijdens het lezen**: `#.(expr)` **voert de volgende vorm uit tijdens het lezen** en behandelt
@@ -159,7 +159,7 @@ In de broncode worden types als gewone symbolen of lijsten geschreven.
   verwante trait worden doorgegeven.
   Voor de voorwaarden waaraan een trait moet voldoen om met `:dyn` te worden gebruikt, zie
   [3.9 deftrait / impl](#39-deftrait--impl--traits). `:dyn` buiten een typepositie schrijven is een fout.
-- Ingebouwde generieke types: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Ingebouwde generieke types: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>`, en de gelijktijdigheidstypes `Task<T>` / `Thread<T>` / `Chan<T>`
   ([hoofdstuk 12](#12-gelijktijdigheid-taken)). Er is ook `Sexpr`, het type van S-expressiedata. De
   ingebouwde concrete foutentypes zijn `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -865,8 +865,8 @@ Een lijst `(Name option...)` op de plaats van de naam geeft opties op (dezelfde 
 
 ; generic
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Elke variant heeft de vorm `(VariantName FieldType...)`. Velden zijn alleen positioneel (ze hebben geen
@@ -877,8 +877,8 @@ Een lijst `(Name option...)` op de plaats van de naam geeft opties op (dezelfde 
   elke variant dekken of een `_` hebben):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Methoden en statische methoden worden in `impl` (3.5) geschreven, zoals bij `defstruct`.
 - Om de enum zelf `pub` te maken, schrijf je `(pub defenum ...)`.
@@ -1051,8 +1051,8 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
 - `module` maakt een naamruimte. **Types zijn geen naamruimten** (zoals in Rust heeft een type alleen statische
   methoden en methoden).
 - Een `use` van een type maakt de varianten van een enum en de publieke statische methoden van het type ook
-  onder de kale naam beschikbaar (bijvoorbeeld na `(use option)` kunnen `some`/`none` zonder
-  `option::some`/`option::none` worden aangeroepen).
+  onder de kale naam beschikbaar (bijvoorbeeld na `(use Option)` kunnen `some`/`none` zonder
+  `Option::some`/`Option::none` worden aangeroepen).
 - **Een naam heeft één betekenis.** Functies, globale variabelen en macro's delen één naamruimte, en binnen
   één module kunnen geen twee ervan dezelfde naam hebben (een fout, welke er ook eerst wordt gedefinieerd).
   Functies en variabelen hebben geen gescheiden naamruimten zoals in CL. Bij dezelfde naam in verschillende
@@ -1369,7 +1369,7 @@ Soorten patronen:
   berekende resultaten), en een door de gebruiker gedefinieerde `Eq`-implementatie wordt zoals ze is de
   vergelijkingsregel. `expr` kan naar alles verwijzen wat zichtbaar is vanaf de positie van de tak
   (argumenten, buitenste bindingen, globale variabelen)
-- `(Ctor sub-pattern...)` — constructorpatronen (`Some x` `None` `Cons a d` `Ok v` enzovoort)
+- `(Ctor sub-pattern...)` — constructorpatronen (`(some x)` `(none)` `(cons a d)` `(ok v)` enzovoort)
 - `(Type :slot pattern... :slot...)` — structpatronen. Schrijf de slots na de typenaam als sleutelwoorden.
   Volgt op een sleutelwoord een patroon, dan wordt dat slot met het patroon vergeleken; volgt er een ander
   sleutelwoord of niets, dan wordt het slot gebonden aan een variabele met zijn eigen naam. Niet-geschreven
@@ -1493,8 +1493,8 @@ dus het kan nooit volledig zijn, en `_` is vereist:
 
 **Typeafleiding over takken heen**: alle takken moeten hetzelfde type hebben (behalve takken die
 divergeren, zoals met `panic`). In een `match` die is geschreven waar geen type wordt verwacht, vullen de
-takken elkaars ontbrekende typeargumenten in: `(result::ok v)` legt alleen `T` vast, en
-`(result::err e)` alleen `E`, maar samen leggen ze `Result<T,E>` vast. Een typeargument dat aan het eind
+takken elkaars ontbrekende typeargumenten in: `(Result::ok v)` legt alleen `T` vast, en
+`(Result::err e)` alleen `E`, maar samen leggen ze `Result<T,E>` vast. Een typeargument dat aan het eind
 door geen enkele tak kan worden vastgelegd is een fout van die tak (`cannot infer type argument ...`).
 Buiten `match` is een typeargument dat niet kan worden vastgelegd meteen een fout.
 
@@ -1705,7 +1705,7 @@ hogere orde enzovoort).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1727,7 +1727,7 @@ breedte, `f32`/`f64`/`ratio`/`char`). Hetzelfde type is geen conversie. **Conver
 geheeltalbreedtes (inclusief `int`) en tussen `f32`↔`f64` zijn echte conversies**: `as` kapt af / rondt af,
 en `try-as` antwoordt of het in die breedte (precisie) past. `(as int x)` is de exacte verbreding vanuit een
 vaste breedte, en `(as i32 n)` het afkappen vanuit `int`. Geheel getal → `char` kan buiten het bereik
-mislukken, dus `as` geeft een panic en `try-as` geeft `None`. Al het andere (verbreden, en het afkappen van
+mislukken, dus `as` geeft een panic en `try-as` geeft `none`. Al het andere (verbreden, en het afkappen van
 `float->int`/`ratio->int`) slaagt altijd. `float->int`/`ratio->int`/`char->int` landen op `int`, en als een
 smallere breedte wordt gevraagd, wordt daarna `int->W` aangeroepen. Dit is suiker die naar de
 overeenkomstige conversiemethoden expandeert (`int->char`/`int->int`/`int->W` enzovoort in
@@ -1832,7 +1832,7 @@ bewaakt en waar `step` stopt zijn de aanroeppaden van de draaiende interpreter; 
 de compiler zelf). `room`/`dribble`/`ed` horen er niet bij en kunnen normaal worden gecompileerd.
 
 Wat **wel** kan worden gecompileerd: stream- en bestands-I/O, `random`, `gensym`,
-`symbol->string`/`string->symbol`, `parse-int`/`parse-float`,
+`symbol->string`/`intern`, `parse-int`/`parse-float`,
 `get-universal-time`/`get-internal-real-time`, `exit`, de transcendente functies, bitbewerkingen,
 `catch`/`throw`/`unwind-protect`, alle vier `eq`/`eql`/`equal`/`equalp` (waardoor `case` voor elk type
 kan compileren), de hele afdrukfamilie inclusief `print`/`println`/`format`/`pprint` en

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Chuỗi, ký tự và tập hợp
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` và `Deque<T>`.
@@ -77,7 +77,7 @@ in ra là `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Đọc phần tử `i`. Panic khi ngoài phạm vi |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Thay đổi phần tử `i`. Panic khi ngoài phạm vi. Cũng có thể viết `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Số phần tử |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Bỏ phần tử cuối và trả về nó. `None` nếu rỗng (không như `get`/`set`, nó không panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Bỏ phần tử cuối và trả về nó. `none` nếu rỗng (không như `get`/`set`, nó không panic) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Tạo một iterator triển khai `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` với `Eq T` | Nối `x` nếu chưa có phần tử bằng nó (`pushnew` của CL. Nó không cần ghi lại một place, nên là một phương thức chứ không phải macro) |
 

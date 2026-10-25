@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Numbers
 
 Operations on integers, floating-point numbers, rationals, complex numbers and booleans, and other
@@ -33,9 +33,9 @@ six fixed-width types (the table for `int` is in chapter 3).
 | `int->int` | `(int->int x)` | `T→int` | Widening conversion to `int` (always exact). What `(as int x)` does |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Widening conversion to `ratio` (always exact) |
 | `int->char` | `(int->char x)` | `T→char` | Interprets the value as a Unicode scalar value. Panics on an invalid value |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | A version of `int->char` that returns `None` on failure |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | A version of `int->char` that returns `none` on failure |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Width conversion. Values that do not fit are truncated (like Rust's `as`) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | The same conversion as a question. `None` if the value does not fit that width |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | The same conversion as a question. `none` if the value does not fit that width |
 
 These conversions are also what the special forms `(as Type x)`/`(try-as Type x)`
 ([Syntax Reference](../syntax.md#7-other-special-forms)) do. Bit operations (`logand`/`ash`/`ldb` and so

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 字串、字元與集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -74,7 +74,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | 讀取第 `i` 個。超出範圍時 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | 修改第 `i` 個。超出範圍時 panic。也可以寫成 `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | 元素個數 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉尾端元素並回傳。為空時為 `None`（與 `get`/`set` 不同，不會 panic） |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉尾端元素並回傳。為空時為 `none`（與 `get`/`set` 不同，不會 panic） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | 建立實作了 `Iter` 的迭代器 |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | 沒有與 `x` 相等的元素時加到尾端（CL 的 `pushnew`。不需要修改位置，所以是方法而不是巨集） |
 

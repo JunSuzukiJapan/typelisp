@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Impressão
 
 `print`/`println`/`format`, as impressoras de um argumento, o pretty printer, `print-object` e as variáveis que
@@ -231,8 +231,8 @@ mesmo jeito que no SBCL. Quando o REPL mostra um resultado, usa a mesma represen
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tupla `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Igual |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (o número é um número de série interno) | Igual |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Igual |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (o número é um número de série interno) | Igual |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Um inteiro (o valor de `get-universal-time` / `get-internal-real-time` do CL) | Igual |
 | Tipos de erro (`ParseIntError`, `SimpleError` etc.) | `#<simpleerror "boom">` | Só a mensagem (`boom`) |
@@ -329,30 +329,27 @@ CL especifica:
 Um valor sem compartilhamento **não mostra rótulo nenhum**, então deixar esta variável como verdadeira não muda a
 saída do código do dia a dia.
 
-### 6.2 Base, caixa e legibilidade
+### 6.2 Base e legibilidade
 
 | Variável | Tipo | Padrão | Significado |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | A base para imprimir inteiros (de largura fixa e `int`). Fora de 2 a 36 é um **erro de impressão** (o CL também especifica a faixa) |
 | `*print-radix*` | `bool` | `false` | Se verdadeiro, acrescenta uma marca de base: `#b`/`#o`/`#x`, `#NNr` para outras bases, e um `.` final para a base 10. A marca vem **antes** do sinal (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | A caixa dos nomes de símbolo: `:upcase` / `:downcase` / `:capitalize` (as mesmas grafias do CL). Qualquer outro símbolo é um erro de impressão |
 | `*print-readably*` | `bool` | `false` | Se verdadeiro, imprime em uma forma que pode ser lida de volta. Força o escape e desativa os cortes de `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | O número de linhas que o pretty printer pode usar. O excesso é cortado, com `..` no final como no CL. 0 significa ilimitado. Um valor negativo é um erro de impressão |
 | `*print-escape*` | `bool` | `true` | Se `write`/`write-to-string` fazem `prin1` ou `princ`. **Só esses dois o leem** |
-| `*print-array*` | `bool` | `true` | Se `Vector<T>` e `Array<T>` mostram o conteúdo. Se verdadeiro, a sintaxe de arrays de CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); se falso, só o tipo e a forma, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Se `Vector<T>` e `Array<T>` mostram o conteúdo. Se verdadeiro, a sintaxe de arrays de CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); se falso, só o tipo e a forma, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 As marcas que `*print-radix*` acrescenta podem ser lidas de volta pelo leitor (a notação de base da
 [Referência de sintaxe](../syntax.md#1-elementos-léxicos)).
 
-**Por que o padrão de `*print-case*` difere do CL**: o padrão do CL é `:upcase` porque o leitor do CL guarda os
-nomes de símbolo em maiúsculas, isto é, significa "como foram guardados". Este leitor os guarda em minúsculas,
-então o padrão com o mesmo significado é `:downcase`.
+**Por que não existe `*print-case*`**: nomes de símbolo diferenciam maiúsculas e minúsculas e são impressos como foram
+escritos, então imprimi-los com outra caixa os leria de volta como outro símbolo.
 
 **A metade que falta de `*print-readably*`**: o CL sinaliza `print-not-readable` para valores que não podem ser
 lidos de volta, mas esta linguagem não tem condição a sinalizar, nem como decidir a legibilidade dos tipos de

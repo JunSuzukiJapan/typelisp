@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # I/O ของไฟล์ สตรีม และเครือข่าย
 
 คู่มือนี้แสดงพื้นฐานของการอ่านและเขียนไฟล์ pathname และการสื่อสารผ่านซ็อกเก็ต รายการ
@@ -20,7 +20,7 @@
 ```
 
 เมื่อรู้ว่าการดำเนินการไม่มีทางล้มเหลว หรือในสคริปต์เล็ก ๆ ที่หยุดเมื่อล้มเหลวได้
-`unwrap` จะดึงค่าออกมา หากเป็น `Err` จะ panic
+`unwrap` จะดึงค่าออกมา หากเป็น `err` จะ panic
 
 ## 2. การอ่านและเขียนทั้งไฟล์
 
@@ -174,7 +174,7 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
 ```
 
 ### เมื่อปลายทางอีกฝั่งตัดการเชื่อมต่อ
@@ -189,7 +189,7 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 `tls-connect` หรือ `send-to` จะแปลงชื่อภายในฟังก์ชันเหล่านั้น การแปลงทำงานบนอีกเธรดหนึ่ง ดังนั้น task
 อื่นยังคงทำงานต่อขณะรอ หากชื่อหนึ่งมีหลายที่อยู่ จะลองทีละที่อยู่ตามลำดับ
 
-หากแปลงชื่อไม่ได้ จะคืน `Err`
+หากแปลงชื่อไม่ได้ จะคืน `err`
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -247,5 +247,5 @@ UDP ไม่ใช่สตรีม แต่ส่งและรับที
 ## 9. Unix domain socket
 
 ส่งพาธของไฟล์ซ็อกเก็ตให้ `unix-listen` / `unix-connect` ค่าที่ได้เป็น
-`socket-stream` ชนิดเดียวกับ TCP `unix-listen` คืน `Err` หากไฟล์มีอยู่แล้ว การปิด
+`socket-stream` ชนิดเดียวกับ TCP `unix-listen` คืน `err` หากไฟล์มีอยู่แล้ว การปิด
 ลิสเทนเนอร์จะลบไฟล์

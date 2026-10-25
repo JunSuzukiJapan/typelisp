@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -7,7 +7,7 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
 
 ## 1. Cú pháp từ vựng
 
-- **Không phân biệt hoa thường.** Mọi symbol đều được chuẩn hóa thành chữ thường khi đọc.
+- **Phân biệt hoa thường.** `foo` và `Foo` là hai symbol khác nhau. Tên kiểu bắt đầu bằng chữ hoa (`Option`, `Vector`, v.v.; các kiểu nguyên thủy như `int` và `string` viết thường).
 - **Chú thích**: từ `;` đến cuối dòng (chú thích dòng). `#| ... |#` (chú thích khối, có thể lồng nhau).
 - **Đánh giá lúc đọc**: `#.(expr)` **chạy dạng theo sau trong khi đọc** và coi giá trị của nó là thứ đã đọc.
   Đây là nơi duy nhất mà reader không chỉ là một hàm của văn bản. Phạm vi nó với tới phụ thuộc vào đường đọc,
@@ -145,7 +145,7 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
   của nó (mọi thứ nó kế thừa, bắc cầu) (upcasting). Nó không thể được truyền cho một trait không liên quan.
   Về các điều kiện một trait phải đáp ứng để dùng với `:dyn`, xem
   [3.9 deftrait / impl](#39-deftrait--impl--trait). Viết `:dyn` ngoài vị trí kiểu là lỗi.
-- Các kiểu generic dựng sẵn: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Các kiểu generic dựng sẵn: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>`, và các kiểu đồng thời `Task<T>` / `Thread<T>` / `Chan<T>`
   ([chương 12](#12-lập-trình-đồng-thời-task)). Cũng có `Sexpr`, kiểu của dữ liệu S-expression. Các kiểu lỗi cụ thể
   dựng sẵn là `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`, và
@@ -804,8 +804,8 @@ Viết một danh sách `(Name option...)` ở vị trí tên sẽ chỉ định
 
 ; generic
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Mỗi variant có dạng `(VariantName FieldType...)`. Các trường chỉ theo vị trí (chúng không có tên). Cần ít
@@ -816,8 +816,8 @@ Viết một danh sách `(Name option...)` ở vị trí tên sẽ chỉ định
   hoặc có một `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Phương thức và phương thức tĩnh được viết trong `impl` (3.5), như với `defstruct`.
 - Để làm cho chính enum là `pub`, hãy viết `(pub defenum ...)`.
@@ -983,8 +983,8 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 - `module` tạo một không gian tên. **Kiểu không phải là không gian tên** (như trong Rust, một kiểu chỉ có
   phương thức tĩnh và phương thức).
 - `use` một kiểu làm cho các biến thể của enum và các phương thức tĩnh công khai của kiểu đó cũng dùng được
-  bằng tên trần (ví dụ, sau `(use option)`, có thể gọi `some`/`none` mà không cần
-  `option::some`/`option::none`).
+  bằng tên trần (ví dụ, sau `(use Option)`, có thể gọi `some`/`none` mà không cần
+  `Option::some`/`Option::none`).
 - **Một tên chỉ có một nghĩa.** Hàm, biến toàn cục và macro dùng chung một không gian tên, và trong một
   module không thể có hai trong số chúng trùng tên (lỗi bất kể cái nào được định nghĩa trước). Hàm và biến
   không có không gian tên riêng như trong CL. Với cùng một tên ở các module khác nhau, cái gần hơn được
@@ -1277,7 +1277,7 @@ Các loại mẫu:
   không có cú pháp literal (các thể hiện `defstruct`, biến toàn cục, kết quả được tính), và một triển khai `Eq`
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
-- `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`Some x` `None` `Cons a d` `Ok v`, v.v.)
+- `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`(some x)` `(none)` `(cons a d)` `(ok v)`, v.v.)
 - `(Type :slot pattern... :slot...)` — mẫu struct. Viết các slot sau tên kiểu dưới dạng từ khóa. Nếu sau
   từ khóa là một mẫu, slot đó được so khớp với mẫu; nếu sau đó là một từ khóa khác hoặc không có gì, slot
   được ràng buộc với một biến cùng tên. Các slot không viết không được so khớp (mẫu không phụ thuộc vào
@@ -1394,7 +1394,7 @@ khai là mở, nên nó không bao giờ có thể đầy đủ, và cần `_`:
 
 **Suy luận kiểu giữa các nhánh**: mọi nhánh phải có cùng kiểu (trừ các nhánh không hội tụ, như với `panic`).
 Trong một `match` viết ở nơi không có kiểu mong đợi, các nhánh điền các đối số kiểu còn thiếu cho nhau:
-`(result::ok v)` chỉ cố định `T`, và `(result::err e)` chỉ cố định `E`, nhưng cùng nhau chúng cố định
+`(Result::ok v)` chỉ cố định `T`, và `(Result::err e)` chỉ cố định `E`, nhưng cùng nhau chúng cố định
 `Result<T,E>`. Một đối số kiểu mà không nhánh nào cố định được đến cuối là lỗi của nhánh đó
 (`cannot infer type argument ...`). Ngoài `match`, một đối số kiểu không thể cố định là lỗi ngay tại chỗ.
 
@@ -1597,7 +1597,7 @@ Các hàm có tên cũng có thể được truyền như giá trị nguyên tr�
 (unreachable)                       ; khai triển thành (panic "unreachable"). defmacro
 (todo)                              ; khai triển thành (panic "todo"). defmacro
 (as Type expr)                      ; chuyển đổi kiểu số/ký tự. các chuyển đổi có thể thất bại thì panic khi thất bại
-(try-as Type expr)                  ; như as, nhưng trả về kết quả dưới dạng Option<Type> (None khi thất bại)
+(try-as Type expr)                  ; như as, nhưng trả về kết quả dưới dạng Option<Type> (none khi thất bại)
 (print control args...)             ; khai triển định dạng và ghi ra đầu ra chuẩn (không có dòng mới)
 (println control args...)           ; giống vậy (với một dòng mới ở cuối)
 (format dest control args...)       ; format của CL. trả về chuỗi đã khai triển
@@ -1618,7 +1618,7 @@ Họ `print`/`println`/`format`/`pprint` là các dạng đặc biệt, nên cá
 nguyên (gồm `int`) và giữa `f32`↔`f64` là các chuyển đổi thật**: `as` cắt cụt / làm tròn, và `try-as` trả lời
 liệu nó có vừa độ rộng (độ chính xác) đó không. `(as int x)` là phép mở rộng chính xác từ một độ rộng cố định,
 và `(as i32 n)` là phép cắt cụt từ `int`. Số nguyên → `char` có thể thất bại khi ngoài phạm vi, nên `as` panic và
-`try-as` cho `None`. Mọi thứ khác (mở rộng, và phép cắt cụt của `float->int`/`ratio->int`) luôn thành công.
+`try-as` cho `none`. Mọi thứ khác (mở rộng, và phép cắt cụt của `float->int`/`ratio->int`) luôn thành công.
 `float->int`/`ratio->int`/`char->int` hạ xuống `int`, và nếu cần độ rộng hẹp hơn, `int->W` được gọi sau chúng.
 Đây là đường cú pháp khai triển thành các phương thức chuyển đổi tương ứng (`int->char`/`int->int`/`int->W`, v.v.
 trong [Số](functions/numbers.md)).
@@ -1714,7 +1714,7 @@ một tệp thực thi AOT không có; thứ `trace` theo dõi và nơi `step` d
 chạy; và `disassemble` dùng chính trình biên dịch). `room`/`dribble`/`ed` không nằm trong số đó và có thể biên
 dịch bình thường.
 
-Những gì **có thể** biên dịch: vào/ra stream và tệp, `random`, `gensym`, `symbol->string`/`string->symbol`,
+Những gì **có thể** biên dịch: vào/ra stream và tệp, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, các hàm siêu việt, phép toán
 bit, `catch`/`throw`/`unwind-protect`, cả bốn `eq`/`eql`/`equal`/`equalp` (cho phép `case` biên dịch được với mọi
 kiểu), toàn bộ họ in gồm `print`/`println`/`format`/`pprint` và `pprint-logical-block`, `read`, và `eval`. Thư

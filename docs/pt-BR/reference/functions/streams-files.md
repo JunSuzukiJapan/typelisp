@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Streams e arquivos
 
 Traits e métodos de stream, tipos de stream concretos, operações com arquivos e nomes de caminho. Os sockets de
@@ -89,7 +89,7 @@ não sabe das quebras de linha que `println` escreveu. Fique com um deles.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` é uma das três constantes `direction-input` / `direction-output` / `direction-append`. `open-file`
-devolve `Err(FileError)` se o arquivo não puder ser aberto (um arquivo inexistente é um resultado comum, não um
+devolve `(err FileError)` se o arquivo não puder ser aberto (um arquivo inexistente é um resultado comum, não um
 panic). O nome do arquivo pode ser uma string ou um `pathname` (`Pathish` no capítulo 9).
 
 `(get-output-stream-string s)` devolve o que foi escrito em um `string-output-stream` e o esvazia. Como no CL,
@@ -136,18 +136,18 @@ Todos são `defstruct` da biblioteca padrão e podem ser aninhados.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Transfere tudo |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Todas as linhas restantes |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Lê um `Sexpr` (o `read` do CL). `Ok(eof)` no fim da entrada, `Ok(datum d)` quando lê um, `Err` se não forem dados. **Consome o caractere de espaço em branco** que terminou o dado (como no CL). `ReadOutcome` não é um `Option<Sexpr>` para que ler a lista vazia `()` e o fim da entrada não sejam o mesmo valor |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Lê um `Sexpr` (o `read` do CL). `(ok eof)` no fim da entrada, `(ok (datum d))` quando lê um, `err` se não forem dados. **Consome o caractere de espaço em branco** que terminou o dado (como no CL). `ReadOutcome` não é um `Option<Sexpr>` para que ler a lista vazia `()` e o fim da entrada não sejam o mesmo valor |
 | `read-sexpr-preserving-whitespace` | Igual ao acima | Igual ao acima | O mesmo, mas deixa o espaço em branco (o `read-preserving-whitespace` do CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Lê até `ch` e forma uma lista. `ch` é consumido. `Err` se a entrada acabar |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Lê até `ch` e forma uma lista. `ch` é consumido. `err` se a entrada acabar |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Escreve uma linha por vez |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | O conteúdo inteiro |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Todas as linhas |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Grava-o |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Se existe |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Apagar, renomear (os argumentos são `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | O caminho absoluto com os links simbólicos e `.`/`..` resolvidos. `Err` se não existir |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | O caminho absoluto com os links simbólicos e `.`/`..` resolvidos. `err` se não existir |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | A hora da última modificação. É **tempo universal**, então `decode-universal-time` ([Tempo](system.md#2-decodificar-e-codificar-datas)) consegue lê-la |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | O nome de login do dono. `Err` se o arquivo não existir, `Ok(none)` se o uid do dono não tiver entrada no banco de senhas: os dois casos que o CL distingue são mantidos separados |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | O nome de login do dono. `err` se o arquivo não existir, `(ok none)` se o uid do dono não tiver entrada no banco de senhas: os dois casos que o CL distingue são mantidos separados |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Se é um diretório. **Também `false` se não existir**; use `probe-file` para distinguir os dois casos |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Lista o conteúdo por truename (o caminho absoluto com os links simbólicos resolvidos, como em `truename`). Links simbólicos cujo destino não existe ficam de fora. `.`/`..` ficam de fora. A ordem é a que o SO der |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Cria-o junto com os pais. Dá certo se já existir |

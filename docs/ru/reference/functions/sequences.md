@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Пары, S-выражения и последовательности
 
 Обобщённая пара `cons-cell`, данные S-выражений `Sexpr`, символы, функции последовательностей, написанные поверх
@@ -80,8 +80,7 @@
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Извлекает имя символа. В имени ключевого слова нет двоеточия (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Создаёт символ из строки (интернирует его в корневом модуле) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Создаёт символ `name` в пространстве имён `namespace` (`intern` в CL). `namespace` — путь модуля от корня (`"geometry::shapes"`); `"keyword"` — пространство ключевых слов, `""` — корень. Если опущен, это модуль, в котором написан вызов |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Возвращает символ, которым `name` читается в пространстве имён `namespace` (`intern` из CL). Если есть символ, видимый из этого пространства имён (собственный, введённый через `use` или из стандартной библиотеки), возвращается он; иначе в этом пространстве имён создаётся новый. `namespace` — путь модуля от корня (`"geometry::shapes"`); `"keyword"` — пространство ключевых слов, `""` — корень. Несуществующее пространство имён — ошибка. Если опущено — модуль, в котором написан вызов (`*package*` нет). Второе значение CL (состояние вроде `:internal`) не возвращается |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Является ли ключевым словом, то есть принадлежит ли пространству имён ключевых слов ([Справочник по синтаксису](../syntax.md#1-лексические-элементы)) |
 
 О `gensym` см. [Макросы](system.md#8-макросы).
@@ -105,7 +104,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Первая позиция, удовлетворяющая предикату |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Сколько удовлетворяют предикату |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Удовлетворяет ли предикату каждый элемент |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Удовлетворяет ли предикату какой-либо элемент (соответствует `some` из CL; имя, не конфликтующее с конструктором `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Удовлетворяет ли предикату какой-либо элемент (соответствует `some` из CL; имя, не конфликтующее с конструктором `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Левая свёртка |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Правая свёртка |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Собирает все оставшиеся элементы. С его помощью результат функции `lazy` ниже превращают в `Vector` |
@@ -116,9 +115,9 @@
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Число элементов |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Соединяет итераторы. Можно передать три и больше |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` из CL. Тип результата записывается **цитированным литералом-символом** (CL использует спецификатор типа во время выполнения). `'vector` принимает один и больше, `'string` — ноль и больше (`""` для нуля). Списки `Sexpr` не охватываются (используйте `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` из CL. Тип результата записывается **цитированным литералом-символом** (CL использует спецификатор типа во время выполнения). `'vector` принимает один и больше, `'string` — ноль и больше (`""` для нуля). Списки `Sexpr` не охватываются (используйте `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Обращение (без разрушения) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Элемент `n` (`None` вне диапазона) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Элемент `n` (`none` вне диапазона) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` с аргументами в обратном порядке |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | Первые `n` элементов |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` ограничивается длиной) |

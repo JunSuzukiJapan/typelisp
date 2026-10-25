@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 스트림과 파일
 
 스트림의 트레이트와 메서드, 구체 스트림 타입, 파일 조작, 경로명. 네트워크 소켓도 스트림이며 [네트워크](network.md)에서
@@ -86,7 +86,7 @@ CL이 클래스 계층으로 나타내는 것을 여기서는 **트레이트 계
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction`은 세 상수 `direction-input` / `direction-output` / `direction-append` 중 하나이다. `open-file`은 파일을 열 수
-없으면 `Err(FileError)`를 반환한다(파일이 없는 것은 panic이 아니라 보통의 결과). 파일 이름은 문자열이든 `pathname`이든
+없으면 `(err FileError)`를 반환한다(파일이 없는 것은 panic이 아니라 보통의 결과). 파일 이름은 문자열이든 `pathname`이든
 된다(9장의 `Pathish`).
 
 `(get-output-stream-string s)`는 `string-output-stream`에 쓴 것을 반환하고 비운다. CL처럼 `close` 뒤에도 꺼낼 수 있다.
@@ -131,18 +131,18 @@ CL은 `(open name :element-type '(unsigned-byte 8))`처럼 **호출**에서 요�
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 전부 옮긴다 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 남은 줄 전부 |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr`를 하나 읽는다(CL의 `read`). 입력 끝이면 `Ok(eof)`, 읽으면 `Ok(datum d)`, 데이터가 아니면 `Err`. 데이터를 끝낸 **공백 한 글자를 소비한다**(CL과 같다). `ReadOutcome`가 `Option<Sexpr>`가 아닌 것은 빈 리스트 `()`를 읽은 것과 입력 끝이 같은 값이 되지 않게 하기 위해서이다 |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr`를 하나 읽는다(CL의 `read`). 입력 끝이면 `(ok eof)`, 읽으면 `(ok (datum d))`, 데이터가 아니면 `err`. 데이터를 끝낸 **공백 한 글자를 소비한다**(CL과 같다). `ReadOutcome`가 `Option<Sexpr>`가 아닌 것은 빈 리스트 `()`를 읽은 것과 입력 끝이 같은 값이 되지 않게 하기 위해서이다 |
 | `read-sexpr-preserving-whitespace` | 위와 같음 | 위와 같음 | 같지만 공백을 남긴다(CL의 `read-preserving-whitespace`) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch`까지 읽어 리스트로 만든다. `ch`는 소비된다. 입력이 다하면 `Err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch`까지 읽어 리스트로 만든다. `ch`는 소비된다. 입력이 다하면 `err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 한 줄씩 쓴다 |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 내용 전체 |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 모든 줄 |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | 써 낸다 |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 있는지 |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 삭제, 이름 바꾸기(인수는 `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | 심볼릭 링크와 `.`/`..`를 해석한 절대 경로. 없으면 `Err` |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | 심볼릭 링크와 `.`/`..`를 해석한 절대 경로. 없으면 `err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 마지막으로 수정한 시각. **유니버설 타임**이므로 `decode-universal-time`([시간](system.md#2-날짜의-분해와-조립))으로 읽을 수 있다 |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 소유자의 로그인 이름. 파일이 없으면 `Err`, 소유자의 uid가 암호 데이터베이스에 없으면 `Ok(none)`. CL이 구별하는 두 경우를 나누어 둔다 |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 소유자의 로그인 이름. 파일이 없으면 `err`, 소유자의 uid가 암호 데이터베이스에 없으면 `(ok none)`. CL이 구별하는 두 경우를 나누어 둔다 |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | 디렉터리인지. **없을 때도 `false`**이다. 둘을 구별하려면 `probe-file`을 쓴다 |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 내용을 truename(`truename`처럼 심볼릭 링크를 해석한 절대 경로)으로 나열한다. 대상이 없는 심볼릭 링크는 빠진다. `.`/`..`는 빠진다. 순서는 OS가 주는 대로 |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 부모까지 함께 만든다. 이미 있으면 성공 |

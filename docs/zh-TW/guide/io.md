@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 檔案 I/O、串流與網路
 
 本指南說明檔案讀寫、路徑名稱以及 socket 通訊的基本寫法。函式一覽見[串流與檔案](../reference/functions/streams-files.md)與
@@ -16,7 +16,7 @@
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
-知道不會失敗時，或者在失敗了停止也無妨的小腳本中，可以用 `unwrap` 取出值。如果是 `Err` 就會 panic。
+知道不會失敗時，或者在失敗了停止也無妨的小腳本中，可以用 `unwrap` 取出值。如果是 `err` 就會 panic。
 
 ## 2. 一次讀寫整個檔案
 
@@ -160,7 +160,7 @@ socket 連線也是串流，所以 `read-line` 與 `write-line` 可以直接使�
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; 為下一次讀取加上計時
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; 為下一次讀取加上計時
 ```
 
 ### 對方中斷連線時
@@ -173,7 +173,7 @@ socket 連線也是串流，所以 `read-line` 與 `write-line` 可以直接使�
 沒有專門用於名稱解析的函式。把主機名稱傳給 `tcp-connect`、`tls-connect`、`send-to`，就會在其中解析。解析在另一個執行緒中進行，所以等待
 期間其他任務照常執行。一個名稱有多個位址時會依序嘗試連線。
 
-無法解析時回傳 `Err`。
+無法解析時回傳 `err`。
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -228,4 +228,4 @@ UDP 不是串流，而是一次收發一個資料包。資料是位元組序列�
 ## 9. Unix 網域 socket
 
 把 socket 檔案的路徑傳給 `unix-listen` / `unix-connect`。得到的值與 TCP 一樣是 `socket-stream`。檔案已存在時 `unix-listen` 回傳
-`Err`。關閉監聽器時檔案會被刪除。
+`err`。關閉監聽器時檔案會被刪除。

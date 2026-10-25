@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -7,7 +7,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
 
 ## 1. Sözcüksel öğeler
 
-- **Büyük/küçük harf duyarsız.** Semboller okunurken hep küçük harfe normalleştirilir.
+- **Büyük/küçük harf duyarlı.** `foo` ile `Foo` farklı sembollerdir. Tür adları büyük harfle başlar (`Option`, `Vector` vb.; `int` ve `string` gibi temel türler küçük harftir).
 - **Yorumlar**: `;`'den satır sonuna kadar (satır yorumları). `#| ... |#` (iç içe geçebilen blok
   yorumları).
 - **Okuma zamanı değerlendirmesi**: `#.(expr)`, **okurken sonraki formu çalıştırır** ve değerini okunan
@@ -155,7 +155,7 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
   Bir trait'in `:dyn` ile kullanılması için karşılaması gereken koşullar için
   [3.9 deftrait / impl](#39-deftrait--impl--traitler)'a bakın. `:dyn`'i bir tür konumunun dışına yazmak
   hatadır.
-- Yerleşik jenerik türler: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Yerleşik jenerik türler: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>` ve eşzamanlılık türleri `Task<T>` / `Thread<T>` / `Chan<T>`
   ([12. bölüm](#12-eşzamanlılık-taskler)). S-ifade verisinin türü olan `Sexpr` de vardır. Yerleşik somut
   hata türleri `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` /
@@ -829,8 +829,8 @@ Ad konumuna bir `(Name option...)` listesi yazmak seçenekleri belirtir (CL ile 
 
 ; generic
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Her varyant `(VariantName FieldType...)` biçimindedir. Alanlar yalnızca konumsaldır (adları yoktur). En az
@@ -841,8 +841,8 @@ Ad konumuna bir `(Name option...)` listesi yazmak seçenekleri belirtir (CL ile 
   bir `_` içermelidir):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Metotlar ve statik metotlar `defstruct`'taki gibi `impl`'e (3.5) yazılır.
 - Enum'un kendisini `pub` yapmak için `(pub defenum ...)` yazın.
@@ -1011,7 +1011,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 - `module` bir ad alanı oluşturur. **Türler ad alanı değildir** (Rust'taki gibi bir türün yalnızca statik
   metotları ve metotları vardır).
 - Bir türü `use` etmek, bir enum'un varyantlarını ve türün açık statik metotlarını da çıplak adla
-  kullanılabilir kılar (örneğin `(use option)`'dan sonra `some`/`none`, `option::some`/`option::none`
+  kullanılabilir kılar (örneğin `(use Option)`'dan sonra `some`/`none`, `Option::some`/`Option::none`
   yazılmadan çağrılabilir).
 - **Bir adın tek bir anlamı vardır.** Fonksiyonlar, global değişkenler ve makrolar tek bir ad alanını
   paylaşır ve bir modül içinde bunlardan ikisi aynı adı taşıyamaz (hangisi önce tanımlanırsa tanımlansın
@@ -1312,7 +1312,7 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   olmayan türleri (`defstruct` örnekleri, globaller, hesaplanan sonuçlar) karşılaştırmanın tek yolu ve
   kullanıcı tanımlı bir `Eq` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
-- `(Ctor sub-pattern...)` — yapıcı örüntüleri (`Some x` `None` `Cons a d` `Ok v` vb.)
+- `(Ctor sub-pattern...)` — yapıcı örüntüleri (`(some x)` `(none)` `(cons a d)` `(ok v)` vb.)
 - `(Type :slot pattern... :slot...)` — yapı desenleri. Yuvaları tür adından sonra anahtar sözcük olarak
   yazın. Bir anahtar sözcüğü bir desen izliyorsa o yuva desenle eşleştirilir; ardından başka bir anahtar
   sözcük geliyor ya da hiçbir şey gelmiyorsa yuva kendi adındaki bir değişkene bağlanır. Yazılmayan
@@ -1434,7 +1434,7 @@ bu yüzden ek sözdizimi yoktur. Gerçekleştiren türler kümesi açıktır; bu
 
 **Kollar arası tür çıkarımı**: tüm kolların türü aynı olmalıdır (`panic` gibi sapan kollar hariç). Hiçbir
 türün beklenmediği yere yazılan bir `match` içinde kollar birbirlerinin eksik tür bağımsız değişkenlerini
-doldurur: `(result::ok v)` yalnızca `T`'yi, `(result::err e)` yalnızca `E`'yi sabitler, ancak birlikte
+doldurur: `(Result::ok v)` yalnızca `T`'yi, `(Result::err e)` yalnızca `E`'yi sabitler, ancak birlikte
 `Result<T,E>`'yi sabitlerler. Sonuna kadar hiçbir kolun sabitleyemediği bir tür bağımsız değişkeni, o
 kolun hatasıdır (`cannot infer type argument ...`). `match` dışında, sabitlenemeyen bir tür bağımsız
 değişkeni orada hatadır.
@@ -1642,7 +1642,7 @@ bağımsız değişken olarak vb.).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1664,7 +1664,7 @@ türleri, `f32`/`f64`/`ratio`/`char` arasında). Aynı tür dönüşüm değildi
 (`int` dahil) arasındaki ve `f32`↔`f64` arasındaki dönüşümler gerçek dönüşümlerdir**: `as` kırpar /
 yuvarlar ve `try-as` o genişliğe (duyarlığa) sığıp sığmadığını yanıtlar. `(as int x)`, sabit bir
 genişlikten tam genişletmedir ve `(as i32 n)`, `int`'ten kırpmadır. Tamsayı → `char` aralık dışında
-başarısız olabilir; bu yüzden `as` panic olur ve `try-as` `None` verir. Geri kalan her şey (genişletme ve
+başarısız olabilir; bu yüzden `as` panic olur ve `try-as` `none` verir. Geri kalan her şey (genişletme ve
 `float->int`/`ratio->int`'in kırpması) her zaman başarılı olur. `float->int`/`ratio->int`/`char->int`
 `int`'e iner ve daha dar bir genişlik istenirse onlardan sonra `int->W` çağrılır. Bu, karşılık gelen
 dönüşüm metotlarına açılan bir şekerdir ([Sayılar](functions/numbers.md)'daki
@@ -1764,7 +1764,7 @@ kendisidir ve bir AOT çalıştırılabilir dosyasında yoktur; `trace`'in izled
 çalışan yorumlayıcının çağrı yollarıdır; ve `disassemble` derleyicinin kendisini kullanır).
 `room`/`dribble`/`ed` bunların arasında değildir ve normal şekilde derlenebilir.
 
-**Derlenebilenler**: akış ve dosya G/Ç'si, `random`, `gensym`, `symbol->string`/`string->symbol`,
+**Derlenebilenler**: akış ve dosya G/Ç'si, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, aşkın fonksiyonlar, bit
 işlemleri, `catch`/`throw`/`unwind-protect`, `eq`/`eql`/`equal`/`equalp`'in dördü de (bu, `case`'in her
 tür için derlenmesini sağlar), `print`/`println`/`format`/`pprint` ve `pprint-logical-block` dahil tüm

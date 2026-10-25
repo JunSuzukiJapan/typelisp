@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # String'ler, Karakterler ve Koleksiyonlar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` ve `Deque<T>`.
@@ -76,7 +76,7 @@ Yazdırıldığında da `#(1 2 3)` olur.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`'inci elemanı okur. Aralık dışında panic olur |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`'inci elemanı değiştirir. Aralık dışında panic olur. `(setf (get v i) x)` olarak da yazılabilir |
 | `len` | `(len v)` | `Vector<T>→int` | Eleman sayısı |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Son elemanı kaldırır ve döndürür. Boşsa `None` (`get`/`set`'ten farklı olarak panic olmaz) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Son elemanı kaldırır ve döndürür. Boşsa `none` (`get`/`set`'ten farklı olarak panic olmaz) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`'i gerçekleştiren bir yineleyici yapar |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Eşit bir eleman yoksa `x`'i ekler (CL'nin `pushnew`'i. Bir yeri yeniden yazmasına gerek olmadığından makro değil metottur) |
 

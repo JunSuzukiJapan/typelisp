@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # الأزواج والتعبيرات الرمزية والتسلسلات
 
 الزوج العام `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات المكتوبة فوق `Iter`
@@ -78,8 +78,7 @@
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | يستخرج اسم الرمز. واسم الكلمة المفتاحية لا يتضمن النقطتين الرأسيتين (`:foo` ← `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | يصنع رمزًا من سلسلة (يدرجه intern في الوحدة الجذرية) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | يصنع الرمز `name` في فضاء الأسماء `namespace` (`intern` في CL). و`namespace` مسار وحدة من الجذر (`"geometry::shapes"`)؛ و`"keyword"` فضاء الكلمات المفتاحية و`""` الجذر. وإن حُذف فهو الوحدة التي كُتب فيها الاستدعاء |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | يُرجع الرمز الذي يُقرأ به `name` في فضاء الأسماء `namespace` (`intern` في CL). إن وُجد رمز مرئي من فضاء الأسماء ذاك (رمزه الخاص، أو رمز أُدخل بـ`use`، أو رمز المكتبة القياسية) أُرجع هو؛ وإلا أُنشئ رمز جديد في فضاء الأسماء ذاك. `namespace` مسار وحدة من الجذر (`"geometry::shapes"`)؛ و`"keyword"` فضاء الكلمات المفتاحية و`""` الجذر. فضاء الأسماء غير الموجود خطأ. إن أُغفل فهو الوحدة التي كُتب فيها الاستدعاء (لا يوجد `*package*`). لا تُرجع القيمة الثانية في CL (حالة مثل `:internal`) |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | هل هو كلمة مفتاحية، أي هل ينتمي إلى فضاء أسماء الكلمات المفتاحية ([مرجع الصياغة](../syntax.md#1-العناصر-المعجمية)) |
 
 وبخصوص `gensym` انظر [الماكرو](system.md#8-الماكرو).
@@ -102,7 +101,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | أول موضع يحقق المحمول |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | كم عنصرًا يحقق المحمول |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | هل يحقق كل عنصر المحمول |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | هل يحقق أي عنصر المحمول (تقابل `some` في CL؛ اسم لا يتعارض مع المُنشِئ `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | هل يحقق أي عنصر المحمول (تقابل `some` في CL؛ اسم لا يتعارض مع المُنشِئ `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | طي من اليسار |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | طي من اليمين |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | تجمع كل العناصر المتبقية. تُستعمل لتحويل نتيجة إحدى دوال `lazy` أدناه إلى `Vector` |
@@ -113,9 +112,9 @@
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | عدد العناصر |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | يضم المكرِّرات. ويمكن إعطاء ثلاثة أو أكثر |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` في CL. ويُكتب نوع النتيجة على صورة **ثابت رمز مقتبس** (تستخدم CL محدِّد نوع وقت التشغيل). و`'vector` تأخذ واحدًا أو أكثر، و`'string` صفرًا أو أكثر (`""` للصفر). ولا تغطي قوائم `Sexpr` (استخدم `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` في CL. ويُكتب نوع النتيجة على صورة **ثابت رمز مقتبس** (تستخدم CL محدِّد نوع وقت التشغيل). و`'vector` تأخذ واحدًا أو أكثر، و`'string` صفرًا أو أكثر (`""` للصفر). ولا تغطي قوائم `Sexpr` (استخدم `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | العكس (دون إتلاف) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | العنصر `n` (`None` خارج النطاق) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | العنصر `n` (`none` خارج النطاق) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` بترتيب وسائط معكوس |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | أول `n` عنصر |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (تُقيَّد `end` بالطول) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -6,7 +6,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 
 ## 1. 词法元素
 
-- **不区分大小写。** 符号在读取时全部规范化为小写。
+- **区分大小写。** `foo` 和 `Foo` 是不同的符号。类型名以大写字母开头（`Option`、`Vector` 等；`int`、`string` 等基本类型为小写）。
 - **注释**：从 `;` 到行尾（行注释）。`#| ... |#`（可以嵌套的块注释）。
 - **读取时求值**：`#.(式)` **在读取的同时执行**后面的形式，并把它的值当作读到的东西。这是读取器不只是文本函数的唯一地方。
   能达到的范围取决于读取路径，这一点与 CL 相同：
@@ -84,7 +84,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
   内部：`Vector<:dyn Drawable>` `HashTable<string, :dyn Drawable>`。具体值在期望位置自动装箱，显式形式为 `(as :dyn Trait 式)`。
   `:dyn Sub` 的值可以直接传给要求其超 trait（传递继承的所有 trait）的 `:dyn Super` 的位置（向上转换）。不能传给没有继承关系的
   trait。可以成为 `:dyn` 的 trait 的条件见 [3.9 deftrait / impl](#39-deftrait--impl--trait-机制)。在类型位置以外写 `:dyn` 是错误。
-- 内置泛型类型：`Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、`HashTable<K,V>`、`Vector<T>`，以及
+- 内置泛型类型：`Option<T>`（`(some T)` / `none`）、`Result<T,E>`（`(ok T)` / `(err E)`）、`HashTable<K,V>`、`Vector<T>`，以及
   并发机制的 `Task<T>` / `Thread<T>` / `Chan<T>`（[第 12 章](#12-并发任务)）。还有 S 表达式数据的类型 `Sexpr`。内置的具体错误
   类型有 `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`，标准库的结构体有
   `SimpleError` / `WrappedError`（`Error` 不是类型而是 trait——作为 `:dyn Error` 使用）。一览见 [types.md](types.md)。
@@ -647,8 +647,8 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 ; 泛型
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - 每个变体的形式是 `(VariantName FieldType...)`。字段只能按位置指定（没有名字）。至少需要一个变体，名字不能重复。
@@ -657,8 +657,8 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - 可以用 `match` / `if-let` 拆解。`match` 检查穷尽性（需要覆盖所有变体或有 `_`）：
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - 方法和静态方法与 `defstruct` 一样写在 `impl`（3.5）中。
 - 要让枚举本身 `pub`，写 `(pub defenum ...)`。
@@ -795,8 +795,8 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 ```
 
 - `module` 创建命名空间。**类型不是命名空间**（与 Rust 一样，类型只拥有静态方法和方法）。
-- 用 `use` 引入类型后，枚举的变体和该类型公开的静态方法也可以用裸名使用（例：`(use option)` 之后，
-  不写 `option::some`/`option::none` 也能调用 `some`/`none`）。
+- 用 `use` 引入类型后，枚举的变体和该类型公开的静态方法也可以用裸名使用（例：`(use Option)` 之后，
+  不写 `Option::some`/`Option::none` 也能调用 `some`/`none`）。
 - **一个名字只有一个含义**。函数、全局变量和宏属于同一个命名空间，在同一模块中它们中的任意两个都不能
   取同一个名字（无论以什么顺序定义都会报错）。不像 CL 那样把函数和变量的命名空间分开。不同模块中的
   同名名字，较近的那个可见。
@@ -1050,7 +1050,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   （[标准 trait](functions/traits.md#2-eq--ord比较)）按值比较。字符串比较的是内容，而不是同一性
 - `(:= expr)` —— 求值任意式子，用 `Eq::equals` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
   用户定义的 `Eq` 实现直接成为比较规则。`expr` 可以引用从该分支位置可见的任何东西（参数、外层绑定、全局变量）
-- `(Ctor sub-pattern...)` —— 构造函数模式（`Some x` `None` `Cons a d` `Ok v` 等）
+- `(Ctor sub-pattern...)` —— 构造函数模式（`(some x)` `(none)` `(cons a d)` `(ok v)` 等）
 - `(Type :slot pattern... :slot...)` — 结构体模式。在类型名之后用关键字写槽。关键字后面是模式时，
   用该模式匹配这个槽；后面是关键字或结束时，把槽绑定到同名的变量。没写的槽不参与匹配（不依赖字段的
   数量和顺序）：
@@ -1147,7 +1147,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 **分支之间的类型推断**：所有分支必须是同一类型（`panic` 等发散的分支除外）。在没有期望类型的位置写的 `match` 中，分支会**互相**
-补足缺少的类型参数——`(result::ok v)` 只决定 `T`，`(result::err e)` 只决定 `E`，两者并列就决定了 `Result<T,E>`。到最后仍有任何
+补足缺少的类型参数——`(Result::ok v)` 只决定 `T`，`(Result::err e)` 只决定 `E`，两者并列就决定了 `Result<T,E>`。到最后仍有任何
 分支都无法决定的类型参数时，会成为该分支自身的错误（`cannot infer type argument ...`）。在 `match` 之外，无法决定的类型参数当场就是错误。
 
 使用向下转换模式的 `match` 的穷尽性检查，不计入 `Sexpr` 本身变体的覆盖（只列出向下转换模式的 `match` 需要用 `_` 收尾）。泛型 ADT
@@ -1331,7 +1331,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 (unreachable)                       ; 展开为 (panic "unreachable")。defmacro
 (todo)                              ; 展开为 (panic "todo")。defmacro
 (as Type expr)                      ; 数值/字符的类型转换。可能失败的转换失败时 panic
-(try-as Type expr)                  ; 与 as 相同，但以 Option<Type> 返回结果（失败时为 None）
+(try-as Type expr)                  ; 与 as 相同，但以 Option<Type> 返回结果（失败时为 none）
 (print control args...)             ; 展开格式写到标准输出（不换行）
 (println control args...)           ; 同上（末尾换行）
 (format dest control args...)       ; CL 的 format。返回展开结果的 string
@@ -1348,7 +1348,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 
 `as`/`try-as` 能处理的只有数值和字符的目录（`int`、固定宽度整数类型、`f32`/`f64`/`ratio`/`char` 之间）。同一类型不转换。**整数
 宽度之间（包括 `int`）以及 `f32`↔`f64` 是真正的转换**——`as` 截断／舍入，`try-as` 回答能否放进该宽度（精度）。`(as int x)` 是
-从固定宽度的精确扩展，`(as i32 n)` 是从 `int` 的截断。整数→`char` 可能因超出范围而失败，所以 `as` 会 panic，`try-as` 为 `None`。
+从固定宽度的精确扩展，`(as i32 n)` 是从 `int` 的截断。整数→`char` 可能因超出范围而失败，所以 `as` 会 panic，`try-as` 为 `none`。
 其他（扩展转换以及 `float->int`/`ratio->int` 的截断）总是成功。`float->int`/`ratio->int`/`char->int` 落到 `int`，要求更窄的宽度
 时接着调用 `int->W`。是展开为相应转换方法（[数值](functions/numbers.md)的 `int->char`/`int->int`/`int->W` 等）的语法糖。
 
@@ -1427,7 +1427,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 的环境本身，而 AOT 可执行文件中没有那个环境。`trace` 看的、`step` 停住的都是正在运行的解释器的调用路径，`disassemble` 使用编译器
 本身）。`room`/`dribble`/`ed` 不是这一类，可以正常编译。
 
-**可以**编译的东西：流和文件 I/O、`random`、`gensym`、`symbol->string`/`string->symbol`、`parse-int`/`parse-float`、
+**可以**编译的东西：流和文件 I/O、`random`、`gensym`、`symbol->string`/`intern`、`parse-int`/`parse-float`、
 `get-universal-time`/`get-internal-real-time`、`exit`、超越函数、位运算、`catch`/`throw`/`unwind-protect`、
 `eq`/`eql`/`equal`/`equalp` 全部 4 个（`case` 因此也能对所有类型编译）、包括 `print`/`println`/`format`/`pprint` 和
 `pprint-logical-block` 在内的全部打印功能、`read`，以及 `eval`。标准库以已编译的状态附带。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Paare, S-Ausdrücke und Sequenzen
 
 Das generische Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, die auf `Iter` aufgebauten
@@ -88,8 +88,7 @@ der umgekehrten Richtung nicht automatisch.
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Holt den Namen des Symbols heraus. Der Name eines Schlüsselworts enthält keinen Doppelpunkt (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Erzeugt ein Symbol aus einer Zeichenkette (interniert es im Wurzelmodul) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Erzeugt das Symbol `name` im Namensraum `namespace` (CLs `intern`). `namespace` ist ein Modulpfad ab der Wurzel (`"geometry::shapes"`); `"keyword"` ist der der Schlüsselwörter, `""` die Wurzel. Fehlt es, ist es das Modul, in dem der Aufruf steht |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Gibt das Symbol zurück, als das `name` im Namensraum `namespace` gelesen wird (CLs `intern`). Gibt es ein von diesem Namensraum aus sichtbares Symbol (ein eigenes, ein mit `use` hereingeholtes oder eines der Standardbibliothek), wird dieses zurückgegeben; sonst wird in diesem Namensraum ein neues erzeugt. `namespace` ist ein Modulpfad ab der Wurzel (`"geometry::shapes"`); `"keyword"` ist der der Schlüsselwörter, `""` die Wurzel. Ein nicht vorhandener Namensraum ist ein Fehler. Weggelassen ist es das Modul, in dem der Aufruf steht (es gibt kein `*package*`). CLs zweiter Wert (ein Status wie `:internal`) wird nicht zurückgegeben |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Ob es ein Schlüsselwort ist, d. h. ob es zum Schlüsselwort-Namensraum gehört ([Syntaxreferenz](../syntax.md#1-lexikalische-elemente)) |
 
 Zu `gensym` siehe [Makros](system.md#8-makros).
@@ -114,7 +113,7 @@ Funktionen, die ein Prädikat nehmen (entsprechen CLs `-if`-Familie):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Die erste Position, die das Prädikat erfüllt |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Wie viele das Prädikat erfüllen |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Ob jedes Element das Prädikat erfüllt |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Ob irgendein Element das Prädikat erfüllt (entspricht CLs `some`; ein Name, der nicht mit dem Konstruktor `Some` kollidiert) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Ob irgendein Element das Prädikat erfüllt (entspricht CLs `some`; ein Name, der nicht mit dem Konstruktor `some` kollidiert) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Linksfaltung |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Rechtsfaltung |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Sammelt alle verbleibenden Elemente. Damit macht man aus dem Ergebnis einer `lazy`-Funktion unten einen `Vector` |
@@ -125,9 +124,9 @@ Indizierung, Länge und Ausschnitte:
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Anzahl der Elemente |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Verkettet Iteratoren. Auch drei oder mehr sind möglich |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CLs `concatenate`. Der Ergebnistyp wird als **quotiertes Symbolliteral** geschrieben (CL verwendet einen Typspezifikator zur Laufzeit). `'vector` nimmt eines oder mehr, `'string` null oder mehr (`""` bei null). `Sexpr`-Listen sind nicht abgedeckt (man verwendet `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CLs `concatenate`. Der Ergebnistyp wird als **quotiertes Symbolliteral** geschrieben (CL verwendet einen Typspezifikator zur Laufzeit). `'vector` nimmt eines oder mehr, `'string` null oder mehr (`""` bei null). `Sexpr`-Listen sind nicht abgedeckt (man verwendet `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Umkehrung (nicht destruktiv) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` außerhalb des Bereichs) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` außerhalb des Bereichs) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` mit umgekehrten Argumenten |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | Die ersten `n` Elemente |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` wird auf die Länge begrenzt) |

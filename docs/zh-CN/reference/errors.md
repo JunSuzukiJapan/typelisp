@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 错误消息
 
 `typl` 给出的主要错误消息的含义和修正方法。
@@ -43,7 +43,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | 需要 `T` 类型的位置是 `U` 类型的表达式。没有隐式类型转换，数值请用 `(as T x)` 转换。`int` 和 `i32` 也是不同的类型 |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | 字面量放不进该类型。想要截断时写 `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | 没有该名称的类型。类型要在首次使用它的形式之前定义（类型没有前向声明）。如果本意是类型变量，请写在函数名的 `<foo>` 等声明位置（[语法参考 3.6](syntax.md#36-defstruct--结构体用户定义类型)） |
-| ``cannot infer type argument `t` for `vector::new` `` | 无法确定类型参数。像 `(the Vector<int> (Vector::new))` 这样用 `the` 写出类型 |
+| ``cannot infer type argument `t` for `Vector::new` `` | 无法确定类型参数。像 `(the Vector<int> (Vector::new))` 这样用 `the` 写出类型 |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` 没有处理所有变体。添加缺少的变体分支或 `_` 分支 |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | 函数要求某个 trait，但传入的类型没有实现。写 `(impl Eq pt ...)`（[标准 trait](functions/traits.md)） |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | 在 `:dyn` 的位置传入了没有实现该 trait 的类型的值。写 `impl` |

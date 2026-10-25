@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Pares, expressões S e sequências
 
 O par genérico `cons-cell`, os dados de expressões S `Sexpr`, os símbolos, as funções de sequência escritas
@@ -84,8 +84,7 @@ automaticamente na outra direção.
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Tira o nome do símbolo. O nome de uma palavra-chave não tem os dois-pontos (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Cria um símbolo a partir de uma string (internando-o no módulo raiz) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Cria o símbolo `name` no espaço de nomes `namespace` (o `intern` do CL). `namespace` é um caminho de módulo a partir da raiz (`"geometry::shapes"`); `"keyword"` é o das palavras-chave e `""` a raiz. Omitido, é o módulo em que a chamada está escrita |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Devolve o símbolo que `name` lê no namespace `namespace` (o `intern` do CL). Se existir um símbolo visível a partir desse namespace (o próprio, um trazido com `use` ou o da biblioteca padrão), devolve esse; caso contrário, cria um novo nesse namespace. `namespace` é um caminho de módulo a partir da raiz (`"geometry::shapes"`); `"keyword"` é o das palavras-chave e `""` a raiz. Um namespace que não existe é um erro. Omitido, é o módulo onde a chamada está escrita (não há `*package*`). O segundo valor do CL (um estado como `:internal`) não é devolvido |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Se é uma palavra-chave, isto é, se pertence ao espaço de nomes das palavras-chave ([Referência de sintaxe](../syntax.md#1-elementos-léxicos)) |
 
 Para `gensym`, consulte [Macros](system.md#8-macros).
@@ -109,7 +108,7 @@ Funções que recebem um predicado (correspondem à família `-if` do CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | A primeira posição que satisfaz o predicado |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Quantos satisfazem o predicado |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Se todo elemento satisfaz o predicado |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Se algum elemento satisfaz o predicado (corresponde ao `some` do CL; um nome que não colide com o construtor `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Se algum elemento satisfaz o predicado (corresponde ao `some` do CL; um nome que não colide com o construtor `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Dobra à esquerda |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Dobra à direita |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Reúne todos os elementos restantes. Serve para transformar em `Vector` o resultado de uma função `lazy` abaixo |
@@ -120,9 +119,9 @@ Funções que recebem um predicado (correspondem à família `-if` do CL):
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Número de elementos |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Concatena iteradores. Podem ser dados três ou mais |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | O `concatenate` do CL. O tipo do resultado é escrito como **um literal de símbolo citado** (o CL usa um especificador de tipo em tempo de execução). `'vector` recebe um ou mais, `'string` zero ou mais (`""` para zero). As listas `Sexpr` não estão incluídas (use `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | O `concatenate` do CL. O tipo do resultado é escrito como **um literal de símbolo citado** (o CL usa um especificador de tipo em tempo de execução). `'vector` recebe um ou mais, `'string` zero ou mais (`""` para zero). As listas `Sexpr` não estão incluídas (use `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Inversão (não destrutiva) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | O elemento `n` (`None` fora do intervalo) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | O elemento `n` (`none` fora do intervalo) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` com os argumentos ao contrário |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | Os primeiros `n` elementos |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` é limitado ao comprimento) |

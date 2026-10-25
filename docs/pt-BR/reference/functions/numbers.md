@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Números
 
 Operações sobre inteiros, números de ponto flutuante, racionais, números complexos e booleanos, e outras
@@ -33,9 +33,9 @@ capítulo 3).
 | `int->int` | `(int->int x)` | `T→int` | Conversão de ampliação para `int` (sempre exata). O que `(as int x)` faz |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Conversão de ampliação para `ratio` (sempre exata) |
 | `int->char` | `(int->char x)` | `T→char` | Interpreta o valor como um valor escalar Unicode. Panic com um valor inválido |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Uma versão de `int->char` que devolve `None` em caso de falha |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Uma versão de `int->char` que devolve `none` em caso de falha |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Conversão de largura. Os valores que não cabem são truncados (como o `as` do Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | A mesma conversão como pergunta. `None` se o valor não couber nessa largura |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | A mesma conversão como pergunta. `none` se o valor não couber nessa largura |
 
 Essas conversões também são o que fazem as formas especiais `(as Type x)`/`(try-as Type x)`
 ([Referência de sintaxe](../syntax.md#7-outras-formas-especiais)). As operações de bits (`logand`/`ash`/`ldb`

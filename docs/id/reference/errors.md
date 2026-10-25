@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Pesan Kesalahan
 
 Arti pesan kesalahan utama dari `typl` dan cara memperbaikinya.
@@ -45,7 +45,7 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | ``type mismatch: expected `T`, found `U` `` | Ekspresi bertipe `U` berada di tempat yang membutuhkan tipe `T`. Tidak ada konversi implisit; untuk bilangan, konversikan dengan `(as T x)`. `int` dan `i32` juga merupakan tipe yang berbeda |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Literal tidak muat dalam tipenya. Jika Anda ingin memotongnya, tulis `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Tidak ada tipe dengan nama itu. Definisikan tipe sebelum bentuk pertama yang memakainya (tipe tidak punya deklarasi maju). Jika yang Anda maksud variabel tipe, tulis di posisi pendeklarasian seperti `<foo>` setelah nama fungsi ([Referensi Sintaks 3.6](syntax.md#36-defstruct--struct-tipe-buatan-pengguna)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Argumen tipe tidak dapat ditentukan. Tulis tipenya dengan `the`, seperti `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Argumen tipe tidak dapat ditentukan. Tulis tipenya dengan `the`, seperti `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` tidak menangani setiap varian. Tambahkan cabang untuk varian yang kurang, atau cabang `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Fungsi mensyaratkan trait yang tidak diimplementasikan oleh tipe yang Anda berikan. Tulis `(impl Eq pt ...)` ([Trait Standar](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Nilai bertipe yang tidak mengimplementasikan trait diberikan di tempat yang mengharapkan `:dyn`. Tulis `impl`-nya |

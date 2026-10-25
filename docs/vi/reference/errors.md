@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Thông báo lỗi
 
 Ý nghĩa của các thông báo lỗi chính từ `typl` và cách sửa chúng.
@@ -44,7 +44,7 @@ Các sai sót được phát hiện trước khi chạy. Dạng đó không đư
 | ``type mismatch: expected `T`, found `U` `` | Một biểu thức kiểu `U` đang ở chỗ cần kiểu `T`. Không có chuyển đổi ngầm; với số, hãy chuyển đổi bằng `(as T x)`. `int` và `i32` cũng là các kiểu khác nhau |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Literal không vừa với kiểu. Nếu bạn muốn cắt bớt, hãy viết `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Không có kiểu nào mang tên đó. Hãy định nghĩa kiểu trước dạng đầu tiên dùng nó (kiểu không có khai báo trước). Nếu bạn muốn nói một biến kiểu, hãy viết nó ở vị trí khai báo như `<foo>` sau tên hàm ([Tham chiếu cú pháp 3.6](syntax.md#36-defstruct--struct-kiểu-do-người-dùng-định-nghĩa)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Không xác định được một đối số kiểu. Hãy viết kiểu bằng `the`, như `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Không xác định được một đối số kiểu. Hãy viết kiểu bằng `the`, như `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` không xử lý mọi variant. Hãy thêm các nhánh cho những variant còn thiếu, hoặc một nhánh `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Hàm yêu cầu một trait mà kiểu bạn truyền vào không triển khai. Hãy viết `(impl Eq pt ...)` ([Các trait chuẩn](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Một giá trị của kiểu không triển khai trait được truyền vào chỗ mong đợi `:dyn`. Hãy viết `impl` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Zeit, Umgebung und Implementierung
 
 Funktionen für Zeit, Abfragen der Laufzeitumgebung, Werkzeuge der Implementierung, Parsen und Auswerten von
@@ -137,7 +137,7 @@ wertet `step` einfach `form` aus**: ein entartetes Verhalten, das CLHS ausdrück
 Tests nicht an einer Eingabeaufforderung hängen, die niemand beantworten kann.
 
 `$VISUAL` / `$EDITOR` von `ed` wird an Leerraum geteilt, daher funktioniert `EDITOR="code -w"`. Ist keines
-gesetzt, ist das Ergebnis `Err`: Es rät nicht `vi`. Die Zeilennummer wird zuerst übergeben, in der Form `+N`.
+gesetzt, ist das Ergebnis `err`: Es rät nicht `vi`. Die Zeilennummer wird zuerst übergeben, in der Form `+N`.
 
 `dribble` zeichnet alle drei Wege auf, auf denen die Ausgabe der Sitzung den Prozess verlässt: was
 `print`/`println`/`format` schreiben, was in mit der Standardausgabe verbundene Streams geschrieben wird, und
@@ -146,14 +146,14 @@ die in die REPL getippten Zeilen samt den Werten, die die REPL zurückgibt.
 ## 6. Parsen und Auswerten
 
 All diese behandeln Text und Daten aus der Laufzeit (die das Programm selbst nicht kontrolliert), daher geben
-sie bei Fehlschlag das `Err` eines `Result` zurück, statt einen Panic auszulösen. Die Fehlertypen sind konkrete
+sie bei Fehlschlag das `err` eines `Result` zurück, statt einen Panic auszulösen. Die Fehlertypen sind konkrete
 Typen pro Operation ([Fehlertypen](option-result.md#3-fehlertypen-und-der-trait-error)).
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CLs `parse-integer`. Überspringt führenden und abschließenden Leerraum (dieselbe Menge wie `trim`), liest höchstens ein Vorzeichen `+`/`-` und dann Ziffern zur Basis `radix` (Standard 10, 2 bis 36; Ziffern über 10 in beliebiger Schreibweise). Die Anzahl der Ziffern ist unbegrenzt (`int`). Andere übrig bleibende Zeichen ergeben `Err`. Mit `:junk-allowed true` hält es bei der ersten Nicht-Ziffer an und ignoriert den Rest, ergibt aber `Err`, wenn es keine einzige Ziffer gibt (entspricht CLs `nil`). Den zweiten Wert von CL (die Position, an der das Lesen endete) gibt es nicht zurück. Ein `radix` außerhalb des Bereichs löst einen Panic aus (ein Fehler des Aufrufers, nicht im Text) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CLs `parse-integer`. Überspringt führenden und abschließenden Leerraum (dieselbe Menge wie `trim`), liest höchstens ein Vorzeichen `+`/`-` und dann Ziffern zur Basis `radix` (Standard 10, 2 bis 36; Ziffern über 10 in beliebiger Schreibweise). Die Anzahl der Ziffern ist unbegrenzt (`int`). Andere übrig bleibende Zeichen ergeben `err`. Mit `:junk-allowed true` hält es bei der ersten Nicht-Ziffer an und ignoriert den Rest, ergibt aber `err`, wenn es keine einzige Ziffer gibt (entspricht CLs `nil`). Den zweiten Wert von CL (die Position, an der das Lesen endete) gibt es nicht zurück. Ein `radix` außerhalb des Bereichs löst einen Panic aus (ein Fehler des Aufrufers, nicht im Text) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Eine Gleitkommazahl. Akzeptiert auch `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Liest ein `Sexpr` aus `s` (mit demselben Reader, der Quelltext liest). Unausgeglichene Klammern, nicht abgeschlossene Zeichenketten und Ähnliches ergeben `Err`. Aus einem Stream liest man mit `read-sexpr` ([Streams](streams-files.md#6-generische-funktionen-und-dateioperationen)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Liest ein `Sexpr` aus `s` (mit demselben Reader, der Quelltext liest). Unausgeglichene Klammern, nicht abgeschlossene Zeichenketten und Ähnliches ergeben `err`. Aus einem Stream liest man mit `read-sexpr` ([Streams](streams-files.md#6-generische-funktionen-und-dateioperationen)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **die Position, an der das Lesen endete**. `(car r)` ist der Wert und `(cdr r)` die Position des nächsten zu lesenden Zeichens. `start` ist standardmäßig 0 |
 | `read-from-string-preserving-whitespace` | Wie oben | Wie oben | Dasselbe, verbraucht aber nicht den Leerraum, der das Datum beendet hat. Der Unterschied zeigt sich in der zurückgegebenen Position |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Typprüft `form` zur Laufzeit und wertet es aus. Folgt CLs `eval` |
@@ -177,7 +177,7 @@ die Position 3 zurück, die bewahrende Fassung 2.
 
 Die Zahlensyntax, die der Reader akzeptiert, steht in
 [Kapitel 1 der Syntaxreferenz](../syntax.md#1-lexikalische-elemente). Was `*print-radix*`
-([Ausgabe](printing.md#62-basis-schreibweise-und-lesbarkeit)) ausgibt, lässt sich unverändert zurücklesen. Ein
+([Ausgabe](printing.md#62-basis-und-lesbarkeit)) ausgibt, lässt sich unverändert zurücklesen. Ein
 CL-`*read-base*` gibt es nicht.
 
 ### 6.1 Was `eval` bedeutet
@@ -206,7 +206,7 @@ sofort und dauerhaft in der globalen Umgebung registriert.
   „undefiniert“. **Spätere `eval`s sehen es jedoch** (ihre Typprüfung läuft zur Laufzeit, nach der Definition).
   Die REPL prüft und führt Zeile für Zeile aus, daher lässt sich ein mit `eval` definierter Name ab der nächsten
   Zeile direkt aufrufen.
-- **Fehler**: Typfehler und Syntaxfehler geben `Err` zurück (kein Panic). **Panics zur Laufzeit** im
+- **Fehler**: Typfehler und Syntaxfehler geben `err` zurück (kein Panic). **Panics zur Laufzeit** im
   ausgewerteten Code (Division durch null usw.) breiten sich aus, wie sie es bei direkt geschriebenem Code
   täten. Die Aufräumarbeit jedes `unwind-protect` dazwischen läuft
   ([Kapitel 8 der Syntaxreferenz](../syntax.md#8-nichtlokale-ausgänge-catch--throw--unwind-protect)).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Akışlar ve Dosyalar
 
 Akış trait'leri ve metotları, somut akış türleri, dosya işlemleri ve yol adları. Ağ soketleri de
@@ -91,7 +91,7 @@ kalın.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction`, `direction-input` / `direction-output` / `direction-append` üç sabitinden biridir.
-`open-file`, dosya açılamazsa `Err(FileError)` döndürür (eksik bir dosya sıradan bir sonuçtur, panic
+`open-file`, dosya açılamazsa `(err FileError)` döndürür (eksik bir dosya sıradan bir sonuçtur, panic
 değil). Dosya adı bir string ya da bir `pathname` olabilir (9. bölümdeki `Pathish`).
 
 `(get-output-stream-string s)`, bir `string-output-stream`'e yazılanı döndürür ve onu boşaltır. CL'deki
@@ -138,18 +138,18 @@ Hepsi standart kütüphanedeki `defstruct`'lardır ve iç içe geçirilebilir.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Her şeyi aktarır |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Kalan tüm satırlar |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Bir `Sexpr` okur (CL'nin `read`'i). Girdinin sonunda `Ok(eof)`, biri okunduğunda `Ok(datum d)`, veri değilse `Err`. Veriyi bitiren **tek boşluk karakterini tüketir** (CL'deki gibi). `ReadOutcome`, boş listeyi `()` okumakla girdinin sonu aynı değer olmasın diye bir `Option<Sexpr>` değildir |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Bir `Sexpr` okur (CL'nin `read`'i). Girdinin sonunda `(ok eof)`, biri okunduğunda `(ok (datum d))`, veri değilse `err`. Veriyi bitiren **tek boşluk karakterini tüketir** (CL'deki gibi). `ReadOutcome`, boş listeyi `()` okumakla girdinin sonu aynı değer olmasın diye bir `Option<Sexpr>` değildir |
 | `read-sexpr-preserving-whitespace` | Yukarıdakiyle aynı | Yukarıdakiyle aynı | Aynısı, ancak boşluğu bırakır (CL'nin `read-preserving-whitespace`'i) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch`'ye kadar okur ve bir liste yapar. `ch` tüketilir. Girdi biterse `Err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch`'ye kadar okur ve bir liste yapar. `ch` tüketilir. Girdi biterse `err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Her seferinde bir satır yazar |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Tüm içerik |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Tüm satırlar |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Yazar |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Var olup olmadığı |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Sil, yeniden adlandır (bağımsız değişkenler `Pathish`'tir) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Sembolik bağlantıları ve `.`/`..`'ı çözülmüş mutlak yol. Yoksa `Err` |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Sembolik bağlantıları ve `.`/`..`'ı çözülmüş mutlak yol. Yoksa `err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Son değiştirilme zamanı. **Evrensel zaman**dır; bu yüzden `decode-universal-time` ([Zaman](system.md#2-tarihleri-çözme-ve-kodlama)) onu okuyabilir |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Sahibin oturum açma adı. Dosya yoksa `Err`, sahibin uid'sinin parola veritabanında girdisi yoksa `Ok(none)`: CL'nin ayırt ettiği iki durum ayrı tutulur |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Sahibin oturum açma adı. Dosya yoksa `err`, sahibin uid'sinin parola veritabanında girdisi yoksa `(ok none)`: CL'nin ayırt ettiği iki durum ayrı tutulur |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Bir dizin olup olmadığı. **Yoksa da `false`**; ikisini ayırt etmek için `probe-file` kullanın |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | İçeriği truename ile listeler (`truename`'deki gibi sembolik bağlantıları çözülmüş mutlak yol). Hedefi eksik olan sembolik bağlantılar dışarıda bırakılır. `.`/`..` dışarıda bırakılır. Sıra işletim sisteminin verdiği şeydir |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Ebeveynleriyle birlikte oluşturur. Zaten varsa başarılı olur |

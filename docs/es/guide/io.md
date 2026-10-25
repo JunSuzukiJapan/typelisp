@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # E/S de archivos, streams y red
 
 Esta guía muestra lo básico de leer y escribir archivos, los nombres de ruta y la comunicación por sockets.
@@ -20,7 +20,7 @@ resultados con `match`.
 ```
 
 Cuando sabes que una operación no puede fallar, o en un script pequeño en el que detenerse ante un fallo
-no importa, `unwrap` saca el valor. Si es un `Err`, provoca un panic.
+no importa, `unwrap` saca el valor. Si es un `err`, provoca un panic.
 
 ## 2. Leer y escribir un archivo entero
 
@@ -175,7 +175,7 @@ Para poner un límite de tiempo a una operación, pasa `:timeout` (en segundos).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; poner un reloj a la siguiente lectura
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; poner un reloj a la siguiente lectura
 ```
 
 ### Cuando el otro lado se desconecta
@@ -190,7 +190,7 @@ No hay una función dedicada a la resolución de nombres. Pasar un nombre de hos
 `tls-connect` o `send-to` lo resuelve dentro de ellas. La resolución ocurre en otro hilo, así que las demás
 tareas siguen en marcha mientras espera. Si un nombre tiene varias direcciones, se prueban por turno.
 
-Si el nombre no se puede resolver, se devuelve un `Err`.
+Si el nombre no se puede resolver, se devuelve un `err`.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -248,5 +248,5 @@ UDP no es un stream; envía y recibe un datagrama cada vez. Los datos son una se
 ## 9. Sockets de dominio Unix
 
 Pasa la ruta del archivo de socket a `unix-listen` / `unix-connect`. El valor que obtienes es el mismo
-`socket-stream` que con TCP. `unix-listen` devuelve un `Err` si el archivo ya existe. Cerrar el listener
+`socket-stream` que con TCP. `unix-listen` devuelve un `err` si el archivo ya existe. Cerrar el listener
 elimina el archivo.

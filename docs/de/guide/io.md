@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Datei-E/A, Streams und Netzwerk
 
 Dieser Leitfaden zeigt die Grundlagen des Lesens und Schreibens von Dateien, der Pfadnamen und der
@@ -20,7 +20,7 @@ Ergebnisse trennt man mit `match`.
 ```
 
 Wenn feststeht, dass eine Operation nicht fehlschlagen kann, oder in einem kleinen Skript, in dem ein Abbruch
-beim Fehlschlag in Ordnung ist, holt `unwrap` den Wert heraus. Ist es ein `Err`, kommt es zu einem Panic.
+beim Fehlschlag in Ordnung ist, holt `unwrap` den Wert heraus. Ist es ein `err`, kommt es zu einem Panic.
 
 ## 2. Eine ganze Datei lesen und schreiben
 
@@ -176,7 +176,7 @@ Um eine Operation zeitlich zu begrenzen, übergibt man `:timeout` (in Sekunden).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; eine Uhr an das nächste Lesen hängen
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; eine Uhr an das nächste Lesen hängen
 ```
 
 ### Wenn die Gegenseite die Verbindung trennt
@@ -192,7 +192,7 @@ Eine eigene Funktion für die Namensauflösung gibt es nicht. Übergibt man eine
 laufen andere Tasks während des Wartens weiter. Hat ein Name mehrere Adressen, werden sie der Reihe nach
 versucht.
 
-Lässt sich der Name nicht auflösen, wird ein `Err` zurückgegeben.
+Lässt sich der Name nicht auflösen, wird ein `err` zurückgegeben.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -251,5 +251,5 @@ UDP ist kein Stream; es sendet und empfängt jeweils ein Datagramm. Die Daten si
 ## 9. Unix-Domain-Sockets
 
 Man übergibt `unix-listen` / `unix-connect` den Pfad der Socket-Datei. Der erhaltene Wert ist derselbe
-`socket-stream` wie bei TCP. `unix-listen` gibt ein `Err` zurück, wenn die Datei bereits existiert. Das
+`socket-stream` wie bei TCP. `unix-listen` gibt ein `err` zurück, wenn die Datei bereits existiert. Das
 Schließen des Listeners entfernt die Datei.

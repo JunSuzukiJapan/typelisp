@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Повідомлення про помилки
 
 Що означають основні повідомлення про помилки від `typl` і як їх виправити.
@@ -44,7 +44,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | Вираз типу `U` стоїть там, де потрібен тип `T`. Неявних перетворень немає; для чисел перетворюйте через `(as T x)`. `int` і `i32` теж різні типи |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Літерал не вміщується в тип. Якщо ви хочете його обрізати, напишіть `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Типу з такою назвою немає. Визначайте тип до першої форми, що його використовує (в типів немає випереджального оголошення). Якщо ви мали на увазі змінну типу, запишіть її на місці оголошення, як-от `<foo>` після назви функції ([Довідник із синтаксису 3.6](syntax.md#36-defstruct--структури-користувацькі-типи)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Аргумент типу не вдається визначити. Запишіть тип через `the`, як-от `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Аргумент типу не вдається визначити. Запишіть тип через `the`, як-от `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` не обробляє кожен варіант. Додайте гілки для відсутніх варіантів або гілку `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Функція вимагає трейт, якого не реалізує переданий вами тип. Напишіть `(impl Eq pt ...)` ([Стандартні трейти](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Значення типу, що не реалізує трейт, передано туди, де очікується `:dyn`. Напишіть `impl` |

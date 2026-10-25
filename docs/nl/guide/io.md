@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Bestands-I/O, streams en netwerk
 
 Deze handleiding toont de basis van het lezen en schrijven van bestanden, padnamen en
@@ -20,7 +20,7 @@ geen `panic`. Scheid de uitkomsten met `match`.
 ```
 
 Wanneer je weet dat een bewerking niet kan mislukken, of in een klein script waarin stoppen bij een
-fout prima is, haalt `unwrap` de waarde eruit. Is het een `Err`, dan geeft het een panic.
+fout prima is, haalt `unwrap` de waarde eruit. Is het een `err`, dan geeft het een panic.
 
 ## 2. Een heel bestand lezen en schrijven
 
@@ -175,7 +175,7 @@ Om een bewerking een tijdslimiet te geven, geef je `:timeout` (in seconden) mee.
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
 ```
 
 ### Wanneer de andere kant de verbinding verbreekt
@@ -191,7 +191,7 @@ Er is geen speciale functie voor naamresolutie. Een hostnaam doorgeven aan `tcp-
 andere taken blijven draaien terwijl erop wordt gewacht. Heeft een naam meerdere adressen, dan worden
 ze om de beurt geprobeerd.
 
-Kan de naam niet worden opgelost, dan wordt een `Err` teruggegeven.
+Kan de naam niet worden opgelost, dan wordt een `err` teruggegeven.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -252,5 +252,5 @@ gebruikt.
 ## 9. Unix-domainsockets
 
 Geef het pad van het socketbestand aan `unix-listen` / `unix-connect`. De waarde die je krijgt is
-dezelfde `socket-stream` als bij TCP. `unix-listen` geeft een `Err` terug als het bestand al bestaat.
+dezelfde `socket-stream` als bij TCP. `unix-listen` geeft een `err` terug als het bestand al bestaat.
 Het sluiten van de listener verwijdert het bestand.

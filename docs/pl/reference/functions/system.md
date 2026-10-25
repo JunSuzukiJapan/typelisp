@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -135,7 +135,7 @@ po prostu oblicza `form`**: zdegenerowane zachowanie, które CLHS wyraźnie dopu
 zawieszały się na zachęcie, na którą nikt nie może odpowiedzieć.
 
 `$VISUAL` / `$EDITOR` w `ed` jest dzielone na białych znakach, więc `EDITOR="code -w"` działa. Jeśli żadna
-nie jest ustawiona, wynikiem jest `Err`: nie zgaduje `vi`. Numer linii jest przekazywany jako pierwszy, w postaci `+N`.
+nie jest ustawiona, wynikiem jest `err`: nie zgaduje `vi`. Numer linii jest przekazywany jako pierwszy, w postaci `+N`.
 
 `dribble` zapisuje wszystkie trzy drogi, którymi wyjście sesji opuszcza proces: to, co zapisują
 `print`/`println`/`format`, to, co jest zapisywane do strumieni połączonych ze standardowym wyjściem, oraz
@@ -144,14 +144,14 @@ linie wpisane do REPL razem z wartościami, które REPL wypisuje z powrotem.
 ## 6. Parsowanie i obliczanie
 
 Wszystkie z nich obsługują tekst i dane z czasu działania (nad którymi sam program nie ma kontroli), więc w razie niepowodzenia
-zwracają `Err` z `Result`, a nie powodują panic. Typy błędów to konkretne typy
+zwracają `err` z `Result`, a nie powodują panic. Typy błędów to konkretne typy
 dla każdej operacji ([Typy błędów](option-result.md#3-typy-błędów-i-trait-error)).
 
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` z CL. Pomija początkowe i końcowe białe znaki (ten sam zbiór co w `trim`), czyta co najwyżej jeden znak `+`/`-`, a potem cyfry w podstawie `radix` (domyślnie 10, od 2 do 36; cyfry powyżej 10 w obu wielkościach liter). Nie ma limitu liczby cyfr (`int`). Wszelkie inne pozostałe znaki dają `Err`. Z `:junk-allowed true` zatrzymuje się na pierwszej nie-cyfrze i ignoruje resztę, ale daje `Err`, jeśli nie ma ani jednej cyfry (odpowiada `nil` z CL). Nie zwraca drugiej wartości z CL (pozycji, na której zakończył się odczyt). `radix` spoza zakresu powoduje panic (błąd wywołującego, a nie tekstu) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` z CL. Pomija początkowe i końcowe białe znaki (ten sam zbiór co w `trim`), czyta co najwyżej jeden znak `+`/`-`, a potem cyfry w podstawie `radix` (domyślnie 10, od 2 do 36; cyfry powyżej 10 w obu wielkościach liter). Nie ma limitu liczby cyfr (`int`). Wszelkie inne pozostałe znaki dają `err`. Z `:junk-allowed true` zatrzymuje się na pierwszej nie-cyfrze i ignoruje resztę, ale daje `err`, jeśli nie ma ani jednej cyfry (odpowiada `nil` z CL). Nie zwraca drugiej wartości z CL (pozycji, na której zakończył się odczyt). `radix` spoza zakresu powoduje panic (błąd wywołującego, a nie tekstu) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Liczba zmiennoprzecinkowa. Akceptuje także `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Wczytuje jedno `Sexpr` z `s` (tym samym czytnikiem, który czyta kod źródłowy). Niezbalansowane nawiasy, niezakończone łańcuchy znaków i tym podobne dają `Err`. Odczyt ze strumienia to `read-sexpr` ([Strumienie](streams-files.md#6-funkcje-generyczne-i-operacje-na-plikach)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Wczytuje jedno `Sexpr` z `s` (tym samym czytnikiem, który czyta kod źródłowy). Niezbalansowane nawiasy, niezakończone łańcuchy znaków i tym podobne dają `err`. Odczyt ze strumienia to `read-sexpr` ([Strumienie](streams-files.md#6-funkcje-generyczne-i-operacje-na-plikach)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **pozycja, na której zakończył się odczyt**. `(car r)` to wartość, a `(cdr r)` pozycja następnego znaku do odczytania. `start` domyślnie wynosi 0 |
 | `read-from-string-preserving-whitespace` | Jak wyżej | Jak wyżej | To samo, ale nie zużywa białego znaku, który zakończył daną. Różnica widoczna jest w zwróconej pozycji |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Sprawdza typy `form` w czasie działania i je oblicza. Idzie za `eval` z CL |
@@ -174,7 +174,7 @@ biały znak, który zakończył daną, a `read-preserving-whitespace` go zostawi
 zwraca pozycję 3, a wersja zachowująca zwraca 2.
 
 Składnia liczb akceptowana przez czytnik znajduje się w [Referencji składni, rozdział 1](../syntax.md#1-elementy-leksykalne).
-To, co wypisuje `*print-radix*` ([Wypisywanie](printing.md#62-podstawa-wielkość-liter-i-czytelność)), można wczytać z powrotem bez zmian.
+To, co wypisuje `*print-radix*` ([Wypisywanie](printing.md#62-podstawa-i-czytelność)), można wczytać z powrotem bez zmian.
 Nie ma `*read-base*` z CL.
 
 ### 6.1 Co oznacza `eval`
@@ -202,7 +202,7 @@ rejestrowane w środowisku globalnym natychmiast i na stałe.
   bezpośrednio w pliku jest sprawdzane przed wykonaniem `eval` definiującego `sq` i jest „niezdefiniowane". Jednak
   **późniejsze `eval` je widzą** (ich sprawdzanie typów działa w czasie działania, po definicji). REPL sprawdza
   i wykonuje po jednej linii, więc nazwę zdefiniowaną za pomocą `eval` można wywołać bezpośrednio z następnej linii.
-- **Błędy**: błędy typów i błędy składni zwracają `Err` (nie powodują panic). **Panic w czasie działania** w
+- **Błędy**: błędy typów i błędy składni zwracają `err` (nie powodują panic). **Panic w czasie działania** w
   obliczanym kodzie (dzielenie przez zero i tak dalej) propagują się tak, jak z kodu napisanego bezpośrednio. Kod sprzątający
   każdego `unwind-protect` pomiędzy jest wykonywany
   ([Referencja składni, rozdział 8](../syntax.md#8-wyjścia-nielokalne-catch--throw--unwind-protect)).

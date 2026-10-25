@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Option, Result i typy błędów
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-Konstruktory: `Option<T>` ma `Some(T)` / `None`. `Result<T,E>` ma `Ok(T)` / `Err(E)`. `E` może być dowolnym
+Konstruktory: `Option<T>` ma `(some T)` / `none`. `Result<T,E>` ma `(ok T)` / `(err E)`. `E` może być dowolnym
 typem: wbudowane konkretne typy błędów oraz typy, które piszesz sam za pomocą `defstruct`/`defenum`,
 pasują tam tak samo (rozdział 3).
 
 | Nazwa | Forma | Option | Result | Opis |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Wyjmuje wartość. Powoduje panic dla `None`/`Err` |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Wyjmuje wartość. Powoduje panic dla `none`/`err` |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | Wartość lub wartość domyślna |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Czy jest to `Some` |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Czy jest to `None` |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Czy jest to `Ok` |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Czy jest to `Err` |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Wyjmuje wartość. Przy `None`/`Err` panic z `msg` |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Wartość albo wynik `f`. `f` jest wywoływana tylko przy `None`/`Err` |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Stosuje `f` do zawartości `Some`/`Ok` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Stosuje `f` do zawartości `Err` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Przy `Some`/`Ok` przekazuje zawartość do `f` i zwraca jej wynik |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Przy `None`/`Err` zwraca wynik `f` |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Zamienia `Some(v)` na `Ok(v)`, a `None` na `Err(e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Czy jest to `some` |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Czy jest to `none` |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Czy jest to `ok` |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Czy jest to `err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Wyjmuje wartość. Przy `none`/`err` panic z `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Wartość albo wynik `f`. `f` jest wywoływana tylko przy `none`/`err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Stosuje `f` do zawartości `some`/`ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Stosuje `f` do zawartości `err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Przy `some`/`ok` przekazuje zawartość do `f` i zwraca jej wynik |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Przy `none`/`err` zwraca wynik `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Zamienia `(some v)` na `(ok v)`, a `none` na `(err e)` |
 
 Konstruktorami są `Option::some`/`Option::none`/`Result::ok`/`Result::err` (lub, po
-`(use option)`/`(use result)`, same nazwy `some`/`none`/`ok`/`err`).
+`(use Option)`/`(use Result)`, same nazwy `some`/`none`/`ok`/`err`).
 
 Rozgałęzienie zapisuje się jawnie przez `match` albo łączy w łańcuch przez `map`/`and-then` i
 pozostałe powyżej. Nie ma składni odpowiadającej `?` z Rusta.
@@ -39,9 +39,9 @@ zmian:
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
-(-> (option::some 8)
+(-> (Option::some 8)
     (and-then half)                          ; (some 4)
     (and-then half)                          ; (some 2)
     (map (lambda ((x int)) int (* x 10)))    ; (some 20)
@@ -102,7 +102,7 @@ dokładnie tak samo jak twoje własne typy błędów napisane za pomocą `(defst
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | Komunikat błędu (metoda traitu `Error`) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | Przyczyna, którą ten błąd opakowuje, lub `None`, jeśli jej nie ma (`Error::source` z Rust) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | Przyczyna, którą ten błąd opakowuje, lub `none`, jeśli jej nie ma (`Error::source` z Rust) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` implementuje `Error`) | Rozszerza konkretny typ błędu do obiektu traitu |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` implementuje `Error`) | Komunikat i łańcuch przyczyn znalezionych przez podążanie za `source`, jedna przyczyna w linii. CL nie ma odpowiednika („caused by" z Rust) |
 
@@ -113,10 +113,10 @@ błędy:
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (option::none)))
+  (source ((self Self)) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; konkretny typ trafia do E bez zmian
-  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
+  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; obsłuż dowolny rodzaj jednolicie
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -131,7 +131,7 @@ konwersja jest zapisywana jawnie:
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (result::err e))))
+    ((err e) (Result::err e))))
 ```
 
 **Typy i traity dzielą jedną przestrzeń nazw** (jak w Rust). W obrębie jednego modułu `defstruct`/`defenum` i

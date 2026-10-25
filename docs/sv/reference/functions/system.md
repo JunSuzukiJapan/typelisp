@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -131,7 +131,7 @@ anropet), `c` (sluta fråga härifrån) och `q` (avbryt). **Om standard in inte 
 hänger sig på en prompt som ingen kan svara på.
 
 `$VISUAL` / `$EDITOR` i `ed` delas vid blanktecken, så `EDITOR="code -w"` fungerar. Om ingen av dem är satt
-blir resultatet `Err`: den gissar inte `vi`. Radnumret skickas först, i formen `+N`.
+blir resultatet `err`: den gissar inte `vi`. Radnumret skickas först, i formen `+N`.
 
 `dribble` spelar in alla tre sätt som sessionens utdata lämnar processen: det som
 `print`/`println`/`format` skriver, det som skrivs till strömmar kopplade till standard ut, och raderna som
@@ -140,14 +140,14 @@ skrivs in i REPL tillsammans med de värden REPL skriver tillbaka.
 ## 6. Tolkning och utvärdering
 
 Alla dessa hanterar text och data från körning (som programmet självt inte styr), så vid misslyckande
-returnerar de `Err` i ett `Result` i stället för att ge panic. Feltyperna är konkreta typer per operation
+returnerar de `err` i ett `Result` i stället för att ge panic. Feltyperna är konkreta typer per operation
 ([Feltyper](option-result.md#3-feltyper-och-traitet-error)).
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL:s `parse-integer`. Hoppar över inledande och avslutande blanktecken (samma mängd som `trim`), läser högst ett tecken `+`/`-`, sedan siffror i basen `radix` (standard 10, 2 till 36; siffror över 10 i endera skiftläget). Det finns ingen gräns för antalet siffror (`int`). Alla andra tecken som blir över ger `Err`. Med `:junk-allowed true` stannar den vid den första icke-siffran och ignorerar resten, men ger `Err` om det inte finns en enda siffra (motsvarar CL:s `nil`). Den returnerar inte CL:s andra värde (positionen där läsningen slutade). En `radix` utanför intervallet ger panic (ett fel hos anroparen, inte i texten) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL:s `parse-integer`. Hoppar över inledande och avslutande blanktecken (samma mängd som `trim`), läser högst ett tecken `+`/`-`, sedan siffror i basen `radix` (standard 10, 2 till 36; siffror över 10 i endera skiftläget). Det finns ingen gräns för antalet siffror (`int`). Alla andra tecken som blir över ger `err`. Med `:junk-allowed true` stannar den vid den första icke-siffran och ignorerar resten, men ger `err` om det inte finns en enda siffra (motsvarar CL:s `nil`). Den returnerar inte CL:s andra värde (positionen där läsningen slutade). En `radix` utanför intervallet ger panic (ett fel hos anroparen, inte i texten) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Ett flyttal. Accepterar också `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Läser en `Sexpr` från `s` (med samma läsare som läser källkod). Obalanserade parenteser, oavslutade strängar och liknande ger `Err`. Att läsa från en ström är `read-sexpr` ([Strömmar](streams-files.md#6-generiska-funktioner-och-filoperationer)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Läser en `Sexpr` från `s` (med samma läsare som läser källkod). Obalanserade parenteser, oavslutade strängar och liknande ger `err`. Att läsa från en ström är `read-sexpr` ([Strömmar](streams-files.md#6-generiska-funktioner-och-filoperationer)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **positionen där läsningen slutade**. `(car r)` är värdet och `(cdr r)` positionen för nästa tecken att läsa. `start` är som standard 0 |
 | `read-from-string-preserving-whitespace` | Som ovan | Som ovan | Samma, men förbrukar inte det blanktecken som avslutade datumet. Skillnaden syns i den returnerade positionen |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Typkontrollerar `form` vid körning och utvärderar den. Följer CL:s `eval` |
@@ -170,7 +170,7 @@ avslutade datumet, och `read-preserving-whitespace` lämnar det. `(read-from-str
 position 3, och den bevarande versionen returnerar 2.
 
 Talsyntaxen som läsaren accepterar finns i [Syntaxreferens kapitel 1](../syntax.md#1-lexikaliska-element). Det
-som `*print-radix*` ([Utskrift](printing.md#62-bas-skiftläge-och-läsbarhet)) skriver ut kan läsas tillbaka som
+som `*print-radix*` ([Utskrift](printing.md#62-bas-och-läsbarhet)) skriver ut kan läsas tillbaka som
 det är. Det finns ingen CL-`*read-base*`.
 
 ### 6.1 Vad `eval` innebär
@@ -199,7 +199,7 @@ globala miljön omedelbart och permanent.
   "odefinierat". **Senare `eval` kan dock se det** (deras typkontroll körs vid körning, efter
   definitionen). REPL kontrollerar och kör en rad i taget, så ett namn som definierats med `eval` kan
   anropas direkt från nästa rad.
-- **Fel**: typfel och syntaxfel returnerar `Err` (de ger inte panic). **Panics vid körning** i den
+- **Fel**: typfel och syntaxfel returnerar `err` (de ger inte panic). **Panics vid körning** i den
   utvärderade koden (division med noll och så vidare) fortplantar sig som de skulle från kod skriven
   direkt. Uppstädningen i varje `unwind-protect` däremellan körs
   ([Syntaxreferens kapitel 8](../syntax.md#8-icke-lokala-utgångar-catch--throw--unwind-protect)).

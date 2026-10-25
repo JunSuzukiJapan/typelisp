@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # สตริง อักขระ และคอลเลกชัน
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` และ `Deque<T>`
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | อ่านสมาชิกตัวที่ `i` panic เมื่อเกินช่วง |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | เปลี่ยนสมาชิกตัวที่ `i` panic เมื่อเกินช่วง เขียนเป็น `(setf (get v i) x)` ได้ด้วย |
 | `len` | `(len v)` | `Vector<T>→int` | จำนวนสมาชิก |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | ลบสมาชิกตัวสุดท้ายและคืนค่า `None` หากว่าง (ต่างจาก `get`/`set` ตรงที่ไม่ panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | ลบสมาชิกตัวสุดท้ายและคืนค่า `none` หากว่าง (ต่างจาก `get`/`set` ตรงที่ไม่ panic) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | สร้างตัววนซ้ำที่ implement `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | ต่อท้าย `x` หากไม่มีสมาชิกที่เท่ากัน (`pushnew` ของ CL ไม่จำเป็นต้องเขียนทับ place จึงเป็นเมทอดแทนที่จะเป็นแมโคร) |
 

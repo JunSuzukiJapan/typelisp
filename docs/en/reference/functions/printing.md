@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Printing
 
 `print`/`println`/`format`, the one-argument printers, the pretty printer, `print-object`, and the
@@ -231,8 +231,8 @@ same way as in SBCL. When the REPL shows a result, it uses the same representati
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | The same |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (the number is an internal serial number) | The same |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | The same |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (the number is an internal serial number) | The same |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | An integer (the value of CL's `get-universal-time` / `get-internal-real-time`) | The same |
 | Error types (`ParseIntError`, `SimpleError` and so on) | `#<simpleerror "boom">` | The message only (`boom`) |
@@ -329,30 +329,27 @@ the same object", as CL specifies:
 A value with no sharing **shows no labels at all**, so leaving this variable true does not change the
 output of everyday code.
 
-### 6.2 Base, case and readability
+### 6.2 Base and readability
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | The base for printing integers (fixed-width and `int`). Outside 2 to 36 it is a **print error** (CL also specifies the range) |
 | `*print-radix*` | `bool` | `false` | If true, adds a radix marker: `#b`/`#o`/`#x`, `#NNr` for other bases, and a trailing `.` for base 10. The marker goes **before** the sign (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | The case of symbol names: `:upcase` / `:downcase` / `:capitalize` (the same spellings as CL). Any other symbol is a print error |
 | `*print-readably*` | `bool` | `false` | If true, prints in a form that can be read back. It forces escaping and disables the cut-offs of `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | The number of lines the pretty printer may use. The excess is cut, with `..` at the end as in CL. 0 means unlimited. A negative value is a print error |
 | `*print-escape*` | `bool` | `true` | Whether `write`/`write-to-string` do `prin1` or `princ`. **Only those two read it** |
-| `*print-array*` | `bool` | `true` | Whether `Vector<T>` and `Array<T>` show their contents. If true, CL's array syntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); if false, just the type and shape, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Whether `Vector<T>` and `Array<T>` show their contents. If true, CL's array syntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); if false, just the type and shape, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 The markers `*print-radix*` adds can be read back by the reader (the radix notation in the
 [Syntax Reference](../syntax.md#1-lexical-elements)).
 
-**Why the default of `*print-case*` differs from CL**: CL's default is `:upcase` because CL's reader
-stores symbol names in upper case, that is, it means "as stored". This reader stores them in lower
-case, so the default with the same meaning is `:downcase`.
+**Why there is no `*print-case*`**: symbol names are case-sensitive and print as they are spelled, so printing
+one in another case would read back as a different symbol.
 
 **The missing half of `*print-readably*`**: CL signals `print-not-readable` for values that cannot be
 read back, but this language has no condition to signal, and no way to decide readability for user

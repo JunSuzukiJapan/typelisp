@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Hata Mesajları
 
 `typl`'nin başlıca hata mesajlarının ne anlama geldiği ve nasıl düzeltileceği.
@@ -45,7 +45,7 @@ olduğu anlamına gelir.
 | ``type mismatch: expected `T`, found `U` `` | `U` türünde bir ifade, `T` türünün gerektiği yerde duruyor. Örtük dönüşüm yoktur; sayılar için `(as T x)` ile dönüştürün. `int` ve `i32` de farklı türlerdir |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Sabit türe sığmıyor. Kırpılmasını istiyorsanız `(as u8 300)` yazın |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Bu adda bir tür yok. Bir türü, onu kullanan ilk formdan önce tanımlayın (türlerin ileri bildirimi yoktur). Bir tür değişkeni kastettiyseniz, onu fonksiyon adından sonraki `<foo>` gibi bir bildirim konumuna yazın ([Sözdizimi Başvurusu 3.6](syntax.md#36-defstruct--structlar-kullanıcı-tanımlı-türler)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Bir tür bağımsız değişkeni belirlenemiyor. Türü `(the Vector<int> (Vector::new))` gibi `the` ile yazın |
+| ``cannot infer type argument `t` for `Vector::new` `` | Bir tür bağımsız değişkeni belirlenemiyor. Türü `(the Vector<int> (Vector::new))` gibi `the` ile yazın |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` her varyantı ele almıyor. Eksik varyantlar için kollar ya da bir `_` kolu ekleyin |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Fonksiyon, geçirdiğiniz türün gerçekleştirmediği bir trait istiyor. `(impl Eq pt ...)` yazın ([Standart Trait'ler](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | `:dyn` beklenen yere, trait'i gerçekleştirmeyen bir türün değeri geçirildi. `impl`'i yazın |

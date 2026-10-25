@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # สตรีมและไฟล์
 
 trait และเมทอดของสตรีม ชนิดสตรีมที่เป็นรูปธรรม การดำเนินการกับไฟล์ และ pathname ซ็อกเก็ตเครือข่ายก็เป็น
@@ -90,7 +90,7 @@ trait และเมทอดของสตรีม ชนิดสตรี�
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` เป็นหนึ่งในสามค่าคงที่ `direction-input` / `direction-output` /
-`direction-append` `open-file` คืน `Err(FileError)` หากเปิดไฟล์ไม่ได้ (ไฟล์ที่หายไปเป็น
+`direction-append` `open-file` คืน `(err FileError)` หากเปิดไฟล์ไม่ได้ (ไฟล์ที่หายไปเป็น
 ผลลัพธ์ธรรมดา ไม่ใช่ panic) ชื่อไฟล์เป็นสตริงหรือ `pathname` ก็ได้ (`Pathish` ใน
 บทที่ 9)
 
@@ -138,18 +138,18 @@ CL ตัดสินชนิดสมาชิกใน **การเรี�
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | ถ่ายโอนทุกอย่าง |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | ทุกบรรทัดที่เหลือ |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | อ่านหนึ่ง `Sexpr` (`read` ของ CL) `Ok(eof)` ที่จุดสิ้นสุดของอินพุต `Ok(datum d)` เมื่ออ่านได้หนึ่งตัว `Err` หากไม่ใช่ข้อมูล มัน **ใช้อักขระช่องว่างหนึ่งตัว** ที่จบ datum (เหมือนใน CL) `ReadOutcome` ไม่ใช่ `Option<Sexpr>` เพื่อให้การอ่านลิสต์ว่าง `()` กับจุดสิ้นสุดของอินพุตไม่เป็นค่าเดียวกัน |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | อ่านหนึ่ง `Sexpr` (`read` ของ CL) `(ok eof)` ที่จุดสิ้นสุดของอินพุต `(ok (datum d))` เมื่ออ่านได้หนึ่งตัว `err` หากไม่ใช่ข้อมูล มัน **ใช้อักขระช่องว่างหนึ่งตัว** ที่จบ datum (เหมือนใน CL) `ReadOutcome` ไม่ใช่ `Option<Sexpr>` เพื่อให้การอ่านลิสต์ว่าง `()` กับจุดสิ้นสุดของอินพุตไม่เป็นค่าเดียวกัน |
 | `read-sexpr-preserving-whitespace` | เหมือนข้างบน | เหมือนข้างบน | เหมือนกัน แต่ทิ้งช่องว่างไว้ (`read-preserving-whitespace` ของ CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | อ่านจนถึง `ch` และสร้างลิสต์ `ch` ถูกใช้ `Err` หากอินพุตหมด |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | อ่านจนถึง `ch` และสร้างลิสต์ `ch` ถูกใช้ `err` หากอินพุตหมด |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | เขียนทีละบรรทัด |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | เนื้อหาทั้งหมด |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | ทุกบรรทัด |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | เขียนออกไป |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | มีอยู่หรือไม่ |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | ลบ เปลี่ยนชื่อ (อาร์กิวเมนต์เป็น `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | พาธสัมบูรณ์ที่แก้ symbolic link และ `.`/`..` แล้ว `Err` หากไม่มีอยู่ |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | พาธสัมบูรณ์ที่แก้ symbolic link และ `.`/`..` แล้ว `err` หากไม่มีอยู่ |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | เวลาของการแก้ไขครั้งล่าสุด เป็น **universal time** ดังนั้น `decode-universal-time` ([เวลา](system.md#2-การถอดรหัสและการเข้ารหัสวันที่)) อ่านได้ |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | ชื่อล็อกอินของเจ้าของ `Err` หากไฟล์ไม่มีอยู่ `Ok(none)` หาก uid ของเจ้าของไม่มีรายการในฐานข้อมูลรหัสผ่าน: สองกรณีที่ CL แยกกันถูกคงไว้แยกกัน |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | ชื่อล็อกอินของเจ้าของ `err` หากไฟล์ไม่มีอยู่ `(ok none)` หาก uid ของเจ้าของไม่มีรายการในฐานข้อมูลรหัสผ่าน: สองกรณีที่ CL แยกกันถูกคงไว้แยกกัน |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | เป็นไดเรกทอรีหรือไม่ **เป็น `false` ด้วยหากไม่มีอยู่** ใช้ `probe-file` เพื่อแยกสองกรณี |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | แสดงเนื้อหาตาม truename (พาธสัมบูรณ์ที่แก้ symbolic link แล้ว เหมือน `truename`) symbolic link ที่เป้าหมายหายไปถูกละไว้ `.`/`..` ถูกละไว้ ลำดับเป็นไปตามที่ OS ให้ |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | สร้างพร้อมไดเรกทอรีแม่ สำเร็จหากมีอยู่แล้ว |

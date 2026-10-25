@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # السلاسل النصية والمحارف والمجموعات
 
 `string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | يقرأ العنصر `i`. ويحدث `panic` خارج النطاق |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | يغيّر العنصر `i`. ويحدث `panic` خارج النطاق. ويمكن كتابته أيضًا `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | عدد العناصر |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | يزيل العنصر الأخير ويعيده. `None` إذا كان فارغًا (وبخلاف `get`/`set` لا يحدث `panic`) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | يزيل العنصر الأخير ويعيده. `none` إذا كان فارغًا (وبخلاف `get`/`set` لا يحدث `panic`) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | يصنع مكرِّرًا ينفّذ `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` حيث `Eq T` | يضيف `x` إذا لم يوجد عنصر مساوٍ (`pushnew` في CL. ولا يحتاج إلى إعادة كتابة موضع (place)، فهو تابع لا ماكرو) |
 

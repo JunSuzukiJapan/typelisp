@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Affichage
 
 `print`/`println`/`format`, les fonctions d'affichage à un argument, le pretty printer, `print-object` et les
@@ -232,8 +232,8 @@ s'affichent comme dans SBCL. Quand la REPL montre un résultat, elle utilise la 
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Idem |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (le nombre est un numéro de série interne) | Idem |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Idem |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (le nombre est un numéro de série interne) | Idem |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Un entier (la valeur du `get-universal-time` / `get-internal-real-time` de CL) | Idem |
 | Types d'erreur (`ParseIntError`, `SimpleError`, etc.) | `#<simpleerror "boom">` | Le message seulement (`boom`) |
@@ -331,30 +331,27 @@ le spécifie CL :
 Une valeur sans partage **n'affiche aucune étiquette** ; laisser cette variable à vrai ne change donc pas la sortie
 du code courant.
 
-### 6.2 Base, casse et lisibilité
+### 6.2 Base et lisibilité
 
 | Variable | Type | Défaut | Signification |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | La base d'affichage des entiers (largeur fixe et `int`). En dehors de 2 à 36, c'est une **erreur d'affichage** (CL spécifie aussi la plage) |
 | `*print-radix*` | `bool` | `false` | Si vrai, ajoute un marqueur de base : `#b`/`#o`/`#x`, `#NNr` pour les autres bases, et un `.` final pour la base 10. Le marqueur va **avant** le signe (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | La casse des noms de symboles : `:upcase` / `:downcase` / `:capitalize` (les mêmes écritures que CL). Tout autre symbole est une erreur d'affichage |
 | `*print-readably*` | `bool` | `false` | Si vrai, affiche sous une forme relisible. Force l'échappement et désactive les coupures de `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Le nombre de lignes que peut utiliser le pretty printer. L'excédent est coupé, avec `..` à la fin comme en CL. 0 signifie illimité. Une valeur négative est une erreur d'affichage |
 | `*print-escape*` | `bool` | `true` | Si `write`/`write-to-string` font `prin1` ou `princ`. **Seules ces deux-là la lisent** |
-| `*print-array*` | `bool` | `true` | Si `Vector<T>` et `Array<T>` montrent leur contenu. Si vrai, la syntaxe des tableaux de CL (`#(1 2 3)` / `#2A((1 2) (3 4))`) ; si faux, seulement le type et la forme, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Si `Vector<T>` et `Array<T>` montrent leur contenu. Si vrai, la syntaxe des tableaux de CL (`#(1 2 3)` / `#2A((1 2) (3 4))`) ; si faux, seulement le type et la forme, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 Les marqueurs qu'ajoute `*print-radix*` peuvent être relus par le lecteur (la notation de base dans la
 [Référence de la syntaxe](../syntax.md#1-éléments-lexicaux)).
 
-**Pourquoi la valeur par défaut de `*print-case*` diffère de CL** : celle de CL est `:upcase` parce que le lecteur de
-CL stocke les noms de symboles en majuscules ; elle signifie donc « tel que stocké ». Ce lecteur les stocke en
-minuscules ; la valeur par défaut de même sens est donc `:downcase`.
+**Pourquoi il n'y a pas de `*print-case*`** : les noms de symbole sont sensibles à la casse et s'impriment tels qu'ils
+sont écrits ; les imprimer dans une autre casse les relirait comme un autre symbole.
 
 **La moitié manquante de `*print-readably*`** : CL signale `print-not-readable` pour les valeurs qui ne peuvent pas
 être relues, mais ce langage n'a pas de condition à signaler, ni de moyen de décider de la lisibilité des types

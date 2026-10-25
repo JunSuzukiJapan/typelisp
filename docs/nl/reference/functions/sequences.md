@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Paren, S-expressies en sequenties
 
 Het generieke paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, de sequentiefuncties die bovenop
@@ -89,8 +89,7 @@ maar niet automatisch in de andere richting.
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Haalt de naam van het symbool eruit. De naam van een keyword bevat geen dubbele punt (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Maakt een symbool uit een string (internt het in de wortelmodule) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Maakt het symbool `name` in de naamruimte `namespace` (de `intern` van CL). `namespace` is een modulepad vanaf de wortel (`"geometry::shapes"`); `"keyword"` is die van de keywords en `""` de wortel. Weggelaten is het de module waarin de aanroep staat |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Geeft het symbool terug waarin `name` gelezen wordt in de naamruimte `namespace` (CL's `intern`). Bestaat er een symbool dat vanuit die naamruimte zichtbaar is (een eigen, een met `use` binnengehaald of dat van de standaardbibliotheek), dan wordt dat teruggegeven; anders wordt er in die naamruimte een nieuw gemaakt. `namespace` is een modulepad vanaf de wortel (`"geometry::shapes"`); `"keyword"` is die van de trefwoorden en `""` de wortel. Een naamruimte die niet bestaat is een fout. Weggelaten is het de module waarin de aanroep staat (er is geen `*package*`). CL's tweede waarde (een status zoals `:internal`) wordt niet teruggegeven |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Of het een keyword is, dat wil zeggen of het tot de keyword-naamruimte behoort ([Syntaxreferentie](../syntax.md#1-lexicale-elementen)) |
 
 Voor `gensym` zie [Macro's](system.md#8-macros).
@@ -115,7 +114,7 @@ Functies die een predicaat nemen (overeenkomend met de `-if`-familie van CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | De eerste positie die aan het predicaat voldoet |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Hoeveel aan het predicaat voldoen |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Of elk element aan het predicaat voldoet |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Of enig element aan het predicaat voldoet (komt overeen met `some` van CL; een naam die niet botst met de constructor `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Of enig element aan het predicaat voldoet (komt overeen met `some` van CL; een naam die niet botst met de constructor `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Linkse vouwing |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Rechtse vouwing |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Verzamelt alle resterende elementen. Hiermee maak je van het resultaat van een `lazy`-functie hieronder een `Vector` |
@@ -126,9 +125,9 @@ Indexeren, lengte en uitsnijden:
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Aantal elementen |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Voegt iterators samen. Er kunnen er drie of meer worden gegeven |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` van CL. Het resultaattype wordt geschreven als **een gequote symboolliteral** (CL gebruikt een runtime-typespecificatie). `'vector` neemt een of meer, `'string` nul of meer (`""` bij nul). `Sexpr`-lijsten worden niet gedekt (gebruik `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` van CL. Het resultaattype wordt geschreven als **een gequote symboolliteral** (CL gebruikt een runtime-typespecificatie). `'vector` neemt een of meer, `'string` nul of meer (`""` bij nul). `Sexpr`-lijsten worden niet gedekt (gebruik `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Omkeren (niet-destructief) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` buiten het bereik) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` buiten het bereik) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` met de argumenten andersom |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | De eerste `n` elementen |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` wordt tot de lengte beperkt) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -33,9 +33,9 @@ fast bredd (tabellen för `int` finns i kapitel 3).
 | `int->int` | `(int->int x)` | `T→int` | Vidgande konvertering till `int` (alltid exakt). Det `(as int x)` gör |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Vidgande konvertering till `ratio` (alltid exakt) |
 | `int->char` | `(int->char x)` | `T→char` | Tolkar värdet som ett skalärt Unicode-värde. Ger panic vid ogiltigt värde |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | En version av `int->char` som returnerar `None` vid misslyckande |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | En version av `int->char` som returnerar `none` vid misslyckande |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Breddkonvertering. Värden som inte ryms trunkeras (som Rusts `as`) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Samma konvertering som en fråga. `None` om värdet inte ryms i den bredden |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Samma konvertering som en fråga. `none` om värdet inte ryms i den bredden |
 
 Dessa konverteringar är också vad specialformerna `(as Type x)`/`(try-as Type x)`
 ([Syntaxreferens](../syntax.md#7-övriga-specialformer)) gör. Bitoperationer (`logand`/`ash`/`ldb` och så

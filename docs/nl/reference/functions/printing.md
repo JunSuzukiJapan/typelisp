@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Afdrukken
 
 `print`/`println`/`format`, de printers met één argument, de pretty printer, `print-object` en de
@@ -237,8 +237,8 @@ weergave als `~s`.
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Hetzelfde |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (het getal is een intern volgnummer) | Hetzelfde |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Hetzelfde |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (het getal is een intern volgnummer) | Hetzelfde |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | Een geheel getal (de waarde van `get-universal-time` / `get-internal-real-time` van CL) | Hetzelfde |
 | Foutentypes (`ParseIntError`, `SimpleError` enzovoort) | `#<simpleerror "boom">` | Alleen de melding (`boom`) |
@@ -338,31 +338,27 @@ twee hetzelfde object zijn", zoals CL voorschrijft:
 Een waarde zonder deling **toont helemaal geen labels**, dus deze variabele op waar laten staan
 verandert de uitvoer van alledaagse code niet.
 
-### 6.2 Grondtal, hoofdlettergebruik en leesbaarheid
+### 6.2 Grondtal en leesbaarheid
 
 | Variabele | Type | Standaard | Betekenis |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | Het grondtal voor het afdrukken van gehele getallen (met vaste breedte en `int`). Buiten 2 tot en met 36 is het een **afdrukfout** (CL specificeert het bereik ook) |
 | `*print-radix*` | `bool` | `false` | Indien waar wordt een grondtalmarkering toegevoegd: `#b`/`#o`/`#x`, `#NNr` voor andere grondtallen, en een afsluitende `.` voor grondtal 10. De markering komt **vóór** het teken (`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | Het hoofdlettergebruik van symboolnamen: `:upcase` / `:downcase` / `:capitalize` (dezelfde schrijfwijzen als CL). Elk ander symbool is een afdrukfout |
 | `*print-readably*` | `bool` | `false` | Indien waar wordt afgedrukt in een vorm die weer kan worden ingelezen. Het dwingt escaping af en schakelt de afkappingen van `*print-level*`/`*print-length*` uit |
 | `*print-lines*` | `int` | `0` | Het aantal regels dat de pretty printer mag gebruiken. Het teveel wordt afgekapt, met `..` aan het einde zoals in CL. 0 betekent onbeperkt. Een negatieve waarde is een afdrukfout |
 | `*print-escape*` | `bool` | `true` | Of `write`/`write-to-string` `prin1` of `princ` doen. **Alleen die twee lezen hem** |
-| `*print-array*` | `bool` | `true` | Of `Vector<T>` en `Array<T>` hun inhoud tonen. Indien waar, de arraysyntaxis van CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); indien onwaar, alleen type en vorm, `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Of `Vector<T>` en `Array<T>` hun inhoud tonen. Indien waar, de arraysyntaxis van CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); indien onwaar, alleen type en vorm, `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 De markeringen die `*print-radix*` toevoegt kunnen door de reader weer worden ingelezen (de
 grondtalnotatie in de [Syntaxreferentie](../syntax.md#1-lexicale-elementen)).
 
-**Waarom de standaardwaarde van `*print-case*` van CL verschilt**: de standaardwaarde van CL is
-`:upcase` omdat de reader van CL symboolnamen in hoofdletters opslaat, dat wil zeggen het betekent "zoals
-opgeslagen". Deze reader slaat ze in kleine letters op, dus de standaardwaarde met dezelfde betekenis is
-`:downcase`.
+**Waarom er geen `*print-case*` is**: symboolnamen zijn hoofdlettergevoelig en worden afgedrukt zoals ze gespeld zijn;
+ze in andere letters afdrukken zou ze teruglezen als een ander symbool.
 
 **De ontbrekende helft van `*print-readably*`**: CL signaleert `print-not-readable` voor waarden die
 niet weer kunnen worden ingelezen, maar deze taal heeft geen conditie om te signaleren, en geen manier

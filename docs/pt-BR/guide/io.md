@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # E/S de arquivos, streams e rede
 
 Este guia mostra o básico de ler e escrever arquivos, nomes de caminho e comunicação por sockets. As listas
@@ -19,7 +19,7 @@ arquivo inexistente não é um erro do programa, então não causa `panic`. Sepa
 ```
 
 Quando você sabe que uma operação não pode falhar, ou em um script pequeno em que parar na falha não tem
-problema, `unwrap` tira o valor. Se for um `Err`, ocorre um panic.
+problema, `unwrap` tira o valor. Se for um `err`, ocorre um panic.
 
 ## 2. Ler e escrever um arquivo inteiro
 
@@ -173,7 +173,7 @@ Para pôr um limite de tempo em uma operação, passe `:timeout` (em segundos).
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; pôr um relógio na próxima leitura
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; pôr um relógio na próxima leitura
 ```
 
 ### Quando o outro lado desconecta
@@ -188,7 +188,7 @@ Não há uma função dedicada à resolução de nomes. Passar um nome de host p
 `send-to` o resolve dentro delas. A resolução acontece em outra thread, então as demais tarefas continuam em
 execução enquanto ela espera. Se um nome tiver vários endereços, eles são tentados em sequência.
 
-Se o nome não puder ser resolvido, um `Err` é devolvido.
+Se o nome não puder ser resolvido, um `err` é devolvido.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -246,5 +246,5 @@ UDP não é um stream; ele envia e recebe um datagrama por vez. Os dados são um
 ## 9. Sockets de domínio Unix
 
 Passe o caminho do arquivo de socket para `unix-listen` / `unix-connect`. O valor obtido é o mesmo
-`socket-stream` do TCP. `unix-listen` devolve um `Err` se o arquivo já existir. Fechar o listener remove o
+`socket-stream` do TCP. `unix-listen` devolve um `err` se o arquivo já existir. Fechar o listener remove o
 arquivo.

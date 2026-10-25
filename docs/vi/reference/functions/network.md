@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Mạng (TCP / TLS / Unix domain / UDP)
 
 Socket là thành viên của các [stream](streams-files.md). Một kết nối được nhìn qua **hai góc nhìn của cùng
@@ -21,7 +21,7 @@ chạy. Đó là lý do một server có thể được viết cùng dạng như
 | `socket-listener` | `Stream` (`close` / `open-stream-p`) | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | — (`bytes`: `Vector<int>`, `from`: `string`) | `recv-from` |
-| `NetError` | `Error` | `Err` của các hàm bên dưới |
+| `NetError` | `Error` | `err` của các hàm bên dưới |
 
 Một kiểu stream có một kiểu phần tử (vì cùng lý do như `file-stream`/`binary-file-stream`), nên ký tự và
 byte là các kiểu khác nhau. `byte-stream-of`/`char-stream-of` trả về các giá trị trỏ tới **cùng một kết
@@ -33,16 +33,16 @@ quy tắc như với tệp).
 
 | Tên | Cách dùng | Kiểu | Ý nghĩa |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Kết nối. `host` có thể là một tên hoặc một địa chỉ. Nếu một tên có nhiều địa chỉ, chúng được thử lần lượt (`localhost` là `::1` và `127.0.0.1`). Phân giải tên thất bại, kết nối bị từ chối, hoặc vượt quá `:timeout` giây cho `Err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS sau `tcp-connect`. Chứng chỉ được xác minh theo tên `host` (`:server-name` nếu tên cần xác minh khác với nơi bạn kết nối) bằng các chứng chỉ gốc của Mozilla. Nếu có `:ca-file` (PEM), nó chỉ tin **các chứng chỉ trong đó** (một CA riêng, hoặc chính chứng chỉ mà `tls-listen` của bạn đưa ra). `:cert-file`/`:key-file` (cả hai hoặc không cái nào) là chứng chỉ của chúng ta, được đưa ra khi server yêu cầu (mutual TLS). Quá trình bắt tay hoàn tất ở đây, nên nếu chứng chỉ của server không đạt, lời gọi này trả về `Err`. Kết quả là một `socket-stream` thông thường |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Kết nối. `host` có thể là một tên hoặc một địa chỉ. Nếu một tên có nhiều địa chỉ, chúng được thử lần lượt (`localhost` là `::1` và `127.0.0.1`). Phân giải tên thất bại, kết nối bị từ chối, hoặc vượt quá `:timeout` giây cho `err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS sau `tcp-connect`. Chứng chỉ được xác minh theo tên `host` (`:server-name` nếu tên cần xác minh khác với nơi bạn kết nối) bằng các chứng chỉ gốc của Mozilla. Nếu có `:ca-file` (PEM), nó chỉ tin **các chứng chỉ trong đó** (một CA riêng, hoặc chính chứng chỉ mà `tls-listen` của bạn đưa ra). `:cert-file`/`:key-file` (cả hai hoặc không cái nào) là chứng chỉ của chúng ta, được đưa ra khi server yêu cầu (mutual TLS). Quá trình bắt tay hoàn tất ở đây, nên nếu chứng chỉ của server không đạt, lời gọi này trả về `err`. Kết quả là một `socket-stream` thông thường |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Kết nối tới Unix domain socket `path`. Nó là cục bộ, nên không có chờ bắt tay và không có timeout |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | Lắng nghe. `"127.0.0.1"` chỉ là máy này, `"0.0.0.0"` là mọi giao diện mạng. Truyền `0` làm `port` để HĐH chọn |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | Phiên bản TLS của `tcp-listen`. `cert-file` là chuỗi chứng chỉ (PEM, chứng chỉ của chính mình đứng đầu), và `key-file` là khóa riêng. Cả hai được đọc và kiểm tra ở đây, nên một khóa không khớp cho `Err` từ lời gọi này, không phải ở client đầu tiên. `accept` trả về **trước khi bắt tay**, và lần đọc hoặc ghi đầu tiên của task xử lý kết nối hoàn tất bắt tay (như `tls.Conn` của Go), nên một client bắt tay chậm không giữ chân các `accept` khác. Nếu có `:client-ca` (PEM), nó **yêu cầu mọi client** đưa ra một chứng chỉ do một CA trong đó cấp (mutual TLS). Không có nó thì không yêu cầu |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | Lắng nghe tại `path`. **`Err` nếu tệp đã tồn tại** (nó có thể thuộc về một tiến trình khác đang chạy, nên không bị thay thế một cách im lặng). `close` xóa tệp |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Kết nối tiếp theo. Dừng task cho đến khi có một kết nối đến. Bỏ cuộc với `Err` sau `:timeout` giây |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | Phiên bản TLS của `tcp-listen`. `cert-file` là chuỗi chứng chỉ (PEM, chứng chỉ của chính mình đứng đầu), và `key-file` là khóa riêng. Cả hai được đọc và kiểm tra ở đây, nên một khóa không khớp cho `err` từ lời gọi này, không phải ở client đầu tiên. `accept` trả về **trước khi bắt tay**, và lần đọc hoặc ghi đầu tiên của task xử lý kết nối hoàn tất bắt tay (như `tls.Conn` của Go), nên một client bắt tay chậm không giữ chân các `accept` khác. Nếu có `:client-ca` (PEM), nó **yêu cầu mọi client** đưa ra một chứng chỉ do một CA trong đó cấp (mutual TLS). Không có nó thì không yêu cầu |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | Lắng nghe tại `path`. **`err` nếu tệp đã tồn tại** (nó có thể thuộc về một tiến trình khác đang chạy, nên không bị thay thế một cách im lặng). `close` xóa tệp |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Kết nối tiếp theo. Dừng task cho đến khi có một kết nối đến. Bỏ cuộc với `err` sau `:timeout` giây |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | Cho đến khi có thể đọc mà không phải chờ, hoặc `secs` giây. `true` nghĩa là vế trước (gồm cả dữ liệu đã nằm sẵn trong bộ đệm). Cách đặt đồng hồ cho một lần đọc: `(if (wait-readable c 5.0) (read-line c) ...)`. Điều nó đảm bảo là **lần đọc tiếp theo không dừng**; `read-line` có thể chờ phần còn lại của dòng |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | Cho đến khi có thể ghi, hoặc `secs` giây |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Thêm một chứng chỉ nữa vào listener của `tls-listen`, được đưa ra cho các client yêu cầu `name` (SNI): nhiều site trên một listener. Việc chuỗi có dành cho `name` hay không được kiểm tra ở đây, và nếu không, lời gọi này trả về `Err`. Các client yêu cầu một tên chưa ai thêm, hoặc không yêu cầu tên nào, nhận chứng chỉ của `tls-listen` |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Thêm một chứng chỉ nữa vào listener của `tls-listen`, được đưa ra cho các client yêu cầu `name` (SNI): nhiều site trên một listener. Việc chuỗi có dành cho `name` hay không được kiểm tra ở đây, và nếu không, lời gọi này trả về `err`. Các client yêu cầu một tên chưa ai thêm, hoặc không yêu cầu tên nào, nhận chứng chỉ của `tls-listen` |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | Subject của chứng chỉ phía đối tác (`CN=client,O=Example,C=JP`, dạng RFC 4514, cụ thể nhất đứng đầu). Cách một server mutual-TLS biết "ai đã kết nối" (sau lần đọc đầu tiên, vốn hoàn tất bắt tay). Phía client, là tên của chứng chỉ server. `none` với kết nối thường, trước khi bắt tay, hoặc nếu đối tác không đưa ra chứng chỉ |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | Trên một kết nối TLS phía server, tên mà client đã yêu cầu (SNI). Cách một server có nhiều site thêm bằng `tls-add-certificate` biết "site nào". `none` với kết nối thường, phía client, hoặc khi không có tên (kết nối bằng địa chỉ) |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | Tắt Nagle (`TCP_NODELAY`). `write-string` đi hết tới socket mỗi lần, nên khi bật Nagle, một phản hồi ghi thành hai phần, header và thân, phải chờ ACK trì hoãn của đối tác: hãy dùng `true` cho các giao thức yêu cầu/phản hồi. Unix domain socket không có Nagle, và nó đơn giản là thành công |
@@ -123,7 +123,7 @@ cho nó.
 ```
 
 Với mutual TLS, một client không đưa ra chứng chỉ (hoặc đưa ra chứng chỉ không đạt) hoàn tất phía bắt tay của
-chính nó trước khi server quyết định, theo TLS 1.3, nên `tls-connect` trả về `Ok` và **lần đọc đầu tiên trả về
+chính nó trước khi server quyết định, theo TLS 1.3, nên `tls-connect` trả về `ok` và **lần đọc đầu tiên trả về
 `none`** (với cảnh báo nằm trong `socket-error`). Phía server, lần đọc đầu tiên của cùng kết nối cũng trả về
 `none`. Cả hai phía đều không panic.
 

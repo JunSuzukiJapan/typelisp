@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # الشبكات (TCP / TLS / نطاق Unix / UDP)
 
 المقابس (sockets) من أفراد [التدفقات](streams-files.md). ويُرى الاتصال في **منظورين للاتصال نفسه**:
@@ -21,7 +21,7 @@ Unix في نوع واحد** (مثل `net.Conn` في Go): فبعد الاتصال
 | `socket-listener` | `Stream` (`close` / `open-stream-p`) | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | — (`bytes`: `Vector<int>`، `from`: `string`) | `recv-from` |
-| `NetError` | `Error` | قيمة `Err` الراجعة من الدوال أدناه |
+| `NetError` | `Error` | قيمة `err` الراجعة من الدوال أدناه |
 
 لنوع التدفق نوع عنصر واحد (للسبب نفسه في `file-stream`/`binary-file-stream`)، فالمحارف والبايتات نوعان
 مختلفان. وتعيد `byte-stream-of`/`char-stream-of` قيمًا تشير إلى **الاتصال نفسه** وتتشارك مخزن الاستقبال
@@ -32,16 +32,16 @@ Unix في نوع واحد** (مثل `net.Conn` في Go): فبعد الاتصال
 
 | الاسم | الاستخدام | النوع | المعنى |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | يتصل. ويمكن أن يكون `host` اسمًا أو عنوانًا. وإذا كان للاسم عدة عناوين جُرّبت بالتتابع (`localhost` هو `::1` و`127.0.0.1`). وفشل حل الاسم أو رفض الاتصال أو تجاوز `:timeout` ثانية يعطي `Err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS بعد `tcp-connect`. تُفحص الشهادة مقابل اسم `host` (أو `:server-name` إذا اختلف الاسم المراد التحقق منه عن مكان الاتصال) بشهادات الجذر من Mozilla. وعند إعطاء `:ca-file` (PEM) يثق **بالشهادات التي فيه فقط** (سلطة شهادات خاصة، أو الشهادة نفسها التي يقدمها `tls-listen` الخاص بك). و`:cert-file`/`:key-file` (كلاهما أو لا شيء) هما شهادتنا، وتُقدَّم عندما يطلب الخادم شهادة (TLS المتبادل). وتكتمل المصافحة هنا، فإذا لم تجتز شهادة الخادم أعاد هذا الاستدعاء `Err`. والنتيجة `socket-stream` عادي |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | يتصل. ويمكن أن يكون `host` اسمًا أو عنوانًا. وإذا كان للاسم عدة عناوين جُرّبت بالتتابع (`localhost` هو `::1` و`127.0.0.1`). وفشل حل الاسم أو رفض الاتصال أو تجاوز `:timeout` ثانية يعطي `err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS بعد `tcp-connect`. تُفحص الشهادة مقابل اسم `host` (أو `:server-name` إذا اختلف الاسم المراد التحقق منه عن مكان الاتصال) بشهادات الجذر من Mozilla. وعند إعطاء `:ca-file` (PEM) يثق **بالشهادات التي فيه فقط** (سلطة شهادات خاصة، أو الشهادة نفسها التي يقدمها `tls-listen` الخاص بك). و`:cert-file`/`:key-file` (كلاهما أو لا شيء) هما شهادتنا، وتُقدَّم عندما يطلب الخادم شهادة (TLS المتبادل). وتكتمل المصافحة هنا، فإذا لم تجتز شهادة الخادم أعاد هذا الاستدعاء `err`. والنتيجة `socket-stream` عادي |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | يتصل بمقبس نطاق Unix في `path`. وهو محلي، فلا انتظار للمصافحة ولا مهلة زمنية |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | يستمع. `"127.0.0.1"` لهذا الجهاز وحده، و`"0.0.0.0"` لكل واجهة. وتمرير `0` لـ `port` يترك لنظام التشغيل الاختيار |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | نسخة TLS من `tcp-listen`. `cert-file` سلسلة الشهادات (PEM، وشهادتك أولًا) و`key-file` المفتاح الخاص. ويُقرآن ويُفحصان هنا، فمفتاح غير مطابق يعطي `Err` من هذا الاستدعاء لا عند أول عميل. وتعود `accept` **قبل المصافحة**، وتكمل أول قراءة أو كتابة من المهمة التي تعالج الاتصال المصافحة (مثل `tls.Conn` في Go)، فلا يعطّل عميل بطيء المصافحة بقية استدعاءات `accept`. وعند إعطاء `:client-ca` (PEM) **يشترط على كل عميل** تقديم شهادة صادرة عن سلطة فيه (TLS المتبادل). وبدونه لا تُطلب أي شهادة |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | يستمع عند `path`. **`Err` إذا كان الملف موجودًا** (فقد يكون لعملية أخرى جارية، فلا يُستبدل بصمت). ويزيل `close` الملف |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | الاتصال التالي. يوقف المهمة حتى يأتي واحد. ويستسلم بـ `Err` بعد `:timeout` ثانية |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | نسخة TLS من `tcp-listen`. `cert-file` سلسلة الشهادات (PEM، وشهادتك أولًا) و`key-file` المفتاح الخاص. ويُقرآن ويُفحصان هنا، فمفتاح غير مطابق يعطي `err` من هذا الاستدعاء لا عند أول عميل. وتعود `accept` **قبل المصافحة**، وتكمل أول قراءة أو كتابة من المهمة التي تعالج الاتصال المصافحة (مثل `tls.Conn` في Go)، فلا يعطّل عميل بطيء المصافحة بقية استدعاءات `accept`. وعند إعطاء `:client-ca` (PEM) **يشترط على كل عميل** تقديم شهادة صادرة عن سلطة فيه (TLS المتبادل). وبدونه لا تُطلب أي شهادة |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | يستمع عند `path`. **`err` إذا كان الملف موجودًا** (فقد يكون لعملية أخرى جارية، فلا يُستبدل بصمت). ويزيل `close` الملف |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | الاتصال التالي. يوقف المهمة حتى يأتي واحد. ويستسلم بـ `err` بعد `:timeout` ثانية |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | حتى تمكن القراءة دون انتظار، أو `secs` ثانية. و`true` تعني الأول (بما في ذلك بيانات مخزنة مؤقتًا بالفعل). وهو طريقة وضع مؤقت على قراءة: `(if (wait-readable c 5.0) (read-line c) ...)`. وما يعد به هو أن **القراءة التالية لا تتوقف**؛ وقد تنتظر `read-line` بقية السطر |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | حتى تمكن الكتابة، أو `secs` ثانية |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | يضيف شهادة أخرى إلى مستمِع `tls-listen`، تُقدَّم للعملاء الذين يطلبون `name` (SNI): عدة مواقع على مستمِع واحد. ويُفحص هنا هل السلسلة مخصصة لـ `name`، وإلا أعاد هذا الاستدعاء `Err`. والعملاء الذين يطلبون اسمًا لم يضفه أحد، أو لا يطلبون اسمًا، يحصلون على شهادة `tls-listen` |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | يضيف شهادة أخرى إلى مستمِع `tls-listen`، تُقدَّم للعملاء الذين يطلبون `name` (SNI): عدة مواقع على مستمِع واحد. ويُفحص هنا هل السلسلة مخصصة لـ `name`، وإلا أعاد هذا الاستدعاء `err`. والعملاء الذين يطلبون اسمًا لم يضفه أحد، أو لا يطلبون اسمًا، يحصلون على شهادة `tls-listen` |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | موضوع (subject) شهادة الطرف الآخر (`CN=client,O=Example,C=JP`، بصيغة RFC 4514، الأكثر تحديدًا أولًا). وهي الطريقة التي يعرف بها خادم TLS المتبادل "من الذي اتصل" (بعد أول قراءة، التي تكمل المصافحة). وفي جانب العميل اسم شهادة الخادم. و`none` للاتصالات العادية، أو قبل المصافحة، أو إذا لم يقدم الطرف الآخر شهادة |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | في اتصال TLS من جانب الخادم، الاسم الذي طلبه العميل (SNI). وهي الطريقة التي يعرف بها خادم له عدة مواقع أُضيفت بـ `tls-add-certificate` "أي موقع". و`none` للاتصالات العادية، أو في جانب العميل، أو بلا اسم (اتصال بالعنوان) |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | يوقف Nagle (`TCP_NODELAY`). وتذهب `write-string` إلى المقبس مباشرة كل مرة، فمع تفعيل Nagle تنتظر استجابة مكتوبة على جزأين، ترويسة وجسم، ACK المتأخر من الطرف الآخر: استخدم `true` لبروتوكولات الطلب/الاستجابة. ولا Nagle في مقابس نطاق Unix، فتنجح ببساطة |
@@ -120,7 +120,7 @@ Unix في نوع واحد** (مثل `net.Conn` في Go): فبعد الاتصال
 ```
 
 في TLS المتبادل يُنهي العميل الذي لا يقدم شهادة (أو يقدم شهادة لا تجتاز) جانبه من المصافحة قبل أن يقرر
-الخادم، في TLS 1.3، فتعيد `tls-connect` القيمة `Ok` و**تعيد أول قراءة `none`** (مع التنبيه في
+الخادم، في TLS 1.3، فتعيد `tls-connect` القيمة `ok` و**تعيد أول قراءة `none`** (مع التنبيه في
 `socket-error`). وفي جانب الخادم تعيد أول قراءة على الاتصال نفسه `none` أيضًا. ولا يحدث `panic` في أي من
 الجانبين.
 

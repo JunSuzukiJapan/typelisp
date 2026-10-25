@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,
@@ -84,8 +84,7 @@ theo chiều ngược lại.
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Lấy tên của symbol. Tên của keyword không chứa dấu hai chấm (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Tạo một symbol từ một chuỗi (intern nó trong module gốc) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Tạo symbol `name` trong không gian tên `namespace` (`intern` của CL). `namespace` là đường dẫn module tính từ gốc (`"geometry::shapes"`); `"keyword"` là của keyword và `""` là gốc. Nếu bỏ qua, đó là module nơi lời gọi được viết |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Trả về symbol mà `name` được đọc thành trong không gian tên `namespace` (`intern` của CL). Nếu có một symbol nhìn thấy được từ không gian tên đó (của chính nó, được đưa vào bằng `use`, hoặc của thư viện chuẩn) thì trả về symbol đó; nếu không thì tạo mới trong không gian tên đó. `namespace` là đường dẫn module từ gốc (`"geometry::shapes"`); `"keyword"` là của từ khóa và `""` là gốc. Không gian tên không tồn tại là lỗi. Nếu bỏ qua thì là module nơi viết lời gọi (không có `*package*`). Không trả về giá trị thứ hai của CL (trạng thái như `:internal`) |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Có phải là keyword không, tức là có thuộc không gian tên keyword không ([Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng)) |
 
 Về `gensym`, xem [Macro](system.md#8-macro).
@@ -109,7 +108,7 @@ Các hàm nhận một vị từ (tương ứng với họ `-if` của CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Vị trí đầu tiên thỏa vị từ |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Có bao nhiêu phần tử thỏa vị từ |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Mọi phần tử có thỏa vị từ không |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Có phần tử nào thỏa vị từ không (tương ứng với `some` của CL; một cái tên không trùng với hàm khởi tạo `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Có phần tử nào thỏa vị từ không (tương ứng với `some` của CL; một cái tên không trùng với hàm khởi tạo `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Gấp trái |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Gấp phải |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Gom tất cả các phần tử còn lại. Dùng để biến kết quả của một hàm `lazy` bên dưới thành `Vector` |
@@ -120,9 +119,9 @@ Các hàm nhận một vị từ (tương ứng với họ `-if` của CL):
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Số phần tử |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Nối các iterator. Có thể đưa ba trở lên |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` của CL. Kiểu kết quả được viết là **một literal symbol có dấu nháy** (CL dùng một type specifier lúc chạy). `'vector` nhận một trở lên, `'string` nhận không hoặc nhiều hơn (`""` cho không). Danh sách `Sexpr` không được bao phủ (dùng `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` của CL. Kiểu kết quả được viết là **một literal symbol có dấu nháy** (CL dùng một type specifier lúc chạy). `'vector` nhận một trở lên, `'string` nhận không hoặc nhiều hơn (`""` cho không). Danh sách `Sexpr` không được bao phủ (dùng `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Đảo ngược (không phá hủy) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Phần tử `n` (`None` khi ngoài phạm vi) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Phần tử `n` (`none` khi ngoài phạm vi) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` với thứ tự đối số ngược lại |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | `n` phần tử đầu tiên |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` bị kẹp về độ dài) |

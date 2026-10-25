@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -126,7 +126,7 @@ saving time information is ignored*).
 **표준 입력이 터미널이 아니면 `step`은 그냥 `form`을 평가한다.** 아무도 답할 수 없는 프롬프트에서 스크립트와 테스트가
 멈추지 않도록 CLHS가 명시적으로 허용하는 퇴화한 동작이다.
 
-`ed`의 `$VISUAL` / `$EDITOR`는 공백에서 나뉘므로 `EDITOR="code -w"`도 동작한다. 둘 다 설정되지 않았으면 결과는 `Err`이며
+`ed`의 `$VISUAL` / `$EDITOR`는 공백에서 나뉘므로 `EDITOR="code -w"`도 동작한다. 둘 다 설정되지 않았으면 결과는 `err`이며
 `vi`를 추측하지 않는다. 줄 번호는 `+N` 형태로 먼저 넘긴다.
 
 `dribble`은 세션의 출력이 프로세스를 떠나는 세 가지 길을 모두 기록한다. `print`/`println`/`format`이 쓰는 것, 표준 출력에
@@ -134,14 +134,14 @@ saving time information is ignored*).
 
 ## 6. 해석과 평가
 
-모두 실행 시의 텍스트와 데이터(프로그램 자신이 통제하지 않는 것)를 다루므로 실패하면 panic하지 않고 `Result`의 `Err`을
+모두 실행 시의 텍스트와 데이터(프로그램 자신이 통제하지 않는 것)를 다루므로 실패하면 panic하지 않고 `Result`의 `err`을
 반환한다. 오류 타입은 연산마다의 구체 타입이다([오류 타입](option-result.md#3-오류-타입과-error-트레이트)).
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL의 `parse-integer`. 앞뒤의 공백(`trim`과 같은 집합)을 건너뛰고, 부호 `+`/`-`를 최대 하나, 그다음 기수 `radix`(기본 10, 2~36. 10 이상의 숫자는 대소문자 어느 쪽이든)의 숫자를 읽는다. 자릿수에 제한은 없다(`int`). 다른 문자가 남으면 `Err`. `:junk-allowed true`면 첫 숫자가 아닌 문자에서 멈추고 나머지를 무시하지만 숫자가 하나도 없으면 `Err`(CL의 `nil`에 해당). CL의 두 번째 값(읽기가 끝난 위치)은 반환하지 않는다. 범위를 벗어난 `radix`는 panic(텍스트가 아니라 호출한 쪽의 실수) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL의 `parse-integer`. 앞뒤의 공백(`trim`과 같은 집합)을 건너뛰고, 부호 `+`/`-`를 최대 하나, 그다음 기수 `radix`(기본 10, 2~36. 10 이상의 숫자는 대소문자 어느 쪽이든)의 숫자를 읽는다. 자릿수에 제한은 없다(`int`). 다른 문자가 남으면 `err`. `:junk-allowed true`면 첫 숫자가 아닌 문자에서 멈추고 나머지를 무시하지만 숫자가 하나도 없으면 `err`(CL의 `nil`에 해당). CL의 두 번째 값(읽기가 끝난 위치)은 반환하지 않는다. 범위를 벗어난 `radix`는 panic(텍스트가 아니라 호출한 쪽의 실수) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 부동소수점 수. `inf`/`nan`도 받는다 |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`에서 `Sexpr`를 하나 읽는다(소스 코드를 읽는 것과 같은 리더로). 괄호의 짝이 맞지 않거나 끝나지 않은 문자열 등은 `Err`. 스트림에서 읽기는 `read-sexpr`([스트림](streams-files.md#6-제네릭-함수와-파일-조작)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`에서 `Sexpr`를 하나 읽는다(소스 코드를 읽는 것과 같은 리더로). 괄호의 짝이 맞지 않거나 끝나지 않은 문자열 등은 `err`. 스트림에서 읽기는 `read-sexpr`([스트림](streams-files.md#6-제네릭-함수와-파일-조작)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read`에 **읽기가 끝난 위치**를 더한 것. `(car r)`가 값, `(cdr r)`가 다음에 읽을 문자의 위치. `start`의 기본값은 0 |
 | `read-from-string-preserving-whitespace` | 위와 같음 | 위와 같음 | 같지만 데이터를 끝낸 공백을 소비하지 않는다. 차이는 반환하는 위치에 나타난다 |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | `form`을 실행 시에 타입 검사해 평가한다. CL의 `eval`을 따른다 |
@@ -162,7 +162,7 @@ CL은 `read-from-string`에서 **두 값**(값과 위치)을 반환하지만 이
 `read-preserving-whitespace`는 남긴다. `(read-from-string "12 34")`는 위치 3을, 남기는 판은 2를 반환한다.
 
 리더가 받는 수의 구문은 [문법 레퍼런스 1장](../syntax.md#1-어휘-요소)에 있다. `*print-radix*`
-([출력](printing.md#62-기수-대소문자-읽을-수-있는-형태))가 출력하는 것은 그대로 다시 읽을 수 있다. CL의 `*read-base*`는
+([출력](printing.md#62-기수-읽을-수-있는-형태))가 출력하는 것은 그대로 다시 읽을 수 있다. CL의 `*read-base*`는
 없다.
 
 ### 6.1 `eval`의 의미
@@ -186,7 +186,7 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
   참조할 수 없다**. 파일에 직접 쓴 `(sq 9)`는 `sq`를 정의하는 `eval`이 실행되기 전에 검사되어 "정의되지 않음"이 된다.
   다만 **나중의 `eval`에서는 보인다**(그 타입 검사는 정의 뒤인 실행 시에 돌기 때문이다). REPL은 한 줄씩 검사하고 실행하므로
   `eval`로 정의한 이름을 다음 줄에서 바로 호출할 수 있다.
-- **오류**: 타입 오류와 구문 오류는 `Err`을 반환한다(panic하지 않는다). 평가한 코드 안의 **실행 시 panic**(0으로 나누기
+- **오류**: 타입 오류와 구문 오류는 `err`을 반환한다(panic하지 않는다). 평가한 코드 안의 **실행 시 panic**(0으로 나누기
   등)은 직접 쓴 코드에서처럼 전파된다. 사이에 있는 `unwind-protect`의 뒷정리는 실행된다
   ([문법 레퍼런스 8장](../syntax.md#8-비지역-탈출catch--throw--unwind-protect)).
 - **이름공간**: `typl file.typl`로 실행할 때와 AOT 실행 파일 안에서 `eval`은 스크립트의 모듈의 이름공간에서 평가한다

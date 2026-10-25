@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`번째 요소를 읽는다. 범위를 벗어나면 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`번째 요소를 바꾼다. 범위를 벗어나면 panic. `(setf (get v i) x)`로도 쓸 수 있다 |
 | `len` | `(len v)` | `Vector<T>→int` | 요소 수 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 마지막 요소를 없애고 반환한다. 비어 있으면 `None`(`get`/`set`과 달리 panic하지 않는다) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 마지막 요소를 없애고 반환한다. 비어 있으면 `none`(`get`/`set`과 달리 panic하지 않는다) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`를 구현한 이터레이터를 만든다 |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | 같은 요소가 없으면 `x`를 추가한다(CL의 `pushnew`. 장소를 고쳐 쓸 필요가 없으므로 매크로가 아니라 메서드) |
 

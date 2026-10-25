@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Çiftler, S-İfadeler ve Diziler
 
 Jenerik çift `cons-cell`, S-ifade verisi `Sexpr`, semboller, `Iter` üzerine yazılmış dizi fonksiyonları ve
@@ -85,8 +85,7 @@ yönde otomatik olarak dönüşmez.
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Sembolün adını çıkarır. Bir anahtar sözcüğün adında iki nokta yoktur (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Bir string'den sembol yapar (kök modülde intern eder) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | `namespace` ad alanında `name` sembolünü yapar (CL'nin `intern`'i). `namespace`, kökten bir modül yoludur (`"geometry::shapes"`); `"keyword"` anahtar sözcüklerinki, `""` köktür. Verilmezse çağrının yazıldığı modüldür |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | `name`'in `namespace` ad alanında okunduğu sembolü döndürür (CL'nin `intern`'i). O ad alanından görünen bir sembol varsa (kendi sembolü, `use` ile getirilen ya da standart kitaplığınki) onu döndürür; yoksa o ad alanında yenisini oluşturur. `namespace` kökten bir modül yoludur (`"geometry::shapes"`); `"keyword"` anahtar sözcüklerinki, `""` köktür. Var olmayan bir ad alanı hatadır. Verilmezse çağrının yazıldığı modüldür (`*package*` yoktur). CL'nin ikinci değeri (`:internal` gibi bir durum) döndürülmez |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Bir anahtar sözcük olup olmadığı, yani anahtar sözcük ad alanına ait olup olmadığı ([Sözdizimi Başvurusu](../syntax.md#1-sözcüksel-öğeler)) |
 
 `gensym` için [Makrolar](system.md#8-makrolar) bölümüne bakın.
@@ -110,7 +109,7 @@ Bir yüklem alan fonksiyonlar (CL'nin `-if` ailesine karşılık gelir):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Yüklemi sağlayan ilk konum |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Kaçının yüklemi sağladığı |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Her elemanın yüklemi sağlayıp sağlamadığı |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Herhangi bir elemanın yüklemi sağlayıp sağlamadığı (CL'nin `some`'una karşılık gelir; `Some` yapıcısıyla çakışmayan bir ad) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Herhangi bir elemanın yüklemi sağlayıp sağlamadığı (CL'nin `some`'una karşılık gelir; `some` yapıcısıyla çakışmayan bir ad) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Soldan katlama |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Sağdan katlama |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Kalan tüm öğeleri toplar. Aşağıdaki bir `lazy` fonksiyonunun sonucunu `Vector`'a çevirmek için kullanılır |
@@ -121,9 +120,9 @@ Bir yüklem alan fonksiyonlar (CL'nin `-if` ailesine karşılık gelir):
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Eleman sayısı |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Yineleyicileri birleştirir. Üç ya da daha fazlası verilebilir |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL'nin `concatenate`'i. Sonuç türü **tırnaklı bir sembol sabiti** olarak yazılır (CL çalışma zamanı tür belirleyicisi kullanır). `'vector` bir ya da daha fazlasını, `'string` sıfır ya da daha fazlasını alır (sıfır için `""`). `Sexpr` listeleri kapsanmaz (`sexpr-append` kullanın) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL'nin `concatenate`'i. Sonuç türü **tırnaklı bir sembol sabiti** olarak yazılır (CL çalışma zamanı tür belirleyicisi kullanır). `'vector` bir ya da daha fazlasını, `'string` sıfır ya da daha fazlasını alır (sıfır için `""`). `Sexpr` listeleri kapsanmaz (`sexpr-append` kullanın) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Tersine çevirme (yıkıcı olmayan) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`'inci eleman (aralık dışında `None`) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`'inci eleman (aralık dışında `none`) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | Bağımsız değişkenleri ters sırada `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | İlk `n` eleman |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` uzunluğa kırpılır) |

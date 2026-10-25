@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Komunikaty o błędach
 
 Co oznaczają główne komunikaty o błędach z `typl` i jak je naprawić.
@@ -44,7 +44,7 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | ``type mismatch: expected `T`, found `U` `` | Wyrażenie typu `U` stoi tam, gdzie potrzebny jest typ `T`. Nie ma niejawnych konwersji; dla liczb przekonwertuj za pomocą `(as T x)`. `int` i `i32` to także różne typy |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | Literał nie mieści się w typie. Jeśli chcesz go obciąć, napisz `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Nie ma typu o tej nazwie. Zdefiniuj typ przed pierwszą formą, która go używa (typy nie mają deklaracji wyprzedzających). Jeśli miałeś na myśli zmienną typową, zapisz ją w pozycji deklarującej, takiej jak `<foo>` po nazwie funkcji ([Referencja składni 3.6](syntax.md#36-defstruct--struktury-typy-definiowane-przez-użytkownika)) |
-| ``cannot infer type argument `t` for `vector::new` `` | Nie da się określić argumentu typu. Zapisz typ za pomocą `the`, jak w `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | Nie da się określić argumentu typu. Zapisz typ za pomocą `the`, jak w `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` nie obsługuje każdego wariantu. Dodaj ramiona dla brakujących wariantów lub ramię `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Funkcja wymaga traitu, którego przekazany typ nie implementuje. Napisz `(impl Eq pt ...)` ([Traity standardowe](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Wartość typu, który nie implementuje traitu, została przekazana tam, gdzie oczekiwane jest `:dyn`. Napisz `impl` |

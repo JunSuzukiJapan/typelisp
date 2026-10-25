@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -7,7 +7,7 @@ typelisp เป็น Lisp ที่มีระบบชนิดแบบส�
 
 ## 1. องค์ประกอบทางศัพท์
 
-- **ไม่แยกตัวพิมพ์ใหญ่และเล็ก** สัญลักษณ์ทั้งหมดถูกทำให้เป็นตัวพิมพ์เล็กเมื่ออ่าน
+- **แยกตัวพิมพ์ใหญ่และเล็ก** `foo` กับ `Foo` เป็นสัญลักษณ์คนละตัว ชื่อชนิดขึ้นต้นด้วยตัวพิมพ์ใหญ่ (`Option`, `Vector` เป็นต้น ส่วนชนิดพื้นฐานอย่าง `int` และ `string` เป็นตัวพิมพ์เล็ก)
 - **คอมเมนต์**: จาก `;` ถึงท้ายบรรทัด (คอมเมนต์บรรทัด) `#| ... |#` (คอมเมนต์แบบบล็อก ซ้อนกันได้)
 - **การประเมินค่าตอนอ่าน**: `#.(expr)` **รันฟอร์มที่ตามมาขณะอ่าน** และถือค่าของมันเป็นสิ่งที่อ่านได้ นี่เป็นที่เดียว
   ที่ตัวอ่านเป็นมากกว่าฟังก์ชันของข้อความ ขอบเขตที่เข้าถึงได้ขึ้นกับเส้นทางการอ่าน เหมือนใน CL:
@@ -112,7 +112,7 @@ typelisp เป็น Lisp ที่มีระบบชนิดแบบส�
   ที่มันสืบทอดแบบถ่ายทอด) (upcasting) ส่งให้ trait ที่ไม่เกี่ยวข้องไม่ได้
   สำหรับเงื่อนไขที่ trait ต้องมีจึงใช้กับ `:dyn` ได้ ดู
   [3.9 deftrait / impl](#39-deftrait--impl--trait) การเขียน `:dyn` นอกตำแหน่งของชนิดเป็นข้อผิดพลาด
-- ชนิด generic ที่มีให้ในตัว: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- ชนิด generic ที่มีให้ในตัว: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>` และชนิดการทำงานพร้อมกัน `Task<T>` / `Thread<T>` / `Chan<T>`
   ([บทที่ 12](#12-การทำงานพร้อมกัน-task)) ยังมี `Sexpr` ชนิดของข้อมูล S-expression
   ชนิดข้อผิดพลาดที่เป็นรูปธรรมที่มีให้ในตัวคือ `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -774,8 +774,8 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 
 ; generic
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - แต่ละ variant มีรูปแบบ `(VariantName FieldType...)` ฟิลด์เป็นแบบตามตำแหน่งเท่านั้น (ไม่มี
@@ -786,8 +786,8 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
   variant หรือมี `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - เมทอดและเมทอดสถิตเขียนใน `impl` (3.5) เหมือนกับ `defstruct`
 - หากต้องการให้ตัว enum เป็น `pub` ให้เขียน `(pub defenum ...)`
@@ -954,7 +954,7 @@ dispatch ผ่าน vtable:
 
 - `module` สร้างเนมสเปซ **ชนิดไม่ใช่เนมสเปซ** (เหมือน Rust ชนิดมีเพียงเมทอดสถิตและเมทอด)
 - การ `use` ชนิดทำให้ variant ของ enum และเมทอดสถิตที่เปิดเผยของชนิดนั้นใช้ด้วยชื่อเปล่าได้ด้วย (เช่น หลัง
-  `(use option)` เรียก `some`/`none` ได้โดยไม่ต้องเขียน `option::some`/`option::none`)
+  `(use Option)` เรียก `some`/`none` ได้โดยไม่ต้องเขียน `Option::some`/`Option::none`)
 - **ชื่อหนึ่งมีความหมายเดียว** ฟังก์ชัน ตัวแปรโกลบอล และแมโครอยู่ในเนมสเปซเดียวกัน และภายในโมดูลเดียว
   สองสิ่งในนั้นตั้งชื่อซ้ำกันไม่ได้ (เป็นข้อผิดพลาดไม่ว่านิยามอันไหนก่อน) ฟังก์ชันและตัวแปรไม่มีเนมสเปซแยกกัน
   เหมือนใน CL สำหรับชื่อเดียวกันในโมดูลต่างกัน อันที่ใกล้กว่าจะมองเห็น
@@ -1249,7 +1249,7 @@ CL ใช้ร่วมกันหนึ่งชุดระหว่าง�
   ที่ไม่มีไวยากรณ์ literal (อินสแตนซ์ของ `defstruct` ตัวแปรโกลบอล ผลลัพธ์ที่คำนวณ) และ
   implementation `Eq` ที่ผู้ใช้นิยามกลายเป็นกฎการเปรียบเทียบตามที่เป็น `expr` อ้างถึงทุกอย่าง
   ที่มองเห็นได้จากตำแหน่งของกิ่ง (อาร์กิวเมนต์ การผูกภายนอก ตัวแปรโกลบอล)
-- `(Ctor sub-pattern...)` — รูปแบบตัวสร้าง (`Some x` `None` `Cons a d` `Ok v` และอื่น ๆ)
+- `(Ctor sub-pattern...)` — รูปแบบตัวสร้าง (`(some x)` `(none)` `(cons a d)` `(ok v)` และอื่น ๆ)
 - `(Type :slot pattern... :slot...)` — แพตเทิร์นของ struct เขียน slot หลังชื่อชนิดเป็นคีย์เวิร์ด ถ้าคีย์เวิร์ด
   ตามด้วยแพตเทิร์น slot นั้นจะถูกจับคู่กับแพตเทิร์น ถ้าตามด้วยคีย์เวิร์ดอื่นหรือไม่มีอะไร slot จะถูกผูกกับตัวแปร
   ชื่อเดียวกัน slot ที่ไม่ได้เขียนจะไม่ถูกจับคู่ (แพตเทิร์นจึงไม่ขึ้นกับจำนวนหรือลำดับของฟิลด์):
@@ -1362,7 +1362,7 @@ literal ที่ไม่ใช่ immediate (สตริง / จำนวน
 
 **การอนุมานชนิดข้ามกิ่ง**: ทุกกิ่งต้องมีชนิดเดียวกัน (ยกเว้นกิ่งที่ไม่จบ เช่นกับ
 `panic`) ใน `match` ที่เขียนในที่ที่ไม่คาดหวังชนิด กิ่งต่าง ๆ เติมอาร์กิวเมนต์ชนิดที่ขาดของกันและกัน:
-`(result::ok v)` กำหนดเฉพาะ `T` และ `(result::err e)` เฉพาะ `E` แต่รวมกันกำหนด
+`(Result::ok v)` กำหนดเฉพาะ `T` และ `(Result::err e)` เฉพาะ `E` แต่รวมกันกำหนด
 `Result<T,E>` อาร์กิวเมนต์ชนิดที่ไม่มีกิ่งใดกำหนดได้ภายในท้ายที่สุดเป็นข้อผิดพลาดของกิ่งนั้น
 (`cannot infer type argument ...`) นอก `match` อาร์กิวเมนต์ชนิดที่กำหนดไม่ได้เป็นข้อผิดพลาด
 ทันที
@@ -1566,7 +1566,7 @@ CL เขียนคำของอนุประโยคเป็นสั�
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1587,7 +1587,7 @@ CL เขียนคำของอนุประโยคเป็นสั�
 (รวม `int`) และระหว่าง `f32`↔`f64` เป็นการแปลงจริง**: `as` ตัดทอน / ปัด และ `try-as`
 ตอบว่าพอดีกับความกว้าง (ความแม่นยำ) นั้นหรือไม่ `(as int x)` คือการขยายที่ถูกต้องแม่นยำจากความกว้างคงที่
 และ `(as i32 n)` คือการตัดทอนจาก `int` จำนวนเต็ม → `char` ล้มเหลวได้เมื่อเกินช่วง ดังนั้น `as` panic และ
-`try-as` ให้ `None` ทุกอย่างอื่น (การขยาย และการตัดทอนของ `float->int`/`ratio->int`) สำเร็จเสมอ
+`try-as` ให้ `none` ทุกอย่างอื่น (การขยาย และการตัดทอนของ `float->int`/`ratio->int`) สำเร็จเสมอ
 `float->int`/`ratio->int`/`char->int` ลงที่ `int` และหากขอความกว้างที่แคบกว่า
 จะเรียก `int->W` ต่อจากนั้น นี่เป็นน้ำตาลไวยากรณ์ที่ขยายเป็นเมทอดแปลงที่สอดคล้องกัน
 (`int->char`/`int->int`/`int->W` และอื่น ๆ ใน[ตัวเลข](functions/numbers.md))
@@ -1684,7 +1684,7 @@ condition ของ CL (`define-condition`/`handler-bind`/`invoke-restart`) ไ�
 `step` หยุดคือเส้นทางการเรียกของอินเทอร์พรีเตอร์ที่กำลังรัน และ `disassemble` ใช้คอมไพเลอร์เอง)
 `room`/`dribble`/`ed` ไม่อยู่ในกลุ่มนี้และคอมไพล์ได้ตามปกติ
 
-สิ่งที่ **คอมไพล์ได้**: I/O ของสตรีมและไฟล์, `random`, `gensym`, `symbol->string`/`string->symbol`,
+สิ่งที่ **คอมไพล์ได้**: I/O ของสตรีมและไฟล์, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, ฟังก์ชัน
 อดิศัย การดำเนินการระดับบิต `catch`/`throw`/`unwind-protect` ทั้งสี่ตัวของ `eq`/`eql`/`equal`/`equalp`
 (ซึ่งทำให้ `case` คอมไพล์ได้สำหรับทุกชนิด) ตระกูลการพิมพ์ทั้งหมดรวม `print`/`println`/

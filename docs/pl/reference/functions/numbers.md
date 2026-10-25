@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Liczby
 
 Operacje na liczbach całkowitych, zmiennoprzecinkowych, wymiernych, zespolonych i wartościach logicznych oraz inne
@@ -33,9 +33,9 @@ sześciu typów o stałej szerokości (tabela dla `int` znajduje się w rozdzial
 | `int->int` | `(int->int x)` | `T→int` | Konwersja rozszerzająca do `int` (zawsze dokładna). To, co robi `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Konwersja rozszerzająca do `ratio` (zawsze dokładna) |
 | `int->char` | `(int->char x)` | `T→char` | Interpretuje wartość jako skalarną wartość Unicode. Powoduje panic przy niepoprawnej wartości |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Wersja `int->char` zwracająca `None` przy niepowodzeniu |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Wersja `int->char` zwracająca `none` przy niepowodzeniu |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Konwersja szerokości. Wartości, które się nie mieszczą, są obcinane (jak `as` w Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Ta sama konwersja w postaci pytania. `None`, jeśli wartość nie mieści się w tej szerokości |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Ta sama konwersja w postaci pytania. `none`, jeśli wartość nie mieści się w tej szerokości |
 
 Te konwersje to także to, co robią formy specjalne `(as Type x)`/`(try-as Type x)`
 ([Referencja składni](../syntax.md#7-pozostałe-formy-specjalne)). Operacje bitowe (`logand`/`ash`/`ldb` i tak

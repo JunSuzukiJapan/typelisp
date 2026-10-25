@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 출력
 
 `print`/`println`/`format`, 인수 하나의 출력 함수, 프리티 프린터, `print-object`, 출력을 제어하는 변수. 서식 지시자 목록은
@@ -211,8 +211,8 @@ CL에서 `pprint-exit-if-list-exhausted`는 `pprint-logical-block`에서의 비�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | 튜플 `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | 같다 |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>`(수는 내부 일련번호) | 같다 |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | 같다 |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>`(수는 내부 일련번호) | 같다 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | 정수(CL의 `get-universal-time` / `get-internal-real-time`의 값) | 같다 |
 | 오류 타입(`ParseIntError`, `SimpleError` 등) | `#<simpleerror "boom">` | 메시지만(`boom`) |
@@ -298,28 +298,26 @@ CL은 "무제한"에 `nil`을 쓰지만 이 언어에는 `nil`이 없으므로 `
 
 공유가 없는 값에는 **레이블이 전혀 나오지 않으므로** 이 변수를 참으로 두어도 일상적인 코드의 출력은 바뀌지 않는다.
 
-### 6.2 기수, 대소문자, 읽을 수 있는 형태
+### 6.2 기수, 읽을 수 있는 형태
 
 | 변수 | 타입 | 기본값 | 의미 |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | 정수(고정 폭과 `int`)를 출력하는 기수. 2~36 밖이면 **출력 오류**(CL도 범위를 정한다) |
 | `*print-radix*` | `bool` | `false` | 참이면 기수 표시를 붙인다. `#b`/`#o`/`#x`, 그 밖의 기수는 `#NNr`, 10진수는 끝에 `.`. 표시는 부호 **앞에** 온다(`#x-ff`) |
-| `*print-case*` | `symbol` | `:downcase` | 심볼 이름의 대소문자: `:upcase` / `:downcase` / `:capitalize`(CL과 같은 철자). 다른 심볼은 출력 오류 |
 | `*print-readably*` | `bool` | `false` | 참이면 다시 읽을 수 있는 형태로 출력한다. 이스케이프를 강제하고 `*print-level*`/`*print-length*`의 생략을 끈다 |
 | `*print-lines*` | `int` | `0` | 프리티 프린터가 쓸 수 있는 줄 수. 넘는 부분은 잘리고 CL처럼 끝에 `..`가 붙는다. 0은 무제한. 음수는 출력 오류 |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string`이 `prin1`을 할지 `princ`를 할지. **이 둘만 읽는다** |
-| `*print-array*` | `bool` | `true` | `Vector<T>`와 `Array<T>`가 내용을 보여 줄지. 참이면 CL의 배열 구문(`#(1 2 3)` / `#2A((1 2) (3 4))`), 거짓이면 타입과 모양만 `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>`와 `Array<T>`가 내용을 보여 줄지. 참이면 CL의 배열 구문(`#(1 2 3)` / `#2A((1 2) (3 4))`), 거짓이면 타입과 모양만 `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 `*print-radix*`가 붙이는 표시는 리더가 다시 읽을 수 있다([문법 레퍼런스](../syntax.md#1-어휘-요소)의 기수 표기).
 
-**`*print-case*`의 기본값이 CL과 다른 이유**: CL의 기본값이 `:upcase`인 것은 CL의 리더가 심볼 이름을 대문자로 저장하기
-때문이며, 즉 "저장된 대로"라는 뜻이다. 이 리더는 소문자로 저장하므로 같은 의미의 기본값은 `:downcase`이다.
+**`*print-case*`가 없는 이유**: 심볼 이름은 대소문자를 구별하고 쓴 철자 그대로 출력되므로, 다른 대소문자로 출력하면
+다시 읽을 때 다른 심볼이 된다.
 
 **`*print-readably*`의 빠진 절반**: CL은 다시 읽을 수 없는 값에 `print-not-readable`을 알리지만, 이 언어에는 알릴
 컨디션이 없고, `print-object`가 어떻게든 출력할 수 있는 사용자 타입에 대해 읽을 수 있는지를 판단할 방법도 없다. 이스케이프

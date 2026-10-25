@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Pairs, S-Expressions and Sequences
 
 The generic pair `cons-cell`, S-expression data `Sexpr`, symbols, the sequence functions written on
@@ -85,8 +85,7 @@ not automatically in the other direction.
 | Name | Form | Type | Description |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Takes out the symbol's name. A keyword's name has no colon (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Makes a symbol from a string (interns it in the root module) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Makes the symbol `name` in the namespace `namespace` (CL's `intern`). `namespace` is a module path from the root (`"geometry::shapes"`); `"keyword"` is the keywords' and `""` the root. Left out, it is the module the call is written in |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Returns the symbol `name` reads as in the namespace `namespace` (CL's `intern`). If a symbol visible from that namespace exists (its own, one brought in by `use`, or the standard library's), that one is returned; otherwise a new one is made in that namespace. `namespace` is a module path from the root (`"geometry::shapes"`); `"keyword"` is the keywords' and `""` the root. A namespace that does not exist is an error. Left out, it is the module the call is written in (there is no `*package*`). CL's second value (a status such as `:internal`) is not returned |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Whether it is a keyword, that is, whether it belongs to the keyword namespace ([Syntax Reference](../syntax.md#1-lexical-elements)) |
 
 For `gensym`, see [Macros](system.md#8-macros).
@@ -110,7 +109,7 @@ Functions taking a predicate (corresponding to CL's `-if` family):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | The first position that satisfies the predicate |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | How many satisfy the predicate |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Whether every element satisfies the predicate |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Whether any element satisfies the predicate (corresponds to CL's `some`; a name that does not clash with the `Some` constructor) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Whether any element satisfies the predicate (corresponds to CL's `some`; a name that does not clash with the `some` constructor) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Left fold |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Right fold |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Gathers all the remaining elements. Used to turn the result of a `lazy` function below into a `Vector` |
@@ -121,9 +120,9 @@ Indexing, length and slicing:
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Number of elements |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Concatenates iterators. Three or more can be given |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL's `concatenate`. The result type is written as **a quoted symbol literal** (CL uses a run-time type specifier). `'vector` takes one or more, `'string` zero or more (`""` for zero). `Sexpr` lists are not covered (use `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL's `concatenate`. The result type is written as **a quoted symbol literal** (CL uses a run-time type specifier). `'vector` takes one or more, `'string` zero or more (`""` for zero). `Sexpr` lists are not covered (use `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Reversal (non-destructive) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` out of range) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` out of range) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` with the arguments the other way round |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | The first `n` elements |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` is clamped to the length) |

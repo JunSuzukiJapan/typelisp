@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Error Messages
 
 What the main error messages from `typl` mean and how to fix them.
@@ -45,7 +45,7 @@ Mistakes found before running. The form is not run until they are fixed.
 | ``type mismatch: expected `T`, found `U` `` | An expression of type `U` is where type `T` is needed. There are no implicit conversions; for numbers, convert with `(as T x)`. `int` and `i32` are different types too |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | The literal does not fit the type. If you want it cut down, write `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | There is no type of that name. Define a type before the first form that uses it (types have no forward declaration). If you meant a type variable, write it in a declaring position such as `<foo>` after the function name ([Syntax Reference 3.6](syntax.md#36-defstruct--structs-user-defined-types)) |
-| ``cannot infer type argument `t` for `vector::new` `` | A type argument cannot be determined. Write the type with `the`, as in `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | A type argument cannot be determined. Write the type with `the`, as in `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | The `match` does not handle every variant. Add arms for the missing variants, or a `_` arm |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | The function requires a trait that the type you passed does not implement. Write `(impl Eq pt ...)` ([Standard Traits](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | A value of a type that does not implement the trait was passed where a `:dyn` is expected. Write the `impl` |

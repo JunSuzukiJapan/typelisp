@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见
@@ -202,8 +202,8 @@ CLHS 22.1.3 的打印函数。不做格式展开，直接打印一个值。流�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`、`#("a" "b")` | `#(1 2 3)`、`#(a b)` |
 | 元组 `#{..}` | `#{1 "a"}` | `#{1 a}` |
-| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | 同左 |
-| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>`（数字是实现内部的编号） | 同左 |
+| `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | 同左 |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>`（数字是实现内部的编号） | 同左 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
 | `universal-time` / `internal-time` | 整数（CL 的 `get-universal-time` / `get-internal-real-time` 的值） | 同左 |
 | 错误类型（`ParseIntError`、`SimpleError` 等） | `#<simpleerror "boom">` | 只有消息（`boom`） |
@@ -284,28 +284,25 @@ CL 用 `nil` 表示"无限制"，但本语言没有 `nil`，所以与 `*print-ri
 
 没有任何共享的值**完全不会出现标签**，所以即使保持这个变量为真运行日常代码，输出也不会改变。
 
-### 6.2 基数、大小写与可读回
+### 6.2 基数与可读回
 
 | 变量 | 类型 | 默认值 | 含义 |
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | 打印整数（固定宽度和 `int`）的基数。2〜36 以外是**打印错误**（CL 也规定了范围） |
 | `*print-radix*` | `bool` | `false` | 为真时加上基数标记。`#b`/`#o`/`#x`，其他为 `#NNr`，基数 10 时末尾加 `.`。标记在符号的**前面**（`#x-ff`） |
-| `*print-case*` | `symbol` | `:downcase` | 符号名的大小写。`:upcase` / `:downcase` / `:capitalize`（与 CL 相同的写法）。其他符号是打印错误 |
 | `*print-readably*` | `bool` | `false` | 为真时以可读回的形式打印。强制转义，并使 `*print-level*`/`*print-length*` 的截断失效 |
 | `*print-lines*` | `int` | `0` | pretty printer 可以使用的行数。超出部分截去，末尾加上与 CL 相同的 `..`。0 表示无限制。负值是打印错误 |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` 做 `prin1` 还是 `princ`。**只有这两个读取它** |
-| `*print-array*` | `bool` | `true` | `Vector<T>` 和 `Array<T>` 是否显示内容。为真时使用 CL 的数组语法（`#(1 2 3)` / `#2A((1 2) (3 4))`），为假时只显示类型和形状 `#<vector<int> 3>` / `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` 和 `Array<T>` 是否显示内容。为真时使用 CL 的数组语法（`#(1 2 3)` / `#2A((1 2) (3 4))`），为假时只显示类型和形状 `#<Vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"
 (dlet ((*print-base* 16) (*print-radix* true)) (format false "~a" 255)) ; => "#xff"
-(dlet ((*print-case* :upcase)) (format false "~a" 'hello))            ; => "HELLO"
 ```
 
 `*print-radix*` 加上的标记可以被读取器读回（[语法参考](../syntax.md#1-词法元素)的基数记法）。
 
-**`*print-case*` 的默认值与 CL 不同的原因**：CL 的默认值是 `:upcase`，那是因为 CL 的读取器以大写存储符号名——也就是
-"按存储的原样"的意思。这个读取器以小写存储，所以含义相同的默认值是 `:downcase`。
+**为什么没有 `*print-case*`**：符号名区分大小写，并按书写的拼写打印；若以其他大小写打印，读回时就成了另一个符号。
 
 **`*print-readably*` 缺少的一半**：CL 对无法读回的值会发出 `print-not-readable`，但本语言没有可以发出的条件，也无法
 对 `print-object` 可能以任何方式打印的用户类型判断能否读回。只有强制转义和覆盖截断。

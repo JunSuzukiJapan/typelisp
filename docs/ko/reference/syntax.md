@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -6,7 +6,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
 
 ## 1. 어휘 요소
 
-- **대소문자를 구별하지 않는다.** 심볼은 읽을 때 모두 소문자로 정규화된다.
+- **대소문자를 구별한다.** `foo`와 `Foo`는 서로 다른 심볼이다. 타입 이름은 대문자로 시작한다(`Option`, `Vector` 등. `int`나 `string` 같은 기본 타입은 소문자).
 - **주석**: `;`부터 줄 끝까지(줄 주석). `#| ... |#`(중첩할 수 있는 블록 주석).
 - **읽기 시 평가**: `#.(식)`은 **읽는 동안** 뒤의 형식을 **실행하고** 그 값을 읽은 것으로 다룬다. 리더가 텍스트의 함수
   이상이 되는 유일한 곳이다. 어디까지 닿을 수 있는지는 CL처럼 읽기 경로에 따라 다르다.
@@ -110,7 +110,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   `:dyn Sub`의 값은 그 상위 트레이트(전이적으로 상속하는 모든 것) 중 어느 `:dyn Super`가 요구되는 곳에도 그대로 넘길 수
   있다(업캐스트). 상속 관계가 없는 트레이트에는 넘길 수 없다. `:dyn`이 될 수 있는 트레이트의 조건은
   [3.9 deftrait / impl](#39-deftrait--impl--트레이트-기구)을 참고한다. 타입 위치 밖에 `:dyn`을 쓰면 오류이다.
-- 내장 제네릭 타입: `Option<T>`(`Some(T)` / `None`), `Result<T,E>`(`Ok(T)` / `Err(E)`), `HashTable<K,V>`, `Vector<T>`, 그리고
+- 내장 제네릭 타입: `Option<T>`(`(some T)` / `none`), `Result<T,E>`(`(ok T)` / `(err E)`), `HashTable<K,V>`, `Vector<T>`, 그리고
   동시성의 `Task<T>` / `Thread<T>` / `Chan<T>`([12장](#12-동시성태스크)). S 식 데이터의 타입 `Sexpr`도 있다. 내장 구체 오류
   타입은 `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`이고, 표준 라이브러리에는
   구조체 `SimpleError` / `WrappedError`가 있다(`Error`는 타입이 아니라 트레이트이다. `:dyn Error`로 쓴다). 목록은
@@ -711,8 +711,8 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 ; 제네릭
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - 각 변형의 형태는 `(VariantName FieldType...)`이다. 필드는 위치로만 지정한다(이름이 없다). 변형은 하나 이상 필요하고 이름은
@@ -722,8 +722,8 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 - `match` / `if-let`으로 분해할 수 있다. `match`는 망라성을 검사한다(모든 변형을 덮거나 `_`가 있어야 한다):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - 메서드와 정적 메서드는 `defstruct`처럼 `impl`(3.5)에 쓴다.
 - 열거형 자체를 `pub`으로 하려면 `(pub defenum ...)`이라고 쓴다.
@@ -874,7 +874,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 - `module`은 이름공간을 만든다. **타입은 이름공간이 아니다**(Rust처럼 타입은 정적 메서드와 메서드를 가질
   뿐이다).
 - `use`로 타입을 들여오면 열거형의 변형과 그 타입의 공개된 정적 메서드도 맨 이름으로 쓸 수 있다
-  (예: `(use option)` 뒤에는 `some`/`none`을 `option::some`/`option::none` 없이 호출할 수 있다).
+  (예: `(use Option)` 뒤에는 `some`/`none`을 `Option::some`/`Option::none` 없이 호출할 수 있다).
 - **한 이름은 한 가지 뜻을 가진다**. 함수·전역 변수·매크로는 한 이름공간에 들어가며, 같은 모듈에서 그중
   두 개에 같은 이름을 붙일 수 없다(어떤 순서로 정의해도 오류). CL처럼 함수와 변수의 이름공간이 나뉘어
   있지 않다. 다른 모듈의 같은 이름이라면 가까운 쪽이 보인다.
@@ -1142,7 +1142,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `(:= expr)` — 아무 식이나 평가해 `Eq::equals`로 비교한다. 리터럴 구문이 없는 타입(`defstruct` 인스턴스, 전역 변수, 계산
   결과)을 비교하는 유일한 방법이며, 사용자 정의 `Eq` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
   모든 것(인수, 바깥 바인딩, 전역 변수)을 참조할 수 있다
-- `(Ctor sub-pattern...)` — 생성자 패턴(`Some x` `None` `Cons a d` `Ok v` 등)
+- `(Ctor sub-pattern...)` — 생성자 패턴(`(some x)` `(none)` `(cons a d)` `(ok v)` 등)
 - `(Type :slot pattern... :slot...)` — 구조체의 패턴. 타입 이름 뒤에 슬롯을 키워드로 쓴다. 키워드
   다음이 패턴이면 그 슬롯을 그 패턴으로 대조하고, 다음이 키워드이거나 끝이면 슬롯을 같은 이름의 변수에
   바인딩한다. 쓰지 않은 슬롯은 대조하지 않는다(필드의 수나 순서에 의존하지 않는다):
@@ -1245,7 +1245,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 **갈래 사이의 타입 추론**: 모든 갈래는 같은 타입이어야 한다(`panic` 같은 발산하는 갈래는 제외). 기대 타입이 없는 곳에 쓴
-`match`에서는 갈래들이 모자란 타입 인수를 **서로** 채운다. `(result::ok v)`는 `T`만, `(result::err e)`는 `E`만 정하지만 둘이
+`match`에서는 갈래들이 모자란 타입 인수를 **서로** 채운다. `(Result::ok v)`는 `T`만, `(Result::err e)`는 `E`만 정하지만 둘이
 나란히 있으면 `Result<T,E>`가 정해진다. 끝까지 어느 갈래도 정할 수 없는 타입 인수가 있으면 그 갈래 자체의 오류가 된다
 (`cannot infer type argument ...`). `match` 밖에서는 정할 수 없는 타입 인수가 그 자리에서 오류이다.
 
@@ -1439,7 +1439,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 (unreachable)                       ; (panic "unreachable")로 전개된다. defmacro
 (todo)                              ; (panic "todo")로 전개된다. defmacro
 (as Type expr)                      ; 수/문자의 타입 변환. 실패할 수 있는 변환은 실패하면 panic
-(try-as Type expr)                  ; as와 같지만 결과를 Option<Type>으로 반환한다(실패하면 None)
+(try-as Type expr)                  ; as와 같지만 결과를 Option<Type>으로 반환한다(실패하면 none)
 (print control args...)             ; 서식을 전개해 표준 출력에 쓴다(줄바꿈 없음)
 (println control args...)           ; 같다(끝에 줄바꿈)
 (format dest control args...)       ; CL의 format. 전개한 string을 반환한다
@@ -1457,7 +1457,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 `as`/`try-as`가 다루는 것은 수와 문자의 카탈로그(`int`, 고정 폭 정수 타입, `f32`/`f64`/`ratio`/`char` 사이)뿐이다. 같은
 타입은 변환하지 않는다. **정수 폭 사이(`int` 포함)와 `f32`↔`f64`는 진짜 변환이다.** `as`는 자르거나 반올림하고, `try-as`는
 그 폭(정밀도)에 들어가는지 답한다. `(as int x)`는 고정 폭에서의 정확한 확대이고 `(as i32 n)`은 `int`에서의 절단이다. 정수 →
-`char`는 범위를 벗어나 실패할 수 있으므로 `as`는 panic하고 `try-as`는 `None`이 된다. 그 밖(확대와
+`char`는 범위를 벗어나 실패할 수 있으므로 `as`는 panic하고 `try-as`는 `none`이 된다. 그 밖(확대와
 `float->int`/`ratio->int`의 절단)은 항상 성공한다. `float->int`/`ratio->int`/`char->int`는 `int`에 내려앉으며, 더 좁은 폭을
 요구하면 그 뒤에 `int->W`를 호출한다. 대응하는 변환 메서드([수](functions/numbers.md)의 `int->char`/`int->int`/`int->W` 등)로
 전개되는 편의 표기이다.
@@ -1545,7 +1545,7 @@ CL의 컨디션(`define-condition`/`handler-bind`/`invoke-restart`)은 채택하
 인터프리터의 호출 경로이며, `disassemble`은 컴파일러 자체를 쓴다). `room`/`dribble`/`ed`는 여기에 들지 않으며 보통으로
 컴파일할 수 있다.
 
-컴파일할 **수 있는** 것: 스트림과 파일 입출력, `random`, `gensym`, `symbol->string`/`string->symbol`,
+컴파일할 **수 있는** 것: 스트림과 파일 입출력, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, 초월 함수, 비트 연산,
 `catch`/`throw`/`unwind-protect`, `eq`/`eql`/`equal`/`equalp` 네 가지 모두(그래서 `case`도 모든 타입에 대해 컴파일된다),
 `print`/`println`/`format`/`pprint`와 `pprint-logical-block`을 포함한 출력 기능 전부, `read`, 그리고 `eval`. 표준

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 오류 메시지
 
 `typl`이 내는 주요 오류 메시지의 의미와 고치는 방법.
@@ -43,7 +43,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``type mismatch: expected `T`, found `U` `` | `T` 타입이 필요한 곳에 `U` 타입의 식이 있다. 암묵적 변환은 없다. 수라면 `(as T x)`로 변환한다. `int`와 `i32`도 다른 타입이다 |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | 리터럴이 타입에 들어가지 않는다. 잘라 내려면 `(as u8 300)`이라고 쓴다 |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | 그 이름의 타입이 없다. 타입은 그것을 쓰는 첫 형식보다 앞에서 정의한다(타입에는 전방 선언이 없다). 타입 변수를 뜻했다면 함수 이름 뒤의 `<foo>` 같은 선언 위치에 쓴다([문법 레퍼런스 3.6](syntax.md#36-defstruct--구조체사용자-정의-타입)) |
-| ``cannot infer type argument `t` for `vector::new` `` | 타입 인수를 정할 수 없다. `(the Vector<int> (Vector::new))`처럼 `the`로 타입을 쓴다 |
+| ``cannot infer type argument `t` for `Vector::new` `` | 타입 인수를 정할 수 없다. `(the Vector<int> (Vector::new))`처럼 `the`로 타입을 쓴다 |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match`가 모든 변형을 다루지 않는다. 빠진 변형의 갈래나 `_` 갈래를 추가한다 |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | 함수가 요구하는 트레이트를 넘긴 타입이 구현하지 않는다. `(impl Eq pt ...)`를 쓴다([표준 트레이트](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | `:dyn`을 기대하는 곳에 트레이트를 구현하지 않은 타입의 값을 넘겼다. `impl`을 쓴다 |

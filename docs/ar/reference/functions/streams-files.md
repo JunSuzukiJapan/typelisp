@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # التدفقات والملفات
 
 سمات التدفقات وتوابعها وأنواع التدفقات الملموسة وعمليات الملفات والمسارات. ومقابس الشبكة تدفقات أيضًا،
@@ -88,7 +88,7 @@
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` أحد الثوابت الثلاثة `direction-input` / `direction-output` / `direction-append`. وتعيد
-`open-file` القيمة `Err(FileError)` إذا تعذّر فتح الملف (فغياب ملف نتيجة عادية لا `panic`). ويمكن أن يكون
+`open-file` القيمة `(err FileError)` إذا تعذّر فتح الملف (فغياب ملف نتيجة عادية لا `panic`). ويمكن أن يكون
 اسم الملف سلسلة نصية أو `pathname` (`Pathish` في الفصل 9).
 
 تعيد `(get-output-stream-string s)` ما كُتب إلى `string-output-stream` وتفرّغه. وكما في CL يمكن استخراجه
@@ -135,18 +135,18 @@
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` حيث `CharInput I`،`CharOutput O` | ينقل كل شيء |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` حيث `CharInput S` | كل الأسطر المتبقية |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` حيث `PeekInput S` | يقرأ `Sexpr` واحدًا (`read` في CL). `Ok(eof)` عند نهاية الدخل، و`Ok(datum d)` عند قراءة واحد، و`Err` إذا لم تكن بيانات. وهو **يستهلك المحرف الأبيض الواحد** الذي أنهى البيان (كما في CL). و`ReadOutcome` ليست `Option<Sexpr>` حتى لا تكون قراءة القائمة الفارغة `()` ونهاية الدخل القيمة نفسها |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` حيث `PeekInput S` | يقرأ `Sexpr` واحدًا (`read` في CL). `(ok eof)` عند نهاية الدخل، و`(ok (datum d))` عند قراءة واحد، و`err` إذا لم تكن بيانات. وهو **يستهلك المحرف الأبيض الواحد** الذي أنهى البيان (كما في CL). و`ReadOutcome` ليست `Option<Sexpr>` حتى لا تكون قراءة القائمة الفارغة `()` ونهاية الدخل القيمة نفسها |
 | `read-sexpr-preserving-whitespace` | مثل ما سبق | مثل ما سبق | المثل، لكنه يترك المحرف الأبيض (`read-preserving-whitespace` في CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` حيث `PeekInput S` | يقرأ حتى `ch` ويصنع قائمة. ويُستهلك `ch`. و`Err` إذا نفد الدخل |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` حيث `PeekInput S` | يقرأ حتى `ch` ويصنع قائمة. ويُستهلك `ch`. و`err` إذا نفد الدخل |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` حيث `CharOutput S`،`Iter I (Item string)` | يكتب سطرًا في كل مرة |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` حيث `Pathish P` | المحتويات كلها |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` حيث `Pathish P` | كل الأسطر |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` حيث `Pathish P` | يكتبه |
 | `probe-file` | `(probe-file name)` | `(P)→bool` حيث `Pathish P` | هل هو موجود |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | حذف وإعادة تسمية (الوسائط `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` حيث `Pathish P` | المسار المطلق مع حل الروابط الرمزية و`.`/`..`. و`Err` إذا لم يكن موجودًا |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` حيث `Pathish P` | المسار المطلق مع حل الروابط الرمزية و`.`/`..`. و`err` إذا لم يكن موجودًا |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` حيث `Pathish P` | وقت آخر تعديل. وهو **زمن عالمي (universal time)**، فيمكن لـ `decode-universal-time` ([الزمن](system.md#2-فك-ترميز-التواريخ-وترميزها)) قراءته |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` حيث `Pathish P` | اسم دخول المالك. و`Err` إذا لم يكن الملف موجودًا، و`Ok(none)` إذا لم يكن لمعرّف المستخدم (uid) الخاص بالمالك إدخال في قاعدة بيانات كلمات المرور: فالحالتان اللتان تميز بينهما CL تبقيان منفصلتين |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` حيث `Pathish P` | اسم دخول المالك. و`err` إذا لم يكن الملف موجودًا، و`(ok none)` إذا لم يكن لمعرّف المستخدم (uid) الخاص بالمالك إدخال في قاعدة بيانات كلمات المرور: فالحالتان اللتان تميز بينهما CL تبقيان منفصلتين |
 | `directory-p` | `(directory-p name)` | `(P)→bool` حيث `Pathish P` | هل هو مجلد. **وهي `false` أيضًا إذا لم يكن موجودًا**؛ استخدم `probe-file` للتمييز بين الحالتين |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` حيث `Pathish P` | يسرد المحتويات بـ truename (المسار المطلق مع حل الروابط الرمزية، كما في `truename`). وتُستبعد الروابط الرمزية التي هدفها مفقود. وتُستبعد `.`/`..`. والترتيب ما يعطيه نظام التشغيل |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` حيث `Pathish P` | ينشئه مع المجلدات الأم. وينجح إذا كان موجودًا |

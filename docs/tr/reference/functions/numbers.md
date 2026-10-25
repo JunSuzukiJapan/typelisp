@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -34,9 +34,9 @@ bölümdedir).
 | `int->int` | `(int->int x)` | `T→int` | `int`'e genişleten dönüşüm (her zaman tam). `(as int x)`'in yaptığı şey |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio`'ya genişleten dönüşüm (her zaman tam) |
 | `int->char` | `(int->char x)` | `T→char` | Değeri bir Unicode skaler değeri olarak yorumlar. Geçersiz bir değerde panic olur |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Başarısızlıkta `None` döndüren bir `int->char` sürümü |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Başarısızlıkta `none` döndüren bir `int->char` sürümü |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Genişlik dönüşümü. Sığmayan değerler kırpılır (Rust'ın `as`'ı gibi) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Aynı dönüşüm bir soru olarak. Değer o genişliğe sığmıyorsa `None` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Aynı dönüşüm bir soru olarak. Değer o genişliğe sığmıyorsa `none` |
 
 Bu dönüşümler, `(as Type x)`/`(try-as Type x)` özel formlarının
 ([Sözdizimi Başvurusu](../syntax.md#7-diğer-özel-formlar)) yaptığı şeylerdir. Bit işlemleri

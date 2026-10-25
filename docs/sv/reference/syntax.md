@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -7,7 +7,7 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
 
 ## 1. Lexikaliska element
 
-- **Skiljer inte på stora och små bokstäver.** Symboler normaliseras alla till gemener vid läsning.
+- **Skiljer på stora och små bokstäver.** `foo` och `Foo` är olika symboler. Typnamn börjar med versal (`Option`, `Vector` och så vidare; primitiva typer som `int` och `string` skrivs med gemener).
 - **Kommentarer**: från `;` till radens slut (radkommentarer). `#| ... |#` (blockkommentarer, som kan
   nästlas).
 - **Utvärdering vid läsning**: `#.(expr)` **kör den följande formen under läsningen** och behandlar dess
@@ -151,7 +151,7 @@ I källkod skrivs typer som vanliga symboler eller listor.
   (allt det ärver, transitivt) (uppkastning). Det kan inte skickas till ett orelaterat trait.
   För villkoren ett trait måste uppfylla för att kunna användas med `:dyn`, se
   [3.9 deftrait / impl](#39-deftrait--impl--traits). Att skriva `:dyn` utanför en typposition är ett fel.
-- Inbyggda generiska typer: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Inbyggda generiska typer: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>`, och samtidighetstyperna `Task<T>` / `Thread<T>` / `Chan<T>`
   ([kapitel 12](#12-samtidighet-tasks)). Det finns också `Sexpr`, typen för S-uttrycksdata. De
   inbyggda konkreta feltyperna är `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -825,8 +825,8 @@ En lista `(Name option...)` på namnets plats anger alternativ (samma plats som 
 
 ; generisk
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Varje variant har formen `(VariantName FieldType...)`. Fält är bara positionella (de har inga namn).
@@ -837,8 +837,8 @@ En lista `(Name option...)` på namnets plats anger alternativ (samma plats som 
   varje variant eller ha en `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Metoder och statiska metoder skrivs i `impl` (3.5), som för `defstruct`.
 - För att göra själva enumen `pub` skriver man `(pub defenum ...)`.
@@ -1010,8 +1010,8 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 - `module` skapar en namnrymd. **Typer är inte namnrymder** (som i Rust har en typ bara statiska metoder och
   metoder).
 - Att göra `use` på en typ gör även en enums varianter och typens publika statiska metoder tillgängliga under
-  det nakna namnet (till exempel kan `some`/`none` efter `(use option)` anropas utan
-  `option::some`/`option::none`).
+  det nakna namnet (till exempel kan `some`/`none` efter `(use Option)` anropas utan
+  `Option::some`/`Option::none`).
 - **Ett namn har en betydelse.** Funktioner, globala variabler och makron delar en namnrymd, och inom en
   modul kan inte två av dem ha samma namn (ett fel oavsett vilken som definieras först). Funktioner och
   variabler har inte separata namnrymder som i CL. För samma namn i olika moduler är det närmaste synligt.
@@ -1314,7 +1314,7 @@ Slag av mönster:
   typer som saknar literalsyntax (`defstruct`-instanser, globaler, beräknade resultat), och en
   användardefinierad `Eq`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
   som syns från grenens position (argument, yttre bindningar, globaler)
-- `(Ctor sub-pattern...)` — konstruktormönster (`Some x` `None` `Cons a d` `Ok v` och så vidare)
+- `(Ctor sub-pattern...)` — konstruktormönster (`(some x)` `(none)` `(cons a d)` `(ok v)` och så vidare)
 - `(Type :slot pattern... :slot...)` — structmönster. Skriv platserna efter typnamnet som nyckelord. Följs
   ett nyckelord av ett mönster matchas platsen mot mönstret; följs det av ett annat nyckelord eller
   ingenting binds platsen till en variabel med samma namn. Platser som inte skrivs matchas inte (mönstret
@@ -1435,7 +1435,7 @@ syntax behövs. Mängden implementerande typer är öppen, så den kan aldrig va
 
 **Typinferens över grenar**: alla grenar måste ha samma typ (utom grenar som divergerar, som med `panic`).
 I en `match` skriven där ingen typ förväntas fyller grenarna i varandras saknade typargument:
-`(result::ok v)` fastställer bara `T`, och `(result::err e)` bara `E`, men tillsammans fastställer de
+`(Result::ok v)` fastställer bara `T`, och `(Result::err e)` bara `E`, men tillsammans fastställer de
 `Result<T,E>`. Ett typargument som ingen gren kan fastställa vid slutet är ett fel i den grenen
 (`cannot infer type argument ...`). Utanför `match` är ett typargument som inte kan fastställas ett fel på
 stället.
@@ -1643,7 +1643,7 @@ och så vidare).
 (unreachable)                       ; expanderar till (panic "unreachable"). defmacro
 (todo)                              ; expanderar till (panic "todo"). defmacro
 (as Type expr)                      ; tal-/teckentypkonvertering. konverteringar som kan misslyckas ger panic vid misslyckande
-(try-as Type expr)                  ; som as, men returnerar resultatet som Option<Type> (None vid misslyckande)
+(try-as Type expr)                  ; som as, men returnerar resultatet som Option<Type> (none vid misslyckande)
 (print control args...)             ; expanderar formatet och skriver till standard ut (inget radbyte)
 (println control args...)           ; samma (med ett radbyte på slutet)
 (format dest control args...)       ; CL:s format. returnerar den expanderade strängen
@@ -1664,7 +1664,7 @@ fast bredd, `f32`/`f64`/`ratio`/`char`). Samma typ är ingen konvertering. **Kon
 heltalsbredder (inklusive `int`) och mellan `f32`↔`f64` är riktiga konverteringar**: `as` trunkerar /
 avrundar, och `try-as` svarar om det ryms i den bredden (precisionen). `(as int x)` är den exakta
 vidgningen från en fast bredd, och `(as i32 n)` trunkeringen från `int`. Heltal → `char` kan misslyckas
-utanför intervallet, så `as` ger panic och `try-as` ger `None`. Allt annat (vidgning, och trunkeringen i
+utanför intervallet, så `as` ger panic och `try-as` ger `none`. Allt annat (vidgning, och trunkeringen i
 `float->int`/`ratio->int`) lyckas alltid. `float->int`/`ratio->int`/`char->int` landar på `int`, och om en
 smalare bredd efterfrågas anropas `int->W` efter dem. Detta är socker som expanderar till motsvarande
 konverteringsmetoder (`int->char`/`int->int`/`int->W` och så vidare i [Tal](functions/numbers.md)).
@@ -1762,7 +1762,7 @@ själva tolkens miljö, som en AOT-körbar fil inte har; det `trace` bevakar och
 anropsvägarna i den tolk som körs; och `disassemble` använder själva kompilatorn).
 `room`/`dribble`/`ed` ingår inte bland dem och kan kompileras normalt.
 
-Det som **kan** kompileras: ström- och fil-I/O, `random`, `gensym`, `symbol->string`/`string->symbol`,
+Det som **kan** kompileras: ström- och fil-I/O, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, de transcendenta
 funktionerna, bitoperationer, `catch`/`throw`/`unwind-protect`, alla fyra av `eq`/`eql`/`equal`/`equalp`
 (vilket låter `case` kompileras för varje typ), hela utskriftsfamiljen inklusive `print`/`println`/

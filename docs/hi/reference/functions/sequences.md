@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # जोड़ियाँ, S-एक्सप्रेशन और अनुक्रम
 
 जेनेरिक जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, `Iter` के ऊपर लिखे अनुक्रम फ़ंक्शन, और उच्च-क्रम फ़ंक्शन।
@@ -62,8 +62,7 @@
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | सिंबल का नाम निकालता है। कीवर्ड के नाम में कोलन नहीं होता (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | स्ट्रिंग से सिंबल बनाता है (रूट मॉड्यूल में इंटर्न करता है) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | नेमस्पेस `namespace` में `name` सिंबल बनाता है (CL का `intern`)। `namespace` रूट से मॉड्यूल पाथ है (`"geometry::shapes"`); `"keyword"` कीवर्ड का और `""` रूट है। छोड़ने पर वह मॉड्यूल जिसमें कॉल लिखी है |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | नेमस्पेस `namespace` में `name` जिस सिंबल के रूप में पढ़ा जाता है, वह लौटाता है (CL का `intern`)। अगर उस नेमस्पेस से दिखने वाला कोई सिंबल है (उसका अपना, `use` से लाया गया, या मानक लाइब्रेरी का), तो वही लौटता है; नहीं तो उस नेमस्पेस में नया बनता है। `namespace` रूट से मॉड्यूल पाथ है (`"geometry::shapes"`); `"keyword"` कीवर्ड का और `""` रूट है। जो नेमस्पेस मौजूद नहीं, वह त्रुटि है। छोड़ने पर वह मॉड्यूल जिसमें कॉल लिखा है (`*package*` नहीं है)। CL का दूसरा मान (`:internal` जैसी स्थिति) नहीं लौटता |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | क्या यह कीवर्ड है, अर्थात क्या यह कीवर्ड नेमस्पेस का है ([सिंटैक्स संदर्भ](../syntax.md#1-लेक्सिकल-तत्व)) |
 
 `gensym` के लिए [Macro](system.md#8-macro) देखें।
@@ -83,7 +82,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | प्रेडिकेट को संतुष्ट करने वाली पहली स्थिति |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | कितने प्रेडिकेट को संतुष्ट करते हैं |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | क्या हर तत्व प्रेडिकेट को संतुष्ट करता है |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | क्या कोई तत्व प्रेडिकेट को संतुष्ट करता है (CL के `some` के अनुरूप; ऐसा नाम जो `Some` कंस्ट्रक्टर से नहीं टकराता) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | क्या कोई तत्व प्रेडिकेट को संतुष्ट करता है (CL के `some` के अनुरूप; ऐसा नाम जो `some` कंस्ट्रक्टर से नहीं टकराता) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | बायाँ फ़ोल्ड |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | दायाँ फ़ोल्ड |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | बचे हुए सभी तत्व इकट्ठा करता है। नीचे के किसी `lazy` फ़ंक्शन के परिणाम को `Vector` बनाने के लिए |
@@ -94,9 +93,9 @@
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | तत्वों की संख्या |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | इटरेटर जोड़ता है। तीन या अधिक दिए जा सकते हैं |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL का `concatenate`। परिणाम का टाइप **उद्धृत सिंबल लिटरल** के रूप में लिखा जाता है (CL रन-टाइम टाइप स्पेसिफ़ायर उपयोग करता है)। `'vector` एक या अधिक लेता है, `'string` शून्य या अधिक (शून्य के लिए `""`)। `Sexpr` सूचियाँ कवर नहीं हैं (`sexpr-append` उपयोग करें) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL का `concatenate`। परिणाम का टाइप **उद्धृत सिंबल लिटरल** के रूप में लिखा जाता है (CL रन-टाइम टाइप स्पेसिफ़ायर उपयोग करता है)। `'vector` एक या अधिक लेता है, `'string` शून्य या अधिक (शून्य के लिए `""`)। `Sexpr` सूचियाँ कवर नहीं हैं (`sexpr-append` उपयोग करें) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | उलटना (अविनाशकारी) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | तत्व `n` (सीमा से बाहर `None`) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | तत्व `n` (सीमा से बाहर `none`) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | उलटे क्रम के आर्ग्युमेंट वाला `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | पहले `n` तत्व |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` को लंबाई तक सीमित किया जाता है) |

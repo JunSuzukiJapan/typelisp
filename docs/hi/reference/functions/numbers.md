@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # संख्याएँ
 
 पूर्णांक, फ़्लोटिंग-पॉइंट संख्याओं, परिमेय संख्याओं, कॉम्प्लेक्स संख्याओं और बूलियन पर ऑपरेशन, और अन्य संख्या-संबंधित फ़ंक्शन। कॉल के रूप कैसे पढ़ें इसके लिए [बिल्ट-इन फ़ंक्शन](README.md) देखें।
@@ -25,9 +25,9 @@
 | `int->int` | `(int->int x)` | `T→int` | `int` में विस्तार रूपांतरण (हमेशा सटीक)। जो `(as int x)` करता है |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio` में विस्तार रूपांतरण (हमेशा सटीक) |
 | `int->char` | `(int->char x)` | `T→char` | मान को Unicode स्केलर मान के रूप में व्याख्यायित करता है। अमान्य मान पर panic करता है |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` का संस्करण जो विफल होने पर `None` लौटाता है |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` का संस्करण जो विफल होने पर `none` लौटाता है |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | चौड़ाई रूपांतरण। जो मान नहीं समाते वे काट दिए जाते हैं (Rust के `as` की तरह) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | वही रूपांतरण प्रश्न के रूप में। यदि मान उस चौड़ाई में नहीं समाता तो `None` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | वही रूपांतरण प्रश्न के रूप में। यदि मान उस चौड़ाई में नहीं समाता तो `none` |
 
 ये रूपांतरण वही भी हैं जो विशेष फ़ॉर्म `(as Type x)`/`(try-as Type x)` ([सिंटैक्स संदर्भ](../syntax.md#7-अन्य-विशेष-फ़ॉर्म)) करते हैं। बिट ऑपरेशन (`logand`/`ash`/`ldb` आदि) और प्रेडिकेट (`zerop`/`evenp` आदि) का आकार टाइपों में समान है, इसलिए वे अध्याय 11 और 9 में इकट्ठे हैं।
 

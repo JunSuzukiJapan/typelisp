@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 文件 I/O、流与网络
 
 本指南说明文件读写、路径名以及套接字通信的基本写法。函数一览见[流与文件](../reference/functions/streams-files.md)
@@ -17,7 +17,7 @@
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
-知道不会失败时，或者在失败了停止也无妨的小脚本中，可以用 `unwrap` 取出值。如果是 `Err` 则会 panic。
+知道不会失败时，或者在失败了停止也无妨的小脚本中，可以用 `unwrap` 取出值。如果是 `err` 则会 panic。
 
 ## 2. 一次读写整个文件
 
@@ -162,7 +162,7 @@
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; 给下一次读取加上计时
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; 给下一次读取加上计时
 ```
 
 ### 对方断开连接时
@@ -175,7 +175,7 @@
 没有专门用于名称解析的函数。把主机名传给 `tcp-connect`、`tls-connect`、`send-to`，就会在其中解析。解析在另一个
 线程中进行，所以等待期间其他任务照常运行。一个名字有多个地址时会依次尝试连接。
 
-无法解析时返回 `Err`。
+无法解析时返回 `err`。
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -231,4 +231,4 @@ UDP 不是流，而是一次收发一个数据报。数据是字节序列（`Vec
 ## 9. Unix 域套接字
 
 把套接字文件的路径传给 `unix-listen` / `unix-connect`。得到的值与 TCP 一样是 `socket-stream`。文件已存在时
-`unix-listen` 返回 `Err`。关闭监听器时文件会被删除。
+`unix-listen` 返回 `err`。关闭监听器时文件会被删除。

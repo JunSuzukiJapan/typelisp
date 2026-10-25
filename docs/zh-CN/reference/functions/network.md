@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 网络（TCP / TLS / Unix 域 / UDP）
 
 套接字是[流](streams-files.md)的一员。连接有 `socket-stream`（字符）／`socket-byte-stream`（字节）这**同一连接的两种视图**，
@@ -18,7 +18,7 @@
 | `socket-listener` | `Stream`（`close` / `open-stream-p`） | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | ——（`bytes`：`Vector<int>`、`from`：`string`） | `recv-from` |
-| `NetError` | `Error` | 下列函数的 `Err` |
+| `NetError` | `Error` | 下列函数的 `err` |
 
 流的元素类型每个类型只有一种（与 `file-stream`/`binary-file-stream` 理由相同），所以字符和字节是不同的类型。
 `byte-stream-of`/`char-stream-of` 返回指向**同一连接**的值，接收缓冲区也是共享的——像 HTTP 那样用字符读头部、用字节读主体的
@@ -28,16 +28,16 @@
 
 | 名称 | 用法 | 类型 | 含义 |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | 连接。`host` 可以是名字也可以是地址。名字有多个地址时依次尝试（`localhost` 是 `::1` 和 `127.0.0.1`）。名称解析失败、连接被拒绝、超过 `:timeout` 秒都是 `Err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect` 之后进行 TLS。证书针对 `host` 名（连接目标与要验证的名字不同时用 `:server-name`）以 Mozilla 根证书验证——传入 `:ca-file`（PEM）时**只信任其中的证书**（私有 CA，或者自己的 `tls-listen` 给出的那张证书本身）。`:cert-file`/`:key-file`（两者都给或都不给）是服务器要求时出示的本方证书（双向 TLS）。握手在这里完成，所以服务器的证书通不过时这次调用返回 `Err`。结果是普通的 `socket-stream` |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | 连接。`host` 可以是名字也可以是地址。名字有多个地址时依次尝试（`localhost` 是 `::1` 和 `127.0.0.1`）。名称解析失败、连接被拒绝、超过 `:timeout` 秒都是 `err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | `tcp-connect` 之后进行 TLS。证书针对 `host` 名（连接目标与要验证的名字不同时用 `:server-name`）以 Mozilla 根证书验证——传入 `:ca-file`（PEM）时**只信任其中的证书**（私有 CA，或者自己的 `tls-listen` 给出的那张证书本身）。`:cert-file`/`:key-file`（两者都给或都不给）是服务器要求时出示的本方证书（双向 TLS）。握手在这里完成，所以服务器的证书通不过时这次调用返回 `err`。结果是普通的 `socket-stream` |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | 连接到 Unix 域套接字 `path`。是本地的，所以没有握手等待，也没有超时 |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | 监听。`"127.0.0.1"` 只限本机，`"0.0.0.0"` 是所有接口。`port` 传入 `0` 则由 OS 选择 |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen` 的 TLS 版本。`cert-file` 是证书链（PEM，自己的在最前），`key-file` 是私钥。两者都在这里读取并检查，所以密钥不匹配时不是在第一个客户端，而是这次调用返回 `Err`。`accept` 在**握手之前**返回，负责该连接的任务的第一次读写完成握手（与 Go 的 `tls.Conn` 相同）——握手慢的客户端不会阻碍其他 `accept`。传入 `:client-ca`（PEM）时，**要求所有客户端**出示由其中的 CA 签发的证书（双向 TLS）。没有时不要求 |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | 在 `path` 上监听。**文件已存在时为 `Err`**（可能属于正在运行的其他进程，所以不会悄悄替换）。`close` 删除文件 |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 下一个连接。在连接到来之前让任务停下。`:timeout` 秒后放弃并返回 `Err` |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | `tcp-listen` 的 TLS 版本。`cert-file` 是证书链（PEM，自己的在最前），`key-file` 是私钥。两者都在这里读取并检查，所以密钥不匹配时不是在第一个客户端，而是这次调用返回 `err`。`accept` 在**握手之前**返回，负责该连接的任务的第一次读写完成握手（与 Go 的 `tls.Conn` 相同）——握手慢的客户端不会阻碍其他 `accept`。传入 `:client-ca`（PEM）时，**要求所有客户端**出示由其中的 CA 签发的证书（双向 TLS）。没有时不要求 |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | 在 `path` 上监听。**文件已存在时为 `err`**（可能属于正在运行的其他进程，所以不会悄悄替换）。`close` 删除文件 |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | 下一个连接。在连接到来之前让任务停下。`:timeout` 秒后放弃并返回 `err` |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | 等到可以不等待地读取，或者 `secs` 秒。`true` 表示前者（包括已缓冲的情况）。给读取加计时的手段：`(if (wait-readable c 5.0) (read-line c) ...)`。它保证的是**下一次读取不会停下**，`read-line` 可能会等待该行的剩余部分 |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | 等到可以写，或者 `secs` 秒 |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | 给 `tls-listen` 的监听器再加一张证书，出示给请求 `name`（SNI）的客户端——一个监听器服务多个站点。证书链是否适用于 `name` 在这里检查，不适用时这次调用返回 `Err`。请求无人添加过的名字的客户端、不带名字的客户端得到 `tls-listen` 的证书 |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | 给 `tls-listen` 的监听器再加一张证书，出示给请求 `name`（SNI）的客户端——一个监听器服务多个站点。证书链是否适用于 `name` 在这里检查，不适用时这次调用返回 `err`。请求无人添加过的名字的客户端、不带名字的客户端得到 `tls-listen` 的证书 |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | 对方证书的 subject（`CN=client,O=Example,C=JP`，RFC 4514 形式，具体的在前）。双向 TLS 服务器了解"谁连接了"的手段（在完成握手的第一次读取之后）。在客户端一侧是服务器证书的名字。明文、握手之前、对方没有出示证书时为 `none` |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | 服务器一侧的 TLS 连接中客户端请求的名字（SNI）。用 `tls-add-certificate` 拥有多个站点的服务器了解"是哪个站点"。明文、客户端一侧、没有名字（用地址连接）时为 `none` |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | 关闭 Nagle（`TCP_NODELAY`）。`write-string` 每次都写到套接字，所以 Nagle 生效时，分两次写出头部和主体的响应会等待对方的延迟 ACK——请求／响应型协议请设为 `true`。Unix 域没有 Nagle，直接成功 |
@@ -112,7 +112,7 @@
 ```
 
 在双向 TLS 中不出示证书（或证书通不过）的客户端，在 TLS 1.3 下客户端一侧的握手先于服务器的判定结束，所以 `tls-connect` 返回
-`Ok`，**第一次读取得到 `none`**（告警记录在 `socket-error` 中）。服务器一侧同一连接的第一次读取也是 `none`。双方都不会 panic。
+`ok`，**第一次读取得到 `none`**（告警记录在 `socket-error` 中）。服务器一侧同一连接的第一次读取也是 `none`。双方都不会 panic。
 
 ## 3. UDP
 

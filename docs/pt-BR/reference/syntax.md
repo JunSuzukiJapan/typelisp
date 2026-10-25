@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -7,7 +7,7 @@ mensagens de erro, [errors.md](errors.md).
 
 ## 1. Elementos léxicos
 
-- **Não diferencia maiúsculas e minúsculas.** Os símbolos são todos normalizados para minúsculas ao serem lidos.
+- **Diferencia maiúsculas e minúsculas.** `foo` e `Foo` são símbolos diferentes. Nomes de tipo começam com maiúscula (`Option`, `Vector` etc.; tipos primitivos como `int` e `string` são minúsculos).
 - **Comentários**: de `;` até o fim da linha (comentários de linha). `#| ... |#` (comentários de bloco, que
   podem ser aninhados).
 - **Avaliação em tempo de leitura**: `#.(expr)` **executa a forma seguinte durante a leitura** e trata seu
@@ -152,7 +152,7 @@ No código-fonte, os tipos são escritos como símbolos ou listas comuns.
   supertraits (tudo o que ele herda, transitivamente) (upcast). Não pode ser passado a um trait não
   relacionado. Para as condições que um trait precisa cumprir para ser usado com `:dyn`, veja
   [3.9 deftrait / impl](#39-deftrait--impl--traits). Escrever `:dyn` fora de uma posição de tipo é um erro.
-- Tipos genéricos embutidos: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Tipos genéricos embutidos: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>`, e os tipos de concorrência `Task<T>` / `Thread<T>` / `Chan<T>`
   ([capítulo 12](#12-concorrência-tarefas)). Também há `Sexpr`, o tipo dos dados de expressões S. Os tipos de erro
   concretos embutidos são `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` /
@@ -822,8 +822,8 @@ Escrever uma lista `(Name option...)` na posição do nome especifica opções (
 
 ; genérica
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Cada variante tem a forma `(VariantName FieldType...)`. Os campos são só posicionais (não têm nome). É preciso
@@ -834,8 +834,8 @@ Escrever uma lista `(Name option...)` na posição do nome especifica opções (
   variantes ou ter um `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - Métodos e métodos estáticos são escritos em `impl` (3.5), como em `defstruct`.
 - Para tornar a própria enumeração `pub`, escreva `(pub defenum ...)`.
@@ -1003,8 +1003,8 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
 - `module` cria um namespace. **Tipos não são namespaces** (como no Rust, um tipo só tem métodos estáticos e
   métodos).
 - Fazer `use` de um tipo deixa as variantes de um enum e os métodos estáticos públicos do tipo disponíveis
-  também pelo nome nu (por exemplo, depois de `(use option)`, `some`/`none` podem ser chamados sem
-  `option::some`/`option::none`).
+  também pelo nome nu (por exemplo, depois de `(use Option)`, `some`/`none` podem ser chamados sem
+  `Option::some`/`Option::none`).
 - **Um nome tem um só significado.** Funções, variáveis globais e macros compartilham um namespace, e dentro
   de um módulo duas delas não podem ter o mesmo nome (é um erro qualquer que seja definida primeiro).
   Funções e variáveis não têm namespaces separados como no CL. Para o mesmo nome em módulos diferentes, o
@@ -1308,7 +1308,7 @@ Tipos de padrão:
   sintaxe literal (instâncias de `defstruct`, globais, resultados calculados), e uma implementação de `Eq`
   definida pelo usuário vira a regra de comparação como está. `expr` pode se referir a qualquer coisa visível da
   posição do ramo (argumentos, vínculos externos, globais)
-- `(Ctor sub-pattern...)` — padrões de construtor (`Some x` `None` `Cons a d` `Ok v` etc.)
+- `(Ctor sub-pattern...)` — padrões de construtor (`(some x)` `(none)` `(cons a d)` `(ok v)` etc.)
 - `(Type :slot pattern... :slot...)` — padrões de estrutura. Escreva os slots depois do nome do tipo como
   palavras-chave. Se uma palavra-chave é seguida de um padrão, esse slot é comparado com o padrão; se é
   seguida de outra palavra-chave ou de nada, o slot é ligado a uma variável com o seu próprio nome. Slots
@@ -1430,7 +1430,7 @@ então não há sintaxe adicional. O conjunto de tipos que o implementam é aber
 
 **Inferência de tipos entre ramos**: todos os ramos precisam ter o mesmo tipo (exceto os ramos que divergem, como
 com `panic`). Em um `match` escrito onde nenhum tipo é esperado, os ramos completam uns aos outros os argumentos de
-tipo que faltam: `(result::ok v)` fixa só `T`, e `(result::err e)` só `E`, mas juntos fixam `Result<T,E>`. Um
+tipo que faltam: `(Result::ok v)` fixa só `T`, e `(Result::err e)` só `E`, mas juntos fixam `Result<T,E>`. Um
 argumento de tipo que nenhum ramo consegue fixar até o fim é um erro desse ramo (`cannot infer type argument ...`).
 Fora de `match`, um argumento de tipo que não pode ser fixado é um erro na hora.
 
@@ -1636,7 +1636,7 @@ superior etc.).
 (unreachable)                       ; expande para (panic "unreachable"). defmacro
 (todo)                              ; expande para (panic "todo"). defmacro
 (as Type expr)                      ; conversão de tipo numérica/de caractere. as conversões que podem falhar causam panic se falharem
-(try-as Type expr)                  ; como as, mas devolve o resultado como Option<Type> (None se falhar)
+(try-as Type expr)                  ; como as, mas devolve o resultado como Option<Type> (none se falhar)
 (print control args...)             ; expande o formato e escreve na saída padrão (sem quebra de linha)
 (println control args...)           ; o mesmo (com uma quebra de linha no final)
 (format dest control args...)       ; o format do CL. devolve a string expandida
@@ -1656,7 +1656,7 @@ estão em [Diretivas de formato](functions/format.md) e em [Impressão](function
 `f32`/`f64`/`ratio`/`char`). O mesmo tipo não é conversão. **As conversões entre larguras inteiras (incluindo
 `int`) e entre `f32`↔`f64` são conversões reais**: `as` trunca / arredonda, e `try-as` responde se cabe naquela
 largura (precisão). `(as int x)` é a ampliação exata a partir de uma largura fixa, e `(as i32 n)` o truncamento a
-partir de `int`. Inteiro → `char` pode falhar fora do intervalo, então `as` causa panic e `try-as` dá `None`.
+partir de `int`. Inteiro → `char` pode falhar fora do intervalo, então `as` causa panic e `try-as` dá `none`.
 Todo o resto (as ampliações, e o truncamento de `float->int`/`ratio->int`) sempre dá certo.
 `float->int`/`ratio->int`/`char->int` chegam em `int`, e se for pedida uma largura mais estreita, `int->W` é
 chamado depois. É uma facilidade de escrita que se expande para os métodos de conversão correspondentes
@@ -1753,7 +1753,7 @@ interpretador, que um executável AOT não tem; o que `trace` observa e onde `st
 do interpretador em execução; e `disassemble` usa o próprio compilador). `room`/`dribble`/`ed` não estão entre
 elas e podem ser compiladas normalmente.
 
-O que **pode** ser compilado: E/S de streams e arquivos, `random`, `gensym`, `symbol->string`/`string->symbol`,
+O que **pode** ser compilado: E/S de streams e arquivos, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, as funções transcendentes, as
 operações de bits, `catch`/`throw`/`unwind-protect`, os quatro `eq`/`eql`/`equal`/`equalp` (o que permite
 compilar `case` para todo tipo), toda a família de impressão incluindo `print`/`println`/`format`/`pprint` e

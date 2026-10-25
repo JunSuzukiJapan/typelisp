@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # เครือข่าย (TCP / TLS / Unix Domain / UDP)
 
 ซ็อกเก็ตเป็นสมาชิกของ[สตรีม](streams-files.md) การเชื่อมต่อถูกมองใน **สองมุมมองของการเชื่อมต่อเดียวกัน**
@@ -22,7 +22,7 @@
 | `socket-listener` | `Stream` (`close` / `open-stream-p`) | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | — (`bytes`: `Vector<int>`, `from`: `string`) | `recv-from` |
-| `NetError` | `Error` | `Err` ของฟังก์ชันด้านล่าง |
+| `NetError` | `Error` | `err` ของฟังก์ชันด้านล่าง |
 
 ชนิดสตรีมมีชนิดสมาชิกเดียว (ด้วยเหตุผลเดียวกับ `file-stream`/`binary-file-stream`) ดังนั้น
 อักขระและไบต์เป็นคนละชนิด `byte-stream-of`/`char-stream-of` คืนค่าที่ชี้ไปยัง
@@ -34,16 +34,16 @@
 
 | ชื่อ | การใช้ | ชนิด | ความหมาย |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | เชื่อมต่อ `host` เป็นชื่อหรือที่อยู่ก็ได้ หากชื่อมีหลายที่อยู่ จะลองทีละที่อยู่ตามลำดับ (`localhost` คือ `::1` และ `127.0.0.1`) การแปลงชื่อล้มเหลว การเชื่อมต่อถูกปฏิเสธ หรือเกิน `:timeout` วินาที ให้ `Err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS หลัง `tcp-connect` ใบรับรองถูกตรวจสอบกับชื่อ `host` (`:server-name` หากชื่อที่ต้องตรวจสอบต่างจากที่ที่เชื่อมต่อ) ด้วยใบรับรองรากของ Mozilla เมื่อให้ `:ca-file` (PEM) จะเชื่อถือ **เฉพาะใบรับรองในนั้น** (CA ส่วนตัว หรือใบรับรองที่ `tls-listen` ของคุณเองแสดง) `:cert-file`/`:key-file` (ให้ทั้งคู่หรือไม่ให้เลย) คือใบรับรองของเรา แสดงเมื่อเซิร์ฟเวอร์ขอ (mutual TLS) handshake เสร็จที่นี่ ดังนั้นหากใบรับรองของเซิร์ฟเวอร์ไม่ผ่าน การเรียกนี้คืน `Err` ผลลัพธ์เป็น `socket-stream` ธรรมดา |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | เชื่อมต่อ `host` เป็นชื่อหรือที่อยู่ก็ได้ หากชื่อมีหลายที่อยู่ จะลองทีละที่อยู่ตามลำดับ (`localhost` คือ `::1` และ `127.0.0.1`) การแปลงชื่อล้มเหลว การเชื่อมต่อถูกปฏิเสธ หรือเกิน `:timeout` วินาที ให้ `err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS หลัง `tcp-connect` ใบรับรองถูกตรวจสอบกับชื่อ `host` (`:server-name` หากชื่อที่ต้องตรวจสอบต่างจากที่ที่เชื่อมต่อ) ด้วยใบรับรองรากของ Mozilla เมื่อให้ `:ca-file` (PEM) จะเชื่อถือ **เฉพาะใบรับรองในนั้น** (CA ส่วนตัว หรือใบรับรองที่ `tls-listen` ของคุณเองแสดง) `:cert-file`/`:key-file` (ให้ทั้งคู่หรือไม่ให้เลย) คือใบรับรองของเรา แสดงเมื่อเซิร์ฟเวอร์ขอ (mutual TLS) handshake เสร็จที่นี่ ดังนั้นหากใบรับรองของเซิร์ฟเวอร์ไม่ผ่าน การเรียกนี้คืน `err` ผลลัพธ์เป็น `socket-stream` ธรรมดา |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | เชื่อมต่อกับ Unix domain socket `path` เป็นการเชื่อมต่อในเครื่อง จึงไม่มีการรอ handshake และไม่มี timeout |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | ฟัง `"127.0.0.1"` คือเครื่องนี้เท่านั้น `"0.0.0.0"` คือทุกอินเทอร์เฟซ การส่ง `0` เป็น `port` ให้ OS เลือก |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | เวอร์ชัน TLS ของ `tcp-listen` `cert-file` คือสายใบรับรอง (PEM ใบรับรองของตัวเองมาก่อน) และ `key-file` คือกุญแจส่วนตัว ทั้งสองถูกอ่านและตรวจสอบที่นี่ ดังนั้นกุญแจที่ไม่ตรงกันให้ `Err` จากการเรียกนี้ ไม่ใช่ที่ไคลเอนต์รายแรก `accept` คืนค่า **ก่อน handshake** และการอ่านหรือเขียนครั้งแรกโดย task ที่จัดการการเชื่อมต่อจะทำ handshake ให้เสร็จ (เหมือน `tls.Conn` ของ Go) ดังนั้นไคลเอนต์ที่ handshake ช้าไม่หน่วง `accept` อื่น เมื่อให้ `:client-ca` (PEM) จะ **กำหนดให้ทุกไคลเอนต์** แสดงใบรับรองที่ออกโดย CA ในนั้น (mutual TLS) หากไม่ให้ ก็ไม่ขอ |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | ฟังที่ `path` **`Err` หากไฟล์มีอยู่แล้ว** (อาจเป็นของอีกโพรเซสที่กำลังรัน จึงไม่แทนที่โดยไม่แจ้ง) `close` ลบไฟล์ |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | การเชื่อมต่อถัดไป หยุด task จนกว่าจะมา ยอมแพ้ด้วย `Err` หลัง `:timeout` วินาที |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | เวอร์ชัน TLS ของ `tcp-listen` `cert-file` คือสายใบรับรอง (PEM ใบรับรองของตัวเองมาก่อน) และ `key-file` คือกุญแจส่วนตัว ทั้งสองถูกอ่านและตรวจสอบที่นี่ ดังนั้นกุญแจที่ไม่ตรงกันให้ `err` จากการเรียกนี้ ไม่ใช่ที่ไคลเอนต์รายแรก `accept` คืนค่า **ก่อน handshake** และการอ่านหรือเขียนครั้งแรกโดย task ที่จัดการการเชื่อมต่อจะทำ handshake ให้เสร็จ (เหมือน `tls.Conn` ของ Go) ดังนั้นไคลเอนต์ที่ handshake ช้าไม่หน่วง `accept` อื่น เมื่อให้ `:client-ca` (PEM) จะ **กำหนดให้ทุกไคลเอนต์** แสดงใบรับรองที่ออกโดย CA ในนั้น (mutual TLS) หากไม่ให้ ก็ไม่ขอ |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | ฟังที่ `path` **`err` หากไฟล์มีอยู่แล้ว** (อาจเป็นของอีกโพรเซสที่กำลังรัน จึงไม่แทนที่โดยไม่แจ้ง) `close` ลบไฟล์ |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | การเชื่อมต่อถัดไป หยุด task จนกว่าจะมา ยอมแพ้ด้วย `err` หลัง `:timeout` วินาที |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | จนกว่าจะอ่านได้โดยไม่ต้องรอ หรือ `secs` วินาที `true` หมายถึงอย่างแรก (รวมข้อมูลที่อยู่ในบัฟเฟอร์แล้ว) วิธีใส่นาฬิกาให้การอ่าน: `(if (wait-readable c 5.0) (read-line c) ...)` สิ่งที่มันรับประกันคือ **การอ่านครั้งถัดไปไม่หยุด**; `read-line` อาจรอส่วนที่เหลือของบรรทัด |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | จนกว่าจะเขียนได้ หรือ `secs` วินาที |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | เพิ่มใบรับรองอีกหนึ่งใบให้ลิสเทนเนอร์ `tls-listen` แสดงให้ไคลเอนต์ที่ขอ `name` (SNI): หลายไซต์บนลิสเทนเนอร์เดียว สายใบรับรองเป็นของ `name` หรือไม่ถูกตรวจสอบที่นี่ และหากไม่ใช่ การเรียกนี้คืน `Err` ไคลเอนต์ที่ขอชื่อที่ไม่มีใครเพิ่ม หรือไม่ขอชื่อ ได้ใบรับรองของ `tls-listen` |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | เพิ่มใบรับรองอีกหนึ่งใบให้ลิสเทนเนอร์ `tls-listen` แสดงให้ไคลเอนต์ที่ขอ `name` (SNI): หลายไซต์บนลิสเทนเนอร์เดียว สายใบรับรองเป็นของ `name` หรือไม่ถูกตรวจสอบที่นี่ และหากไม่ใช่ การเรียกนี้คืน `err` ไคลเอนต์ที่ขอชื่อที่ไม่มีใครเพิ่ม หรือไม่ขอชื่อ ได้ใบรับรองของ `tls-listen` |
 | `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | subject ของใบรับรองของอีกฝั่ง (`CN=client,O=Example,C=JP` รูปแบบ RFC 4514 เฉพาะเจาะจงที่สุดก่อน) วิธีที่เซิร์ฟเวอร์ mutual-TLS รู้ว่า "ใครเชื่อมต่อ" (หลังการอ่านครั้งแรกที่ทำ handshake ให้เสร็จ) ฝั่งไคลเอนต์คือชื่อของใบรับรองเซิร์ฟเวอร์ `none` สำหรับการเชื่อมต่อธรรมดา ก่อน handshake หรือหากอีกฝั่งไม่แสดงใบรับรอง |
 | `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | บนการเชื่อมต่อ TLS ฝั่งเซิร์ฟเวอร์ คือชื่อที่ไคลเอนต์ขอ (SNI) วิธีที่เซิร์ฟเวอร์ซึ่งมีหลายไซต์ที่เพิ่มด้วย `tls-add-certificate` รู้ว่า "ไซต์ไหน" `none` สำหรับการเชื่อมต่อธรรมดา ฝั่งไคลเอนต์ หรือไม่มีชื่อ (เชื่อมต่อด้วยที่อยู่) |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | ปิด Nagle (`TCP_NODELAY`) `write-string` ไปถึงซ็อกเก็ตทุกครั้ง ดังนั้นเมื่อเปิด Nagle การตอบกลับที่เขียนเป็นสองส่วน คือส่วนหัวและตัวเนื้อหา จะรอ ACK ที่ล่าช้าของอีกฝั่ง: ใช้ `true` สำหรับโปรโตคอลแบบคำขอ/การตอบกลับ Unix domain socket ไม่มี Nagle และสำเร็จเฉย ๆ |
@@ -124,7 +124,7 @@
 ```
 
 ใน mutual TLS ไคลเอนต์ที่ไม่แสดงใบรับรอง (หรือแสดงใบที่ไม่ผ่าน) จะทำ handshake ฝั่งของตัวเองให้เสร็จ
-ก่อนที่เซิร์ฟเวอร์จะตัดสินใจ ภายใต้ TLS 1.3 ดังนั้น `tls-connect` คืน `Ok` และ **การอ่าน
+ก่อนที่เซิร์ฟเวอร์จะตัดสินใจ ภายใต้ TLS 1.3 ดังนั้น `tls-connect` คืน `ok` และ **การอ่าน
 ครั้งแรกคืน `none`** (โดยมี alert อยู่ใน `socket-error`) ฝั่งเซิร์ฟเวอร์ การอ่านครั้งแรกของ
 การเชื่อมต่อเดียวกันก็คืน `none` เช่นกัน ไม่มีฝั่งใด panic
 

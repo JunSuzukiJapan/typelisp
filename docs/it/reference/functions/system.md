@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Tempo, ambiente e implementazione
 
 Funzioni per il tempo, interrogazioni sull'ambiente di esecuzione, strumenti di implementazione,
@@ -140,7 +140,7 @@ un terminale, `step` si limita a valutare `form`**: un comportamento degenere ch
 esplicitamente, in modo che script e test non si blocchino su un prompt a cui nessuno può rispondere.
 
 `$VISUAL` / `$EDITOR` di `ed` viene diviso agli spazi, quindi `EDITOR="code -w"` funziona. Se nessuno dei
-due è impostato, il risultato è `Err`: non ipotizza `vi`. Il numero di riga viene passato per primo, nella
+due è impostato, il risultato è `err`: non ipotizza `vi`. Il numero di riga viene passato per primo, nella
 forma `+N`.
 
 `dribble` registra tutti e tre i modi in cui l'output della sessione esce dal processo: ciò che scrivono
@@ -150,14 +150,14 @@ digitate nel REPL insieme ai valori che il REPL stampa in risposta.
 ## 6. Analisi e valutazione
 
 Tutte queste trattano testo e dati a runtime (che il programma stesso non controlla), quindi in caso di
-fallimento restituiscono l'`Err` di un `Result` anziché andare in panic. I tipi di errore sono tipi
+fallimento restituiscono l'`err` di un `Result` anziché andare in panic. I tipi di errore sono tipi
 concreti per ciascuna operazione ([Tipi di errore](option-result.md#3-tipi-di-errore-e-il-trait-error)).
 
 | Nome | Forma | Tipo | Descrizione |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | Il `parse-integer` di CL. Salta gli spazi iniziali e finali (lo stesso insieme di `trim`), legge al più un segno `+`/`-`, poi cifre in base `radix` (predefinita 10, da 2 a 36; le cifre oltre 10 in maiuscolo o minuscolo). Non c'è limite al numero di cifre (`int`). Qualsiasi altro carattere rimasto dà `Err`. Con `:junk-allowed true`, si ferma alla prima non cifra e ignora il resto, ma dà `Err` se non c'è nemmeno una cifra (corrispondente al `nil` di CL). Non restituisce il secondo valore di CL (la posizione in cui la lettura è terminata). Una `radix` fuori intervallo va in panic (un errore di chi chiama, non nel testo) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | Il `parse-integer` di CL. Salta gli spazi iniziali e finali (lo stesso insieme di `trim`), legge al più un segno `+`/`-`, poi cifre in base `radix` (predefinita 10, da 2 a 36; le cifre oltre 10 in maiuscolo o minuscolo). Non c'è limite al numero di cifre (`int`). Qualsiasi altro carattere rimasto dà `err`. Con `:junk-allowed true`, si ferma alla prima non cifra e ignora il resto, ma dà `err` se non c'è nemmeno una cifra (corrispondente al `nil` di CL). Non restituisce il secondo valore di CL (la posizione in cui la lettura è terminata). Una `radix` fuori intervallo va in panic (un errore di chi chiama, non nel testo) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Un numero in virgola mobile. Accetta anche `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Legge una `Sexpr` da `s` (con lo stesso lettore che legge il codice sorgente). Parentesi non bilanciate, stringhe non terminate e simili danno `Err`. La lettura da uno stream è `read-sexpr` ([Stream](streams-files.md#6-funzioni-generiche-e-operazioni-sui-file)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Legge una `Sexpr` da `s` (con lo stesso lettore che legge il codice sorgente). Parentesi non bilanciate, stringhe non terminate e simili danno `err`. La lettura da uno stream è `read-sexpr` ([Stream](streams-files.md#6-funzioni-generiche-e-operazioni-sui-file)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` più **la posizione in cui la lettura è terminata**. `(car r)` è il valore e `(cdr r)` la posizione del carattere successivo da leggere. `start` è 0 per impostazione predefinita |
 | `read-from-string-preserving-whitespace` | Come sopra | Come sopra | Lo stesso, ma non consuma lo spazio che ha terminato il dato. La differenza si vede nella posizione restituita |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Controlla i tipi di `form` a runtime e la valuta. Segue l'`eval` di CL |
@@ -181,7 +181,7 @@ restituisce la posizione 3, e la versione preserving restituisce 2.
 
 La sintassi dei numeri che il lettore accetta si trova nel
 [capitolo 1 del Riferimento della sintassi](../syntax.md#1-elementi-lessicali). Ciò che stampa
-`*print-radix*` ([Stampa](printing.md#62-base-maiuscoleminuscole-e-leggibilità)) può essere riletto così
+`*print-radix*` ([Stampa](printing.md#62-base-e-leggibilità)) può essere riletto così
 com'è. Non esiste `*read-base*` di CL.
 
 ### 6.1 Che cosa significa `eval`
@@ -211,7 +211,7 @@ globale immediatamente e in modo permanente.
   `eval` successivi possono vederlo** (il loro controllo dei tipi avviene a runtime, dopo la
   definizione). Il REPL controlla ed esegue una riga alla volta, quindi un nome definito con `eval` può
   essere chiamato direttamente dalla riga successiva.
-- **Errori**: gli errori di tipo e di sintassi restituiscono `Err` (non vanno in panic). I **panic a
+- **Errori**: gli errori di tipo e di sintassi restituiscono `err` (non vanno in panic). I **panic a
   runtime** nel codice valutato (divisione per zero e così via) si propagano come farebbero dal codice
   scritto direttamente. La pulizia di qualsiasi `unwind-protect` intermedio viene eseguita
   ([capitolo 8 del Riferimento della sintassi](../syntax.md#8-uscite-non-locali-catch--throw--unwind-protect)).

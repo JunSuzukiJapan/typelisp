@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -34,9 +34,9 @@ für die sechs Typen fester Breite (die Tabelle für `int` steht in Kapitel 3).
 | `int->int` | `(int->int x)` | `T→int` | Erweiternde Umwandlung in `int` (immer exakt). Das, was `(as int x)` tut |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Erweiternde Umwandlung in `ratio` (immer exakt) |
 | `int->char` | `(int->char x)` | `T→char` | Deutet den Wert als Unicode-Skalarwert. Panic bei einem ungültigen Wert |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Eine Fassung von `int->char`, die bei Fehlschlag `None` zurückgibt |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Eine Fassung von `int->char`, die bei Fehlschlag `none` zurückgibt |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Breitenumwandlung. Werte, die nicht passen, werden abgeschnitten (wie Rusts `as`) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dieselbe Umwandlung als Frage. `None`, wenn der Wert nicht in diese Breite passt |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dieselbe Umwandlung als Frage. `none`, wenn der Wert nicht in diese Breite passt |
 
 Diese Umwandlungen sind auch das, was die Spezialformen `(as Type x)`/`(try-as Type x)`
 ([Syntaxreferenz](../syntax.md#7-weitere-spezialformen)) tun. Bitoperationen (`logand`/`ash`/`ldb` usw.) und

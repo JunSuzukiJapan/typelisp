@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Mensajes de error
 
 Qué significan los principales mensajes de error de `typl` y cómo corregirlos.
@@ -45,7 +45,7 @@ Errores encontrados antes de ejecutar. La forma no se ejecuta hasta que se corri
 | ``type mismatch: expected `T`, found `U` `` | Hay una expresión de tipo `U` donde se necesita el tipo `T`. No hay conversiones implícitas; para números, convierte con `(as T x)`. `int` e `i32` también son tipos distintos |
 | ``integer literal 300 is out of range for u8 (0..=255)`` | El literal no cabe en el tipo. Si quieres recortarlo, escribe `(as u8 300)` |
 | ``unknown type `foo`: no type of that name is visible here. ...`` | No hay ningún tipo con ese nombre. Define el tipo antes de la primera forma que lo use (los tipos no tienen declaración anticipada). Si querías una variable de tipo, escríbela en una posición de declaración como `<foo>` tras el nombre de la función ([Referencia de sintaxis 3.6](syntax.md#36-defstruct--estructuras-tipos-definidos-por-el-usuario)) |
-| ``cannot infer type argument `t` for `vector::new` `` | No se puede determinar un argumento de tipo. Escribe el tipo con `the`, como en `(the Vector<int> (Vector::new))` |
+| ``cannot infer type argument `t` for `Vector::new` `` | No se puede determinar un argumento de tipo. Escribe el tipo con `the`, como en `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | El `match` no trata todas las variantes. Añade ramas para las variantes que faltan, o una rama `_` |
 | ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | La función exige un trait que el tipo que pasaste no implementa. Escribe `(impl Eq pt ...)` ([Traits estándar](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Se pasó un valor de un tipo que no implementa el trait donde se espera un `:dyn`. Escribe el `impl` |

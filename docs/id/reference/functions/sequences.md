@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Pasangan, S-Expression, dan Sekuens
 
 Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens yang ditulis di atas
@@ -89,8 +89,7 @@ diperlukan, tetapi tidak secara otomatis ke arah sebaliknya.
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | Mengambil nama simbol. Nama keyword tidak mengandung titik dua (`:foo` → `"foo"`) |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Membuat simbol dari string (meng-intern-nya di modul akar) |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Membuat simbol `name` di namespace `namespace` (`intern` pada CL). `namespace` adalah path modul dari akar (`"geometry::shapes"`); `"keyword"` adalah milik keyword dan `""` adalah akar. Jika dihilangkan, yaitu modul tempat panggilan ditulis |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Mengembalikan simbol yang terbaca dari `name` di namespace `namespace` (`intern` milik CL). Jika ada simbol yang terlihat dari namespace itu (miliknya sendiri, yang dibawa masuk dengan `use`, atau milik pustaka standar), simbol itulah yang dikembalikan; jika tidak, dibuat simbol baru di namespace itu. `namespace` adalah path modul dari root (`"geometry::shapes"`); `"keyword"` milik kata kunci dan `""` root. Namespace yang tidak ada adalah error. Jika dihilangkan, yaitu modul tempat pemanggilan ditulis (tidak ada `*package*`). Nilai kedua CL (status seperti `:internal`) tidak dikembalikan |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | Apakah keyword, yaitu apakah termasuk namespace keyword ([Referensi Sintaks](../syntax.md#1-unsur-leksikal)) |
 
 Untuk `gensym`, lihat [Makro](system.md#8-makro).
@@ -114,7 +113,7 @@ Fungsi yang menerima predikat (sepadan dengan keluarga `-if` pada CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Posisi pertama yang memenuhi predikat |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Berapa banyak yang memenuhi predikat |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Apakah setiap elemen memenuhi predikat |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Apakah ada elemen yang memenuhi predikat (sepadan dengan `some` pada CL; nama yang tidak bentrok dengan konstruktor `Some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Apakah ada elemen yang memenuhi predikat (sepadan dengan `some` pada CL; nama yang tidak bentrok dengan konstruktor `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Lipatan kiri |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Lipatan kanan |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Mengumpulkan semua elemen yang tersisa. Dipakai untuk mengubah hasil fungsi `lazy` di bawah menjadi `Vector` |
@@ -125,9 +124,9 @@ Pengindeksan, panjang, dan pengirisan:
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | Jumlah elemen |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Menyambung iterator. Tiga atau lebih dapat diberikan |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` pada CL. Tipe hasil ditulis sebagai **literal simbol yang dikutip** (CL memakai type specifier saat dijalankan). `'vector` menerima satu atau lebih, `'string` nol atau lebih (`""` untuk nol). Daftar `Sexpr` tidak tercakup (gunakan `sexpr-append`) |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` pada CL. Tipe hasil ditulis sebagai **literal simbol yang dikutip** (CL memakai type specifier saat dijalankan). `'vector` menerima satu atau lebih, `'string` nol atau lebih (`""` untuk nol). Daftar `Sexpr` tidak tercakup (gunakan `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Pembalikan (tidak destruktif) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Elemen `n` (`None` jika di luar rentang) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Elemen `n` (`none` jika di luar rentang) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` dengan urutan argumen terbalik |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | `n` elemen pertama |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` dibatasi pada panjang) |

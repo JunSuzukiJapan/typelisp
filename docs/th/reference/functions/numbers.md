@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -32,9 +32,9 @@ literal จำนวนเต็มที่ไม่มีคำอธิบา
 | `int->int` | `(int->int x)` | `T→int` | การแปลงขยายเป็น `int` (ถูกต้องแม่นยำเสมอ) สิ่งที่ `(as int x)` ทำ |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | การแปลงขยายเป็น `ratio` (ถูกต้องแม่นยำเสมอ) |
 | `int->char` | `(int->char x)` | `T→char` | ตีความค่าเป็น Unicode scalar value panic เมื่อค่าไม่ถูกต้อง |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | เวอร์ชันของ `int->char` ที่คืน `None` เมื่อล้มเหลว |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | เวอร์ชันของ `int->char` ที่คืน `none` เมื่อล้มเหลว |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | การแปลงความกว้าง ค่าที่ไม่พอดีถูกตัดทอน (เหมือน `as` ของ Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | การแปลงเดียวกันในรูปของคำถาม `None` หากค่าไม่พอดีกับความกว้างนั้น |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | การแปลงเดียวกันในรูปของคำถาม `none` หากค่าไม่พอดีกับความกว้างนั้น |
 
 การแปลงเหล่านี้คือสิ่งที่ฟอร์มพิเศษ `(as Type x)`/`(try-as Type x)`
 ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#7-ฟอร์มพิเศษอื่น-ๆ)) ทำ การดำเนินการระดับบิต (`logand`/`ash`/`ldb` และ

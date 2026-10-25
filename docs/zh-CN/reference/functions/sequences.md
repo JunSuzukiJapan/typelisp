@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 序对、S 表达式与序列
 
 泛型序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、构建在 `Iter` 之上的序列函数，以及高阶函数。
@@ -71,8 +71,7 @@
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `symbol→string` | 取出符号名。关键字的名字不含冒号（`:foo` → `"foo"`） |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | 从字符串创建符号（intern 到根模块） |
-| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 在命名空间 `namespace` 中创建名为 `name` 的符号（CL 的 `intern`）。`namespace` 是从根开始的模块路径（`"geometry::shapes"`），`"keyword"` 表示关键字，`""` 表示根。省略时为调用所在的模块 |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 返回 `name` 在命名空间 `namespace` 中被读成的符号（CL 的 `intern`）。若存在从该命名空间可见的符号（自己的、用 `use` 引入的、标准库的），就返回它；否则在该命名空间中新建一个。`namespace` 是从根开始的模块路径（`"geometry::shapes"`），`"keyword"` 是关键字的，`""` 是根。不存在的命名空间是错误。省略时为写下该调用的模块（没有 `*package*`）。不返回 CL 的第 2 个值（`:internal` 等状态） |
 | `keywordp` | `(keywordp s)` | `symbol→bool` | 是否为关键字，即是否属于关键字专用命名空间（[语法参考](../syntax.md#1-词法元素)） |
 
 `gensym` 见[宏](system.md#8-宏)。
@@ -94,7 +93,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 第一个满足条件的位置 |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 满足条件的个数 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否所有元素都满足条件 |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否有元素满足条件（相当于 CL 的 `some`。是不与 `Some` 构造函数冲突的名字） |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否有元素满足条件（相当于 CL 的 `some`。是不与 `some` 构造函数冲突的名字） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左折叠 |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右折叠 |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 收集剩下的全部元素。用来把下面 `lazy` 函数的结果变成 `Vector` |
@@ -105,9 +104,9 @@
 |---|---|---|---|
 | `length` | `(length it)` | `Iter<A>→int` | 元素个数 |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | 连接迭代器。也可以写 3 个以上 |
-| `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL 的 `concatenate`。结果类型写成**引用符号的字面量**（CL 是运行时的类型说明符）。`'vector` 需要 1 个以上，`'string` 0 个以上（0 个时为 `""`）。`Sexpr` 列表不适用（用 `sexpr-append`） |
+| `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL 的 `concatenate`。结果类型写成**引用符号的字面量**（CL 是运行时的类型说明符）。`'vector` 需要 1 个以上，`'string` 0 个以上（0 个时为 `""`）。`Sexpr` 列表不适用（用 `sexpr-append`） |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反转（非破坏性） |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | 第 `n` 个元素（越界时为 `None`） |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | 第 `n` 个元素（越界时为 `none`） |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | 参数顺序不同的 `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 前 `n` 个 |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`（`end` 按长度截断） |

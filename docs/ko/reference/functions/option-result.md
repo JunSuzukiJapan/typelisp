@@ -1,28 +1,28 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Option, Result, 오류 타입
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-생성자: `Option<T>`는 `Some(T)` / `None`. `Result<T,E>`는 `Ok(T)` / `Err(E)`. `E`는 어떤 타입이든 된다. 내장 구체 오류
+생성자: `Option<T>`는 `(some T)` / `none`. `Result<T,E>`는 `(ok T)` / `(err E)`. `E`는 어떤 타입이든 된다. 내장 구체 오류
 타입도, `defstruct`/`defenum`으로 직접 쓴 타입도 똑같이 들어간다(3장).
 
 | 이름 | 형식 | Option | Result | 설명 |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | 값을 꺼낸다. `None`/`Err`이면 panic |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | 값을 꺼낸다. `none`/`err`이면 panic |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | 값, 또는 기본값 |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `Some`인지 |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `None`인지 |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `Ok`인지 |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `Err`인지 |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 값을 꺼낸다. `None`/`Err`이면 `msg`로 panic |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 값, 또는 `f`의 결과. `f`는 `None`/`Err`일 때만 호출된다 |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok`의 내용에 `f`를 적용한다 |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err`의 내용에 `f`를 적용한다 |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok`이면 내용을 `f`에 넘기고 그 결과를 돌려준다 |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err`이면 `f`의 결과를 돌려준다 |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)`를 `Ok(v)`로, `None`을 `Err(e)`로 바꾼다 |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `some`인지 |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `none`인지 |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `ok`인지 |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `err`인지 |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 값을 꺼낸다. `none`/`err`이면 `msg`로 panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 값, 또는 `f`의 결과. `f`는 `none`/`err`일 때만 호출된다 |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `some`/`ok`의 내용에 `f`를 적용한다 |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `err`의 내용에 `f`를 적용한다 |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `some`/`ok`이면 내용을 `f`에 넘기고 그 결과를 돌려준다 |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err`이면 `f`의 결과를 돌려준다 |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)`를 `(ok v)`로, `none`을 `(err e)`로 바꾼다 |
 
-생성자는 `Option::some`/`Option::none`/`Result::ok`/`Result::err`이다(`(use option)`/`(use result)` 뒤에는 맨 이름
+생성자는 `Option::some`/`Option::none`/`Result::ok`/`Result::err`이다(`(use Option)`/`(use Result)` 뒤에는 맨 이름
 `some`/`none`/`ok`/`err`).
 
 분기는 `match`로 명시하거나, 위의 `map`/`and-then` 등으로 잇는다. Rust의 `?`에 해당하는 구문은 없다.
@@ -35,9 +35,9 @@
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
-(-> (option::some 8)
+(-> (Option::some 8)
     (and-then half)                          ; (some 4)
     (and-then half)                          ; (some 2)
     (map (lambda ((x int)) int (* x 10)))    ; (some 20)
@@ -93,7 +93,7 @@ Rust의 `std::error::Error`를 따라 **`Error`는 타입이 아니라 트레이
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | 오류 메시지(`Error` 트레이트의 메서드) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | 이 오류가 감싸는 원인. 없으면 `None`(Rust의 `Error::source`) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | 이 오류가 감싸는 원인. 없으면 `none`(Rust의 `Error::source`) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>`(`E`는 `Error`를 구현) | 구체 오류 타입을 트레이트 객체로 넓힌다 |
 | `describe-error` | `(describe-error e)` | `E→string`(`E`는 `Error`를 구현) | 메시지와 `source`를 따라가며 찾은 원인의 사슬. 원인마다 한 줄. CL에는 대응하는 것이 없다(Rust의 "caused by") |
 
@@ -103,10 +103,10 @@ Rust의 `std::error::Error`를 따라 **`Error`는 타입이 아니라 트레이
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (option::none)))
+  (source ((self Self)) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; 구체 타입을 그대로 E에 넣는다
-  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
+  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; 어떤 종류든 똑같이 다룬다
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -120,7 +120,7 @@ Rust의 `std::error::Error`를 따라 **`Error`는 타입이 아니라 트레이
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (result::err e))))
+    ((err e) (Result::err e))))
 ```
 
 **타입과 트레이트는 하나의 이름공간을 공유한다**(Rust와 같다). 하나의 모듈 안에서 `defstruct`/`defenum`과 트레이트는 같은

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # String, Karakter, dan Koleksi
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, dan `Deque<T>`.
@@ -78,7 +78,7 @@ dicetak sebagai `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Membaca elemen `i`. Panic jika di luar rentang |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Mengubah elemen `i`. Panic jika di luar rentang. Dapat juga ditulis `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Jumlah elemen |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Menghapus elemen terakhir dan mengembalikannya. `None` jika kosong (tidak seperti `get`/`set`, ia tidak panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Menghapus elemen terakhir dan mengembalikannya. `none` jika kosong (tidak seperti `get`/`set`, ia tidak panic) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Membuat iterator yang mengimplementasikan `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Menambahkan `x` jika tidak ada elemen yang sama (`pushnew` pada CL. Tidak perlu menulis ulang sebuah place, sehingga ia adalah metode dan bukan makro) |
 

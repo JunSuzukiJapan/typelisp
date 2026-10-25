@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -32,9 +32,9 @@
 | `int->int` | `(int->int x)` | `T→int` | تحويل توسيعي إلى `int` (دقيق دائمًا). وهو ما يفعله `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | تحويل توسيعي إلى `ratio` (دقيق دائمًا) |
 | `int->char` | `(int->char x)` | `T→char` | يفسّر القيمة على أنها قيمة عددية Unicode. ويحدث `panic` عند قيمة غير صالحة |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | نسخة من `int->char` تعيد `None` عند الفشل |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | نسخة من `int->char` تعيد `none` عند الفشل |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | تحويل العرض. والقيم التي لا تتسع تُقتطع (مثل `as` في Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | التحويل نفسه على صورة سؤال. `None` إذا لم تتسع القيمة في ذلك العرض |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | التحويل نفسه على صورة سؤال. `none` إذا لم تتسع القيمة في ذلك العرض |
 
 وهذه التحويلات هي أيضًا ما تفعله الصيغتان الخاصتان `(as Type x)`/`(try-as Type x)`
 ([مرجع الصياغة](../syntax.md#7-صيغ-خاصة-أخرى)). أما عمليات البتات (`logand`/`ash`/`ldb` وهكذا) والمحمولات

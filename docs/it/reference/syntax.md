@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -7,8 +7,7 @@ metodi predefiniti, si veda [Funzioni predefinite](functions/README.md); per l'e
 
 ## 1. Elementi lessicali
 
-- **Senza distinzione tra maiuscole e minuscole.** I simboli vengono tutti normalizzati in minuscolo
-  durante la lettura.
+- **Con distinzione tra maiuscole e minuscole.** `foo` e `Foo` sono simboli diversi. I nomi di tipo iniziano con la maiuscola (`Option`, `Vector` e così via; i tipi primitivi come `int` e `string` sono in minuscolo).
 - **Commenti**: da `;` fino alla fine della riga (commenti di riga). `#| ... |#` (commenti di blocco,
   che possono annidarsi).
 - **Valutazione in fase di lettura**: `#.(expr)` **esegue la forma seguente durante la lettura** e tratta
@@ -162,7 +161,7 @@ Nel sorgente, i tipi si scrivono come normali simboli o liste.
   Per le condizioni che un trait deve soddisfare per essere usato con `:dyn`, si veda
   [3.9 deftrait / impl](#39-deftrait--impl--trait). Scrivere `:dyn` fuori da una posizione di tipo è un
   errore.
-- Tipi generici predefiniti: `Option<T>` (`Some(T)` / `None`), `Result<T,E>` (`Ok(T)` / `Err(E)`),
+- Tipi generici predefiniti: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
   `HashTable<K,V>`, `Vector<T>`, e i tipi di concorrenza `Task<T>` / `Thread<T>` / `Chan<T>`
   ([capitolo 12](#12-concorrenza-task)). C'è anche `Sexpr`, il tipo dei dati S-expression. I tipi di
   errore concreti predefiniti sono `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -863,8 +862,8 @@ CL).
 
 ; generic
 (defenum Option<T>
-  (Some T)
-  (None))
+  (some T)
+  (none))
 ```
 
 - Ogni variante ha la forma `(VariantName FieldType...)`. I campi sono solo posizionali (non hanno
@@ -875,8 +874,8 @@ CL).
   variante o avere un `_`):
   ```lisp
   (match opt
-    ((Some v) v)
-    ((None) 0))
+    ((some v) v)
+    ((none) 0))
   ```
 - I metodi e i metodi statici si scrivono in `impl` (3.5), come per `defstruct`.
 - Per rendere `pub` l'enumerazione stessa, scrivi `(pub defenum ...)`.
@@ -1050,8 +1049,8 @@ tali valori attraverso `:dyn`, avvolgili in una struttura, come in `(defstruct f
 - `module` crea uno spazio dei nomi. **I tipi non sono spazi dei nomi** (come in Rust, un tipo ha solo metodi
   statici e metodi).
 - Fare `use` di un tipo rende disponibili anche per nome nudo le varianti di un enum e i metodi statici
-  pubblici del tipo (per esempio, dopo `(use option)`, `some`/`none` si possono chiamare senza
-  `option::some`/`option::none`).
+  pubblici del tipo (per esempio, dopo `(use Option)`, `some`/`none` si possono chiamare senza
+  `Option::some`/`Option::none`).
 - **Un nome ha un solo significato.** Funzioni, variabili globali e macro condividono uno spazio dei nomi,
   e all'interno di un modulo due di esse non possono avere lo stesso nome (è un errore qualunque sia
   definita per prima). Funzioni e variabili non hanno spazi dei nomi separati come in CL. Per lo stesso
@@ -1369,7 +1368,7 @@ Tipi di pattern:
   un'implementazione `Eq` definita dall'utente diventa la regola di confronto così com'è. `expr` può
   fare riferimento a qualsiasi cosa visibile dalla posizione del ramo (argomenti, binding esterni,
   globali)
-- `(Ctor sub-pattern...)` — pattern di costruttore (`Some x` `None` `Cons a d` `Ok v` e così via)
+- `(Ctor sub-pattern...)` — pattern di costruttore (`(some x)` `(none)` `(cons a d)` `(ok v)` e così via)
 - `(Type :slot pattern... :slot...)` — pattern di struttura. Scrivi gli slot dopo il nome del tipo come
   parole chiave. Se una parola chiave è seguita da un pattern, quello slot viene confrontato con il
   pattern; se è seguita da un'altra parola chiave o da niente, lo slot viene legato a una variabile con il
@@ -1498,7 +1497,7 @@ mai essere esaustivo, e `_` è obbligatorio:
 
 **Inferenza dei tipi tra i rami**: tutti i rami devono avere lo stesso tipo (tranne i rami che divergono,
 come con `panic`). In un `match` scritto dove non è atteso alcun tipo, i rami si completano a vicenda gli
-argomenti di tipo mancanti: `(result::ok v)` fissa solo `T`, e `(result::err e)` solo `E`, ma insieme
+argomenti di tipo mancanti: `(Result::ok v)` fissa solo `T`, e `(Result::err e)` solo `E`, ma insieme
 fissano `Result<T,E>`. Un argomento di tipo che nessun ramo riesce a fissare alla fine è un errore di quel
 ramo (`cannot infer type argument ...`). Fuori da `match`, un argomento di tipo che non si può fissare è
 un errore immediato.
@@ -1709,7 +1708,7 @@ ordine superiore e così via).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1731,7 +1730,7 @@ fissa, `f32`/`f64`/`ratio`/`char`). Lo stesso tipo non è una conversione. **Le 
 intere (incluso `int`) e tra `f32`↔`f64` sono conversioni vere**: `as` tronca / arrotonda, e `try-as`
 risponde se sta in quella larghezza (precisione). `(as int x)` è l'allargamento esatto da una larghezza
 fissa, e `(as i32 n)` il troncamento da `int`. Intero → `char` può fallire fuori intervallo, quindi `as`
-va in panic e `try-as` dà `None`. Tutto il resto (allargamento, e il troncamento di
+va in panic e `try-as` dà `none`. Tutto il resto (allargamento, e il troncamento di
 `float->int`/`ratio->int`) riesce sempre. `float->int`/`ratio->int`/`char->int` arrivano a `int`, e se si
 chiede una larghezza più stretta, dopo di esse viene chiamato `int->W`. Questo è zucchero che si espande
 nei corrispondenti metodi di conversione (`int->char`/`int->int`/`int->W` e così via in
@@ -1836,7 +1835,7 @@ ferma sono i percorsi di chiamata dell'interprete in esecuzione; e `disassemble`
 stesso). `room`/`dribble`/`ed` non ne fanno parte e possono essere compilate normalmente.
 
 Ciò che **si può** compilare: l'I/O su stream e file, `random`, `gensym`,
-`symbol->string`/`string->symbol`, `parse-int`/`parse-float`,
+`symbol->string`/`intern`, `parse-int`/`parse-float`,
 `get-universal-time`/`get-internal-real-time`, `exit`, le funzioni trascendenti, le operazioni sui bit,
 `catch`/`throw`/`unwind-protect`, tutti e quattro `eq`/`eql`/`equal`/`equalp` (il che permette di
 compilare `case` per ogni tipo), l'intera famiglia di stampa compresi

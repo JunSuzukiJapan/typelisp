@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Streams en bestanden
 
 Streamtraits en -methoden, concrete streamtypes, bestandsbewerkingen en padnamen. Netwerksockets zijn
@@ -91,7 +91,7 @@ Houd je aan een van beide.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` is een van de drie constanten `direction-input` / `direction-output` /
-`direction-append`. `open-file` geeft `Err(FileError)` terug als het bestand niet kan worden geopend
+`direction-append`. `open-file` geeft `(err FileError)` terug als het bestand niet kan worden geopend
 (een ontbrekend bestand is een gewoon resultaat, geen panic). De bestandsnaam kan een string of een
 `pathname` zijn (`Pathish` in hoofdstuk 9).
 
@@ -140,18 +140,18 @@ Allemaal `defstruct`s in de standaardbibliotheek en ze kunnen worden genest.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Draagt alles over |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Alle resterende regels |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Leest één `Sexpr` (`read` van CL). `Ok(eof)` aan het einde van de invoer, `Ok(datum d)` wanneer er een wordt gelezen, `Err` als het geen data is. Het **verbruikt het ene witruimteteken** dat het datum beëindigde (zoals in CL). `ReadOutcome` is geen `Option<Sexpr>` zodat het lezen van de lege lijst `()` en het einde van de invoer niet dezelfde waarde zijn |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Leest één `Sexpr` (`read` van CL). `(ok eof)` aan het einde van de invoer, `(ok (datum d))` wanneer er een wordt gelezen, `err` als het geen data is. Het **verbruikt het ene witruimteteken** dat het datum beëindigde (zoals in CL). `ReadOutcome` is geen `Option<Sexpr>` zodat het lezen van de lege lijst `()` en het einde van de invoer niet dezelfde waarde zijn |
 | `read-sexpr-preserving-whitespace` | Idem | Idem | Hetzelfde, maar laat de witruimte staan (`read-preserving-whitespace` van CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Leest tot `ch` en maakt een lijst. `ch` wordt verbruikt. `Err` als de invoer opraakt |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Leest tot `ch` en maakt een lijst. `ch` wordt verbruikt. `err` als de invoer opraakt |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Schrijft één regel per keer |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | De hele inhoud |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Alle regels |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Schrijft het weg |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Of het bestaat |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Verwijderen, hernoemen (argumenten zijn `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Het absolute pad met symbolische koppelingen en `.`/`..` opgelost. `Err` als het niet bestaat |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Het absolute pad met symbolische koppelingen en `.`/`..` opgelost. `err` als het niet bestaat |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Het tijdstip van de laatste wijziging. Het is **universele tijd**, dus `decode-universal-time` ([Tijd](system.md#2-datums-decoderen-en-coderen)) kan het lezen |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | De inlognaam van de eigenaar. `Err` als het bestand niet bestaat, `Ok(none)` als de uid van de eigenaar geen invoer in de wachtwoorddatabase heeft: de twee gevallen die CL onderscheidt blijven gescheiden |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | De inlognaam van de eigenaar. `err` als het bestand niet bestaat, `(ok none)` als de uid van de eigenaar geen invoer in de wachtwoorddatabase heeft: de twee gevallen die CL onderscheidt blijven gescheiden |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Of het een map is. **Ook `false` als het niet bestaat**; gebruik `probe-file` om de twee te onderscheiden |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Toont de inhoud als truename (het absolute pad met opgeloste symbolische koppelingen, zoals bij `truename`). Symbolische koppelingen waarvan het doel ontbreekt blijven weg. `.`/`..` blijven weg. De volgorde is wat het OS geeft |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Maakt het aan samen met zijn ouders. Slaagt als het al bestaat |

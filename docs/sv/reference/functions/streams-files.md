@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Strömmar och filer
 
 Strömtraits och metoder, konkreta strömtyper, filoperationer och pathnames. Nätverkssocketar är också
@@ -90,7 +90,7 @@ dem.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` är en av de tre konstanterna `direction-input` / `direction-output` /
-`direction-append`. `open-file` returnerar `Err(FileError)` om filen inte kan öppnas (en saknad fil är ett
+`direction-append`. `open-file` returnerar `(err FileError)` om filen inte kan öppnas (en saknad fil är ett
 vanligt resultat, inte en panic). Filnamnet kan vara en sträng eller ett `pathname` (`Pathish` i
 kapitel 9).
 
@@ -139,18 +139,18 @@ Alla är `defstruct`s i standardbiblioteket och kan nästlas.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Överför allt |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Alla återstående rader |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Läser en `Sexpr` (CL:s `read`). `Ok(eof)` vid slutet av indata, `Ok(datum d)` när en läses, `Err` om det inte är data. Den **förbrukar det ena blanktecken** som avslutade datumet (som i CL). `ReadOutcome` är inte en `Option<Sexpr>` så att läsning av den tomma listan `()` och slutet av indata inte blir samma värde |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Läser en `Sexpr` (CL:s `read`). `(ok eof)` vid slutet av indata, `(ok (datum d))` när en läses, `err` om det inte är data. Den **förbrukar det ena blanktecken** som avslutade datumet (som i CL). `ReadOutcome` är inte en `Option<Sexpr>` så att läsning av den tomma listan `()` och slutet av indata inte blir samma värde |
 | `read-sexpr-preserving-whitespace` | Som ovan | Som ovan | Samma, men lämnar blanktecknet (CL:s `read-preserving-whitespace`) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Läser fram till `ch` och gör en lista. `ch` förbrukas. `Err` om indata tar slut |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Läser fram till `ch` och gör en lista. `ch` förbrukas. `err` om indata tar slut |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Skriver en rad i taget |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Hela innehållet |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Alla rader |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Skriver ut det |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Om den finns |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Ta bort, byt namn (argumenten är `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Den absoluta sökvägen med symboliska länkar och `.`/`..` upplösta. `Err` om den inte finns |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Den absoluta sökvägen med symboliska länkar och `.`/`..` upplösta. `err` om den inte finns |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Tidpunkten för senaste ändring. Det är **universal time**, så `decode-universal-time` ([Tid](system.md#2-avkoda-och-koda-datum)) kan läsa den |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ägarens inloggningsnamn. `Err` om filen inte finns, `Ok(none)` om ägarens uid inte har någon post i lösenordsdatabasen: de två fall CL skiljer åt hålls isär |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ägarens inloggningsnamn. `err` om filen inte finns, `(ok none)` om ägarens uid inte har någon post i lösenordsdatabasen: de två fall CL skiljer åt hålls isär |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Om det är en katalog. **Också `false` om den inte finns**; använd `probe-file` för att skilja de två åt |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Listar innehållet som truenames (den absoluta sökvägen med symboliska länkar upplösta, som med `truename`). Symboliska länkar vars mål saknas utelämnas. `.`/`..` utelämnas. Ordningen är den OS ger |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Skapar den tillsammans med sina föräldrar. Lyckas om den redan finns |

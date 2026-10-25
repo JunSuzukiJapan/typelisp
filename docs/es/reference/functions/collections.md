@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Cadenas, caracteres y colecciones
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` y `Deque<T>`.
@@ -78,7 +78,7 @@ nuevo). También se imprime como `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Lee el elemento `i`. Panic fuera de rango |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Cambia el elemento `i`. Panic fuera de rango. También se puede escribir `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Número de elementos |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Quita el último elemento y lo devuelve. `None` si está vacío (a diferencia de `get`/`set`, no provoca un panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Quita el último elemento y lo devuelve. `none` si está vacío (a diferencia de `get`/`set`, no provoca un panic) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Crea un iterador que implementa `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Añade `x` si no existe un elemento igual (el `pushnew` de CL. No necesita reescribir un lugar, así que es un método y no una macro) |
 

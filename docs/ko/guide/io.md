@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # 파일 입출력, 스트림, 네트워크
 
 이 가이드에서는 파일 읽기와 쓰기, 경로명, 소켓 통신의 기본을 보인다. 함수 목록은
@@ -17,7 +17,7 @@
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
-실패하지 않는다는 것을 알고 있을 때나, 실패하면 멈춰도 괜찮은 작은 스크립트에서는 `unwrap`으로 값을 꺼낸다. `Err`이면
+실패하지 않는다는 것을 알고 있을 때나, 실패하면 멈춰도 괜찮은 작은 스크립트에서는 `unwrap`으로 값을 꺼낸다. `err`이면
 panic한다.
 
 ## 2. 파일 전체를 읽고 쓰기
@@ -168,7 +168,7 @@ panic한다.
 ```lisp
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (option::none))   ; 다음 읽기에 시계를 붙인다
+(if (wait-readable c 5.0) (read-line c) (Option::none))   ; 다음 읽기에 시계를 붙인다
 ```
 
 ### 상대가 끊었을 때
@@ -181,7 +181,7 @@ panic한다.
 이름 해석 전용 함수는 없다. `tcp-connect`, `tls-connect`, `send-to`에 호스트 이름을 넘기면 그 안에서 해석된다. 해석은
 다른 스레드에서 일어나므로 기다리는 동안에도 다른 태스크는 계속 실행된다. 이름에 주소가 여러 개 있으면 차례로 시도한다.
 
-이름을 해석하지 못하면 `Err`이 반환된다.
+이름을 해석하지 못하면 `err`이 반환된다.
 
 ```lisp
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
@@ -238,4 +238,4 @@ UDP는 스트림이 아니며 데이터그램을 하나씩 보내고 받는다. 
 ## 9. Unix 도메인 소켓
 
 `unix-listen` / `unix-connect`에 소켓 파일의 경로를 넘긴다. 얻는 값은 TCP와 같은 `socket-stream`이다. `unix-listen`은
-파일이 이미 있으면 `Err`을 반환한다. 리스너를 닫으면 파일이 지워진다.
+파일이 이미 있으면 `err`을 반환한다. 리스너를 닫으면 파일이 지워진다.

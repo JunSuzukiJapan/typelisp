@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Stream dan Berkas
 
 Trait dan metode stream, tipe stream konkret, operasi berkas, dan pathname. Socket jaringan juga
@@ -92,7 +92,7 @@ mencampur keduanya, `(fresh-line *standard-output*)` tidak mengetahui baris baru
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` adalah salah satu dari tiga konstanta `direction-input` / `direction-output` /
-`direction-append`. `open-file` mengembalikan `Err(FileError)` jika berkas tidak dapat dibuka
+`direction-append`. `open-file` mengembalikan `(err FileError)` jika berkas tidak dapat dibuka
 (berkas yang tidak ada adalah hasil biasa, bukan panic). Nama berkas dapat berupa string atau
 `pathname` (`Pathish` pada bab 9).
 
@@ -142,18 +142,18 @@ Semuanya adalah `defstruct` pada pustaka standar dan dapat disarangkan.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Memindahkan semuanya |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Semua baris yang tersisa |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Membaca satu `Sexpr` (`read` pada CL). `Ok(eof)` di akhir masukan, `Ok(datum d)` ketika satu dibaca, `Err` jika bukan data. Ia **mengonsumsi satu karakter spasi putih** yang mengakhiri datum (seperti di CL). `ReadOutcome` bukan `Option<Sexpr>` agar membaca daftar kosong `()` dan akhir masukan bukan nilai yang sama |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Membaca satu `Sexpr` (`read` pada CL). `(ok eof)` di akhir masukan, `(ok (datum d))` ketika satu dibaca, `err` jika bukan data. Ia **mengonsumsi satu karakter spasi putih** yang mengakhiri datum (seperti di CL). `ReadOutcome` bukan `Option<Sexpr>` agar membaca daftar kosong `()` dan akhir masukan bukan nilai yang sama |
 | `read-sexpr-preserving-whitespace` | Sama seperti di atas | Sama seperti di atas | Sama, tetapi membiarkan spasi putih (`read-preserving-whitespace` pada CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Membaca sampai `ch` dan membuat daftar. `ch` dikonsumsi. `Err` jika masukan habis |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Membaca sampai `ch` dan membuat daftar. `ch` dikonsumsi. `err` jika masukan habis |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Menulis satu baris sekali waktu |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Seluruh isi |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Semua baris |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Menuliskannya |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Apakah ada |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Menghapus, mengganti nama (argumennya `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Path absolut dengan tautan simbolik dan `.`/`..` diselesaikan. `Err` jika tidak ada |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Path absolut dengan tautan simbolik dan `.`/`..` diselesaikan. `err` jika tidak ada |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Waktu modifikasi terakhir. Berupa **universal time**, sehingga `decode-universal-time` ([Waktu](system.md#2-mendekode-dan-mengodekan-tanggal)) dapat membacanya |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Nama login pemilik. `Err` jika berkas tidak ada, `Ok(none)` jika uid pemilik tidak memiliki entri di basis data password: dua kasus yang dibedakan CL tetap dipisahkan |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Nama login pemilik. `err` jika berkas tidak ada, `(ok none)` jika uid pemilik tidak memiliki entri di basis data password: dua kasus yang dibedakan CL tetap dipisahkan |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Apakah direktori. **Juga `false` jika tidak ada**; gunakan `probe-file` untuk membedakan keduanya |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Mendaftar isinya berdasarkan truename (path absolut dengan tautan simbolik diselesaikan, seperti `truename`). Tautan simbolik yang targetnya hilang dilewati. `.`/`..` dilewati. Urutannya sesuai yang diberikan OS |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Membuatnya beserta induknya. Berhasil jika sudah ada |

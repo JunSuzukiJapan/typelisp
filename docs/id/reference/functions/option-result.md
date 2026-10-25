@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
 # Option, Result, dan Tipe Kesalahan
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-Konstruktor: `Option<T>` memiliki `Some(T)` / `None`. `Result<T,E>` memiliki `Ok(T)` / `Err(E)`.
+Konstruktor: `Option<T>` memiliki `(some T)` / `none`. `Result<T,E>` memiliki `(ok T)` / `(err E)`.
 `E` dapat berupa tipe apa pun: tipe kesalahan konkret bawaan, dan tipe yang Anda tulis sendiri
 dengan `defstruct`/`defenum`, cocok di sana sama saja (bab 3).
 
 | Nama | Bentuk | Option | Result | Deskripsi |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Mengambil nilainya. Panic pada `None`/`Err` |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Mengambil nilainya. Panic pada `none`/`err` |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | Nilainya, atau nilai bawaan |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Apakah `Some` |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Apakah `None` |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Apakah `Ok` |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Apakah `Err` |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Mengambil nilainya. Pada `None`/`Err` panic dengan `msg` |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Nilainya, atau hasil `f`. `f` hanya dipanggil pada `None`/`Err` |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Menerapkan `f` pada isi `Some`/`Ok` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Menerapkan `f` pada isi `Err` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Pada `Some`/`Ok`, meneruskan isinya ke `f` dan mengembalikan hasilnya |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Pada `None`/`Err`, mengembalikan hasil `f` |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Mengubah `Some(v)` menjadi `Ok(v)` dan `None` menjadi `Err(e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Apakah `some` |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Apakah `none` |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Apakah `ok` |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Apakah `err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Mengambil nilainya. Pada `none`/`err` panic dengan `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Nilainya, atau hasil `f`. `f` hanya dipanggil pada `none`/`err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Menerapkan `f` pada isi `some`/`ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Menerapkan `f` pada isi `err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Pada `some`/`ok`, meneruskan isinya ke `f` dan mengembalikan hasilnya |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Pada `none`/`err`, mengembalikan hasil `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Mengubah `(some v)` menjadi `(ok v)` dan `none` menjadi `(err e)` |
 
 Konstruktornya adalah `Option::some`/`Option::none`/`Result::ok`/`Result::err` (atau, setelah
-`(use option)`/`(use result)`, nama polos `some`/`none`/`ok`/`err`).
+`(use Option)`/`(use Result)`, nama polos `some`/`none`/`ok`/`err`).
 
 Percabangan ditulis secara eksplisit dengan `match`, atau dirangkai dengan `map`/`and-then` dan yang
 lain di atas. Tidak ada sintaks yang setara dengan `?` milik Rust.
@@ -39,9 +39,9 @@ kombinator dapat dirangkai apa adanya:
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
-(-> (option::some 8)
+(-> (Option::some 8)
     (and-then half)                          ; (some 4)
     (and-then half)                          ; (some 2)
     (map (lambda ((x int)) int (* x 10)))    ; (some 20)
@@ -103,7 +103,7 @@ diperlakukan persis seperti tipe kesalahan Anda sendiri yang ditulis dengan
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | Pesan kesalahan (metode trait `Error`) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | Penyebab yang dibungkus kesalahan ini, atau `None` jika tidak ada (`Error::source` pada Rust) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | Penyebab yang dibungkus kesalahan ini, atau `none` jika tidak ada (`Error::source` pada Rust) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` mengimplementasikan `Error`) | Memperluas tipe kesalahan konkret menjadi objek trait |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` mengimplementasikan `Error`) | Pesan dan rantai penyebab yang ditemukan dengan mengikuti `source`, satu penyebab per baris. CL tidak memiliki padanannya ("caused by" pada Rust) |
 
@@ -114,10 +114,10 @@ Jika Anda mengimplementasikan `Error` untuk tipe kesalahan Anda sendiri, tipe it
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (option::none)))
+  (source ((self Self)) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; the concrete type goes into E as it is
-  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
+  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; handle any kind uniformly
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -132,7 +132,7 @@ Karena tidak ada `?`, konversi ini ditulis secara eksplisit:
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (result::err e))))
+    ((err e) (Result::err e))))
 ```
 
 **Tipe dan trait berbagi satu ruang nama** (seperti di Rust). Dalam satu modul, `defstruct`/`defenum`
