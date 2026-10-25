@@ -649,6 +649,9 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `destructuring-bind` `prog1` `setq` `psetf` `psetq` `dlet` など）を `std::control` へ、`digit-weight`
      `digit->char` `name->char` を `std::char` へ、`left-trim` `right-trim` `trim` を `std::string` へ移した
      （ABI は変わらない）。
+     次に `Iter` と `doiter` `map` `filter` `collect` `foldl` `foldr` を `std::iter` へ、`Iter` の上の CL の列と
+     リストの関数（`length` `append` `nth` `find` `sort` `assoc` `first` `rest` `remove` `union` など）を `std::seq`
+     へ移した（ABI は変わらない）。各型への `Iter` の impl と、型ごとの反復子（`vector-iter` など）は型と一緒に移す。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。
