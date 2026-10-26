@@ -989,7 +989,7 @@ impl Registry {
         // name of its own because the CL one is the prelude's.
         internal.fns.insert(
             "read-datum-at".to_string(),
-            FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::std("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(wk::READ_ERROR), )),
+            FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::in_ns(typelisp_mem::StdModule::SEXPR.ns(), "cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(wk::READ_ERROR), )),
         );
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
@@ -2069,7 +2069,7 @@ fn hashtable_def() -> AdtDef {
     assoc.insert(
         "entries".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Named(Path::std("cons-cell"), vec![tvar("K"), tvar("V")])])),
+            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Named(Path::in_ns(typelisp_mem::StdModule::SEXPR.ns(), "cons-cell"), vec![tvar("K"), tvar("V")])])),
             instance: true,
             builtin: true,
         },

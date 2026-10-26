@@ -59,7 +59,7 @@ fn loading_the_prelude_installs_native_bodies() {
     let (_heap, _chk, interp) = env(true);
     for target in [
         f("not"),
-        f("sexpr-map"),
+        CompileTarget::Fn(Path::in_ns(typelisp::std_module("sexpr"), "sexpr-map")),
         m("i32", "gcd"),
         m("i32", "abs"),
         m("int", "signum"),

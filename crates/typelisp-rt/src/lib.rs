@@ -5917,7 +5917,7 @@ mod tests {
         }
 
         // `entries` builds a `Vector` of `cons-cell`s, one per entry.
-        let entries = unsafe { rt_hashtable_entries([ht, make_type(&["Vector"], &[make_type(&["std", "cons-cell"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])])].as_ptr(), 2) };
+        let entries = unsafe { rt_hashtable_entries([ht, make_type(&["Vector"], &[make_type(&["std", "sexpr", "cons-cell"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])])].as_ptr(), 2) };
         match decode(entries) {
             Value::Boxed(id) => {
                 let h = unsafe { active_heap() };

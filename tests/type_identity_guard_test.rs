@@ -223,7 +223,7 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         // language has no multiple values to carry) — both on the runtime's
         // own side of the boundary, so both need the identity too.
         (TypeId::VECTOR, Path::builtin(typelisp::mem::wk::VECTOR)),
-        (TypeId::CONS_CELL, Path::std("cons-cell")),
+        (TypeId::CONS_CELL, Path::in_ns(typelisp::mem::StdModule::SEXPR.ns(), "cons-cell")),
         // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
         // `Scope<V>` is made of.
         (TypeId::HASHTABLE, Path::builtin(typelisp::mem::wk::HASHTABLE)),

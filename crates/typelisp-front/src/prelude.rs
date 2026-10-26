@@ -1248,10 +1248,11 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `map` is now the generic `Iter` combinator further down (an iterator, not a
 ;; `Sexpr`, so it cannot walk a macro's argument list). Macro authors doing
 ;; the same should likewise reach for `sexpr-*` (see the redesign doc §7).
-(defun sexpr-map ((f (fn (Option<Sexpr>) Option<Sexpr>)) (lst Option<Sexpr>)) Option<Sexpr>
+(module sexpr
+(pub defun sexpr-map ((f (fn (Option<Sexpr>) Option<Sexpr>)) (lst Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp lst)
       (sexpr-cons (f (sexpr-car lst)) (sexpr-map f (sexpr-cdr lst)))
-      ()))
+      ())))
 
 ;; `case` (roadmap step 8c, catalog §1.1): `(case expr (key1 body1...)
 ;; (key2 body2...) ... (:else default...))` expands to `(cond ((eq tmp key1)
@@ -1516,7 +1517,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; have to choose between starting over and corrupting external iteration
 ;; state — `vector-iter<T>` is the conventional fix: a separate, independent
 ;; cursor per `(v::iter)` call).
-(defstruct vector-iter<T> (vec Vector<T>) (pos int))
+(module vec
+(pub defstruct vector-iter<T> (vec Vector<T>) (pos int))
 (impl Iter vector-iter<T>
   (:type Item T)
   (next ((self Self)) Option<T>
@@ -1526,7 +1528,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (Option::some v))
         (Option::none))))
 (impl Vector<T>
-  (pub iter (self) vector-iter<T> (make-instance 'vector-iter :vec self :pos 0)))
+  (pub iter (self) vector-iter<T> (make-instance 'vector-iter :vec self :pos 0))))
 
 ;; Generic collection combinators (redesign Phase 4). Each takes an
 ;; *iterator* — any type implementing the `Iter` trait — rather than one
@@ -1795,7 +1797,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `Vector<T>`/`vector-iter<T>` are. `HashTable<K,V>::entries`
 ;; (`registry::hashtable_def`) yields a `Vector<cons-cell<K,V>>` of `(key
 ;; . value)` pairs.
-(defstruct cons-cell<A,B> (pub car A) (pub cdr B))
+(module sexpr
+(pub defstruct cons-cell<A,B> (pub car A) (pub cdr B)))
 
 ;; `cons`/`car`/`cdr`: the generic pair API (Symbol/Sexpr redesign Phase 4b).
 ;; `cons` builds a `cons-cell<A,B>`; `car`/`cdr` are `cons-cell`'s own
@@ -1807,7 +1810,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; typed list node — is a different thing entirely, built/walked through the
 ;; `sexpr-*` island layer (`sexpr-cons`/`sexpr-car`/`sexpr-cdr`), never this
 ;; pair. Mutate a pair field with `(setf p::car v)`.
-(defun cons<A,B> ((a A) (b B)) cons-cell<A,B> (make-instance 'cons-cell :car a :cdr b))
+(module sexpr
+(pub defun cons<A,B> ((a A) (b B)) cons-cell<A,B> (make-instance 'cons-cell :car a :cdr b)))
 
 ;; CL's 2-argument `floor`/`ceiling`/`round`/`truncate` (`(floor 7 2) => 3,
 ;; 1`): a division that reports both quotient and remainder. CL returns them
@@ -1976,7 +1980,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; observed, unlike `vector-iter<T>`'s shared reference). `hashtable-iter<K,V>`
 ;; reuses `vector-iter<T>`'s exact cursor logic over that snapshot rather
 ;; than duplicating it.
-(defstruct hashtable-iter<K,V> (snapshot Vector<cons-cell<K,V>>) (pos int))
+(module collections
+(pub defstruct hashtable-iter<K,V> (snapshot Vector<cons-cell<K,V>>) (pos int))
 (impl Iter hashtable-iter<K,V>
   (:type Item cons-cell<K,V>)
   (next ((self Self)) Option<cons-cell<K,V>>
@@ -1986,7 +1991,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (Option::some e))
         (Option::none))))
 (impl HashTable<K,V>
-  (pub iter (self) hashtable-iter<K,V> (make-instance 'hashtable-iter :snapshot (entries self) :pos 0)))
+  (pub iter (self) hashtable-iter<K,V> (make-instance 'hashtable-iter :snapshot (entries self) :pos 0))))
 
 ;; CL's `maphash` and `hash-table-size`, receiver-first and without the type
 ;; name in the method name (§1.1 of cl-parity-plan.md) — `(maphash h f)` and
@@ -2952,34 +2957,35 @@ user-visible capacity."
 ;; cons-cell<A,cons-cell<B,C>>))` leaves `B`/`C` unbound and `car` stops
 ;; resolving on it. Generated mechanically; the type of `cXr` is read
 ;; right-to-left, one `cons-cell` nesting per letter.
-(defun caar<A,B,C> ((x cons-cell<cons-cell<A,B>,C>)) A (car (car x)))
-(defun cadr<A,B,C> ((x cons-cell<A,cons-cell<B,C>>)) B (car (cdr x)))
-(defun cdar<A,B,C> ((x cons-cell<cons-cell<A,B>,C>)) B (cdr (car x)))
-(defun cddr<A,B,C> ((x cons-cell<A,cons-cell<B,C>>)) C (cdr (cdr x)))
-(defun caaar<A,B,C,D> ((x cons-cell<cons-cell<cons-cell<A,B>,C>,D>)) A (car (car (car x))))
-(defun caadr<A,B,C,D> ((x cons-cell<A,cons-cell<cons-cell<B,C>,D>>)) B (car (car (cdr x))))
-(defun cadar<A,B,C,D> ((x cons-cell<cons-cell<A,cons-cell<B,C>>,D>)) B (car (cdr (car x))))
-(defun caddr<A,B,C,D> ((x cons-cell<A,cons-cell<B,cons-cell<C,D>>>)) C (car (cdr (cdr x))))
-(defun cdaar<A,B,C,D> ((x cons-cell<cons-cell<cons-cell<A,B>,C>,D>)) B (cdr (car (car x))))
-(defun cdadr<A,B,C,D> ((x cons-cell<A,cons-cell<cons-cell<B,C>,D>>)) C (cdr (car (cdr x))))
-(defun cddar<A,B,C,D> ((x cons-cell<cons-cell<A,cons-cell<B,C>>,D>)) C (cdr (cdr (car x))))
-(defun cdddr<A,B,C,D> ((x cons-cell<A,cons-cell<B,cons-cell<C,D>>>)) D (cdr (cdr (cdr x))))
-(defun caaaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<cons-cell<A,B>,C>,D>,E>)) A (car (car (car (car x)))))
-(defun caaadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<cons-cell<B,C>,D>,E>>)) B (car (car (car (cdr x)))))
-(defun caadar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<cons-cell<B,C>,D>>,E>)) B (car (car (cdr (car x)))))
-(defun caaddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<cons-cell<C,D>,E>>>)) C (car (car (cdr (cdr x)))))
-(defun cadaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<A,cons-cell<B,C>>,D>,E>)) B (car (cdr (car (car x)))))
-(defun cadadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<B,cons-cell<C,D>>,E>>)) C (car (cdr (car (cdr x)))))
-(defun caddar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<B,cons-cell<C,D>>>,E>)) C (car (cdr (cdr (car x)))))
-(defun cadddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<C,cons-cell<D,E>>>>)) D (car (cdr (cdr (cdr x)))))
-(defun cdaaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<cons-cell<A,B>,C>,D>,E>)) B (cdr (car (car (car x)))))
-(defun cdaadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<cons-cell<B,C>,D>,E>>)) C (cdr (car (car (cdr x)))))
-(defun cdadar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<cons-cell<B,C>,D>>,E>)) C (cdr (car (cdr (car x)))))
-(defun cdaddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<cons-cell<C,D>,E>>>)) D (cdr (car (cdr (cdr x)))))
-(defun cddaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<A,cons-cell<B,C>>,D>,E>)) C (cdr (cdr (car (car x)))))
-(defun cddadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<B,cons-cell<C,D>>,E>>)) D (cdr (cdr (car (cdr x)))))
-(defun cdddar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<B,cons-cell<C,D>>>,E>)) D (cdr (cdr (cdr (car x)))))
-(defun cddddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<C,cons-cell<D,E>>>>)) E (cdr (cdr (cdr (cdr x)))))
+(module sexpr
+(pub defun caar<A,B,C> ((x cons-cell<cons-cell<A,B>,C>)) A (car (car x)))
+(pub defun cadr<A,B,C> ((x cons-cell<A,cons-cell<B,C>>)) B (car (cdr x)))
+(pub defun cdar<A,B,C> ((x cons-cell<cons-cell<A,B>,C>)) B (cdr (car x)))
+(pub defun cddr<A,B,C> ((x cons-cell<A,cons-cell<B,C>>)) C (cdr (cdr x)))
+(pub defun caaar<A,B,C,D> ((x cons-cell<cons-cell<cons-cell<A,B>,C>,D>)) A (car (car (car x))))
+(pub defun caadr<A,B,C,D> ((x cons-cell<A,cons-cell<cons-cell<B,C>,D>>)) B (car (car (cdr x))))
+(pub defun cadar<A,B,C,D> ((x cons-cell<cons-cell<A,cons-cell<B,C>>,D>)) B (car (cdr (car x))))
+(pub defun caddr<A,B,C,D> ((x cons-cell<A,cons-cell<B,cons-cell<C,D>>>)) C (car (cdr (cdr x))))
+(pub defun cdaar<A,B,C,D> ((x cons-cell<cons-cell<cons-cell<A,B>,C>,D>)) B (cdr (car (car x))))
+(pub defun cdadr<A,B,C,D> ((x cons-cell<A,cons-cell<cons-cell<B,C>,D>>)) C (cdr (car (cdr x))))
+(pub defun cddar<A,B,C,D> ((x cons-cell<cons-cell<A,cons-cell<B,C>>,D>)) C (cdr (cdr (car x))))
+(pub defun cdddr<A,B,C,D> ((x cons-cell<A,cons-cell<B,cons-cell<C,D>>>)) D (cdr (cdr (cdr x))))
+(pub defun caaaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<cons-cell<A,B>,C>,D>,E>)) A (car (car (car (car x)))))
+(pub defun caaadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<cons-cell<B,C>,D>,E>>)) B (car (car (car (cdr x)))))
+(pub defun caadar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<cons-cell<B,C>,D>>,E>)) B (car (car (cdr (car x)))))
+(pub defun caaddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<cons-cell<C,D>,E>>>)) C (car (car (cdr (cdr x)))))
+(pub defun cadaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<A,cons-cell<B,C>>,D>,E>)) B (car (cdr (car (car x)))))
+(pub defun cadadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<B,cons-cell<C,D>>,E>>)) C (car (cdr (car (cdr x)))))
+(pub defun caddar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<B,cons-cell<C,D>>>,E>)) C (car (cdr (cdr (car x)))))
+(pub defun cadddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<C,cons-cell<D,E>>>>)) D (car (cdr (cdr (cdr x)))))
+(pub defun cdaaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<cons-cell<A,B>,C>,D>,E>)) B (cdr (car (car (car x)))))
+(pub defun cdaadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<cons-cell<B,C>,D>,E>>)) C (cdr (car (car (cdr x)))))
+(pub defun cdadar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<cons-cell<B,C>,D>>,E>)) C (cdr (car (cdr (car x)))))
+(pub defun cdaddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<cons-cell<C,D>,E>>>)) D (cdr (car (cdr (cdr x)))))
+(pub defun cddaar<A,B,C,D,E> ((x cons-cell<cons-cell<cons-cell<A,cons-cell<B,C>>,D>,E>)) C (cdr (cdr (car (car x)))))
+(pub defun cddadr<A,B,C,D,E> ((x cons-cell<A,cons-cell<cons-cell<B,cons-cell<C,D>>,E>>)) D (cdr (cdr (car (cdr x)))))
+(pub defun cdddar<A,B,C,D,E> ((x cons-cell<cons-cell<A,cons-cell<B,cons-cell<C,D>>>,E>)) D (cdr (cdr (cdr (car x)))))
+(pub defun cddddr<A,B,C,D,E> ((x cons-cell<A,cons-cell<B,cons-cell<C,cons-cell<D,E>>>>)) E (cdr (cdr (cdr (cdr x))))))
 
 ;; --- Phase 3b: predicate, negated and mapping variants ---
 ;; The `-if`/`-if-not` pairs CL has for every search. `member-if` reports

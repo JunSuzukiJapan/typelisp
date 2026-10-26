@@ -184,7 +184,7 @@ pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
     (StdModule::OPTION, "Option", &[]),
     (StdModule::RESULT, "Result", &[]),
     (StdModule::VEC, "Vector", &[]),
-    (StdModule::STD, "cons-cell", &[]),
+    (StdModule::SEXPR, "cons-cell", &[]),
     (StdModule::COLLECTIONS, "HashTable", &[]),
     (StdModule::STD, "Scope", &[]),
     (StdModule::STD, "scope-frame", &[]),
