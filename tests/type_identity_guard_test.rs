@@ -213,10 +213,10 @@ fn the_runtimes_fixed_types_are_the_checkers() {
     for (id, path) in [
         (TypeId::OPTION, Path::builtin(typelisp::mem::wk::OPTION)),
         (TypeId::RESULT, Path::builtin(typelisp::mem::wk::RESULT)),
-        (TypeId::FILE_ERROR, Path::std("FileError")),
-        (TypeId::READ_ERROR, Path::std("ReadError")),
-        (TypeId::PARSE_INT_ERROR, Path::std("ParseIntError")),
-        (TypeId::PARSE_FLOAT_ERROR, Path::std("ParseFloatError")),
+        (TypeId::FILE_ERROR, Path::builtin(typelisp::mem::wk::FILE_ERROR)),
+        (TypeId::READ_ERROR, Path::builtin(typelisp::mem::wk::READ_ERROR)),
+        (TypeId::PARSE_INT_ERROR, Path::builtin(typelisp::mem::wk::PARSE_INT_ERROR)),
+        (TypeId::PARSE_FLOAT_ERROR, Path::builtin(typelisp::mem::wk::PARSE_FLOAT_ERROR)),
         // `file-list-directory` builds a `Vector<string>` box directly, and
         // `read-datum-at` pairs its datum with its end index in a
         // `cons-cell<Sexpr, int>` box (CL's second return value, which this
@@ -238,7 +238,7 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         (TypeId::INTERNAL_TIME, Path::in_ns(typelisp::std_module("time"), "internal-time")),
         (TypeId::HEAP_INFO, Path::in_ns(typelisp::std_module("repl"), "heap-info")),
         // The socket layer's error type, built by `net_builtin`.
-        (TypeId::NET_ERROR, Path::std("NetError")),
+        (TypeId::NET_ERROR, Path::builtin(typelisp::mem::wk::NET_ERROR)),
         (TypeId::SEXPR, Path::builtin(typelisp::mem::wk::SEXPR)),
     ] {
         assert_eq!(

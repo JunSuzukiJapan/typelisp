@@ -12,18 +12,17 @@
 - 段階 6 は 6a（再公開 `(pub use PATH)`）、6b（ルートの組み込みを `std` へ）、6c（`std::prelude` が
   `std` を全部再公開）が済み、6d（`std` の子モジュールに分ける）が途中。6d' （シンボルの大文字と
   小文字の区別）は済み。6d で移したものの一覧と、残っているものの一覧は計画の 6d の項にある。
-- ABI は 0.3.39。全体テストは最後のコミットで通っている。
+- ABI は 0.3.40。全体テストは最後のコミットで通っている。
 - 途中の作業は無い（作業ツリーはコミット済み）。
 
 ## 2. 次にすること（順に）
 
 1. 6d の残り。registry（`crates/typelisp-front/src/check/registry.rs` の `with_builtins`）が `std` に
-   直接登録しているものを子モジュールへ移す。
-   - 組み込みのエラー型。案は `ReadError` を `std::reader`、`FileError` を `std::fs`、`NetError` を
-     `std::net`、`EvalError` を `std::eval`、`ParseIntError` `ParseFloatError` を `std::num`。置き場所は
-     `StdModule::of_builtin_type`（`crates/typelisp-mem/src/symbols.rs`）の 1 か所で答える。
+   直接登録しているものを子モジュールへ移す。組み込みのエラー型は済み。
    - 基本型を `std::primitive` へ。`Sexpr` の構成子（`int` `f64` `char` など）は基本型と同じ綴りなので、
      基本型と同じモジュールに置く（`std::prelude` が公開する名前は 1 つのパスでなければならない）。
+     構成子 `tuple` と同じ綴りの `tuple` マクロ（`prelude.rs` の `tuple_source`）も `std::primitive` に置く
+     （ユーザー決定）。手書きのコア IR のテストの `::std::i32` などは `::std::primitive::i32` になる。
    - `llvm-*` の型と `Scope` を `%core` へ。
    - `format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。置き場所はまだ決めて
      いない。内部の補助なら `%internal`（計画の 5 節）。
@@ -87,6 +86,14 @@
 - LLVM 22 が要る。`scripts/with-llvm-env.sh` が `LLVM_SYS_221_PREFIX` を設定する（Linux では
   `scripts/linux-llvm-prefix.sh` が探す）。Linux で LLVM 22 と依存を入れる手順は
   `.github/actions/setup-build/action.yml` にある。
+- クラウドの環境で apt が apt.llvm.org に届かないときは、apt にプロキシと CA を渡す。apt は `_apt`
+  ユーザーで動き `/root` の下を読めないので、CA の束を読める場所へ写して
+  `Acquire::https::apt.llvm.org::Proxy` と `::CAInfo` を `/etc/apt/apt.conf.d/` に書く。ネットワークの許可は
+  始めたセッションには効かないことがある。
+- クラウドのディスクは割り当てが小さい。テストの実行ファイル（`target/debug/deps`）が 20G を超え、
+  `target/aot-test-tmp` にも数 G たまる。`CARGO_INCREMENTAL` を変えると実行ファイルの名前が変わって前の
+  ものが残るので、全体テストの間は変えない。ディスクが一杯になると、走り終えたテストの実行ファイルと
+  `target/aot-test-tmp` の古いものを消して空ける。
 - cargo のコマンドは `scripts/with-llvm-env.sh` を通して打つ（例:
   `scripts/with-llvm-env.sh cargo check --workspace --all-targets --locked`）。
 - 全体テストは `scripts/with-llvm-env.sh scripts/test-serial.sh > <ログ> 2>&1`。通ったと言えるのは

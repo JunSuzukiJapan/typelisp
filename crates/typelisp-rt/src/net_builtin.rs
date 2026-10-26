@@ -22,7 +22,7 @@ use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
 use crate::stream::with_streams;
 use crate::stream_builtin::{int, lookup, text, ArgError};
 
-const NET_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "NetError", &[]);
+const NET_ERROR: TypeSpec = TypeSpec::Named(StdModule::NET, "NetError", &[]);
 
 /// The runtime type each builtin's *result* carries — [`crate::
 /// stream_builtin::RESULT_TYPES`]'s companion, checked against the registry

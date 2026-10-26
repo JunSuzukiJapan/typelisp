@@ -831,10 +831,16 @@ impl Registry {
         let mut vec = Namespace::new(typelisp_mem::StdModule::VEC.ns());
         let mut sexpr_ns = Namespace::new(typelisp_mem::StdModule::SEXPR.ns());
         let mut collections = Namespace::new(typelisp_mem::StdModule::COLLECTIONS.ns());
+        let mut fs = Namespace::new(typelisp_mem::StdModule::FS.ns());
+        let mut net = Namespace::new(typelisp_mem::StdModule::NET.ns());
         option.add_type(option_def());
         result.add_type(result_def());
         for def in builtin_error_defs() {
-            std_ns.add_type(def);
+            let home = [&mut reader, &mut eval, &mut num, &mut fs, &mut net]
+                .into_iter()
+                .find(|m| m.ns == def.name.ns())
+                .expect("a built-in error type's module is one `with_builtins` makes");
+            home.add_type(def);
         }
         // `Sexpr` is the one type whose data constructors (`int`/`str`/...)
         // are reachable as bare names without a `use` — so `(int 5)` datum
@@ -1164,7 +1170,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result, vec, sexpr_ns, collections].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result, vec, sexpr_ns, collections, fs, net].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg

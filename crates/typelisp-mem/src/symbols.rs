@@ -852,6 +852,11 @@ impl StdModule {
     pub const SEXPR: StdModule = StdModule(&["sexpr"]);
     pub const COLLECTIONS: StdModule = StdModule(&["collections"]);
     pub const SYNC: StdModule = StdModule(&["sync"]);
+    pub const READER: StdModule = StdModule(&["reader"]);
+    pub const EVAL: StdModule = StdModule(&["eval"]);
+    pub const NUM: StdModule = StdModule(&["num"]);
+    pub const FS: StdModule = StdModule(&["fs"]);
+    pub const NET: StdModule = StdModule(&["net"]);
 
     /// The module, found one segment at a time from `std`.
     pub fn ns(self) -> NsId {
@@ -871,6 +876,11 @@ impl StdModule {
             wk::ARRAY => StdModule::ARRAY,
             wk::TASK_TYPE | wk::THREAD_TYPE => StdModule::THREAD,
             wk::CHAN => StdModule::SYNC,
+            wk::READ_ERROR => StdModule::READER,
+            wk::EVAL_ERROR => StdModule::EVAL,
+            wk::PARSE_INT_ERROR | wk::PARSE_FLOAT_ERROR => StdModule::NUM,
+            wk::FILE_ERROR => StdModule::FS,
+            wk::NET_ERROR => StdModule::NET,
             wk::I8
             | wk::I16
             | wk::I32
@@ -892,12 +902,6 @@ impl StdModule {
             | wk::SCOPE
             | wk::STRING
             | wk::SYMBOL
-            | wk::PARSE_INT_ERROR
-            | wk::PARSE_FLOAT_ERROR
-            | wk::READ_ERROR
-            | wk::FILE_ERROR
-            | wk::EVAL_ERROR
-            | wk::NET_ERROR
             | wk::LLVM_MODULE
             | wk::LLVM_FUNCTION
             | wk::LLVM_BUILDER

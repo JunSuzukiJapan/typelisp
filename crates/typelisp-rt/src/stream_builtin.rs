@@ -41,7 +41,7 @@ use crate::stream::with_streams;
 // representation `value.rs`'s `BoxedObj` doc comment describes, whose *fields
 // are its elements*. `file-list-directory` builds one directly.
 
-const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "FileError", &[]);
+const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::FS, "FileError", &[]);
 
 /// The runtime type each builtin's *result* carries, and — for the ones
 /// that wrap something generic inside it — the type of that inner value.

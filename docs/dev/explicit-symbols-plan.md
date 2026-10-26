@@ -695,10 +695,13 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      （`Registry::std_definition_elsewhere`）。利用者が `(module std ...)` に書いた定義が
      `reexport_std_in_prelude` の assert を panic させていたため。
      prelude で `std` 直下に残るのは `not` `unreachable` `todo` と関数の組み合わせ（`identity` `const`
-     `complement` `compose` `flip`）で、5 節の表に置き場所が無い。registry が `std` に置くもので残るのは、
-     組み込みのエラー型（`ReadError` を `std::reader`、`FileError` を `std::fs`、`NetError` を `std::net`、
-     `EvalError` を `std::eval`、`ParseIntError` `ParseFloatError` を `std::num` の案）、基本型（`std::primitive`）、
-     `llvm-*` の型と `Scope`（`%core`）、`format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。
+     `complement` `compose` `flip`）で、5 節の表に置き場所が無い。
+     次に組み込みのエラー型を移した。`ReadError` を `std::reader`、`EvalError` を `std::eval`、`ParseIntError`
+     `ParseFloatError` を `std::num`、`FileError` を `std::fs`、`NetError` を `std::net`。置き場所は
+     `StdModule::of_builtin_type` が答える。ABI は 0.3.40。
+     registry が `std` に置くもので残るのは、基本型（`std::primitive`。`Sexpr` の構成子と、構成子 `tuple` と同じ
+     綴りの `tuple` マクロも同じモジュールへ。2026-10-26、ユーザー決定）、`llvm-*` の型と `Scope`（`%core`）、
+     `format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

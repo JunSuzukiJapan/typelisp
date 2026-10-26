@@ -4330,7 +4330,7 @@ const READER_MACRO_GLUE: &str = "call-reader-macro";
 pub const MACROEXPAND_RESULT_TYPE: TypeSpec = TypeSpec::Named(
     StdModule::RESULT,
     "Result",
-    &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::SEXPR]), TypeSpec::Named(StdModule::STD, "EvalError", &[])],
+    &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::SEXPR]), TypeSpec::Named(StdModule::EVAL, "EvalError", &[])],
 );
 
 /// `eval`'s result type — the same as `macroexpand`'s, and the same fixed

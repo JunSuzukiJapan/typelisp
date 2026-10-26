@@ -24,8 +24,8 @@ use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
 // pre-interned table — same standing exception (and same guard test) as
 // [`crate::stream_builtin`]: this crate has no `Path` to derive a name from.
 
-const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "FileError", &[]);
-const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "ParseFloatError", &[]);
+const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::FS, "FileError", &[]);
+const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(StdModule::NUM, "ParseFloatError", &[]);
 
 /// The runtime type each of these builtins' results carries — the same
 /// table [`crate::stream_builtin::RESULT_TYPES`] keeps, for the same reason

@@ -32,7 +32,7 @@ use crate::reader::Reader;
 /// `Option<Sexpr>` inside them is niche-represented — `some v` *is* `v` — so
 /// it builds no box of its own.
 const OPTION_SEXPR: TypeSpec = TypeSpec::Named(StdModule::OPTION, "Option", &[spec::SEXPR]);
-const READ_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "ReadError", &[]);
+const READ_ERROR: TypeSpec = TypeSpec::Named(StdModule::READER, "ReadError", &[]);
 pub const READ_RESULT_TYPE: TypeSpec = TypeSpec::Named(StdModule::RESULT, "Result", &[OPTION_SEXPR, READ_ERROR]);
 pub const READ_DATUM_PAIR_TYPE: TypeSpec = TypeSpec::Named(StdModule::SEXPR, "cons-cell", &[OPTION_SEXPR, spec::INT]);
 pub const READ_DATUM_RESULT_TYPE: TypeSpec = TypeSpec::Named(StdModule::RESULT, "Result", &[READ_DATUM_PAIR_TYPE, READ_ERROR]);

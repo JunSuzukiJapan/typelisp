@@ -130,7 +130,7 @@ fn match_result_arms_must_agree() {
 }
 
 fn error_ty() -> Type {
-    Type::Named(Path::std("ParseIntError"), vec![])
+    Type::Named(Path::builtin(typelisp::mem::wk::PARSE_INT_ERROR), vec![])
 }
 
 // ---- the `Error` trait / user-defined error types (TODO T3) -----------------
