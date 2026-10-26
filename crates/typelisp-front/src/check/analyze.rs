@@ -1499,7 +1499,18 @@ impl Checker {
     /// `"function"`/`"type"`), given whatever already occupies that name in
     /// the table it's about to be inserted into (`None` if the name is free).
     /// A builtin is never redefinable; anything else follows `redef_policy`.
+    ///
+    /// In the standard library a name has one definition across the modules
+    /// `std::prelude` re-exports, and a type name one across all of its
+    /// modules, so a definition there of a name another of them has is
+    /// refused whatever the policy.
     fn check_redef<T: Definable>(&self, kind: &str, name: &str, existing: Option<&T>) -> Result<(), Error> {
+        if let Some(other) = self.info.reg.std_definition_elsewhere(self.info.ns, name) {
+            return Err(Error::TypeError(format!(
+                "cannot define {} `{}` here: the standard library already defines `{}`",
+                kind, name, other
+            )));
+        }
         match existing {
             None => Ok(()),
             Some(e) => self.check_redef_outcome(kind, name, e.builtin()),
@@ -2577,7 +2588,7 @@ impl Checker {
         // `sexpr-cons`, not the free `cons` (which is the `cons<T,U>` pair
         // builder now — Symbol/Sexpr redesign Phase 4b): a `&rest` list is a
         // `Sexpr`, built through the island cons layer.
-        let cons_path = Path::std("sexpr-cons");
+        let cons_path = Path::in_ns(typelisp_mem::StdModule::SEXPR.ns(), "sexpr-cons");
         let r = cons_path;
         let mut acc = self.quoted(heap, Value::Empty, option_of_sexpr());
         for item in items.into_iter().rev() {
@@ -7768,7 +7779,9 @@ impl Checker {
             Some(args) => d.insts.get(&ConcreteNames::type_args(args)).and_then(|i| i.assoc.get(&method)),
             None => d.assoc.get(&method),
         });
-        self.check_redef("method", &method, previous)?;
+        if let Some(e) = previous {
+            self.check_redef_outcome("method", &method, e.builtin())?;
+        }
         if let Some(def) = self.info.reg.type_def_mut(&type_fq) {
             let af = AssocFn { sig, instance, builtin: false };
             match &inst_args {
@@ -14138,7 +14151,7 @@ impl Checker {
     /// value whose type has no `Sexpr` encoding is the same clear `TypeError`
     /// a bad `&rest` element gets), then `sexpr-cons`-ed together back-to-front.
     fn cons_hetero_sexpr(&self, heap: &mut Heap, items: Vec<Checked>) -> Result<Checked, Error> {
-        let r = Path::std("sexpr-cons");
+        let r = Path::in_ns(typelisp_mem::StdModule::SEXPR.ns(), "sexpr-cons");
         let mut acc = self.quoted(heap, Value::Empty, option_of_sexpr());
         for item in items.into_iter().rev() {
             let elem_ty = item.ty.clone();

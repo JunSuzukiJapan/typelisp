@@ -1047,12 +1047,12 @@ impl Registry {
         // `is_empty`) rather than pattern-matching, so they survive that
         // fence. Same heap operations as `cons`/`car`/`cdr` (see
         // `Interp::eval_builtin`), so no new runtime machinery is needed.
-        std_ns.fns.insert("sexpr-cons".to_string(), FnSig::builtin(vec![option_of(sexpr()), option_of(sexpr())], option_of(sexpr())));
-        std_ns.fns.insert("sexpr-car".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
-        std_ns.fns.insert("sexpr-cdr".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
-        std_ns.fns.insert("sexpr-consp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
-        std_ns.fns.insert("sexpr-null".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
-        std_ns.fns.insert("sexpr-atom".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        sexpr_ns.fns.insert("sexpr-cons".to_string(), FnSig::builtin(vec![option_of(sexpr()), option_of(sexpr())], option_of(sexpr())));
+        sexpr_ns.fns.insert("sexpr-car".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
+        sexpr_ns.fns.insert("sexpr-cdr".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
+        sexpr_ns.fns.insert("sexpr-consp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        sexpr_ns.fns.insert("sexpr-null".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        sexpr_ns.fns.insert("sexpr-atom".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
         // Internal `Sexpr` payload extractors (Symbol/Sexpr redesign Phase 2):
         // typed field readers that used to be `match`-based typelisp defuns in
         // `compiler.rs` (`(match s ((Int n) n) (_ (panic ...)))`), moved to Rust
@@ -1062,9 +1062,9 @@ impl Registry {
         // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
         // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
-        std_ns.fns.insert("sexpr-int".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Int));
-        std_ns.fns.insert("sexpr-f64".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F64));
-        std_ns.fns.insert("sexpr-f32".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F32));
+        sexpr_ns.fns.insert("sexpr-int".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Int));
+        sexpr_ns.fns.insert("sexpr-f64".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F64));
+        sexpr_ns.fns.insert("sexpr-f32".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F32));
         // One extractor per integer type, not one per machine word: the five
         // narrow widths are separate `Sexpr` variants carrying separate boxes
         // (`BoxedObj::Narrow`), and each of these returns exactly its own.
@@ -1076,13 +1076,13 @@ impl Registry {
             ("sexpr-u32", Type::U32),
             ("sexpr-i32", Type::I32),
         ] {
-            std_ns.fns.insert(name.to_string(), FnSig::builtin(vec![option_of(sexpr())], ty));
+            sexpr_ns.fns.insert(name.to_string(), FnSig::builtin(vec![option_of(sexpr())], ty));
         }
-        std_ns.fns.insert("sexpr-bool".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
-        std_ns.fns.insert("sexpr-char".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Char));
-        std_ns.fns.insert("sexpr-str".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
-        std_ns.fns.insert("sexpr-sym-name".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
-        std_ns.fns.insert("sexpr-symp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        sexpr_ns.fns.insert("sexpr-bool".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        sexpr_ns.fns.insert("sexpr-char".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Char));
+        sexpr_ns.fns.insert("sexpr-str".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
+        sexpr_ns.fns.insert("sexpr-sym-name".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
+        sexpr_ns.fns.insert("sexpr-symp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
         // `equal`/`equalp`: structural equality (CL `equal`/`equalp`), Rust
         // builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`)
         // since the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5).
@@ -1209,6 +1209,30 @@ impl Registry {
                 }
             }
         }
+    }
+
+    /// The definition of `name` that a definition of it in the module `ns`
+    /// would make [`Self::reexport_std_in_prelude`] find twice: when `ns` is
+    /// one of the modules `std::prelude` re-exports, another of them defining
+    /// `name`; when `ns` is in the standard library, another of its modules
+    /// defining a type, trait or C struct `name`.
+    pub fn std_definition_elsewhere(&self, ns: NsId, name: &str) -> Option<Path> {
+        if !crate::types::in_std(ns) {
+            return None;
+        }
+        let offered = |m: NsId| m == NsId::STD || PRELUDE_MODULES.iter().any(|seg| crate::types::std_module(seg) == m);
+        if offered(ns) {
+            if let Some(&path) = self.module_at(crate::types::prelude_ns()).and_then(|p| p.aliases.get(name)) {
+                if path.ns() != ns {
+                    return Some(path);
+                }
+            }
+        }
+        self.modules
+            .values()
+            .filter(|m| m.ns != ns && crate::types::in_std(m.ns))
+            .find(|m| m.types.contains_key(name) || m.traits.contains_key(name) || m.c_structs.contains_key(name))
+            .map(|m| Path::in_ns(m.ns, name))
     }
 
     /// The root module's definitions.

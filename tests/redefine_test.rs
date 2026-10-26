@@ -37,13 +37,33 @@ fn redefining_a_builtin_function_is_always_an_error() {
     // them wouldn't conflict with what this test checks. `sexpr-car` is a
     // genuine `Registry::with_builtins` free function (direct cons-heap access —
     // can't be written in typelisp itself), so it still exercises this rule.
-    // In `std`, where the built-in functions are registered: a definition
+    // In `std::sexpr`, where the function is registered: a definition
     // anywhere else is another module's name.
-    let src = "(module std (defun sexpr-car ((x Sexpr)) Sexpr x))";
+    let src = "(module std (module sexpr (defun sexpr-car ((x Sexpr)) Sexpr x)))";
     for policy in [RedefPolicy::Warn, RedefPolicy::Error, RedefPolicy::Silent] {
         let (_, result) = run(src, policy);
         assert!(result.is_err(), "policy {:?} should still reject redefining a builtin function", policy);
     }
+}
+
+#[test]
+fn a_name_another_std_module_defines_is_refused_in_std() {
+    // `std::prelude` offers `sexpr-car` from `std::sexpr`; a second one in
+    // `std` would give it two definitions of one name.
+    let src = "(module std (defun sexpr-car ((x Sexpr)) Sexpr x))";
+    for policy in [RedefPolicy::Warn, RedefPolicy::Error, RedefPolicy::Silent] {
+        let (_, result) = run(src, policy);
+        let e = result.expect_err("a second `sexpr-car` in the standard library");
+        assert!(e.to_string().contains("std::sexpr::sexpr-car"), "unexpected error: {}", e);
+    }
+}
+
+#[test]
+fn a_type_name_another_std_module_defines_is_refused_in_std() {
+    let src = "(module std (module mine (defstruct Option (x int))))";
+    let (_, result) = run(src, RedefPolicy::Silent);
+    let e = result.expect_err("a second `Option` in the standard library");
+    assert!(e.to_string().contains("std::option::Option"), "unexpected error: {}", e);
 }
 
 #[test]

@@ -3094,6 +3094,7 @@ mod tests {
         // The built-in helpers live in `std::%internal`, a module of every
         // session the registry is published into; there is no registry here.
         heap.names().declare_module(typelisp_mem::symbols::ns_of(&["std".to_string(), crate::INTERNAL_MODULE.to_string()]));
+        heap.names().declare_module(typelisp_mem::StdModule::SEXPR.ns());
         // Core IR, read in the core IR's module so its tags are the IR's own.
         let mut vs: Vec<Value> = crate::Reader::new()
             .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
@@ -3289,7 +3290,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
+            "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
@@ -3312,9 +3313,9 @@ mod tests {
     #[test]
     fn an_argument_that_is_itself_a_call_suspends_the_outer_one() {
         let mut h = stress_heap();
-        let src = "(call ::std::sexpr-cons (sexpr sexpr) \
+        let src = "(call ::std::sexpr::sexpr-cons (sexpr sexpr) \
                      (str \"first\") \
-                     (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
+                     (call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
         let v = eval_ok(&mut h, src);
         match h.car(v).unwrap() {
             Value::Str(id) => assert_eq!(&*h.string(id), "first"),
@@ -3331,7 +3332,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..30).rev() {
             src = format!(
-                "(call ::std::sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
+                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
                 i, src
             );
         }
@@ -3428,7 +3429,7 @@ mod tests {
     #[test]
     fn a_builtin_can_be_applied_as_a_value() {
         let mut h = stress_heap();
-        let src = "(apply (fnref ::std::sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
+        let src = "(apply (fnref ::std::sexpr::sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
                      (int-any-width 1) (int-any-width 2))";
         let v = eval_ok(&mut h, src);
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
@@ -3456,12 +3457,12 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 20);
 
         let src = "(labels ((build ((n int-any-width)) sexpr
-                        (if (call ::std::sexpr-null (sexpr) (var n))
+                        (if (call ::std::sexpr::sexpr-null (sexpr) (var n))
                             (unit)
-                            (call ::std::sexpr-cons (sexpr sexpr)
+                            (call ::std::sexpr::sexpr-cons (sexpr sexpr)
                               (int-any-width 1)
                               (apply (var build) sexpr (sexpr)
-                                (call ::std::sexpr-cdr (sexpr) (var n)))))))
+                                (call ::std::sexpr::sexpr-cdr (sexpr) (var n)))))))
                (apply (var build) sexpr (sexpr) (var xs)))".to_string();
 
         // `xs` is a list of DEPTH elements, built on the Rust side so the
@@ -3601,7 +3602,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..n).rev() {
             src = format!(
-                "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
+                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
                 i, src
             );
         }
@@ -3614,9 +3615,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call ::std::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call ::std::sexpr-car (sexpr) (var lst)))
-                     (set lst (call ::std::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr::sexpr-car (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(5)
         );
@@ -3646,9 +3647,9 @@ mod tests {
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
                      (loop unit (break))
-                     (if (call ::std::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call ::std::sexpr-car (sexpr) (var lst)))
-                     (set lst (call ::std::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr::sexpr-car (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(3)
         );
@@ -3663,9 +3664,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call ::std::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call ::std::sexpr-car (sexpr) (var lst)))
-                     (set lst (call ::std::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr::sexpr-car (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(300)
         );
@@ -3791,8 +3792,8 @@ mod tests {
                          (unwind-protect
                            (unwind-protect
                              (throw (quote done) (int-any-width 0))
-                             (set trail (call ::std::sexpr-cons (sexpr sexpr) (str "i") (var trail))))
-                           (set trail (call ::std::sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
+                             (set trail (call ::std::sexpr::sexpr-cons (sexpr sexpr) (str "i") (var trail))))
+                           (set trail (call ::std::sexpr::sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
                        (var trail))"#;
         let v = eval_ok(&mut h, src);
         let head = h.car(v).unwrap();
@@ -3909,8 +3910,8 @@ mod tests {
         let mut h = stress_heap();
         let build = |tag: i64| {
             format!(
-                "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width {}) \
-                   (call ::std::sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
+                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width {}) \
+                   (call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
                 tag,
                 tag + 1
             )
@@ -3950,8 +3951,8 @@ mod tests {
             &mut h,
             &[
                 "(throw (quote escaped) \
-                   (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
-                "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
+                   (call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
+                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
             ],
         );
         // Allocating now would collect an unrooted carried value.

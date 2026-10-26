@@ -3449,7 +3449,7 @@ mod tests {
         // here, so the island has nothing to re-derive
         // (`interp::rt_builtin_symbol`).
         assert_eq!(
-            bridged("(call ::std::sexpr-car (sexpr) (var xs))"),
+            bridged("(call ::std::sexpr::sexpr-car (sexpr) (var xs))"),
             r#"(call "rt_car" (2 var "xs" false))"#
         );
         // (`sym`'s kind is `0`: an interned symbol is a tagged word the

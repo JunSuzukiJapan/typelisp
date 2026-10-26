@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.38
+# ABI バージョン 0.3.39
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.38 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.39 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `49360213f694935f`
+内容ハッシュ (FNV-1a 64): `3060acc4b1e9b213`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1873,26 +1873,26 @@
 | `std::reader::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)) -> ()` |
 | `std::reader::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)) -> ()` |
 | `std::repl::heap-info` | `rt_heap_info` | `() -> std::repl::heap-info` |
-| `std::sexpr-atom` | `rt_atom` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
-| `std::sexpr-bool` | `rt_sexpr_bool` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
-| `std::sexpr-car` | `rt_car` | `(std::option::Option<std::sexpr::Sexpr>) -> std::option::Option<std::sexpr::Sexpr>` |
-| `std::sexpr-cdr` | `rt_cdr` | `(std::option::Option<std::sexpr::Sexpr>) -> std::option::Option<std::sexpr::Sexpr>` |
-| `std::sexpr-char` | `rt_sexpr_char` | `(std::option::Option<std::sexpr::Sexpr>) -> char` |
-| `std::sexpr-cons` | `rt_cons` | `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> std::option::Option<std::sexpr::Sexpr>` |
-| `std::sexpr-consp` | `rt_consp` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
-| `std::sexpr-f32` | `rt_sexpr_f32` | `(std::option::Option<std::sexpr::Sexpr>) -> f32` |
-| `std::sexpr-f64` | `rt_sexpr_f64` | `(std::option::Option<std::sexpr::Sexpr>) -> f64` |
-| `std::sexpr-i16` | `rt_sexpr_i16` | `(std::option::Option<std::sexpr::Sexpr>) -> i16` |
-| `std::sexpr-i32` | `rt_sexpr_i32` | `(std::option::Option<std::sexpr::Sexpr>) -> i32` |
-| `std::sexpr-i8` | `rt_sexpr_i8` | `(std::option::Option<std::sexpr::Sexpr>) -> i8` |
-| `std::sexpr-int` | `rt_sexpr_int` | `(std::option::Option<std::sexpr::Sexpr>) -> int` |
-| `std::sexpr-null` | `rt_null` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
-| `std::sexpr-str` | `rt_sexpr_str` | `(std::option::Option<std::sexpr::Sexpr>) -> string` |
-| `std::sexpr-sym-name` | `rt_sym_name` | `(std::option::Option<std::sexpr::Sexpr>) -> string` |
-| `std::sexpr-symp` | `rt_symp` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
-| `std::sexpr-u16` | `rt_sexpr_u16` | `(std::option::Option<std::sexpr::Sexpr>) -> u16` |
-| `std::sexpr-u32` | `rt_sexpr_u32` | `(std::option::Option<std::sexpr::Sexpr>) -> u32` |
-| `std::sexpr-u8` | `rt_sexpr_u8` | `(std::option::Option<std::sexpr::Sexpr>) -> u8` |
+| `std::sexpr::sexpr-atom` | `rt_atom` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
+| `std::sexpr::sexpr-bool` | `rt_sexpr_bool` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
+| `std::sexpr::sexpr-car` | `rt_car` | `(std::option::Option<std::sexpr::Sexpr>) -> std::option::Option<std::sexpr::Sexpr>` |
+| `std::sexpr::sexpr-cdr` | `rt_cdr` | `(std::option::Option<std::sexpr::Sexpr>) -> std::option::Option<std::sexpr::Sexpr>` |
+| `std::sexpr::sexpr-char` | `rt_sexpr_char` | `(std::option::Option<std::sexpr::Sexpr>) -> char` |
+| `std::sexpr::sexpr-cons` | `rt_cons` | `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> std::option::Option<std::sexpr::Sexpr>` |
+| `std::sexpr::sexpr-consp` | `rt_consp` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
+| `std::sexpr::sexpr-f32` | `rt_sexpr_f32` | `(std::option::Option<std::sexpr::Sexpr>) -> f32` |
+| `std::sexpr::sexpr-f64` | `rt_sexpr_f64` | `(std::option::Option<std::sexpr::Sexpr>) -> f64` |
+| `std::sexpr::sexpr-i16` | `rt_sexpr_i16` | `(std::option::Option<std::sexpr::Sexpr>) -> i16` |
+| `std::sexpr::sexpr-i32` | `rt_sexpr_i32` | `(std::option::Option<std::sexpr::Sexpr>) -> i32` |
+| `std::sexpr::sexpr-i8` | `rt_sexpr_i8` | `(std::option::Option<std::sexpr::Sexpr>) -> i8` |
+| `std::sexpr::sexpr-int` | `rt_sexpr_int` | `(std::option::Option<std::sexpr::Sexpr>) -> int` |
+| `std::sexpr::sexpr-null` | `rt_null` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
+| `std::sexpr::sexpr-str` | `rt_sexpr_str` | `(std::option::Option<std::sexpr::Sexpr>) -> string` |
+| `std::sexpr::sexpr-sym-name` | `rt_sym_name` | `(std::option::Option<std::sexpr::Sexpr>) -> string` |
+| `std::sexpr::sexpr-symp` | `rt_symp` | `(std::option::Option<std::sexpr::Sexpr>) -> bool` |
+| `std::sexpr::sexpr-u16` | `rt_sexpr_u16` | `(std::option::Option<std::sexpr::Sexpr>) -> u16` |
+| `std::sexpr::sexpr-u32` | `rt_sexpr_u32` | `(std::option::Option<std::sexpr::Sexpr>) -> u32` |
+| `std::sexpr::sexpr-u8` | `rt_sexpr_u8` | `(std::option::Option<std::sexpr::Sexpr>) -> u8` |
 | `std::symbol::intern` | `rt_intern` | `(string, string) -> symbol` |
 | `std::symbol::keywordp` | `rt_keywordp` | `(symbol) -> bool` |
 | `std::symbol::symbol->string` | `rt_sym_name` | `(symbol) -> string` |

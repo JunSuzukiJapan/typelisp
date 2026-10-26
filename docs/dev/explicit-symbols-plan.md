@@ -688,6 +688,17 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      パスを作る（`Path::std("Vector")` の組み立ては無くした）。`Sexpr` の構成子は `std` に残した。`int`
      `f64` `char` などが基本型と同じ綴りで、`std::prelude` が公開する名前は 1 つのパスなので、構成子と基本型は
      同じモジュールの 2 つの定義でなければならない。ABI は 0.3.37。
+     続いて `cons` `c*r` `cons-cell` `sexpr-map` を `std::sexpr`、`vector-iter` を `std::vec`、`hashtable-iter` を
+     `std::collections` へ（ABI は 0.3.38）、registry が登録する `sexpr-*` の組み込み関数を `std::sexpr` へ移した
+     （ABI は 0.3.39）。標準ライブラリの中で、`std::prelude` が再公開するモジュールのどれかがすでに持つ名前、
+     または別のモジュールがすでに持つ型名を定義しようとすると、チェッカーが型エラーで断る
+     （`Registry::std_definition_elsewhere`）。利用者が `(module std ...)` に書いた定義が
+     `reexport_std_in_prelude` の assert を panic させていたため。
+     prelude で `std` 直下に残るのは `not` `unreachable` `todo` と関数の組み合わせ（`identity` `const`
+     `complement` `compose` `flip`）で、5 節の表に置き場所が無い。registry が `std` に置くもので残るのは、
+     組み込みのエラー型（`ReadError` を `std::reader`、`FileError` を `std::fs`、`NetError` を `std::net`、
+     `EvalError` を `std::eval`、`ParseIntError` `ParseFloatError` を `std::num` の案）、基本型（`std::primitive`）、
+     `llvm-*` の型と `Scope`（`%core`）、`format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

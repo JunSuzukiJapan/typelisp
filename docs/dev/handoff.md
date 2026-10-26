@@ -1,57 +1,55 @@
-# 引き継ぎ（2026-10-23）
+# 引き継ぎ（2026-10-26）
 
 別のセッション（クラウドを含む）がこの作業を続けるための文書。作業の設計と段階は
 [explicit-symbols-plan.md](explicit-symbols-plan.md) にある。ここには、その計画のどこまで進んで
-いて、何が途中で、次に何をするかだけを書く。作業が進んだら、この文書も書き換える。
+いて、次に何をするかだけを書く。作業が進んだら、この文書も書き換える。
 
 ## 1. 今の位置
 
 - ブランチ: `feature/keyword-markers`。main には入れていない。
-- 計画の段階 4（名前の解決をポインタにする）は 4d まで済み。4d で変えたことは計画の 4d の項に
-  ある。要点は、解析が今のモジュールを `NsId` で持つことと、IR の中の定義の名前をルートからの
-  パス（`::f`、`::m::f`）で読み書きすること（`core::path_form` / `core::path_value`）。ダンプの形式は 25、
-  ABI は 0.3.14。
-- 段階 5 は 5a まで済み。IR とコンパイル済みコードが型をフォームで運ぶ（計画の 5a の項）。
-  ダンプの形式は 26、ABI は 0.3.16。
-- 5b も済み。ヒープの型の表は形（`TypeShape`）で引き、`TypeKeyId` は `TypeId` になった
-  （計画の 5b の項）。ABI は 0.3.17。
-- 5c も済み。型の表はプロセスに 1 つ、印字と vtable の表は定義か `TypeId` で引き、実行ファイルは
-  起動時に型の表を作る（計画の 5c の項）。ABI は 0.3.18。
-- 5d も済み。コンパイル済みコードは型をモジュールの型の表から読み（`compile::type_table`）、
-  FFI の型・コールバック・C メモリ層は `TypeId` と定義のシンボルで引く（計画の 5d の項）。
-  ダンプの形式は 27、ABI は 0.3.20。
-- 5e も済み。単型化した定義は元の定義と型引数の `TypeId` の表
-  （`typelisp_mem::specialization`）で識別し、名前はどの表にも載らないシンボル。生成した名前を
-  切って読み戻す `ConcreteNames` の関数は消した。`NameView` は定義（`NsId` と `SymRef`）と型の形
-  から表示を作る（計画の 5e の項）。ダンプの形式は 28、ABI は 0.3.22。
+- 段階 4（名前の解決をポインタにする）と段階 5（型をフォームと `TypeId` で運ぶ）は済み。
+  各段階で変えたことは計画の 4d・5a〜5e の項にある。
+- 段階 6 は 6a（再公開 `(pub use PATH)`）、6b（ルートの組み込みを `std` へ）、6c（`std::prelude` が
+  `std` を全部再公開）が済み、6d（`std` の子モジュールに分ける）が途中。6d' （シンボルの大文字と
+  小文字の区別）は済み。6d で移したものの一覧と、残っているものの一覧は計画の 6d の項にある。
+- ABI は 0.3.39。全体テストは最後のコミットで通っている。
+- 途中の作業は無い（作業ツリーはコミット済み）。
 
-## 2. 4d で知っておくこと
+## 2. 次にすること（順に）
 
-- IR の定義の名前は `core::path_form` で書き、`core::path_value`（`core::path_field`）で読む。
-  読む側は木の子をシンボルでたどるので、`core::path_form` を通らずに組んだパス（綴りから
-  intern したシンボルの並び）を渡すと panic する。
-- 手書きの IR のテストは、定義を `::f`、`::m::f`、`(assoc ::int ...)` のように書き、`%core` で
-  そのまま読む。読んだあとにシンボルを付け替える補助関数は作らない。印字した IR を比べる
-  テストの期待値も同じ形になる。
-- ダンプの中のパスのシンボルの意味が変わったので、島と prelude の成果物を作り直した。
-  ダンプを読む処理を変えたら、島 → prelude → ABI の順に作り直す（スキル commit-check の 2 節）。
-- `Checker::exit_file_module` は引数を取らない（戻り先は `enter_file_module` が積む）。
-- 綴りの並びから `Path` を作り直す処理は、型キーの文字列（`type_key.rs`、`ConcreteNames`）と
-  評価器の表（`eval/scope.rs`、`eval/interp.rs`）に残っている。段階 5 と 7 の対象。
+1. 6d の残り。registry（`crates/typelisp-front/src/check/registry.rs` の `with_builtins`）が `std` に
+   直接登録しているものを子モジュールへ移す。
+   - 組み込みのエラー型。案は `ReadError` を `std::reader`、`FileError` を `std::fs`、`NetError` を
+     `std::net`、`EvalError` を `std::eval`、`ParseIntError` `ParseFloatError` を `std::num`。置き場所は
+     `StdModule::of_builtin_type`（`crates/typelisp-mem/src/symbols.rs`）の 1 か所で答える。
+   - 基本型を `std::primitive` へ。`Sexpr` の構成子（`int` `f64` `char` など）は基本型と同じ綴りなので、
+     基本型と同じモジュールに置く（`std::prelude` が公開する名前は 1 つのパスでなければならない）。
+   - `llvm-*` の型と `Scope` を `%core` へ。
+   - `format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。置き場所はまだ決めて
+     いない。内部の補助なら `%internal`（計画の 5 節）。
+   - prelude で `std` 直下に残る `not` `unreachable` `todo` と関数の組み合わせ（`identity` など）は、
+     5 節の表に置き場所が無いので `std` に残す。
+2. 6e。`std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
+   `std::prelude` の名前を定義するときの `shadow` を要求し、`Info::in_scope` の広い規則
+   （`item_ns == self.ns || in_std(item_ns)`）を狭める。利用者向け文書の `pub use`
+   （`docs/ja/reference/syntax.md` の 3.10 と「`pub` が付けられるのは」の節）もここで書き換え、
+   翻訳をまとめて行う。
+3. 段階 7〜9（計画の 6 節）。7 で、メソッド名を文字列で比べている残りの箇所をシンボルにする。
+   各段階で全体テストを通してからコミットし、push する。
 
-## 3. 次にすること（順に）
+## 3. 移すときの手順
 
-1. 段階 6。計画の 6 節で 6a〜6e に分けた。6a（再公開 `(pub use PATH)`）と 6b（ルートの組み込みを
-   `std` へ移す。6a の後で 6b と 6c の順を入れ替えた）と 6c（`std::prelude` が `std` を全部再公開）は済み。
-   6d（prelude のソースと組み込みを `std` の子モジュールに分ける）は途中。乱数を `std::random`、時刻を `std::time`、`room` などを `std::repl`、環境の関数を `std::env`、ソケットを `std::net`、`Task` `Thread` を `std::thread`、`Chan` と同期の型を `std::sync`、シンボルの関数を `std::symbol`、`exit` を `std::process`、`Hash` を `std::hash`、`Error` と汎用のエラー型・`assert` を `std::error`、比較を `std::cmp`、算術のトレイトを `std::ops`、リーダーを `std::reader`、`eval` と `macroexpand` を `std::eval`、数値の関数と定数を `std::num`、繰り返しと束縛のマクロを `std::control`、文字の関数を `std::char`、`trim` などを `std::string`、`Iter` と反復の関数を `std::iter`、列の関数を `std::seq`、印字を `std::fmt`、パス名を `std::path`、ストリームを `std::io`、ファイルを `std::fs`、`HashSet` などを `std::collections` へ移した。6d'（大文字と小文字の区別、計画の 6d' の項）は済み。`Array` `BitVector` を `std::array`、`Option` `Result` を `std::option` `std::result`、`Vector` を `std::vec`、`HashTable` を `std::collections`、`Sexpr` を `std::sexpr` へ移した（置き場所は `StdModule::of_builtin_type`）。`cons` `c*r` `cons-cell` `sexpr-map` を `std::sexpr`、`vector-iter` を `std::vec`、`hashtable-iter` を `std::collections` へ移した。prelude で `std` 直下に残るのは `not` `unreachable` `todo` と関数の組み合わせ（`identity` など）。残りは registry が `std` に置く `sexpr-*`・エラー型・基本型（`std::primitive`）・`llvm-*` と `Scope`（`%core`）。`std` は `std::prelude` が再公開する子モジュールの名前を取り込む。
-   組み込みの型を移すときは、残っている `Path::std("vector")` などの組み立てを直す。
-   次は 5 節の表に沿ってほかのまとまりを子モジュールへ移し、それぞれ `registry::PRELUDE_MODULES` に足す。
-   利用者向け文書はまだ `pub use` を書いていない（`docs/ja/reference/syntax.md` の 3.10 と
-   「`pub` が付けられるのは」の節は「`use` には付けられない」のまま）。6e で同じ節を書き換えるので、
-   翻訳はそこでまとめて行う。
-2. 段階 7〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
-   段階 6 で `Info::in_scope` の移行のための広い規則
-   （`item_ns == self.ns || in_std(item_ns)`）を狭める。
+1. registry の登録先の名前空間を変え、prelude のソース（`crates/typelisp-front/src/prelude.rs`）なら
+   `(module NAME ...)` で包んで `pub` を付ける。新しい子モジュールは `registry::PRELUDE_MODULES` に足す。
+2. コードの中でパスを組み立てている箇所（`Path::std("...")`、`Path::in_ns(...)`）を探して直す。
+   組み込みの型は `Path::builtin(wk::X)` を使う。
+3. コア IR を手で書いているテスト（`src/compile/core_bridge.rs`、`eval/interp/core_eval.rs`、
+   `eval/interp/core_cps.rs` のテスト）の `::std::...` のパスを新しい場所に直す。新しい子モジュールは
+   各テストの読み込み関数（`read_core` / `read1`）で宣言する。
+4. 島 → prelude → ABI の順に作り直す（スキル commit-check の 2 節）。島の名前や IR が変わったときは
+   島を 2 回作り、2 回目で成果物が変わらないことを確かめる。
+5. `scripts/with-llvm-env.sh cargo build -p typelisp-front` で staticlib を作り直してから全体テスト。
+   ABI を変えたのにこれを忘れると、AOT のテストが「not of ABI version」でリンクに失敗する。
 
 ## 4. 守ること
 
@@ -60,7 +58,12 @@
 - 応答と文書は日本語。文書に絵文字・飾り罫線を使わない。利用者向け文書から `docs/dev` へ
   リンクしない。
 - パスを含んだ名前を登録しない。`foo::bar::zot` は「foo の子に bar、bar の子に zot」と読む
-  設計だけを受け付ける。チェッカーは型検査だけをし、型情報を持つ層とは分ける。
+  設計だけを受け付ける。`::` でつないだ文字列で比べない。文字列で比べている箇所は、できれば
+  シンボルで比べるようにする。
+- シンボルは大文字と小文字を区別する。型名だけが大文字始まりで、基本型（`int` `string` など）と
+  変種名（`some` `none` `ok` `err`）は小文字。名前を `to_lowercase` で正規化しない。
+- `match` の腕の一番外に裸で書いた名前は常に変種。何にでも当たるのは `_` だけ。
+- 文字列からシンボルを得るのは `intern`（CL 準拠）だけ。`string->symbol` は無い。
 - フォールバックするコードを書かない。どうしても要るなら `unimplemented!()` にするか、
   ユーザーに尋ねる。
 - エラーは見つけたらすぐ直す。いつからあるかを調べない。「既存の制限」「今回と無関係」で
@@ -73,28 +76,38 @@
 - コミットメッセージの末尾は `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。
   コミットのたびに push する（バックアップのため）。
 - 実行時間を計測して数字を出さない。
+- 翻訳は commit-check の 4 節の手順で行う（日本語の原本を先にコミットし、訳の 1 行目にその
+  ハッシュを書く）。
 
-## 5. コミット前の確認
+## 5. クラウドセッションでの用意
 
 - クローンしたら最初に `git config core.hooksPath scripts/git-hooks` を打つ。pre-commit フックが、
   翻訳の鮮度（CI の Translations と同じ検査）と、足した行の絶対パス・絵文字を毎回確かめる。
   日本語の原本を変えるコミットだけは翻訳の検査を飛ばし、pre-push が push の前に検査する。
+- LLVM 22 が要る。`scripts/with-llvm-env.sh` が `LLVM_SYS_221_PREFIX` を設定する（Linux では
+  `scripts/linux-llvm-prefix.sh` が探す）。Linux で LLVM 22 と依存を入れる手順は
+  `.github/actions/setup-build/action.yml` にある。
+- cargo のコマンドは `scripts/with-llvm-env.sh` を通して打つ（例:
+  `scripts/with-llvm-env.sh cargo check --workspace --all-targets --locked`）。
+- 全体テストは `scripts/with-llvm-env.sh scripts/test-serial.sh > <ログ> 2>&1`。通ったと言えるのは
+  ログに `ALL TESTS PASSED (serial)` があるときだけ。始める前に `~/.typelisp/cache` を消す
+  （registry を変えると古い fasl のキャッシュが残る）。
 - コミットや push の前の残りの確認（警告 0 の `cargo check`、生成物の再生成の判断、全体テストの
   判定、翻訳の直し方）は、スキル `.claude/skills/commit-check/SKILL.md` にまとめてある。
 
 ## 6. 落とし穴
 
-- デバッグ用の行を消すのに `git checkout <file>` を使わない。未コミットの変更がすべて消える
-  （このセッションで `crates/typelisp-mem/src/symbols.rs` を一度消し、会話の記録から復元した）。
+- デバッグ用の行を消すのに `git checkout <file>` を使わない。未コミットの変更がすべて消える。
   編集で消す。
 - zsh は変数を単語に分けない。`for t in "a b"; do set -- $t` は効かず、テスト名の絞り込みが
   空振りする。引数は直接書く。
 - LLVM を使うテストを別々のプロセスで同時に走らせると SIGSEGV する。全体は
   `scripts/test-serial.sh` で流し、個別のテストも 1 本ずつ流す。SIGSEGV したテストは
   `test result` の行を出さないので、行が無いことも失敗として数える。
-- AOT のテスト（実行ファイルを作るもの）は `cargo test` が作らない staticlib にリンクする。
-  ソースを変えたら `scripts/with-llvm-env.sh cargo build -p typelisp-front` を先に。
-- LLVM 22 が要る（`LLVM_SYS_221_PREFIX`）。`scripts/with-llvm-env.sh` がそれを設定する。
-  Linux での用意は CI の設定（`.github/workflows/`）を見る。
+- lib のテストに出る PoisonError は、先に panic した別のテストの巻き添え。最初の panic を見る。
 - `src/compiler_island.typld` と `crates/typelisp-front/src/prelude.typld` は生成物。
-  手で直さず、再生成のスクリプトで作る。
+  手で直さず、再生成のスクリプトで作る。`docs/dev/api_version/history/` の既存のファイルは消さず、
+  書き換えない。
+- 型を子モジュールへ移すと、標準ライブラリの 2 つのモジュールが同じ名前を定義していないかを
+  `Registry::reexport_std_in_prelude` が assert で確かめる。ライブラリ自身が二重に定義すると
+  ここで panic する（利用者の定義はその前にチェッカーが断る）。
