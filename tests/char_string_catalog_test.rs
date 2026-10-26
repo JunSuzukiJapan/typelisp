@@ -186,6 +186,14 @@ fn string_filled_builds_n_copies_of_a_character() {
     assert_eq!(eval_string("(string::filled 0 #\\x)"), "");
 }
 
+/// `string` before `::` is the primitive type the library offers every
+/// module, from any module — not the library's module `std::string`, which a
+/// module reaches by its path.
+#[test]
+fn string_filled_is_reached_from_any_module() {
+    assert_eq!(eval_string("(module m (pub defun f () string (string::filled 2 #\\y))) (m::f)"), "yy");
+}
+
 #[test]
 fn search_finds_the_first_occurrence() {
     assert_eq!(eval_string("(format false \"~a\" (search \"hello world\" \"o w\"))"), "(some 4)");

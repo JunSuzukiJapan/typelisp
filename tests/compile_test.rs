@@ -396,10 +396,10 @@ fn expect_bool(v: Value) -> bool {
 /// a later phase), and check the resulting IR.
 const BUILD_ANSWER_MODULE: &str = r#"
 (defun build-answer-module () string
-  (let ((m (llvm-module::create "mymod")))
+  (let ((m (%core::llvm-module::create "mymod")))
     (let ((f (add-function m "answer")))
       (let ((b (append-block f "entry")))
-        (let ((builder (llvm-builder::create)))
+        (let ((builder (%core::llvm-builder::create)))
           (position-at-end builder b)
           (let ((c (const-word builder 42)))
             (build-ret builder c)
@@ -418,10 +418,10 @@ fn builds_a_module_with_a_constant_returning_function() {
 fn a_freshly_built_module_verifies_successfully() {
     let src = r#"
         (defun build-and-verify () bool
-          (let ((m (llvm-module::create "mymod")))
+          (let ((m (%core::llvm-module::create "mymod")))
             (let ((f (add-function m "answer")))
               (let ((b (append-block f "entry")))
-                (let ((builder (llvm-builder::create)))
+                (let ((builder (%core::llvm-builder::create)))
                   (position-at-end builder b)
                   (let ((c (const-word builder 42)))
                     (build-ret builder c)
@@ -550,11 +550,11 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
 #[test]
 fn the_built_module_actually_jit_executes_to_42() {
     let src = r#"
-        (defun build-answer-module-raw () llvm-module
-          (let ((m (llvm-module::create "mymod")))
+        (defun build-answer-module-raw () %core::llvm-module
+          (let ((m (%core::llvm-module::create "mymod")))
             (let ((f (add-function m "answer")))
               (let ((b (append-block f "entry")))
-                (let ((builder (llvm-builder::create)))
+                (let ((builder (%core::llvm-builder::create)))
                   (position-at-end builder b)
                   (let ((c (const-word builder 42)))
                     (build-ret builder c)
@@ -577,11 +577,11 @@ fn the_built_module_actually_jit_executes_to_42() {
 #[test]
 fn a_function_using_load_arg_and_build_add_computes_correctly() {
     let src = r#"
-        (defun build-add-fn-raw () llvm-module
-          (let ((m (llvm-module::create "mod")))
+        (defun build-add-fn-raw () %core::llvm-module
+          (let ((m (%core::llvm-module::create "mod")))
             (let ((f (add-function m "add2")))
               (let ((b (append-block f "entry")))
-                (let ((builder (llvm-builder::create)))
+                (let ((builder (%core::llvm-builder::create)))
                   (position-at-end builder b)
                   (let ((a (load-arg builder f 0)))
                     (let ((bb (load-arg builder f 1)))
@@ -610,17 +610,17 @@ fn a_function_using_load_arg_and_build_add_computes_correctly() {
 #[test]
 fn a_function_can_directly_call_another_function_in_the_same_module() {
     let src = r#"
-        (defun build-quadruple-module () llvm-module
-          (let ((m (llvm-module::create "mod")))
+        (defun build-quadruple-module () %core::llvm-module
+          (let ((m (%core::llvm-module::create "mod")))
             (let ((double-fn (add-function m "double")))
               (let ((quad-fn (add-function m "quadruple")))
                 (let ((b1 (append-block double-fn "entry")))
-                  (let ((builder1 (llvm-builder::create)))
+                  (let ((builder1 (%core::llvm-builder::create)))
                     (position-at-end builder1 b1)
                     (let ((x (load-arg builder1 double-fn 0)))
                       (build-ret builder1 (build-add builder1 x x)))))
                 (let ((b2 (append-block quad-fn "entry")))
-                  (let ((builder2 (llvm-builder::create)))
+                  (let ((builder2 (%core::llvm-builder::create)))
                     (position-at-end builder2 b2)
                     (let ((n (load-arg builder2 quad-fn 0)))
                       (let ((args1 (alloca-args builder2 1)))
@@ -679,20 +679,20 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
 #[test]
 fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
     let src = r#"
-        (defun build-and-run-closure-module () llvm-module
-          (let* ((m (llvm-module::create "mod"))
+        (defun build-and-run-closure-module () %core::llvm-module
+          (let* ((m (%core::llvm-module::create "mod"))
                  (ignored-new (add-function m "rt_closure_new"))
                  (add-offset-fn (add-function-with-env m "add_offset"))
                  (caller-fn (add-coroutine-function m "caller"))
                  (b1 (append-block add-offset-fn "entry"))
-                 (builder1 (llvm-builder::create)))
+                 (builder1 (%core::llvm-builder::create)))
             (position-at-end builder1 b1)
             (build-ret builder1
                        (build-add builder1
                                   (load-arg builder1 add-offset-fn 0)
                                   (load-env builder1 add-offset-fn 0)))
             (let* ((b2 (append-block caller-fn "entry"))
-                   (builder2 (llvm-builder::create)))
+                   (builder2 (%core::llvm-builder::create)))
               (position-at-end builder2 b2)
               (coroutine-begin builder2 m caller-fn)
               (let* ((closure-slot (frame-slot builder2))
@@ -2245,11 +2245,11 @@ fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
 #[test]
 fn build_shl_and_build_ashr_round_trip_a_signed_fixnum_payload() {
     let src = r#"
-        (defun build-fixnum-round-trip-module () llvm-module
-          (let ((m (llvm-module::create "mod")))
+        (defun build-fixnum-round-trip-module () %core::llvm-module
+          (let ((m (%core::llvm-module::create "mod")))
             (let ((f (add-function m "round_trip")))
               (let ((b (append-block f "entry")))
-                (let ((builder (llvm-builder::create)))
+                (let ((builder (%core::llvm-builder::create)))
                   (position-at-end builder b)
                   (let ((x (load-arg builder f 0)))
                     (let ((three (const-word builder 3)))
@@ -2277,11 +2277,11 @@ fn build_shl_and_build_ashr_round_trip_a_signed_fixnum_payload() {
 #[test]
 fn build_or_and_build_and_pack_and_read_back_a_tag() {
     let src = r#"
-        (defun build-tag-round-trip-module () llvm-module
-          (let ((m (llvm-module::create "mod")))
+        (defun build-tag-round-trip-module () %core::llvm-module
+          (let ((m (%core::llvm-module::create "mod")))
             (let ((f (add-function m "round_trip")))
               (let ((b (append-block f "entry")))
-                (let ((builder (llvm-builder::create)))
+                (let ((builder (%core::llvm-builder::create)))
                   (position-at-end builder b)
                   (let ((idx (load-arg builder f 0)))
                     (let ((three (const-word builder 3)))
@@ -6952,11 +6952,11 @@ fn a_specialization_at_a_module_qualified_type_resolves() {
 #[test]
 fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
     let src = r#"
-        (defun build-suspending-module () llvm-module
-          (let* ((m (llvm-module::create "mod"))
+        (defun build-suspending-module () %core::llvm-module
+          (let* ((m (%core::llvm-module::create "mod"))
                  (f (add-coroutine-function m "two_halves"))
                  (entry (append-block f "entry"))
-                 (builder (llvm-builder::create)))
+                 (builder (%core::llvm-builder::create)))
             (position-at-end builder entry)
             (coroutine-begin builder m f)
             (let ((slot (frame-slot builder)))
@@ -7012,15 +7012,15 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
 #[test]
 fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
     let src = r#"
-        (defun build-deep-module () llvm-module
-          (let* ((m (llvm-module::create "mod"))
+        (defun build-deep-module () %core::llvm-module
+          (let* ((m (%core::llvm-module::create "mod"))
                  (ignored-arg (add-function m "rt_pending_arg"))
                  (f (add-coroutine-function m "sum_to"))
                  (entry (append-block f "entry"))
                  (base (append-block f "base"))
                  (rec (append-block f "rec"))
                  (merge (append-block f "merge"))
-                 (builder (llvm-builder::create)))
+                 (builder (%core::llvm-builder::create)))
             (position-at-end builder entry)
             (coroutine-begin builder m f)
             ;; `n` and the result each get a frame slot, which is the only

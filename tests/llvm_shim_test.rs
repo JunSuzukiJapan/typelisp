@@ -7,6 +7,9 @@
 //! Rust-native LLVM values built by interpreted code, and check the results
 //! round-trip — the boundary the island's own AOT compilation (later
 //! stages) rests on.
+//!
+//! The LLVM handle types are `%core`'s, the island's module, which the
+//! standard library does not offer; a program outside it `use`s them.
 
 mod common;
 use common::eval_ok_compiled as eval_ok;
@@ -29,7 +32,8 @@ fn a_compiled_function_with_llvm_typed_params_builds_a_constant() {
     // `mk-const` takes an `llvm-builder` (crossing in as a handle) and
     // returns an `llvm-value` (crossing back out) — compiled, its body is a
     // single `rt_llvm_call` into `llvm-builder::const-word`.
-    let src = "(defun mk-const ((b llvm-builder)) llvm-value (const-word b 42)) \
+    let src = "(use %core::llvm-builder) (use %core::llvm-value) \
+               (defun mk-const ((b llvm-builder)) llvm-value (const-word b 42)) \
                (compile mk-const) \
                (let ((b (llvm-builder::create))) (mk-const b))";
     assert_eq!(const_int_of(&eval_ok(src)), 42);
@@ -37,7 +41,8 @@ fn a_compiled_function_with_llvm_typed_params_builds_a_constant() {
 
 #[test]
 fn compiled_and_interpreted_results_agree_for_an_llvm_method_body() {
-    let defs = "(defun mk-const ((b llvm-builder)) llvm-value (const-word b 7))";
+    let defs = "(use %core::llvm-builder) (use %core::llvm-value) \
+                (defun mk-const ((b llvm-builder)) llvm-value (const-word b 7))";
     let interp_src = format!("{} (let ((b (llvm-builder::create))) (mk-const b))", defs);
     let compiled_src = format!("{} (compile mk-const) (let ((b (llvm-builder::create))) (mk-const b))", defs);
     assert_eq!(const_int_of(&eval_ok(&interp_src)), const_int_of(&eval_ok(&compiled_src)));
@@ -49,7 +54,8 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
     // `set` stores a handle, `get` returns `Option<llvm-value>` as a heap
     // enum box whose payload decodes through the integer field kind, and a
     // compiled `match` takes it apart.
-    let src = "(defun keep ((s Scope<llvm-value>) (v llvm-value)) llvm-value \
+    let src = "(use %core::llvm-builder) (use %core::llvm-value) \
+               (defun keep ((s Scope<llvm-value>) (v llvm-value)) llvm-value \
                  (set s \"x\" v) \
                  (match (get s \"x\") \
                    ((some w) w) \
@@ -63,7 +69,8 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
 
 #[test]
 fn a_compiled_function_sees_none_for_a_missing_scope_name() {
-    let src = "(defun probe ((s Scope<llvm-value>)) int \
+    let src = "(use %core::llvm-value) \
+               (defun probe ((s Scope<llvm-value>)) int \
                  (match (get s \"absent\") \
                    ((some w) 1) \
                    (none 0))) \

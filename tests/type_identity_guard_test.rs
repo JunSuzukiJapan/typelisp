@@ -227,8 +227,8 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
         // `Scope<V>` is made of.
         (TypeId::HASHTABLE, Path::builtin(typelisp::mem::wk::HASHTABLE)),
-        (TypeId::SCOPE, Path::std("Scope")),
-        (TypeId::SCOPE_FRAME, Path::std("scope-frame")),
+        (TypeId::SCOPE, Path::builtin(typelisp::mem::wk::SCOPE)),
+        (TypeId::SCOPE_FRAME, Path::in_ns(typelisp::mem::StdModule::COLLECTIONS.ns(), "scope-frame")),
         // Three prelude `defstruct`s the runtime builds itself, because the
         // facts in them belong to the runtime and not to the checker: two
         // clocks (`get-universal-time` / `get-internal-real-time`, in

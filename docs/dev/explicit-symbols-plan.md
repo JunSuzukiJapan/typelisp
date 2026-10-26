@@ -704,8 +704,20 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `tuple` は構成子で、使う場所で決まる。基本型のパスは `Path::primitive`、型の形は
      `StdModule::PRIMITIVE`。型の式の中でパスで書いた基本型（`std::primitive::int`、チェッカーが型をフォームに
      書き戻したもの）も基本型として読む（`types::scalar_type`）。ABI は 0.3.41。
-     registry が `std` に置くもので残るのは、`llvm-*` の型と `Scope`（`%core`）、`format-rt` と `pprint-*-rt` などの
-     内部関数、`compile-file` とダンプの関数。
+     次に `Scope`（と、その枠の型 `scope-frame`）を `std::collections` へ、`llvm-*` の型を `%core` へ移した
+     （2026-10-26、ユーザー決定。`Scope` は LLVM に依存しない汎用の型なので、5 節の案の `%core` ではなく
+     `std::collections` に置く）。`%core` の型は `std::prelude` が再公開しないので、島の外では `%core::llvm-module`
+     と書くか `use` する。型を `use` するとその静的メソッドも取り込むので、`create` を持つ 2 つの型を同じ
+     モジュールで `use` すると名前がぶつかる（テストはパスで書く）。`Path::builtin` は LLVM の型なら `%core`、
+     `types::builtin_type` も `%core` の LLVM の型を組み込みとして答える。
+     このとき、パスの先頭の段で型を探す処理（`SymTable::step_down_symbol`）が、型の定義のモジュールを見て
+     いなかったのを直した。語彙の型名はどのモジュールでも同じシンボルなので、`llvm-module::create` が
+     `use` なしでどこからでも引けていた。型は定義のモジュール（`SessionNames::type_home`）か `use` した
+     モジュールからだけ見え、`std::prelude` が公開する型は、素の名前と同じく、どのモジュールからでもパスの
+     先頭になる（`SessionNames::offered_type`。`string::filled` は基本型 `string` の静的メソッドで、
+     モジュール `std::string` ではない）。ABI は 0.3.42。
+     registry が `std` に置くもので残るのは、`format-rt` と `pprint-*-rt` などの内部関数、`compile-file` と
+     ダンプの関数。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

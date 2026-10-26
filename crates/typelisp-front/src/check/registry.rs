@@ -834,6 +834,7 @@ impl Registry {
         let mut fs = Namespace::new(typelisp_mem::StdModule::FS.ns());
         let mut net = Namespace::new(typelisp_mem::StdModule::NET.ns());
         let mut primitive = Namespace::new(typelisp_mem::StdModule::PRIMITIVE.ns());
+        let mut core = Namespace::new(NsId::CORE);
         option.add_type(option_def());
         result.add_type(result_def());
         for def in builtin_error_defs() {
@@ -867,19 +868,21 @@ impl Registry {
         thread.add_type(task_def());
         thread.add_type(thread_def());
         sync.add_type(chan_def());
-        std_ns.add_type(scope_def());
+        collections.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
         // LLVM: four more builtin types, metadata-only like `hashtable_def`
         // (the runtime implementation lives in `eval_llvm_builtin_method` in
         // `crate::eval::interp`). `llvm-basic-block` has no methods of its
         // own yet — it's only ever produced by `add-block` and consumed by
         // `position-at-end` — but still needs registering as a type so it
-        // has a `Path` to appear as a parameter/return type.
-        std_ns.add_type(llvm_module_def());
-        std_ns.add_type(llvm_function_def());
-        std_ns.add_type(llvm_builder_def());
-        std_ns.add_type(llvm_basic_block_def());
-        std_ns.add_type(llvm_value_def());
+        // has a `Path` to appear as a parameter/return type. In `%core`, the
+        // compiler island's module: nothing outside the compiler works with
+        // these, so the standard library does not offer them.
+        core.add_type(llvm_module_def());
+        core.add_type(llvm_function_def());
+        core.add_type(llvm_builder_def());
+        core.add_type(llvm_basic_block_def());
+        core.add_type(llvm_value_def());
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get a
         // method table too, so `defmethod` can target them (see
         // `check_defmethod`/`receiver_method`, which map a primitive
@@ -1171,7 +1174,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result, vec, sexpr_ns, collections, fs, net, primitive].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result, vec, sexpr_ns, collections, fs, net, primitive, core].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
@@ -2312,7 +2315,7 @@ fn chan_def() -> AdtDef {
 }
 
 fn scope_ty() -> Type {
-    Type::Named(Path::std("Scope"), vec![tvar("V")])
+    Type::Named(Path::builtin(wk::SCOPE), vec![tvar("V")])
 }
 
 /// `Scope<V>`: a builtin (Rust-implemented) stack of `String`-keyed frames —
@@ -2362,28 +2365,28 @@ fn scope_def() -> AdtDef {
             builtin: true,
         },
     );
-    builtin_adt(Path::std("Scope"), &["V"], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::builtin(wk::SCOPE), &["V"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 
 fn llvm_module_ty() -> Type {
-    Type::Named(Path::std("llvm-module"), vec![])
+    Type::Named(Path::builtin(wk::LLVM_MODULE), vec![])
 }
 
 fn llvm_function_ty() -> Type {
-    Type::Named(Path::std("llvm-function"), vec![])
+    Type::Named(Path::builtin(wk::LLVM_FUNCTION), vec![])
 }
 
 fn llvm_basic_block_ty() -> Type {
-    Type::Named(Path::std("llvm-basic-block"), vec![])
+    Type::Named(Path::builtin(wk::LLVM_BASIC_BLOCK), vec![])
 }
 
 fn llvm_builder_ty() -> Type {
-    Type::Named(Path::std("llvm-builder"), vec![])
+    Type::Named(Path::builtin(wk::LLVM_BUILDER), vec![])
 }
 
 fn llvm_value_ty() -> Type {
-    Type::Named(Path::std("llvm-value"), vec![])
+    Type::Named(Path::builtin(wk::LLVM_VALUE), vec![])
 }
 
 fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
@@ -2425,7 +2428,7 @@ pub fn llvm_module_def() -> AdtDef {
     // What comes back is a status word, not the value; the value is in the
     // frame, which is what makes stopping mid-body sayable at all.
     assoc.insert("add-coroutine-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
-    builtin_adt(Path::std("llvm-module"), &[], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::builtin(wk::LLVM_MODULE), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// A declared LLVM function (a `Module::add-function` result).
@@ -2436,13 +2439,13 @@ pub fn llvm_function_def() -> AdtDef {
     // *logical* argument out of the `i64*` array the old ABI passes. Under the
     // coroutine ABI the frame is a real parameter, so there is no array.
     assoc.insert("function-param".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Int], llvm_value_ty(), true));
-    builtin_adt(Path::std("llvm-function"), &[], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::builtin(wk::LLVM_FUNCTION), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// An LLVM basic block. No methods of its own yet (Phase 0) — produced by
 /// `llvm-function::append-block`, consumed by `llvm-builder::position-at-end`.
 fn llvm_basic_block_def() -> AdtDef {
-    builtin_adt(Path::std("llvm-basic-block"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
+    builtin_adt(Path::builtin(wk::LLVM_BASIC_BLOCK), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
 }
 
 /// An IR builder. `load-arg` reads logical parameter `index` out of a
@@ -2831,13 +2834,13 @@ pub fn llvm_builder_def() -> AdtDef {
     // process's type table, read out of the module's own table — the island's
     // `(type-ref N)`.
     assoc.insert("load-type".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), Type::Int], llvm_value_ty(), true));
-    builtin_adt(Path::std("llvm-builder"), &[], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::builtin(wk::LLVM_BUILDER), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// An LLVM SSA value (e.g. a constant). No methods of its own yet — produced
 /// by `llvm-builder::const-word`, consumed by `llvm-builder::build-ret`.
 fn llvm_value_def() -> AdtDef {
-    builtin_adt(Path::std("llvm-value"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
+    builtin_adt(Path::builtin(wk::LLVM_VALUE), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
 }
 
 /// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/dev/cl-equivalence-catalog.md)

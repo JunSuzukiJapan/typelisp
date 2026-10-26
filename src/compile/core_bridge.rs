@@ -3522,7 +3522,7 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc ::std::llvm-builder const-word true handle (handle int-any-width) (type-named ::std::llvm-value) (var b) (int-any-width 42))");
+        let printed = bridged("(assoc ::%core::llvm-builder const-word true handle (handle int-any-width) (type-named ::%core::llvm-value) (var b) (int-any-width 42))");
         assert_eq!(
             printed,
             format!(
@@ -3538,11 +3538,11 @@ mod tests {
     /// `Repr::Scope` carries one.
     #[test]
     fn a_scope_routes_on_what_it_holds() {
-        let printed = bridged("(assoc ::std::Scope get true enum ((scope handle) str) (type-named ::std::option::Option (type-named ::std::llvm-value)) (var e) (var n))");
+        let printed = bridged("(assoc ::std::collections::Scope get true enum ((scope handle) str) (type-named ::std::option::Option (type-named ::%core::llvm-value)) (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc ::std::Scope get true enum ((scope int-any-width) str) (type-named ::std::option::Option (type-named ::std::primitive::i32)) (var e) (var n))"),
-            r#"(assoc Scope "get" true "tl_std::Scope''get" (2 var "e" false) (2 var "n" false))"#
+            bridged("(assoc ::std::collections::Scope get true enum ((scope int-any-width) str) (type-named ::std::option::Option (type-named ::std::primitive::i32)) (var e) (var n))"),
+            r#"(assoc Scope "get" true "tl_std::collections::Scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
 

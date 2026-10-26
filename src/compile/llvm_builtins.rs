@@ -2435,7 +2435,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         let ty = typelisp_front::type_key::type_id(
             &crate::types::Type::Named(
                 crate::Path::builtin(typelisp_mem::wk::OPTION),
-                vec![crate::types::Type::Named(crate::Path::std("llvm-value"), vec![])],
+                vec![crate::types::Type::Named(crate::Path::builtin(typelisp_mem::wk::LLVM_VALUE), vec![])],
             ),
         );
         // A niche (`Repr::Niche`): the handle's fixnum word for `some`, the

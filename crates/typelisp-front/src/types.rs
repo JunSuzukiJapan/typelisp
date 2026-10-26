@@ -88,10 +88,13 @@ impl Path {
     }
 
     /// The built-in type whose name is the vocabulary symbol `ty`
-    /// (`wk::OPTION` ...), in the module of the standard library that defines
-    /// it (`StdModule::of_builtin_type`).
+    /// (`wk::OPTION` ...), in the module that defines it: `%core` for the
+    /// LLVM handle types, which only the compiler island works with, and
+    /// otherwise the module of the standard library
+    /// `StdModule::of_builtin_type` answers.
     pub fn builtin(ty: u32) -> Path {
-        Path { ns: typelisp_mem::StdModule::of_builtin_type(ty).ns(), name: symbols::well_known_symbol(ty) }
+        let ns = if LLVM_HANDLE_TYPES.contains(&ty) { NsId::CORE } else { typelisp_mem::StdModule::of_builtin_type(ty).ns() };
+        Path { ns, name: symbols::well_known_symbol(ty) }
     }
 
     /// The primitive type `name` (`int`, `i32`, `string` ...), which
@@ -305,7 +308,8 @@ pub fn path_is_builtin(p: &Path, ty: u32) -> bool {
 /// per-type behaviour is keyed by, so that no type is told by its spelling.
 pub fn builtin_type(p: &Path) -> Option<u32> {
     let ty = p.name_symbol().well_known();
-    (p.is_std() && ty != symbols::NOT_WELL_KNOWN).then_some(ty)
+    let home = p.is_std() || (p.ns() == NsId::CORE && LLVM_HANDLE_TYPES.contains(&ty));
+    (home && ty != symbols::NOT_WELL_KNOWN).then_some(ty)
 }
 
 /// [`path_is_builtin`] against a set of types — for the "one of the natively

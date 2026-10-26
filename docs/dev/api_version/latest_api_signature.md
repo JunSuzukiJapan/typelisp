@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.41
+# ABI バージョン 0.3.42
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.41 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.42 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `0241df28c762c9ec`
+内容ハッシュ (FNV-1a 64): `c23ca4fb797eadee`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -428,8 +428,8 @@
 | 2 | `std::vec::Vector` |
 | 3 | `std::sexpr::cons-cell` |
 | 4 | `std::collections::HashTable` |
-| 5 | `std::Scope` |
-| 6 | `std::scope-frame` |
+| 5 | `std::collections::Scope` |
+| 6 | `std::collections::scope-frame` |
 | 7 | `std::reader::ReadError` |
 | 8 | `std::fs::FileError` |
 | 9 | `std::num::ParseIntError` |
@@ -534,6 +534,11 @@
 | 型 | 型キー | Repr | field_kind | binding_kind |
 |---|---|---|---|---|
 | `!` | `!` | none | 0 | 0 |
+| `%core::llvm-basic-block` | `%core::llvm-basic-block` | handle | 1 | 0 |
+| `%core::llvm-builder` | `%core::llvm-builder` | handle | 1 | 0 |
+| `%core::llvm-function` | `%core::llvm-function` | handle | 1 | 0 |
+| `%core::llvm-module` | `%core::llvm-module` | handle | 1 | 0 |
+| `%core::llvm-value` | `%core::llvm-value` | handle | 1 | 0 |
 | `()` | `()` | unit | 100 | 0 |
 | `(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)` | `(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)` | fn | 6 | 2 |
 | `E` | `E` | none | 0 | 0 |
@@ -553,14 +558,9 @@
 | `random-state` | `std::primitive::random-state` | random-state | 6 | 2 |
 | `ratio` | `std::primitive::ratio` | ratio | 6 | 2 |
 | `rational` | `std::primitive::rational` | rational | 6 | 2 |
-| `std::Scope<V>` | `std::Scope<V>` | scope | 6 | 2 |
 | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` | none | 0 | 0 |
 | `std::collections::HashTable<K,V>` | `std::collections::HashTable<K,V>` | hashtable | 6 | 2 |
-| `std::llvm-basic-block` | `std::llvm-basic-block` | handle | 1 | 0 |
-| `std::llvm-builder` | `std::llvm-builder` | handle | 1 | 0 |
-| `std::llvm-function` | `std::llvm-function` | handle | 1 | 0 |
-| `std::llvm-module` | `std::llvm-module` | handle | 1 | 0 |
-| `std::llvm-value` | `std::llvm-value` | handle | 1 | 0 |
+| `std::collections::Scope<V>` | `std::collections::Scope<V>` | scope | 6 | 2 |
 | `std::option::Option<(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)>` | `std::option::Option<(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)>` | niche | 101 | 2 |
 | `std::option::Option<T>` | `std::option::Option<T>` | enum | 6 | 2 |
 | `std::option::Option<V>` | `std::option::Option<V>` | enum | 6 | 2 |
@@ -972,14 +972,109 @@
 
 ## 組み込み型
 
-### `std::Scope` (sum, 型引数 [V])
+### `%core::llvm-basic-block` (sum, 型引数 [])
 
-- インスタンス `clone-frames`: `(std::Scope<V>) -> std::Scope<V>`
-- インスタンス `get`: `(std::Scope<V>, string) -> std::option::Option<V>`
-- 関連関数 `new`: `() -> std::Scope<V>`
-- インスタンス `pop-frame`: `(std::Scope<V>) -> ()`
-- インスタンス `push-frame`: `(std::Scope<V>) -> ()`
-- インスタンス `set`: `(std::Scope<V>, string, V) -> ()`
+
+### `%core::llvm-builder` (sum, 型引数 [])
+
+- インスタンス `alloca-args`: `(%core::llvm-builder, int) -> %core::llvm-value`
+- インスタンス `block-terminated?`: `(%core::llvm-builder) -> bool`
+- インスタンス `build-add`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-and`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-ashr`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-br`: `(%core::llvm-builder, %core::llvm-basic-block) -> ()`
+- インスタンス `build-call`: `(%core::llvm-builder, %core::llvm-function, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `build-call-with-env`: `(%core::llvm-builder, %core::llvm-function, %core::llvm-value, int, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `build-cond-br`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-basic-block, %core::llvm-basic-block) -> ()`
+- インスタンス `build-fadd`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fceil`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fcmp-eq`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fcmp-ge`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fcmp-gt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fcmp-le`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fcmp-lt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fcmp-ne`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fcos`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fdiv`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fexp`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-ffloor`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-flog`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fmaxnum`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fminnum`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fmul`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fn-address`: `(%core::llvm-builder, %core::llvm-function) -> %core::llvm-value`
+- インスタンス `build-fpow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fptosi`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-free`: `(%core::llvm-builder, %core::llvm-value) -> ()`
+- インスタンス `build-frem`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fround`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fround32`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fsin`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fsqrt`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fsub`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-ftrunc`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-icmp-eq`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-icmp-ge`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-icmp-gt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-icmp-le`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-icmp-lt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-icmp-ne`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-int-to-ptr`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-lshr`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-make-closure`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-function, %core::llvm-value, int, int, int) -> %core::llvm-value`
+- インスタンス `build-malloc`: `(%core::llvm-builder, int) -> %core::llvm-value`
+- インスタンス `build-mul`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-or`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-ptr-to-int`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-ret`: `(%core::llvm-builder, %core::llvm-value) -> ()`
+- インスタンス `build-sadd-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-select`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-shl`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-sitofp`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-slot-ptr`: `(%core::llvm-builder, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `build-smul-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-ssub-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-sub`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-xor`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `const-word`: `(%core::llvm-builder, int) -> %core::llvm-value`
+- インスタンス `coroutine-apply`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `coroutine-begin`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-function) -> ()`
+- インスタンス `coroutine-call`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `coroutine-call-env`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, int, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `coroutine-dyn-call`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `coroutine-end`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> ()`
+- インスタンス `coroutine-suspend`: `(%core::llvm-builder, %core::llvm-module) -> %core::llvm-value`
+- インスタンス `coroutine-unwind`: `(%core::llvm-builder, %core::llvm-module) -> ()`
+- 関連関数 `create`: `() -> %core::llvm-builder`
+- インスタンス `frame-clear-handler`: `(%core::llvm-builder, %core::llvm-module) -> ()`
+- インスタンス `frame-set-handler`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-basic-block) -> ()`
+- インスタンス `frame-slot`: `(%core::llvm-builder) -> %core::llvm-value`
+- インスタンス `frame-slot-rooted`: `(%core::llvm-builder, %core::llvm-module) -> %core::llvm-value`
+- インスタンス `load-arg`: `(%core::llvm-builder, %core::llvm-function, int) -> %core::llvm-value`
+- インスタンス `load-env`: `(%core::llvm-builder, %core::llvm-function, int) -> %core::llvm-value`
+- インスタンス `load-raw`: `(%core::llvm-builder, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `load-type`: `(%core::llvm-builder, %core::llvm-module, int) -> %core::llvm-value`
+- インスタンス `position-at-end`: `(%core::llvm-builder, %core::llvm-basic-block) -> ()`
+- インスタンス `scratch-slot`: `(%core::llvm-builder, int) -> %core::llvm-value`
+- インスタンス `store-arg`: `(%core::llvm-builder, %core::llvm-value, int, %core::llvm-value) -> ()`
+
+### `%core::llvm-function` (sum, 型引数 [])
+
+- インスタンス `append-block`: `(%core::llvm-function, string) -> %core::llvm-basic-block`
+- インスタンス `function-param`: `(%core::llvm-function, int) -> %core::llvm-value`
+
+### `%core::llvm-module` (sum, 型引数 [])
+
+- インスタンス `add-coroutine-function`: `(%core::llvm-module, string) -> %core::llvm-function`
+- インスタンス `add-function`: `(%core::llvm-module, string) -> %core::llvm-function`
+- インスタンス `add-function-with-env`: `(%core::llvm-module, string) -> %core::llvm-function`
+- 関連関数 `create`: `(string) -> %core::llvm-module`
+- インスタンス `get-function`: `(%core::llvm-module, string) -> %core::llvm-function`
+- インスタンス `to-string`: `(%core::llvm-module) -> string`
+- インスタンス `verify`: `(%core::llvm-module) -> bool`
+
+### `%core::llvm-value` (sum, 型引数 [])
+
 
 ### `std::collections::HashTable` (sum, 型引数 [K, V])
 
@@ -995,6 +1090,15 @@
 - 関連関数 `new`: `() -> std::collections::HashTable<K,V>`
 - インスタンス `values`: `(std::collections::HashTable<K,V>) -> std::vec::Vector<V>`
 
+### `std::collections::Scope` (sum, 型引数 [V])
+
+- インスタンス `clone-frames`: `(std::collections::Scope<V>) -> std::collections::Scope<V>`
+- インスタンス `get`: `(std::collections::Scope<V>, string) -> std::option::Option<V>`
+- 関連関数 `new`: `() -> std::collections::Scope<V>`
+- インスタンス `pop-frame`: `(std::collections::Scope<V>) -> ()`
+- インスタンス `push-frame`: `(std::collections::Scope<V>) -> ()`
+- インスタンス `set`: `(std::collections::Scope<V>, string, V) -> ()`
+
 ### `std::eval::EvalError` (sum, 型引数 [])
 
 - 変種 0 `EvalError`: `string`
@@ -1002,110 +1106,6 @@
 ### `std::fs::FileError` (sum, 型引数 [])
 
 - 変種 0 `FileError`: `string`
-
-### `std::llvm-basic-block` (sum, 型引数 [])
-
-
-### `std::llvm-builder` (sum, 型引数 [])
-
-- インスタンス `alloca-args`: `(std::llvm-builder, int) -> std::llvm-value`
-- インスタンス `block-terminated?`: `(std::llvm-builder) -> bool`
-- インスタンス `build-add`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-and`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-ashr`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-br`: `(std::llvm-builder, std::llvm-basic-block) -> ()`
-- インスタンス `build-call`: `(std::llvm-builder, std::llvm-function, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `build-call-with-env`: `(std::llvm-builder, std::llvm-function, std::llvm-value, int, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `build-cond-br`: `(std::llvm-builder, std::llvm-value, std::llvm-basic-block, std::llvm-basic-block) -> ()`
-- インスタンス `build-fadd`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fceil`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fcmp-eq`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fcmp-ge`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fcmp-gt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fcmp-le`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fcmp-lt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fcmp-ne`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fcos`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fdiv`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fexp`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-ffloor`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-flog`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fmaxnum`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fminnum`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fmul`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fn-address`: `(std::llvm-builder, std::llvm-function) -> std::llvm-value`
-- インスタンス `build-fpow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fptosi`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-free`: `(std::llvm-builder, std::llvm-value) -> ()`
-- インスタンス `build-frem`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fround`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fround32`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fsin`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fsqrt`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-fsub`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-ftrunc`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-icmp-eq`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-icmp-ge`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-icmp-gt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-icmp-le`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-icmp-lt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-icmp-ne`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-int-to-ptr`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-lshr`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-make-closure`: `(std::llvm-builder, std::llvm-module, std::llvm-function, std::llvm-value, int, int, int) -> std::llvm-value`
-- インスタンス `build-malloc`: `(std::llvm-builder, int) -> std::llvm-value`
-- インスタンス `build-mul`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-or`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-ptr-to-int`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-ret`: `(std::llvm-builder, std::llvm-value) -> ()`
-- インスタンス `build-sadd-overflow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-select`: `(std::llvm-builder, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-shl`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-sitofp`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-slot-ptr`: `(std::llvm-builder, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `build-smul-overflow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-ssub-overflow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-sub`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `build-xor`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
-- インスタンス `const-word`: `(std::llvm-builder, int) -> std::llvm-value`
-- インスタンス `coroutine-apply`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `coroutine-begin`: `(std::llvm-builder, std::llvm-module, std::llvm-function) -> ()`
-- インスタンス `coroutine-call`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `coroutine-call-env`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, int, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `coroutine-dyn-call`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `coroutine-end`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> ()`
-- インスタンス `coroutine-suspend`: `(std::llvm-builder, std::llvm-module) -> std::llvm-value`
-- インスタンス `coroutine-unwind`: `(std::llvm-builder, std::llvm-module) -> ()`
-- 関連関数 `create`: `() -> std::llvm-builder`
-- インスタンス `frame-clear-handler`: `(std::llvm-builder, std::llvm-module) -> ()`
-- インスタンス `frame-set-handler`: `(std::llvm-builder, std::llvm-module, std::llvm-basic-block) -> ()`
-- インスタンス `frame-slot`: `(std::llvm-builder) -> std::llvm-value`
-- インスタンス `frame-slot-rooted`: `(std::llvm-builder, std::llvm-module) -> std::llvm-value`
-- インスタンス `load-arg`: `(std::llvm-builder, std::llvm-function, int) -> std::llvm-value`
-- インスタンス `load-env`: `(std::llvm-builder, std::llvm-function, int) -> std::llvm-value`
-- インスタンス `load-raw`: `(std::llvm-builder, std::llvm-value, int) -> std::llvm-value`
-- インスタンス `load-type`: `(std::llvm-builder, std::llvm-module, int) -> std::llvm-value`
-- インスタンス `position-at-end`: `(std::llvm-builder, std::llvm-basic-block) -> ()`
-- インスタンス `scratch-slot`: `(std::llvm-builder, int) -> std::llvm-value`
-- インスタンス `store-arg`: `(std::llvm-builder, std::llvm-value, int, std::llvm-value) -> ()`
-
-### `std::llvm-function` (sum, 型引数 [])
-
-- インスタンス `append-block`: `(std::llvm-function, string) -> std::llvm-basic-block`
-- インスタンス `function-param`: `(std::llvm-function, int) -> std::llvm-value`
-
-### `std::llvm-module` (sum, 型引数 [])
-
-- インスタンス `add-coroutine-function`: `(std::llvm-module, string) -> std::llvm-function`
-- インスタンス `add-function`: `(std::llvm-module, string) -> std::llvm-function`
-- インスタンス `add-function-with-env`: `(std::llvm-module, string) -> std::llvm-function`
-- 関連関数 `create`: `(string) -> std::llvm-module`
-- インスタンス `get-function`: `(std::llvm-module, string) -> std::llvm-function`
-- インスタンス `to-string`: `(std::llvm-module) -> string`
-- インスタンス `verify`: `(std::llvm-module) -> bool`
-
-### `std::llvm-value` (sum, 型引数 [])
-
 
 ### `std::net::NetError` (sum, 型引数 [])
 

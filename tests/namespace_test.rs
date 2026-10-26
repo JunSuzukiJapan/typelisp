@@ -357,3 +357,16 @@ fn a_primitive_written_as_its_path_is_the_primitive() {
     assert_eq!(ty_program("(the std::primitive::string \"a\")"), Type::Str);
     assert!(program("(defun f ((r Result<int,std::num::ParseIntError>)) Result<int,ParseIntError> r)").is_ok());
 }
+
+/// A type is reached as a path's first segment only from the module that
+/// defines it (or one that `use`s it). A vocabulary name is the same symbol
+/// in every module, so this is what keeps `%core`'s `llvm-module` out of
+/// reach of a module that has not brought it in — in a type and in a path
+/// alike.
+#[test]
+fn a_type_the_library_does_not_offer_is_reached_only_through_a_use() {
+    assert!(program("(llvm-module::create \"m\")").is_err());
+    assert!(program("(defun f () llvm-module (%core::llvm-module::create \"m\"))").is_err());
+    assert!(program("(defun f () %core::llvm-module (%core::llvm-module::create \"m\"))").is_ok());
+    assert!(program("(use %core::llvm-module) (defun f () llvm-module (llvm-module::create \"m\"))").is_ok());
+}

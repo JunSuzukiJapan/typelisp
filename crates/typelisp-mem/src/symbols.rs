@@ -873,7 +873,7 @@ impl StdModule {
             wk::RESULT => StdModule::RESULT,
             wk::VECTOR => StdModule::VEC,
             wk::SEXPR => StdModule::SEXPR,
-            wk::HASHTABLE => StdModule::COLLECTIONS,
+            wk::HASHTABLE | wk::SCOPE => StdModule::COLLECTIONS,
             wk::ARRAY => StdModule::ARRAY,
             wk::TASK_TYPE | wk::THREAD_TYPE => StdModule::THREAD,
             wk::CHAN => StdModule::SYNC,
@@ -902,12 +902,6 @@ impl StdModule {
             | wk::C_ULONG
             | wk::STRING
             | wk::SYMBOL => StdModule::PRIMITIVE,
-            wk::SCOPE
-            | wk::LLVM_MODULE
-            | wk::LLVM_FUNCTION
-            | wk::LLVM_BUILDER
-            | wk::LLVM_BASIC_BLOCK
-            | wk::LLVM_VALUE => StdModule::STD,
             _ => panic!("`{}` names no built-in type", well_known_symbol(ty).name()),
         }
     }
@@ -1137,7 +1131,10 @@ impl SymTable {
                 return Some(PathStep::Module(*id));
             }
         }
-        names.types.contains_key(&sym).then_some(PathStep::Type(sym))
+        // A type is a step from the module that defines it. Its name alone
+        // does not say which: a vocabulary symbol (`Vector`, `llvm-module`)
+        // is the same symbol in every module.
+        (names.type_home(sym) == Some(ns)).then_some(PathStep::Type(sym))
     }
 
     /// Where the name `name` written in `ns` leads, as a path's first step:
@@ -1162,10 +1159,15 @@ impl SymTable {
     }
 
     /// Where the first segment `name` of a path read in `ns` leads: from
-    /// `ns`, else from the root, else — while the standard library's names
-    /// are still resolved by name — from `std`.
+    /// `ns`, else a type the standard library offers every module under the
+    /// name ([`SessionNames::offered_type`]), else from the root, else — while
+    /// the standard library's names are still resolved by name — from `std`.
     fn first_step(&mut self, names: &SessionNames, ns: NsId, name: &str) -> Option<(SymRef, PathStep)> {
         let mut found = self.step_in(names, ns, name);
+        if found.is_none() {
+            let sym = self.read(ns, name);
+            found = names.offered_type(sym).map(|step| (sym, step));
+        }
         for outer in [NsId::ROOT, NsId::STD] {
             if found.is_none() && ns != outer {
                 found = self.step_in(names, outer, name);
@@ -1505,6 +1507,13 @@ impl SessionNames {
         self.exports.get(sym.name()) == Some(&sym)
     }
 
+    /// The type `sym` names, when the standard library offers it to every
+    /// module ([`Self::export`]): a path's first segment reaches it from any
+    /// module, as the bare name does, though the type is defined elsewhere.
+    fn offered_type(&self, sym: SymRef) -> Option<PathStep> {
+        (self.offers(sym) && self.type_home(sym).is_some()).then_some(PathStep::Type(sym))
+    }
+
     /// Makes `ns` read `name` as its own symbol from now on, in front of what
     /// the standard library offers every module under it — what
     /// `(shadow name)` written in `ns` says. The symbol is the one `ns`
@@ -1621,10 +1630,13 @@ impl SessionNames {
         let mut at = if first.name().is_empty() {
             PathStep::Module(NsId::ROOT)
         } else {
-            let home = (first.well_known() == NOT_WELL_KNOWN).then(|| first.home());            [Some(ns), home, Some(NsId::ROOT), Some(NsId::STD)]
+            let home = (first.well_known() == NOT_WELL_KNOWN).then(|| first.home());
+            [Some(ns), home]
                 .into_iter()
                 .flatten()
                 .find_map(|outer| t.step_in_symbol(self, outer, *first))
+                .or_else(|| self.offered_type(*first))
+                .or_else(|| [NsId::ROOT, NsId::STD].into_iter().find_map(|outer| t.step_in_symbol(self, outer, *first)))
                 .ok_or_else(|| format!("`{}`: no module or type `{}` is visible here", spelled(segments.len()), first.name()))?
         };
         for (i, seg) in rest.iter().enumerate() {
