@@ -716,8 +716,10 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      モジュールからだけ見え、`std::prelude` が公開する型は、素の名前と同じく、どのモジュールからでもパスの
      先頭になる（`SessionNames::offered_type`。`string::filled` は基本型 `string` の静的メソッドで、
      モジュール `std::string` ではない）。ABI は 0.3.42。
-     registry が `std` に置くもので残るのは、`format-rt` と `pprint-*-rt` などの内部関数、`compile-file` と
-     ダンプの関数。
+     最後に、チェッカーが下ろす先の組み込み（`format-rt` `print-rt` `pprint-*-rt`、C メモリ、C のコールバックの
+     アドレス。`registry::lowered_builtins`）を `std::%internal` へ移した。どの表にも名前が無く、ソースからは
+     名指せない内部の補助である。`compile-file` と `dump` は利用者が呼ぶ関数で、5 節の表に置き場所が無いので
+     `std` に残した（`not` や `identity` と同じ）。これで 6d は済み。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

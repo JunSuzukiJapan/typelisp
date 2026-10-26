@@ -350,7 +350,7 @@ fn builtin_homes() -> &'static std::collections::HashMap<String, typelisp_mem::N
     HOMES.get_or_init(|| {
         let reg = typelisp_front::check::Registry::with_builtins();
         let mut homes: std::collections::HashMap<String, typelisp_mem::NsId> = typelisp_front::check::registry::lowered_builtins()
-            .map(|name| (name.to_string(), typelisp_mem::NsId::STD))
+            .map(|name| (name.to_string(), typelisp_front::types::internal_ns()))
             .collect();
         for ns in reg.namespaces() {
             for (name, sig) in ns.fns.iter() {

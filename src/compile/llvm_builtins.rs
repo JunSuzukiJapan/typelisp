@@ -2457,7 +2457,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             other => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", other)),
         }
     } else {
-        match eval_llvm_builtin_method(heap, &Path::std(op.type_key), &op.method, &vals) {
+        match eval_llvm_builtin_method(heap, &Path::in_ns(typelisp_mem::NsId::CORE, op.type_key), &op.method, &vals) {
             Some(r) => r,
             None => rt_llvm_fatal(&format!("rt_llvm_call: {} has no builtin method {}", op.type_key, op.method)),
         }

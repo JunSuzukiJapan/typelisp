@@ -6,30 +6,24 @@
 
 ## 1. 今の位置
 
-- ブランチ: `feature/keyword-markers`。main には入れていない。
+- ブランチ: `claude/nice-feynman-dasp54`（`feature/keyword-markers` の続き）。main には入れていない。
 - 段階 4（名前の解決をポインタにする）と段階 5（型をフォームと `TypeId` で運ぶ）は済み。
   各段階で変えたことは計画の 4d・5a〜5e の項にある。
 - 段階 6 は 6a（再公開 `(pub use PATH)`）、6b（ルートの組み込みを `std` へ）、6c（`std::prelude` が
-  `std` を全部再公開）が済み、6d（`std` の子モジュールに分ける）が途中。6d' （シンボルの大文字と
-  小文字の区別）は済み。6d で移したものの一覧と、残っているものの一覧は計画の 6d の項にある。
+  `std` を全部再公開）、6d（`std` の子モジュールに分ける）、6d' （シンボルの大文字と小文字の区別）が
+  済み。6d で移したものの一覧は計画の 6d の項にある。`std` 直下に残したもの（`not` `unreachable` `todo`、
+  関数の組み合わせ、`compile-file` `dump`）は 5 節の表に置き場所が無いため。
 - ABI は 0.3.42。全体テストは最後のコミットで通っている。
 - 途中の作業は無い（作業ツリーはコミット済み）。
 
 ## 2. 次にすること（順に）
 
-1. 6d の残り。registry（`crates/typelisp-front/src/check/registry.rs` の `with_builtins`）が `std` に
-   直接登録しているものを子モジュールへ移す。組み込みのエラー型、基本型（`std::primitive`）、`Scope`
-   （`std::collections`）、`llvm-*` の型（`%core`）は済み。
-   - `format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。置き場所はまだ決めて
-     いない。内部の補助なら `%internal`（計画の 5 節）。
-   - prelude で `std` 直下に残る `not` `unreachable` `todo` と関数の組み合わせ（`identity` など）は、
-     5 節の表に置き場所が無いので `std` に残す。
-2. 6e。`std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
+1. 6e。`std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
    `std::prelude` の名前を定義するときの `shadow` を要求し、`Info::in_scope` の広い規則
    （`item_ns == self.ns || in_std(item_ns)`）を狭める。利用者向け文書の `pub use`
    （`docs/ja/reference/syntax.md` の 3.10 と「`pub` が付けられるのは」の節）もここで書き換え、
    翻訳をまとめて行う。
-3. 段階 7〜9（計画の 6 節）。7 で、メソッド名を文字列で比べている残りの箇所をシンボルにする。
+2. 段階 7〜9（計画の 6 節）。7 で、メソッド名を文字列で比べている残りの箇所をシンボルにする。
    各段階で全体テストを通してからコミットし、push する。
 
 ## 3. 移すときの手順

@@ -451,7 +451,7 @@ impl Checker {
     /// A call to one of the internal builtins, which answers a `ret`. They
     /// are not in the registry (`crate::c_struct`): no program can name one.
     fn c_call(&self, name: &str, args: Vec<Checked>, ret: Type) -> Result<Checked, Error> {
-        Ok(Checked::of(Node::Call { path: Path::std(name), args }, ret))
+        Ok(Checked::of(Node::Call { path: Path::internal(name), args }, ret))
     }
 
     /// The `unsafe`'s arena, a local of its own.

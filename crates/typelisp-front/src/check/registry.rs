@@ -508,8 +508,8 @@ pub struct TypeAlias {
 /// The builtins the checker lowers a form to without giving them a
 /// signature — `format`, `print` and the pretty printer's directives, C
 /// memory ([`crate::c_struct`]), a C callback's address
-/// ([`crate::ffi_callback`]): they live in `std`, in no table, so no source
-/// reaches one by its name.
+/// ([`crate::ffi_callback`]): they live in `std::%internal`, in no table, so
+/// no source reaches one by its name.
 pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
     ["format-rt", "print-rt", "println-rt", "pprint-rt", "pprint-block-start-rt", "pprint-block-end-rt"]
         .into_iter()

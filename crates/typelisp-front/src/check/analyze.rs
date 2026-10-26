@@ -14445,7 +14445,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, "format", &control_text, control, &items, nth_loc(arg_locs, 1))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        Ok(Checked::of(Node::Call { path: Path::std("format-rt"), args: vec![dest, control, list] }, Type::Str))
+        Ok(Checked::of(Node::Call { path: Path::internal("format-rt"), args: vec![dest, control, list] }, Type::Str))
     }
 
     /// `(format stream control args…)` — CL's stream destination.
@@ -14598,7 +14598,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, what, &control_text, control, &items, nth_loc(arg_locs, 0))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        Ok(Checked::of(Node::Call { path: Path::std(builtin), args: vec![control, list] }, ret))
+        Ok(Checked::of(Node::Call { path: Path::internal(builtin), args: vec![control, list] }, ret))
     }
 
     /// The `pprint` family — `(pprint x)`, `(pprint-fill x)`,
@@ -14642,7 +14642,7 @@ impl Checker {
             None => self.literal(heap, wk::INT_ANY_WIDTH, Some(Value::Int(16)), Type::I32),
         };
         let which = self.str_literal(heap, form)?;
-        Ok(Checked::of(Node::Call { path: Path::std("pprint-rt"), args: vec![which, value, colinc] }, Type::Unit))
+        Ok(Checked::of(Node::Call { path: Path::internal("pprint-rt"), args: vec![which, value, colinc] }, Type::Unit))
     }
 
     /// `(pprint-logical-block (obj :prefix "(" :suffix ")") body…)` — CLHS
@@ -14717,12 +14717,12 @@ impl Checker {
         // a `let` with no bindings. The block's own value is `unit` — the body
         // is run for its printing effect.
         let flag = self.literal(&mut s, wk::BOOL, Some(Value::Bool(per_line)), Type::Bool);
-        let start = Node::Call { path: Path::std("pprint-block-start-rt"), args: vec![obj, prefix, flag, suffix] };
+        let start = Node::Call { path: Path::internal("pprint-block-start-rt"), args: vec![obj, prefix, flag, suffix] };
         let mut seq = vec![Checked::of(start, Type::Unit)];
         for (i, &form) in args[1..].iter().enumerate() {
             seq.push(self.check_at(&mut s, interp, env, form, None, nth_loc(arg_locs, 1 + i))?);
         }
-        let end = Node::Call { path: Path::std("pprint-block-end-rt"), args: Vec::new() };
+        let end = Node::Call { path: Path::internal("pprint-block-end-rt"), args: Vec::new() };
         seq.push(Checked::of(end, Type::Unit));
         Ok(Checked::of(Node::Let { binds: Vec::new(), body: seq }, Type::Unit))
     }
