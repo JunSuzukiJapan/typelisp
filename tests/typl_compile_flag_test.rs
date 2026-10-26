@@ -131,3 +131,40 @@ fn dash_dash_compile_is_dash_c() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).starts_with("--compile:"));
 }
+
+/// An object file LLVM cannot finish writing ends the process: LLVM reports
+/// the I/O failure and calls `exit` from inside the compile, and the process
+/// has to get through its exit-time teardown with the compile's lock still
+/// held. `out.o` points at `/dev/full`, where every write fails with "no
+/// space left on device".
+#[cfg(target_os = "linux")]
+#[test]
+fn an_object_file_that_cannot_be_written_ends_the_process() {
+    let dir = tmp_dir("typl-c-object-write-fails");
+    let src = dir.join("hello.typl");
+    let exe = dir.join("out");
+    let object = dir.join("out.o");
+    std::fs::write(&src, HELLO).unwrap();
+    let _ = std::fs::remove_file(&object);
+    std::os::unix::fs::symlink("/dev/full", &object).unwrap();
+
+    let mut child = Command::new(TYPL)
+        .args(["-c", src.to_str().unwrap(), "-o", exe.to_str().unwrap()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to start the typl binary");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            child.kill().unwrap();
+            panic!("typl -c did not end after the object file failed to write");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    let _ = std::fs::remove_file(&object);
+    assert!(!status.success());
+}

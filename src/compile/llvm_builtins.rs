@@ -2064,8 +2064,9 @@ pub(crate) enum NativeHandle {
 /// the shared LLVM Context's value-name tables, so it has to happen under
 /// `COMPILE_LOCK` like every other Context-touching operation (see that
 /// static's doc comment) — including at thread exit, which is where this
-/// `Drop` comes in. The exiting thread holds no lock of its own, so taking
-/// one here cannot deadlock.
+/// `Drop` comes in. A thread normally exits outside the lock and takes it
+/// here; a process LLVM ends with `exit` from inside a compile runs this with
+/// the lock already held, and then the destructor is inside it as it is.
 ///
 /// The shares are not handed to `compile::retire_llvm` the way an engine is:
 /// these are `Rc`s, and every share of a given module lives on this thread
@@ -2077,7 +2078,8 @@ struct LlvmHandles(Vec<NativeHandle>);
 
 impl Drop for LlvmHandles {
     fn drop(&mut self) {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let lock = &crate::compile::COMPILE_LOCK;
+        let _guard = (!lock.held_here()).then(|| lock.lock().unwrap_or_else(|e| e.into_inner()));
         self.0.clear();
     }
 }

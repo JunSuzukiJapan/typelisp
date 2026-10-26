@@ -181,7 +181,53 @@ use inkwell::module::Module;
 /// parsing IR, and the crash landed in `llvm::Value::destroyValueName` with no
 /// hint that a drop was involved. A module is dropped where its builder holds
 /// this lock.
-pub static COMPILE_LOCK: Mutex<()> = Mutex::new(());
+pub static COMPILE_LOCK: CompileLock = CompileLock(Mutex::new(()));
+
+/// The lock [`COMPILE_LOCK`] is: a `Mutex` that knows whether the calling
+/// thread is the one holding it.
+///
+/// That is what a destructor run at process exit needs to ask. LLVM ends the
+/// process with `exit` from inside a compile on a fatal error (an object file
+/// it cannot finish writing, say), so the thread-local teardown that `exit`
+/// runs can find this thread still inside the lock; taking it again there
+/// would wait for itself forever instead of letting the process end.
+pub struct CompileLock(Mutex<()>);
+
+thread_local! {
+    static HOLDS_COMPILE_LOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// [`COMPILE_LOCK`] held by this thread, until dropped.
+pub struct CompileGuard<'a> {
+    _guard: std::sync::MutexGuard<'a, ()>,
+}
+
+impl CompileLock {
+    /// Waits for the lock. Panics when this thread already holds it: the
+    /// lock is not reentrant, and the second take would never return.
+    pub fn lock(&self) -> std::sync::LockResult<CompileGuard<'_>> {
+        assert!(!self.held_here(), "COMPILE_LOCK is already held by this thread");
+        let wrap = |guard| {
+            HOLDS_COMPILE_LOCK.with(|held| held.set(true));
+            CompileGuard { _guard: guard }
+        };
+        match self.0.lock() {
+            Ok(guard) => Ok(wrap(guard)),
+            Err(poisoned) => Err(std::sync::PoisonError::new(wrap(poisoned.into_inner()))),
+        }
+    }
+
+    /// Whether the calling thread holds the lock.
+    pub fn held_here(&self) -> bool {
+        HOLDS_COMPILE_LOCK.with(|held| held.get())
+    }
+}
+
+impl Drop for CompileGuard<'_> {
+    fn drop(&mut self) {
+        HOLDS_COMPILE_LOCK.with(|held| held.set(false));
+    }
+}
 
 /// JIT-compiled code whose last owner is gone, waiting until no compiled
 /// chain can be inside it.
