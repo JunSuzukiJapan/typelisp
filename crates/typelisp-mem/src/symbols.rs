@@ -857,6 +857,7 @@ impl StdModule {
     pub const NUM: StdModule = StdModule(&["num"]);
     pub const FS: StdModule = StdModule(&["fs"]);
     pub const NET: StdModule = StdModule(&["net"]);
+    pub const PRIMITIVE: StdModule = StdModule(&["primitive"]);
 
     /// The module, found one segment at a time from `std`.
     pub fn ns(self) -> NsId {
@@ -899,9 +900,9 @@ impl StdModule {
             | wk::PTR
             | wk::C_LONG
             | wk::C_ULONG
-            | wk::SCOPE
             | wk::STRING
-            | wk::SYMBOL
+            | wk::SYMBOL => StdModule::PRIMITIVE,
+            wk::SCOPE
             | wk::LLVM_MODULE
             | wk::LLVM_FUNCTION
             | wk::LLVM_BUILDER

@@ -109,12 +109,12 @@ pub mod spec {
     use super::TypeSpec::{self, Named};
     use crate::symbols::StdModule;
 
-    pub const INT: TypeSpec = Named(StdModule::STD, "int", &[]);
-    pub const I32: TypeSpec = Named(StdModule::STD, "i32", &[]);
-    pub const F64: TypeSpec = Named(StdModule::STD, "f64", &[]);
-    pub const BOOL: TypeSpec = Named(StdModule::STD, "bool", &[]);
-    pub const CHAR: TypeSpec = Named(StdModule::STD, "char", &[]);
-    pub const STRING: TypeSpec = Named(StdModule::STD, "string", &[]);
+    pub const INT: TypeSpec = Named(StdModule::PRIMITIVE, "int", &[]);
+    pub const I32: TypeSpec = Named(StdModule::PRIMITIVE, "i32", &[]);
+    pub const F64: TypeSpec = Named(StdModule::PRIMITIVE, "f64", &[]);
+    pub const BOOL: TypeSpec = Named(StdModule::PRIMITIVE, "bool", &[]);
+    pub const CHAR: TypeSpec = Named(StdModule::PRIMITIVE, "char", &[]);
+    pub const STRING: TypeSpec = Named(StdModule::PRIMITIVE, "string", &[]);
     pub const SEXPR: TypeSpec = Named(StdModule::SEXPR, "Sexpr", &[]);
     pub const UNIT: TypeSpec = TypeSpec::Unit;
 }

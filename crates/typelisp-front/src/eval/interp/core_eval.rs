@@ -2347,7 +2347,7 @@ mod tests {
         // The standard library's modules its paths name are declared first,
         // since a path is read one segment at a time.
         use typelisp_mem::StdModule;
-        for m in [StdModule::OPTION, StdModule::RESULT, StdModule::VEC, StdModule::SEXPR, StdModule::COLLECTIONS] {
+        for m in [StdModule::OPTION, StdModule::RESULT, StdModule::VEC, StdModule::SEXPR, StdModule::COLLECTIONS, StdModule::PRIMITIVE] {
             heap.names().declare_module(m.ns());
         }
         let mut vs: Vec<Value> = crate::Reader::new()
@@ -3385,7 +3385,7 @@ mod tests {
         let mut h = stress_heap();
         let form = read1(&mut h, "(apply (var f) int-any-width (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))");
         h.push_root(form);
-        let Value::Path(recv) = crate::check::core::path_form(&mut h, &crate::Path::std("i32")) else {
+        let Value::Path(recv) = crate::check::core::path_form(&mut h, &crate::Path::primitive("i32")) else {
             unreachable!("Heap::intern_path always returns Value::Path")
         };
         let i32 = crate::type_key::type_id(&crate::Type::I32);

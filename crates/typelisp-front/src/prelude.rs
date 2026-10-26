@@ -169,16 +169,18 @@ fn tuple_source() -> String {
         )
         .unwrap();
     }
-    // `(tuple a b ...)`: the constructor of the arity the call has.
+    // `(tuple a b ...)`: the constructor of the arity the call has. In
+    // `std::primitive`, beside the `Sexpr` constructor spelled `tuple`: a name
+    // `std::prelude` offers is one path, so the two have to be one module's.
     let mut arms = String::new();
     for n in 1..=TUPLE_MAX_ARITY {
         write!(arms, " ({} `({}::new ,@xs))", n, tuple_path(n)).unwrap();
     }
     writeln!(
         out,
-        "(pub defmacro tuple (&rest xs) \"Builds the tuple `#{{a b ...}}` of the evaluated arguments.\" \
+        "(module primitive (pub defmacro tuple (&rest xs) \"Builds the tuple `#{{a b ...}}` of the evaluated arguments.\" \
          (labels ((count ((l Option<Sexpr>)) int (if (sexpr-consp l) (+ 1 (count (sexpr-cdr l))) 0))) \
-         (case (count xs){} (:else (panic (format false \"tuple: takes 1 to {} elements, got ~a\" (count xs)))))))",
+         (case (count xs){} (:else (panic (format false \"tuple: takes 1 to {} elements, got ~a\" (count xs))))))))",
         arms, TUPLE_MAX_ARITY
     )
     .unwrap();

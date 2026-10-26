@@ -6339,7 +6339,7 @@ impl Checker {
         let target_var = match parts[1] {
             Value::Symbol(id) => {
                 let n = heap.symbol_spelling(id).to_string();
-                (head_params.contains(&n) && self.info.reg.type_def(&Path::std(&n)).is_none()).then_some(n)
+                (head_params.contains(&n) && self.info.offered_type(&n).is_none()).then_some(n)
             }
             _ => None,
         };
@@ -9723,7 +9723,7 @@ impl Checker {
                         // so the printer's specialization has to be asked for here too.
                         self.request_print_object(&Type::Rational);
                         let node = Node::Assoc {
-                            owner: Path::std("ratio"),
+                            owner: Path::primitive("ratio"),
                             method: typelisp_mem::symbols::intern("ratio->rational"),
                             instance: true,
                             ret: Type::Rational,

@@ -37,7 +37,7 @@ use std::borrow::Cow;
 
 use crate::mem::BoxId;
 use crate::{Heap, Path, Type, TypeId};
-use typelisp_mem::{ConcreteNames, NsId, TypeKey, TypeShape};
+use typelisp_mem::{ConcreteNames, TypeKey, TypeShape};
 
 /// How `p` is spelled when interned as (or looked up among) type identities.
 /// The one place a type identity *name* is produced.
@@ -98,7 +98,7 @@ fn type_id_in(ty: &Type, params: &[String]) -> TypeId {
             Some(i) => TypeShape::Param(i as u32),
             None => panic!("the type variable `{}` has no runtime identity (internal error)", name),
         },
-        scalar => TypeShape::named(NsId::STD, scalar.scalar_name().expect("every other type is matched above"), &[]),
+        scalar => TypeShape::named(typelisp_mem::StdModule::PRIMITIVE.ns(), scalar.scalar_name().expect("every other type is matched above"), &[]),
     };
     typelisp_mem::intern_type(shape)
 }
@@ -219,7 +219,7 @@ pub fn definition_path(ty: TypeId) -> Option<Path> {
 }
 
 /// How a type is spelled as text: the whole path, plus its type arguments
-/// when it has any (`gen<std::i32>`, `std::hashtable<std::string,std::i32>`). For a type with no
+/// when it has any (`gen<std::primitive::i32>`, `std::collections::HashTable<std::primitive::string,std::primitive::i32>`). For a type with no
 /// arguments this is [`type_key_of`] of its path, character for character.
 impl TypeKey for Type {
     fn type_key(&self) -> String {
@@ -232,7 +232,7 @@ impl TypeKey for Type {
             Type::Var(name) => name.clone(),
             Type::Dyn(p, pins) => ConcreteNames::dyn_type(&p.to_string(), pins),
             Type::Fn(ps, rest, r) => ConcreteNames::fn_type(ps, rest.as_deref(), &**r),
-            scalar => type_key_of(&Path::std(scalar.scalar_name().expect("every other type is matched above"))).into_owned(),
+            scalar => type_key_of(&Path::primitive(scalar.scalar_name().expect("every other type is matched above"))).into_owned(),
         }
     }
 }

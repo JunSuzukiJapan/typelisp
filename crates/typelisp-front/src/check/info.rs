@@ -449,6 +449,13 @@ impl Info {
         self.reg.fn_sig(&path).is_some().then_some(path)
     }
 
+    /// The type the standard library offers every module as `name`.
+    pub(super) fn offered_type(&self, name: &str) -> Option<Path> {
+        let prelude = self.reg.module_at(crate::types::prelude_ns())?;
+        let path = *prelude.aliases.get(name)?;
+        self.reg.type_def(&path).is_some().then_some(path)
+    }
+
     /// The `Sexpr` `cons` variant's `(type path, variant index)`, read from the
     /// type definition directly rather than the bare-name `ctors` map — that
     /// bare `cons` name was removed (Symbol/Sexpr redesign Phase 4b) so `(cons

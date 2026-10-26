@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections", "array", "option", "result", "vec", "sexpr"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections", "array", "option", "result", "vec", "sexpr", "primitive"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -833,6 +833,7 @@ impl Registry {
         let mut collections = Namespace::new(typelisp_mem::StdModule::COLLECTIONS.ns());
         let mut fs = Namespace::new(typelisp_mem::StdModule::FS.ns());
         let mut net = Namespace::new(typelisp_mem::StdModule::NET.ns());
+        let mut primitive = Namespace::new(typelisp_mem::StdModule::PRIMITIVE.ns());
         option.add_type(option_def());
         result.add_type(result_def());
         for def in builtin_error_defs() {
@@ -852,14 +853,14 @@ impl Registry {
         // `Sexpr` cons cell. Internal `Sexpr` cons construction (`list`/
         // quasiquote/`&rest`) goes through `Checker::sexpr_cons_ctor`/
         // `sexpr-cons` directly instead of this bare name.
-        // The constructors are `std`'s own while the type is `std::sexpr`'s:
-        // several are spelled as the primitive types they hold
+        // The constructors are `std::primitive`'s while the type is
+        // `std::sexpr`'s: several are spelled as the primitive types they hold
         // (`int`, `f64`, `char` ...), and a name `std::prelude` offers is one
         // path, so the constructor and the primitive type have to be one
         // module's two definitions of it.
         let def = sexpr_def();
-        std_ns.register_ctors(&def.name, &def.variants);
-        std_ns.ctors.remove("cons");
+        primitive.register_ctors(&def.name, &def.variants);
+        primitive.ctors.remove("cons");
         sexpr_ns.add_type(def);
         collections.add_type(hashtable_def());
         vec.add_type(vector_def());
@@ -919,7 +920,7 @@ impl Registry {
                 ref t if t.is_float() => float_assoc(t.clone()),
                 _ => BTreeMap::new(),
             };
-            std_ns.add_type(builtin_adt(name, &[], AdtKind::Sum, Vec::new(), assoc));
+            primitive.add_type(builtin_adt(name, &[], AdtKind::Sum, Vec::new(), assoc));
         }
         // `random-state` (CL's `random-state`): a mutable PRNG stream, its
         // actual bit-twiddling done in Rust (`interp::eval_random_state_next`
@@ -1170,7 +1171,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result, vec, sexpr_ns, collections, fs, net].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result, vec, sexpr_ns, collections, fs, net, primitive].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg

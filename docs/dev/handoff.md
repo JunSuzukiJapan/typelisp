@@ -12,17 +12,13 @@
 - 段階 6 は 6a（再公開 `(pub use PATH)`）、6b（ルートの組み込みを `std` へ）、6c（`std::prelude` が
   `std` を全部再公開）が済み、6d（`std` の子モジュールに分ける）が途中。6d' （シンボルの大文字と
   小文字の区別）は済み。6d で移したものの一覧と、残っているものの一覧は計画の 6d の項にある。
-- ABI は 0.3.40。全体テストは最後のコミットで通っている。
+- ABI は 0.3.41。全体テストは最後のコミットで通っている。
 - 途中の作業は無い（作業ツリーはコミット済み）。
 
 ## 2. 次にすること（順に）
 
 1. 6d の残り。registry（`crates/typelisp-front/src/check/registry.rs` の `with_builtins`）が `std` に
-   直接登録しているものを子モジュールへ移す。組み込みのエラー型は済み。
-   - 基本型を `std::primitive` へ。`Sexpr` の構成子（`int` `f64` `char` など）は基本型と同じ綴りなので、
-     基本型と同じモジュールに置く（`std::prelude` が公開する名前は 1 つのパスでなければならない）。
-     構成子 `tuple` と同じ綴りの `tuple` マクロ（`prelude.rs` の `tuple_source`）も `std::primitive` に置く
-     （ユーザー決定）。手書きのコア IR のテストの `::std::i32` などは `::std::primitive::i32` になる。
+   直接登録しているものを子モジュールへ移す。組み込みのエラー型と基本型（`std::primitive`）は済み。
    - `llvm-*` の型と `Scope` を `%core` へ。
    - `format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。置き場所はまだ決めて
      いない。内部の補助なら `%internal`（計画の 5 節）。

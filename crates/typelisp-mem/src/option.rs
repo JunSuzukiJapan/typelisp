@@ -16,7 +16,6 @@
 //! printer must answer identically, and the AOT tier cannot see
 //! `typelisp-front`.
 
-use crate::symbols::NsId;
 use crate::{Heap, TypeId, TypeShape, Value};
 
 /// The payload `P` of `ty` when `ty` is an `Option<P>`.
@@ -43,7 +42,7 @@ pub fn option_payload_niches(payload: TypeId) -> bool {
     match crate::type_shape(payload) {
         TypeShape::Unit | TypeShape::Never => false,
         shape @ TypeShape::Named(..) => {
-            let raw_word = ["ptr", "c-long", "c-ulong"].iter().any(|n| shape == TypeShape::named(NsId::STD, n, &[]));
+            let raw_word = ["ptr", "c-long", "c-ulong"].iter().any(|n| shape == TypeShape::named(crate::StdModule::PRIMITIVE.ns(), n, &[]));
             !(raw_word || option_payload(payload).is_some())
         }
         TypeShape::Fn(..) | TypeShape::Ptr(_) | TypeShape::Dyn(..) | TypeShape::CStruct(..) => true,
@@ -98,7 +97,7 @@ mod tests {
         let ns = match name {
             "Option" => crate::StdModule::OPTION.ns(),
             "Vector" => crate::StdModule::VEC.ns(),
-            _ => NsId::STD,
+            _ => crate::StdModule::PRIMITIVE.ns(),
         };
         intern_type(TypeShape::named(ns, name, args))
     }

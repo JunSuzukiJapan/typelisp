@@ -699,9 +699,13 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      次に組み込みのエラー型を移した。`ReadError` を `std::reader`、`EvalError` を `std::eval`、`ParseIntError`
      `ParseFloatError` を `std::num`、`FileError` を `std::fs`、`NetError` を `std::net`。置き場所は
      `StdModule::of_builtin_type` が答える。ABI は 0.3.40。
-     registry が `std` に置くもので残るのは、基本型（`std::primitive`。`Sexpr` の構成子と、構成子 `tuple` と同じ
-     綴りの `tuple` マクロも同じモジュールへ。2026-10-26、ユーザー決定）、`llvm-*` の型と `Scope`（`%core`）、
-     `format-rt` と `pprint-*-rt` などの内部関数、`compile-file` とダンプの関数。
+     次に基本型を `std::primitive` へ移した。`Sexpr` の構成子と、構成子 `tuple` と同じ綴りの `tuple` マクロも
+     同じモジュールに置いた（2026-10-26、ユーザー決定）。式の頭の `tuple` はマクロ、`match` のパターンの頭の
+     `tuple` は構成子で、使う場所で決まる。基本型のパスは `Path::primitive`、型の形は
+     `StdModule::PRIMITIVE`。型の式の中でパスで書いた基本型（`std::primitive::int`、チェッカーが型をフォームに
+     書き戻したもの）も基本型として読む（`types::scalar_type`）。ABI は 0.3.41。
+     registry が `std` に置くもので残るのは、`llvm-*` の型と `Scope`（`%core`）、`format-rt` と `pprint-*-rt` などの
+     内部関数、`compile-file` とダンプの関数。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

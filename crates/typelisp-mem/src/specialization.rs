@@ -93,12 +93,12 @@ mod tests {
     fn a_specialization_is_one_symbol_no_table_holds() {
         let m = child_ns(NsId::ROOT, "specialization-test");
         let f = intern_in(m, "pick");
-        let int = crate::intern_type(TypeShape::named(NsId::STD, "int", &[]));
+        let int = crate::intern_type(TypeShape::named(crate::StdModule::PRIMITIVE.ns(), "int", &[]));
         let s = specialization(Generic::Fn(m, f), &[int]);
         assert_eq!(specialization(Generic::Fn(m, f), &[int]), s);
-        assert_eq!(s.name(), "pick <std::int>");
+        assert_eq!(s.name(), "pick <std::primitive::int>");
         assert_eq!(s.home(), m);
-        assert_eq!(find_exact(m, "pick <std::int>"), None);
+        assert_eq!(find_exact(m, "pick <std::primitive::int>"), None);
         assert_eq!(specialized(s), Some((Generic::Fn(m, f), vec![int])));
         assert_eq!(specialized(f), None);
     }

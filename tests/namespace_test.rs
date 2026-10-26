@@ -347,3 +347,13 @@ fn absolute_path_shadows_local() {
                (m::use-root 5)";
     assert_eq!(ty_program(src), Type::Int);
 }
+
+/// A primitive type written as its path, `std::primitive::int`, is the
+/// primitive itself — the same type the bare `int` names — and so is the
+/// error type a fallible built-in reports, written from its module.
+#[test]
+fn a_primitive_written_as_its_path_is_the_primitive() {
+    assert_eq!(ty_program("(defun f ((x std::primitive::int)) int x) (f 1)"), Type::Int);
+    assert_eq!(ty_program("(the std::primitive::string \"a\")"), Type::Str);
+    assert!(program("(defun f ((r Result<int,std::num::ParseIntError>)) Result<int,ParseIntError> r)").is_ok());
+}

@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn a_list_defines_the_types_it_was_written_from() {
         let m = child_ns(NsId::STD, "type-words-test");
-        let int = crate::intern_type(TypeShape::named(NsId::STD, "int", &[]));
+        let int = crate::intern_type(TypeShape::named(crate::StdModule::PRIMITIVE.ns(), "int", &[]));
         let gen = crate::intern_type(TypeShape::named(m, "gen", &[int, TypeId::OPTION_SEXPR]));
         let template = crate::intern_type(TypeShape::named(crate::StdModule::OPTION.ns(), "Option", &[crate::intern_type(TypeShape::Param(1))]));
         let f = crate::intern_type(TypeShape::Fn(vec![gen], Some(int), crate::intern_type(TypeShape::Unit)));

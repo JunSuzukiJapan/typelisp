@@ -3243,7 +3243,7 @@ mod tests {
         h.names().declare_module(typelisp_mem::symbols::ns_of(&["m".to_string()]));
         h.names().declare_module(typelisp_front::types::std_module("symbol"));
         use typelisp_mem::StdModule;
-        for m in [StdModule::OPTION, StdModule::RESULT, StdModule::VEC, StdModule::SEXPR, StdModule::COLLECTIONS] {
+        for m in [StdModule::OPTION, StdModule::RESULT, StdModule::VEC, StdModule::SEXPR, StdModule::COLLECTIONS, StdModule::PRIMITIVE] {
             h.names().declare_module(m.ns());
         }
         Ok(crate::Reader::new()
@@ -3463,11 +3463,11 @@ mod tests {
     #[test]
     fn an_ordinary_method_call_is_named_by_its_qualified_type() {
         assert_eq!(
-            bridged("(assoc ::std::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var a) (var b))"),
-            r#"(assoc i32 "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#
+            bridged("(assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b))"),
+            r#"(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc ::m::point area true int-any-width (struct) (type-named ::std::i32) (var p))"),
+            bridged("(assoc ::m::point area true int-any-width (struct) (type-named ::std::primitive::i32) (var p))"),
             r#"(assoc () "area" true "tl_m::point''area" (2 var "p" false))"#
         );
         // Only the standard library's type is named for the island: a root
@@ -3483,7 +3483,7 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc ::std::vec::Vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::i32) (var v) (int-any-width 0))"),
+            bridged("(assoc ::std::vec::Vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::primitive::i32) (var v) (int-any-width 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
@@ -3494,8 +3494,8 @@ mod tests {
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc ::std::vec::Vector new false (vector int-any-width) () (type-named ::std::vec::Vector (type-named ::std::i32)))"),
-            format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::vec::Vector (type-named ::std::i32))"))
+            bridged("(assoc ::std::vec::Vector new false (vector int-any-width) () (type-named ::std::vec::Vector (type-named ::std::primitive::i32)))"),
+            format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::vec::Vector (type-named ::std::primitive::i32))"))
         );
     }
 
@@ -3512,7 +3512,7 @@ mod tests {
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc ::std::collections::HashTable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::i32) (var h) (var n) (var i))"),
+            bridged("(assoc ::std::collections::HashTable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::primitive::i32) (var h) (var n) (var i))"),
             r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
@@ -3541,7 +3541,7 @@ mod tests {
         let printed = bridged("(assoc ::std::Scope get true enum ((scope handle) str) (type-named ::std::option::Option (type-named ::std::llvm-value)) (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc ::std::Scope get true enum ((scope int-any-width) str) (type-named ::std::option::Option (type-named ::std::i32)) (var e) (var n))"),
+            bridged("(assoc ::std::Scope get true enum ((scope int-any-width) str) (type-named ::std::option::Option (type-named ::std::primitive::i32)) (var e) (var n))"),
             r#"(assoc Scope "get" true "tl_std::Scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -3698,9 +3698,9 @@ mod tests {
     fn a_value_pattern_crosses_as_a_name_and_a_test() {
         let printed = bridged_with(
             &DEFS,
-            r#"(match (var s) str ((pat-guard $match-scrut (assoc ::std::string equals true bool (str str) (type-named ::std::bool) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc ::std::primitive::string equals true bool (str str) (type-named ::std::primitive::bool) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         );
-        assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc string "equals" true "tl_std::string''equals""#), "{}", printed);
+        assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc string "equals" true "tl_std::primitive::string''equals""#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
         assert!(printed.ends_with(" 2)"), "{}", printed);
     }
@@ -4025,11 +4025,11 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun ::m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc ::std::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var a) (var b)))")
+            top_level(&[], "(defun ::m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
-        assert_eq!(body, r#"(assoc i32 "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#);
+        assert_eq!(body, r#"(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false))"#);
         // The same mangling a call to it produces.
         assert!(bridged("(call ::m::add ())").contains(r#""tl_m::add""#));
     }

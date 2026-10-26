@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.40
+# ABI バージョン 0.3.41
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.40 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.41 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `6bbd7720cdc5e78f`
+内容ハッシュ (FNV-1a 64): `0241df28c762c9ec`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -447,87 +447,87 @@
 
 | 表 | 関数 | 型 |
 |---|---|---|
-| sys_builtin::RESULT_TYPES | `parse-float` | `std::result::Result<std::f64,std::num::ParseFloatError>` |
-| sys_builtin::RESULT_TYPES | `command-line-args` | `std::vec::Vector<std::string>` |
-| sys_builtin::RESULT_TYPES | `getenv` | `std::option::Option<std::string>` |
-| sys_builtin::RESULT_TYPES | `home-directory` | `std::option::Option<std::string>` |
-| sys_builtin::RESULT_TYPES | `machine-instance` | `std::option::Option<std::string>` |
-| sys_builtin::RESULT_TYPES | `machine-version` | `std::option::Option<std::string>` |
-| sys_builtin::RESULT_TYPES | `software-version` | `std::option::Option<std::string>` |
-| sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `std::option::Option<std::int>` |
-| sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `std::option::Option<std::bool>` |
+| sys_builtin::RESULT_TYPES | `parse-float` | `std::result::Result<std::primitive::f64,std::num::ParseFloatError>` |
+| sys_builtin::RESULT_TYPES | `command-line-args` | `std::vec::Vector<std::primitive::string>` |
+| sys_builtin::RESULT_TYPES | `getenv` | `std::option::Option<std::primitive::string>` |
+| sys_builtin::RESULT_TYPES | `home-directory` | `std::option::Option<std::primitive::string>` |
+| sys_builtin::RESULT_TYPES | `machine-instance` | `std::option::Option<std::primitive::string>` |
+| sys_builtin::RESULT_TYPES | `machine-version` | `std::option::Option<std::primitive::string>` |
+| sys_builtin::RESULT_TYPES | `software-version` | `std::option::Option<std::primitive::string>` |
+| sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `std::option::Option<std::primitive::int>` |
+| sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `std::option::Option<std::primitive::bool>` |
 | sys_builtin::RESULT_TYPES | `dribble-start` | `std::result::Result<(),std::fs::FileError>` |
 | sys_builtin::RESULT_TYPES | `dribble-stop` | `std::result::Result<(),std::fs::FileError>` |
 | sys_builtin::RESULT_TYPES | `ed-open` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-open-file` | `std::result::Result<std::i32,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-open-file` | `std::result::Result<std::primitive::i32,std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `stream-close` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-input-p` | `std::result::Result<std::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-output-p` | `std::result::Result<std::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-listen` | `std::result::Result<std::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-position` | `std::result::Result<std::int,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-at-line-start` | `std::result::Result<std::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-read-char` | `std::result::Result<std::option::Option<std::char>,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-input-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-output-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-listen` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-position` | `std::result::Result<std::primitive::int,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-at-line-start` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-read-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `stream-unread-char` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-read-byte` | `std::result::Result<std::option::Option<std::int>,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-read-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `stream-write-byte` | `std::result::Result<(),std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `stream-write-string` | `std::result::Result<(),std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `stream-finish-output` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-take-output-string` | `std::result::Result<std::string,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `stream-take-output-string` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `file-delete` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-truename` | `std::result::Result<std::string,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `file-truename` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `file-modified-date` | `std::result::Result<std::time::universal-time,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-owner-name` | `std::result::Result<std::option::Option<std::string>,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-list-directory` | `std::result::Result<std::vec::Vector<std::string>,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `file-owner-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::fs::FileError>` |
+| stream_builtin::RESULT_TYPES | `file-list-directory` | `std::result::Result<std::vec::Vector<std::primitive::string>,std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `file-create-directories` | `std::result::Result<(),std::fs::FileError>` |
 | stream_builtin::RESULT_TYPES | `file-rename` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::INNER_TYPES | `stream-read-char` | `std::option::Option<std::char>` |
-| stream_builtin::INNER_TYPES | `stream-read-byte` | `std::option::Option<std::int>` |
-| stream_builtin::INNER_TYPES | `file-list-directory` | `std::vec::Vector<std::string>` |
-| stream_builtin::INNER_TYPES | `file-owner-name` | `std::option::Option<std::string>` |
-| net_builtin::RESULT_TYPES | `net-resolve-begin` | `std::result::Result<std::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-resolve-finish` | `std::result::Result<std::option::Option<std::vec::Vector<std::string>>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-connect-begin` | `std::result::Result<std::i32,std::net::NetError>` |
+| stream_builtin::INNER_TYPES | `stream-read-char` | `std::option::Option<std::primitive::char>` |
+| stream_builtin::INNER_TYPES | `stream-read-byte` | `std::option::Option<std::primitive::int>` |
+| stream_builtin::INNER_TYPES | `file-list-directory` | `std::vec::Vector<std::primitive::string>` |
+| stream_builtin::INNER_TYPES | `file-owner-name` | `std::option::Option<std::primitive::string>` |
+| net_builtin::RESULT_TYPES | `net-resolve-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-resolve-finish` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::string>>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-connect-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-connect-finish` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-listen` | `std::result::Result<std::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-tls-listen` | `std::result::Result<std::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-unix-connect` | `std::result::Result<std::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-unix-listen` | `std::result::Result<std::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-accept` | `std::result::Result<std::option::Option<std::i32>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-fill` | `std::result::Result<std::option::Option<std::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-pop-byte` | `std::result::Result<std::option::Option<std::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-pop-char` | `std::result::Result<std::option::Option<std::char>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-buffered-p` | `std::result::Result<std::bool,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-tls-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-unix-connect` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-unix-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-accept` | `std::result::Result<std::option::Option<std::primitive::i32>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-fill` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-pop-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-pop-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-buffered-p` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-push-string` | `std::result::Result<(),std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-push-byte` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-flush` | `std::result::Result<std::option::Option<std::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-socket-error` | `std::result::Result<std::option::Option<std::string>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-peer-subject` | `std::result::Result<std::option::Option<std::string>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-server-name` | `std::result::Result<std::option::Option<std::string>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-flush` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-socket-error` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-peer-subject` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-server-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-set-nodelay` | `std::result::Result<(),std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-set-keepalive` | `std::result::Result<(),std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `std::result::Result<(),std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `std::result::Result<(),std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-shutdown-write` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-local-address` | `std::result::Result<std::string,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-peer-address` | `std::result::Result<std::string,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-local-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-peer-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
 | net_builtin::RESULT_TYPES | `net-tls-start` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-tls-handshake` | `std::result::Result<std::option::Option<std::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-bind` | `std::result::Result<std::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-send-to` | `std::result::Result<std::bool,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-recv` | `std::result::Result<std::option::Option<std::vec::Vector<std::int>>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-last-sender` | `std::result::Result<std::string,std::net::NetError>` |
-| net_builtin::INNER_TYPES | `net-resolve-finish` | `std::option::Option<std::vec::Vector<std::string>>` |
-| net_builtin::INNER_TYPES | `net-tls-handshake` | `std::option::Option<std::int>` |
-| net_builtin::INNER_TYPES | `net-udp-recv` | `std::option::Option<std::vec::Vector<std::int>>` |
-| net_builtin::INNER_TYPES | `net-accept` | `std::option::Option<std::i32>` |
-| net_builtin::INNER_TYPES | `net-fill` | `std::option::Option<std::int>` |
-| net_builtin::INNER_TYPES | `net-flush` | `std::option::Option<std::int>` |
-| net_builtin::INNER_TYPES | `net-socket-error` | `std::option::Option<std::string>` |
-| net_builtin::INNER_TYPES | `net-peer-subject` | `std::option::Option<std::string>` |
-| net_builtin::INNER_TYPES | `net-server-name` | `std::option::Option<std::string>` |
-| net_builtin::INNER_TYPES | `net-pop-byte` | `std::option::Option<std::int>` |
-| net_builtin::INNER_TYPES | `net-pop-char` | `std::option::Option<std::char>` |
-| readtable::READER_MACRO_OPTION_TYPE | | `std::option::Option<(fn (std::io::string-input-stream,std::char) std::option::Option<std::sexpr::Sexpr>)>` |
+| net_builtin::RESULT_TYPES | `net-tls-handshake` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-udp-bind` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-udp-send-to` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-udp-recv` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::int>>,std::net::NetError>` |
+| net_builtin::RESULT_TYPES | `net-udp-last-sender` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| net_builtin::INNER_TYPES | `net-resolve-finish` | `std::option::Option<std::vec::Vector<std::primitive::string>>` |
+| net_builtin::INNER_TYPES | `net-tls-handshake` | `std::option::Option<std::primitive::int>` |
+| net_builtin::INNER_TYPES | `net-udp-recv` | `std::option::Option<std::vec::Vector<std::primitive::int>>` |
+| net_builtin::INNER_TYPES | `net-accept` | `std::option::Option<std::primitive::i32>` |
+| net_builtin::INNER_TYPES | `net-fill` | `std::option::Option<std::primitive::int>` |
+| net_builtin::INNER_TYPES | `net-flush` | `std::option::Option<std::primitive::int>` |
+| net_builtin::INNER_TYPES | `net-socket-error` | `std::option::Option<std::primitive::string>` |
+| net_builtin::INNER_TYPES | `net-peer-subject` | `std::option::Option<std::primitive::string>` |
+| net_builtin::INNER_TYPES | `net-server-name` | `std::option::Option<std::primitive::string>` |
+| net_builtin::INNER_TYPES | `net-pop-byte` | `std::option::Option<std::primitive::int>` |
+| net_builtin::INNER_TYPES | `net-pop-char` | `std::option::Option<std::primitive::char>` |
+| readtable::READER_MACRO_OPTION_TYPE | | `std::option::Option<(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)>` |
 
 ## 型ごとの表現 (Repr)
 
@@ -535,24 +535,24 @@
 |---|---|---|---|---|
 | `!` | `!` | none | 0 | 0 |
 | `()` | `()` | unit | 100 | 0 |
-| `(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)` | `(fn (std::io::string-input-stream,std::char) std::option::Option<std::sexpr::Sexpr>)` | fn | 6 | 2 |
+| `(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)` | `(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)` | fn | 6 | 2 |
 | `E` | `E` | none | 0 | 0 |
 | `K` | `K` | none | 0 | 0 |
 | `T` | `T` | none | 0 | 0 |
 | `V` | `V` | none | 0 | 0 |
-| `bool` | `std::bool` | bool | 4 | 0 |
-| `c-long` | `std::c-long` | raw-word | 0 | 0 |
-| `c-ulong` | `std::c-ulong` | raw-word | 0 | 0 |
-| `char` | `std::char` | char | 3 | 0 |
-| `f32` | `std::f32` | f32 | 11 | 0 |
-| `f64` | `std::f64` | f64 | 2 | 0 |
-| `i16` | `std::i16` | int-any-width | 1 | 0 |
-| `i32` | `std::i32` | int-any-width | 1 | 0 |
-| `i8` | `std::i8` | int-any-width | 1 | 0 |
-| `int` | `std::int` | int | 6 | 2 |
-| `random-state` | `std::random-state` | random-state | 6 | 2 |
-| `ratio` | `std::ratio` | ratio | 6 | 2 |
-| `rational` | `std::rational` | rational | 6 | 2 |
+| `bool` | `std::primitive::bool` | bool | 4 | 0 |
+| `c-long` | `std::primitive::c-long` | raw-word | 0 | 0 |
+| `c-ulong` | `std::primitive::c-ulong` | raw-word | 0 | 0 |
+| `char` | `std::primitive::char` | char | 3 | 0 |
+| `f32` | `std::primitive::f32` | f32 | 11 | 0 |
+| `f64` | `std::primitive::f64` | f64 | 2 | 0 |
+| `i16` | `std::primitive::i16` | int-any-width | 1 | 0 |
+| `i32` | `std::primitive::i32` | int-any-width | 1 | 0 |
+| `i8` | `std::primitive::i8` | int-any-width | 1 | 0 |
+| `int` | `std::primitive::int` | int | 6 | 2 |
+| `random-state` | `std::primitive::random-state` | random-state | 6 | 2 |
+| `ratio` | `std::primitive::ratio` | ratio | 6 | 2 |
+| `rational` | `std::primitive::rational` | rational | 6 | 2 |
 | `std::Scope<V>` | `std::Scope<V>` | scope | 6 | 2 |
 | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` | none | 0 | 0 |
 | `std::collections::HashTable<K,V>` | `std::collections::HashTable<K,V>` | hashtable | 6 | 2 |
@@ -561,49 +561,49 @@
 | `std::llvm-function` | `std::llvm-function` | handle | 1 | 0 |
 | `std::llvm-module` | `std::llvm-module` | handle | 1 | 0 |
 | `std::llvm-value` | `std::llvm-value` | handle | 1 | 0 |
-| `std::option::Option<(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)>` | `std::option::Option<(fn (std::io::string-input-stream,std::char) std::option::Option<std::sexpr::Sexpr>)>` | niche | 101 | 2 |
+| `std::option::Option<(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)>` | `std::option::Option<(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)>` | niche | 101 | 2 |
 | `std::option::Option<T>` | `std::option::Option<T>` | enum | 6 | 2 |
 | `std::option::Option<V>` | `std::option::Option<V>` | enum | 6 | 2 |
-| `std::option::Option<bool>` | `std::option::Option<std::bool>` | niche | 101 | 0 |
-| `std::option::Option<c-long>` | `std::option::Option<std::c-long>` | enum | 6 | 2 |
-| `std::option::Option<c-ulong>` | `std::option::Option<std::c-ulong>` | enum | 6 | 2 |
-| `std::option::Option<char>` | `std::option::Option<std::char>` | niche | 101 | 0 |
-| `std::option::Option<f32>` | `std::option::Option<std::f32>` | niche | 101 | 2 |
-| `std::option::Option<f64>` | `std::option::Option<std::f64>` | niche | 101 | 2 |
-| `std::option::Option<i16>` | `std::option::Option<std::i16>` | niche | 101 | 0 |
-| `std::option::Option<i32>` | `std::option::Option<std::i32>` | niche | 101 | 0 |
-| `std::option::Option<i8>` | `std::option::Option<std::i8>` | niche | 101 | 0 |
-| `std::option::Option<int>` | `std::option::Option<std::int>` | niche | 101 | 2 |
+| `std::option::Option<bool>` | `std::option::Option<std::primitive::bool>` | niche | 101 | 0 |
+| `std::option::Option<c-long>` | `std::option::Option<std::primitive::c-long>` | enum | 6 | 2 |
+| `std::option::Option<c-ulong>` | `std::option::Option<std::primitive::c-ulong>` | enum | 6 | 2 |
+| `std::option::Option<char>` | `std::option::Option<std::primitive::char>` | niche | 101 | 0 |
+| `std::option::Option<f32>` | `std::option::Option<std::primitive::f32>` | niche | 101 | 2 |
+| `std::option::Option<f64>` | `std::option::Option<std::primitive::f64>` | niche | 101 | 2 |
+| `std::option::Option<i16>` | `std::option::Option<std::primitive::i16>` | niche | 101 | 0 |
+| `std::option::Option<i32>` | `std::option::Option<std::primitive::i32>` | niche | 101 | 0 |
+| `std::option::Option<i8>` | `std::option::Option<std::primitive::i8>` | niche | 101 | 0 |
+| `std::option::Option<int>` | `std::option::Option<std::primitive::int>` | niche | 101 | 2 |
 | `std::option::Option<std::sexpr::Sexpr>` | `std::option::Option<std::sexpr::Sexpr>` | niche | 101 | 2 |
-| `std::option::Option<string>` | `std::option::Option<std::string>` | niche | 101 | 2 |
-| `std::option::Option<u16>` | `std::option::Option<std::u16>` | niche | 101 | 0 |
-| `std::option::Option<u32>` | `std::option::Option<std::u32>` | niche | 101 | 0 |
-| `std::option::Option<u8>` | `std::option::Option<std::u8>` | niche | 101 | 0 |
+| `std::option::Option<string>` | `std::option::Option<std::primitive::string>` | niche | 101 | 2 |
+| `std::option::Option<u16>` | `std::option::Option<std::primitive::u16>` | niche | 101 | 0 |
+| `std::option::Option<u32>` | `std::option::Option<std::primitive::u32>` | niche | 101 | 0 |
+| `std::option::Option<u8>` | `std::option::Option<std::primitive::u8>` | niche | 101 | 0 |
 | `std::repl::heap-info` | `std::repl::heap-info` | none | 0 | 0 |
 | `std::result::Result<(),std::fs::FileError>` | `std::result::Result<(),std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<(),std::net::NetError>` | `std::result::Result<(),std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<bool,std::fs::FileError>` | `std::result::Result<std::bool,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<bool,std::net::NetError>` | `std::result::Result<std::bool,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<f64,std::num::ParseFloatError>` | `std::result::Result<std::f64,std::num::ParseFloatError>` | enum | 6 | 2 |
-| `std::result::Result<i32,std::fs::FileError>` | `std::result::Result<std::i32,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<i32,std::net::NetError>` | `std::result::Result<std::i32,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<int,std::fs::FileError>` | `std::result::Result<std::int,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<char>,std::fs::FileError>` | `std::result::Result<std::option::Option<std::char>,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<char>,std::net::NetError>` | `std::result::Result<std::option::Option<std::char>,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<i32>,std::net::NetError>` | `std::result::Result<std::option::Option<std::i32>,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<int>,std::fs::FileError>` | `std::result::Result<std::option::Option<std::int>,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<int>,std::net::NetError>` | `std::result::Result<std::option::Option<std::int>,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<bool,std::fs::FileError>` | `std::result::Result<std::primitive::bool,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<bool,std::net::NetError>` | `std::result::Result<std::primitive::bool,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<f64,std::num::ParseFloatError>` | `std::result::Result<std::primitive::f64,std::num::ParseFloatError>` | enum | 6 | 2 |
+| `std::result::Result<i32,std::fs::FileError>` | `std::result::Result<std::primitive::i32,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<i32,std::net::NetError>` | `std::result::Result<std::primitive::i32,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<int,std::fs::FileError>` | `std::result::Result<std::primitive::int,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<char>,std::fs::FileError>` | `std::result::Result<std::option::Option<std::primitive::char>,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<char>,std::net::NetError>` | `std::result::Result<std::option::Option<std::primitive::char>,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<i32>,std::net::NetError>` | `std::result::Result<std::option::Option<std::primitive::i32>,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<int>,std::fs::FileError>` | `std::result::Result<std::option::Option<std::primitive::int>,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<int>,std::net::NetError>` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` | enum | 6 | 2 |
 | `std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::eval::EvalError>` | `std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::eval::EvalError>` | enum | 6 | 2 |
 | `std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::reader::ReadError>` | `std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::reader::ReadError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<std::vec::Vector<int>>,std::net::NetError>` | `std::result::Result<std::option::Option<std::vec::Vector<std::int>>,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<std::vec::Vector<string>>,std::net::NetError>` | `std::result::Result<std::option::Option<std::vec::Vector<std::string>>,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<string>,std::fs::FileError>` | `std::result::Result<std::option::Option<std::string>,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<std::option::Option<string>,std::net::NetError>` | `std::result::Result<std::option::Option<std::string>,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,int>,std::reader::ReadError>` | `std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,std::int>,std::reader::ReadError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<std::vec::Vector<int>>,std::net::NetError>` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::int>>,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<std::vec::Vector<string>>,std::net::NetError>` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::string>>,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<string>,std::fs::FileError>` | `std::result::Result<std::option::Option<std::primitive::string>,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<std::option::Option<string>,std::net::NetError>` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,int>,std::reader::ReadError>` | `std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,std::primitive::int>,std::reader::ReadError>` | enum | 6 | 2 |
 | `std::result::Result<std::time::universal-time,std::fs::FileError>` | `std::result::Result<std::time::universal-time,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<std::vec::Vector<string>,std::fs::FileError>` | `std::result::Result<std::vec::Vector<std::string>,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<string,std::fs::FileError>` | `std::result::Result<std::string,std::fs::FileError>` | enum | 6 | 2 |
-| `std::result::Result<string,std::net::NetError>` | `std::result::Result<std::string,std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<std::vec::Vector<string>,std::fs::FileError>` | `std::result::Result<std::vec::Vector<std::primitive::string>,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<string,std::fs::FileError>` | `std::result::Result<std::primitive::string,std::fs::FileError>` | enum | 6 | 2 |
+| `std::result::Result<string,std::net::NetError>` | `std::result::Result<std::primitive::string,std::net::NetError>` | enum | 6 | 2 |
 | `std::sync::Chan<T>` | `std::sync::Chan<T>` | struct | 6 | 2 |
 | `std::thread::Task<T>` | `std::thread::Task<T>` | struct | 6 | 2 |
 | `std::thread::Thread<T>` | `std::thread::Thread<T>` | struct | 6 | 2 |
@@ -612,15 +612,15 @@
 | `std::vec::Vector<K>` | `std::vec::Vector<K>` | vector | 6 | 2 |
 | `std::vec::Vector<T>` | `std::vec::Vector<T>` | vector | 6 | 2 |
 | `std::vec::Vector<V>` | `std::vec::Vector<V>` | vector | 6 | 2 |
-| `std::vec::Vector<int>` | `std::vec::Vector<std::int>` | vector | 6 | 2 |
+| `std::vec::Vector<int>` | `std::vec::Vector<std::primitive::int>` | vector | 6 | 2 |
 | `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>` | `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>` | vector | 6 | 2 |
 | `std::vec::Vector<std::sexpr::cons-cell<K,V>>` | `std::vec::Vector<std::sexpr::cons-cell<K,V>>` | vector | 6 | 2 |
-| `std::vec::Vector<string>` | `std::vec::Vector<std::string>` | vector | 6 | 2 |
-| `string` | `std::string` | str | 6 | 2 |
-| `symbol` | `std::symbol` | sym | 6 | 0 |
-| `u16` | `std::u16` | int-any-width | 1 | 0 |
-| `u32` | `std::u32` | int-any-width | 1 | 0 |
-| `u8` | `std::u8` | int-any-width | 1 | 0 |
+| `std::vec::Vector<string>` | `std::vec::Vector<std::primitive::string>` | vector | 6 | 2 |
+| `string` | `std::primitive::string` | str | 6 | 2 |
+| `symbol` | `std::primitive::symbol` | sym | 6 | 0 |
+| `u16` | `std::primitive::u16` | int-any-width | 1 | 0 |
+| `u32` | `std::primitive::u32` | int-any-width | 1 | 0 |
+| `u8` | `std::primitive::u8` | int-any-width | 1 | 0 |
 
 ## ランタイム関数
 
@@ -981,71 +981,6 @@
 - インスタンス `push-frame`: `(std::Scope<V>) -> ()`
 - インスタンス `set`: `(std::Scope<V>, string, V) -> ()`
 
-### `std::bool` (sum, 型引数 [])
-
-- インスタンス `eq`: `(bool, bool) -> bool`
-- インスタンス `eql`: `(bool, bool) -> bool`
-- インスタンス `equal`: `(bool, bool) -> bool`
-- インスタンス `equalp`: `(bool, bool) -> bool`
-
-### `std::c-long` (sum, 型引数 [])
-
-- インスタンス `int->c-long`: `(c-long) -> c-long`
-- インスタンス `int->c-ulong`: `(c-long) -> c-ulong`
-- インスタンス `int->i16`: `(c-long) -> i16`
-- インスタンス `int->i32`: `(c-long) -> i32`
-- インスタンス `int->i8`: `(c-long) -> i8`
-- インスタンス `int->int`: `(c-long) -> int`
-- インスタンス `int->u16`: `(c-long) -> u16`
-- インスタンス `int->u32`: `(c-long) -> u32`
-- インスタンス `int->u8`: `(c-long) -> u8`
-- インスタンス `try-int->c-long`: `(c-long) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(c-long) -> std::option::Option<c-ulong>`
-- インスタンス `try-int->i16`: `(c-long) -> std::option::Option<i16>`
-- インスタンス `try-int->i32`: `(c-long) -> std::option::Option<i32>`
-- インスタンス `try-int->i8`: `(c-long) -> std::option::Option<i8>`
-- インスタンス `try-int->u16`: `(c-long) -> std::option::Option<u16>`
-- インスタンス `try-int->u32`: `(c-long) -> std::option::Option<u32>`
-- インスタンス `try-int->u8`: `(c-long) -> std::option::Option<u8>`
-
-### `std::c-ulong` (sum, 型引数 [])
-
-- インスタンス `int->c-long`: `(c-ulong) -> c-long`
-- インスタンス `int->c-ulong`: `(c-ulong) -> c-ulong`
-- インスタンス `int->i16`: `(c-ulong) -> i16`
-- インスタンス `int->i32`: `(c-ulong) -> i32`
-- インスタンス `int->i8`: `(c-ulong) -> i8`
-- インスタンス `int->int`: `(c-ulong) -> int`
-- インスタンス `int->u16`: `(c-ulong) -> u16`
-- インスタンス `int->u32`: `(c-ulong) -> u32`
-- インスタンス `int->u8`: `(c-ulong) -> u8`
-- インスタンス `try-int->c-long`: `(c-ulong) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(c-ulong) -> std::option::Option<c-ulong>`
-- インスタンス `try-int->i16`: `(c-ulong) -> std::option::Option<i16>`
-- インスタンス `try-int->i32`: `(c-ulong) -> std::option::Option<i32>`
-- インスタンス `try-int->i8`: `(c-ulong) -> std::option::Option<i8>`
-- インスタンス `try-int->u16`: `(c-ulong) -> std::option::Option<u16>`
-- インスタンス `try-int->u32`: `(c-ulong) -> std::option::Option<u32>`
-- インスタンス `try-int->u8`: `(c-ulong) -> std::option::Option<u8>`
-
-### `std::char` (sum, 型引数 [])
-
-- インスタンス `<`: `(char, char) -> bool`
-- インスタンス `<=`: `(char, char) -> bool`
-- インスタンス `>`: `(char, char) -> bool`
-- インスタンス `>=`: `(char, char) -> bool`
-- インスタンス `alphap`: `(char) -> bool`
-- インスタンス `char->int`: `(char) -> int`
-- インスタンス `char->string`: `(char) -> string`
-- インスタンス `digitp`: `(char) -> bool`
-- インスタンス `downcase`: `(char) -> char`
-- インスタンス `eq`: `(char, char) -> bool`
-- インスタンス `eql`: `(char, char) -> bool`
-- インスタンス `equal`: `(char, char) -> bool`
-- インスタンス `equalp`: `(char, char) -> bool`
-- インスタンス `lt`: `(char, char) -> bool`
-- インスタンス `upcase`: `(char) -> char`
-
 ### `std::collections::HashTable` (sum, 型引数 [K, V])
 
 - インスタンス `bucket-count`: `(std::collections::HashTable<K,V>, int) -> int`
@@ -1064,300 +999,9 @@
 
 - 変種 0 `EvalError`: `string`
 
-### `std::f32` (sum, 型引数 [])
-
-- インスタンス `*`: `(f32, f32) -> f32`
-- インスタンス `+`: `(f32, f32) -> f32`
-- インスタンス `-`: `(f32, f32) -> f32`
-- インスタンス `/`: `(f32, f32) -> f32`
-- インスタンス `/=`: `(f32, f32) -> bool`
-- インスタンス `<`: `(f32, f32) -> bool`
-- インスタンス `<=`: `(f32, f32) -> bool`
-- インスタンス `=`: `(f32, f32) -> bool`
-- インスタンス `>`: `(f32, f32) -> bool`
-- インスタンス `>=`: `(f32, f32) -> bool`
-- インスタンス `acos`: `(f32) -> f32`
-- インスタンス `acosh`: `(f32) -> f32`
-- インスタンス `asin`: `(f32) -> f32`
-- インスタンス `asinh`: `(f32) -> f32`
-- インスタンス `atan`: `(f32) -> f32`
-- インスタンス `atanh`: `(f32) -> f32`
-- インスタンス `ceiling`: `(f32) -> f32`
-- インスタンス `cos`: `(f32) -> f32`
-- インスタンス `cosh`: `(f32) -> f32`
-- インスタンス `eq`: `(f32, f32) -> bool`
-- インスタンス `eql`: `(f32, f32) -> bool`
-- インスタンス `equal`: `(f32, f32) -> bool`
-- インスタンス `equalp`: `(f32, f32) -> bool`
-- インスタンス `exp`: `(f32) -> f32`
-- インスタンス `expt`: `(f32, f32) -> f32`
-- インスタンス `float->f32`: `(f32) -> f32`
-- インスタンス `float->f64`: `(f32) -> f64`
-- インスタンス `float->int`: `(f32) -> int`
-- インスタンス `float->ratio`: `(f32) -> ratio`
-- インスタンス `floor`: `(f32) -> f32`
-- インスタンス `log`: `(f32) -> f32`
-- インスタンス `max`: `(f32, f32) -> f32`
-- インスタンス `min`: `(f32, f32) -> f32`
-- インスタンス `round`: `(f32) -> f32`
-- インスタンス `sin`: `(f32) -> f32`
-- インスタンス `sinh`: `(f32) -> f32`
-- インスタンス `sqrt`: `(f32) -> f32`
-- インスタンス `tan`: `(f32) -> f32`
-- インスタンス `tanh`: `(f32) -> f32`
-- インスタンス `truncate`: `(f32) -> f32`
-- インスタンス `try-float->f32`: `(f32) -> std::option::Option<f32>`
-- インスタンス `try-float->f64`: `(f32) -> std::option::Option<f64>`
-
-### `std::f64` (sum, 型引数 [])
-
-- インスタンス `*`: `(f64, f64) -> f64`
-- インスタンス `+`: `(f64, f64) -> f64`
-- インスタンス `-`: `(f64, f64) -> f64`
-- インスタンス `/`: `(f64, f64) -> f64`
-- インスタンス `/=`: `(f64, f64) -> bool`
-- インスタンス `<`: `(f64, f64) -> bool`
-- インスタンス `<=`: `(f64, f64) -> bool`
-- インスタンス `=`: `(f64, f64) -> bool`
-- インスタンス `>`: `(f64, f64) -> bool`
-- インスタンス `>=`: `(f64, f64) -> bool`
-- インスタンス `acos`: `(f64) -> f64`
-- インスタンス `acosh`: `(f64) -> f64`
-- インスタンス `asin`: `(f64) -> f64`
-- インスタンス `asinh`: `(f64) -> f64`
-- インスタンス `atan`: `(f64) -> f64`
-- インスタンス `atanh`: `(f64) -> f64`
-- インスタンス `ceiling`: `(f64) -> f64`
-- インスタンス `cos`: `(f64) -> f64`
-- インスタンス `cosh`: `(f64) -> f64`
-- インスタンス `eq`: `(f64, f64) -> bool`
-- インスタンス `eql`: `(f64, f64) -> bool`
-- インスタンス `equal`: `(f64, f64) -> bool`
-- インスタンス `equalp`: `(f64, f64) -> bool`
-- インスタンス `exp`: `(f64) -> f64`
-- インスタンス `expt`: `(f64, f64) -> f64`
-- インスタンス `float->f32`: `(f64) -> f32`
-- インスタンス `float->f64`: `(f64) -> f64`
-- インスタンス `float->int`: `(f64) -> int`
-- インスタンス `float->ratio`: `(f64) -> ratio`
-- インスタンス `floor`: `(f64) -> f64`
-- インスタンス `log`: `(f64) -> f64`
-- インスタンス `max`: `(f64, f64) -> f64`
-- インスタンス `min`: `(f64, f64) -> f64`
-- インスタンス `round`: `(f64) -> f64`
-- インスタンス `sin`: `(f64) -> f64`
-- インスタンス `sinh`: `(f64) -> f64`
-- インスタンス `sqrt`: `(f64) -> f64`
-- インスタンス `tan`: `(f64) -> f64`
-- インスタンス `tanh`: `(f64) -> f64`
-- インスタンス `truncate`: `(f64) -> f64`
-- インスタンス `try-float->f32`: `(f64) -> std::option::Option<f32>`
-- インスタンス `try-float->f64`: `(f64) -> std::option::Option<f64>`
-
 ### `std::fs::FileError` (sum, 型引数 [])
 
 - 変種 0 `FileError`: `string`
-
-### `std::i16` (sum, 型引数 [])
-
-- インスタンス `*`: `(i16, i16) -> i16`
-- インスタンス `+`: `(i16, i16) -> i16`
-- インスタンス `-`: `(i16, i16) -> i16`
-- インスタンス `/`: `(i16, i16) -> i16`
-- インスタンス `/=`: `(i16, i16) -> bool`
-- インスタンス `<`: `(i16, i16) -> bool`
-- インスタンス `<=`: `(i16, i16) -> bool`
-- インスタンス `=`: `(i16, i16) -> bool`
-- インスタンス `>`: `(i16, i16) -> bool`
-- インスタンス `>=`: `(i16, i16) -> bool`
-- インスタンス `ash`: `(i16, int) -> i16`
-- インスタンス `eq`: `(i16, i16) -> bool`
-- インスタンス `eql`: `(i16, i16) -> bool`
-- インスタンス `equal`: `(i16, i16) -> bool`
-- インスタンス `equalp`: `(i16, i16) -> bool`
-- インスタンス `int->c-long`: `(i16) -> c-long`
-- インスタンス `int->c-ulong`: `(i16) -> c-ulong`
-- インスタンス `int->char`: `(i16) -> char`
-- インスタンス `int->float`: `(i16) -> f64`
-- インスタンス `int->i16`: `(i16) -> i16`
-- インスタンス `int->i32`: `(i16) -> i32`
-- インスタンス `int->i8`: `(i16) -> i8`
-- インスタンス `int->int`: `(i16) -> int`
-- インスタンス `int->ratio`: `(i16) -> ratio`
-- インスタンス `int->u16`: `(i16) -> u16`
-- インスタンス `int->u32`: `(i16) -> u32`
-- インスタンス `int->u8`: `(i16) -> u8`
-- インスタンス `integer-length`: `(i16) -> i16`
-- インスタンス `logand`: `(i16, i16) -> i16`
-- インスタンス `logbitp`: `(i16, int) -> bool`
-- インスタンス `logcount`: `(i16) -> i16`
-- インスタンス `logior`: `(i16, i16) -> i16`
-- インスタンス `lognot`: `(i16) -> i16`
-- インスタンス `logtest`: `(i16, i16) -> bool`
-- インスタンス `logxor`: `(i16, i16) -> i16`
-- インスタンス `max`: `(i16, i16) -> i16`
-- インスタンス `min`: `(i16, i16) -> i16`
-- インスタンス `mod`: `(i16, i16) -> i16`
-- インスタンス `try-int->c-long`: `(i16) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i16) -> std::option::Option<c-ulong>`
-- インスタンス `try-int->char`: `(i16) -> std::option::Option<char>`
-- インスタンス `try-int->i16`: `(i16) -> std::option::Option<i16>`
-- インスタンス `try-int->i32`: `(i16) -> std::option::Option<i32>`
-- インスタンス `try-int->i8`: `(i16) -> std::option::Option<i8>`
-- インスタンス `try-int->u16`: `(i16) -> std::option::Option<u16>`
-- インスタンス `try-int->u32`: `(i16) -> std::option::Option<u32>`
-- インスタンス `try-int->u8`: `(i16) -> std::option::Option<u8>`
-
-### `std::i32` (sum, 型引数 [])
-
-- インスタンス `*`: `(i32, i32) -> i32`
-- インスタンス `+`: `(i32, i32) -> i32`
-- インスタンス `-`: `(i32, i32) -> i32`
-- インスタンス `/`: `(i32, i32) -> i32`
-- インスタンス `/=`: `(i32, i32) -> bool`
-- インスタンス `<`: `(i32, i32) -> bool`
-- インスタンス `<=`: `(i32, i32) -> bool`
-- インスタンス `=`: `(i32, i32) -> bool`
-- インスタンス `>`: `(i32, i32) -> bool`
-- インスタンス `>=`: `(i32, i32) -> bool`
-- インスタンス `ash`: `(i32, int) -> i32`
-- インスタンス `eq`: `(i32, i32) -> bool`
-- インスタンス `eql`: `(i32, i32) -> bool`
-- インスタンス `equal`: `(i32, i32) -> bool`
-- インスタンス `equalp`: `(i32, i32) -> bool`
-- インスタンス `int->c-long`: `(i32) -> c-long`
-- インスタンス `int->c-ulong`: `(i32) -> c-ulong`
-- インスタンス `int->char`: `(i32) -> char`
-- インスタンス `int->float`: `(i32) -> f64`
-- インスタンス `int->i16`: `(i32) -> i16`
-- インスタンス `int->i32`: `(i32) -> i32`
-- インスタンス `int->i8`: `(i32) -> i8`
-- インスタンス `int->int`: `(i32) -> int`
-- インスタンス `int->ratio`: `(i32) -> ratio`
-- インスタンス `int->u16`: `(i32) -> u16`
-- インスタンス `int->u32`: `(i32) -> u32`
-- インスタンス `int->u8`: `(i32) -> u8`
-- インスタンス `integer-length`: `(i32) -> i32`
-- インスタンス `logand`: `(i32, i32) -> i32`
-- インスタンス `logbitp`: `(i32, int) -> bool`
-- インスタンス `logcount`: `(i32) -> i32`
-- インスタンス `logior`: `(i32, i32) -> i32`
-- インスタンス `lognot`: `(i32) -> i32`
-- インスタンス `logtest`: `(i32, i32) -> bool`
-- インスタンス `logxor`: `(i32, i32) -> i32`
-- インスタンス `max`: `(i32, i32) -> i32`
-- インスタンス `min`: `(i32, i32) -> i32`
-- インスタンス `mod`: `(i32, i32) -> i32`
-- インスタンス `try-int->c-long`: `(i32) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i32) -> std::option::Option<c-ulong>`
-- インスタンス `try-int->char`: `(i32) -> std::option::Option<char>`
-- インスタンス `try-int->i16`: `(i32) -> std::option::Option<i16>`
-- インスタンス `try-int->i32`: `(i32) -> std::option::Option<i32>`
-- インスタンス `try-int->i8`: `(i32) -> std::option::Option<i8>`
-- インスタンス `try-int->u16`: `(i32) -> std::option::Option<u16>`
-- インスタンス `try-int->u32`: `(i32) -> std::option::Option<u32>`
-- インスタンス `try-int->u8`: `(i32) -> std::option::Option<u8>`
-
-### `std::i8` (sum, 型引数 [])
-
-- インスタンス `*`: `(i8, i8) -> i8`
-- インスタンス `+`: `(i8, i8) -> i8`
-- インスタンス `-`: `(i8, i8) -> i8`
-- インスタンス `/`: `(i8, i8) -> i8`
-- インスタンス `/=`: `(i8, i8) -> bool`
-- インスタンス `<`: `(i8, i8) -> bool`
-- インスタンス `<=`: `(i8, i8) -> bool`
-- インスタンス `=`: `(i8, i8) -> bool`
-- インスタンス `>`: `(i8, i8) -> bool`
-- インスタンス `>=`: `(i8, i8) -> bool`
-- インスタンス `ash`: `(i8, int) -> i8`
-- インスタンス `eq`: `(i8, i8) -> bool`
-- インスタンス `eql`: `(i8, i8) -> bool`
-- インスタンス `equal`: `(i8, i8) -> bool`
-- インスタンス `equalp`: `(i8, i8) -> bool`
-- インスタンス `int->c-long`: `(i8) -> c-long`
-- インスタンス `int->c-ulong`: `(i8) -> c-ulong`
-- インスタンス `int->char`: `(i8) -> char`
-- インスタンス `int->float`: `(i8) -> f64`
-- インスタンス `int->i16`: `(i8) -> i16`
-- インスタンス `int->i32`: `(i8) -> i32`
-- インスタンス `int->i8`: `(i8) -> i8`
-- インスタンス `int->int`: `(i8) -> int`
-- インスタンス `int->ratio`: `(i8) -> ratio`
-- インスタンス `int->u16`: `(i8) -> u16`
-- インスタンス `int->u32`: `(i8) -> u32`
-- インスタンス `int->u8`: `(i8) -> u8`
-- インスタンス `integer-length`: `(i8) -> i8`
-- インスタンス `logand`: `(i8, i8) -> i8`
-- インスタンス `logbitp`: `(i8, int) -> bool`
-- インスタンス `logcount`: `(i8) -> i8`
-- インスタンス `logior`: `(i8, i8) -> i8`
-- インスタンス `lognot`: `(i8) -> i8`
-- インスタンス `logtest`: `(i8, i8) -> bool`
-- インスタンス `logxor`: `(i8, i8) -> i8`
-- インスタンス `max`: `(i8, i8) -> i8`
-- インスタンス `min`: `(i8, i8) -> i8`
-- インスタンス `mod`: `(i8, i8) -> i8`
-- インスタンス `try-int->c-long`: `(i8) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i8) -> std::option::Option<c-ulong>`
-- インスタンス `try-int->char`: `(i8) -> std::option::Option<char>`
-- インスタンス `try-int->i16`: `(i8) -> std::option::Option<i16>`
-- インスタンス `try-int->i32`: `(i8) -> std::option::Option<i32>`
-- インスタンス `try-int->i8`: `(i8) -> std::option::Option<i8>`
-- インスタンス `try-int->u16`: `(i8) -> std::option::Option<u16>`
-- インスタンス `try-int->u32`: `(i8) -> std::option::Option<u32>`
-- インスタンス `try-int->u8`: `(i8) -> std::option::Option<u8>`
-
-### `std::int` (sum, 型引数 [])
-
-- インスタンス `*`: `(int, int) -> int`
-- インスタンス `+`: `(int, int) -> int`
-- インスタンス `-`: `(int, int) -> int`
-- インスタンス `/`: `(int, int) -> rational`
-- インスタンス `/=`: `(int, int) -> bool`
-- インスタンス `<`: `(int, int) -> bool`
-- インスタンス `<=`: `(int, int) -> bool`
-- インスタンス `=`: `(int, int) -> bool`
-- インスタンス `>`: `(int, int) -> bool`
-- インスタンス `>=`: `(int, int) -> bool`
-- インスタンス `ash`: `(int, int) -> int`
-- インスタンス `eq`: `(int, int) -> bool`
-- インスタンス `eql`: `(int, int) -> bool`
-- インスタンス `equal`: `(int, int) -> bool`
-- インスタンス `equalp`: `(int, int) -> bool`
-- インスタンス `int->c-long`: `(int) -> c-long`
-- インスタンス `int->c-ulong`: `(int) -> c-ulong`
-- インスタンス `int->char`: `(int) -> char`
-- インスタンス `int->float`: `(int) -> f64`
-- インスタンス `int->i16`: `(int) -> i16`
-- インスタンス `int->i32`: `(int) -> i32`
-- インスタンス `int->i8`: `(int) -> i8`
-- インスタンス `int->int`: `(int) -> int`
-- インスタンス `int->ratio`: `(int) -> ratio`
-- インスタンス `int->u16`: `(int) -> u16`
-- インスタンス `int->u32`: `(int) -> u32`
-- インスタンス `int->u8`: `(int) -> u8`
-- インスタンス `integer-length`: `(int) -> int`
-- インスタンス `logand`: `(int, int) -> int`
-- インスタンス `logbitp`: `(int, int) -> bool`
-- インスタンス `logcount`: `(int) -> int`
-- インスタンス `logior`: `(int, int) -> int`
-- インスタンス `lognot`: `(int) -> int`
-- インスタンス `logtest`: `(int, int) -> bool`
-- インスタンス `logxor`: `(int, int) -> int`
-- インスタンス `max`: `(int, int) -> int`
-- インスタンス `min`: `(int, int) -> int`
-- インスタンス `mod`: `(int, int) -> int`
-- インスタンス `truncate`: `(int, int) -> int`
-- インスタンス `try-int->c-long`: `(int) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(int) -> std::option::Option<c-ulong>`
-- インスタンス `try-int->char`: `(int) -> std::option::Option<char>`
-- インスタンス `try-int->i16`: `(int) -> std::option::Option<i16>`
-- インスタンス `try-int->i32`: `(int) -> std::option::Option<i32>`
-- インスタンス `try-int->i8`: `(int) -> std::option::Option<i8>`
-- インスタンス `try-int->u16`: `(int) -> std::option::Option<u16>`
-- インスタンス `try-int->u32`: `(int) -> std::option::Option<u32>`
-- インスタンス `try-int->u8`: `(int) -> std::option::Option<u8>`
 
 ### `std::llvm-basic-block` (sum, 型引数 [])
 
@@ -1480,10 +1124,366 @@
 - 変種 0 `some`: `T`
 - 変種 1 `none`: 
 
-### `std::random-state` (sum, 型引数 [])
+### `std::primitive::bool` (sum, 型引数 [])
+
+- インスタンス `eq`: `(bool, bool) -> bool`
+- インスタンス `eql`: `(bool, bool) -> bool`
+- インスタンス `equal`: `(bool, bool) -> bool`
+- インスタンス `equalp`: `(bool, bool) -> bool`
+
+### `std::primitive::c-long` (sum, 型引数 [])
+
+- インスタンス `int->c-long`: `(c-long) -> c-long`
+- インスタンス `int->c-ulong`: `(c-long) -> c-ulong`
+- インスタンス `int->i16`: `(c-long) -> i16`
+- インスタンス `int->i32`: `(c-long) -> i32`
+- インスタンス `int->i8`: `(c-long) -> i8`
+- インスタンス `int->int`: `(c-long) -> int`
+- インスタンス `int->u16`: `(c-long) -> u16`
+- インスタンス `int->u32`: `(c-long) -> u32`
+- インスタンス `int->u8`: `(c-long) -> u8`
+- インスタンス `try-int->c-long`: `(c-long) -> std::option::Option<c-long>`
+- インスタンス `try-int->c-ulong`: `(c-long) -> std::option::Option<c-ulong>`
+- インスタンス `try-int->i16`: `(c-long) -> std::option::Option<i16>`
+- インスタンス `try-int->i32`: `(c-long) -> std::option::Option<i32>`
+- インスタンス `try-int->i8`: `(c-long) -> std::option::Option<i8>`
+- インスタンス `try-int->u16`: `(c-long) -> std::option::Option<u16>`
+- インスタンス `try-int->u32`: `(c-long) -> std::option::Option<u32>`
+- インスタンス `try-int->u8`: `(c-long) -> std::option::Option<u8>`
+
+### `std::primitive::c-ulong` (sum, 型引数 [])
+
+- インスタンス `int->c-long`: `(c-ulong) -> c-long`
+- インスタンス `int->c-ulong`: `(c-ulong) -> c-ulong`
+- インスタンス `int->i16`: `(c-ulong) -> i16`
+- インスタンス `int->i32`: `(c-ulong) -> i32`
+- インスタンス `int->i8`: `(c-ulong) -> i8`
+- インスタンス `int->int`: `(c-ulong) -> int`
+- インスタンス `int->u16`: `(c-ulong) -> u16`
+- インスタンス `int->u32`: `(c-ulong) -> u32`
+- インスタンス `int->u8`: `(c-ulong) -> u8`
+- インスタンス `try-int->c-long`: `(c-ulong) -> std::option::Option<c-long>`
+- インスタンス `try-int->c-ulong`: `(c-ulong) -> std::option::Option<c-ulong>`
+- インスタンス `try-int->i16`: `(c-ulong) -> std::option::Option<i16>`
+- インスタンス `try-int->i32`: `(c-ulong) -> std::option::Option<i32>`
+- インスタンス `try-int->i8`: `(c-ulong) -> std::option::Option<i8>`
+- インスタンス `try-int->u16`: `(c-ulong) -> std::option::Option<u16>`
+- インスタンス `try-int->u32`: `(c-ulong) -> std::option::Option<u32>`
+- インスタンス `try-int->u8`: `(c-ulong) -> std::option::Option<u8>`
+
+### `std::primitive::char` (sum, 型引数 [])
+
+- インスタンス `<`: `(char, char) -> bool`
+- インスタンス `<=`: `(char, char) -> bool`
+- インスタンス `>`: `(char, char) -> bool`
+- インスタンス `>=`: `(char, char) -> bool`
+- インスタンス `alphap`: `(char) -> bool`
+- インスタンス `char->int`: `(char) -> int`
+- インスタンス `char->string`: `(char) -> string`
+- インスタンス `digitp`: `(char) -> bool`
+- インスタンス `downcase`: `(char) -> char`
+- インスタンス `eq`: `(char, char) -> bool`
+- インスタンス `eql`: `(char, char) -> bool`
+- インスタンス `equal`: `(char, char) -> bool`
+- インスタンス `equalp`: `(char, char) -> bool`
+- インスタンス `lt`: `(char, char) -> bool`
+- インスタンス `upcase`: `(char) -> char`
+
+### `std::primitive::f32` (sum, 型引数 [])
+
+- インスタンス `*`: `(f32, f32) -> f32`
+- インスタンス `+`: `(f32, f32) -> f32`
+- インスタンス `-`: `(f32, f32) -> f32`
+- インスタンス `/`: `(f32, f32) -> f32`
+- インスタンス `/=`: `(f32, f32) -> bool`
+- インスタンス `<`: `(f32, f32) -> bool`
+- インスタンス `<=`: `(f32, f32) -> bool`
+- インスタンス `=`: `(f32, f32) -> bool`
+- インスタンス `>`: `(f32, f32) -> bool`
+- インスタンス `>=`: `(f32, f32) -> bool`
+- インスタンス `acos`: `(f32) -> f32`
+- インスタンス `acosh`: `(f32) -> f32`
+- インスタンス `asin`: `(f32) -> f32`
+- インスタンス `asinh`: `(f32) -> f32`
+- インスタンス `atan`: `(f32) -> f32`
+- インスタンス `atanh`: `(f32) -> f32`
+- インスタンス `ceiling`: `(f32) -> f32`
+- インスタンス `cos`: `(f32) -> f32`
+- インスタンス `cosh`: `(f32) -> f32`
+- インスタンス `eq`: `(f32, f32) -> bool`
+- インスタンス `eql`: `(f32, f32) -> bool`
+- インスタンス `equal`: `(f32, f32) -> bool`
+- インスタンス `equalp`: `(f32, f32) -> bool`
+- インスタンス `exp`: `(f32) -> f32`
+- インスタンス `expt`: `(f32, f32) -> f32`
+- インスタンス `float->f32`: `(f32) -> f32`
+- インスタンス `float->f64`: `(f32) -> f64`
+- インスタンス `float->int`: `(f32) -> int`
+- インスタンス `float->ratio`: `(f32) -> ratio`
+- インスタンス `floor`: `(f32) -> f32`
+- インスタンス `log`: `(f32) -> f32`
+- インスタンス `max`: `(f32, f32) -> f32`
+- インスタンス `min`: `(f32, f32) -> f32`
+- インスタンス `round`: `(f32) -> f32`
+- インスタンス `sin`: `(f32) -> f32`
+- インスタンス `sinh`: `(f32) -> f32`
+- インスタンス `sqrt`: `(f32) -> f32`
+- インスタンス `tan`: `(f32) -> f32`
+- インスタンス `tanh`: `(f32) -> f32`
+- インスタンス `truncate`: `(f32) -> f32`
+- インスタンス `try-float->f32`: `(f32) -> std::option::Option<f32>`
+- インスタンス `try-float->f64`: `(f32) -> std::option::Option<f64>`
+
+### `std::primitive::f64` (sum, 型引数 [])
+
+- インスタンス `*`: `(f64, f64) -> f64`
+- インスタンス `+`: `(f64, f64) -> f64`
+- インスタンス `-`: `(f64, f64) -> f64`
+- インスタンス `/`: `(f64, f64) -> f64`
+- インスタンス `/=`: `(f64, f64) -> bool`
+- インスタンス `<`: `(f64, f64) -> bool`
+- インスタンス `<=`: `(f64, f64) -> bool`
+- インスタンス `=`: `(f64, f64) -> bool`
+- インスタンス `>`: `(f64, f64) -> bool`
+- インスタンス `>=`: `(f64, f64) -> bool`
+- インスタンス `acos`: `(f64) -> f64`
+- インスタンス `acosh`: `(f64) -> f64`
+- インスタンス `asin`: `(f64) -> f64`
+- インスタンス `asinh`: `(f64) -> f64`
+- インスタンス `atan`: `(f64) -> f64`
+- インスタンス `atanh`: `(f64) -> f64`
+- インスタンス `ceiling`: `(f64) -> f64`
+- インスタンス `cos`: `(f64) -> f64`
+- インスタンス `cosh`: `(f64) -> f64`
+- インスタンス `eq`: `(f64, f64) -> bool`
+- インスタンス `eql`: `(f64, f64) -> bool`
+- インスタンス `equal`: `(f64, f64) -> bool`
+- インスタンス `equalp`: `(f64, f64) -> bool`
+- インスタンス `exp`: `(f64) -> f64`
+- インスタンス `expt`: `(f64, f64) -> f64`
+- インスタンス `float->f32`: `(f64) -> f32`
+- インスタンス `float->f64`: `(f64) -> f64`
+- インスタンス `float->int`: `(f64) -> int`
+- インスタンス `float->ratio`: `(f64) -> ratio`
+- インスタンス `floor`: `(f64) -> f64`
+- インスタンス `log`: `(f64) -> f64`
+- インスタンス `max`: `(f64, f64) -> f64`
+- インスタンス `min`: `(f64, f64) -> f64`
+- インスタンス `round`: `(f64) -> f64`
+- インスタンス `sin`: `(f64) -> f64`
+- インスタンス `sinh`: `(f64) -> f64`
+- インスタンス `sqrt`: `(f64) -> f64`
+- インスタンス `tan`: `(f64) -> f64`
+- インスタンス `tanh`: `(f64) -> f64`
+- インスタンス `truncate`: `(f64) -> f64`
+- インスタンス `try-float->f32`: `(f64) -> std::option::Option<f32>`
+- インスタンス `try-float->f64`: `(f64) -> std::option::Option<f64>`
+
+### `std::primitive::i16` (sum, 型引数 [])
+
+- インスタンス `*`: `(i16, i16) -> i16`
+- インスタンス `+`: `(i16, i16) -> i16`
+- インスタンス `-`: `(i16, i16) -> i16`
+- インスタンス `/`: `(i16, i16) -> i16`
+- インスタンス `/=`: `(i16, i16) -> bool`
+- インスタンス `<`: `(i16, i16) -> bool`
+- インスタンス `<=`: `(i16, i16) -> bool`
+- インスタンス `=`: `(i16, i16) -> bool`
+- インスタンス `>`: `(i16, i16) -> bool`
+- インスタンス `>=`: `(i16, i16) -> bool`
+- インスタンス `ash`: `(i16, int) -> i16`
+- インスタンス `eq`: `(i16, i16) -> bool`
+- インスタンス `eql`: `(i16, i16) -> bool`
+- インスタンス `equal`: `(i16, i16) -> bool`
+- インスタンス `equalp`: `(i16, i16) -> bool`
+- インスタンス `int->c-long`: `(i16) -> c-long`
+- インスタンス `int->c-ulong`: `(i16) -> c-ulong`
+- インスタンス `int->char`: `(i16) -> char`
+- インスタンス `int->float`: `(i16) -> f64`
+- インスタンス `int->i16`: `(i16) -> i16`
+- インスタンス `int->i32`: `(i16) -> i32`
+- インスタンス `int->i8`: `(i16) -> i8`
+- インスタンス `int->int`: `(i16) -> int`
+- インスタンス `int->ratio`: `(i16) -> ratio`
+- インスタンス `int->u16`: `(i16) -> u16`
+- インスタンス `int->u32`: `(i16) -> u32`
+- インスタンス `int->u8`: `(i16) -> u8`
+- インスタンス `integer-length`: `(i16) -> i16`
+- インスタンス `logand`: `(i16, i16) -> i16`
+- インスタンス `logbitp`: `(i16, int) -> bool`
+- インスタンス `logcount`: `(i16) -> i16`
+- インスタンス `logior`: `(i16, i16) -> i16`
+- インスタンス `lognot`: `(i16) -> i16`
+- インスタンス `logtest`: `(i16, i16) -> bool`
+- インスタンス `logxor`: `(i16, i16) -> i16`
+- インスタンス `max`: `(i16, i16) -> i16`
+- インスタンス `min`: `(i16, i16) -> i16`
+- インスタンス `mod`: `(i16, i16) -> i16`
+- インスタンス `try-int->c-long`: `(i16) -> std::option::Option<c-long>`
+- インスタンス `try-int->c-ulong`: `(i16) -> std::option::Option<c-ulong>`
+- インスタンス `try-int->char`: `(i16) -> std::option::Option<char>`
+- インスタンス `try-int->i16`: `(i16) -> std::option::Option<i16>`
+- インスタンス `try-int->i32`: `(i16) -> std::option::Option<i32>`
+- インスタンス `try-int->i8`: `(i16) -> std::option::Option<i8>`
+- インスタンス `try-int->u16`: `(i16) -> std::option::Option<u16>`
+- インスタンス `try-int->u32`: `(i16) -> std::option::Option<u32>`
+- インスタンス `try-int->u8`: `(i16) -> std::option::Option<u8>`
+
+### `std::primitive::i32` (sum, 型引数 [])
+
+- インスタンス `*`: `(i32, i32) -> i32`
+- インスタンス `+`: `(i32, i32) -> i32`
+- インスタンス `-`: `(i32, i32) -> i32`
+- インスタンス `/`: `(i32, i32) -> i32`
+- インスタンス `/=`: `(i32, i32) -> bool`
+- インスタンス `<`: `(i32, i32) -> bool`
+- インスタンス `<=`: `(i32, i32) -> bool`
+- インスタンス `=`: `(i32, i32) -> bool`
+- インスタンス `>`: `(i32, i32) -> bool`
+- インスタンス `>=`: `(i32, i32) -> bool`
+- インスタンス `ash`: `(i32, int) -> i32`
+- インスタンス `eq`: `(i32, i32) -> bool`
+- インスタンス `eql`: `(i32, i32) -> bool`
+- インスタンス `equal`: `(i32, i32) -> bool`
+- インスタンス `equalp`: `(i32, i32) -> bool`
+- インスタンス `int->c-long`: `(i32) -> c-long`
+- インスタンス `int->c-ulong`: `(i32) -> c-ulong`
+- インスタンス `int->char`: `(i32) -> char`
+- インスタンス `int->float`: `(i32) -> f64`
+- インスタンス `int->i16`: `(i32) -> i16`
+- インスタンス `int->i32`: `(i32) -> i32`
+- インスタンス `int->i8`: `(i32) -> i8`
+- インスタンス `int->int`: `(i32) -> int`
+- インスタンス `int->ratio`: `(i32) -> ratio`
+- インスタンス `int->u16`: `(i32) -> u16`
+- インスタンス `int->u32`: `(i32) -> u32`
+- インスタンス `int->u8`: `(i32) -> u8`
+- インスタンス `integer-length`: `(i32) -> i32`
+- インスタンス `logand`: `(i32, i32) -> i32`
+- インスタンス `logbitp`: `(i32, int) -> bool`
+- インスタンス `logcount`: `(i32) -> i32`
+- インスタンス `logior`: `(i32, i32) -> i32`
+- インスタンス `lognot`: `(i32) -> i32`
+- インスタンス `logtest`: `(i32, i32) -> bool`
+- インスタンス `logxor`: `(i32, i32) -> i32`
+- インスタンス `max`: `(i32, i32) -> i32`
+- インスタンス `min`: `(i32, i32) -> i32`
+- インスタンス `mod`: `(i32, i32) -> i32`
+- インスタンス `try-int->c-long`: `(i32) -> std::option::Option<c-long>`
+- インスタンス `try-int->c-ulong`: `(i32) -> std::option::Option<c-ulong>`
+- インスタンス `try-int->char`: `(i32) -> std::option::Option<char>`
+- インスタンス `try-int->i16`: `(i32) -> std::option::Option<i16>`
+- インスタンス `try-int->i32`: `(i32) -> std::option::Option<i32>`
+- インスタンス `try-int->i8`: `(i32) -> std::option::Option<i8>`
+- インスタンス `try-int->u16`: `(i32) -> std::option::Option<u16>`
+- インスタンス `try-int->u32`: `(i32) -> std::option::Option<u32>`
+- インスタンス `try-int->u8`: `(i32) -> std::option::Option<u8>`
+
+### `std::primitive::i8` (sum, 型引数 [])
+
+- インスタンス `*`: `(i8, i8) -> i8`
+- インスタンス `+`: `(i8, i8) -> i8`
+- インスタンス `-`: `(i8, i8) -> i8`
+- インスタンス `/`: `(i8, i8) -> i8`
+- インスタンス `/=`: `(i8, i8) -> bool`
+- インスタンス `<`: `(i8, i8) -> bool`
+- インスタンス `<=`: `(i8, i8) -> bool`
+- インスタンス `=`: `(i8, i8) -> bool`
+- インスタンス `>`: `(i8, i8) -> bool`
+- インスタンス `>=`: `(i8, i8) -> bool`
+- インスタンス `ash`: `(i8, int) -> i8`
+- インスタンス `eq`: `(i8, i8) -> bool`
+- インスタンス `eql`: `(i8, i8) -> bool`
+- インスタンス `equal`: `(i8, i8) -> bool`
+- インスタンス `equalp`: `(i8, i8) -> bool`
+- インスタンス `int->c-long`: `(i8) -> c-long`
+- インスタンス `int->c-ulong`: `(i8) -> c-ulong`
+- インスタンス `int->char`: `(i8) -> char`
+- インスタンス `int->float`: `(i8) -> f64`
+- インスタンス `int->i16`: `(i8) -> i16`
+- インスタンス `int->i32`: `(i8) -> i32`
+- インスタンス `int->i8`: `(i8) -> i8`
+- インスタンス `int->int`: `(i8) -> int`
+- インスタンス `int->ratio`: `(i8) -> ratio`
+- インスタンス `int->u16`: `(i8) -> u16`
+- インスタンス `int->u32`: `(i8) -> u32`
+- インスタンス `int->u8`: `(i8) -> u8`
+- インスタンス `integer-length`: `(i8) -> i8`
+- インスタンス `logand`: `(i8, i8) -> i8`
+- インスタンス `logbitp`: `(i8, int) -> bool`
+- インスタンス `logcount`: `(i8) -> i8`
+- インスタンス `logior`: `(i8, i8) -> i8`
+- インスタンス `lognot`: `(i8) -> i8`
+- インスタンス `logtest`: `(i8, i8) -> bool`
+- インスタンス `logxor`: `(i8, i8) -> i8`
+- インスタンス `max`: `(i8, i8) -> i8`
+- インスタンス `min`: `(i8, i8) -> i8`
+- インスタンス `mod`: `(i8, i8) -> i8`
+- インスタンス `try-int->c-long`: `(i8) -> std::option::Option<c-long>`
+- インスタンス `try-int->c-ulong`: `(i8) -> std::option::Option<c-ulong>`
+- インスタンス `try-int->char`: `(i8) -> std::option::Option<char>`
+- インスタンス `try-int->i16`: `(i8) -> std::option::Option<i16>`
+- インスタンス `try-int->i32`: `(i8) -> std::option::Option<i32>`
+- インスタンス `try-int->i8`: `(i8) -> std::option::Option<i8>`
+- インスタンス `try-int->u16`: `(i8) -> std::option::Option<u16>`
+- インスタンス `try-int->u32`: `(i8) -> std::option::Option<u32>`
+- インスタンス `try-int->u8`: `(i8) -> std::option::Option<u8>`
+
+### `std::primitive::int` (sum, 型引数 [])
+
+- インスタンス `*`: `(int, int) -> int`
+- インスタンス `+`: `(int, int) -> int`
+- インスタンス `-`: `(int, int) -> int`
+- インスタンス `/`: `(int, int) -> rational`
+- インスタンス `/=`: `(int, int) -> bool`
+- インスタンス `<`: `(int, int) -> bool`
+- インスタンス `<=`: `(int, int) -> bool`
+- インスタンス `=`: `(int, int) -> bool`
+- インスタンス `>`: `(int, int) -> bool`
+- インスタンス `>=`: `(int, int) -> bool`
+- インスタンス `ash`: `(int, int) -> int`
+- インスタンス `eq`: `(int, int) -> bool`
+- インスタンス `eql`: `(int, int) -> bool`
+- インスタンス `equal`: `(int, int) -> bool`
+- インスタンス `equalp`: `(int, int) -> bool`
+- インスタンス `int->c-long`: `(int) -> c-long`
+- インスタンス `int->c-ulong`: `(int) -> c-ulong`
+- インスタンス `int->char`: `(int) -> char`
+- インスタンス `int->float`: `(int) -> f64`
+- インスタンス `int->i16`: `(int) -> i16`
+- インスタンス `int->i32`: `(int) -> i32`
+- インスタンス `int->i8`: `(int) -> i8`
+- インスタンス `int->int`: `(int) -> int`
+- インスタンス `int->ratio`: `(int) -> ratio`
+- インスタンス `int->u16`: `(int) -> u16`
+- インスタンス `int->u32`: `(int) -> u32`
+- インスタンス `int->u8`: `(int) -> u8`
+- インスタンス `integer-length`: `(int) -> int`
+- インスタンス `logand`: `(int, int) -> int`
+- インスタンス `logbitp`: `(int, int) -> bool`
+- インスタンス `logcount`: `(int) -> int`
+- インスタンス `logior`: `(int, int) -> int`
+- インスタンス `lognot`: `(int) -> int`
+- インスタンス `logtest`: `(int, int) -> bool`
+- インスタンス `logxor`: `(int, int) -> int`
+- インスタンス `max`: `(int, int) -> int`
+- インスタンス `min`: `(int, int) -> int`
+- インスタンス `mod`: `(int, int) -> int`
+- インスタンス `truncate`: `(int, int) -> int`
+- インスタンス `try-int->c-long`: `(int) -> std::option::Option<c-long>`
+- インスタンス `try-int->c-ulong`: `(int) -> std::option::Option<c-ulong>`
+- インスタンス `try-int->char`: `(int) -> std::option::Option<char>`
+- インスタンス `try-int->i16`: `(int) -> std::option::Option<i16>`
+- インスタンス `try-int->i32`: `(int) -> std::option::Option<i32>`
+- インスタンス `try-int->i8`: `(int) -> std::option::Option<i8>`
+- インスタンス `try-int->u16`: `(int) -> std::option::Option<u16>`
+- インスタンス `try-int->u32`: `(int) -> std::option::Option<u32>`
+- インスタンス `try-int->u8`: `(int) -> std::option::Option<u8>`
+
+### `std::primitive::random-state` (sum, 型引数 [])
 
 
-### `std::ratio` (sum, 型引数 [])
+### `std::primitive::ratio` (sum, 型引数 [])
 
 - インスタンス `*`: `(ratio, ratio) -> ratio`
 - インスタンス `+`: `(ratio, ratio) -> ratio`
@@ -1507,7 +1507,7 @@
 - インスタンス `ratio->int`: `(ratio) -> int`
 - インスタンス `ratio->rational`: `(ratio) -> rational`
 
-### `std::rational` (sum, 型引数 [])
+### `std::primitive::rational` (sum, 型引数 [])
 
 - インスタンス `*`: `(rational, rational) -> rational`
 - インスタンス `+`: `(rational, rational) -> rational`
@@ -1532,42 +1532,7 @@
 - インスタンス `rational->ratio`: `(rational) -> ratio`
 - インスタンス `try-rational->int`: `(rational) -> std::option::Option<int>`
 
-### `std::reader::ReadError` (sum, 型引数 [])
-
-- 変種 0 `ReadError`: `string`
-
-### `std::result::Result` (sum, 型引数 [T, E])
-
-- 変種 0 `ok`: `T`
-- 変種 1 `err`: `E`
-
-### `std::sexpr::Sexpr` (sum, 型引数 [])
-
-- 変種 0 `nil`: 
-- 変種 1 `int`: `int`
-- 変種 2 `f64`: `f64`
-- 変種 3 `char`: `char`
-- 変種 4 `bool`: `bool`
-- 変種 5 `sym`: `symbol`
-- 変種 6 `str`: `string`
-- 変種 7 `cons`: `std::option::Option<std::sexpr::Sexpr>`, `std::option::Option<std::sexpr::Sexpr>`
-- 変種 8 `bignum`: `int`
-- 変種 9 `ratio`: `ratio`
-- 変種 10 `path`: `std::option::Option<std::sexpr::Sexpr>`
-- 変種 11 `f32`: `f32`
-- 変種 12 `i8`: `i8`
-- 変種 13 `i16`: `i16`
-- 変種 14 `u8`: `u8`
-- 変種 15 `u16`: `u16`
-- 変種 16 `u32`: `u32`
-- 変種 17 `i32`: `i32`
-- 変種 18 `vector`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
-- 変種 19 `array`: `std::array::Array<std::option::Option<std::sexpr::Sexpr>>`
-- 変種 20 `tuple`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
-- インスタンス `eq`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
-- インスタンス `eql`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
-
-### `std::string` (sum, 型引数 [])
+### `std::primitive::string` (sum, 型引数 [])
 
 - インスタンス `<`: `(string, string) -> bool`
 - インスタンス `<=`: `(string, string) -> bool`
@@ -1585,31 +1550,12 @@
 - インスタンス `substring`: `(string, int, int) -> string`
 - インスタンス `upcase`: `(string) -> string`
 
-### `std::symbol` (sum, 型引数 [])
+### `std::primitive::symbol` (sum, 型引数 [])
 
 - インスタンス `eq`: `(symbol, symbol) -> bool`
 - インスタンス `eql`: `(symbol, symbol) -> bool`
 
-### `std::sync::Chan` (struct, 型引数 [T])
-
-- インスタンス `cap`: `(std::sync::Chan<T>) -> int`
-- インスタンス `close`: `(std::sync::Chan<T>) -> ()`
-- インスタンス `len`: `(std::sync::Chan<T>) -> int`
-- 関連関数 `new`: `(int) -> std::sync::Chan<T>`
-- インスタンス `recv`: `(std::sync::Chan<T>) -> std::option::Option<T>`
-- インスタンス `send`: `(std::sync::Chan<T>, T) -> ()`
-
-### `std::thread::Task` (struct, 型引数 [T])
-
-- インスタンス `wait`: `(std::thread::Task<T>) -> T`
-
-### `std::thread::Thread` (struct, 型引数 [T])
-
-- 関連関数 `available-parallelism`: `() -> int`
-- 関連関数 `current-id`: `() -> int`
-- インスタンス `join`: `(std::thread::Thread<T>) -> T`
-
-### `std::u16` (sum, 型引数 [])
+### `std::primitive::u16` (sum, 型引数 [])
 
 - インスタンス `*`: `(u16, u16) -> u16`
 - インスタンス `+`: `(u16, u16) -> u16`
@@ -1659,7 +1605,7 @@
 - インスタンス `try-int->u32`: `(u16) -> std::option::Option<u32>`
 - インスタンス `try-int->u8`: `(u16) -> std::option::Option<u8>`
 
-### `std::u32` (sum, 型引数 [])
+### `std::primitive::u32` (sum, 型引数 [])
 
 - インスタンス `*`: `(u32, u32) -> u32`
 - インスタンス `+`: `(u32, u32) -> u32`
@@ -1709,7 +1655,7 @@
 - インスタンス `try-int->u32`: `(u32) -> std::option::Option<u32>`
 - インスタンス `try-int->u8`: `(u32) -> std::option::Option<u8>`
 
-### `std::u8` (sum, 型引数 [])
+### `std::primitive::u8` (sum, 型引数 [])
 
 - インスタンス `*`: `(u8, u8) -> u8`
 - インスタンス `+`: `(u8, u8) -> u8`
@@ -1758,6 +1704,60 @@
 - インスタンス `try-int->u16`: `(u8) -> std::option::Option<u16>`
 - インスタンス `try-int->u32`: `(u8) -> std::option::Option<u32>`
 - インスタンス `try-int->u8`: `(u8) -> std::option::Option<u8>`
+
+### `std::reader::ReadError` (sum, 型引数 [])
+
+- 変種 0 `ReadError`: `string`
+
+### `std::result::Result` (sum, 型引数 [T, E])
+
+- 変種 0 `ok`: `T`
+- 変種 1 `err`: `E`
+
+### `std::sexpr::Sexpr` (sum, 型引数 [])
+
+- 変種 0 `nil`: 
+- 変種 1 `int`: `int`
+- 変種 2 `f64`: `f64`
+- 変種 3 `char`: `char`
+- 変種 4 `bool`: `bool`
+- 変種 5 `sym`: `symbol`
+- 変種 6 `str`: `string`
+- 変種 7 `cons`: `std::option::Option<std::sexpr::Sexpr>`, `std::option::Option<std::sexpr::Sexpr>`
+- 変種 8 `bignum`: `int`
+- 変種 9 `ratio`: `ratio`
+- 変種 10 `path`: `std::option::Option<std::sexpr::Sexpr>`
+- 変種 11 `f32`: `f32`
+- 変種 12 `i8`: `i8`
+- 変種 13 `i16`: `i16`
+- 変種 14 `u8`: `u8`
+- 変種 15 `u16`: `u16`
+- 変種 16 `u32`: `u32`
+- 変種 17 `i32`: `i32`
+- 変種 18 `vector`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
+- 変種 19 `array`: `std::array::Array<std::option::Option<std::sexpr::Sexpr>>`
+- 変種 20 `tuple`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
+- インスタンス `eq`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
+- インスタンス `eql`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
+
+### `std::sync::Chan` (struct, 型引数 [T])
+
+- インスタンス `cap`: `(std::sync::Chan<T>) -> int`
+- インスタンス `close`: `(std::sync::Chan<T>) -> ()`
+- インスタンス `len`: `(std::sync::Chan<T>) -> int`
+- 関連関数 `new`: `(int) -> std::sync::Chan<T>`
+- インスタンス `recv`: `(std::sync::Chan<T>) -> std::option::Option<T>`
+- インスタンス `send`: `(std::sync::Chan<T>, T) -> ()`
+
+### `std::thread::Task` (struct, 型引数 [T])
+
+- インスタンス `wait`: `(std::thread::Task<T>) -> T`
+
+### `std::thread::Thread` (struct, 型引数 [T])
+
+- 関連関数 `available-parallelism`: `() -> int`
+- 関連関数 `current-id`: `() -> int`
+- インスタンス `join`: `(std::thread::Thread<T>) -> T`
 
 ### `std::vec::Vector` (struct, 型引数 [T])
 

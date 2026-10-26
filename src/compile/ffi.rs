@@ -49,7 +49,7 @@ use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, Int
 use typelisp_front::eval::interp::{CompiledBody, FfiDecl, Interp};
 use typelisp_front::ffi_callback::CallbackSig;
 use typelisp_front::Type;
-use typelisp_mem::{ConcreteNames, NsId, TypeId, TypeShape};
+use typelisp_mem::{ConcreteNames, TypeId, TypeShape};
 
 use crate::compile::llvm_builtins::compiled_fn_type;
 use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
@@ -101,8 +101,8 @@ impl CType {
             // points at is checked by the runtime, not the C signature.
             TypeShape::Ptr(_) => return Some(CType::Ptr),
             TypeShape::Unit => return Some(CType::Void),
-            // The primitives are the standard library's types without arguments.
-            TypeShape::Named(ns, name, args) if ns == NsId::STD && args.is_empty() => {
+            // The primitives are `std::primitive`'s types, which take no arguments.
+            TypeShape::Named(ns, name, args) if ns == typelisp_mem::StdModule::PRIMITIVE.ns() && args.is_empty() => {
                 typelisp_front::types::scalar_of_symbol(name)?
             }
             _ => return None,

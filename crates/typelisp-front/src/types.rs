@@ -94,6 +94,12 @@ impl Path {
         Path { ns: typelisp_mem::StdModule::of_builtin_type(ty).ns(), name: symbols::well_known_symbol(ty) }
     }
 
+    /// The primitive type `name` (`int`, `i32`, `string` ...), which
+    /// `std::primitive` defines.
+    pub fn primitive(name: &str) -> Path {
+        Path::in_ns(typelisp_mem::StdModule::PRIMITIVE.ns(), name)
+    }
+
     /// `name` inside the standard library's module, `std::name`.
     pub fn std(name: &str) -> Path {
         Path::in_ns(NsId::STD, name)
@@ -724,7 +730,7 @@ pub fn nominal_path(ty: &Type) -> Option<Path> {
 }
 
 /// The registry [`Path`] a primitive `Type` is addressed by when used as a
-/// `defmethod` receiver (e.g. `Type::I32` -> `std::i32`). Mirrors the surface
+/// `defmethod` receiver (e.g. `Type::I32` -> `std::primitive::i32`). Mirrors the surface
 /// names [`primitive_by_name`] recognizes, so `(defmethod m ((self i32)) ...)`
 /// and this lookup agree on the same name. `None` for `ptr`, which is
 /// genuinely opaque — nothing to call on it — and for every type that is not
@@ -733,7 +739,7 @@ pub fn nominal_path(ty: &Type) -> Option<Path> {
 pub fn prim_type_path(ty: &Type) -> Option<Path> {
     match ty {
         Type::Ptr => None,
-        other => other.scalar_name().map(Path::std),
+        other => other.scalar_name().map(Path::primitive),
     }
 }
 
@@ -782,7 +788,13 @@ pub fn parse_type_spanned(
             Some(t) => Ok(t),
             None => Ok(Type::Named(record_name(Path::of_symbol(ns, sym), loc, false, out), Vec::new())),
         },
-        Value::Path(_) => Ok(Type::Named(record_name(written_path(heap, ns, v)?, loc, false, out), Vec::new())),
+        Value::Path(_) => {
+            let path = written_path(heap, ns, v)?;
+            match scalar_type(&path) {
+                Some(t) => Ok(t),
+                None => Ok(Type::Named(record_name(path, loc, false, out), Vec::new())),
+            }
+        }
         // `(:dyn Trait)` — the reader's joined form of the two-word `:dyn
         // Trait` spelling (`read::reader::read_datum`). Checked before
         // the `(fn ...)` case since both are lists.
@@ -1080,10 +1092,10 @@ pub fn scalar_of_symbol(sym: SymRef) -> Option<Type> {
     })
 }
 
-/// The primitive type `p` names, when it names one of the standard
-/// library's: [`scalar_of_symbol`] for a path.
+/// The primitive type `p` names, when it names one of `std::primitive`'s:
+/// [`scalar_of_symbol`] for a path.
 pub fn scalar_type(p: &Path) -> Option<Type> {
-    if p.is_std() {
+    if p.ns() == typelisp_mem::StdModule::PRIMITIVE.ns() {
         scalar_of_symbol(p.name_symbol())
     } else {
         None
