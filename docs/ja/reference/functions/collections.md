@@ -111,6 +111,7 @@
 ハッシュしたいときは `string` の実装が使っている `(sxhash-string s)`（FNV-1a 32bit）を呼べる。
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -195,6 +196,7 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 要素のイテレータ。順序は決まっていない |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -225,6 +227,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | キーの順に `#{キー 値}` のタプルを返す |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 と pear 3
@@ -247,6 +250,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | 先頭から順に |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

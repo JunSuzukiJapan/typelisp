@@ -102,3 +102,41 @@ fn the_ranges_the_reference_writes_expand_as_expected() {
     assert_eq!(names.len(), 10 + 28);
     assert!(names.contains("tenth") && names.contains("cadr") && names.contains("cddddr"));
 }
+
+/// The names of the library that `std::prelude` does not offer every module,
+/// as `module -> names`: what a program reaches only through a `use` or a
+/// path.
+fn not_offered() -> std::collections::BTreeMap<String, BTreeSet<String>> {
+    let mut heap = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut heap, &mut chk, &mut interp);
+    let reg = chk.registry();
+    let prelude = reg.module_at(typelisp::types::prelude_ns()).expect("the registry always has `std::prelude`");
+    let library = reg.module_at(typelisp::NsId::STD).expect("the registry always has `std`");
+    let mut out = std::collections::BTreeMap::<String, BTreeSet<String>>::new();
+    for (name, path) in library.aliases.iter() {
+        if prelude.aliases.get(name).is_none() {
+            let module = typelisp::mem::symbols::ns_path(path.ns()).into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("::");
+            out.entry(module).or_default().insert(name.to_string());
+        }
+    }
+    out
+}
+
+/// The function reference's table of the names a program `use`s
+/// (`docs/ja/reference/functions/README.md`) lists every one of them, each
+/// under its module, and nothing else: a name the library stops or starts
+/// offering moves in or out of the table with it.
+#[test]
+fn the_reference_lists_every_name_a_program_has_to_use() {
+    let text = std::fs::read_to_string(repo_root().join("docs/ja/reference/functions/README.md")).expect("readable document");
+    let mut table = std::collections::BTreeMap::<String, BTreeSet<String>>::new();
+    for line in text.lines() {
+        let Some(row) = line.strip_prefix("| `std::") else { continue };
+        let (module, names) = row.split_once("` | ").expect("a row of module and names");
+        let names = names.trim_end_matches(" |").split('、').map(|n| n.trim_matches('`').to_string()).collect();
+        table.insert(format!("std::{}", module), names);
+    }
+    assert_eq!(table, not_offered());
+}

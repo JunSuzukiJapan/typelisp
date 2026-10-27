@@ -113,6 +113,7 @@ none
 エラー `E` を持つ `err` です。
 
 ```lisp
+(use std::num::parse-int)
 (match (parse-int "42")
   ((ok n) (println "n = ~a" (+ n 1)))
   ((err e) (println "error: ~a" (message e))))

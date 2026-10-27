@@ -17,6 +17,7 @@ typelisp のエラー処理は、失敗を 2 種類に分けて考えます。
 あります。
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -92,6 +93,7 @@ Rust の `?` のような省略構文はありません。`Result` を返す関�
 変換します。
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

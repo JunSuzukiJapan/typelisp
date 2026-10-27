@@ -42,6 +42,7 @@
 `(Chan::new 0)` と `(Chan::new 16)` で書く。
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -94,6 +95,7 @@
 多い。動的に増える仕事や、ハンドルを持ちたくない場合のための道具。
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: 入力ごとに 1 タスク立てて合流する（この言語に nil チャネルは無い）
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -122,6 +124,7 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 | `with-lock` | `(with-lock (x m) body...)` | マクロ | ロックし、`x` に中身を束ねて `body` を走らせ、**必ず**解放 |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -180,6 +183,7 @@ Go の `context.Context`。仕事を外から止めたいときに渡す。止�
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | キャンセルされたか |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

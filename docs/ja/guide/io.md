@@ -10,6 +10,7 @@
 無いことはプログラムの誤りではないので、`panic` にはなりません。結果は `match` で分けます。
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -25,6 +26,7 @@
 いちばん手軽なのは、ファイル全体を 1 回で扱う関数です。
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -36,6 +38,7 @@
 ストリームは閉じられます。値は `Result<本体の値, FileError>` です。
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; 書く
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -118,6 +121,7 @@
 ファイルシステムの操作:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; 親ごと作る
 (probe-file "out/deep")                           ; => true（存在する）
 (directory-p "out/deep")                          ; => true
@@ -139,6 +143,7 @@
 **そのタスクだけ**を止めるので、他の接続の処理は続きます。
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -159,6 +164,7 @@
 `with-connection` は、接続して本体を実行し、最後に閉じます。値は `Result<本体の値, NetError>` です。
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -169,6 +175,7 @@
 時間の制限をかけるときは `:timeout`（秒）を渡します。
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; 次の読みに時計をかける
@@ -189,6 +196,7 @@
 解決できなかった場合は `err` が返ります。
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -201,6 +209,7 @@
 標準のルート証明書で検証されます。結果は普通の `socket-stream` なので、読み書きは TCP と同じです。
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -213,6 +222,7 @@
 TLS のサーバは `tls-listen` に証明書と秘密鍵のファイル（PEM）を渡して作ります。
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; TCP の serve をそのまま使える
@@ -229,6 +239,7 @@ UDP はストリームではなく、データグラムを 1 つずつ送受信�
 （`Vector<int>`）で、文字列との変換には `string->utf8` / `utf8->string` を使います。
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; 送るだけでもソケットが要る。0 は OS に任せる
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

@@ -59,6 +59,7 @@ macOS ではリンクに Xcode Command Line Tools を使います。
 入口として、**引数を取らない `main` 関数**を定義します。
 
 ```lisp
+(use std::env::command-line-args)
 ;; hello.typl
 (defun fib ((n int)) int
   (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))

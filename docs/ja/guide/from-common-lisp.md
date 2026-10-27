@@ -163,6 +163,7 @@ CL との違いは 3 つあります。要素の型がそろっていなけれ�
   Rust の `?` に当たる省略構文はありません。
 
   ```lisp
+(use std::num::parse-int)
   (match (parse-int "42x")
     ((ok n) n)
     ((err e) (progn (println "bad input: ~a" (message e)) 0)))

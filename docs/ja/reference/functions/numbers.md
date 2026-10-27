@@ -381,6 +381,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 再現したいときは `seed-random-state` を使う:
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; 何回実行しても同じ 3 つの数が出る

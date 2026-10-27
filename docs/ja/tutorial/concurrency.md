@@ -36,6 +36,7 @@ typelisp では、**タスク**（軽量スレッド）を起動して複数の�
 両方が待ちます。
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; 送る
@@ -68,6 +69,7 @@ got 30
 すぐ終わる仕事が混ざっていても、仕事が自然に分担されます。
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; この仕事にかかる時間
@@ -128,6 +130,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 タイムアウトが書けます。
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -146,6 +149,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - 最後に `(:else 本体...)` を書くと、どの腕もすぐには実行できないときに `:else` を実行し、待ちません。
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -163,13 +167,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 終わったら `done` を呼び、`wait` で数が 0 になるまで待ちます。
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

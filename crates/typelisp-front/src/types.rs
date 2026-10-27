@@ -194,12 +194,12 @@ pub mod ns_as_segments {
     }
 }
 
-/// The module `segments` names from the root. A module's segments are names
-/// the reader wrote, which are already lowercase.
+/// The module `segments` names from the root, each segment as written: a
+/// module's name keeps its case, a file's module included (`Shapes.typl` is
+/// the module `Shapes`).
 fn module_ns<'a>(segments: impl Iterator<Item = &'a str>) -> NsId {
     let mut ns = NsId::ROOT;
     for seg in segments {
-        debug_assert!(seg.chars().all(|c| !c.is_uppercase()), "module segment `{}` is not lowercase", seg);
         ns = symbols::child_ns(ns, seg);
     }
     ns

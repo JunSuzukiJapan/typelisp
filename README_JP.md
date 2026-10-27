@@ -46,6 +46,7 @@ TypeLisp は静的型付きの Lisp です。
 ### wc
 
 ```
+(use std::env::command-line-args std::fs::open-binary-input std::process::exit)
 (defun is-whitespace ((b int)) bool
   (case b
     ((#x20 #x09 #x0a #x0b #x0c #x0d) true)
@@ -121,6 +122,7 @@ TypeLisp は静的型付きの Lisp です。
 ### Task
 
 ```
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -146,6 +148,7 @@ TypeLisp は静的型付きの Lisp です。
 `Result<T,E>` を返し、`match` で中身を取り出します。
 
 ```
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

@@ -938,6 +938,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (module path body...)      ; path は foo または foo::bar のようなセグメント列
 (in-module path)           ; 以降このユニットの末尾まで path の中（module の平たい形）
 (use path...)              ; 関数・型・モジュールをカレント名前空間へエイリアス導入
+(pub use path...)          ; 取り込んだ定義を、このモジュールを通るパスからも引けるようにする
 (import path...)           ; use と同じ（CL 互換の綴り）
 (shadowing-import path...) ; 既に埋まっている裸名を承知の上で取る use
 ```
@@ -960,6 +961,14 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   `pub` の付いた定義を `::geo::f` のようにルートからのパスで書くか、`use` で取り込む。関数を値として渡す位置でも同じ規則で、4 の「第 1 引数の型」は、
   そこで期待される関数型の第 1 引数の型になる（`(fn (pt) int)` が期待される位置に `norm` と書けば
   `pt` のメソッド `norm`）。期待される型がまだ決まっていなければ 4 は飛ばす。
+- **標準ライブラリが公開する名前**は、`use` なしでどのモジュールからでも使える。基本型、
+  `Option`・`Result`・`Vector`、反復、S 式とリスト、列の関数、制御のマクロ、比較、算術のトレイトと、
+  Common Lisp の `COMMON-LISP` パッケージにある名前と同じ名前のもの、およびそれらの型に現れる型が
+  そう。並行処理・ネットワーク・ファイルの便利関数など、それ以外の名前は `(use std::sync::Chan)` の
+  ように取り込むか、`std::sync::Chan` とパスで書く（一覧は
+  [組み込み関数の「`use` が要る名前」](functions/README.md#use-が要る名前)）。`use` は関数・グローバル変数・
+  マクロ・型・トレイト・`deftype` の別名・モジュールを取り込める。`use` はそれを書いたモジュールにだけ
+  効く。`(module ...)` の中で使うなら、その中に書く。
 - 修飾パス `a::...::n` は、`a::...` が指すモジュールの名前（マクロ・関数・グローバル変数）か、
   型の変種・静的メソッドに解決する。値の位置の `x::f`（`x` が値の名前）はフィールドの読み出し。
 - **`use` はそれより後のフォームに効く。** ファイルは 1 フォームずつ読まれ、依存も
@@ -1034,7 +1043,10 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (pub deftype ...)
 ```
 
-`pub` が付けられるのは上記11種類のみ（`module`/`use`/`impl` には付けられない）。
+`pub` が付けられるのは上記11種類と `use` だけ（`module`/`impl` には付けられない）。
+`(pub use path...)` は取り込んだ定義を**再公開**する: ほかのモジュールからも、このモジュールを通る
+パス（`m::name`）で引け、`(use m::name)` で取り込める。再公開できるのは定義だけで、モジュールは
+再公開できない。
 定義形を括弧で包む `(pub (defun ...))` 形式ではなく、`pub` の直後に定義キーワードを続ける。
 1つの `pub` が公開指定できる定義は1つだけ（複数の定義の一括指定はできない）。
 
@@ -1071,6 +1083,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ### 3.16 `#[test]` — テスト関数
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1084,6 +1097,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 `print-object` で表示する。`:dyn Error` も `Error` なので、いろいろなエラーを 1 つの型にまとめて返せる。
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1769,6 +1783,7 @@ typl --image session.typld             # REPL も同じ
 `read-delimited-list` はどれも `(:where (PeekInput S))` なので、具体型のまま全部使える。
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1889,6 +1904,7 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
 （`case` がキーに対して持つのと同じ規律）。
 
 ```lisp
+(use std::sync::after)
 (select                             ; タイムアウト付き受信
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

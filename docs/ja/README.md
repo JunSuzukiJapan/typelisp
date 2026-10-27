@@ -11,6 +11,7 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 参照してください。
 
 ```lisp
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -38,6 +39,7 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 [型の基本](tutorial/types.md) と [エラー処理](tutorial/errors.md) を参照してください。
 
 ```lisp
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

@@ -168,3 +168,15 @@ fn an_object_file_that_cannot_be_written_ends_the_process() {
     let _ = std::fs::remove_file(&object);
     assert!(!status.success());
 }
+
+/// A file's module is named as the file is, capitals and all: `Hello.typl`
+/// is the module `Hello`, and runs.
+#[test]
+fn a_file_named_with_capitals_runs() {
+    let dir = tmp_dir("typl-capital-file-name");
+    let src = dir.join("Hello.typl");
+    std::fs::write(&src, HELLO).unwrap();
+    let out = typl(&[src.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "hello\n");
+}

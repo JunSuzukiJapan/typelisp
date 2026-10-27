@@ -163,6 +163,7 @@ CL の Lisp Pretty Printer（CLHS 22.2）に当たる。**行幅に収まらな�
 CL 側の定型もつねに `loop` の中に書くので、書き味は変わらない。
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

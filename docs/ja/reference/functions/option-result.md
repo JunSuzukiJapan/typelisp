@@ -35,6 +35,7 @@
 メソッドは第 1 引数が受け手なので、コンビネータをそのままつなげる:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -104,6 +105,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 自前のエラー型に `Error` を実装すれば、組み込みエラーと**同じ形で**扱える:
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -122,6 +124,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 この変換は明示的に書く:
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
