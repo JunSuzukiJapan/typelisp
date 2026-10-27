@@ -751,7 +751,10 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      モジュールの `ctors` に置き、`std::prelude` がどのモジュールにも公開する。このため `none`
      （`REPR_NONE`）を `std` の語彙へ移した。`Option<Sexpr>` に対する `(some x)` は型を取り出す
      パターンの候補にしない（`resolve_sexpr_downcast_ctor`）。
-     残り: `std::prelude` の名前を定義するときの `shadow` の要求。
+     `std::prelude` の名前を定義するときの `shadow` の要求は、4b の `Checker::refuse_offered_name` が
+     公開の表（`SessionNames::offers`）で決めるので、公開を狭めたことがそのまま効く。公開しない
+     ライブラリの名前（`parse-int` `trim` など）は `shadow` なしで定義でき、公開する構成子（`some` など）は
+     `shadow` が要る（`shadow_test`）。6e は済み。
      利用者向け文書は書き換えた（関数一覧の README に「`use` が要る名前」の表、`syntax.md` の 3.10 に
      標準ライブラリの公開範囲と `pub use`、例のコードに `use`）。表が `prelude_offers` と合っていることは
      `root_names_documented_test` が確かめる。

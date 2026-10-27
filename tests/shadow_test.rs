@@ -21,6 +21,22 @@ fn defining_an_offered_name_without_shadow_is_an_error() {
     assert!(msg.contains("defmacro: `when`"), "{}", msg);
 }
 
+/// A definition of the standard library that `std::prelude` does not offer
+/// (it is brought in by `use`) leaves its name free: no `shadow` is needed.
+#[test]
+fn a_library_name_that_is_not_offered_needs_no_shadow() {
+    assert_eq!(eval_ok("(defun parse-int ((x int)) int (+ x 1))\n(parse-int 41)"), Value::Int(42));
+    assert_eq!(eval_ok("(defun trim ((x int)) int x)\n(trim 7)"), Value::Int(7));
+}
+
+/// `Option`'s and `Result`'s constructors are offered like a function is.
+#[test]
+fn an_offered_constructor_needs_shadow_too() {
+    let msg = check_err("(defun some ((x int)) int x)");
+    assert!(msg.contains("defun: `some` is a name the standard library offers every module"), "{}", msg);
+    assert_eq!(eval_ok("(shadow some)\n(defun some ((x int)) int (* x 2))\n(some 21)"), Value::Int(42));
+}
+
 /// After `shadow`, the name is the module's own: the definition is allowed,
 /// and the module's uses of the name mean it.
 #[test]
