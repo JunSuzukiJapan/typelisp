@@ -18,7 +18,7 @@
 
 ## 2. 次にすること（順に）
 
-1. 6e。`std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
+1. 6e（途中。済んだことと残りは計画の 6e の項）。`std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
    `std::prelude` の名前を定義するときの `shadow` を要求し、`Info::in_scope` の広い規則
    （`item_ns == self.ns || in_std(item_ns)`）を狭める。利用者向け文書の `pub use`
    （`docs/ja/reference/syntax.md` の 3.10 と「`pub` が付けられるのは」の節）もここで書き換え、

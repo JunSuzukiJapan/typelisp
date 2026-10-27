@@ -517,9 +517,75 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
         .chain(std::iter::once(crate::ffi_callback::ADDRESS_BUILTIN))
 }
 
-/// The modules inside `std` whose definitions `std::prelude` re-exports,
-/// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
+/// The modules inside `std` that, with `std` itself, make up the library
+/// every module can draw on: `std` imports each of their definitions, no two
+/// of them define one name, and `std::prelude` re-exports from them what
+/// [`prelude_offers`] says ([`Registry::reexport_std_in_prelude`]).
 pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections", "array", "option", "result", "vec", "sexpr", "primitive"];
+
+/// The modules of [`PRELUDE_MODULES`] `std::prelude` offers whole: the
+/// primitive types, `Option`, `Result`, `Vector`, iteration, S-expressions
+/// and lists, the sequence functions, the control macros, comparison and the
+/// arithmetic traits.
+pub const PRELUDE_WHOLE_MODULES: &[&str] = &["primitive", "option", "result", "vec", "iter", "sexpr", "seq", "control", "cmp", "ops"];
+
+/// Definitions `std::prelude` offers by name, as `(module, name)`, from
+/// modules it does not offer whole: the `Error` trait and `assert`,
+/// `print-object`, and the types that stand for a Common Lisp standard type
+/// under another spelling (`hash-table`, `array`, `bit-vector`, `stream`,
+/// and the input and output streams `input-stream-p`/`output-stream-p`
+/// tell apart), whose operations are their methods rather than functions
+/// that would bring the type in, with `Hash`, which a key of a `HashTable`
+/// implements ([`prelude_offers`]).
+pub const PRELUDE_NAMED: &[(&str, &str)] = &[
+    ("error", "Error"),
+    ("error", "assert"),
+    ("fmt", "print-object"),
+    ("collections", "HashTable"),
+    ("hash", "Hash"),
+    ("array", "Array"),
+    ("array", "BitVector"),
+    ("io", "Stream"),
+    ("io", "InputStream"),
+    ("io", "OutputStream"),
+];
+
+/// Whether `std::prelude` offers every module the library's definition
+/// `path`, before the types its functions and variables mention are added
+/// ([`Registry::reexport_std_in_prelude`]): a definition of `std` itself or
+/// of a module of [`PRELUDE_WHOLE_MODULES`], one of [`PRELUDE_NAMED`], or one
+/// whose name is Common Lisp's ([`crate::cl_symbols`]) — what a Common Lisp
+/// program uses without importing anything. The rest of the library is
+/// reached with a `use` or a path.
+pub fn prelude_offers(path: &Path) -> bool {
+    let ns = path.ns();
+    let name = path.name_symbol().name();
+    let module_is = |seg: &str| crate::types::std_module(seg) == ns;
+    ns == NsId::STD
+        || PRELUDE_WHOLE_MODULES.iter().any(|seg| module_is(seg))
+        || PRELUDE_NAMED.iter().any(|&(seg, n)| n == name && module_is(seg))
+        || crate::cl_symbols::is_common_lisp_symbol(name)
+}
+
+/// The named types and traits `t` mentions, its arguments' included.
+fn mentioned_types(t: &Type, out: &mut Vec<Path>) {
+    match t {
+        Type::Named(p, args) | Type::Dyn(p, args) => {
+            out.push(*p);
+            for a in args {
+                mentioned_types(a, out);
+            }
+        }
+        Type::Fn(params, rest, ret) => {
+            for p in params.iter().chain(rest.as_deref()) {
+                mentioned_types(p, out);
+            }
+            mentioned_types(ret, out);
+        }
+        Type::PtrTo(inner) => mentioned_types(inner, out),
+        _ => {}
+    }
+}
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -1180,33 +1246,57 @@ impl Registry {
         reg
     }
 
-    /// Makes `std::prelude` re-export every definition of `std` and of the
-    /// modules of [`PRELUDE_MODULES`], as a `(pub use std::...::name)`
-    /// written there would. Run again whenever one of them may have gained a
-    /// definition, so what every module reads without a `use` is what they
-    /// define. `std` itself imports each one it does not define, the way
-    /// every other module's paths reach them through `std`. Also asserts that
-    /// no two of the library's modules define a type of one name, which
+    /// Makes `std::prelude` re-export the definitions of `std` and of the
+    /// modules of [`PRELUDE_MODULES`] that [`prelude_offers`] offers, and the
+    /// library's types their functions and variables mention, as a
+    /// `(pub use std::...::name)` written there would. Run again whenever one
+    /// of them may have gained a definition, so what every module reads
+    /// without a `use` is what they define. `std` itself imports every
+    /// definition of those modules, offered or not, the way every other
+    /// module's paths reach them through `std`. Also asserts that no two of
+    /// the library's modules define one name, nor a type of one name, which
     /// [`Path::is_std`] relies on.
     pub fn reexport_std_in_prelude(&mut self) {
-        let offered: Vec<NsId> =
+        let library: Vec<NsId> =
             std::iter::once(NsId::STD).chain(PRELUDE_MODULES.iter().map(|m| crate::types::std_module(m))).collect();
-        let defined: Vec<Path> = offered
+        let defined: Vec<Path> = library
             .into_iter()
             .filter_map(|ns| self.module_at(ns))
             .flat_map(|m| m.defined_symbols().map(|sym| Path::of_symbol(m.ns, sym)))
             .collect();
-        let prelude = self.module_mut(crate::types::prelude_ns());
+        let mut names: HashMap<&str, Path> = HashMap::new();
         for &path in &defined {
             let name = path.name_symbol().name();
-            if let Some(prev) = prelude.aliases.insert(name, path) {
+            if let Some(prev) = names.insert(name, path) {
                 assert!(prev == path, "the standard library defines `{}` twice: `{}` and `{}`", name, prev, path);
             }
+        }
+        // What `prelude_offers` offers, and the library's types its functions
+        // and variables mention: a function a module may call bare has a
+        // type the module may write.
+        let mut offered: Vec<Path> = defined.iter().copied().filter(prelude_offers).collect();
+        let mut mentioned = Vec::new();
+        for path in &offered {
+            if let Some(sig) = self.fn_sig(path) {
+                for t in sig.params.iter().chain(sig.rest.as_ref()).chain(std::iter::once(&sig.ret)) {
+                    mentioned_types(t, &mut mentioned);
+                }
+            }
+            if let Some(var) = self.module_at(path.ns()).and_then(|m| m.vars.get_sym(path.name_symbol())) {
+                mentioned_types(&var.ty, &mut mentioned);
+            }
+        }
+        offered.extend(mentioned.into_iter().filter(|p| names.get(p.name_symbol().name()) == Some(p)));
+        let prelude = self.module_mut(crate::types::prelude_ns());
+        for path in offered {
+            let name = path.name_symbol().name();
+            prelude.aliases.insert(name, path);
             prelude.reexports.insert(name, ());
         }
-        // `std` imports what `std::prelude` offers, as a `(use PATH)` of each
-        // written there would, so a path starting at one of those names leads
-        // through `std`'s imports.
+        // `std` imports every definition of the library, as a `(use PATH)` of
+        // each written there would: what the library's own modules read
+        // (`SessionNames::read`), whatever `std::prelude` offers other
+        // modules, and where a path starting at one of those names leads.
         let std_module = self.module_mut(NsId::STD);
         for path in defined.into_iter().filter(|p| p.ns() != NsId::STD) {
             std_module.aliases.insert(path.name_symbol().name(), path);
@@ -1223,19 +1313,21 @@ impl Registry {
 
     /// The definition of `name` that a definition of it in the module `ns`
     /// would make [`Self::reexport_std_in_prelude`] find twice: when `ns` is
-    /// one of the modules `std::prelude` re-exports, another of them defining
-    /// `name`; when `ns` is in the standard library, another of its modules
+    /// `std` or one of [`PRELUDE_MODULES`], another of them defining `name`; when `ns` is in the standard library, another of its modules
     /// defining a type, trait or C struct `name`.
     pub fn std_definition_elsewhere(&self, ns: NsId, name: &str) -> Option<Path> {
         if !crate::types::in_std(ns) {
             return None;
         }
-        let offered = |m: NsId| m == NsId::STD || PRELUDE_MODULES.iter().any(|seg| crate::types::std_module(seg) == m);
-        if offered(ns) {
-            if let Some(&path) = self.module_at(crate::types::prelude_ns()).and_then(|p| p.aliases.get(name)) {
-                if path.ns() != ns {
-                    return Some(path);
-                }
+        let library = |m: NsId| m == NsId::STD || PRELUDE_MODULES.iter().any(|seg| crate::types::std_module(seg) == m);
+        if library(ns) {
+            let elsewhere = self
+                .modules
+                .values()
+                .filter(|m| m.ns != ns && library(m.ns))
+                .find(|m| m.defined_symbols().any(|sym| sym.name() == name));
+            if let Some(m) = elsewhere {
+                return Some(Path::in_ns(m.ns, name));
             }
         }
         self.modules

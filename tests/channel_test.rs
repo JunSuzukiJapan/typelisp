@@ -117,7 +117,7 @@ fn check_err(src: &str) -> String {
 fn a_buffered_send_with_room_does_not_wait() {
     assert_eq!(
         text(
-            r#"(defvar (trail string) "")
+            r#"(use std::sync::Chan) (defvar (trail string) "")
                (defun fill ((ch Chan<int>)) ()
                  (send ch 1) (setf trail (append trail "a"))
                  (send ch 2) (setf trail (append trail "b"))
@@ -142,7 +142,7 @@ fn a_buffered_send_with_room_does_not_wait() {
 fn an_unbuffered_send_waits_for_a_receiver() {
     assert_eq!(
         text(
-            r#"(defvar (trail string) "")
+            r#"(use std::sync::Chan std::thread::yield) (defvar (trail string) "")
                (defun fill ((ch Chan<int>)) ()
                  (send ch 1) (setf trail (append trail "sent"))
                  ())
@@ -165,7 +165,7 @@ fn an_unbuffered_send_waits_for_a_receiver() {
 fn a_full_buffer_stops_the_sender_until_room_appears() {
     assert_eq!(
         int(
-            r#"(defvar (sent int) 0)
+            r#"(use std::sync::Chan std::thread::yield) (defvar (sent int) 0)
                (defun fill ((ch Chan<int>)) ()
                  (send ch 1) (setf sent (+ sent 1))
                  (send ch 2) (setf sent (+ sent 1))
@@ -195,7 +195,7 @@ fn a_full_buffer_stops_the_sender_until_room_appears() {
 fn a_receive_on_a_closed_and_drained_channel_is_none() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan) (defun main () string
                  (let ((ch (the Chan<int> (Chan::new 1))))
                    (close ch)
                    (format false "~a ~a" (recv ch) (recv ch))))
@@ -211,7 +211,7 @@ fn a_receive_on_a_closed_and_drained_channel_is_none() {
 fn closing_does_not_discard_what_is_buffered() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan) (defun main () string
                  (let ((ch (the Chan<int> (Chan::new 2))))
                    (send ch 1)
                    (send ch 2)
@@ -228,7 +228,7 @@ fn closing_does_not_discard_what_is_buffered() {
 #[test]
 fn sending_on_a_closed_channel_panics() {
     let e = err(
-        r#"(defun main () ()
+        r#"(use std::sync::Chan) (defun main () ()
              (let ((ch (the Chan<int> (Chan::new 1))))
                (close ch)
                (send ch 1)))
@@ -241,7 +241,7 @@ fn sending_on_a_closed_channel_panics() {
 #[test]
 fn closing_twice_panics() {
     let e = err(
-        r#"(defun main () ()
+        r#"(use std::sync::Chan) (defun main () ()
              (let ((ch (the Chan<int> (Chan::new 1))))
                (close ch)
                (close ch)))
@@ -256,7 +256,7 @@ fn closing_twice_panics() {
 #[test]
 fn closing_while_a_sender_waits_panics_that_sender() {
     let e = err(
-        r#"(defun fill ((ch Chan<int>)) () (send ch 1))
+        r#"(use std::sync::Chan std::thread::yield) (defun fill ((ch Chan<int>)) () (send ch 1))
            (defun main () ()
              (let ((ch (the Chan<int> (Chan::new 0))))
                (task (fill ch))
@@ -275,7 +275,7 @@ fn closing_while_a_sender_waits_panics_that_sender() {
 fn len_reports_the_buffer_and_cap_the_room() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan) (defun main () string
                  (let ((ch (the Chan<int> (Chan::new 3))))
                    (send ch 1)
                    (send ch 2)
@@ -291,7 +291,7 @@ fn len_reports_the_buffer_and_cap_the_room() {
 /// A capacity a channel cannot have is a panic, not a silently clamped zero.
 #[test]
 fn a_negative_capacity_panics() {
-    let e = err(r#"(defun main () () (let ((ch (the Chan<int> (Chan::new -1)))) ())) (main)"#);
+    let e = err(r#"(use std::sync::Chan) (defun main () () (let ((ch (the Chan<int> (Chan::new -1)))) ())) (main)"#);
     assert!(e.contains("not a capacity"), "got: {}", e);
 }
 
@@ -304,7 +304,7 @@ fn a_negative_capacity_panics() {
 fn a_channel_is_its_own_iterator() {
     assert_eq!(
         int(
-            r#"(defun produce ((ch Chan<int>) (n int)) ()
+            r#"(use std::sync::Chan) (defun produce ((ch Chan<int>) (n int)) ()
                  (dotimes (i n) (send ch (* i 2)))
                  (close ch))
                (defun main () int
@@ -325,7 +325,7 @@ fn a_channel_is_its_own_iterator() {
 fn a_worker_pool_runs() {
     assert_eq!(
         int(
-            r#"(defun worker ((jobs Chan<int>) (out Chan<int>)) ()
+            r#"(use std::sync::Chan) (defun worker ((jobs Chan<int>) (out Chan<int>)) ()
                  (doiter (j jobs) (send out (* j j))))
                (defun main () int
                  (let ((jobs (the Chan<int> (Chan::new 4)))
@@ -347,7 +347,7 @@ fn a_worker_pool_runs() {
 fn a_pipeline_runs() {
     assert_eq!(
         int(
-            r#"(defun gen ((out Chan<int>) (n int)) ()
+            r#"(use std::sync::Chan) (defun gen ((out Chan<int>) (n int)) ()
                  (dotimes (i n) (send out (+ i 1)))
                  (close out))
                (defun square ((in Chan<int>) (out Chan<int>)) ()
@@ -379,7 +379,7 @@ fn a_pipeline_runs() {
 fn fan_in_runs_with_a_task_per_input() {
     assert_eq!(
         int(
-            r#"(defvar (left int) 0)
+            r#"(use std::sync::Chan) (defvar (left int) 0)
                (defun drain ((in Chan<int>) (out Chan<int>)) ()
                  (doiter (v in) (send out v))
                  (setf left (- left 1))
@@ -411,7 +411,7 @@ fn fan_in_runs_with_a_task_per_input() {
 fn after_delivers_one_value() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::after) (defun main () string
                  (format false "~a" (recv (after 0.01))))
                (main)"#
         ),
@@ -425,7 +425,7 @@ fn after_delivers_one_value() {
 #[test]
 fn the_element_type_is_checked() {
     let e = check_err(
-        r#"(defun main () () (let ((ch (the Chan<int> (Chan::new 1)))) (send ch "x")))"#,
+        r#"(use std::sync::Chan) (defun main () () (let ((ch (the Chan<int> (Chan::new 1)))) (send ch "x")))"#,
     );
     assert!(e.contains("`int`") && e.contains("`string`"), "got: {}", e);
 }
@@ -435,7 +435,7 @@ fn the_element_type_is_checked() {
 #[test]
 fn two_instantiations_are_different_types() {
     let e = check_err(
-        r#"(shadow take)
+        r#"(use std::sync::Chan) (shadow take)
            (defun take ((ch Chan<int>)) () ())
            (defun main () () (take (the Chan<string> (Chan::new 1))))"#,
     );
@@ -447,7 +447,7 @@ fn two_instantiations_are_different_types() {
 /// apart, and no builtin in this language has ever had one.
 #[test]
 fn the_capacity_is_required() {
-    let e = check_err(r#"(defun main () () (let ((ch (the Chan<int> (Chan::new)))) ()))"#);
+    let e = check_err(r#"(use std::sync::Chan) (defun main () () (let ((ch (the Chan<int> (Chan::new)))) ()))"#);
     assert!(e.contains("argument"), "got: {}", e);
 }
 
@@ -458,7 +458,7 @@ fn the_capacity_is_required() {
 /// through the frame's value slot.
 #[test]
 fn a_compiled_send_and_receive_agree_with_the_interpreter() {
-    let src = r#"(defun produce ((ch Chan<int>) (n int)) ()
+    let src = r#"(use std::sync::Chan) (defun produce ((ch Chan<int>) (n int)) ()
                    (dotimes (i n) (send ch (* i 2)))
                    (close ch))
                  (defun consume ((ch Chan<int>)) int
@@ -480,7 +480,7 @@ fn a_compiled_send_and_receive_agree_with_the_interpreter() {
 /// paths: an immediate, a heap pointer, and a box that has to be *allocated*.
 #[test]
 fn a_compiled_send_carries_every_element_representation() {
-    let src = r#"(defun ints ((ch Chan<int>)) () (send ch 7) (close ch))
+    let src = r#"(use std::sync::Chan) (defun ints ((ch Chan<int>)) () (send ch 7) (close ch))
                  (defun strs ((ch Chan<string>)) () (send ch "hi") (close ch))
                  (defun floats ((ch Chan<f64>)) () (send ch 1.5) (close ch))
                  (defun chars ((ch Chan<char>)) () (send ch #\z) (close ch))
@@ -507,7 +507,7 @@ fn a_compiled_send_carries_every_element_representation() {
 /// scheduler's, and the driver is the only way to it.
 #[test]
 fn the_four_operations_that_never_wait_still_compile() {
-    let src = r#"(defun probe () string
+    let src = r#"(use std::sync::Chan) (defun probe () string
                    (let ((ch (the Chan<int> (Chan::new 2))))
                      (send ch 1)
                      (let ((a (format false "~d/~d" (len ch) (cap ch))))
@@ -531,7 +531,7 @@ fn the_four_operations_that_never_wait_still_compile() {
 fn a_channel_holds_its_values_through_gc_stress() {
     assert_eq!(
         text_stressed(
-            r#"(defun fill ((ch Chan<string>) (n int)) ()
+            r#"(use std::sync::Chan) (defun fill ((ch Chan<string>) (n int)) ()
                  (dotimes (i n) (send ch (append "v" (to-string i))))
                  (close ch))
                (defun main () string
@@ -555,7 +555,7 @@ fn a_channel_holds_its_values_through_gc_stress() {
 fn a_receive_that_needs_no_waiting_works_under_a_rust_caller() {
     assert_eq!(
         text(
-            r#"(defstruct probe (ch Chan<int>))
+            r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
                (impl print-object probe
                  (print-object ((self Self) (escape bool)) string
                    (format false "<~a>" (recv self::ch))))
@@ -574,7 +574,7 @@ fn a_receive_that_needs_no_waiting_works_under_a_rust_caller() {
 #[test]
 fn a_receive_that_would_wait_under_a_rust_caller_is_refused() {
     let e = err(
-        r#"(defstruct probe (ch Chan<int>))
+        r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
            (impl print-object probe
              (print-object ((self Self) (escape bool)) string
                (format false "<~a>" (recv self::ch))))
@@ -595,7 +595,7 @@ fn a_receive_that_would_wait_under_a_rust_caller_is_refused() {
 fn a_compiled_receive_that_needs_no_waiting_works_under_a_rust_caller() {
     assert_eq!(
         text_compiled(
-            r#"(defstruct probe (ch Chan<int>))
+            r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
                (impl print-object probe
                  (print-object ((self Self) (escape bool)) string
                    (format false "<~a>" (recv self::ch))))
@@ -617,7 +617,7 @@ fn a_compiled_receive_that_needs_no_waiting_works_under_a_rust_caller() {
 #[test]
 fn a_compiled_receive_that_would_wait_under_a_rust_caller_is_refused() {
     let e = err_compiled(
-        r#"(defstruct probe (ch Chan<int>))
+        r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
            (impl print-object probe
              (print-object ((self Self) (escape bool)) string
                (format false "<~a>" (recv self::ch))))
@@ -639,7 +639,7 @@ fn a_compiled_receive_that_would_wait_under_a_rust_caller_is_refused() {
 fn a_yield_under_a_rust_caller_is_a_no_op() {
     assert_eq!(
         text(
-            r#"(defstruct probe (tag int))
+            r#"(use std::thread::yield) (defstruct probe (tag int))
                (impl print-object probe
                  (print-object ((self Self) (escape bool)) string
                    (progn (yield) "<ok>")))
@@ -655,7 +655,7 @@ fn a_yield_under_a_rust_caller_is_a_no_op() {
 fn a_compiled_yield_under_a_rust_caller_is_a_no_op() {
     assert_eq!(
         text_compiled(
-            r#"(defstruct probe (tag int))
+            r#"(use std::thread::yield) (defstruct probe (tag int))
                (impl print-object probe
                  (print-object ((self Self) (escape bool)) string
                    (progn (yield) "<ok>")))

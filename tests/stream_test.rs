@@ -216,7 +216,7 @@ fn composites_nest() {
 #[test]
 fn copy_stream_works_between_any_input_and_any_output() {
     let v = eval_string(
-        r#"(let ((src (make-string-input-stream "payload"))
+        r#"(use std::io::copy-stream) (let ((src (make-string-input-stream "payload"))
                  (dst (make-string-output-stream)))
              (copy-stream src dst)
              (get-output-stream-string dst))"#,
@@ -227,7 +227,7 @@ fn copy_stream_works_between_any_input_and_any_output() {
 #[test]
 fn read_lines_collects_every_line() {
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "a
+        r#"(use std::io::read-lines) (let ((s (make-string-input-stream "a
 b
 c")))
              (let ((out ""))
@@ -287,7 +287,7 @@ fn a_file_round_trips_through_write_and_read() {
     let d = TmpDir::new("roundtrip");
     let p = d.path("a.txt");
     let v = eval_string(&format!(
-        r#"(match (write-file-string "{p}" "contents")
+        r#"(use std::fs::read-file-string std::fs::write-file-string) (match (write-file-string "{p}" "contents")
              ((ok _) (match (read-file-string "{p}") ((ok s) s) ((err e) (message e))))
              ((err e) (message e)))"#
     ));
@@ -300,7 +300,7 @@ fn read_file_lines_splits_the_file() {
     let p = d.path("b.txt");
     std::fs::write(&p, "x\ny\n").unwrap();
     let v = eval_string(&format!(
-        r#"(match (read-file-lines "{p}")
+        r#"(use std::fs::read-file-lines) (match (read-file-lines "{p}")
              ((ok ls) (let ((out "")) (doiter (l (iter ls)) (setf out (append out l))) out))
              ((err e) (message e)))"#
     ));
@@ -313,7 +313,7 @@ fn with_open_file_closes_and_yields_the_bodys_value() {
     let p = d.path("c.txt");
     std::fs::write(&p, "data").unwrap();
     let v = eval_string(&format!(
-        r#"(match (with-open-file (f "{p}" direction-input) (read-all f))
+        r#"(use std::fs::direction-input) (match (with-open-file (f "{p}" direction-input) (read-all f))
              ((ok s) s)
              ((err e) (message e)))"#
     ));
@@ -332,7 +332,7 @@ fn with_open_file_types_itself_where_nothing_expects_a_type() {
     let p = d.path("c2.txt");
     std::fs::write(&p, "data").unwrap();
     let v = eval_string(&format!(
-        r#"(let ((r (with-open-file (f "{p}" direction-input) (read-all f))))
+        r#"(use std::fs::direction-input) (let ((r (with-open-file (f "{p}" direction-input) (read-all f))))
              (match r ((ok s) s) ((err e) (message e))))"#
     ));
     assert_eq!(v, "data");
@@ -343,7 +343,7 @@ fn opening_a_missing_file_is_an_error_value_not_a_panic() {
     let d = TmpDir::new("missing");
     let p = d.path("nope.txt");
     let v = eval_string(&format!(
-        r#"(match (open-input "{p}") ((ok _) "opened") ((err e) (message e)))"#
+        r#"(use std::fs::open-input) (match (open-input "{p}") ((ok _) "opened") ((err e) (message e)))"#
     ));
     let m = v;
     assert!(m.contains("nope.txt"), "{}", m);
@@ -355,7 +355,7 @@ fn appending_adds_to_an_existing_file() {
     let p = d.path("d.txt");
     std::fs::write(&p, "one").unwrap();
     let v = eval_string(&format!(
-        r#"(match (with-open-file (f "{p}" direction-append) (write-string f "two"))
+        r#"(use std::fs::direction-append std::fs::read-file-string) (match (with-open-file (f "{p}" direction-append) (write-string f "two"))
              ((ok _) (match (read-file-string "{p}") ((ok s) s) ((err e) (message e))))
              ((err e) (message e)))"#
     ));
@@ -413,7 +413,7 @@ fn write_file_string_succeeds_with_a_unit_payload() {
     let d = TmpDir::new("unitwrite");
     let p = d.path("u.txt");
     let v = eval_string(&format!(
-        r#"(match (write-file-string "{p}" "contents")
+        r#"(use std::fs::read-file-string std::fs::write-file-string) (match (write-file-string "{p}" "contents")
              ((ok u) (progn u (match (read-file-string "{p}") ((ok s) s) ((err e) (message e)))))
              ((err e) (message e)))"#
     ));
@@ -554,7 +554,7 @@ fn format_to_a_file_stream_goes_to_the_file() {
     let d = TmpDir::new("formatfile");
     let p = d.path("f.txt");
     let v = eval_string(&format!(
-        r#"(match (open-output "{p}")
+        r#"(use std::fs::open-output std::fs::read-file-string) (match (open-output "{p}")
              ((ok f) (progn (format f "~d~%" 7) (close f)
                             (match (read-file-string "{p}") ((ok s) s) ((err e) (message e)))))
              ((err e) (message e)))"#
@@ -567,7 +567,7 @@ fn format_to_a_file_stream_goes_to_the_file() {
 #[test]
 fn read_sexpr_reads_one_datum_at_a_time() {
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "(+ 1 2) foo \"bar\" 42"))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "(+ 1 2) foo \"bar\" 42"))
                  (out ""))
              (loop
                (match (read-sexpr s)
@@ -586,7 +586,7 @@ fn read_sexpr_consumes_the_datum_and_the_whitespace_that_ended_it() {
     // behaviour under `read`'s name); cl-parity-plan.md Phase 8b split the
     // two, and the preserving one is tested just below.
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "(a b) rest")))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "(a b) rest")))
              (read-sexpr s)
              (read-all s))"#,
     );
@@ -596,7 +596,7 @@ fn read_sexpr_consumes_the_datum_and_the_whitespace_that_ended_it() {
 #[test]
 fn read_sexpr_preserving_whitespace_leaves_what_ended_the_datum() {
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "(a b) rest")))
+        r#"(use std::reader::read-sexpr-preserving-whitespace) (let ((s (make-string-input-stream "(a b) rest")))
              (read-sexpr-preserving-whitespace s)
              (read-all s))"#,
     );
@@ -608,7 +608,7 @@ fn read_sexpr_leaves_a_non_whitespace_terminator_alone() {
     // Only whitespace is consumed: a `)` that ended the datum belongs to
     // whatever comes next.
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "a)b")))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "a)b")))
              (read-sexpr s)
              (read-all s))"#,
     );
@@ -618,7 +618,7 @@ fn read_sexpr_leaves_a_non_whitespace_terminator_alone() {
 #[test]
 fn read_sexpr_handles_quotes_comments_strings_and_character_literals() {
     let v = eval_string(
-        r##"(defun one ((text string)) string
+        r##"(use std::reader::read-sexpr) (defun one ((text string)) string
              (let ((s (make-string-input-stream text)))
                (match (read-sexpr s)
                  ((ok o) (match o ((eof) "<eof>") ((datum d) (format false "~s" d))))
@@ -642,7 +642,7 @@ fn an_atom_ends_at_a_paren_without_losing_it() {
     // The pushback is the whole reason `read-sexpr` wants `PeekInput`: the
     // `(` that ends `1` has to still be there for the next read.
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "1(2 3)"))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "1(2 3)"))
                  (out ""))
              (loop
                (match (read-sexpr s)
@@ -656,7 +656,7 @@ fn an_atom_ends_at_a_paren_without_losing_it() {
 #[test]
 fn read_sexpr_reports_an_incomplete_datum_as_an_error() {
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "(1 2")))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "(1 2")))
              (match (read-sexpr s)
                ((ok _) "no error")
                ((err e) (message e))))"#,
@@ -667,7 +667,7 @@ fn read_sexpr_reports_an_incomplete_datum_as_an_error() {
 #[test]
 fn end_of_input_is_a_value_not_an_error() {
     let v = eval_string(
-        r#"(let ((s (make-string-input-stream "   ")))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "   ")))
              (match (read-sexpr s)
                ((ok o) (match o ((eof) "eof") ((datum _) "datum")))
                ((err e) (message e))))"#,
@@ -681,7 +681,7 @@ fn read_sexpr_reads_a_file_form_by_form() {
     let p = d.path("forms.typl");
     std::fs::write(&p, "(one 1)\n; a comment\n(two 2)\n").unwrap();
     let v = eval_string(&format!(
-        r#"(match (open-input "{p}")
+        r#"(use std::fs::open-input std::reader::read-sexpr) (match (open-input "{p}")
              ((ok f)
               (let ((out ""))
                 (loop
@@ -714,9 +714,9 @@ fn a_string_stream_that_unread_more_than_it_read_has_no_position() {
         r#"(let ((s (make-string-input-stream "xyz")))
              (read-char s)
              (unread-char s #\x)
-             (let ((one (%internal::stream-position s::h)))
+             (let ((one (%internal::stream-position (%internal::string-input-handle s))))
                (unread-char s #\w)
-               (format false "~a ~a" (unwrap one) (is-err (%internal::stream-position s::h)))))"#,
+               (format false "~a ~a" (unwrap one) (is-err (%internal::stream-position (%internal::string-input-handle s))))))"#,
     );
     assert_eq!(v, "0 true");
 }
@@ -726,7 +726,7 @@ fn a_stream_without_pushback_gets_it_by_wrapping() {
     // A composite has no pushback of its own; `peek-stream` adds it, which is
     // what lets `read-sexpr` run over one.
     let v = eval_string(
-        r#"(let ((parts (the Vector<:dyn CharInput> (Vector::new))))
+        r#"(use std::io::make-peek-stream std::reader::read-sexpr) (let ((parts (the Vector<:dyn CharInput> (Vector::new))))
              (push parts (make-string-input-stream "(1 2)"))
              (push parts (make-string-input-stream " 3"))
              (let ((p (make-peek-stream (make-concatenated-stream parts)))
@@ -743,7 +743,7 @@ fn a_stream_without_pushback_gets_it_by_wrapping() {
 #[test]
 fn a_user_defined_input_stream_can_be_read_from() {
     let v = eval_string(
-        r#"(defstruct fixed (text string) (at int))
+        r#"(use std::io::make-peek-stream std::reader::read-sexpr) (defstruct fixed (text string) (at int))
            (impl Stream fixed
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))

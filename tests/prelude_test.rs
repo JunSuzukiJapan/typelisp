@@ -420,20 +420,20 @@ fn int_to_char_panics_past_the_max_scalar_value() {
 fn symbol_to_string_extracts_the_name() {
     // `symbol->string : Symbol -> string`. A `Symbol` is produced by
     // `intern` (or `gensym`), not by a quoted-datum `Sexpr`.
-    assert_eq!(eval_string(r#"(symbol->string (intern "foo"))"#), "foo");
+    assert_eq!(eval_string(r#"(use std::symbol::symbol->string) (symbol->string (intern "foo"))"#), "foo");
 }
 
 #[test]
 fn symbol_to_string_rejects_a_non_symbol_at_check_time() {
     // `(quote 1)` is a `Sexpr` (an int datum), not a `Symbol`, so passing it to
     // `symbol->string` is now a static type error rather than a runtime panic.
-    type_error("(symbol->string (quote 1))");
+    type_error("(use std::symbol::symbol->string) (symbol->string (quote 1))");
 }
 
 #[test]
 fn intern_round_trips_symbol_to_string() {
     // Stated at `string`, where the two sides are the same type outright.
-    assert_eq!(eval_string(r#"(symbol->string (intern "foo"))"#), "foo");
+    assert_eq!(eval_string(r#"(use std::symbol::symbol->string) (symbol->string (intern "foo"))"#), "foo");
     // And against the quoted symbol, in either order: `'foo` is a `Symbol`
     // too, so both sides of the generic `equal<T>(T, T)` already agree.
     assert_eq!(eval_ok(r#"(equal (intern "foo") (quote foo))"#), Value::Bool(true));
@@ -538,26 +538,26 @@ fn is_none_distinguishes_none_from_some() {
 
 #[test]
 fn result_unwrap_returns_the_ok_payload() {
-    let src = "(defun get-r () Result<int,ParseIntError> (Result::ok 7)) (unwrap (get-r))";
+    let src = "(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::ok 7)) (unwrap (get-r))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn result_unwrap_panics_on_err() {
-    let src = r#"(defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
+    let src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn result_unwrap_or_returns_the_default_on_err() {
-    let src = r#"(defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
+    let src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn result_is_ok_and_is_err() {
-    let ok_src = "(defun get-r () Result<int,ParseIntError> (Result::ok 7)) (is-ok (get-r))";
-    let err_src = r#"(defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
+    let ok_src = "(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::ok 7)) (is-ok (get-r))";
+    let err_src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
     eval_true(ok_src);
     eval_true(err_src);
 }
@@ -567,7 +567,7 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     // `unwrap` is defined on both `Option<T>` and `Result<T,E>` — same name,
     // disambiguated by `Checker::receiver_method` from each call's
     // receiver type, like any other type's instance methods.
-    let src = r#"
+    let src = r#"(use std::num::ParseIntError) 
         (defun get-r () Result<int,ParseIntError> (Result::ok 3))
         (+ (unwrap (Option::some 4)) (unwrap (get-r)))
     "#;

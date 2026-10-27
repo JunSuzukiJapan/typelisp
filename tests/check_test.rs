@@ -206,7 +206,7 @@ fn gensym_is_typed_symbol() {
 #[test]
 fn symbol_string_bridges_are_typed() {
     assert_eq!(ty("(intern \"x\")"), Type::Symbol);
-    assert_eq!(ty_with_prelude("(symbol->string (gensym))"), Type::Str);
+    assert_eq!(ty_with_prelude("(use std::symbol::symbol->string) (symbol->string (gensym))"), Type::Str);
 }
 
 #[test]
@@ -899,13 +899,13 @@ fn exit_type_checks_as_never() {
     // `exit`'s actual process termination can only be observed
     // out-of-process — see `tests/exit_test.rs`. This only checks the type
     // level: `Never` satisfies any expected type, like `panic`.
-    assert_eq!(ret_of("(defun f () int (if true 1 (exit 1)))", "f"), Type::Int);
+    assert_eq!(ret_of("(use std::process::exit) (defun f () int (if true 1 (exit 1)))", "f"), Type::Int);
 }
 
 #[test]
 fn exit_rejects_wrong_arity() {
-    assert_type_error("(exit)");
-    assert_type_error("(exit 1 2)");
+    assert_type_error("(std::process::exit)");
+    assert_type_error("(std::process::exit 1 2)");
 }
 
 // ---- unreachable / todo (prelude macros) ---------------------------------------
@@ -1014,7 +1014,7 @@ fn a_quoted_symbol_is_a_symbol() {
     assert_eq!(ty("(quote 42)"), opt_sexpr());
     // It still reaches a `Symbol` parameter, and still reaches an
     // S-expression one.
-    assert!(program(r#"(defun f ((s symbol)) string (symbol->string s)) (f (quote foo))"#).is_ok());
+    assert!(program(r#"(use std::symbol::symbol->string) (defun f ((s symbol)) string (symbol->string s)) (f (quote foo))"#).is_ok());
     assert!(program(r#"(defun g ((s Option<Sexpr>)) bool (sexpr-symp s)) (g (quote foo))"#).is_ok());
 }
 

@@ -292,7 +292,7 @@ fn a_spawn_is_a_task_of_the_call_s_return_type() {
 #[test]
 fn a_task_can_be_annotated_with_its_own_type() {
     assert_eq!(
-        int(r#"(defvar (hit int) 0)
+        int(r#"(use std::thread::Task) (defvar (hit int) 0)
                (defun f () int (setf hit 5))
                (let ((t (the Task<int> (task (f))))) 0)
                hit"#),
@@ -328,7 +328,7 @@ fn a_task_can_be_waited_on_more_than_once() {
 #[test]
 fn a_task_can_wait_on_another_task() {
     assert_eq!(
-        int(r#"(defun double ((n int)) int (* n 2))
+        int(r#"(use std::thread::Task) (defun double ((n int)) int (* n 2))
                (defun relay ((t Task<int>)) int (+ (wait t) 1))
                (let ((inner (task (double 20))))
                  (wait (task (relay inner))))"#),
@@ -379,7 +379,7 @@ fn text(src: &str) -> String {
 #[test]
 fn yield_interleaves_two_tasks() {
     assert_eq!(
-        text(r#"(defvar (trail string) "")
+        text(r#"(use std::thread::yield) (defvar (trail string) "")
                 (defun tick ((name string) (n int)) ()
                   (dotimes (i n)
                     (setf trail (append trail name))
@@ -409,7 +409,7 @@ fn without_yield_each_task_runs_to_its_end() {
 /// A `yield` with nothing else to run comes straight back.
 #[test]
 fn yield_with_nothing_else_ready_is_a_no_op() {
-    assert_eq!(int("(progn (yield) 7)"), 7);
+    assert_eq!(int("(use std::thread::yield) (progn (yield) 7)"), 7);
 }
 
 // ---- the callee can be a value ------------------------------------------
@@ -477,7 +477,7 @@ fn each_turn_of_a_loop_starts_a_task_over_its_own_binding() {
 #[test]
 fn a_compiled_body_can_start_tasks() {
     assert_eq!(
-        text_compiled(r#"(defun work ((name string)) string name)
+        text_compiled(r#"(use std::thread::Task) (defun work ((name string)) string name)
                 (defun spawn-two () cons-cell<Task<string>,Task<string>>
                   (cons (task (work "a")) (task (work "b"))))
                 (compile spawn-two)
@@ -494,7 +494,7 @@ fn a_compiled_body_can_start_tasks() {
 #[test]
 fn a_compiled_spawn_carries_arguments_of_every_representation() {
     assert_eq!(
-        text_compiled(r#"(defvar (trail string) "")
+        text_compiled(r#"(use std::thread::Task) (defvar (trail string) "")
                 (defun mixed ((n int) (x f64) (s string)) ()
                   (when true
                     (setf trail (append (append (append trail (to-string n)) (to-string x)) s))))
@@ -513,7 +513,7 @@ fn a_compiled_spawn_carries_arguments_of_every_representation() {
 #[test]
 fn a_compiled_body_can_spawn_a_function_value() {
     assert_eq!(
-        int_compiled(r#"(defun twice ((n int)) int (* n 2))
+        int_compiled(r#"(use std::thread::Task) (defun twice ((n int)) int (* n 2))
                (defun spawn-value ((n int)) Task<int>
                  (let ((f twice)) (task (f n))))
                (compile spawn-value)
@@ -574,7 +574,7 @@ fn a_compiled_wait_answers_with_a_heap_value() {
 fn a_compiled_yield_interleaves_two_tasks() {
     assert_eq!(
         text_compiled(
-            r#"(defvar (trail string) "")
+            r#"(use std::thread::yield) (defvar (trail string) "")
                (defun tick ((name string) (n int)) ()
                  (dotimes (i n)
                    (setf trail (append trail name))
@@ -598,7 +598,7 @@ fn a_compiled_yield_interleaves_two_tasks() {
 fn a_compiled_yield_resumes_where_it_left_off() {
     assert_eq!(
         int_compiled(
-            r#"(defun counted ((n int)) int
+            r#"(use std::thread::yield) (defun counted ((n int)) int
                  (let ((acc 0))
                    (dotimes (i n)
                      (yield)
@@ -633,7 +633,7 @@ fn a_compiled_yield_resumes_where_it_left_off() {
 #[test]
 fn sleepers_due_at_once_wake_earliest_deadline_first() {
     assert_eq!(
-        text(r#"(defvar (trail string) "")
+        text(r#"(use std::time::internal-time-seconds) (defvar (trail string) "")
                 (defun slow ((name string) (sec f64)) ()
                   (progn (sleep sec)
                          (when true (setf trail (append trail name)))))
@@ -718,7 +718,7 @@ fn a_lone_sleeper_still_waits_and_comes_back() {
 fn a_compiled_sleep_suspends_only_the_calling_task() {
     assert_eq!(
         int_compiled(
-            r#"(defun sleeper ((flag Mutex<bool>)) bool
+            r#"(use std::sync::Mutex std::sync::with-lock std::thread::Task std::thread::Thread) (defun sleeper ((flag Mutex<bool>)) bool
                  (sleep 2.0)
                  (with-lock (f flag) f))
                (defun mark ((flag Mutex<bool>)) ()
@@ -766,7 +766,7 @@ fn a_compiled_sleep_refuses_a_negative_wait() {
 fn a_compiled_yield_inside_a_catch_suspends() {
     assert_eq!(
         text_compiled(
-            r#"(defvar (trail string) "")
+            r#"(use std::thread::yield) (defvar (trail string) "")
                (defun tick ((name string) (n int)) int
                  (catch 'unused
                    (progn
@@ -831,7 +831,7 @@ fn a_compiled_sleep_inside_an_unwind_protect_runs_the_cleanup_after() {
 /// `a`'s cleanup did — `a`'s throw truly waited out `b`'s.
 #[test]
 fn a_task_switch_during_a_cleanup_does_not_corrupt_the_parked_throw() {
-    let src = r#"(defvar (trail string) "")
+    let src = r#"(use std::sync::Chan) (defvar (trail string) "")
                  (defun a ((ready Chan<int>) (go Chan<int>)) int
                    (catch 'a-tag
                      (unwind-protect
@@ -867,7 +867,7 @@ fn a_task_switch_during_a_cleanup_does_not_corrupt_the_parked_throw() {
 fn a_compiled_throw_after_a_suspension_is_still_caught() {
     assert_eq!(
         int_compiled(
-            r#"(defun guarded () int
+            r#"(use std::thread::yield) (defun guarded () int
                  (catch 'done (progn (yield) (throw 'done 41))))
                (compile guarded)
                (wait (task (guarded)))"#
@@ -890,7 +890,7 @@ fn a_compiled_throw_after_a_suspension_is_still_caught() {
 fn a_compiled_apply_of_a_compiled_value_can_suspend() {
     assert_eq!(
         text_compiled(
-            r#"(defvar (trail string) "")
+            r#"(use std::thread::yield) (defvar (trail string) "")
                (defun tick ((name string) (n int)) int
                  (progn (dotimes (i n) (setf trail (append trail name)) (yield)) 0))
                (defun via-value ((name string)) int
@@ -914,7 +914,7 @@ fn a_compiled_apply_of_a_compiled_value_can_suspend() {
 fn a_compiled_apply_of_an_interpreted_closure_can_suspend() {
     assert_eq!(
         text_compiled(
-            r#"(defvar (trail string) "")
+            r#"(use std::thread::yield) (defvar (trail string) "")
                (defun call-thrice ((f (fn () int))) int
                  (progn (dotimes (i 3) (f)) 0))
                (compile call-thrice)
@@ -980,7 +980,7 @@ fn an_applied_closure_s_throw_runs_a_compiled_cleanup() {
 fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
     assert_eq!(
         text_compiled(
-            r#"(defvar (trail string) "")
+            r#"(use std::thread::yield) (defvar (trail string) "")
                (deftrait Ticker ()
                  (tick ((self Self) (n int)) int))
                (defstruct marker (name string))
@@ -1091,7 +1091,7 @@ fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
 fn an_interpreted_caller_applying_a_compiled_closure_may_really_wait() {
     assert_eq!(
         text_compiled(
-            r#"(defvar (trail string) "")
+            r#"(use std::sync::Chan) (defvar (trail string) "")
                (defun make-worker ((ch Chan<int>)) (fn () int)
                  (lambda () int (progn (unwrap (recv ch)) (setf trail (append trail "a")) 0)))
                (defun mark ((ch Chan<int>)) int (progn (setf trail (append trail "b")) (send ch 0) 0))
@@ -1114,7 +1114,7 @@ fn an_interpreted_caller_applying_a_compiled_closure_may_really_wait() {
 /// shows up here as a wrong total or a crash.
 #[test]
 fn a_task_that_moves_to_the_interpreter_s_thread_keeps_its_roots_under_gc_stress() {
-    let src = r#"(defun count-items ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (count-items (sexpr-cdr s))) 0))
+    let src = r#"(use std::thread::Task) (defun count-items ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (count-items (sexpr-cdr s))) 0))
                  (defun work ((cb (fn (int) int)) (n int)) int
                    (let ((xs (list n (+ n 1) (+ n 2))))
                      (+ (cb (count-items xs)) (* 3 n) 3)))

@@ -41,7 +41,7 @@ fn after_the_script_name_they_belong_to_the_script() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp").join("typl-help-after-script");
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("args.typl");
-    std::fs::write(&src, "(println \"~a\" (command-line-args))\n").unwrap();
+    std::fs::write(&src, "(use std::env::command-line-args) (println \"~a\" (command-line-args))\n").unwrap();
 
     let out = typl(&[src.to_str().unwrap(), "--help", "--version"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));

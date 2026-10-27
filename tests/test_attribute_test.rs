@@ -36,7 +36,7 @@ fn typl(dir: &Path, args: &[&str]) -> (i32, String, String) {
     )
 }
 
-const MATH: &str = r#"
+const MATH: &str = r#"(use std::error::assert-eq) 
 (shadow add)
 (pub defun add ((a int) (b int)) int (+ a b))
 
@@ -80,7 +80,7 @@ fn typl_test_runs_every_test_and_reports_each_failure() {
     write(
         &dir,
         "tests/more.typl",
-        r#"
+        r#"(use std::error::assert-eq) 
 (use math)
 #[test]
 (defun boom () () (panic "boom"))
@@ -134,9 +134,9 @@ fn a_test_in_a_module_of_the_file_is_found_there() {
     let file = write(
         &dir,
         "geo.typl",
-        r#"
-(pub defun area ((w int) (h int)) int (* w h))
+        r#"(pub defun area ((w int) (h int)) int (* w h))
 (module tests
+  (use std::error::assert-eq)
   #[test]
   (defun square () () (assert-eq (geo::area 3 3) 9)))
 "#,
@@ -168,9 +168,9 @@ fn a_misplaced_attribute_is_an_error() {
 
 #[test]
 fn assert_eq_wants_eq_and_print_object() {
-    let err = check_err("(defstruct P (x int))\n(assert-eq (make-instance 'P :x 1) (make-instance 'P :x 1))");
+    let err = check_err("(use std::error::assert-eq) (defstruct P (x int))\n(assert-eq (make-instance 'P :x 1) (make-instance 'P :x 1))");
     assert!(err.contains("does not implement trait `std::cmp::Eq`"), "{}", err);
-    assert_eq!(eval_string("(progn (assert-eq #{1 \"a\"} #{1 \"a\"}) \"same\")"), "same");
+    assert_eq!(eval_string("(use std::error::assert-eq) (progn (assert-eq #{1 \"a\"} #{1 \"a\"}) \"same\")"), "same");
 }
 
 #[test]
@@ -179,7 +179,7 @@ fn compile_file_leaves_a_test_out() {
     let file = write(
         &dir,
         "app.typl",
-        "(defun twice ((x int)) int (* 2 x))\n#[test]\n(defun twice-works () () (assert-eq (twice 2) 4))\n(defun main () () (println \"~a\" (twice 21)))\n",
+        "(use std::error::assert-eq) (defun twice ((x int)) int (* 2 x))\n#[test]\n(defun twice-works () () (assert-eq (twice 2) 4))\n(defun main () () (println \"~a\" (twice 21)))\n",
     );
     let exe = dir.join("app");
     let (code, _, err) = typl(&dir, &["-c", file.to_str().unwrap(), "-o", exe.to_str().unwrap()]);
@@ -217,7 +217,7 @@ fn a_test_may_return_any_error_and_is_reported_by_its_message() {
     let file = write(
         &dir,
         "dyn.typl",
-        r#"#[test]
+        r#"(use std::error::as-dyn-error std::num::parse-int std::num::ParseIntError) #[test]
 (defun concrete () Result<(),ParseIntError>
   (match (parse-int "x") ((ok _) (Result::ok ())) ((err e) (Result::err e))))
 #[test]

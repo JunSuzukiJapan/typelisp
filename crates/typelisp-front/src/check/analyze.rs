@@ -854,6 +854,7 @@ pub(super) enum Written {
 enum UseTarget {
     Value(Path),
     Type(Path),
+    Trait(Path),
     Alias(TypeAlias),
     Module(typelisp_mem::NsId),
 }
@@ -3054,6 +3055,13 @@ impl Checker {
         if self.info.type_names.borrow().is_empty() {
             return Ok(());
         }
+        if let Some(t) = self.first_unknown_trait(ty) {
+            return Err(Error::TypeError(format!(
+                "unknown trait `{}`: no trait of that name is visible here (a `:dyn` names a trait \
+                 defined before it, in this module, or brought in by a `use`)",
+                t
+            )));
+        }
         match self.first_unknown_type_name(ty) {
             None => Ok(()),
             Some(p) => Err(Error::TypeError(format!(
@@ -3065,6 +3073,26 @@ impl Checker {
                  `(:type {})`.",
                 p, p, p, p, p
             ))),
+        }
+    }
+
+    /// The first `:dyn` in `ty` whose trait is not a trait visible here.
+    fn first_unknown_trait(&self, ty: &Type) -> Option<String> {
+        match ty {
+            Type::Dyn(p, pins) => {
+                if self.info.reg.trait_def(p).is_none() {
+                    return Some(p.to_string());
+                }
+                pins.iter().find_map(|a| self.first_unknown_trait(a))
+            }
+            Type::Named(_, args) => args.iter().find_map(|a| self.first_unknown_trait(a)),
+            Type::Fn(ps, rest, r) => ps
+                .iter()
+                .chain(rest.as_deref())
+                .chain(std::iter::once(&**r))
+                .find_map(|a| self.first_unknown_trait(a)),
+            Type::PtrTo(inner) => self.first_unknown_trait(inner),
+            _ => None,
         }
     }
 
@@ -8889,8 +8917,8 @@ impl Checker {
         let path_loc = parts_locs.first().and_then(|l| l.as_ref());
         let alias = self.info.fq(&bare);
         let form = match self.use_target(heap, &syms) {
-            // A module-level value — a function or a global, one or the
-            // other, since a name has one value.
+            // A module-level entry — a function, a global or a macro, one of
+            // them, since a name has one meaning.
             Some(UseTarget::Value(target)) => {
                 self.report_import_collision(&bare, target, shadowing)?;
                 self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), target);
@@ -8912,7 +8940,9 @@ impl Checker {
                 self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
                 self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), target);
                 let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
-                for (i, v) in def.variants.iter().enumerate() {
+                // A struct's one constructor has a name no source can write
+                // (`STRUCT_CTOR`), so it is no bare name to bring in.
+                for (i, v) in def.variants.iter().enumerate().filter(|(_, v)| v.name != STRUCT_CTOR) {
                     let is_builtin = self
                         .info.cur_ns()
                         .ctors
@@ -8920,7 +8950,9 @@ impl Checker {
                         .and_then(|(owner, _)| self.info.reg.type_def(owner))
                         .map(|d| d.builtin)
                         .unwrap_or(false);
-                    if self.info.cur_ns().ctors.contains_key(&v.name) {
+                    // The same constructor brought in again is no redefinition.
+                    let existing = self.info.cur_ns().ctors.get(&v.name).cloned();
+                    if existing.is_some_and(|e| e != (target, i)) {
                         self.check_redef_outcome("constructor", &v.name, is_builtin)?;
                     }
                     self.info.reg.module_mut(self.info.ns).ctors.insert(v.name.clone(), (target, i));
@@ -8941,11 +8973,22 @@ impl Checker {
                         .and_then(|(owner, m)| self.info.reg.type_def(owner).and_then(|d| d.assoc.get(m)))
                         .map(|af| af.builtin)
                         .unwrap_or(false);
-                    if self.info.cur_ns().static_uses.contains_key(name) {
+                    let existing = self.info.cur_ns().static_uses.get(name).cloned();
+                    if existing.is_some_and(|e| e != (target, name.clone())) {
                         self.check_redef_outcome("static method", name, is_builtin)?;
                     }
                     self.info.reg.module_mut(self.info.ns).static_uses.insert(name.clone(), (target, name.clone()));
                 }
+                self.register_use_for_reading(heap, self.info.ns, &syms);
+                forms::use_form(heap, &alias, &target)
+            }
+            // A trait. Only the name is imported, for a bound, an `impl` or a
+            // `:dyn` to name: a trait's methods are called on a value of a
+            // type that implements it, and are found from that value.
+            Some(UseTarget::Trait(target)) => {
+                self.report_import_collision(&bare, target, shadowing)?;
+                self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
+                self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), target);
                 self.register_use_for_reading(heap, self.info.ns, &syms);
                 forms::use_form(heap, &alias, &target)
             }
@@ -9041,15 +9084,17 @@ impl Checker {
         }
     }
 
-    /// The definition a `use` path names at `p`: a function or a global, a
-    /// type, or a `deftype` alias.
+    /// The definition a `use` path names at `p`: a function, a global or a
+    /// macro, a type, a trait, or a `deftype` alias.
     fn use_target_at(&self, p: &Path) -> Option<UseTarget> {
-        if let Some(value) = self.info.module_value_at(p) {
-            let (ModuleValue::Fn(target) | ModuleValue::Var(target, _)) = value;
+        if let Some((target, _)) = self.info.module_entry_at(p) {
             return Some(UseTarget::Value(target));
         }
         if let Some(target) = self.info.type_at(p) {
             return Some(UseTarget::Type(target));
+        }
+        if let Some(target) = self.info.trait_at(p) {
+            return Some(UseTarget::Trait(target));
         }
         self.info.type_alias_at(p).map(UseTarget::Alias)
     }
@@ -9072,10 +9117,11 @@ impl Checker {
                 let ty = target.name_symbol();
                 names.push((bare, Import::Type(ty)));
                 let def = self.info.reg.type_def(&target).expect("resolved type exists");
-                names.extend(def.variants.iter().map(|v| (v.name.clone(), Import::Member(ty))));
+                names.extend(def.variants.iter().filter(|v| v.name != STRUCT_CTOR).map(|v| (v.name.clone(), Import::Member(ty))));
                 let statics = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter());
                 names.extend(statics.filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.clone(), Import::Member(ty))));
             }
+            Some(UseTarget::Trait(target)) => names.push((bare, Import::Type(target.name_symbol()))),
             Some(UseTarget::Alias(a)) => names.push((bare, Import::Item(a.name.name_symbol()))),
             Some(UseTarget::Module(m)) => names.push((bare, Import::Module(m))),
             None => {}
@@ -10839,8 +10885,17 @@ impl Checker {
             return Err(Error::NoSuchFunction(method.to_string()));
         };
         let recv = self.check_at(heap, interp, env, first, None, nth_loc(arg_locs, 0))?;
-        // A trait object: `check_dyn_call`'s message names the trait.
+        // A trait object: `check_dyn_call`'s message names the trait. When
+        // the trait has no such method either, both lookups failed, and the
+        // name may be a function of the library this module has not brought
+        // in.
         if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
+            if !self.check_object_safe(&trait_path)?.vtable_order.iter().any(|n| n == method) {
+                return Err(Error::TypeError(format!(
+                    "no function `{}` is visible here, and it is not a method of `{}` either — a `:dyn {}` value can only call the trait's own or inherited methods",
+                    method, trait_path, trait_path
+                )));
+            }
             return self.check_dyn_call(heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..]);
         }
         let recv_ty = recv.ty.clone();
@@ -12365,7 +12420,7 @@ impl Checker {
                         if heap.cdr(car_cdr)?.is_empty() {
                             let spliced = self.check(heap, interp, env, x, Some(&sexpr_ty))?;
                             let rest = self.check_qq_template(heap, interp, env, cdr)?;
-                            let append_fq = self.info.offered_fn("sexpr-append").ok_or_else(|| {
+                            let append_fq = self.info.library_fn("sexpr-append").ok_or_else(|| {
                                 Error::TypeError(
                                     "unquote-splicing (,@) requires the prelude's `sexpr-append` to be loaded"
                                         .into(),
@@ -13429,8 +13484,8 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let fq = self
-            .info.offered_fn(name)
-            .ok_or_else(|| Error::TypeError(format!("{}: the prelude's `{}` is not loaded", name, name)))?;
+            .info.library_fn(name)
+            .ok_or_else(|| Error::TypeError(format!("{}: the library's `{}` is not loaded", name, name)))?;
         self.check_call(heap, interp, env, &fq, args, arg_locs)
     }
 

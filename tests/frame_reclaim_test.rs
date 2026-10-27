@@ -32,7 +32,7 @@ fn boxes_after(out: &str, label: &str) -> usize {
 
 /// Twenty-one thousand calls that return, and as many that are left by an
 /// unwind (`throw` out of the innermost of a chain of calls).
-const PROGRAM: &str = r#"
+const PROGRAM: &str = r#"(use std::repl::heap-info) 
 (defun fib ((n int)) int (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 (defun dive ((n int)) int (if (= n 0) (throw 'out 1) (+ 1 (dive (- n 1)))))
 (defun dives ((times int)) int

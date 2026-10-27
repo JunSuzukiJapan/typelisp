@@ -58,12 +58,12 @@ fn a_keyword_evaluates_to_itself_without_being_bound() {
     // The point of a keyword: no `defvar`, no `let`, yet it is not an
     // "unbound variable" error. Its static type is the ordinary `symbol`.
     // As in CL, the colon spells the keyword and is no part of its name.
-    assert_eq!(eval_string("(symbol->string :foo)"), "foo");
+    assert_eq!(eval_string("(use std::symbol::symbol->string) (symbol->string :foo)"), "foo");
 }
 
 #[test]
 fn a_keyword_is_typed_as_symbol_and_flows_where_a_symbol_is_expected() {
-    let out = eval_string("(defun name-of ((s symbol)) string (symbol->string s)) (name-of :hello)");
+    let out = eval_string("(use std::symbol::symbol->string) (defun name-of ((s symbol)) string (symbol->string s)) (name-of :hello)");
     assert_eq!(out, "hello");
 }
 
@@ -83,7 +83,7 @@ fn keywords_are_case_sensitive_like_every_other_symbol() {
 fn a_keyword_can_be_stored_in_a_sexpr_datum() {
     // The `Symbol -> Sexpr` transparent retype already in `check_inner`
     // covers this — a keyword needs no wrapping constructor.
-    let out = eval_string("(match (sexpr-car (list :a :b)) ((sym s) (symbol->string s)) (_ \"not a symbol\"))");
+    let out = eval_string("(use std::symbol::symbol->string) (match (sexpr-car (list :a :b)) ((sym s) (symbol->string s)) (_ \"not a symbol\"))");
     assert_eq!(out, "a");
 }
 

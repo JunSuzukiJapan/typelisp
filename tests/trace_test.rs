@@ -29,7 +29,7 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader
 fn traced(src: &str) -> String {
     let full = format!(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
+         (setf *trace-output* (%internal::standard-stream-of *cap*))\n\
          {}\n\
          (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
         src
@@ -361,7 +361,7 @@ fn trace_rendering_holds_its_roots_under_gc_stress() {
         let src = "(defstruct pt (pub x int) (pub y int))\n\
                    (defun shift ((p pt) (d int) (s string)) int (+ p::x d))\n\
                    (defvar (*cap* i32) (%internal::stream-string-output))\n\
-                   (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
+                   (setf *trace-output* (%internal::standard-stream-of *cap*))\n\
                    (trace shift)\n\
                    (shift (make-instance 'pt :x 1 :y 2) 3 \"four\")\n\
                    (shift (make-instance 'pt :x 5 :y 6) 7 \"eight\")\n\

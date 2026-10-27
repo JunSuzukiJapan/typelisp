@@ -54,7 +54,7 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
     // `set` stores a handle, `get` returns `Option<llvm-value>` as a heap
     // enum box whose payload decodes through the integer field kind, and a
     // compiled `match` takes it apart.
-    let src = "(use %core::llvm-builder) (use %core::llvm-value) \
+    let src = "(use std::collections::Scope) (use %core::llvm-builder) (use %core::llvm-value) \
                (defun keep ((s Scope<llvm-value>) (v llvm-value)) llvm-value \
                  (set s \"x\" v) \
                  (match (get s \"x\") \
@@ -69,7 +69,7 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
 
 #[test]
 fn a_compiled_function_sees_none_for_a_missing_scope_name() {
-    let src = "(use %core::llvm-value) \
+    let src = "(use std::collections::Scope) (use %core::llvm-value) \
                (defun probe ((s Scope<llvm-value>)) int \
                  (match (get s \"absent\") \
                    ((some w) 1) \

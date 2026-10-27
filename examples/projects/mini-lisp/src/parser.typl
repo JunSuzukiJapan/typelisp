@@ -4,6 +4,7 @@
 ;; 構文解析: token 列 (Vector<string>) から lexpr の木を組み立てる。
 ;; 入れ子の丸括弧は parse-expr 自身の再帰呼び出しでそのまま処理できる。
 ;; 相互再帰が無いので、labels も defsignature も要らない。
+(use std::num::parse-int)
 (use ast::lexpr)
 
 (pub defstruct cursor

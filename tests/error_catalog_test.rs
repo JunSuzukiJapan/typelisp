@@ -29,7 +29,7 @@ fn a_simple_error_is_the_root_of_its_chain() {
 
 #[test]
 fn a_simple_error_travels_as_a_dyn_error() {
-    let src = r#"(defun f () Result<int, :dyn Error>
+    let src = r#"(use std::error::as-dyn-error) (defun f () Result<int, :dyn Error>
                    (as-dyn-error (the Result<int,SimpleError> (Result::err (simple-error "no")))))
                  (equal (match (f) ((ok _) "?") ((err e) (message e))) "no")"#;
     is_true(src);
@@ -39,9 +39,9 @@ fn a_simple_error_travels_as_a_dyn_error() {
 
 #[test]
 fn a_wrapped_error_reports_its_own_message_and_keeps_the_cause() {
-    is_true(r#"(equal (message (wrap-error "reading" (simple-error "no such file"))) "reading")"#);
+    is_true(r#"(use std::error::wrap-error) (equal (message (wrap-error "reading" (simple-error "no such file"))) "reading")"#);
     is_true(
-        r#"(match (source (wrap-error "reading" (simple-error "no such file")))
+        r#"(use std::error::wrap-error) (match (source (wrap-error "reading" (simple-error "no such file")))
              ((some c) (equal (message c) "no such file"))
              ((none) false))"#,
     );
@@ -52,7 +52,7 @@ fn wrapping_works_over_any_concrete_error_type() {
     // The cause is widened where the call site specializes the body, the same
     // way `as-dyn-error` does it.
     is_true(
-        r#"(match (source (wrap-error "parsing" (ParseIntError::ParseIntError "bad digit")))
+        r#"(use std::error::wrap-error std::num::ParseIntError) (match (source (wrap-error "parsing" (ParseIntError::ParseIntError "bad digit")))
              ((some c) (equal (message c) "bad digit"))
              ((none) false))"#,
     );
@@ -60,7 +60,7 @@ fn wrapping_works_over_any_concrete_error_type() {
 
 #[test]
 fn a_cause_that_is_not_an_error_is_a_type_error() {
-    let msg = check_err(r#"(wrap-error "x" 42)"#);
+    let msg = check_err(r#"(use std::error::wrap-error) (wrap-error "x" 42)"#);
     assert!(msg.contains("does not implement"), "{}", msg);
 }
 
@@ -68,7 +68,7 @@ fn a_cause_that_is_not_an_error_is_a_type_error() {
 
 #[test]
 fn describe_error_is_just_the_message_for_a_leaf() {
-    is_true(r#"(equal (describe-error (simple-error "boom")) "boom")"#);
+    is_true(r#"(use std::error::describe-error) (equal (describe-error (simple-error "boom")) "boom")"#);
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn describe_error_walks_every_cause() {
                    (wrap-error "starting up"
                      (wrap-error "reading the config" (simple-error "no such file"))))"#;
     is_true(&format!(
-        "(equal {} \"starting up\n  caused by: reading the config\n  caused by: no such file\")",
+        "(use std::error::describe-error std::error::wrap-error) (equal {} \"starting up\n  caused by: reading the config\n  caused by: no such file\")",
         src.replace('\n', " ")
     ));
 }
@@ -85,7 +85,7 @@ fn describe_error_walks_every_cause() {
 #[test]
 fn describe_error_accepts_a_dyn_error_too() {
     // The parameter is generic over `Error`, and a `:dyn Error` implements it.
-    is_true(r#"(equal (describe-error (as :dyn Error (simple-error "boom"))) "boom")"#);
+    is_true(r#"(use std::error::describe-error) (equal (describe-error (as :dyn Error (simple-error "boom"))) "boom")"#);
 }
 
 // ---- assert -----------------------------------------------------------------

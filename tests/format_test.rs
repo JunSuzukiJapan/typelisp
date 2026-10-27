@@ -285,7 +285,7 @@ fn built_in_enum_values_print_their_variant_names() {
     assert_eq!(eval_string(r#"(format false "~a" (Option::some 1))"#), "(some 1)");
     assert_eq!(eval_string(r#"(defun no-int () Option<int> (Option::none)) (format false "~a" (no-int))"#), "none");
     assert_eq!(
-        eval_string(r#"(defun okv () Result<int,ParseIntError> (Result::ok 7)) (format false "~a" (okv))"#),
+        eval_string(r#"(use std::num::ParseIntError) (defun okv () Result<int,ParseIntError> (Result::ok 7)) (format false "~a" (okv))"#),
         "(ok 7)"
     );
 }
@@ -295,13 +295,13 @@ fn a_built_in_error_value_prints_like_an_sbcl_condition() {
     // SBCL's two answers for a condition: `~s` names the type around the
     // report, `~a` is the report alone. The message text is the builtin's
     // own wording; only the shape matters.
-    let s = eval_string(r#"(format false "~s" (parse-int "zz"))"#);
+    let s = eval_string(r#"(use std::num::parse-int) (format false "~s" (parse-int "zz"))"#);
     assert!(s.starts_with("(err #<parseinterror \"parse-int: "), "got {}", s);
-    let a = eval_string(r#"(format false "~a" (parse-int "zz"))"#);
+    let a = eval_string(r#"(use std::num::parse-int) (format false "~a" (parse-int "zz"))"#);
     assert!(a.starts_with("(err parse-int: "), "got {}", a);
     assert_eq!(eval_string(r#"(format false "~s" (simple-error "boom"))"#), "#<simpleerror \"boom\">");
     assert_eq!(eval_string(r#"(format false "~a" (simple-error "boom"))"#), "boom");
-    assert_eq!(eval_string(r#"(format false "~s" (wrap-error "outer" (simple-error "inner")))"#), "#<wrappederror \"outer\">");
+    assert_eq!(eval_string(r#"(use std::error::wrap-error) (format false "~s" (wrap-error "outer" (simple-error "inner")))"#), "#<wrappederror \"outer\">");
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn a_decoded_time_prints_as_a_date_and_a_clock() {
 #[test]
 fn heap_info_prints_how_full_the_arena_is() {
     assert_eq!(
-        eval_string(r#"(format false "~s" (make-instance 'heap-info :capacity 100 :live 25 :free 75 :symbols 1 :strings 2 :boxes 3 :gc-count 4 :growable true))"#),
+        eval_string(r#"(use std::repl::heap-info) (format false "~s" (make-instance 'heap-info :capacity 100 :live 25 :free 75 :symbols 1 :strings 2 :boxes 3 :gc-count 4 :growable true))"#),
         "#<heap-info 25 of 100 cells live (25%), 75 free, 1 symbols, 2 strings, 3 boxes, 4 collections, growable>"
     );
 }
@@ -371,9 +371,9 @@ fn a_generic_handle_prints_its_type_arguments() {
         eval_string(r#"(format false "~s" (the HashTable<string,int> (HashTable::new)))"#),
         "#<HashTable<string,int> count=0>"
     );
-    let chan = eval_string(r#"(format false "~s" (the Chan<string> (Chan::new 1)))"#);
+    let chan = eval_string(r#"(use std::sync::Chan) (format false "~s" (the Chan<string> (Chan::new 1)))"#);
     assert!(chan.starts_with("#<Chan<string> "), "got {}", chan);
-    let task = eval_string(r#"(defun three () int 3) (format false "~s" (task (three)))"#);
+    let task = eval_string(r#"(use std::thread::Task) (defun three () int 3) (format false "~s" (task (three)))"#);
     assert!(task.starts_with("#<Task<int> "), "got {}", task);
 }
 

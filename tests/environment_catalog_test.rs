@@ -207,9 +207,9 @@ fn get_decoded_time_agrees_with_the_clock() {
 /// is not. `PATH` is set in every environment a test runs in.
 #[test]
 fn getenv_distinguishes_set_from_unset() {
-    assert_eq!(show("(is-some (getenv \"PATH\"))"), "true");
+    assert_eq!(show("(is-some (std::env::getenv \"PATH\"))"), "true");
     assert_eq!(
-        show("(is-none (getenv \"TYPELISP_A_VARIABLE_NOBODY_SETS\"))"),
+        show("(is-none (std::env::getenv \"TYPELISP_A_VARIABLE_NOBODY_SETS\"))"),
         "true"
     );
 }
@@ -219,7 +219,7 @@ fn getenv_distinguishes_set_from_unset() {
 /// contract `sys_builtin::COMMAND_LINE_ARGS` exists to keep.
 #[test]
 fn the_command_line_always_names_the_program() {
-    assert_eq!(show("(> (len (command-line-args)) 0)"), "true");
+    assert_eq!(show("(> (len (std::env::command-line-args)) 0)"), "true");
 }
 
 /// The implementation-identity strings are constants, so the test is that
@@ -253,12 +253,12 @@ fn directories_are_created_listed_and_recognized() {
         show(&format!("(is-ok (ensure-directories-exist \"{}\"))", nested_s)),
         "true"
     );
-    assert_eq!(show(&format!("(directory-p \"{}\")", nested_s)), "true");
+    assert_eq!(show(&format!("(std::fs::directory-p \"{}\")", nested_s)), "true");
 
     std::fs::write(nested.join("f.txt"), "hello").expect("write the probe file");
     let file_s = nested.join("f.txt").to_string_lossy().replace('\\', "/");
     // A plain file is not a directory, and is not confused with a missing one.
-    assert_eq!(show(&format!("(directory-p \"{}\")", file_s)), "false");
+    assert_eq!(show(&format!("(std::fs::directory-p \"{}\")", file_s)), "false");
     assert_eq!(show(&format!("(probe-file \"{}\")", file_s)), "true");
 
     // The listing holds exactly the one entry, as a full path.
@@ -308,7 +308,7 @@ fn a_missing_path_is_an_err_not_a_panic() {
     assert_eq!(show(&format!("(is-err (truename \"{}\"))", missing)), "true");
     assert_eq!(show(&format!("(is-err (directory \"{}\"))", missing)), "true");
     assert_eq!(show(&format!("(is-err (file-write-date \"{}\"))", missing)), "true");
-    assert_eq!(show(&format!("(directory-p \"{}\")", missing)), "false");
+    assert_eq!(show(&format!("(std::fs::directory-p \"{}\")", missing)), "false");
 }
 
 /// `directory` answers with truenames (CL: "the truenames of those files"):
@@ -346,7 +346,7 @@ fn the_queries_take_a_pathname_too() {
     let dir = std::env::temp_dir().join(format!("typelisp-9c-path-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create the probe directory");
     let dir_s = dir.to_string_lossy().replace('\\', "/");
-    assert_eq!(show(&format!("(directory-p (to-pathname \"{}\"))", dir_s)), "true");
+    assert_eq!(show(&format!("(std::fs::directory-p (to-pathname \"{}\"))", dir_s)), "true");
     assert_eq!(show(&format!("(is-ok (truename (to-pathname \"{}\")))", dir_s)), "true");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -401,7 +401,7 @@ fn sleep_takes_seconds_as_a_float() {
 fn the_no_zone_default_decodes_into_local_time() {
     let same = show(
         "(let ((ut (get-universal-time)))
-           (let ((west (match (timezone-offset-seconds ut::day ut::second)
+           (let ((west (match (std::time::timezone-offset-seconds ut::day ut::second)
                          ((some w) w)
                          ((none) (panic \"no zone\"))))
                  (local (decode-universal-time ut)))
@@ -473,7 +473,7 @@ fn encode_and_decode_round_trip_in_local_time() {
 /// it.
 #[test]
 fn run_time_is_cpu_time_and_not_elapsed_time() {
-    let used: f64 = run("(format false \"~a\" (internal-time-seconds (get-internal-run-time)))")
+    let used: f64 = run("(use std::time::internal-time-seconds) (format false \"~a\" (internal-time-seconds (get-internal-run-time)))")
         .parse()
         .expect("a number of seconds");
     assert!(used > 0.0, "the process has used no CPU at all: {}", used);

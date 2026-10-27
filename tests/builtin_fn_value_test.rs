@@ -53,7 +53,7 @@ fn eval_ok(src: &str) -> Value {
 /// matches it back out and applies it. Both the built-in *method* case
 /// (`recv_type: Some`) and the free-built-in case (`recv_type: None`) have a
 /// variant here.
-const OP_ENUM: &str = "(defenum op (binary (fn (int int) int)) (naming (fn (symbol) string)) (none)) \
+const OP_ENUM: &str = "(use std::symbol::symbol->string) (defenum op (binary (fn (int int) int)) (naming (fn (symbol) string)) (none)) \
                        (defun run-binary ((o op) (a int) (b int)) int \
                          (match o ((binary f) (f a b)) ((naming _) 0) ((none) -1))) \
                        (defun run-naming ((o op) (s symbol)) string \
@@ -85,7 +85,7 @@ fn a_free_builtin_passed_as_an_argument_is_applied() {
     // (cl-parity-plan.md Phase 4c), so it stopped exercising the free-*built-in*
     // path this test is about — a prelude `defun` reaches compiled code as an
     // ordinary closure.
-    let src = "(defun call1 ((f (fn (symbol) string)) (s symbol)) string (f s)) (call1 symbol->string (quote x))";
+    let src = "(use std::symbol::symbol->string) (defun call1 ((f (fn (symbol) string)) (s symbol)) string (f s)) (call1 symbol->string (quote x))";
     assert_str(eval_ok(src));
 }
 
@@ -112,7 +112,7 @@ fn a_builtin_method_stored_in_an_enum_field_is_recovered_and_applied() {
 /// The free-built-in half — `recv_type: None` rather than a receiver path.
 #[test]
 fn a_free_builtin_stored_in_an_enum_field_is_recovered_and_applied() {
-    let src = format!("{} (run-naming (op::naming symbol->string) (quote x))", OP_ENUM);
+    let src = format!("(use std::symbol::symbol->string) {} (run-naming (op::naming symbol->string) (quote x))", OP_ENUM);
     assert_str(eval_ok(&src));
 }
 

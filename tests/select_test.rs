@@ -99,7 +99,7 @@ fn check_err(src: &str) -> String {
 fn a_ready_receive_arm_wins() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan) (defun main () string
                  (let ((a (the Chan<int> (Chan::new 1)))
                        (b (the Chan<int> (Chan::new 0))))
                    (send a 7)
@@ -117,7 +117,7 @@ fn a_ready_receive_arm_wins() {
 fn a_ready_send_arm_wins() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan) (defun main () string
                  (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<string> (Chan::new 1))))
                    (let ((r (select
@@ -135,7 +135,7 @@ fn a_ready_send_arm_wins() {
 fn else_runs_when_nothing_is_ready() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan) (defun main () string
                  (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<int> (Chan::new 0))))
                    (select
@@ -153,7 +153,7 @@ fn else_runs_when_nothing_is_ready() {
 fn without_else_it_waits() {
     assert_eq!(
         int(
-            r#"(defun feed ((ch Chan<int>)) () (send ch 42) ())
+            r#"(use std::sync::Chan) (defun feed ((ch Chan<int>)) () (send ch 42) ())
                (defun main () int
                  (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<int> (Chan::new 0))))
@@ -173,7 +173,7 @@ fn without_else_it_waits() {
 fn the_arm_that_wakes_it_is_the_one_that_runs() {
     assert_eq!(
         text(
-            r#"(defun feed ((ch Chan<string>)) () (send ch "second") ())
+            r#"(use std::sync::Chan) (defun feed ((ch Chan<string>)) () (send ch "second") ())
                (defun main () string
                  (let ((a (the Chan<string> (Chan::new 0)))
                        (b (the Chan<string> (Chan::new 0))))
@@ -193,7 +193,7 @@ fn the_arm_that_wakes_it_is_the_one_that_runs() {
 fn a_parked_send_arm_is_taken_by_a_receiver() {
     assert_eq!(
         text(
-            r#"(defvar (trail string) "")
+            r#"(use std::sync::Chan std::thread::yield) (defvar (trail string) "")
                (defun taker ((ch Chan<int>)) ()
                  (setf trail (append trail (to-string (unwrap (recv ch)))))
                  ())
@@ -218,7 +218,7 @@ fn a_parked_send_arm_is_taken_by_a_receiver() {
 fn a_closed_channel_makes_its_receive_arm_ready() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan) (defun main () string
                  (let ((a (the Chan<int> (Chan::new 0)))
                        (b (the Chan<int> (Chan::new 0))))
                    (close a)
@@ -240,7 +240,7 @@ fn a_closed_channel_makes_its_receive_arm_ready() {
 fn every_operand_is_evaluated_once_in_order() {
     assert_eq!(
         text(
-            r#"(defvar (trail string) "")
+            r#"(use std::sync::Chan) (defvar (trail string) "")
                (defun note ((tag string) (n int)) int
                  (setf trail (append trail tag))
                  n)
@@ -282,7 +282,7 @@ fn else_alone_is_refused() {
 #[test]
 fn else_must_be_last() {
     let e = check_err(
-        r#"(defun main () int
+        r#"(use std::sync::Chan) (defun main () int
              (let ((a (the Chan<int> (Chan::new 0))))
                (select (:else 1) ((v (recv a)) 2))))"#,
     );
@@ -293,7 +293,7 @@ fn else_must_be_last() {
 #[test]
 fn the_arms_types_are_joined() {
     let e = check_err(
-        r#"(defun main () int
+        r#"(use std::sync::Chan) (defun main () int
              (let ((a (the Chan<int> (Chan::new 0)))
                    (b (the Chan<int> (Chan::new 0))))
                (select ((v (recv a)) 1) ((v (recv b)) "two"))))"#,
@@ -313,7 +313,7 @@ fn a_non_channel_is_refused_by_name() {
 #[test]
 fn a_send_arms_value_is_checked() {
     let e = check_err(
-        r#"(defun main () int
+        r#"(use std::sync::Chan) (defun main () int
              (let ((a (the Chan<int> (Chan::new 1))))
                (select ((send a "x") 1))))"#,
     );
@@ -328,7 +328,7 @@ fn a_send_arms_value_is_checked() {
 fn a_timeout_arm_wins_when_nothing_else_comes() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Chan std::sync::after) (defun main () string
                  (let ((a (the Chan<int> (Chan::new 0))))
                    (select
                      ((v (recv a)) "data")
@@ -346,7 +346,7 @@ fn a_timeout_arm_wins_when_nothing_else_comes() {
 /// can stop — and the answer comes back as one `(ARM . VALUE)` cons.
 #[test]
 fn compiled_select_agrees_with_the_interpreter() {
-    let src = r#"(defun feed ((ch Chan<int>) (n int)) () (send ch n) ())
+    let src = r#"(use std::sync::Chan) (defun feed ((ch Chan<int>) (n int)) () (send ch n) ())
                  (defun pick ((a Chan<int>) (b Chan<string>)) string
                    (select
                      ((v (recv a)) (format false "a=~a" v))
@@ -378,7 +378,7 @@ fn compiled_select_agrees_with_the_interpreter() {
 /// the site tags it. `f64` is the case that has to *allocate* to do so.
 #[test]
 fn a_compiled_send_arm_carries_a_float() {
-    let src = r#"(defun offer ((b Chan<f64>)) string
+    let src = r#"(use std::sync::Chan) (defun offer ((b Chan<f64>)) string
                    (select ((send b 2.5) "ok")))
                  (defun main () string
                    (let ((f (the Chan<f64> (Chan::new 1))))
@@ -393,7 +393,7 @@ fn a_compiled_send_arm_carries_a_float() {
 /// across it.
 #[test]
 fn a_compiled_arm_body_may_suspend() {
-    let src = r#"(defun feed ((ch Chan<int>) (n int)) () (send ch n) ())
+    let src = r#"(use std::sync::Chan) (defun feed ((ch Chan<int>) (n int)) () (send ch n) ())
                  (defun relay ((a Chan<int>) (out Chan<int>)) int
                    (select ((v (recv a)) (send out (* (unwrap v) 2)) (unwrap v))))
                  (defun main () int
@@ -414,7 +414,7 @@ fn a_compiled_arm_body_may_suspend() {
 fn a_parked_select_holds_its_operands_through_gc_stress() {
     assert_eq!(
         text_stressed(
-            r#"(defun feed ((ch Chan<string>) (n int)) ()
+            r#"(use std::sync::Chan) (defun feed ((ch Chan<string>) (n int)) ()
                  (dotimes (i n) (send ch (append "v" (to-string i))))
                  (close ch)
                  ())

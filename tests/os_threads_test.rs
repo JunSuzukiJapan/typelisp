@@ -72,13 +72,13 @@ fn same_on_one_and_four_threads(name: &str, source: &str, code: i32, stdout: &st
 fn a_mutex_counts_every_increment_from_eight_tasks() {
     same_on_one_and_four_threads(
         "threads_mutex",
-        r#"(defun bump ((m Mutex<int>) (wg WaitGroup) (times int)) ()
+        r#"(use std::sync::Mutex std::sync::with-lock) (defun bump ((m Mutex<int>) (wg std::sync::WaitGroup) (times int)) ()
              (dotimes (i times)
                (with-lock (n m) (setf n (+ n 1))))
              (done wg))
            (defun main () int
              (let ((m (the Mutex<int> (Mutex::new 0)))
-                   (wg (the WaitGroup (WaitGroup::new))))
+                   (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
                (add wg 8)
                (dotimes (i 8) (task (bump m wg 10000)))
                (wait wg)
@@ -98,7 +98,7 @@ fn a_mutex_counts_every_increment_from_eight_tasks() {
 fn tasks_allocating_on_every_thread_survive_collections() {
     same_on_one_and_four_threads(
         "threads_gc",
-        r#"(defstruct pair (a int) (b string))
+        r#"(use std::repl::heap-info std::sync::Chan) (defstruct pair (a int) (b string))
            (defun build ((n int)) Option<Sexpr>
              (let ((acc (the Option<Sexpr> ())))
                (dotimes (i n) (setf acc (sexpr-cons (quote x) acc)))
@@ -138,7 +138,7 @@ fn tasks_allocating_on_every_thread_survive_collections() {
 fn values_crossing_a_channel_survive_collections() {
     same_on_one_and_four_threads(
         "threads_chan_gc",
-        r#"(defun build ((n int)) Option<Sexpr>
+        r#"(use std::sync::Chan) (defun build ((n int)) Option<Sexpr>
              (let ((acc (the Option<Sexpr> ())))
                (dotimes (i n) (setf acc (sexpr-cons (quote x) acc)))
                acc))
@@ -147,13 +147,13 @@ fn values_crossing_a_channel_survive_collections() {
                (loop (if (sexpr-null c)
                          (return k)
                          (progn (setf k (+ k 1)) (setf c (sexpr-cdr c)))))))
-           (defun produce ((ch Chan<Option<Sexpr>>) (wg WaitGroup) (n int)) ()
+           (defun produce ((ch Chan<Option<Sexpr>>) (wg std::sync::WaitGroup) (n int)) ()
              (dotimes (i 300) (send ch (build n)))
              (done wg))
-           (defun close-when-done ((wg WaitGroup) (ch Chan<Option<Sexpr>>)) () (wait wg) (close ch))
+           (defun close-when-done ((wg std::sync::WaitGroup) (ch Chan<Option<Sexpr>>)) () (wait wg) (close ch))
            (defun main () int
              (let ((ch (the Chan<Option<Sexpr>> (Chan::new 4)))
-                   (wg (the WaitGroup (WaitGroup::new))))
+                   (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
                (add wg 4)
                (dotimes (i 4) (task (produce ch wg (+ 100 i))))
                (task (close-when-done wg ch))
@@ -176,19 +176,19 @@ fn values_crossing_a_channel_survive_collections() {
 fn a_pipeline_with_select_and_after_gives_the_same_answer() {
     same_on_one_and_four_threads(
         "threads_pipeline",
-        r#"(defun numbers ((out Chan<int>) (n int)) ()
+        r#"(use std::sync::Chan std::sync::after) (defun numbers ((out Chan<int>) (n int)) ()
              (dotimes (i n) (send out i))
              (close out))
-           (defun square ((in Chan<int>) (out Chan<int>) (wg WaitGroup)) ()
+           (defun square ((in Chan<int>) (out Chan<int>) (wg std::sync::WaitGroup)) ()
              (loop (match (recv in)
                      ((none) (break))
                      ((some v) (send out (* v v)))))
              (done wg))
-           (defun close-when-done ((wg WaitGroup) (ch Chan<int>)) () (wait wg) (close ch))
+           (defun close-when-done ((wg std::sync::WaitGroup) (ch Chan<int>)) () (wait wg) (close ch))
            (defun main () int
              (let ((a (the Chan<int> (Chan::new 0)))
                    (b (the Chan<int> (Chan::new 8)))
-                   (wg (the WaitGroup (WaitGroup::new))))
+                   (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
                (task (numbers a 1000))
                (add wg 3)
                (dotimes (i 3) (task (square a b wg)))
@@ -216,7 +216,7 @@ fn a_pipeline_with_select_and_after_gives_the_same_answer() {
 fn a_panic_in_a_task_stops_the_program_from_any_thread() {
     let err = same_on_one_and_four_threads(
         "threads_panic",
-        r#"(defun boom ((n int)) int
+        r#"(use std::sync::Chan) (defun boom ((n int)) int
              (progn (sleep 0.01) (if (> n 0) (panic "boom in a task") n)))
            (defun main () int
              (let ((never (the Chan<int> (Chan::new 0))))
@@ -235,7 +235,7 @@ fn a_panic_in_a_task_stops_the_program_from_any_thread() {
 fn a_deadlock_is_reported_with_workers_idle() {
     let err = same_on_one_and_four_threads(
         "threads_deadlock",
-        r#"(defun stuck ((ch Chan<int>)) int (unwrap (recv ch)))
+        r#"(use std::sync::Chan) (defun stuck ((ch Chan<int>)) int (unwrap (recv ch)))
            (defun main () int
              (let ((ch (the Chan<int> (Chan::new 0))))
                (let ((t (task (stuck ch))))
@@ -252,7 +252,7 @@ fn a_deadlock_is_reported_with_workers_idle() {
 fn tasks_started_by_an_initialiser_are_there_for_main() {
     same_on_one_and_four_threads(
         "threads_defvar",
-        r#"(defun count-to ((n int)) int
+        r#"(use std::thread::Task) (defun count-to ((n int)) int
              (let ((acc 0)) (dotimes (i n) (setf acc (+ acc i))) acc))
            (defvar (big Task<int>) (task (count-to 100000)))
            (defvar (small Task<int>) (task (count-to 1000)))
@@ -298,7 +298,7 @@ fn a_thread_count_that_is_not_one_is_refused() {
 fn tasks_report_the_os_thread_they_ran_on() {
     let exe = compile(
         "threads_current_id",
-        r#"(defun work-then-report ((out Chan<int>)) ()
+        r#"(use std::sync::Chan std::thread::Thread) (defun work-then-report ((out Chan<int>)) ()
              (let ((acc 0))
                (dotimes (i 20000) (setf acc (+ acc (mod i 7))))
                (send out (Thread::current-id))))
@@ -330,7 +330,7 @@ fn tasks_report_the_os_thread_they_ran_on() {
 fn a_thread_runs_on_an_os_thread_of_its_own() {
     same_on_one_and_four_threads(
         "threads_own_thread",
-        r#"(defun whoami () int (Thread::current-id))
+        r#"(use std::thread::Task std::thread::Thread) (defun whoami () int (Thread::current-id))
            (defun main () int
              (let* ((me (Thread::current-id))
                     (th (thread (whoami)))
@@ -375,7 +375,7 @@ fn join_answers_with_the_result_every_time_it_is_asked() {
 fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
     same_on_one_and_four_threads(
         "threads_blocking_ffi",
-        r#"(defffi (c-usleep "usleep") (u32) i32)
+        r#"(use std::sync::Chan) (defffi (c-usleep "usleep") (u32) i32)
            (defun sleeper ((done Chan<()>)) int
              (progn (unsafe (c-usleep (as u32 500000))) (send done ()) 1))
            (defun echo ((in Chan<int>) (out Chan<int>)) ()
@@ -405,7 +405,7 @@ fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
 fn a_thread_can_start_tasks_and_send() {
     same_on_one_and_four_threads(
         "threads_start_tasks_from_thread",
-        r#"(defun double-into ((out Chan<int>) (n int)) () (send out (* 2 n)))
+        r#"(use std::sync::Chan) (defun double-into ((out Chan<int>) (n int)) () (send out (* 2 n)))
            (defun fan-out ((out Chan<int>) (n int)) int
              (progn (dotimes (i n) (task (double-into out i))) n))
            (defun main () int
@@ -425,7 +425,7 @@ fn a_thread_can_start_tasks_and_send() {
 fn a_panic_on_a_thread_stops_the_program() {
     let err = same_on_one_and_four_threads(
         "threads_thread_panic",
-        r#"(defun boom () int (panic "boom on a thread"))
+        r#"(use std::sync::Chan) (defun boom () int (panic "boom on a thread"))
            (defun main () int
              (let ((never (the Chan<int> (Chan::new 0))))
                (thread (boom))

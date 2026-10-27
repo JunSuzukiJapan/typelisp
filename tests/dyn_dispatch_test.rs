@@ -560,7 +560,7 @@ fn an_impl_for_one_instantiation_covers_only_that_instantiation() {
 fn a_where_bound_is_checked_against_a_trait_object() {
     let same = "(defun same<T> ((a T) (b T)) bool (:where (Eq T)) (equals a b))\n";
     let err = common::check_err(&format!(
-        "{}(match (as-dyn-error (parse-int \"x\")) ((ok _) false) ((err e) (same e e)))",
+        "(use std::error::as-dyn-error std::num::parse-int) {}(match (as-dyn-error (parse-int \"x\")) ((ok _) false) ((err e) (same e e)))",
         same
     ));
     assert!(err.contains("type `:dyn Error` does not implement trait `std::cmp::Eq`"), "{}", err);
@@ -569,7 +569,7 @@ fn a_where_bound_is_checked_against_a_trait_object() {
     assert!(err.contains("type `()` does not implement trait `std::cmp::Eq`"), "{}", err);
     // Its own trait is a bound it meets.
     assert_eq!(
-        eval_string("(match (as-dyn-error (parse-int \"x\")) ((ok _) \"\") ((err e) (describe-error e)))"),
+        eval_string("(use std::error::as-dyn-error std::error::describe-error std::num::parse-int) (match (as-dyn-error (parse-int \"x\")) ((ok _) \"\") ((err e) (describe-error e)))"),
         "parse-int: invalid integer literal: \"x\""
     );
 }

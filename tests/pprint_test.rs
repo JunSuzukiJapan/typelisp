@@ -257,7 +257,7 @@ fn pprint_accepts_any_type_not_only_lists() {
 #[test]
 fn a_logical_block_collects_ordinary_print_calls() {
     let out = stdout_of(
-        r#"
+        r#"(use std::fmt::pprint-list-exhausted) 
         (setf *print-right-margin* 24)
         (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
           (loop (pprint-exit-if-list-exhausted)

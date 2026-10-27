@@ -54,7 +54,7 @@ fn same_on_one_and_four_threads(name: &str, source: &str, code: i32, stdout: &st
 fn an_interpreted_task_runs_on_the_interpreter_s_thread() {
     same_on_one_and_four_threads(
         "typl_interpreted_task",
-        r#"(defun whoami () int (Thread::current-id))
+        r#"(use std::thread::Task std::thread::Thread) (defun whoami () int (Thread::current-id))
            (let* ((me (Thread::current-id))
                   (tasks (the Vector<Task<int>> (Vector::new)))
                   (elsewhere 0))
@@ -73,7 +73,7 @@ fn an_interpreted_task_runs_on_the_interpreter_s_thread() {
 /// whose answer depends on the thread count.
 #[test]
 fn compiled_tasks_run_on_workers_and_a_thread_on_its_own() {
-    let source = r#"(defun work-then-report ((out Chan<int>)) ()
+    let source = r#"(use std::sync::Chan std::thread::Thread) (defun work-then-report ((out Chan<int>)) ()
                       (let ((acc 0))
                         (dotimes (i 20000) (setf acc (+ acc (mod i 7))))
                         (send out (Thread::current-id))))
@@ -112,7 +112,7 @@ fn compiled_tasks_run_on_workers_and_a_thread_on_its_own() {
 fn a_compiled_task_that_needs_the_interpreter_moves_to_its_thread() {
     same_on_one_and_four_threads(
         "typl_needs_main",
-        r#"(defun work ((cb (fn (int) int))) int
+        r#"(use std::sync::after std::thread::Task std::thread::Thread) (defun work ((cb (fn (int) int))) int
              (let ((acc 0))
                (dotimes (i 20000) (setf acc (+ acc (mod i 7))))
                (let* ((v (cb 41))
@@ -138,7 +138,7 @@ fn a_compiled_task_that_needs_the_interpreter_moves_to_its_thread() {
 fn a_dyn_call_to_an_interpreted_method_moves_the_task_too() {
     same_on_one_and_four_threads(
         "typl_needs_main_dyn",
-        r#"(deftrait Answer () (answer ((self Self)) int))
+        r#"(use std::thread::Task std::thread::Thread) (deftrait Answer () (answer ((self Self)) int))
            (defstruct fixed (n int))
            (impl Answer fixed (answer ((self Self)) int (+ self::n (Thread::current-id))))
            (defun ask ((a :dyn Answer)) int (- (answer a) (Thread::current-id)))
@@ -161,7 +161,7 @@ fn a_dyn_call_to_an_interpreted_method_moves_the_task_too() {
 fn a_parked_task_keeps_the_body_it_is_in_across_a_recompile() {
     same_on_one_and_four_threads(
         "typl_recompile_parked",
-        r#"(defun slow () int (sleep 0.2) 1)
+        r#"(use std::thread::Task) (defun slow () int (sleep 0.2) 1)
            (defun start () Task<int> (task (slow)))
            (compile start)
            (defvar (pending Task<int>) (start))

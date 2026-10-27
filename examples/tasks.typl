@@ -2,6 +2,7 @@
 ;; send their squares back on the results channel.
 ;; タスクとチャネル: 2つのワーカータスクが jobs チャネルから数を受け取り、
 ;; 2乗した結果を results チャネルに送り返す。
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)

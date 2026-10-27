@@ -10,6 +10,7 @@
 ;; パースの失敗は種類の違うエラーが Result<T, :dyn Error> の1本にまとまって返る。
 ;; このファイルには :dyn Shape という型名が一度も出てこない点にも注目 ── シーンの
 ;; 型は parse-scene の戻り型から推論されるので、駆動側は図形の存在すら知らずに済む。
+(use std::error::as-dyn-error std::num::parse-int)
 (use canvas::make-canvas)
 (use canvas::render)
 (use shapes::parse-scene)

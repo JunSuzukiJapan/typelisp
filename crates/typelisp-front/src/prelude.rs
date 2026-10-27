@@ -4926,6 +4926,13 @@ user-visible capacity."
 (pub defstruct string-input-stream (h i32))
 (pub defstruct string-output-stream (h i32))
 (pub defstruct standard-stream (h i32)))
+;; A stream's handle is the library's own: a program reaches a stream through
+;; its functions. These two are for a test that looks at the layer under them
+;; — the output a standard stream sends to a capture, the position a string
+;; stream's handle is at.
+(module %internal
+(pub defun standard-stream-of ((h i32)) standard-stream (make-instance 'standard-stream :h h))
+(pub defun string-input-handle ((s string-input-stream)) i32 s::h))
 
 ;; A stream prints the way SBCL prints one: its type, what it is attached to
 ;; (`for "file /tmp/a.txt"`, `for "standard output"`, a socket's addresses)
@@ -7601,6 +7608,10 @@ user-visible capacity."
 (pub defstruct Context (done-ch Chan<()>) (cancelled Mutex<bool>) (children Vector<Context>) (parent Option<Context>)))
 (module %internal (pub defun context-child ((parent Option<Context>)) Context
   (make-instance 'Context :done-ch (the Chan<()> (Chan::new 0)) :cancelled (Mutex::new false) :children (the Vector<Context> (Vector::new)) :parent parent)))
+;; How many contexts made from `c` are still attached to it: a cancelled one
+;; leaves its parent, so the list does not grow with every child ever made.
+;; Nothing outside the library reads `children`; a test of that leaving does.
+(module %internal (pub defun context-child-count ((c Context)) int (len c::children)))
 (module sync
 (impl Context
   (pub background () Context (std::%internal::context-child (Option::none)))

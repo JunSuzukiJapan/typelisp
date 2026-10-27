@@ -77,7 +77,7 @@ fn check_error(src: &str) -> String {
 fn stdout_of(src: &str) -> String {
     eval_string(&format!(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *standard-output* (make-instance 'standard-stream :h *cap*))\n\
+         (setf *standard-output* (%internal::standard-stream-of *cap*))\n\
          {}\n\
          (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
         src
@@ -99,14 +99,14 @@ fn temp_path(name: &str) -> std::path::PathBuf {
 fn heap_info_reports_a_consistent_arena() {
     assert_eq!(
         eval_string(
-            "(let ((i (heap-info)))\n\
+            "(use std::repl::heap-info) (let ((i (heap-info)))\n\
                (format false \"~d\" (- i::capacity (+ i::live i::free))))"
         ),
         "0"
     );
     // The arena the prelude was loaded into is not empty, and the collector
     // has run: both are facts about any session that got this far.
-    assert_eq!(eval_string("(let ((i (heap-info))) (format false \"~a\" (> i::live 0)))"), "true");
+    assert_eq!(eval_string("(use std::repl::heap-info) (let ((i (heap-info))) (format false \"~a\" (> i::live 0)))"), "true");
 }
 
 /// CL's `room` prints and returns nothing. The default report is the two
@@ -136,7 +136,7 @@ fn room_prints_a_report_and_returns_nothing() {
 fn the_collection_counter_is_an_int() {
     assert_eq!(
         eval_string(
-            "(let ((i (heap-info)))\n\
+            "(use std::repl::heap-info) (let ((i (heap-info)))\n\
                (format false \"~a\" (>= (+ i::gc-count (the int 0)) (the int 0))))"
         ),
         "true"
@@ -146,7 +146,7 @@ fn the_collection_counter_is_an_int() {
 /// `room` is an ordinary function, so a `defun` that calls it compiles.
 #[test]
 fn room_compiles() {
-    let (h, v) = eval("(defun live-cells () int (let ((i (heap-info))) i::live))\n(compile live-cells)");
+    let (h, v) = eval("(use std::repl::heap-info) (defun live-cells () int (let ((i (heap-info))) i::live))\n(compile live-cells)");
     assert!(matches!(v, Value::Bool(true)), "expected the compile to succeed, got {:?}", v);
     drop(h);
 }
@@ -309,7 +309,7 @@ fn ed_without_an_editor_variable_is_an_error() {
 /// an editor opened on line 0 of nothing.
 #[test]
 fn ed_on_a_builtin_says_there_is_no_file() {
-    let msg = check_error("(ed parse-float)");
+    let msg = check_error("(use std::num::parse-float) (ed parse-float)");
     assert!(msg.starts_with("ed: `parse-float` has no source location"), "{}", msg);
 }
 
@@ -378,10 +378,10 @@ fn disassemble_can_print_llvm_ir_instead() {
 fn disassemble_leaves_the_definition_interpreted() {
     let after_disassemble = eval_string(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
+         (setf *trace-output* (%internal::standard-stream-of *cap*))\n\
          (defun f ((n int)) int (+ n 1))\n\
          (defun quiet () () ())\n\
-         (setf *standard-output* (make-instance 'standard-stream :h (%internal::stream-string-output)))\n\
+         (setf *standard-output* (%internal::standard-stream-of (%internal::stream-string-output)))\n\
          (disassemble f)\n\
          (trace f)\n\
          (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",

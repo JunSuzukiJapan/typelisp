@@ -257,7 +257,7 @@ fn an_omitted_optional_argument_is_the_niche_the_callee_matches() {
 /// told by the static type in each case, since the word cannot say.
 #[test]
 fn a_niched_option_still_prints_as_some_and_none() {
-    const DEFS: &str = r#"
+    const DEFS: &str = r#"(use std::num::ParseIntError) 
         (defstruct pair (a Option<int>) (b Option<string>))
         (defstruct gen<T> (v T))
         (defenum shape (circle Option<f64>) (dot))
@@ -316,7 +316,7 @@ fn macroexpand_1_result_uses_the_niche() {
 fn a_traced_call_prints_a_niched_option_by_its_declared_type() {
     let out = eval_string(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
+         (setf *trace-output* (%internal::standard-stream-of *cap*))\n\
          (defun opt ((o Option<int>)) Option<int> (match o ((some n) (Option::some (+ n 1))) ((none) (Option::none))))\n\
          (trace opt)\n\
          (opt (Option::some 5))\n\

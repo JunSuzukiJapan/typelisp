@@ -77,11 +77,11 @@ fn unwrap_or_none() {
 
 #[test]
 fn result_match() {
-    let prog = "(defun unwrap-i ((r Result<int,ParseIntError>)) int \
+    let prog = "(use std::num::ParseIntError) (defun unwrap-i ((r Result<int,ParseIntError>)) int \
                   (match r ((ok v) v) ((err e) (panic \"err\")))) ";
     assert_eq!(eval_ok(&format!("{} (unwrap-i (Result::ok 9))", prog)), Value::Int(9));
     assert_eq!(
-        run(&format!("{} (unwrap-i (Result::err (ParseIntError::ParseIntError \"boom\")))", prog)),
+        run(&format!("(use std::num::ParseIntError) {} (unwrap-i (Result::err (ParseIntError::ParseIntError \"boom\")))", prog)),
         Err(EvalError::Panic("err".into()))
     );
 }

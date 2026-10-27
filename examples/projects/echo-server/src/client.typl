@@ -2,6 +2,7 @@
 ;;
 ;;   typl examples/projects/echo-server/src/client.typl [port]
 
+(use std::env::command-line-args std::net::with-connection std::num::parse-int)
 (defun main () ()
   (let ((args (command-line-args)))
     (let ((port (if (> (len args) 1) (unwrap-or (parse-int (get args 1)) 7777) 7777)))

@@ -17,7 +17,7 @@ fn both(body: &str, expected: &str) {
 #[test]
 fn a_hashset_holds_each_element_once() {
     both(
-        r##"(let ((s (the HashSet<int> (HashSet::new))))
+        r##"(let ((s (the std::collections::HashSet<int> (std::collections::HashSet::new))))
              (let ((added (list (insert s 3) (insert s 1) (insert s 3))))
                (format false "~s ~a ~a ~a ~a ~a"
                  added (contains s 1) (contains s 2) (remove s 1) (remove s 1) (count s))))"##,
@@ -29,7 +29,7 @@ fn a_hashset_holds_each_element_once() {
 #[test]
 fn a_hashset_of_strings_compares_by_content() {
     both(
-        r##"(let ((s (the HashSet<string> (HashSet::new))))
+        r##"(let ((s (the std::collections::HashSet<string> (std::collections::HashSet::new))))
              (insert s "a")
              (insert s (append "a" ""))
              (clear s)
@@ -41,14 +41,14 @@ fn a_hashset_of_strings_compares_by_content() {
 
 #[test]
 fn a_hashset_element_type_must_implement_hash() {
-    let msg = check_err("(defun f () bool (let ((s (the HashSet<f64> (HashSet::new)))) (insert s 1.0)))");
+    let msg = check_err("(use std::collections::HashSet) (defun f () bool (let ((s (the HashSet<f64> (HashSet::new)))) (insert s 1.0)))");
     assert!(msg.contains("hash"), "{}", msg);
 }
 
 #[test]
 fn a_sortedtable_keeps_its_keys_in_order() {
     both(
-        r##"(let ((t (the SortedTable<string,int> (SortedTable::new))))
+        r##"(let ((t (the std::collections::SortedTable<string,int> (std::collections::SortedTable::new))))
              (set t "b" 2) (set t "c" 3) (set t "a" 1) (set t "b" 20)
              (format false "~s ~s ~s ~s ~s"
                (keys t) (values t) (get t "b") (get t "zz") (collect (iter t))))"##,
@@ -59,7 +59,7 @@ fn a_sortedtable_keeps_its_keys_in_order() {
 #[test]
 fn a_sortedtable_remove_and_clear() {
     both(
-        r##"(let ((t (the SortedTable<int,string> (SortedTable::new))))
+        r##"(let ((t (the std::collections::SortedTable<int,string> (std::collections::SortedTable::new))))
              (dotimes (i 5) (set t (- 10 i) (format false "~a" i)))
              (let ((r1 (remove t 8)) (r2 (remove t 8)) (n (count t)) (ks (keys t)))
                (clear t)
@@ -71,7 +71,7 @@ fn a_sortedtable_remove_and_clear() {
 #[test]
 fn a_sortedtable_key_type_must_implement_ord() {
     let msg = check_err(
-        "(defstruct p (x int))\n(defun f () () (let ((t (the SortedTable<p,int> (SortedTable::new)))) (set t (make-instance 'p :x 1) 1)))",
+        "(use std::collections::SortedTable) (defstruct p (x int))\n(defun f () () (let ((t (the SortedTable<p,int> (SortedTable::new)))) (set t (make-instance 'p :x 1) 1)))",
     );
     assert!(msg.contains("Ord"), "{}", msg);
 }
@@ -79,7 +79,7 @@ fn a_sortedtable_key_type_must_implement_ord() {
 #[test]
 fn a_deque_takes_and_gives_at_both_ends() {
     both(
-        r##"(let ((d (the Deque<int> (Deque::new))))
+        r##"(let ((d (the std::collections::Deque<int> (std::collections::Deque::new))))
              (push-back d 1) (push-back d 2) (push-front d 0) (push-front d -1)
              (let ((all (collect (iter d))) (f (front d)) (b (back d)) (g (get d 2)) (out (get d 4)))
                (set d 0 -9)
@@ -94,7 +94,7 @@ fn a_deque_takes_and_gives_at_both_ends() {
 #[test]
 fn a_deque_pops_what_was_pushed_at_the_other_end() {
     both(
-        r##"(let ((d (the Deque<int> (Deque::new))) (a "") (b ""))
+        r##"(let ((d (the std::collections::Deque<int> (std::collections::Deque::new))) (a "") (b ""))
              (dotimes (i 6) (push-front d i))
              (dotimes (i 3) (setf a (format false "~a~a" a (unwrap (pop-back d)))))
              (dotimes (i 3) (push-back d (+ 10 i)))
@@ -106,16 +106,16 @@ fn a_deque_pops_what_was_pushed_at_the_other_end() {
 
 #[test]
 fn setting_past_the_end_of_a_deque_panics() {
-    let msg = common::eval_err("(let ((d (the Deque<int> (Deque::new)))) (push-back d 1) (set d 3 0))");
+    let msg = common::eval_err("(use std::collections::Deque) (let ((d (the Deque<int> (Deque::new)))) (push-back d 1) (set d 3 0))");
     assert!(msg.contains("Deque::set: index 3 is out of range for count 1"), "{}", msg);
 }
 
 #[test]
 fn the_collections_print_their_elements() {
     both(
-        r##"(let ((s (the HashSet<string> (HashSet::new)))
-                  (t (the SortedTable<int,string> (SortedTable::new)))
-                  (d (the Deque<char> (Deque::new))))
+        r##"(let ((s (the std::collections::HashSet<string> (std::collections::HashSet::new)))
+                  (t (the std::collections::SortedTable<int,string> (std::collections::SortedTable::new)))
+                  (d (the std::collections::Deque<char> (std::collections::Deque::new))))
              (insert s "x")
              (set t 2 "b") (set t 1 "a")
              (push-back d #\q) (push-front d #\p)

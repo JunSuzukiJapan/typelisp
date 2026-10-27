@@ -23,17 +23,17 @@ fn run_typl(input: &str) -> i32 {
 
 #[test]
 fn exit_terminates_the_process_with_the_given_code() {
-    assert_eq!(run_typl("(exit 7)\n"), 7);
+    assert_eq!(run_typl("(use std::process::exit) (exit 7)\n"), 7);
 }
 
 #[test]
 fn exit_code_is_truncated_to_a_byte_on_posix() {
     // Process exit codes are a byte on POSIX (`status.code()` already
     // reports the OS's truncated view) — 256 wraps to 0.
-    assert_eq!(run_typl("(exit 256)\n"), 0);
+    assert_eq!(run_typl("(use std::process::exit) (exit 256)\n"), 0);
 }
 
 #[test]
 fn exit_runs_from_inside_an_ordinary_function_body() {
-    assert_eq!(run_typl("(defun boom () int (exit 42)) (boom)\n"), 42);
+    assert_eq!(run_typl("(use std::process::exit) (defun boom () int (exit 42)) (boom)\n"), 42);
 }

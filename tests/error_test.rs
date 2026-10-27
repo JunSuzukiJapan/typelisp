@@ -98,33 +98,33 @@ fn parses_never_type_annotation() {
 
 #[test]
 fn result_ok_infers_from_return_type() {
-    let src = "(defun mk () Result<int,ParseIntError> (Result::ok 1))";
+    let src = "(use std::num::ParseIntError) (defun mk () Result<int,ParseIntError> (Result::ok 1))";
     assert_eq!(ret_of(src, "mk"), Type::Named(Path::builtin(typelisp::mem::wk::RESULT), vec![Type::Int, error_ty()]));
 }
 
 #[test]
 fn result_err_takes_error_value() {
-    let src = "(defun bad () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError \"boom\")))";
+    let src = "(use std::num::ParseIntError) (defun bad () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError \"boom\")))";
     assert_eq!(program(src).expect("check failed").0, "defun");
 }
 
 #[test]
 fn match_result_exhaustive_with_panic_arm() {
     // Unwrapping a Result: the Err arm diverges, so the match has type int.
-    let src = "(defun unwrap-i ((r Result<int,ParseIntError>)) int \
+    let src = "(use std::num::ParseIntError) (defun unwrap-i ((r Result<int,ParseIntError>)) int \
                  (match r ((ok v) v) ((err e) (panic \"unwrap on Err\"))))";
     assert_eq!(ret_of(src, "unwrap-i"), Type::Int);
 }
 
 #[test]
 fn match_result_non_exhaustive_rejected() {
-    let src = "(defun f ((r Result<int,ParseIntError>)) int (match r ((ok v) v)))";
+    let src = "(use std::num::ParseIntError) (defun f ((r Result<int,ParseIntError>)) int (match r ((ok v) v)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
 #[test]
 fn match_result_arms_must_agree() {
-    let src = "(defun f ((r Result<int,ParseIntError>)) int \
+    let src = "(use std::num::ParseIntError) (defun f ((r Result<int,ParseIntError>)) int \
                  (match r ((ok v) v) ((err e) true)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
@@ -203,7 +203,7 @@ fn assert_prelude_type_error(src: &str) {
 fn builtin_errors_implement_the_error_trait() {
     // Each fallible builtin returns its *own* concrete error type, and each
     // one implements `Error` — so the message is read the same way for all.
-    let src = r#"
+    let src = r#"(use std::num::ParseIntError) (use std::num::parse-int) 
         (defun int-msg ((r Result<int,ParseIntError>)) string
           (match r ((ok _) "?") ((err e) (message e))))
         (defun read-msg ((r Result<Option<Sexpr>,ReadError>)) string
@@ -216,7 +216,7 @@ fn builtin_errors_implement_the_error_trait() {
 
 #[test]
 fn a_builtin_error_boxes_into_dyn_error() {
-    let src = r#"
+    let src = r#"(use std::num::ParseFloatError) 
         (defun describe ((e :dyn Error)) string (message e))
         (describe (ParseFloatError::ParseFloatError "bad float"))
     "#;
@@ -287,7 +287,7 @@ fn as_dyn_error_unifies_builtin_and_user_error_types() {
     // The prelude's `as-dyn-error` widens any `Result<T,E>` whose `E`
     // implements `Error` — the point being that both results below end up in
     // the *same* `Result<int, :dyn Error>` type.
-    let src = r#"
+    let src = r#"(use std::error::as-dyn-error std::num::parse-int) 
         (defstruct AppErr (why string))
         (impl Error AppErr
           (message ((self Self)) string self::why)

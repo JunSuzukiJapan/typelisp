@@ -657,7 +657,7 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      ストリームのトレイトと型・標準のストリームを `std::io` へ、ファイルの関数を `std::fs` へ、`HashSet`
      `SortedTable` `Deque` を `std::collections` へ、複素数を `std::num` へ、`string->utf8` などを `std::string` へ
      移した。印字の制御変数の置き場所を答えるのは `types::printer_global`。チェッカーが書き換えで呼ぶ
-     標準ライブラリの関数（`atan2` など）は `std::prelude` の再公開から引く（`Info::offered_fn`）。
+     標準ライブラリの関数（`atan2` など）は `std::prelude` の再公開から引く（`Info::offered_fn`。6e で `Info::library_fn` になり、`std` の取り込みから引く）。
      `time` マクロは雛形が `*trace-output*` を使うので、その定義より後ろに置いた（読む時点で `std::io` が
      まだ無いとパスが読めない）。ABI は 0.3.34。
      `Array` を `std::array` へ移すと、モジュール `array` と型 `Array` が小文字に畳まれて同じ名前になり、
@@ -722,6 +722,30 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `std` に残した（`not` や `identity` と同じ）。これで 6d は済み。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
+     途中。公開する範囲は次の規則にした（2026-10-27、ユーザー決定。Common Lisp の利用者が困らないように、
+     CL で何もせずに使える名前は使えるようにする。`std::seq` は全部公開、印字の制御変数なども CL の名前なら
+     公開）。`registry::prelude_offers` が答える。
+     1. `std` 直下と、`registry::PRELUDE_WHOLE_MODULES`（`primitive` `option` `result` `vec` `iter` `sexpr` `seq`
+        `control` `cmp` `ops`）の定義。
+     2. `registry::PRELUDE_NAMED` に挙げたもの（`Error` `assert` `print-object` と、CL の標準の型に当たる型で
+        綴りが違うもの `HashTable` `Array` `BitVector` `Stream` `InputStream` `OutputStream`、`HashTable` の
+        キーが実装する `Hash`）。
+     3. 名前が CL の `COMMON-LISP` パッケージの外部シンボル（978 個、`cl_symbols.rs`、SBCL から取った）と
+        同じ定義。
+     4. 1〜3 で公開する関数・変数の型に現れる、ライブラリの型（`reexport_std_in_prelude` が足す）。
+     それ以外（`std::net` `std::thread` `std::sync` の大半、`parse-int` `trim` `getenv` `exit` など）は `use` か
+     パスで使う。ライブラリ自身は全部を見る: `std` がライブラリの定義を全部取り込み、`std` の中のモジュールは
+     名前を自分で見つけられなければ `std` の取り込みを読む（リーダーは `SessionNames::read`、チェッカーは
+     `Info::find_named`）。チェッカーが合成する呼び出しの先は公開に関係なく引く（`Info::library_fn`）。
+     `Info::in_scope` は、`pub` の無い定義が見えるのを「同じモジュール」と「標準ライブラリの中どうし」だけに
+     狭めた。テストが標準ライブラリの非公開の中身を見るところは、`std::%internal` の補助
+     （`context-child-count` `standard-stream-of` `string-input-handle`）を通す。
+     このとき直したもの: トレイトとマクロが `use` で取り込めなかった、`:dyn` の知らないトレイトが黙って
+     通っていた、同じ型を 2 度 `use` すると警告が出ていた、構造体を 2 つ `use` すると内部の構成子
+     （`STRUCT_CTOR`）がぶつかっていた、島の組み立てがトップレベルの `use` を受け付けなかった。
+     残り: 型を `use` したときに静的メソッドの名前がぶつかる（`Chan::new` と `WaitGroup::new`）扱い
+     （案: 裸の名前を使ったときだけエラーにする。ユーザーの判断待ち）、利用者向け文書と翻訳。テストは今、
+     ぶつかる組み合わせでは片方をパスで書いている。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。
 8. ダンプ・fasl を 3.6 の形に。
 9. 利用者向け文書（日本語の原本、翻訳）。

@@ -103,10 +103,10 @@ fn the_step_is_the_checkers_own_so_a_bad_call_reports_like_one() {
 #[test]
 fn gensym_takes_a_prefix_and_counts_through_the_counter() {
     // The name starts with a space, which no source can write.
-    assert_eq!(show("(symbol->string (gensym))"), " g0");
-    assert_eq!(show("(symbol->string (gensym \"tmp\"))"), " tmp0");
+    assert_eq!(show("(std::symbol::symbol->string (gensym))"), " g0");
+    assert_eq!(show("(std::symbol::symbol->string (gensym \"tmp\"))"), " tmp0");
     assert_eq!(
-        show("(progn (gensym) (gensym) (symbol->string (gensym)))"),
+        show("(progn (gensym) (gensym) (std::symbol::symbol->string (gensym)))"),
         " g2"
     );
 }
@@ -115,7 +115,7 @@ fn gensym_takes_a_prefix_and_counts_through_the_counter() {
 fn the_counter_is_a_variable_a_program_can_read_and_set() {
     assert_eq!(show("(progn (gensym) *gensym-counter*)"), "1");
     assert_eq!(
-        show("(progn (setf *gensym-counter* 100) (symbol->string (gensym)))"),
+        show("(progn (setf *gensym-counter* 100) (std::symbol::symbol->string (gensym)))"),
         " g100"
     );
 }

@@ -251,12 +251,12 @@ impl Info {
     /// current module without `pub`: only from that module itself. An
     /// enclosing or an enclosed module is another module.
     ///
-    /// Until the standard library is sorted into its own modules
-    /// (`docs/dev/explicit-symbols-plan.md`, stage 6), the library is in
-    /// scope everywhere — its private layer (`%internal`, a stream's handle,
-    /// the built-ins under `HashTable`'s `get`/`set`) included.
+    /// The standard library is written as one body: its modules see each
+    /// other's definitions, `pub` or not — the private layer (`%internal`, a
+    /// stream's handle) included. A module outside it sees only what the
+    /// library makes `pub`.
     pub(super) fn in_scope(&self, item_ns: NsId) -> bool {
-        item_ns == self.ns || crate::types::in_std(item_ns)
+        item_ns == self.ns || (crate::types::in_std(self.ns) && crate::types::in_std(item_ns))
     }
 
     /// Whether an associated function/method `af` of `type_fq` is reachable
@@ -283,7 +283,8 @@ impl Info {
     /// brought in under the name, then what the name means in the module the
     /// symbol belongs to, its definition or its import there (a name a
     /// macro's expansion carried in from the macro's module, or one the
-    /// reader read as the definition `std::prelude` re-exports), then what
+    /// reader read as the definition `std::prelude` re-exports), then, in a
+    /// module of the standard library, what `std` imports under it, then what
     /// `std::prelude` re-exports under it. No enclosing module is consulted: a module sees what it defines and what
     /// it brings in (`docs/dev/explicit-symbols-plan.md`, 3.3).
     ///
@@ -315,8 +316,18 @@ impl Info {
                 }
             }
         }
-        // A member of the vocabulary is read as one symbol in every module,
-        // `std::prelude` too, so it is the key `std::prelude`'s table holds.
+        // A module of the standard library sees the library's definitions as
+        // `std` imports them, offered to every module or not. A member of the
+        // vocabulary is read as one symbol in every module, so it is the key
+        // `std`'s table holds.
+        if crate::types::in_std(here.ns) {
+            if let Some(target) = self.reg.module_at(NsId::STD).and_then(|m| m.aliases.get_sym(sym)) {
+                if let Some(found) = at(target.ns(), target.name_symbol()) {
+                    return Some(found);
+                }
+            }
+        }
+        // Likewise the key `std::prelude`'s table holds.
         let prelude = self.reg.module_at(crate::types::prelude_ns())?;
         prelude.reexports.get_sym(sym)?;
         let target = prelude.aliases.get_sym(sym).expect("a re-export is one of the module's imports");
@@ -344,14 +355,6 @@ impl Info {
     /// definition is a macro, which hides any value further out.
     pub(super) fn resolve_module_value(&self, sym: SymRef) -> Option<ModuleValue> {
         match self.resolve_module_entry(sym)? {
-            (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
-            (_, ModuleEntry::Macro { .. }) => None,
-        }
-    }
-
-    /// [`Self::resolve_module_value`] for a written name ([`Self::module_entry_at`]).
-    pub(super) fn module_value_at(&self, p: &Path) -> Option<ModuleValue> {
-        match self.module_entry_at(p)? {
             (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
             (_, ModuleEntry::Macro { .. }) => None,
         }
@@ -440,12 +443,16 @@ impl Info {
         (path, idx)
     }
 
-    /// The function the standard library offers every module as `name` — for
-    /// a form the checker rewrites into a call of a library function, which
-    /// means the library's whatever the module defines.
-    pub(super) fn offered_fn(&self, name: &str) -> Option<Path> {
-        let prelude = self.reg.module_at(crate::types::prelude_ns())?;
-        let path = *prelude.aliases.get(name)?;
+    /// The standard library's function `name`, as `std` reaches it — for a
+    /// form the checker rewrites into a call of a library function, which
+    /// means the library's whatever the module defines, and whether or not
+    /// `std::prelude` offers it to the module.
+    pub(super) fn library_fn(&self, name: &str) -> Option<Path> {
+        let std_module = self.reg.module_at(NsId::STD)?;
+        let path = match std_module.aliases.get(name) {
+            Some(path) => *path,
+            None => Path::std(name),
+        };
         self.reg.fn_sig(&path).is_some().then_some(path)
     }
 

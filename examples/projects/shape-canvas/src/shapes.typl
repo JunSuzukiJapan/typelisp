@@ -7,6 +7,7 @@
 ;; 見どころは2つ ── (1) 具象型の違う図形を Vector<:dyn Shape> に混ぜ、描画ループの
 ;; たった1つの (paint s cv) が実装ごとに振り分けられる。(2) パースの失敗は種類の
 ;; 違うエラーを Result<T, :dyn Error> の1本にまとめて返す。
+(use std::num::ParseIntError std::num::parse-int)
 (use canvas::canvas)
 (use canvas::plot)
 

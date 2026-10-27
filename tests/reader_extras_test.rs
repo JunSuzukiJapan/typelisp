@@ -21,7 +21,7 @@ use common::is_true;
 /// A `peek-stream` over `text`, which is what `read-delimited-list` and
 /// `read-sexpr` need (they put the terminating character back).
 fn over(text: &str) -> String {
-    format!(r#"(make-peek-stream (as :dyn CharInput (make-string-input-stream "{}")))"#, text)
+    format!(r#"(std::io::make-peek-stream (as :dyn CharInput (make-string-input-stream "{}")))"#, text)
 }
 
 // ---- read-from-string's second value ----------------------------------------
@@ -63,7 +63,7 @@ fn the_returned_index_is_where_the_next_read_begins() {
 #[test]
 fn preserving_whitespace_stops_one_character_earlier() {
     is_true(
-        r#"(match (read-from-string-preserving-whitespace "12 34")
+        r#"(use std::reader::read-from-string-preserving-whitespace) (match (read-from-string-preserving-whitespace "12 34")
              ((ok p) (= (cdr p) 2))
              ((err e) false))"#,
     );
@@ -72,7 +72,7 @@ fn preserving_whitespace_stops_one_character_earlier() {
 #[test]
 fn the_two_forms_read_the_same_datum() {
     is_true(
-        r#"(match (read-from-string "12 34")
+        r#"(use std::reader::read-from-string-preserving-whitespace) (match (read-from-string "12 34")
              ((ok a) (match (read-from-string-preserving-whitespace "12 34")
                        ((ok b) (equal (car a) (car b)))
                        ((err e) false)))
@@ -123,7 +123,7 @@ fn unreadable_text_is_an_err() {
 #[test]
 fn read_sexpr_consumes_the_whitespace_that_ended_the_datum() {
     is_true(
-        r#"(let ((s (make-string-input-stream "1 2")))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "1 2")))
              (progn (read-sexpr s) (equalp (read-char s) (Option::some #\2))))"#,
     );
 }
@@ -131,7 +131,7 @@ fn read_sexpr_consumes_the_whitespace_that_ended_the_datum() {
 #[test]
 fn read_sexpr_preserving_whitespace_leaves_it() {
     is_true(
-        r#"(let ((s (make-string-input-stream "1 2")))
+        r#"(use std::reader::read-sexpr-preserving-whitespace) (let ((s (make-string-input-stream "1 2")))
              (progn (read-sexpr-preserving-whitespace s)
                     (equalp (read-char s) (Option::some #\space))))"#,
     );
@@ -140,7 +140,7 @@ fn read_sexpr_preserving_whitespace_leaves_it() {
 #[test]
 fn only_one_whitespace_character_is_consumed() {
     is_true(
-        r#"(let ((s (make-string-input-stream "1  2")))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "1  2")))
              (progn (read-sexpr s) (equalp (read-char s) (Option::some #\space))))"#,
     );
 }
@@ -148,7 +148,7 @@ fn only_one_whitespace_character_is_consumed() {
 #[test]
 fn a_non_whitespace_terminator_is_left_alone() {
     is_true(
-        r#"(let ((s (make-string-input-stream "1)2")))
+        r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "1)2")))
              (progn (read-sexpr s) (equalp (read-char s) (Option::some #\)))))"#,
     );
 }
@@ -156,7 +156,7 @@ fn a_non_whitespace_terminator_is_left_alone() {
 #[test]
 fn both_stream_forms_read_the_same_datum() {
     is_true(
-        r#"(let ((a (make-string-input-stream "42 x")) (b (make-string-input-stream "42 x")))
+        r#"(use std::reader::read-sexpr std::reader::read-sexpr-preserving-whitespace) (let ((a (make-string-input-stream "42 x")) (b (make-string-input-stream "42 x")))
              (match (read-sexpr a)
                ((ok x) (match (read-sexpr-preserving-whitespace b)
                          ((ok y) (equalp x y))

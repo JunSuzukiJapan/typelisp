@@ -298,6 +298,10 @@ pub static SOURCE: std::sync::LazyLock<String> =
 /// `#%sexpr-cons`/`#%kind-unit` and [`SOURCE`] puts the number in; the
 /// numbers themselves live only in `crate::sexpr_variant`.
 const SOURCE_TEMPLATE: &str = r#"
+;; The library's names this module uses that `std::prelude` does not offer
+;; every module.
+(use std::collections::Scope)
+
 ;; ---------------------------------------------------------------------------
 ;; Forward declarations.
 ;;

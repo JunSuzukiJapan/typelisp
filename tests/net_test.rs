@@ -63,7 +63,7 @@ fn err(src: &str) -> String {
 }
 
 /// A listener on a free loopback port, and its port number.
-const LISTEN: &str = r#"
+const LISTEN: &str = r#"(use std::net::socket-listener std::num::parse-int) 
 (defun port-of ((l socket-listener)) int
   (let ((addr (local-address l)))
     (unwrap (parse-int (substring addr (+ 1 (unwrap (search addr ":"))) (length addr))))))
@@ -71,7 +71,7 @@ const LISTEN: &str = r#"
 
 /// An echo server: one task per connection, each echoing lines until the
 /// client closes.
-const ECHO: &str = r#"
+const ECHO: &str = r#"(use std::net::socket-listener std::net::socket-stream) 
 (defun echo-conn ((c socket-stream)) ()
   (loop
     (match (read-line c)
@@ -89,7 +89,7 @@ const ECHO: &str = r#"
 #[test]
 fn a_line_is_echoed_over_the_loopback() {
     let src = format!(
-        "{LISTEN}{ECHO}
+        "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}{ECHO}
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (echo-serve l 1))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
@@ -106,7 +106,7 @@ fn a_line_is_echoed_over_the_loopback() {
 #[test]
 fn the_compiled_wait_loop_sees_the_same_answers() {
     let src = format!(
-        "{LISTEN}{ECHO}
+        "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}{ECHO}
 (defun round-trip ((port int)) string
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" port))))
     (write-line c \"compiled hello\")
@@ -130,7 +130,7 @@ fn a_task_waiting_on_accept_does_not_stop_the_others() {
     // must keep waking. The counter it advances is the evidence; the
     // connection that finally arrives is made by a third task after it.
     let src = format!(
-        "{LISTEN}
+        "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defvar (ticks int) 0)
 (defun tick ((n int)) ()
   (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
@@ -152,7 +152,7 @@ fn a_task_waiting_on_accept_does_not_stop_the_others() {
 #[test]
 fn a_refused_connection_is_an_error_value() {
     let src = format!(
-        "{LISTEN}
+        "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (let ((port (port-of l)))
     (close l)
@@ -165,7 +165,7 @@ fn a_refused_connection_is_an_error_value() {
 
 #[test]
 fn a_net_error_is_an_error_trait_object() {
-    let src = r#"
+    let src = r#"(use std::error::as-dyn-error std::net::socket-stream std::net::tcp-connect) 
 (defun try-it () Result<socket-stream, :dyn Error>
   (as-dyn-error (tcp-connect "127.0.0.1" 1)))
 (match (try-it)
@@ -180,7 +180,7 @@ fn end_of_input_when_the_peer_closes_and_half_close() {
     // until `none`, then answers with the count — which the client can still
     // read after `shutdown-output`.
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::socket-stream std::net::tcp-connect std::net::tcp-listen std::sync::after) {LISTEN}
 (defun count-lines ((c socket-stream)) ()
   (let ((n 0))
     (loop (match (read-line c) ((some _) (setf n (+ n 1))) ((none) (break))))
@@ -206,7 +206,7 @@ fn end_of_input_when_the_peer_closes_and_half_close() {
 #[test]
 fn the_byte_view_shares_the_connection() {
     let src = format!(
-        "{LISTEN}
+        "(use std::net::byte-stream-of std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-bytes ((l socket-listener)) ()
   (match (accept l)
     ((ok c)
@@ -232,7 +232,7 @@ fn the_byte_view_shares_the_connection() {
 #[test]
 fn a_pushed_back_character_refuses_a_byte_read() {
     let src = format!(
-        "{LISTEN}
+        "(use std::net::byte-stream-of std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-text ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (write-string c \"ab\") (close c))
@@ -254,7 +254,7 @@ fn waiting_on_a_socket_from_a_print_method_is_refused() {
     // it, so a wait that cannot be answered at once is an error — the same
     // rule `sleep` and `recv` follow.
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tcp-listen) {LISTEN}
 (defstruct peeker (l socket-listener))
 (impl print-object peeker
   (print-object ((self Self) (escape bool)) string
@@ -270,7 +270,7 @@ fn waiting_on_a_socket_from_a_print_method_is_refused() {
 
 #[test]
 fn accepting_on_a_closed_listener_is_an_error_value() {
-    let src = r#"
+    let src = r#"(use std::net::tcp-listen) 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
   (close l)
   (match (accept l)
@@ -297,7 +297,7 @@ fn several_clients_are_served_at_once() {
     // Three clients, three server tasks, all parked on their own sockets at
     // some point: `poll` has to wake the right one each time.
     let src = format!(
-        "{LISTEN}{ECHO}
+        "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}{ECHO}
 (defun client ((port int) (name string)) string
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" port))))
     (write-line c name)
@@ -322,7 +322,7 @@ fn several_clients_are_served_at_once() {
 
 #[test]
 fn accept_with_a_timeout_gives_up() {
-    let src = r#"
+    let src = r#"(use std::net::tcp-listen) 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
   (match (accept l :timeout 0.05)
     ((ok c) (progn (close c) "accepted?!"))
@@ -333,7 +333,7 @@ fn accept_with_a_timeout_gives_up() {
 #[test]
 fn a_timed_wait_answers_true_when_data_arrives_first() {
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-late ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
@@ -354,7 +354,7 @@ fn a_timed_wait_answers_true_when_data_arrives_first() {
 #[test]
 fn a_compiled_timed_wait_answers_the_same() {
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-late ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
@@ -378,7 +378,7 @@ fn a_compiled_timed_wait_answers_the_same() {
 
 #[test]
 fn a_timed_wait_does_not_stop_other_tasks() {
-    let src = r#"
+    let src = r#"(use std::net::tcp-listen) 
 (defvar (ticks int) 0)
 (defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
@@ -392,7 +392,7 @@ fn a_timed_wait_does_not_stop_other_tasks() {
 #[test]
 fn connecting_by_name_resolves_on_a_thread() {
     let src = format!(
-        "{LISTEN}{ECHO}
+        "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}{ECHO}
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (echo-serve l 1))
   (let ((c (unwrap (tcp-connect \"localhost\" (port-of l)))))
@@ -407,7 +407,7 @@ fn connecting_by_name_resolves_on_a_thread() {
 
 #[test]
 fn an_unresolvable_name_is_an_error_value_and_others_keep_running() {
-    let src = r#"
+    let src = r#"(use std::net::tcp-connect) 
 (defvar (ticks int) 0)
 (defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
 (task (tick 3))
@@ -419,7 +419,7 @@ fn an_unresolvable_name_is_an_error_value_and_others_keep_running() {
 
 #[test]
 fn a_datagram_goes_from_one_socket_to_another() {
-    let src = r#"
+    let src = r#"(use std::net::udp-bind std::num::parse-int std::string::string->utf8 std::string::utf8->string) 
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))
       (b (unwrap (udp-bind "127.0.0.1" 0))))
   (let ((b-port (unwrap (parse-int (substring (local-address b) (+ 1 (unwrap (search (local-address b) ":"))) (length (local-address b)))))))
@@ -436,7 +436,7 @@ fn a_datagram_goes_from_one_socket_to_another() {
 
 #[test]
 fn recv_from_with_a_timeout_gives_up() {
-    let src = r#"
+    let src = r#"(use std::net::udp-bind) 
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (match (recv-from s :timeout 0.05)
     ((ok d) "a datagram?!")
@@ -446,7 +446,7 @@ fn recv_from_with_a_timeout_gives_up() {
 
 #[test]
 fn utf8_round_trips_and_rejects_garbage() {
-    let src = r#"
+    let src = r#"(use std::string::string->utf8 std::string::utf8->string) 
 (let ((bytes (string->utf8 "aé€😀")))
   (format false "~a ~a ~a"
     (len bytes)
@@ -462,7 +462,7 @@ fn tls_against_a_plain_peer_fails_cleanly() {
     // A listener that never speaks TLS: the handshake must come back as an
     // `Err`, with every other task still running, not hang the program.
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tcp-listen std::net::tls-connect) {LISTEN}
 (defun sink ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (write-line c \"not tls\") (close c))
@@ -484,7 +484,7 @@ fn a_unix_domain_socket_is_the_same_stream() {
     let path = std::env::temp_dir().join(format!("typelisp-net-test-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let src = format!(
-        "{ECHO}
+        "(use std::net::unix-connect std::net::unix-listen) {ECHO}
 (let ((l (unwrap (unix-listen \"{p}\"))))
   (task (echo-serve l 1))
   (let ((c (unwrap (unix-connect \"{p}\"))))
@@ -503,7 +503,7 @@ fn a_unix_domain_socket_is_the_same_stream() {
 
 #[test]
 fn connecting_to_a_missing_unix_socket_is_an_error_value() {
-    let src = r#"
+    let src = r#"(use std::net::unix-connect) 
 (match (unix-connect "/nonexistent/typelisp.sock")
   ((ok c) (progn (close c) "connected?!"))
   ((err e) (if (> (length (message e)) 0) "refused" "")))"#;
@@ -579,7 +579,7 @@ fn a_line_is_echoed_over_tls() {
     // compiled turns of the drain loop must see the same `some interest`.
     let Pki { ca, cert, key, .. } = test_pki();
     let src = format!(
-        "{LISTEN}{ECHO}
+        "(use std::net::tls-connect std::net::tls-listen) {LISTEN}{ECHO}
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (task (echo-serve l 1))
   (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"))))
@@ -600,7 +600,7 @@ fn a_server_that_writes_first_shakes_hands_in_its_write() {
     // greeting must arrive once it is done.
     let Pki { ca, cert, key, .. } = test_pki();
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tls-connect std::net::tls-listen) {LISTEN}
 (defun greet ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (write-line c \"220 ready\") (close c))
@@ -624,7 +624,7 @@ fn an_untrusted_certificate_is_the_clients_error_and_the_servers_socket_error() 
     // there to serve the next client.
     let Pki { cert, key, .. } = test_pki();
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tls-connect std::net::tls-listen) {LISTEN}
 (defvar (server-saw string) \"\")
 (defun serve-one ((l socket-listener)) ()
   (match (accept l)
@@ -653,7 +653,7 @@ fn a_peer_that_goes_away_does_not_panic_the_server() {
     // after that go nowhere and `socket-error` says so, while a clean end
     // of input on a sound connection reports `none`.
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defvar (seen string) \"\")
 (defun talk ((l socket-listener)) ()
   (match (accept l)
@@ -678,7 +678,7 @@ fn a_peer_that_goes_away_does_not_panic_the_server() {
     );
     assert_eq!(text(&src), "broken");
     assert_eq!(text(&format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen std::sync::after) {LISTEN}
 (defun serve-one ((l socket-listener)) ()
   (match (accept l)
     ((ok c) (read-line c) (close c))
@@ -699,7 +699,7 @@ fn a_peer_that_goes_away_does_not_panic_the_server() {
 fn tls_listen_with_bad_files_is_an_error_value() {
     let Pki { cert, key, .. } = test_pki();
     let src = format!(
-        "(match (tls-listen \"127.0.0.1\" 0 \"{key}\" \"{cert}\")
+        "(use std::net::tls-listen) (match (tls-listen \"127.0.0.1\" 0 \"{key}\" \"{cert}\")
   ((ok l) (progn (close l) \"listening?!\"))
   ((err e) (if (> (length (message e)) 0) \"refused\" \"\")))"
     );
@@ -716,7 +716,7 @@ fn mutual_tls_admits_a_client_with_a_certificate_and_refuses_one_without() {
     // with `socket-error` saying why.
     let Pki { ca, cert, key, client_cert, client_key, .. } = test_pki();
     let src = format!(
-        "{LISTEN}{ECHO}
+        "(use std::net::tls-connect std::net::tls-listen) {LISTEN}{ECHO}
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\" :client-ca \"{ca}\"))))
   (task (echo-serve l 2))
   (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"
@@ -744,7 +744,7 @@ fn a_client_certificate_needs_its_key() {
     // before anything is sent.
     let Pki { ca, client_cert, .. } = test_pki();
     let src = format!(
-        "{LISTEN}
+        "(use std::net::tcp-listen std::net::tls-connect) {LISTEN}
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (let ((r (match (tls-connect \"localhost\" (port-of l) :ca-file \"{ca}\" :cert-file \"{client_cert}\")
              ((ok c) (progn (close c) \"connected?!\"))
@@ -764,7 +764,7 @@ fn the_peer_subject_names_both_sides_and_sni_picks_the_certificate() {
     // name gets, and the server can tell which name was asked for.
     let Pki { ca, cert, key, client_cert, client_key, alt_cert, alt_key } = test_pki();
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tls-connect std::net::tls-listen) {LISTEN}
 (defvar (seen string) \"\")
 (defun identify ((l socket-listener) (n int)) ()
   (dotimes (i n)
@@ -805,7 +805,7 @@ fn the_peer_subject_names_both_sides_and_sni_picks_the_certificate() {
 fn adding_a_certificate_for_the_wrong_name_is_an_error_value() {
     let Pki { cert, key, .. } = test_pki();
     let src = format!(
-        "(let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
+        "(use std::net::tls-listen) (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (let ((r (match (tls-add-certificate l \"alt.test\" \"{cert}\" \"{key}\")
              ((ok _) \"added?!\")
              ((err e) (message e)))))
@@ -818,7 +818,7 @@ fn adding_a_certificate_for_the_wrong_name_is_an_error_value() {
 #[test]
 fn socket_options_apply_and_plain_connections_have_no_peer_subject() {
     let src = format!(
-        "{LISTEN}
+        "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun serve-one ((l socket-listener)) ()
   (match (accept l) ((ok c) (read-line c) (close c)) ((err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))

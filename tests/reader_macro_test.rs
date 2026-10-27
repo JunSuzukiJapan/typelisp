@@ -72,7 +72,7 @@ fn repl_stdout(input: &str) -> String {
 }
 
 /// `!x` -> `(not x)`: the smallest macro that actually reads something.
-const BANG: &str = r#"(set-macro-character #\!
+const BANG: &str = r#"(use std::reader::read-sexpr) (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
       ((ok o) (match o
@@ -130,7 +130,7 @@ fn an_unregistered_character_still_reads_as_itself() {
 fn a_macro_character_wins_over_the_built_in_syntax() {
     // `'` normally means `quote`. Registering over it is the whole point of
     // looking in the table *before* the built-in dispatch.
-    let src = r#"(set-macro-character #\'
+    let src = r#"(use std::reader::read-sexpr) (set-macro-character #\'
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s) ((ok o) 99) ((err e) 0))))
 (defvar (n int) 'whatever)
@@ -366,7 +366,7 @@ fn the_readtable_builtins_work_in_a_compiled_executable() {
     std::fs::create_dir_all(&dir).expect("create the aot dir");
     let src_path = dir.join("aot.typl");
     let out_path = dir.join("aot");
-    let src = r#"(defun bang ((s string-input-stream) (c char)) Option<Sexpr>
+    let src = r#"(use std::reader::read-sexpr) (defun bang ((s string-input-stream) (c char)) Option<Sexpr>
   (match (read-sexpr s)
     ((ok o) (match o
               ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))

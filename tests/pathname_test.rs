@@ -42,7 +42,7 @@ impl Drop for TmpDir {
 #[test]
 fn an_absolute_name_splits_into_directory_name_and_type() {
     let v = eval_string(
-        r#"(let ((p (parse-namestring "/usr/local/lib/thing.tar.gz")))
+        r#"(use std::path::pathname-absolute-p) (let ((p (parse-namestring "/usr/local/lib/thing.tar.gz")))
              (format false "~a|~a|~a|~a"
                (directory-namestring p) (pathname-name p) (pathname-type p) (pathname-absolute-p p)))"#,
     );
@@ -53,7 +53,7 @@ fn an_absolute_name_splits_into_directory_name_and_type() {
 #[test]
 fn a_relative_name_stays_relative() {
     let v = eval_string(
-        r#"(let ((p (parse-namestring "a/b/c.txt")))
+        r#"(use std::path::pathname-absolute-p) (let ((p (parse-namestring "a/b/c.txt")))
              (format false "~a|~a" (namestring p) (pathname-absolute-p p)))"#,
     );
     assert_eq!(v, "a/b/c.txt|false");
@@ -149,7 +149,7 @@ fn a_pathname_can_be_used_wherever_a_string_can() {
     let d = TmpDir::new("designator");
     let dir = d.dir();
     let v = eval_string(&format!(
-        r#"(let ((p (merge-pathnames (make-pathname :name "note" :type "txt") "{dir}")))
+        r#"(use std::fs::read-file-string std::fs::write-file-string) (let ((p (merge-pathnames (make-pathname :name "note" :type "txt") "{dir}")))
              (match (write-file-string p "hello")
                ((ok _)
                 (match (read-file-string p)
@@ -165,7 +165,7 @@ fn a_pathname_opens_a_stream_like_a_string_does() {
     let d = TmpDir::new("openstream");
     let dir = d.dir();
     let v = eval_string(&format!(
-        r#"(let ((p (merge-pathnames "out.log" "{dir}")))
+        r#"(use std::fs::open-output std::fs::read-file-lines) (let ((p (merge-pathnames "out.log" "{dir}")))
              (match (open-output p)
                ((ok f) (progn (write-line f "line") (close f)
                               (match (read-file-lines p)
@@ -181,7 +181,7 @@ fn with_open_file_accepts_a_pathname_too() {
     let d = TmpDir::new("withopen");
     let dir = d.dir();
     let v = eval_string(&format!(
-        r#"(let ((p (merge-pathnames "w.txt" "{dir}")))
+        r#"(use std::fs::direction-output std::fs::read-file-string) (let ((p (merge-pathnames "w.txt" "{dir}")))
              (with-open-file (f p direction-output) (write-string f "written"))
              (match (read-file-string p) ((ok s) s) ((err e) (message e))))"#
     ));
@@ -193,7 +193,7 @@ fn rename_can_mix_a_pathname_and_a_string() {
     let d = TmpDir::new("mixrename");
     let dir = d.dir();
     let v = eval_string(&format!(
-        r#"(let ((from (merge-pathnames "a.txt" "{dir}")))
+        r#"(use std::fs::write-file-string) (let ((from (merge-pathnames "a.txt" "{dir}")))
              (match (write-file-string from "x")
                ((ok _)
                 (match (rename-file from "{dir}b.txt")

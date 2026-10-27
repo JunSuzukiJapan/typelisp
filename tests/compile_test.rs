@@ -2858,11 +2858,11 @@ fn a_seeded_stream_agrees_across_the_compile_boundary() {
                        (setf i (+ i 1)))
                      acc))";
     let interpreted = run_with_compiler_and_prelude(&format!(
-        "{draws} (draws (seed-random-state 2024))"
+        "(use std::random::seed-random-state) {draws} (draws (seed-random-state 2024))"
     ))
     .expect("the interpreted draw should succeed");
     let compiled = run_with_compiler_and_prelude(&format!(
-        "{draws} (compile draws) (draws (seed-random-state 2024))"
+        "(use std::random::seed-random-state) {draws} (compile draws) (draws (seed-random-state 2024))"
     ))
     .expect("the compiled draw should succeed");
     assert_eq!(compiled, interpreted, "seed 2024 must name one stream, not one per tier");
@@ -3969,7 +3969,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
 #[test]
 fn compile_match_binds_and_returns_a_sym_payload() {
     let v = eval_string_with_compiler(
-        r#"
+        r#"(use std::symbol::symbol->string) 
         (defun get-sym ((s Option<Sexpr>)) symbol
           (match s ((sym x) x) (_ (panic "not a sym"))))
         (compile get-sym)
@@ -5902,7 +5902,7 @@ fn compile_dispatches_a_result_carrying_a_user_error_type() {
 #[test]
 fn compile_dispatches_a_match_on_a_builtin_error_type() {
     let v = run_readback(
-        r#"
+        r#"(use std::num::ParseIntError) (use std::num::parse-int) 
         (defun classify ((r Result<int,ParseIntError>)) string
           (match r ((ok _) "ok") ((err e) (message e))))
         (compile classify)
@@ -5920,7 +5920,7 @@ fn compile_dispatches_a_match_on_a_builtin_error_type() {
 #[test]
 fn compile_dispatches_message_on_a_dyn_error() {
     let v = run_readback(
-        r#"
+        r#"(use std::num::ParseIntError) 
         (defstruct app-err (why string))
         (impl Error app-err
           (message ((self Self)) string self::why)
@@ -6801,7 +6801,7 @@ fn a_compiled_bit_wise_operation_leaves_no_bits_past_the_length() {
 
 #[test]
 fn a_compiled_function_builds_and_reads_an_error_chain() {
-    let src = "
+    let src = "(use std::error::describe-error std::error::wrap-error) 
         (defun chain () string
           (describe-error (wrap-error \"starting up\" (simple-error \"no such file\"))))
         (compile chain)
@@ -6886,7 +6886,7 @@ fn a_compiled_int_to_char_raises_on_a_bad_code_point() {
 /// arrives at the same answer the interpreter does.
 #[test]
 fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
-    let prog = r#"
+    let prog = r#"(use std::hash::*sxhash-mask*) 
         (defstruct pt (x int) (y int))
         (impl Eq pt
           (equals ((self Self) (other Self)) bool

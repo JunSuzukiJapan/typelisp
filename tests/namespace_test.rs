@@ -349,13 +349,14 @@ fn absolute_path_shadows_local() {
 }
 
 /// A primitive type written as its path, `std::primitive::int`, is the
-/// primitive itself — the same type the bare `int` names — and so is the
-/// error type a fallible built-in reports, written from its module.
+/// primitive itself — the same type the bare `int` names — and the error
+/// type a fallible built-in reports, written with its module, is the type a
+/// `use` of it names.
 #[test]
 fn a_primitive_written_as_its_path_is_the_primitive() {
     assert_eq!(ty_program("(defun f ((x std::primitive::int)) int x) (f 1)"), Type::Int);
     assert_eq!(ty_program("(the std::primitive::string \"a\")"), Type::Str);
-    assert!(program("(defun f ((r Result<int,std::num::ParseIntError>)) Result<int,ParseIntError> r)").is_ok());
+    assert!(program("(use std::num::ParseIntError) (defun f ((r Result<int,std::num::ParseIntError>)) Result<int,ParseIntError> r)").is_ok());
 }
 
 /// A type is reached as a path's first segment only from the module that
@@ -369,4 +370,18 @@ fn a_type_the_library_does_not_offer_is_reached_only_through_a_use() {
     assert!(program("(defun f () llvm-module (%core::llvm-module::create \"m\"))").is_err());
     assert!(program("(defun f () %core::llvm-module (%core::llvm-module::create \"m\"))").is_ok());
     assert!(program("(use %core::llvm-module) (defun f () llvm-module (llvm-module::create \"m\"))").is_ok());
+}
+
+/// A trait is brought in by `use` like a type: its name then names it in a
+/// `:dyn`, a bound and an `impl` of the module that wrote the `use`.
+#[test]
+fn use_brings_in_a_trait() {
+    let src = "(module m (pub deftrait Area () (area ((self Self)) int)))
+               (use m::Area)
+               (defstruct sq (side int))
+               (impl Area sq (area ((self Self)) int (* self::side self::side)))
+               (defun total ((s :dyn Area)) int (area s))
+               (total (make-instance 'sq :side 3))";
+    assert_eq!(ty_program(src), Type::Int);
+    assert!(program("(module m (pub deftrait Area () (area ((self Self)) int))) (defun f ((s :dyn Area)) int 1)").is_err());
 }

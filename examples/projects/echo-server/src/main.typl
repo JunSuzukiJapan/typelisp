@@ -10,6 +10,7 @@
 ;; clients and while clients sit idle, and several clients are served at
 ;; once by tasks that each wait on their own socket.
 
+(use std::env::command-line-args std::net::socket-listener std::net::socket-stream std::net::tcp-listen std::num::parse-int)
 (defun serve ((c socket-stream)) ()
   (println "~a connected" (peer-address c))
   (loop

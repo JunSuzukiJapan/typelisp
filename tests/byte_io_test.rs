@@ -45,7 +45,7 @@ fn tmp(name: &str) -> String {
 fn bytes_written_come_back_in_order() {
     let path = tmp("order");
     is_true(&format!(
-        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
+        r#"(use std::fs::open-binary-input std::fs::open-binary-output) (defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 1) (write-byte s 2) (write-byte s 3) (close s)))
@@ -69,7 +69,7 @@ fn bytes_written_come_back_in_order() {
 fn read_byte_is_none_at_end_of_file() {
     let path = tmp("eof");
     is_true(&format!(
-        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
+        r#"(use std::fs::open-binary-input std::fs::open-binary-output) (defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 9) (close s)))
@@ -88,7 +88,7 @@ fn every_byte_value_survives_the_round_trip() {
     // a multi-byte character if anything were decoding it.
     let path = tmp("range");
     is_true(&format!(
-        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
+        r#"(use std::fs::open-binary-input std::fs::open-binary-output) (defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 0) (write-byte s 128) (write-byte s 255) (close s)))
@@ -108,7 +108,7 @@ fn bytes_and_characters_agree_on_the_same_file() {
     // bytes that are ASCII — the two views are of one file, not two encodings.
     let path = tmp("ascii");
     is_true(&format!(
-        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
+        r#"(use std::fs::open-binary-output std::fs::open-input) (defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 72) (write-byte s 105) (close s)))
@@ -125,7 +125,7 @@ fn bytes_and_characters_agree_on_the_same_file() {
 fn appending_adds_to_what_is_there() {
     let path = tmp("append");
     is_true(&format!(
-        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
+        r#"(use std::fs::direction-append std::fs::open-binary std::fs::open-binary-input std::fs::open-binary-output) (defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 1) (close s)))
@@ -148,7 +148,7 @@ fn appending_adds_to_what_is_there() {
 fn a_value_above_255_is_not_a_byte() {
     let path = tmp("over");
     let e = eval_err(&format!(
-        r#"(match (open-binary-output "{p}")
+        r#"(use std::fs::open-binary-output) (match (open-binary-output "{p}")
              ((ok s) (progn (write-byte s 256) (close s)))
              ((err e) (panic (message e))))"#,
         p = path
@@ -161,7 +161,7 @@ fn a_value_above_255_is_not_a_byte() {
 fn a_negative_value_is_not_a_byte() {
     let path = tmp("neg");
     let e = eval_err(&format!(
-        r#"(match (open-binary-output "{p}")
+        r#"(use std::fs::open-binary-output) (match (open-binary-output "{p}")
              ((ok s) (progn (write-byte s -1) (close s)))
              ((err e) (panic (message e))))"#,
         p = path
@@ -182,7 +182,7 @@ fn a_character_stream_is_not_a_byte_stream() {
 fn a_byte_stream_is_not_a_character_stream() {
     let path = tmp("notchar");
     let e = check_err(&format!(
-        r#"(match (open-binary-input "{p}")
+        r#"(use std::fs::open-binary-input) (match (open-binary-input "{p}")
              ((ok s) (progn (read-char s) ()))
              ((err e) ()))"#,
         p = path
@@ -193,7 +193,7 @@ fn a_byte_stream_is_not_a_character_stream() {
 #[test]
 fn opening_a_missing_file_for_bytes_is_an_ordinary_err() {
     is_true(
-        r#"(match (open-binary-input "/nonexistent/typelisp/byte/path")
+        r#"(use std::fs::open-binary-input) (match (open-binary-input "/nonexistent/typelisp/byte/path")
              ((ok s) (progn (close s) false))
              ((err e) true))"#,
     );
@@ -205,7 +205,7 @@ fn opening_a_missing_file_for_bytes_is_an_ordinary_err() {
 fn a_byte_stream_is_a_stream() {
     let path = tmp("isstream");
     is_true(&format!(
-        r#"(match (open-binary-output "{p}")
+        r#"(use std::fs::open-binary-output) (match (open-binary-output "{p}")
              ((ok s) (let ((open-before (open-stream-p s)))
                        (progn (close s) (and open-before (not (open-stream-p s))))))
              ((err e) (panic (message e))))"#,
@@ -218,7 +218,7 @@ fn a_byte_stream_is_a_stream() {
 fn read_item_is_the_same_operation_as_read_byte() {
     let path = tmp("readitem");
     is_true(&format!(
-        r#"(defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
+        r#"(use std::fs::open-binary-input std::fs::open-binary-output) (defun byte-or ((d int) (o Option<int>)) int (match o ((some b) b) ((none) d)))
            (progn
              (match (open-binary-output "{p}")
                ((ok s) (progn (write-byte s 5) (close s)))
@@ -236,7 +236,7 @@ fn a_generic_function_over_byteinput_accepts_a_binary_file_stream() {
     // The point of the trait layer: a caller writes the bound, not the type.
     let path = tmp("generic");
     is_true(&format!(
-        r#"(defun total<S> ((s S)) int (:where (ByteInput S))
+        r#"(use std::fs::open-binary-input std::fs::open-binary-output std::io::ByteInput) (defun total<S> ((s S)) int (:where (ByteInput S))
              (let ((n (the int 0)))
                (progn (loop (match (read-byte s) ((none) (break)) ((some b) (setf n (+ n b))))) n)))
            (progn

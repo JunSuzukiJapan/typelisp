@@ -1,5 +1,6 @@
 ;; ToDo CLI. Accepts add/list/done/remove/help/quit as commands.
 ;; ToDo CLI。add/list/done/remove/help/quit をコマンドとして受け付ける。
+(use std::num::parse-int)
 (use model::todo-item)
 (use store::add-todo)
 (use store::complete-todo)

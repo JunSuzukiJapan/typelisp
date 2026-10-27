@@ -84,7 +84,7 @@ fn an_item_without_pub_is_private_to_its_module() {
 /// cannot add methods to a standard library type.
 #[test]
 fn a_program_cannot_impl_a_standard_library_type() {
-    for target in ["Vector<T>", "HashSet<T>", "int", "Option<T>"] {
+    for target in ["Vector<T>", "std::collections::HashSet<T>", "int", "Option<T>"] {
         let msg = check_err(&format!("(impl {} (pub twice (self) int 2))", target));
         assert!(msg.contains("is a standard library type"), "{}: {}", target, msg);
     }

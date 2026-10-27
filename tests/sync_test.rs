@@ -73,7 +73,7 @@ fn err(src: &str) -> String {
 fn a_wait_group_waits_for_every_counted_task() {
     assert_eq!(
         int(
-            r#"(defvar (done-count int) 0)
+            r#"(use std::sync::WaitGroup std::thread::yield) (defvar (done-count int) 0)
                (defun work ((wg WaitGroup)) ()
                  (yield)
                  (setf done-count (+ done-count 1))
@@ -96,7 +96,7 @@ fn a_wait_group_waits_for_every_counted_task() {
 fn waiting_on_a_finished_group_returns_at_once() {
     assert_eq!(
         int(
-            r#"(defun main () int
+            r#"(use std::sync::WaitGroup) (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::new))))
                    (add wg 1)
                    (done wg)
@@ -117,7 +117,7 @@ fn waiting_on_a_finished_group_returns_at_once() {
 fn a_finished_group_can_be_used_again() {
     assert_eq!(
         int(
-            r#"(defvar (finished int) 0)
+            r#"(use std::sync::WaitGroup std::thread::yield) (defvar (finished int) 0)
                (defun work ((wg WaitGroup)) ()
                  (yield)
                  (setf finished (+ finished 1))
@@ -143,7 +143,7 @@ fn a_finished_group_can_be_used_again() {
 fn several_tasks_can_wait_on_one_group() {
     assert_eq!(
         int(
-            r#"(defvar (woke int) 0)
+            r#"(use std::sync::WaitGroup std::thread::yield) (defvar (woke int) 0)
                (defun watcher ((wg WaitGroup)) ()
                  (wait wg)
                  (setf woke (+ woke 1))
@@ -168,7 +168,7 @@ fn several_tasks_can_wait_on_one_group() {
 #[test]
 fn one_done_too_many_panics() {
     let e = err(
-        r#"(defun main () ()
+        r#"(use std::sync::WaitGroup) (defun main () ()
              (let ((wg (the WaitGroup (WaitGroup::new))))
                (add wg 1)
                (done wg)
@@ -182,7 +182,7 @@ fn one_done_too_many_panics() {
 #[test]
 fn a_negative_add_panics() {
     let e = err(
-        r#"(defun main () ()
+        r#"(use std::sync::WaitGroup) (defun main () ()
              (let ((wg (the WaitGroup (WaitGroup::new))))
                (add wg -1)))
            (main)"#,
@@ -195,7 +195,7 @@ fn a_negative_add_panics() {
 fn wait_is_shared_with_the_task_handle() {
     assert_eq!(
         int(
-            r#"(defun answer () int 42)
+            r#"(use std::sync::WaitGroup) (defun answer () int 42)
                (defun main () int
                  (let ((wg (the WaitGroup (WaitGroup::new)))
                        (t1 (task (answer))))
@@ -215,7 +215,7 @@ fn wait_is_shared_with_the_task_handle() {
 fn a_mutex_keeps_a_read_modify_write_whole() {
     assert_eq!(
         int(
-            r#"(defun bump ((m Mutex<int>) (wg WaitGroup)) ()
+            r#"(use std::sync::Mutex std::sync::with-lock std::thread::yield) (defun bump ((m Mutex<int>) (wg std::sync::WaitGroup)) ()
                  (with-lock (n m)
                    (let ((seen n))
                      (yield)
@@ -223,7 +223,7 @@ fn a_mutex_keeps_a_read_modify_write_whole() {
                  (done wg))
                (defun main () int
                  (let ((m (the Mutex<int> (Mutex::new 0)))
-                       (wg (the WaitGroup (WaitGroup::new))))
+                       (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
                    (add wg 4)
                    (dotimes (i 4) (task (bump m wg)))
                    (wait wg)
@@ -240,7 +240,7 @@ fn a_mutex_keeps_a_read_modify_write_whole() {
 fn the_alias_is_a_place() {
     assert_eq!(
         int(
-            r#"(defun main () int
+            r#"(use std::sync::Mutex std::sync::with-lock) (defun main () int
                  (let ((m (the Mutex<int> (Mutex::new 5))))
                    (with-lock (n m) (setf n (* n 3)))
                    (with-lock (n m) n)))
@@ -256,7 +256,7 @@ fn the_alias_is_a_place() {
 fn the_lock_is_released_when_the_body_throws() {
     assert_eq!(
         int(
-            r#"(defun main () int
+            r#"(use std::sync::Mutex std::sync::with-lock) (defun main () int
                  (let ((m (the Mutex<int> (Mutex::new 1))))
                    (catch 'out (with-lock (n m) (throw 'out 9)))
                    ;; Still lockable: the cleanup put the token back.
@@ -272,7 +272,7 @@ fn the_lock_is_released_when_the_body_throws() {
 fn the_lock_is_released_on_a_static_exit() {
     assert_eq!(
         int(
-            r#"(defun leave ((m Mutex<int>)) int
+            r#"(use std::sync::Mutex std::sync::with-lock) (defun leave ((m Mutex<int>)) int
                  (with-lock (n m) (return-from leave 3))
                  0)
                (defun main () int
@@ -289,7 +289,7 @@ fn the_lock_is_released_on_a_static_exit() {
 #[test]
 fn unlocking_an_unlocked_mutex_panics() {
     let e = err(
-        r#"(defun main () ()
+        r#"(use std::sync::Mutex) (defun main () ()
              (let ((m (the Mutex<int> (Mutex::new 1))))
                (unlock m)))
            (main)"#,
@@ -304,7 +304,7 @@ fn unlocking_an_unlocked_mutex_panics() {
 fn the_expansion_does_not_capture_the_bodys_names() {
     assert_eq!(
         int(
-            r#"(defun main () int
+            r#"(use std::sync::Mutex std::sync::with-lock) (defun main () int
                  (let ((m (the Mutex<int> (Mutex::new 4)))
                        (g 100)
                        (tmp 20))
@@ -321,7 +321,7 @@ fn the_expansion_does_not_capture_the_bodys_names() {
 fn the_mutex_expression_is_evaluated_once() {
     assert_eq!(
         int(
-            r#"(defvar (calls int) 0)
+            r#"(use std::sync::Mutex std::sync::with-lock) (defvar (calls int) 0)
                (defun the-mutex ((m Mutex<int>)) Mutex<int>
                  (setf calls (+ calls 1))
                  m)
@@ -341,7 +341,7 @@ fn the_mutex_expression_is_evaluated_once() {
 fn a_mutex_can_hold_a_heap_value() {
     assert_eq!(
         text(
-            r#"(defun main () string
+            r#"(use std::sync::Mutex std::sync::with-lock) (defun main () string
                  (let ((m (the Mutex<string> (Mutex::new "a"))))
                    (with-lock (s m) (setf s (append s "b")))
                    (with-lock (s m) (append s "!"))))
@@ -358,7 +358,7 @@ fn a_mutex_can_hold_a_heap_value() {
 /// compiled code too.
 #[test]
 fn compiled_bodies_agree_with_the_interpreter() {
-    let src = r#"(defun bump ((m Mutex<int>) (wg WaitGroup)) ()
+    let src = r#"(use std::sync::Mutex std::sync::with-lock std::thread::yield) (defun bump ((m Mutex<int>) (wg std::sync::WaitGroup)) ()
                    (with-lock (n m)
                      (let ((seen n))
                        (yield)
@@ -366,7 +366,7 @@ fn compiled_bodies_agree_with_the_interpreter() {
                    (done wg))
                  (defun main () int
                    (let ((m (the Mutex<int> (Mutex::new 0)))
-                         (wg (the WaitGroup (WaitGroup::new))))
+                         (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
                      (add wg 4)
                      (dotimes (i 4) (task (bump m wg)))
                      (wait wg)
@@ -383,12 +383,12 @@ fn compiled_bodies_agree_with_the_interpreter() {
 fn the_sync_types_survive_gc_stress() {
     assert_eq!(
         int_stressed(
-            r#"(defun bump ((m Mutex<string>) (wg WaitGroup)) ()
+            r#"(use std::sync::Mutex std::sync::with-lock) (defun bump ((m Mutex<string>) (wg std::sync::WaitGroup)) ()
                  (with-lock (s m) (setf s (append s "x")))
                  (done wg))
                (defun main () int
                  (let ((m (the Mutex<string> (Mutex::new "")))
-                       (wg (the WaitGroup (WaitGroup::new))))
+                       (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
                    (add wg 5)
                    (dotimes (i 5) (task (bump m wg)))
                    (wait wg)

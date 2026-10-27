@@ -176,7 +176,7 @@ fn the_island_rewrites_only_at_level_one_and_up() {
 #[test]
 fn the_flag_names_one_of_four_levels() {
     let dir = scratch("flag");
-    let file = write(&dir, "prog.typl", "(println \"~a\" (command-line-args))\n");
+    let file = write(&dir, "prog.typl", "(use std::env::command-line-args) (println \"~a\" (command-line-args))\n");
     for bad in ["-O4", "-O", "-Os"] {
         let (code, _, err) = output(typl().arg(bad).arg(&file));
         assert_eq!(code, 1, "{}", bad);

@@ -5,12 +5,16 @@
 mod common;
 use common::{eval_string, eval_string_compiled};
 
+/// What `std::prelude` does not offer and the cases use: `Context`, `Chan`
+/// and `after` are `std::sync`'s, `yield` `std::thread`'s.
+const USES: &str = "(use std::sync::Chan std::sync::Context std::sync::after std::thread::yield)";
+
 /// `body` (a `string`-valued expression), interpreted and inside a compiled
 /// function, both expected to give `expected`.
 fn both(body: &str, expected: &str) {
-    let interpreted = eval_string(body);
+    let interpreted = eval_string(&format!("{}\n{}", USES, body));
     assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("(defun go () string {})\n(compile go)\n(go)", body));
+    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", USES, body));
     assert_eq!(compiled, expected, "compiled: {}", body);
 }
 
@@ -68,7 +72,7 @@ fn a_cancelled_child_leaves_its_parent() {
     both(
         r##"(let* ((root (Context::background)) (a (Context::with-cancel root)) (b (Context::with-cancel root)))
              (cancel a)
-             (format false "~a ~a" (len root::children) (is-cancelled b)))"##,
+             (format false "~a ~a" (std::%internal::context-child-count root) (is-cancelled b)))"##,
         "1 false",
     );
 }
@@ -124,5 +128,5 @@ fn a_thread_polling_is_cancelled_stops() {
   (format false "~a" (join th)))
 "##;
     // `thread` compiles its body, so this needs the compiler loaded.
-    assert_eq!(eval_string_compiled(src), "1");
+    assert_eq!(eval_string_compiled(&format!("{}\n{}", USES, src)), "1");
 }

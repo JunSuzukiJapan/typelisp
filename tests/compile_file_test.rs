@@ -1644,7 +1644,7 @@ fn an_aot_executable_initializes_the_preludes_globals() {
 /// a local zone and a file owner all had to come back for it to be 0.
 #[test]
 fn the_system_information_builtins_run_in_an_executable() {
-    let src = r#"
+    let src = r#"(use std::time::internal-time-seconds std::time::timezone-daylight-p std::time::timezone-offset-seconds) 
 (defun main () int
   (let ((host (is-some (machine-instance)))
         (rel (is-some (software-version)))
@@ -1754,7 +1754,7 @@ fn sleep_in_a_standalone_executable_stops_only_its_task() {
 fn channels_and_select_run_in_a_standalone_executable() {
     let (code, err) = compile_and_capture(
         "chan_aot",
-        r#"(defun producer ((ch Chan<int>)) ()
+        r#"(use std::sync::Chan) (defun producer ((ch Chan<int>)) ()
              (send ch 1) (send ch 2) (close ch) ())
            (defun drain ((ch Chan<int>)) int
              (let ((acc 0))
@@ -1802,7 +1802,7 @@ fn a_long_compiled_loop_runs_in_a_standalone_executable() {
 fn a_defvar_initialiser_may_make_a_channel_in_a_standalone_executable() {
     let (code, err) = compile_and_capture(
         "defvar_chan_aot",
-        r#"(defvar (ch Chan<int>) (Chan::new 2))
+        r#"(use std::sync::Chan) (defvar (ch Chan<int>) (Chan::new 2))
            (defun main () int
              (progn (send ch 5)
                     (match (recv ch)
@@ -1835,7 +1835,7 @@ fn a_defvar_initialiser_may_wait_in_a_standalone_executable() {
 fn a_print_object_method_may_use_a_channel_in_a_standalone_executable() {
     let (code, out, err) = compile_and_capture_with(
         "po_chan_aot",
-        r##"(defstruct point (x int) (y int))
+        r##"(use std::sync::Chan) (defstruct point (x int) (y int))
            (impl point
   (print-object (self (escape bool)) string
                (let ((ch (the Chan<int> (Chan::new 1))))
@@ -1856,7 +1856,7 @@ fn a_print_object_method_may_use_a_channel_in_a_standalone_executable() {
 fn a_print_object_method_that_would_block_is_refused_not_aborted() {
     let (code, _, err) = compile_and_capture_with(
         "po_chan_block_aot",
-        r#"(defstruct probe (ch Chan<int>))
+        r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
            (impl probe
   (print-object (self (escape bool)) string
                (format false "<~a>" (recv self::ch))))
@@ -1875,7 +1875,7 @@ fn a_print_object_method_that_would_block_is_refused_not_aborted() {
 fn a_deadlocked_standalone_executable_says_so() {
     let (code, _, err) = compile_and_capture_with(
         "deadlock_aot",
-        r#"(defun main () int
+        r#"(use std::sync::Chan) (defun main () int
              (let ((ch (the Chan<int> (Chan::new 0))))
                (progn (recv ch) 0)))"#,
         &[],
@@ -1896,7 +1896,7 @@ fn an_echo_server_runs_in_a_standalone_executable() {
 
     let exe = compile_only(
         "echo_aot",
-        r#"(defun serve ((c socket-stream)) int
+        r#"(use std::env::command-line-args std::net::socket-stream std::net::tcp-listen std::num::parse-int) (defun serve ((c socket-stream)) int
              (loop
                (match (read-line c)
                  ((none) (break))
@@ -1979,7 +1979,7 @@ fn an_eval_carrying_program_runs_main_once_and_never_at_compile_time() {
     let src_path = dir.join("aot_eval_trailing_main.typl");
     let out_path = dir.join("aot_eval_trailing_main");
     let source = format!(
-        r#"
+        r#"(use std::fs::direction-append) 
         (defun main () ()
           (match (with-open-file (o "{}" direction-append) (write-string o "x"))
             ((ok _) ())

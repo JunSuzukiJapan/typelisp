@@ -23,6 +23,7 @@
 ;; else: the server keeps serving. To require client certificates instead,
 ;; give `tls-listen` a `:client-ca` (see `serve-tls` below).
 
+(use std::env::command-line-args std::net::NetError std::net::socket-listener std::net::socket-stream std::net::tcp-listen std::net::tls-listen std::num::parse-int)
 (use http::read-request)
 (use http::write-response)
 (use http::text-response)

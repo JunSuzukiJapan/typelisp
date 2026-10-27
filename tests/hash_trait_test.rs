@@ -69,7 +69,7 @@ fn a_chars_hash_is_its_code_point() {
 
 #[test]
 fn a_user_type_can_implement_hash() {
-    let src = "
+    let src = "(use std::hash::*sxhash-mask*) 
         (defstruct point (x int) (y int))
         (impl Eq point (equals ((self Self) (other Self)) bool
           (and (= self::x other::x) (= self::y other::y))))
@@ -174,7 +174,7 @@ fn size_reports_the_occupancy() {
 
 /// The `point` from `a_key_type_the_table_cannot_hold_is_a_type_error`, with
 /// the two impls that make it a key.
-const POINT: &str = r#"
+const POINT: &str = r#"(use std::hash::*sxhash-mask*) 
     (defstruct point (x int) (y int))
     (impl Eq point
       (equals ((self Self) (other Self)) bool

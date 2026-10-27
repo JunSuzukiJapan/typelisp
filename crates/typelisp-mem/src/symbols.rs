@@ -1176,6 +1176,11 @@ impl SymTable {
         found
     }
 
+    /// Whether `ns` is `std` or a module inside it.
+    fn within_std(&self, ns: NsId) -> bool {
+        std::iter::successors(Some(ns), |m| self.nodes[m.0 as usize].parent).any(|m| m == NsId::STD)
+    }
+
     fn path(&self, ns: NsId) -> Vec<String> {
         let mut segs = Vec::new();
         let mut cur = Some(ns);
@@ -1537,7 +1542,8 @@ impl SessionNames {
     /// What the name `name`, written in `ns`, reads as: a member of the fixed
     /// vocabulary `ns` holds under it, what a `(shadow ...)` in `ns` made its
     /// own, or what a `use` in `ns` brought in under it; else what the standard library offers every module under it
-    /// ([`Self::export`]); else [`intern_in`]'s symbol.
+    /// ([`Self::export`]); else, in a module of the standard library, what
+    /// `std` imports under it; else [`intern_in`]'s symbol.
     ///
     /// Any other symbol `ns`'s table holds under the name was made by reading
     /// it there earlier, which is no reason for it to stand in front of the
@@ -1552,6 +1558,16 @@ impl SessionNames {
             }
             if let Some(sym) = self.exports.get(name) {
                 return *sym;
+            }
+            // A module of the standard library reads the library's names as
+            // `std` imports them, offered to every module or not: the library
+            // is written against all of itself.
+            if ns != NsId::STD && t.within_std(ns) {
+                if let Some(local) = t.lookup(NsId::STD, name) {
+                    if let Some(Import::Item(sym) | Import::Type(sym)) = self.imports.get(&(NsId::STD, local)) {
+                        return *sym;
+                    }
+                }
             }
         }
         t.read(ns, name)

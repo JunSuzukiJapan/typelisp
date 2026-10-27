@@ -92,7 +92,7 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
 
 #[test]
 fn new_scope_supports_set_then_get() {
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 42)
@@ -103,7 +103,7 @@ fn new_scope_supports_set_then_get() {
 
 #[test]
 fn get_missing_key_returns_none() {
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (match (get s \"missing\") ((some v) v) ((none) -1))))
@@ -113,7 +113,7 @@ fn get_missing_key_returns_none() {
 
 #[test]
 fn push_frame_shadows_the_same_name_in_the_new_top_frame() {
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 1)
@@ -126,7 +126,7 @@ fn push_frame_shadows_the_same_name_in_the_new_top_frame() {
 
 #[test]
 fn pop_frame_reveals_the_shadowed_outer_binding_again() {
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 1)
@@ -140,7 +140,7 @@ fn pop_frame_reveals_the_shadowed_outer_binding_again() {
 
 #[test]
 fn pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (push-frame s)
@@ -155,7 +155,7 @@ fn pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
 fn set_always_writes_into_the_most_recently_pushed_frame() {
     // Two names set in two different frames must both stay visible — `set`
     // never overwrites an outer frame's own slot for a *different* name.
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"a\" 1)
@@ -172,7 +172,7 @@ fn clone_frames_shares_existing_frames_without_copying_their_entries() {
     // A name set *before* `clone-frames` is visible through the clone too —
     // proving the clone shares the original's frames (by reference) rather
     // than starting empty.
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 7)
@@ -187,7 +187,7 @@ fn clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
     // Since `clone-frames` shares (not copies) the underlying frame, a
     // mutation made through the clone — to a name that already lived in a
     // *shared* frame — is visible back through the original too.
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" 1)
@@ -204,7 +204,7 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
     // become visible through the original `Scope` — `clone-frames` makes an
     // independent *list* of frames, even though the frames it starts with
     // are shared.
-    let src = "(defun make-s () Scope<int> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<int> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (let ((s2 (clone-frames s)))
@@ -225,7 +225,7 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
 
 #[test]
 fn heap_scope_set_then_get_roundtrips() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" (quote 42))
@@ -238,7 +238,7 @@ fn heap_scope_set_then_get_roundtrips() {
 
 #[test]
 fn heap_scope_get_missing_key_returns_none() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (match (get s \"missing\") ((some v) 0) ((none) -1))))
@@ -248,7 +248,7 @@ fn heap_scope_get_missing_key_returns_none() {
 
 #[test]
 fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun as-int ((o Option<Option<Sexpr>>)) int
                  (match o
                    ((some v) (sexpr-int v))
@@ -268,7 +268,7 @@ fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
 
 #[test]
 fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (push-frame s)
@@ -281,7 +281,7 @@ fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
 
 #[test]
 fn heap_scope_clone_frames_shares_existing_frames() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" (quote 7))
@@ -295,7 +295,7 @@ fn heap_scope_clone_frames_shares_existing_frames() {
 
 #[test]
 fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (set s \"x\" (quote 1))
@@ -310,7 +310,7 @@ fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both(
 
 #[test]
 fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
                    (let ((s2 (clone-frames s)))
@@ -327,7 +327,7 @@ fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
 /// `EvalError` instead, matching the native path's own behavior.
 #[test]
 fn heap_scope_set_with_every_frame_popped_is_a_catchable_error_not_a_panic() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () ()
                  (let ((s (make-s)))
                    (pop-frame s)
@@ -345,7 +345,7 @@ fn heap_scope_set_with_every_frame_popped_is_a_catchable_error_not_a_panic() {
 /// retrieved handle is visible through the original one.
 #[test]
 fn heap_scope_stores_a_boxed_struct_element_by_reference() {
-    let src = "(defun make-v () Vector<int> (Vector::new))
+    let src = "(use std::collections::Scope) (defun make-v () Vector<int> (Vector::new))
                (defun make-s () Scope<Vector<int>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
@@ -369,7 +369,7 @@ fn heap_scope_stores_a_boxed_struct_element_by_reference() {
 /// Mirrors `hashtable_test.rs`'s `sexpr_values_survive_gc_pressure`.
 #[test]
 fn heap_scope_sexpr_values_survive_gc_pressure() {
-    let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
+    let src = "(use std::collections::Scope) (defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () Option<Sexpr>
                  (let ((s (make-s)))
                    (set s \"keep\" (quote (a b c d e)))

@@ -9,6 +9,7 @@
 
 ;; ---- Messages -----------------------------------------------------------
 
+(use std::char::digit-weight std::net::socket-stream std::net::tcp-connect std::net::tls-connect std::num::parse-int std::string::string->utf8 std::string::trim)
 (pub defstruct header (pub name string) (pub value string))
 
 (pub defstruct request

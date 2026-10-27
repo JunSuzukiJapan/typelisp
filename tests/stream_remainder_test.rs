@@ -71,7 +71,7 @@ fn a_pushed_back_character_counts_as_ready() {
     // would report nothing available when a character is in hand.
     assert_eq!(
         eval_string(
-            r#"(let ((p (make-peek-stream (make-string-input-stream ""))))
+            r#"(use std::io::make-peek-stream) (let ((p (make-peek-stream (make-string-input-stream ""))))
                  (unread-char p #\z)
                  (format false "~a ~a" (listen p) (read-char-no-hang p)))"#
         ),
@@ -198,7 +198,7 @@ fn the_byte_layer_has_the_same_pair() {
     let path = dir.join("bytes.bin");
     let path_str = path.to_string_lossy().replace('\\', "/");
     let src = format!(
-        r#"(match (open-binary-output "{p}")
+        r#"(use std::fs::open-binary-input std::fs::open-binary-output) (match (open-binary-output "{p}")
              ((ok o) (let ((v (the Vector<int> (Vector::new))))
                        (push v 65)
                        (push v 66)

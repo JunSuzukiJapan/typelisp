@@ -21,6 +21,7 @@ pub mod owned_form;
 pub mod read;
 pub mod mem;
 pub mod types;
+pub mod cl_symbols;
 pub mod sexpr_variant;
 pub mod type_key;
 pub mod check;

@@ -74,7 +74,7 @@ fn random_state_copy_replays_the_same_sequence() {
 /// this, which is why a separate entry point exists at all.
 #[test]
 fn the_same_seed_replays_the_same_sequence() {
-    let src = "(defun draws ((s random-state)) int
+    let src = "(use std::random::seed-random-state) (defun draws ((s random-state)) int
                  (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
                      (setf acc (+ (* acc 10) (as int (random 10 s))))
@@ -90,7 +90,7 @@ fn the_same_seed_replays_the_same_sequence() {
 /// `typelisp_rt::seeded_random_state` for why the map is a bijection instead.
 #[test]
 fn neighbouring_seeds_name_different_streams() {
-    let src = "(defun draws ((s random-state)) int
+    let src = "(use std::random::seed-random-state) (defun draws ((s random-state)) int
                  (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
                      (setf acc (+ (* acc 10) (as int (random 10 s))))
@@ -106,7 +106,7 @@ fn neighbouring_seeds_name_different_streams() {
 /// must not be the one degenerate run.
 #[test]
 fn seed_zero_is_not_a_degenerate_stream() {
-    let src = "(defun any-nonzero ((s random-state)) bool
+    let src = "(use std::random::seed-random-state) (defun any-nonzero ((s random-state)) bool
                  (let ((found false) (i 0))
                    (while (< i 20)
                      (when (/= (random 1000 s) 0) (setf found true))
@@ -120,7 +120,7 @@ fn seed_zero_is_not_a_degenerate_stream() {
 /// language hands the shim a sign-extended integer and it is reinterpreted.
 #[test]
 fn a_negative_seed_differs_from_its_absolute_value() {
-    let src = "(defun draws ((s random-state)) int
+    let src = "(use std::random::seed-random-state) (defun draws ((s random-state)) int
                  (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
                      (setf acc (+ (* acc 10) (as int (random 10 s))))
@@ -134,7 +134,7 @@ fn a_negative_seed_differs_from_its_absolute_value() {
 /// replays, like any other.
 #[test]
 fn a_seeded_state_copies_like_any_other() {
-    let src = "(defun draws ((s random-state)) int
+    let src = "(use std::random::seed-random-state) (defun draws ((s random-state)) int
                  (let ((acc (the int 0)) (i 0))
                    (while (< i 9)
                      (setf acc (+ (* acc 10) (as int (random 10 s))))
@@ -244,7 +244,7 @@ fn get_universal_time_is_a_plausible_unix_era_value() {
 fn get_internal_real_time_is_monotonic() {
     // Compared through `internal-time-seconds`, since a reading is a struct
     // of whole seconds and microseconds rather than one number.
-    let src = "(let ((a (internal-time-seconds (get-internal-real-time))))
+    let src = "(use std::time::internal-time-seconds) (let ((a (internal-time-seconds (get-internal-real-time))))
                  (let ((b (internal-time-seconds (get-internal-real-time))))
                    (<= a b)))";
     assert_eq!(eval_ok(src), Value::Bool(true));

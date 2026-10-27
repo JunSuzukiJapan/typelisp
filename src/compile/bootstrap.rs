@@ -422,8 +422,9 @@ fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompileTarget>) ->
             };
             out.push(CompileTarget::Method(type_path, method));
         }
-        // Declares a signature and emits no body of its own.
-        wk::DEFSIGNATURE => {}
+        // Declares a signature, or brings in names: neither emits a body of
+        // its own.
+        wk::DEFSIGNATURE | wk::USE => {}
         _ => {
             return Err(format!(
                 "island: the SOURCE grew a top-level `{}`, which this bootstrap does not know how to emit",
