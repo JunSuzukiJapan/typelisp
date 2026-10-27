@@ -938,21 +938,34 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (module path body...)      ; path は foo または foo::bar のようなセグメント列
 (in-module path)           ; 以降このユニットの末尾まで path の中（module の平たい形）
 (use path...)              ; 関数・型・モジュールをカレント名前空間へエイリアス導入
+(use Type::member)         ; 型の構成子か静的メソッドを 1 つ、裸の名前で使えるようにする
+(use Type::*)              ; 型の構成子と公開された静的メソッドをすべて、裸の名前で使えるようにする
 (pub use path...)          ; 取り込んだ定義を、このモジュールを通るパスからも引けるようにする
 (import path...)           ; use と同じ（CL 互換の綴り）
 (shadowing-import path...) ; 既に埋まっている裸名を承知の上で取る use
 ```
 
 - `module` は名前空間を作る。**型は名前空間ではない**（Rust と同様、型は静的メソッドとメソッドを持つのみ）。
-- `use` で型を導入すると、列挙型の変種と、その型の公開された静的メソッドも裸名で使えるように
-  なる（例: `(use Option)` の後は `some`/`none` を `Option::some`/`Option::none` なしで呼べる）。
+- `(use Type)` で取り込まれるのは、型の名前だけ。列挙型の変種と静的メソッドは
+  `Option::some` や `Chan::new` のように型の名前を通して書く。`(use std::sync::Chan)` の後でも
+  裸の `(new 1)` は、`new` という関数がどこにも定義されていなければエラーになる。
+- 型の構成子と静的メソッドを裸の名前で使うには、`(use std::sync::Chan::new)` のように 1 つずつ
+  取り込むか、`(use Type::*)` で、構成子と公開された静的メソッドをすべて取り込む（構造体の
+  構成子は `make-instance` で作るので含まない）。`pub use` で再公開することはできない。
+- 同じ裸の名前を、別の型から 2 つ取り込むことはできない（`(use std::sync::Chan::* std::sync::WaitGroup::*)`
+  は、どちらにも `new` があるのでエラー）。そのモジュールが定義している関数・グローバル変数・
+  マクロと同じ名前を取り込むのもエラー。承知のうえで置き換えるときは `shadowing-import` を使う。
+- `Option` の `some`/`none` と `Result` の `ok`/`err` は、標準ライブラリがどのモジュールにも
+  公開しているので、`use` しなくても裸の名前で使える（Rust の prelude が `Some`/`None`/`Ok`/`Err`
+  を取り込んでいるのと同じ）。
 - **1 つの名前は 1 つの意味を持つ**。関数・グローバル変数・マクロは 1 つの名前空間に入り、
   同じモジュールで 2 つに同じ名前は付けられない（どの順に定義してもエラー）。CL のように
   関数と変数で名前空間が分かれてはいない。別のモジュールの同じ名前なら、近いほうが見える。
 - 裸名 `n` の解決（呼び出し `(n a ...)` の位置。特殊形の名前はこれより先に決まる）:
   1. ローカル（引数、`let`・`labels`・`macrolet`・`symbol-macrolet` の束縛）
   2. モジュールの名前 `n` がマクロなら、そのマクロ
-  3. `use` した列挙型の変種、`use` した型の静的メソッド
+  3. 構成子と静的メソッド: `use` で取り込んだもの、標準ライブラリが公開する `Sexpr` の構成子
+     （`sym`、`int` など）と `Option`/`Result` の構成子
   4. 第 1 引数の型のメソッド `n`（メソッドは**第 1 引数の型だけ**から探す）
   5. モジュールの名前 `n` が関数かグローバル変数なら、それ（グローバル変数ならその値の関数を呼ぶ）
 
@@ -1329,10 +1342,9 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — **型名**を先頭に置くフィールド分解（struct 専用）。上の構造体の
   パターンと同じ形で書く。例: `(defstruct point (x f64) (y f64))` に対し `(point :x :y)`。
-- 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。`(use EnumType)` 済みで可視な
-  裸の名前として解決される（構成子を呼ぶときと同じ可視性規則）。例: `(defenum color (red) (blue))` の
-  `(use color)` 後に `(red)` `(blue)`。可視な複数 enum で変種名が衝突する場合は曖昧エラーになるため、
-  修飾形 `(EnumType::VariantName ...)` でも書ける（`use` 不要）。
+- 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。スクルーティニーの型の変種として
+  解決される。例: `(defenum color (red) (blue))` の値に対して `(red)` `(blue)`。修飾形
+  `(EnumType::VariantName ...)` でも書ける。
 - `(the Type pattern)` — 型全体でのdowncast（丸ごと束縛）。フィールド分解せず、値をそのまま
   `pattern` へ渡す。可変な struct の同一性を保ったまま取り出せる唯一の書き方であり、`Vector<T>`/
   `HashTable<K,V>` を `Sexpr` から取り出す唯一の手段でもある（両者はフィールド分解形を持たない）。

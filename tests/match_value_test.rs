@@ -267,7 +267,7 @@ fn a_type_without_eq_is_refused_at_the_pattern() {
 fn a_bare_variant_name_is_that_variant() {
     both(
         "(defenum color (red) (blue))\
-         \n(use color)\
+         \n(use color::*)\
          \n(defun f ((c color)) int (match c (red 1) (blue 2)))",
         "(+ (* 10 (f (red))) (f (blue)))",
         12,
@@ -280,7 +280,7 @@ fn a_bare_variant_name_is_that_variant() {
 fn bare_variant_names_count_toward_exhaustiveness() {
     let e = err(
         "(defenum color (red) (blue))\
-         \n(use color)\
+         \n(use color::*)\
          \n(defun f ((c color)) int (match c (red 1)))\
          \n(f (red))",
     );
@@ -307,7 +307,7 @@ fn a_bare_name_for_a_variant_with_fields_is_an_arity_error() {
 fn a_bare_name_that_names_no_variant_is_an_error() {
     let e = err(
         "(defenum color (red) (blue))\
-         \n(use color)\
+         \n(use color::*)\
          \n(defun f ((n int)) int (match n (blues 1)))",
     );
     assert!(e.contains("`blues` is not a variant of `int`"), "{}", e);

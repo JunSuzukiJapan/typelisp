@@ -2,7 +2,7 @@
 ;; token sequence (recursive descent, operator precedence).
 ;; 構文解析: token 列から四則演算+丸括弧の構文木 (expr) を作る
 ;; (再帰下降・演算子優先順位法)。
-(use lexer::token)
+(use lexer::token lexer::token::*)
 
 (pub defenum expr
   (num int)
@@ -11,7 +11,7 @@
   (mul expr expr)
   (div expr expr))
 
-(use expr)
+(use expr::*)
 
 ;; Cursor: the current position in the token sequence. The field is advanced with
 ;; the defstruct setter.

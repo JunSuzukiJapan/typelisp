@@ -6123,7 +6123,7 @@ fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
 const CONFORMANCE_MODULE: &str = r#"
 (module m
   (pub defenum expr (num int) (add expr expr))
-  (use expr)
+  (use expr::*)
   (pub defstruct pt (x int) (y int))
 
   ;; builders — `-i` stays interpreted, `-c` gets compiled below
@@ -6180,7 +6180,7 @@ fn an_enum_value_matches_an_interpreted_inline_match_whichever_side_built_it() {
     // whole, while this `match` sits at top level in the caller's own body.
     for build in ["m::enum-i", "m::enum-c", "m::enum-nested"] {
         let got = conformance_int(&format!(
-            "(use m::expr) (match ({build} 5) ((num v) v) ((add a b) -1))"
+            "(use m::expr m::expr::*) (match ({build} 5) ((num v) v) ((add a b) -1))"
         ));
         assert_eq!(got, 5, "built by {build}");
     }

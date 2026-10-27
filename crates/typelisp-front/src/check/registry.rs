@@ -901,8 +901,15 @@ impl Registry {
         let mut net = Namespace::new(typelisp_mem::StdModule::NET.ns());
         let mut primitive = Namespace::new(typelisp_mem::StdModule::PRIMITIVE.ns());
         let mut core = Namespace::new(NsId::CORE);
-        option.add_type(option_def());
-        result.add_type(result_def());
+        // `Option`'s and `Result`'s constructors are their modules' own
+        // bare names too, which `std::prelude` offers every module, as
+        // Rust's prelude brings in `Some`/`None`/`Ok`/`Err`.
+        let def = option_def();
+        option.register_ctors(&def.name, &def.variants);
+        option.add_type(def);
+        let def = result_def();
+        result.register_ctors(&def.name, &def.variants);
+        result.add_type(def);
         for def in builtin_error_defs() {
             let home = [&mut reader, &mut eval, &mut num, &mut fs, &mut net]
                 .into_iter()
@@ -910,11 +917,11 @@ impl Registry {
                 .expect("a built-in error type's module is one `with_builtins` makes");
             home.add_type(def);
         }
-        // `Sexpr` is the one type whose data constructors (`int`/`str`/...)
-        // are reachable as bare names without a `use` — so `(int 5)` datum
-        // literals stay writable. `Option`/`Result`/the error
-        // types' constructors are `Type::ctor` (or `use`d) only — see
-        // `Checker::check_use`. The one exception is the `cons` variant: its
+        // `Sexpr`'s data constructors (`int`/`str`/...) are reachable as
+        // bare names without a `use` — so `(int 5)` datum
+        // literals stay writable. The error types' constructors are
+        // `Type::ctor` (or `use`d) only — see `Checker::check_use`. The one
+        // exception is the `cons` variant: its
         // bare name is removed here so `(cons a b)` resolves to the free
         // `cons<T,U>` pair function (Symbol/Sexpr redesign Phase 4b), not the
         // `Sexpr` cons cell. Internal `Sexpr` cons construction (`list`/

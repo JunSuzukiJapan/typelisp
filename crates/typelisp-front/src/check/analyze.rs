@@ -857,6 +857,21 @@ enum UseTarget {
     Trait(Path),
     Alias(TypeAlias),
     Module(typelisp_mem::NsId),
+    /// A type's members, brought in bare: the one named (`Option::some`),
+    /// or all of them (`Option::*`, `None` here) — see [`importable_members`].
+    Members(Path, Option<String>),
+}
+
+/// What `(use Type::*)` brings in bare: the type's constructors (but a
+/// struct's, which no source can name) as `(name, Some(variant index))`, and
+/// its public static methods, whether written for every instantiation or for
+/// one, as `(name, None)`: which one a call means is decided at the call
+/// (`Checker::select_method`).
+fn importable_members(def: &AdtDef) -> Vec<(String, Option<usize>)> {
+    let ctors = def.variants.iter().enumerate().filter(|(_, v)| v.name != STRUCT_CTOR).map(|(i, v)| (v.name.clone(), Some(i)));
+    let statics: BTreeMap<&String, &AssocFn> = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter()).collect();
+    let statics = statics.into_iter().filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.clone(), None));
+    ctors.chain(statics).collect()
 }
 
 /// What a written name resolves to — the one rule of
@@ -1476,11 +1491,8 @@ impl Checker {
     /// The one place the warn/error/silent (and "never touch a builtin")
     /// decision actually lives, given only whether the name already in use
     /// is a builtin. [`Self::check_redef`] (the `Definable`-generic path used
-    /// by `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`) and
-    /// `check_use`'s constructor/static-method snapshot (whose tables,
-    /// `Namespace::ctors`/`static_uses`, are plain `(Path, ..)` tuples with
-    /// no `Definable` impl of their own — "builtin" there means "owned by a
-    /// builtin type") both reduce to calling this.
+    /// by `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`) and an
+    /// inherent method's redefinition both reduce to calling this.
     fn check_redef_outcome(&self, kind: &str, name: &str, is_builtin: bool) -> Result<(), Error> {
         if is_builtin {
             return Err(Error::TypeError(format!("cannot redefine built-in {} `{}`", kind, name)));
@@ -8925,60 +8937,17 @@ impl Checker {
                 self.register_use_for_reading(heap, self.info.ns, &syms);
                 forms::use_form(heap, &alias, &target)
             }
-            // A type. Beyond the usual alias (so the bare name also resolves
-            // in a type-annotation position, e.g. `(x Option)` — see
-            // `resolve_type_name`), this snapshots the type's *current*
-            // constructors and public static methods as bare names in the
-            // current namespace — e.g. `(use Option)` makes `some`/`none`
-            // callable bare, exactly like `Option::some`/`Option::none` (see
-            // `check_path_call`, which already treats a variant and a
-            // non-instance `assoc` entry as the same kind of "static member").
+            // A type. The alias also lets the bare name resolve in a
+            // type-annotation position, e.g. `(x Option)` — see
+            // `resolve_type_name`. Only the type's name comes in: its
+            // constructors and static methods are written through it
+            // (`Option::some`, `Chan::new`).
             Some(UseTarget::Type(target)) => {
                 // Unlike `rect::new`, a `use` path's *last* segment is the type
                 // itself — the import names it and nothing else.
                 self.report_import_collision(&bare, target, shadowing)?;
                 self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
                 self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), target);
-                let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
-                // A struct's one constructor has a name no source can write
-                // (`STRUCT_CTOR`), so it is no bare name to bring in.
-                for (i, v) in def.variants.iter().enumerate().filter(|(_, v)| v.name != STRUCT_CTOR) {
-                    let is_builtin = self
-                        .info.cur_ns()
-                        .ctors
-                        .get(&v.name)
-                        .and_then(|(owner, _)| self.info.reg.type_def(owner))
-                        .map(|d| d.builtin)
-                        .unwrap_or(false);
-                    // The same constructor brought in again is no redefinition.
-                    let existing = self.info.cur_ns().ctors.get(&v.name).cloned();
-                    if existing.is_some_and(|e| e != (target, i)) {
-                        self.check_redef_outcome("constructor", &v.name, is_builtin)?;
-                    }
-                    self.info.reg.module_mut(self.info.ns).ctors.insert(v.name.clone(), (target, i));
-                }
-                // Every static method, whether written for every instantiation or
-                // for one: which one a call means is decided at the call
-                // (`Self::select_method`).
-                let statics: BTreeMap<&String, &AssocFn> =
-                    def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter()).collect();
-                for (name, af) in statics {
-                    if af.instance || !af.sig.public {
-                        continue;
-                    }
-                    let is_builtin = self
-                        .info.cur_ns()
-                        .static_uses
-                        .get(name)
-                        .and_then(|(owner, m)| self.info.reg.type_def(owner).and_then(|d| d.assoc.get(m)))
-                        .map(|af| af.builtin)
-                        .unwrap_or(false);
-                    let existing = self.info.cur_ns().static_uses.get(name).cloned();
-                    if existing.is_some_and(|e| e != (target, name.clone())) {
-                        self.check_redef_outcome("static method", name, is_builtin)?;
-                    }
-                    self.info.reg.module_mut(self.info.ns).static_uses.insert(name.clone(), (target, name.clone()));
-                }
                 self.register_use_for_reading(heap, self.info.ns, &syms);
                 forms::use_form(heap, &alias, &target)
             }
@@ -9001,6 +8970,24 @@ impl Checker {
                 self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), a.name);
                 self.register_use_for_reading(heap, self.info.ns, &syms);
                 forms::use_form(heap, &alias, &a.name)
+            }
+            // A type's members: `(use Option::some)` makes `some` callable
+            // bare, exactly like `Option::some`; `(use Option::*)` does so for
+            // every member `importable_members` lists.
+            Some(UseTarget::Members(target, which)) => {
+                if public {
+                    return Err(Error::TypeError(format!(
+                        "pub use: `{}` names a type's members, and only a definition is re-exported",
+                        segs.join("::")
+                    )));
+                }
+                let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
+                let members = importable_members(&def).into_iter().filter(|(name, _)| which.as_ref().is_none_or(|w| w == name));
+                for (name, ctor) in members {
+                    self.import_member(&target, &name, ctor, shadowing)?;
+                }
+                self.register_use_for_reading(heap, self.info.ns, &syms);
+                forms::use_form(heap, &alias, &target)
             }
             // A module alias — `(use std::math)` makes `math` a short name for `std::math`.
             Some(UseTarget::Module(ns)) => {
@@ -9041,6 +9028,22 @@ impl Checker {
     /// file's directory, also inside a `(module ...)` block in it, which has
     /// no directory of its own.
     fn use_target(&self, heap: &Heap, syms: &[typelisp_mem::SymRef]) -> Option<UseTarget> {
+        if let Some(found) = self.use_definition(heap, syms) {
+            return Some(found);
+        }
+        // `Type::member` or `Type::*`.
+        let (last, prefix) = syms.split_last()?;
+        let Some(UseTarget::Type(ty)) = self.use_definition(heap, prefix) else { return None };
+        if last.name() == "*" {
+            return Some(UseTarget::Members(ty, None));
+        }
+        let def = self.info.reg.type_def(&ty)?;
+        let name = last.name();
+        importable_members(def).iter().any(|(m, _)| m == name).then(|| UseTarget::Members(ty, Some(name.to_string())))
+    }
+
+    /// [`Self::use_target`] for a path that names a definition or a module.
+    fn use_definition(&self, heap: &Heap, syms: &[typelisp_mem::SymRef]) -> Option<UseTarget> {
         use typelisp_mem::symbols::PathStep;
         let cur = self.info.ns;
         let spelled: Vec<&str> = syms.iter().map(|s| s.name()).collect();
@@ -9099,6 +9102,42 @@ impl Checker {
         self.info.type_alias_at(p).map(UseTarget::Alias)
     }
 
+    /// Brings the member `name` of the type `target` in bare: a constructor,
+    /// `ctor` its variant index, or a static method. A bare name already
+    /// standing for another type's member, or for a definition of this
+    /// module, is an error, as two `use`s of one name are in Rust: which one
+    /// a call means would depend on the order of the `use`s. `shadowing`
+    /// (`shadowing-import`) replaces the member instead.
+    fn import_member(&mut self, target: &Path, name: &str, ctor: Option<usize>, shadowing: bool) -> Result<(), Error> {
+        let ns = self.info.cur_ns();
+        let held = match (ns.ctors.get(name), ns.static_uses.get(name)) {
+            (Some((owner, i)), _) if ctor != Some(*i) || owner != target => Some(format!("`{}::{}`", owner, name)),
+            (_, Some((owner, _))) if ctor.is_some() || owner != target => Some(format!("`{}::{}`", owner, name)),
+            _ if ns.fns.contains_key(name) || ns.vars.contains_key(name) || ns.macros.contains_key(name) => {
+                Some("a definition of this module".to_string())
+            }
+            _ => None,
+        };
+        if let Some(held) = held.filter(|_| !shadowing) {
+            return Err(Error::TypeError(format!(
+                "use: `{}` already stands for {} here — write `{}::{}`, or say `shadowing-import` to replace it",
+                name, held, target, name
+            )));
+        }
+        let module = self.info.reg.module_mut(self.info.ns);
+        match ctor {
+            Some(i) => {
+                module.static_uses.remove(name);
+                module.ctors.insert(name.to_string(), (*target, i));
+            }
+            None => {
+                module.ctors.remove(name);
+                module.static_uses.insert(name.to_string(), (*target, name.to_string()));
+            }
+        }
+        Ok(())
+    }
+
     /// What a `(use PATH)` written in the module `ns` brings in, registered
     /// in `heap`'s table of names for the forms read after it — the reader's
     /// `use`, once the file behind `path` (if any) is loaded — so they read
@@ -9113,17 +9152,16 @@ impl Checker {
         let mut names = Vec::new();
         match self.use_target(heap, path) {
             Some(UseTarget::Value(target)) => names.push((bare, Import::Item(target.name_symbol()))),
-            Some(UseTarget::Type(target)) => {
-                let ty = target.name_symbol();
-                names.push((bare, Import::Type(ty)));
-                let def = self.info.reg.type_def(&target).expect("resolved type exists");
-                names.extend(def.variants.iter().filter(|v| v.name != STRUCT_CTOR).map(|v| (v.name.clone(), Import::Member(ty))));
-                let statics = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter());
-                names.extend(statics.filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.clone(), Import::Member(ty))));
-            }
+            Some(UseTarget::Type(target)) => names.push((bare, Import::Type(target.name_symbol()))),
             Some(UseTarget::Trait(target)) => names.push((bare, Import::Type(target.name_symbol()))),
             Some(UseTarget::Alias(a)) => names.push((bare, Import::Item(a.name.name_symbol()))),
             Some(UseTarget::Module(m)) => names.push((bare, Import::Module(m))),
+            Some(UseTarget::Members(target, which)) => {
+                let ty = target.name_symbol();
+                let def = self.info.reg.type_def(&target).expect("resolved type exists");
+                let members = importable_members(def).into_iter().filter(|(name, _)| which.as_ref().is_none_or(|w| w == name));
+                names.extend(members.map(|(name, _)| (name, Import::Member(ty))));
+            }
             None => {}
         }
         for (name, what) in names {
@@ -16464,7 +16502,7 @@ impl Checker {
     /// (field-destructuring, its sole `new` variant, index 0 — e.g. `(point
     /// x y)`), a bare enum variant name (resolved exactly like a bare
     /// constructor *expression* is — [`Info::resolve_ctor`], in scope only
-    /// after `(use EnumType)`), or a `::`-qualified enum variant (`(color::
+    /// after `(use EnumType::*)`), or a `::`-qualified enum variant (`(color::
     /// red)`, the escape hatch for a bare-name collision between two
     /// visible enums — the type the path's prefix leads to, the variant
     /// name as the last segment). `None` means the head names neither,
@@ -16502,7 +16540,15 @@ impl Checker {
                         }
                     }
                 }
-                if let Some((adt, idx)) = self.info.resolve_ctor(id) {
+                // `Option`'s and `Result`'s constructors, which the standard
+                // library offers bare, are generic, so no downcast can name
+                // them: against `Option<Sexpr>`, `(some x)` is the
+                // scrutinee's own variant, which the caller matches.
+                let offered_generic = |adt: &Path| {
+                    crate::types::path_is_builtin(adt, typelisp_mem::wk::OPTION)
+                        || crate::types::path_is_builtin(adt, typelisp_mem::wk::RESULT)
+                };
+                if let Some((adt, idx)) = self.info.resolve_ctor(id).filter(|(adt, _)| !offered_generic(adt)) {
                     if !crate::types::path_is_builtin(&adt, typelisp_mem::wk::SEXPR) {
                         let def = self.info.reg.type_def(&adt).expect("resolved ctor's type is registered");
                         no_generics(&adt, def)?;

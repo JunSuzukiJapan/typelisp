@@ -9,7 +9,7 @@
   (tlparen)
   (trparen))
 
-(use token)
+(use token::*)
 
 (defun digit-value ((c char)) int
   (- (char->int c) (char->int #\0)))

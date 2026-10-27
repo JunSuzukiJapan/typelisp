@@ -215,7 +215,7 @@ fn wait_is_shared_with_the_task_handle() {
 fn a_mutex_keeps_a_read_modify_write_whole() {
     assert_eq!(
         int(
-            r#"(use std::sync::Mutex std::sync::with-lock std::thread::yield) (defun bump ((m Mutex<int>) (wg std::sync::WaitGroup)) ()
+            r#"(use std::sync::WaitGroup std::sync::Mutex std::sync::with-lock std::thread::yield) (defun bump ((m Mutex<int>) (wg WaitGroup)) ()
                  (with-lock (n m)
                    (let ((seen n))
                      (yield)
@@ -223,7 +223,7 @@ fn a_mutex_keeps_a_read_modify_write_whole() {
                  (done wg))
                (defun main () int
                  (let ((m (the Mutex<int> (Mutex::new 0)))
-                       (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+                       (wg (the WaitGroup (WaitGroup::new))))
                    (add wg 4)
                    (dotimes (i 4) (task (bump m wg)))
                    (wait wg)
@@ -358,7 +358,7 @@ fn a_mutex_can_hold_a_heap_value() {
 /// compiled code too.
 #[test]
 fn compiled_bodies_agree_with_the_interpreter() {
-    let src = r#"(use std::sync::Mutex std::sync::with-lock std::thread::yield) (defun bump ((m Mutex<int>) (wg std::sync::WaitGroup)) ()
+    let src = r#"(use std::sync::WaitGroup std::sync::Mutex std::sync::with-lock std::thread::yield) (defun bump ((m Mutex<int>) (wg WaitGroup)) ()
                    (with-lock (n m)
                      (let ((seen n))
                        (yield)
@@ -366,7 +366,7 @@ fn compiled_bodies_agree_with_the_interpreter() {
                    (done wg))
                  (defun main () int
                    (let ((m (the Mutex<int> (Mutex::new 0)))
-                         (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+                         (wg (the WaitGroup (WaitGroup::new))))
                      (add wg 4)
                      (dotimes (i 4) (task (bump m wg)))
                      (wait wg)
@@ -383,12 +383,12 @@ fn compiled_bodies_agree_with_the_interpreter() {
 fn the_sync_types_survive_gc_stress() {
     assert_eq!(
         int_stressed(
-            r#"(use std::sync::Mutex std::sync::with-lock) (defun bump ((m Mutex<string>) (wg std::sync::WaitGroup)) ()
+            r#"(use std::sync::WaitGroup std::sync::Mutex std::sync::with-lock) (defun bump ((m Mutex<string>) (wg WaitGroup)) ()
                  (with-lock (s m) (setf s (append s "x")))
                  (done wg))
                (defun main () int
                  (let ((m (the Mutex<string> (Mutex::new "")))
-                       (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+                       (wg (the WaitGroup (WaitGroup::new))))
                    (add wg 5)
                    (dotimes (i 5) (task (bump m wg)))
                    (wait wg)

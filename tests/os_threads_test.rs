@@ -72,13 +72,13 @@ fn same_on_one_and_four_threads(name: &str, source: &str, code: i32, stdout: &st
 fn a_mutex_counts_every_increment_from_eight_tasks() {
     same_on_one_and_four_threads(
         "threads_mutex",
-        r#"(use std::sync::Mutex std::sync::with-lock) (defun bump ((m Mutex<int>) (wg std::sync::WaitGroup) (times int)) ()
+        r#"(use std::sync::WaitGroup std::sync::Mutex std::sync::with-lock) (defun bump ((m Mutex<int>) (wg WaitGroup) (times int)) ()
              (dotimes (i times)
                (with-lock (n m) (setf n (+ n 1))))
              (done wg))
            (defun main () int
              (let ((m (the Mutex<int> (Mutex::new 0)))
-                   (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+                   (wg (the WaitGroup (WaitGroup::new))))
                (add wg 8)
                (dotimes (i 8) (task (bump m wg 10000)))
                (wait wg)
@@ -138,7 +138,7 @@ fn tasks_allocating_on_every_thread_survive_collections() {
 fn values_crossing_a_channel_survive_collections() {
     same_on_one_and_four_threads(
         "threads_chan_gc",
-        r#"(use std::sync::Chan) (defun build ((n int)) Option<Sexpr>
+        r#"(use std::sync::WaitGroup std::sync::Chan) (defun build ((n int)) Option<Sexpr>
              (let ((acc (the Option<Sexpr> ())))
                (dotimes (i n) (setf acc (sexpr-cons (quote x) acc)))
                acc))
@@ -147,13 +147,13 @@ fn values_crossing_a_channel_survive_collections() {
                (loop (if (sexpr-null c)
                          (return k)
                          (progn (setf k (+ k 1)) (setf c (sexpr-cdr c)))))))
-           (defun produce ((ch Chan<Option<Sexpr>>) (wg std::sync::WaitGroup) (n int)) ()
+           (defun produce ((ch Chan<Option<Sexpr>>) (wg WaitGroup) (n int)) ()
              (dotimes (i 300) (send ch (build n)))
              (done wg))
-           (defun close-when-done ((wg std::sync::WaitGroup) (ch Chan<Option<Sexpr>>)) () (wait wg) (close ch))
+           (defun close-when-done ((wg WaitGroup) (ch Chan<Option<Sexpr>>)) () (wait wg) (close ch))
            (defun main () int
              (let ((ch (the Chan<Option<Sexpr>> (Chan::new 4)))
-                   (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+                   (wg (the WaitGroup (WaitGroup::new))))
                (add wg 4)
                (dotimes (i 4) (task (produce ch wg (+ 100 i))))
                (task (close-when-done wg ch))
@@ -176,19 +176,19 @@ fn values_crossing_a_channel_survive_collections() {
 fn a_pipeline_with_select_and_after_gives_the_same_answer() {
     same_on_one_and_four_threads(
         "threads_pipeline",
-        r#"(use std::sync::Chan std::sync::after) (defun numbers ((out Chan<int>) (n int)) ()
+        r#"(use std::sync::WaitGroup std::sync::Chan std::sync::after) (defun numbers ((out Chan<int>) (n int)) ()
              (dotimes (i n) (send out i))
              (close out))
-           (defun square ((in Chan<int>) (out Chan<int>) (wg std::sync::WaitGroup)) ()
+           (defun square ((in Chan<int>) (out Chan<int>) (wg WaitGroup)) ()
              (loop (match (recv in)
                      ((none) (break))
                      ((some v) (send out (* v v)))))
              (done wg))
-           (defun close-when-done ((wg std::sync::WaitGroup) (ch Chan<int>)) () (wait wg) (close ch))
+           (defun close-when-done ((wg WaitGroup) (ch Chan<int>)) () (wait wg) (close ch))
            (defun main () int
              (let ((a (the Chan<int> (Chan::new 0)))
                    (b (the Chan<int> (Chan::new 8)))
-                   (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+                   (wg (the WaitGroup (WaitGroup::new))))
                (task (numbers a 1000))
                (add wg 3)
                (dotimes (i 3) (task (square a b wg)))

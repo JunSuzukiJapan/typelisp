@@ -134,56 +134,77 @@ fn a_module_is_not_re_exported() {
 
 #[test]
 fn builtins_still_resolve() {
-    // `Option`'s constructors are type-scoped (`Option::some`, not a bare
-    // `some`) — see `Registry::add_type`/`Checker::check_use` — but the
-    // type itself, and `Type::ctor` construction, still resolve with no
-    // setup needed.
     assert_eq!(
         ty_program("(Option::some 1)"),
         Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int])
     );
 }
 
+/// The standard library offers `Option`'s and `Result`'s constructors bare,
+/// as Rust's prelude brings in `Some`/`None`/`Ok`/`Err`.
 #[test]
-fn bare_option_constructors_no_longer_resolve() {
-    // The flip side of `builtins_still_resolve`: a bare `some`/`none` is
-    // *not* a free function/global, so it's the "unbound variable" error
-    // path, not the construct-then-typecheck path `Some` used to take.
-    assert!(program("(some 1)").is_err());
-    assert!(program("(none)").is_err());
+fn option_and_result_constructors_are_offered_bare() {
+    assert_eq!(ty_program("(some 1)"), Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int]));
+    assert_eq!(
+        ty_program("(defun f () Option<int> (none)) (f)"),
+        Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int])
+    );
+    assert!(program("(defun f () Result<int,string> (ok 1)) (f)").is_ok());
+    assert!(program(r#"(defun f () Result<int,string> (err "x")) (f)"#).is_ok());
 }
 
 #[test]
-fn bare_result_and_error_constructors_no_longer_resolve() {
-    assert!(program("(ok 1)").is_err());
-    assert!(program(r#"(err (ParseIntError::ParseIntError "x"))"#).is_err());
+fn an_error_types_constructor_is_not_offered_bare() {
     assert!(program(r#"(ParseIntError "x")"#).is_err());
 }
 
-// ---- use Type: snapshotting a type's constructors/static methods bare -----
+// ---- use Type, Type::member, Type::* ----------------------------------------
 
 #[test]
-fn use_option_makes_constructors_callable_bare() {
-    assert_eq!(
-        ty_program("(use Option) (some 1)"),
-        Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int])
-    );
-    // `none` has no fields, so — same limitation as `Option::none` alone,
-    // see `prelude_test.rs`'s comment on this — it needs a declared return
-    // type to seed `T` from; bare `(none)` with no context can't infer it.
-    let src = "(use Option) (defun f () Option<int> (none)) (f)";
-    assert_eq!(ty_program(src), Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int]));
+fn use_of_a_type_brings_in_only_its_name() {
+    // Two types with a static `new` can both be brought in: `new` stays
+    // unbound, and each is written through its type.
+    let src = "(use std::sync::Chan HashTable) (new 1)";
+    assert!(program(src).is_err());
+    let src = "(use std::sync::Chan HashTable) (the Chan<int> (Chan::new 1)) (the HashTable<int,int> (HashTable::new))";
+    if let Err(e) = program(src) {
+        panic!("{}", e);
+    }
+    // A `new` the module defines is the bare name.
+    let src = "(use std::sync::Chan) (defun new ((n int)) int n) (new 1)";
+    assert_eq!(ty_program(src), Type::Int);
+    // So is an enum's variant: only `Type::variant`.
+    assert!(program("(defenum color (red) (blue)) (use color) (red)").is_err());
 }
 
 #[test]
-fn use_hashtable_makes_its_static_new_callable_bare() {
-    // `new` is a static (`instance: false`) associated function, not a
-    // constructor — exercises `Namespace::static_uses`/`resolve_static_use`,
-    // not `ctors`. A declared return type seeds `K`/`V` the same way any
-    // `HashTable::new`/`Vector::new` call needs one (`let`'s binding value
-    // is checked with `expected: None`, so `new` can't be inferred there).
-    let src = "(use HashTable) (defun f () HashTable<int,int> (new)) (f)";
-    assert_eq!(program(src).expect("check failed").0, "expr");
+fn use_of_a_member_brings_in_that_member() {
+    let src = "(use std::sync::Chan std::sync::Chan::new) (the Chan<int> (new 1))";
+    assert!(program(src).is_ok());
+    let src = "(defenum color (red) (blue)) (use color::red) (red)";
+    assert_eq!(ty_program(src), Type::Named(Path::of(&["color"]), vec![]));
+    // The other members stay out.
+    assert!(program("(defenum color (red) (blue)) (use color::red) (blue)").is_err());
+    assert!(program("(defenum color (red) (blue)) (use color::green)").is_err());
+}
+
+#[test]
+fn use_of_every_member_brings_in_the_constructors_and_static_methods() {
+    let src = "(defenum color (red) (blue)) (use color::*) (blue)";
+    assert_eq!(ty_program(src), Type::Named(Path::of(&["color"]), vec![]));
+    let src = "(use std::sync::Chan std::sync::Chan::*) (the Chan<int> (new 1))";
+    assert!(program(src).is_ok());
+}
+
+#[test]
+fn two_types_members_of_one_name_cannot_both_come_in() {
+    let err = program("(use std::sync::Chan::* HashTable::*)").expect_err("two `new`s");
+    assert!(err.to_string().contains("`new` already stands for"), "{}", err);
+    // Replacing one on purpose.
+    let src = "(use std::sync::Chan::*) (shadowing-import HashTable::new) (the HashTable<int,int> (new))";
+    if let Err(e) = program(src) {
+        panic!("{}", e);
+    }
 }
 
 /// A type brought in by `use` is one name wherever a type name is written:
@@ -202,14 +223,14 @@ fn a_used_type_is_the_same_name_in_type_member_position() {
 
 #[test]
 fn use_is_scoped_to_its_own_namespace() {
-    // `use`d inside `m`, `some` stays bare-unresolved at the root.
-    let src = "(module m (use Option) (defun f () Option<int> (some 1))) (some 1)";
+    // `use`d inside `m`, `new` stays bare-unresolved at the root.
+    let src = "(module m (use std::sync::Chan::new) (defun f () Chan<int> (new 1))) (new 1)";
     assert!(program(src).is_err());
 }
 
 #[test]
 fn use_inside_a_module_does_not_leak_to_a_sibling_module() {
-    let src = "(module a (use Option)) (module b (defun f () Option<int> (some 1)))";
+    let src = "(module a (use std::sync::Chan::new)) (module b (defun f () std::sync::Chan<int> (new 1)))";
     assert!(program(src).is_err());
 }
 

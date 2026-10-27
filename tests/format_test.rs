@@ -395,8 +395,8 @@ fn variant_names_resolve_inside_a_nested_structure() {
 
 #[test]
 fn a_bad_arg_type_is_a_static_type_error() {
-    // an Option has no Sexpr encoding, so it can't be a format argument
-    let src = r#"(defun f () string (format false "~a" (some 1)))"#;
+    // a function has no Sexpr encoding, so it can't be a format argument
+    let src = r#"(defun f () string (format false "~a" (lambda ((x int)) int x)))"#;
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();

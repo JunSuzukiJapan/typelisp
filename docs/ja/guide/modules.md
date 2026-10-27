@@ -96,6 +96,8 @@ typl main.typl        # => 25
 (use geometry)              ; モジュールを取り込む。geometry::dist2 と書いて使う
 (use geometry::dist2)       ; 関数を取り込む。dist2 と裸の名前で使える
 (use geometry::point)       ; 型を取り込む。point::new、point::origin、型注釈の point と書ける
+(use geometry::point::new)  ; 型の静的メソッドを取り込む。new と裸の名前で使える
+(use geometry::shape::*)    ; 型の構成子と公開された静的メソッドを、すべて裸の名前で使えるようにする
 (use a::f b::g)             ; 複数をまとめて書ける
 ```
 
@@ -104,7 +106,10 @@ typl main.typl        # => 25
 - モジュールを `use` せずに `geometry::dist2` とフルパスで書いても解決しません。ファイルを読み込む
   きっかけは `use` だけです。
 - 裸の名前が既に埋まっているところへ同じ名前を `use` すると警告が出ます。承知のうえで
-  取り込むときは `shadowing-import` を使います。
+  取り込むときは `shadowing-import` を使います。型の構成子や静的メソッドの場合は、警告では
+  なくエラーです。
+- `(use geometry::point)` で取り込まれるのは型の名前だけです。`point::new` を `new` と書きたい
+  ときは、`(use geometry::point::new)` か `(use geometry::point::*)` を書きます。
 - ディレクトリの中のモジュールは `(use geo::shapes)` と書き、取り込んだ後は最後の部分
   （`shapes::...`）で参照します。
 

@@ -6,7 +6,7 @@
   (leaf)
   (node int tree tree))
 
-(use tree)
+(use tree::*)
 
 (defun insert ((t tree) (x int)) tree
   (match t

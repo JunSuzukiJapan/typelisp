@@ -22,8 +22,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err` なら `f` の結果を返す |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)` を `(ok v)` に、`none` を `(err e)` にする |
 
-構成子は `Option::some`/`Option::none`/`Result::ok`/`Result::err`（または `(use Option)`/
-`(use Result)` で裸名 `some`/`none`/`ok`/`err` も使える）。
+構成子 `some`/`none`/`ok`/`err` は、`use` しなくてもどのモジュールでも裸の名前で使える。
+`Option::some` のように型の名前を付けても書ける。
 
 分岐は `match` で明示するか、上の `map`/`and-then` などでつなぐ。Rust の `?` に当たる構文は無い。
 

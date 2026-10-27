@@ -920,7 +920,7 @@ pub const STD_VOCABULARY: &[u32] = &[
     wk::INT, wk::BIGNUM, wk::RATIO, wk::CHAR, wk::BOOL, wk::STR, wk::ASSOC, wk::SYM, wk::NIL,
     wk::CONS, wk::PATH, wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32,
     wk::REPR_RATIONAL, wk::REPR_RANDOM_STATE, wk::REPR_SEXPR, wk::REPR_SCOPE, wk::REPR_VECTOR,
-    wk::REPR_HASHTABLE,
+    wk::REPR_HASHTABLE, wk::REPR_NONE,
     wk::OPTION, wk::RESULT, wk::SEXPR, wk::VECTOR, wk::HASHTABLE, wk::SCOPE, wk::CHAN, wk::TASK_TYPE,
     wk::THREAD_TYPE, wk::ARRAY, wk::STRING, wk::SYMBOL, wk::PARSE_INT_ERROR, wk::PARSE_FLOAT_ERROR,
     wk::READ_ERROR, wk::EVAL_ERROR, wk::FILE_ERROR, wk::NET_ERROR, wk::LLVM_MODULE, wk::LLVM_FUNCTION,
@@ -943,7 +943,7 @@ pub const CORE_VOCABULARY: &[u32] = &[
     wk::RETIRED_ELSE, wk::SPAWN, wk::TAG, wk::SPAWN_THREAD, wk::PAT_WHEN, wk::INTERNAL_MODULE_NAME,
     wk::ATTRIBUTE, wk::APPLY_INDIRECT, wk::CELLVAR, wk::CELLSET, wk::GLOBAL_INIT, wk::HASHTABLE_OP,
     wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_STRUCT,
-    wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::REPR_NONE, wk::TYPE_NAMED, wk::TYPE_FN,
+    wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::TYPE_NAMED, wk::TYPE_FN,
     wk::TYPE_DYN, wk::TYPE_PTR, wk::TYPE_CSTRUCT, wk::TYPE_PARAM, wk::TYPE_VAR, wk::TYPE_UNIT, wk::TYPE_NEVER,
     wk::TYPE_REF, wk::TYPE_VALUE,
 ];

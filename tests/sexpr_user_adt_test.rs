@@ -193,7 +193,7 @@ fn match_destructures_a_struct_downcast_pattern() {
 fn match_destructures_a_bare_enum_variant_after_use() {
     let v = eval_ok(
         "(defenum color (red) (green) (blue))
-         (use color)
+         (use color::*)
          (match (sexpr-car (list (color::green)))
            ((red) 0)
            ((green) 1)

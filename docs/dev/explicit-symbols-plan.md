@@ -743,9 +743,15 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      このとき直したもの: トレイトとマクロが `use` で取り込めなかった、`:dyn` の知らないトレイトが黙って
      通っていた、同じ型を 2 度 `use` すると警告が出ていた、構造体を 2 つ `use` すると内部の構成子
      （`STRUCT_CTOR`）がぶつかっていた、島の組み立てがトップレベルの `use` を受け付けなかった。
-     残り: 型を `use` したときに静的メソッドの名前がぶつかる（`Chan::new` と `WaitGroup::new`）扱い
-     （案: 裸の名前を使ったときだけエラーにする。ユーザーの判断待ち）。テストと文書は今、
-     ぶつかる組み合わせでは片方をパスで書いている。
+     型の `use` は 2026-10-27 のユーザー決定で Rust に合わせた。`(use Type)` が取り込むのは型の名前だけ。
+     構成子と静的メソッドは `(use Type::member)` で 1 つ、`(use Type::*)` で全部（構造体の構成子を除く）を
+     裸の名前にする（`UseTarget::Members`、`importable_members`）。別の型から同じ裸の名前を取り込むのと、
+     モジュール自身の定義と同じ名前を取り込むのはエラー（`shadowing-import` で置き換える）。`pub use` は
+     できない。Rust の prelude に合わせ、`Option`/`Result` の構成子 `some`/`none`/`ok`/`err` はその
+     モジュールの `ctors` に置き、`std::prelude` がどのモジュールにも公開する。このため `none`
+     （`REPR_NONE`）を `std` の語彙へ移した。`Option<Sexpr>` に対する `(some x)` は型を取り出す
+     パターンの候補にしない（`resolve_sexpr_downcast_ctor`）。
+     残り: `std::prelude` の名前を定義するときの `shadow` の要求。
      利用者向け文書は書き換えた（関数一覧の README に「`use` が要る名前」の表、`syntax.md` の 3.10 に
      標準ライブラリの公開範囲と `pub use`、例のコードに `use`）。表が `prelude_offers` と合っていることは
      `root_names_documented_test` が確かめる。

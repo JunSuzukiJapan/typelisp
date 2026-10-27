@@ -187,7 +187,7 @@ fn a_bare_constructor_is_unresolved_without_use() {
 
 #[test]
 fn use_makes_constructors_bare_callable() {
-    let src = "(defenum Color (Red) (Green) (Blue)) (use Color) (Green)";
+    let src = "(defenum Color (Red) (Green) (Blue)) (use Color::*) (Green)";
     let (variant, _) = eval_enum(src);
     assert_eq!(variant, 1);
 }
