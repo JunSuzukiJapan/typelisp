@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option, Result ve Hata Türleri
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -37,6 +37,7 @@ gibi). `(-> x (f a) (g b))`, `(g (f x a) b)` olur. Parantezsiz bir ad, `h`, `(h 
 alınır. Bir metodun ilk argümanı alıcısıdır; bu yüzden birleştiriciler olduğu gibi zincirlenir:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -109,6 +110,7 @@ Kendi hata türünüz için `Error`'ı gerçekleştirirseniz, yerleşik hatalarl
 alınabilir:
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -127,6 +129,7 @@ Birkaç hata türünü tek bir `Result` içinde toplamak için `Result<T, :dyn E
 dönüşüm açıkça yazılır:
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

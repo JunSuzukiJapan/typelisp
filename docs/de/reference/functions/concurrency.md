@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Tasks und Kanäle
 
 Das Vokabular der Tasks (leichtgewichtigen Threads). `task` und `thread`, die sie starten, und `select`, das
@@ -46,6 +46,7 @@ und wie sich das von Go unterscheidet, steht in
 `make(chan int, 16)` schreibt, schreibt man `(Chan::new 0)` und `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -98,6 +99,7 @@ Aktualisierung verloren, auch wenn die Tasks auf verschiedenen OS-Threads laufen
 ein Werkzeug für dynamisch wachsende Arbeit oder für den Fall, dass man die Handles nicht aufbewahren will.
 
 ```lisp
+(use std::sync::Chan)
 ;; Fan-in: pro Eingabe einen Task starten und sie zusammenführen (diese Sprache hat keine nil-Kanäle)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -126,6 +128,7 @@ Kapazität ist 1, daher kann der sendende Task enden, auch wenn niemand empfäng
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Sperrt, bindet den Inhalt an `x`, führt `body` aus und gibt **immer** frei |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -187,6 +190,7 @@ selbst `is-cancelled` prüft oder auf `done` empfängt.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Ob abgebrochen wurde |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

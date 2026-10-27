@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # त्रुटि प्रबंधन
 
 typelisp में त्रुटि प्रबंधन विफलताओं को दो प्रकारों में बाँटता है।
@@ -15,6 +15,7 @@ typelisp में त्रुटि प्रबंधन विफलता�
 यहाँ एक फ़ंक्शन है जो स्ट्रिंग से पोर्ट नंबर पढ़ता है। यह दो तरह से विफल हो सकता है: इनपुट संख्या नहीं है, या वह सीमा से बाहर है।
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -83,6 +84,7 @@ Rust के `?` जैसा कोई शॉर्टहैंड नहीं 
 यदि एक फ़ंक्शन `parse-int` (`ParseIntError`) और `check-workers` (`config-error`) दोनों को कॉल करता है, तो दो त्रुटि टाइप होते हैं, और वे दोनों एक `Result<T,E>` का `E` नहीं हो सकते। ऐसे में `E` को `:dyn Error` बनाएँ (`Error` को लागू करने वाले किसी भी टाइप की त्रुटि)। हर त्रुटि को `as-dyn-error` से बदलें।
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

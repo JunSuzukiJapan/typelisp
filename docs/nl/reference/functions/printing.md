@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Afdrukken
 
 `print`/`println`/`format`, de printers met één argument, de pretty printer, `print-object` en de
@@ -174,6 +174,7 @@ In CL is `pprint-exit-if-list-exhausted` een niet-lokale uitgang uit `pprint-log
 CL zet het hoe dan ook altijd binnen een `loop`, dus het leest hetzelfde.
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

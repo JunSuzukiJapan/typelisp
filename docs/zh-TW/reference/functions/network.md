@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 網路（TCP / TLS / Unix 網域 / UDP）
 
 socket 是[串流](streams-files.md)的一員。連線有 `socket-stream`（字元）／`socket-byte-stream`（位元組）這**同一連線的兩種視圖**，
@@ -64,6 +64,7 @@ socket 是[串流](streams-files.md)的一員。連線有 `socket-stream`（字�
 回傳 `Option<Item>`，沒有回傳錯誤的管道。需要計時的地方有連線、接受、「下一次讀取」這 3 處，各自都有引數。
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; 伺服器：每個連線一個任務
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -125,6 +126,7 @@ socket 是[串流](streams-files.md)的一員。連線有 `socket-stream`（字�
 字串與位元組序列之間的轉換用 `string->utf8` / `utf8->string`（[字串](collections.md#1-字串-string)）。
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -144,6 +144,7 @@ CLHS 22.1.3 的列印函式。不做格式展開，直接列印一個值。串�
 不建立 `block`）。CL 端的慣用寫法也一律寫在 `loop` 之中，所以寫起來沒有差別。
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

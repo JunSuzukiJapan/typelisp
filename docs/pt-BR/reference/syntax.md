@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -996,6 +996,7 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
 (module path body...)      ; path é uma sequência de segmentos como foo ou foo::bar
 (in-module path)           ; daqui até o fim desta unidade, dentro de path (a forma plana de module)
 (use path...)              ; cria apelidos de funções, tipos e módulos no namespace atual
+(pub use path...)          ; faz o que foi trazido ser alcançado também pelo caminho deste módulo
 (import path...)           ; o mesmo que use (uma escrita compatível com o CL)
 (shadowing-import path...) ; um use que toma de propósito um nome simples já em uso
 ```
@@ -1026,6 +1027,15 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
   e "o tipo do primeiro argumento" do passo 4 é o tipo do primeiro parâmetro do tipo de função esperado
   ali (escrever `norm` onde se espera `(fn (pt) int)` dá o método `norm` de `pt`). Se o tipo esperado ainda
   não está fixado, o passo 4 é pulado.
+- **Os nomes que a biblioteca padrão oferece** podem ser usados em qualquer módulo sem `use`: os tipos
+  primitivos, `Option`/`Result`/`Vector`, a iteração, as expressões S e as listas, as funções de
+  sequência, as macros de controle, a comparação e os traits aritméticos; todo nome que também é um
+  nome do pacote `COMMON-LISP` de Common Lisp; e os tipos que esses mencionam. Qualquer outro nome —
+  entre eles as conveniências de concorrência, rede e arquivos — é trazido com um `use`, como
+  `(use std::sync::Chan)`, ou escrito pelo caminho, `std::sync::Chan` (a lista está em
+  [Nomes que precisam de um `use`](functions/README.md#nomes-que-precisam-de-um-use) das funções embutidas). `use` traz funções, variáveis
+  globais, macros, tipos, traits, apelidos de `deftype` e módulos. Um `use` vale só no módulo em que
+  está escrito: para usar um nome dentro de um `(module ...)`, escreva o `use` dentro dele.
 - Um caminho qualificado `a::...::n` resolve para um nome de módulo (macro, função ou variável global) do
   módulo que `a::...` nomeia, ou para uma variante ou um método estático de um tipo. `x::f` numa posição de
   valor (onde `x` nomeia um valor) é uma leitura de campo.
@@ -1103,7 +1113,11 @@ e uma declaração explícita nunca colidem.
 (pub deftype ...)
 ```
 
-`pub` só pode ser posto nos onze tipos acima (não em `module`/`use`/`impl`). Escreve-se com a
+`pub` só pode ser posto nos onze tipos acima e em `use` (não em `module`/`impl`).
+`(pub use path...)` **reexporta** o que traz: outros módulos o alcançam por um caminho que passa por
+este módulo (`m::name`) e o trazem com `(use m::name)`. Só uma definição pode ser reexportada; um
+módulo, não.
+Escreve-se com a
 palavra-chave da definição logo depois de `pub`, não na forma `(pub (defun ...))` que envolve a definição em
 parênteses. Um `pub` torna pública exatamente uma definição (não é possível marcar várias de uma vez).
 
@@ -1144,6 +1158,7 @@ expandida do corpo). A lista lambda é a mesma de `defmacro`. As regras detalhad
 ### 3.16 `#[test]` — funções de teste
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1152,6 +1167,7 @@ expandida do corpo). A lista lambda é a mesma de `defmacro`. As regras detalhad
 Um `defun` marcado com `#[test]` é uma função de teste, que `typl test` chama uma de cada vez (igual ao `#[test]` do Rust). Ela não deve receber argumentos e deve retornar `()` ou `Result<(), E>` (também não pode receber parâmetros de tipo). Não precisa de `pub`. Um teste que retorna um `Result` falha ao retornar um `err`, e o erro é mostrado; por isso `E` precisa implementar `Error` ou `print-object` (assim como o Rust exige `Debug` do tipo de erro de um teste). Um `Error` é mostrado por `describe-error` (a mensagem e sua cadeia de causas), e qualquer outra coisa por `print-object`. `:dyn Error` também é um `Error`, então um teste pode reunir erros diferentes em um só tipo e retorná-lo.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1853,6 +1869,7 @@ sempre passa este único tipo: `read-sexpr` / `read-char` / `peek-char` / `unrea
 recebem todos `(:where (PeekInput S))`, então todos funcionam sobre o tipo concreto como está.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1975,6 +1992,7 @@ ser usados como estão.
 que seja o ramo escolhido** (a mesma disciplina que `case` tem com suas chaves).
 
 ```lisp
+(use std::sync::after)
 (select                             ; receber com tempo limite
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

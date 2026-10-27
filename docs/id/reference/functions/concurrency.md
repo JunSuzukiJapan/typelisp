@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Task dan Kanal
 
 Kosakata task (thread ringan). `task` dan `thread`, yang memulainya, dan `select`, yang menunggu
@@ -46,6 +46,7 @@ ke thread lain). Tempat task berpindah dan perbedaannya dengan Go ada di
 `make(chan int, 16)` di sini ditulis `(Chan::new 0)` dan `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -104,6 +105,7 @@ sering sudah cukup. Ia adalah alat untuk pekerjaan yang bertambah secara dinamis
 tidak ingin menyimpan handle.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: start one task per input and join them (this language has no nil channels)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -132,6 +134,7 @@ Kapasitasnya 1, sehingga task pengirim dapat selesai meskipun tidak ada yang men
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Mengunci, mengikat isinya ke `x`, menjalankan `body`, dan **selalu** melepas |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -193,6 +196,7 @@ memeriksa `is-cancelled` sendiri atau dengan menerima dari `done`.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Apakah sudah dibatalkan |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

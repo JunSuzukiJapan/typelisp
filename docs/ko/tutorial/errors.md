@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 오류 처리
 
 typelisp의 오류 처리는 실패를 두 종류로 나눈다.
@@ -16,6 +16,7 @@ typelisp의 오류 처리는 실패를 두 종류로 나눈다.
 문자열에서 포트 번호를 읽는 함수이다. 입력이 수가 아닌 경우와 범위를 벗어난 경우, 두 가지로 실패할 수 있다.
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -90,6 +91,7 @@ Rust의 `?` 같은 줄임 표기는 없다. `Result`를 반환하는 함수를 �
 한다. 각 오류는 `as-dyn-error`로 변환한다.
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

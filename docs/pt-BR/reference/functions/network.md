@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Rede (TCP / TLS / domínio Unix / UDP)
 
 Os sockets fazem parte dos [streams](streams-files.md). Uma conexão é vista em **duas visões da mesma
@@ -75,6 +75,7 @@ por onde relatar). Só os erros do próprio programa causam panic (um handle fec
 e na "próxima leitura", e cada um tem um argumento para isso.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; servidor: uma tarefa por conexão
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -139,6 +140,7 @@ Converta entre strings e sequências de bytes com `string->utf8` / `utf8->string
 ([Strings](collections.md#1-strings-string)).
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

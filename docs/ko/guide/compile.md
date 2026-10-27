@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -56,6 +56,7 @@ macOS에서는 링크에 Xcode Command Line Tools를 쓴다.
 시작점으로 **인수를 받지 않는 `main` 함수**를 정의한다.
 
 ```lisp
+(use std::env::command-line-args)
 ;; hello.typl
 (defun fib ((n int)) int
   (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1044,6 +1044,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(pub use path...)          ; maakt wat binnengehaald is ook bereikbaar via het pad van dit module
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
@@ -1075,6 +1076,16 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   doorgegeven; "het type van het eerste argument" in stap 4 is dan het eerste parametertype van het daar
   verwachte functietype (`norm` schrijven waar `(fn (pt) int)` wordt verwacht, geeft de methode `norm` van
   `pt`). Ligt het verwachte type nog niet vast, dan wordt stap 4 overgeslagen.
+- **De namen die de standaardbibliotheek aanbiedt** zijn in elk module te gebruiken zonder `use`: de
+  primitieve typen, `Option`/`Result`/`Vector`, iteratie, S-expressies en lijsten, de
+  reeksfuncties, de besturingsmacro's, vergelijking en de rekenkundige traits; elke naam die ook een
+  naam is van het `COMMON-LISP`-pakket van Common Lisp; en de typen die deze noemen. Elke andere naam —
+  waaronder de hulpmiddelen voor gelijktijdigheid, netwerk en bestanden — haal je binnen met een `use`,
+  zoals `(use std::sync::Chan)`, of schrijf je als pad, `std::sync::Chan` (de lijst staat in
+  [Namen die een `use` nodig hebben](functions/README.md#namen-die-een-use-nodig-hebben) bij de ingebouwde functies). `use` haalt functies,
+  globale variabelen, macro's, typen, traits, `deftype`-aliassen en modules binnen. Een `use` werkt
+  alleen in het module waarin het staat: om een naam in een `(module ...)` te gebruiken, schrijf je het
+  `use` daarbinnen.
 - Een gekwalificeerd pad `a::...::n` wordt opgelost naar een modulenaam (macro, functie of globale
   variabele) van de module die `a::...` noemt, of naar een variant of statische methode van een type.
   `x::f` op een waardepositie (waar `x` een waarde noemt) is het lezen van een veld.
@@ -1156,7 +1167,11 @@ nooit.
 (pub deftype ...)
 ```
 
-`pub` kan alleen op de elf soorten hierboven staan (niet op `module`/`use`/`impl`). Het wordt
+`pub` kan alleen op de elf soorten hierboven en op `use` staan (niet op `module`/`impl`).
+`(pub use path...)` **herexporteert** wat het binnenhaalt: andere modules bereiken het via een pad door
+dit module (`m::name`) en halen het binnen met `(use m::name)`. Alleen een definitie kan worden
+geherexporteerd, een module niet.
+Het wordt
 geschreven met het definitiesleutelwoord direct na `pub`, niet in de vorm `(pub (defun ...))` die de definitie
 tussen haakjes zet. Eén `pub` maakt precies één definitie publiek (meerdere definities tegelijk markeren kan
 niet).
@@ -1199,6 +1214,7 @@ regels en voorbeelden staan in
 ### 3.16 `#[test]` — testfuncties
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1207,6 +1223,7 @@ regels en voorbeelden staan in
 Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` of `Result<(), E>` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig. Een test die een `Result` teruggeeft, faalt door een `err` terug te geven, en de fout wordt getoond; daarom moet `E` `Error` of `print-object` implementeren (zoals Rust `Debug` vraagt van het fouttype van een test). Een `Error` wordt getoond met `describe-error` (het bericht en de keten van oorzaken), al het andere met `print-object`. Ook `:dyn Error` is een `Error`, dus een test kan verschillende fouten in één type verzamelen en teruggeven.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1940,6 +1957,7 @@ plaats van `:dyn PeekInput` omdat de reader altijd deze ene soort doorgeeft:
 `(:where (PeekInput S))`, dus ze werken allemaal zoals ze zijn op het concrete type.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -2070,6 +2088,7 @@ gebruikt.
 welke tak ook wordt gekozen** (dezelfde discipline die `case` voor zijn sleutels heeft).
 
 ```lisp
+(use std::sync::after)
 (select                             ; receiving with a timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

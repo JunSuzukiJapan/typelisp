@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -948,6 +948,7 @@ dispatch ผ่าน vtable:
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(pub use path...)          ; ทำให้สิ่งที่นำเข้ามาเข้าถึงได้ผ่านพาธของโมดูลนี้ด้วย
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
@@ -970,6 +971,14 @@ dispatch ผ่าน vtable:
   กฎเดียวกันใช้ในที่ที่ส่งฟังก์ชันเป็นค่า โดย "ชนิดของอาร์กิวเมนต์ตัวแรก" ในขั้น 4 คือชนิดของพารามิเตอร์ตัวแรก
   ของชนิดฟังก์ชันที่คาดหวังที่นั่น (เขียน `norm` ในที่ที่คาดหวัง `(fn (pt) int)` จะได้เมทอด `norm` ของ `pt`)
   ถ้าชนิดที่คาดหวังยังไม่ถูกกำหนด จะข้ามขั้น 4
+- **ชื่อที่ไลบรารีมาตรฐานเปิดให้** ใช้ได้ในทุกโมดูลโดยไม่ต้อง `use` ได้แก่ ชนิดพื้นฐาน
+  `Option`/`Result`/`Vector` การวนซ้ำ นิพจน์ S และลิสต์ ฟังก์ชันลำดับ แมโครควบคุม การเปรียบเทียบ และ
+  trait ทางคณิตศาสตร์ ชื่อทุกชื่อที่เป็นชื่อในแพ็กเกจ `COMMON-LISP` ของ Common Lisp ด้วย และชนิดที่สิ่ง
+  เหล่านี้กล่าวถึง ชื่ออื่นใด รวมทั้งเครื่องมือด้านการทำงานพร้อมกัน เครือข่าย และไฟล์ ให้นำเข้าด้วย
+  `use` เช่น `(use std::sync::Chan)` หรือเขียนด้วยพาธ `std::sync::Chan` (รายการอยู่ที่
+  [ชื่อที่ต้อง `use`](functions/README.md#ชื่อที่ต้อง-use) ของฟังก์ชันในตัว) `use` นำเข้าฟังก์ชัน ตัวแปรส่วนกลาง แมโคร ชนิด trait
+  ชื่อแฝงของ `deftype` และโมดูลได้ `use` มีผลเฉพาะในโมดูลที่เขียนไว้ ถ้าจะใช้ชื่อภายใน `(module ...)`
+  ให้เขียน `use` ไว้ข้างใน
 - พาธแบบระบุ `a::...::n` แก้ไขเป็นชื่อโมดูล (แมโคร ฟังก์ชัน หรือตัวแปรโกลบอล) ของโมดูลที่ `a::...` ชี้ หรือเป็น
   variant หรือเมทอดสถิตของชนิด `x::f` ในตำแหน่งค่า (เมื่อ `x` เป็นชื่อของค่า) คือการอ่านฟิลด์
 - **`use` มีผลกับฟอร์มที่อยู่หลังมัน** ไฟล์ถูกอ่านทีละฟอร์ม และการพึ่งพาถูกแก้ไข
@@ -1045,7 +1054,10 @@ dispatch ผ่าน vtable:
 (pub deftype ...)
 ```
 
-ใส่ `pub` ได้เฉพาะสิบเอ็ดประเภทข้างต้น (ใส่ให้ `module`/`use`/`impl` ไม่ได้) เขียนโดยให้คีย์เวิร์ดของ
+ใส่ `pub` ได้เฉพาะสิบเอ็ดประเภทข้างต้นและ `use` (ใส่ให้ `module`/`impl` ไม่ได้)
+`(pub use path...)` **ส่งออกซ้ำ** สิ่งที่นำเข้ามา: โมดูลอื่นเข้าถึงได้ผ่านพาธที่ผ่านโมดูลนี้ (`m::name`)
+และนำเข้าได้ด้วย `(use m::name)` ส่งออกซ้ำได้เฉพาะนิยาม ส่งออกซ้ำโมดูลไม่ได้
+เขียนโดยให้คีย์เวิร์ดของ
 การนิยามตามหลัง `pub` ทันที ไม่ใช่รูป `(pub (defun ...))` ที่ห่อการนิยามด้วยวงเล็บ `pub` หนึ่งตัวทำให้
 การนิยามเปิดเผยได้หนึ่งอันพอดี (ทำเครื่องหมายหลายอันพร้อมกันไม่ได้)
 
@@ -1086,6 +1098,7 @@ dispatch ผ่าน vtable:
 ### 3.16 `#[test]` — ฟังก์ชันทดสอบ
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1094,6 +1107,7 @@ dispatch ผ่าน vtable:
 `defun` ที่ใส่ `#[test]` คือฟังก์ชันทดสอบ ซึ่ง `typl test` เรียกทีละตัว (เหมือน `#[test]` ของ Rust) ต้องไม่รับอาร์กิวเมนต์และต้องคืนค่า `()` หรือ `Result<(), E>` (รับพารามิเตอร์ชนิดก็ไม่ได้) ไม่จำเป็นต้องมี `pub` การทดสอบที่คืนค่า `Result` จะล้มเหลวเมื่อคืน `err` และจะแสดงข้อผิดพลาดนั้น ดังนั้น `E` ต้องอิมพลีเมนต์ `Error` หรือ `print-object` (เหมือนที่ Rust ต้องการ `Debug` จากชนิดข้อผิดพลาดของการทดสอบ) ถ้าเป็น `Error` จะแสดงด้วย `describe-error` (ข้อความและลำดับสาเหตุ) นอกนั้นแสดงด้วย `print-object` `:dyn Error` ก็เป็น `Error` เช่นกัน การทดสอบจึงรวบรวมข้อผิดพลาดหลายชนิดไว้ในชนิดเดียวแล้วคืนค่าได้
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1787,6 +1801,7 @@ dispatch) ค่าที่คืนกลายเป็นข้อมูล�
 ที่เป็นรูปธรรมได้ตามที่เป็น
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1909,6 +1924,7 @@ task นั้นและรันบนมันเท่านั้น** ไ
 กิ่งใด** (วินัยเดียวกับที่ `case` มีสำหรับคีย์ของมัน)
 
 ```lisp
+(use std::sync::after)
 (select                             ; receiving with a timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

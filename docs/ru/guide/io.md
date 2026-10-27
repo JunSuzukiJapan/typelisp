@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Файловый ввод-вывод, потоки и сеть
 
 Это руководство показывает основы чтения и записи файлов, работы с путями и обмена через сокеты. Списки функций
@@ -10,6 +10,7 @@
 `Result`. Отсутствующий файл — не ошибка в программе, поэтому `panic` не происходит. Разделяйте исходы через `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -25,6 +26,7 @@
 Самые простые функции работают с файлом целиком.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -36,6 +38,7 @@
 закрывается. Значение — `Result<значение тела, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; запись
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -118,6 +121,7 @@
 Операции с файловой системой:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; создать вместе с родительскими
 (probe-file "out/deep")                           ; => true (существует)
 (directory-p "out/deep")                          ; => true
@@ -139,6 +143,7 @@
 не придут данные, так что обработка других соединений продолжается.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -160,6 +165,7 @@
 `Result<значение тела, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -170,6 +176,7 @@
 Чтобы ограничить время операции, передайте `:timeout` (в секундах).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; поставить таймер на следующее чтение
@@ -190,6 +197,7 @@
 Если имя не удаётся разрешить, возвращается `err`.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -203,6 +211,7 @@
 работают как с TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -215,6 +224,7 @@
 TLS-сервер создаётся передачей в `tls-listen` файлов сертификата и закрытого ключа (PEM).
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; serve для TCP работает как есть
@@ -231,6 +241,7 @@ UDP — не поток; он отправляет и получает по од
 преобразование из строк и в строки — через `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; даже для отправки нужен сокет; 0 оставляет выбор порта ОС
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

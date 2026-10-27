@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Строки, символы и коллекции
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` и `Deque<T>`.
@@ -116,6 +116,7 @@
 реализация для `string`.
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -201,6 +202,7 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Итератор по элементам. Порядок не определён |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -232,6 +234,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Кортежи `#{ключ значение}` в порядке ключей |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 и pear 3
@@ -255,6 +258,7 @@ Rust).
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | С начала, по порядку |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

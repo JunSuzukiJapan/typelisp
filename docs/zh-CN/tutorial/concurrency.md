@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 并发
 
 在 typelisp 中，通过启动**任务**（轻量级线程）让多项工作并发进行，任务之间通过**通道**传递值。这与 Go 的
@@ -33,6 +33,7 @@ goroutine 和通道很接近。本章依次介绍任务的启动与结果的获�
 通道上，发送方和接收方都要等到对方就绪。
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; 发送
@@ -62,6 +63,7 @@ got 30
 耗时的工作和很快结束的工作混在一起，工作也会自然地分摊。
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; 这项工作需要的时间
@@ -118,6 +120,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 就能写出超时。
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -136,6 +139,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - 在最后写 `(:else 主体...)`，当没有分支能立即执行时执行 `:else`，不会等待。
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -151,13 +155,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 `WaitGroup` 是等待一定数量任务完成的工具。用 `add` 增加计数，各任务结束时调用 `done`，用 `wait` 等到计数变为 0。
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

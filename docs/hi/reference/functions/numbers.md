@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # संख्याएँ
 
 पूर्णांक, फ़्लोटिंग-पॉइंट संख्याओं, परिमेय संख्याओं, कॉम्प्लेक्स संख्याओं और बूलियन पर ऑपरेशन, और अन्य संख्या-संबंधित फ़ंक्शन। कॉल के रूप कैसे पढ़ें इसके लिए [बिल्ट-इन फ़ंक्शन](README.md) देखें।
@@ -330,6 +330,7 @@ CL के `numberp`/`integerp`/`floatp` जैसे **टाइप प्रे
 `make-random-state` से बना नया state दीवार घड़ी से seed होता है, इसलिए उसे अलग-अलग चलाने में दोहराया नहीं जा सकता। दोहराने के लिए, `seed-random-state` का उपयोग करें:
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; हर बार वही तीन संख्याएँ प्रिंट करता है

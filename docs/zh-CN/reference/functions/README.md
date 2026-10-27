@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 内置函数
 
 内置函数、方法和标准库的一览。语法（特殊形式、定义方法）见[语法参考](../syntax.md)，类型一览见[类型一览](../types.md)。
@@ -12,6 +12,43 @@
 - 静态方法（关联函数）：`(Type::name args...)`
 
 每个类型都可以有同名的方法。`(+ a b)` 调用的是 `a` 的类型的 `+`。
+
+## 需要 `use` 的名字
+
+标准库的名字中，什么都不写就能在任何模块中使用的是以下这些（[语法参考 3.10](../syntax.md#310-module--use--命名空间)）。
+
+- 基本类型、`Option`・`Result`・`Vector`、迭代、S 表达式与列表、序列函数、控制宏、比较、算术 trait
+- 与 Common Lisp 的 `COMMON-LISP` 包中的名字同名的东西（`length`・`format`・`open` 等）
+- `Error`・`assert`・`print-object`、`HashTable`・`Array`・`BitVector`、流的 trait
+  `Stream`・`InputStream`・`OutputStream`，以及 `HashTable` 的键所实现的 `Hash`
+- 这些函数和变量的类型中出现的类型
+
+其他名字要像 `(use std::net::tcp-connect)` 这样用 `use` 引入，或写成路径 `std::net::tcp-connect`。
+下表列出这些名字及其所在位置。
+
+| 模块 | 名字 |
+|---|---|
+| `std::array` | `array-iter` |
+| `std::char` | `digit->char`、`digit-weight`、`name->char` |
+| `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
+| `std::env` | `command-line-args`、`getenv`、`home-directory` |
+| `std::error` | `WrappedError`、`as-dyn-error`、`assert-eq`、`describe-error`、`wrap-error` |
+| `std::fmt` | `pprint-list-exhausted` |
+| `std::fs` | `direction-append`、`direction-input`、`direction-output`、`directory-p`、`open-binary`、`open-binary-input`、`open-binary-output`、`open-file`、`open-input`、`open-output`、`read-file-lines`、`read-file-string`、`write-file-string` |
+| `std::hash` | `*sxhash-mask*`、`sxhash-string` |
+| `std::io` | `ByteInput`、`ByteOutput`、`PeekInput`、`binary-file-stream`、`copy-stream`、`make-peek-stream`、`peek-stream`、`read-lines`、`write-lines` |
+| `std::net` | `NetError`、`byte-stream-of`、`char-stream-of`、`datagram`、`socket-byte-stream`、`socket-listener`、`socket-stream`、`tcp-connect`、`tcp-listen`、`tls-connect`、`tls-listen`、`udp-bind`、`udp-socket`、`unix-connect`、`unix-listen`、`with-connection` |
+| `std::num` | `ParseFloatError`、`ParseIntError`、`atan2`、`parse-float`、`parse-int` |
+| `std::path` | `Pathish`、`pathname-absolute-p` |
+| `std::process` | `exit` |
+| `std::random` | `seed-random-state` |
+| `std::reader` | `ReadOutcome`、`read-from-string-preserving-whitespace`、`read-sexpr`、`read-sexpr-preserving-whitespace` |
+| `std::repl` | `heap-info` |
+| `std::string` | `left-trim`、`right-trim`、`string->utf8`、`trim`、`utf8->string` |
+| `std::symbol` | `symbol->string` |
+| `std::sync` | `Chan`、`Context`、`Mutex`、`WaitGroup`、`after`、`with-lock` |
+| `std::thread` | `Task`、`Thread`、`yield` |
+| `std::time` | `internal-time-seconds`、`timezone-daylight-p`、`timezone-offset-seconds` |
 
 ## 表格的读法
 

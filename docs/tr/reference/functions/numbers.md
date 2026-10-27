@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -403,6 +403,7 @@ bunlar hizalandı. Kalan bağımsız değişkenler CL'nin göreli sırasını ko
 yeniden üretilemez. Yeniden üretmek için `seed-random-state` kullanın:
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; prints the same three numbers on every run

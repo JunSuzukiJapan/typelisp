@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -774,6 +774,7 @@ vtable 進行動態分派：
 (module path body...)      ; path 是 foo 或 foo::bar 這樣的區段序列
 (in-module path)           ; 從這裡到這個單元的結尾都在 path 中（module 的平鋪形式）
 (use path...)              ; 把函式、型別、模組以別名引入目前的命名空間
+(pub use path...)          ; 讓引入的定義也能透過經過本模組的路徑找到
 (import path...)           ; 與 use 相同（CL 相容的寫法）
 (shadowing-import path...) ; 明知裸名稱已被占用仍要取用的 use
 ```
@@ -794,6 +795,12 @@ vtable 進行動態分派：
   模組的名稱依 目前的模組自身的定義 → `use` 的別名 → 標準函式庫公開的名稱 的順序尋找，取第一個找到的。不尋找父模組。要使用父模組的定義，就把帶 `pub` 的定義像 `::geo::f` 這樣用從根開始的路徑來寫，或者用 `use` 引入。把函式當作值
   傳遞的位置也遵循同樣的規則，第 4 步的「第一個引數的型別」是該處所期望的函式型別的第一個參數的型別
   （在期望 `(fn (pt) int)` 的位置寫 `norm`，就是 `pt` 的方法 `norm`）。期望的型別尚未確定時略過第 4 步。
+- **標準函式庫公開的名稱**不用 `use` 就能在任何模組中使用。基本型別、`Option`・`Result`・`Vector`、
+  迭代、S 運算式與串列、序列函式、控制巨集、比較、算術 trait，以及與 Common Lisp 的 `COMMON-LISP`
+  套件中的名稱同名者，還有它們的型別中出現的型別，都屬於此類。並行、網路、檔案的便利函式等其他名稱，
+  要像 `(use std::sync::Chan)` 這樣引入，或寫成路徑 `std::sync::Chan`（清單見
+  [內建函式的「需要 `use` 的名稱」](functions/README.md#需要-use-的名稱)）。`use` 可以引入函式、全域變數、巨集、型別、trait、
+  `deftype` 的別名與模組。`use` 只在寫它的模組中生效。要在 `(module ...)` 中使用，就寫在其中。
 - 限定路徑 `a::...::n` 解析為 `a::...` 所指模組的名稱（巨集、函式、全域變數），或者型別的變體、靜態
   方法。值位置上的 `x::f`（`x` 是值的名稱）是欄位的讀取。
 - **`use` 對其後的形式生效。** 檔案逐個形式讀取，相依關係也在檢查該形式之前解析，所以在 `(use m)` **上面**寫 `m::f` 會得到 `unresolved path`。
@@ -849,7 +856,10 @@ vtable 進行動態分派：
 (pub deftype ...)
 ```
 
-`pub` 只能用於上述 11 種（不能用於 `module`/`use`/`impl`）。不是以括號包住定義形式的
+`pub` 只能用於上述 11 種以及 `use`（不能用於 `module`/`impl`）。
+`(pub use path...)` 會**再匯出**它引入的定義：其他模組也能透過經過本模組的路徑（`m::name`）找到它，
+並用 `(use m::name)` 引入。只能再匯出定義，不能再匯出模組。
+不是以括號包住定義形式的
 `(pub (defun ...))` 形式，而是在 `pub` 之後緊接定義關鍵字。一個 `pub` 只能公開一個定義（不能一次
 指定多個定義）。
 
@@ -883,6 +893,7 @@ vtable 進行動態分派：
 ### 3.16 `#[test]` — 測試函式
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -891,6 +902,7 @@ vtable 進行動態分派：
 加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()` 或 `Result<(), E>`（也不能有型別參數）。不需要 `pub`。回傳 `Result` 的測試在回傳 `err` 時失敗，並顯示該錯誤，因此 `E` 必須實作 `Error` 或 `print-object`（與 Rust 要求測試的錯誤型別實作 `Debug` 相同）。是 `Error` 時用 `describe-error`（訊息及原因鏈）顯示，否則用 `print-object` 顯示。`:dyn Error` 也是 `Error`，因此可以把各種錯誤歸為一個型別回傳。
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1472,6 +1484,7 @@ typl --image session.typld             # REPL 也一樣
 `read-char` / `peek-char` / `unread-char` / `read-delimited-list` 都是 `(:where (PeekInput S))`，所以具體型別可以直接全部使用。
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1571,6 +1584,7 @@ typl --image session.typld             # REPL 也一樣
 **無論選擇哪個分支，通道運算式與要傳送的值都由左至右各求值一次**（與 `case` 對鍵所持的規則相同）。
 
 ```lisp
+(use std::sync::after)
 (select                             ; 帶逾時的接收
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

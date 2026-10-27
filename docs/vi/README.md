@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Tài liệu typelisp (Tiếng Việt)
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh. Về cách cài đặt và build, xem [README.md](../../README.md)
@@ -12,6 +12,7 @@ Khởi động các task (thread nhẹ) và truyền giá trị giữa chúng qu
 trình đồng thời](tutorial/concurrency.md).
 
 ```lisp
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -39,6 +40,7 @@ trường hợp `none` trong `match`, là lỗi kiểu ngay trước khi chươn
 [Kiến thức cơ bản về kiểu](tutorial/types.md) và [Xử lý lỗi](tutorial/errors.md).
 
 ```lisp
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Числа
 
 Операции над целыми, числами с плавающей точкой, рациональными, комплексными числами и логическими значениями, а
@@ -394,6 +394,7 @@ does not fit a fixnum»).
 Для воспроизведения используйте `seed-random-state`:
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; при каждом запуске выводит одни и те же три числа

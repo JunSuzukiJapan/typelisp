@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1045,6 +1045,7 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(pub use path...)          ; membuat yang dibawa masuk juga tercapai lewat path modul ini
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
@@ -1073,6 +1074,14 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
   nilai; "tipe argumen pertama" pada langkah 4 lalu adalah tipe parameter pertama dari tipe fungsi yang
   diharapkan di sana (menulis `norm` di tempat yang mengharapkan `(fn (pt) int)` memberi metode `norm`
   milik `pt`). Jika tipe yang diharapkan belum ditetapkan, langkah 4 dilewati.
+- **Nama yang ditawarkan pustaka standar** dapat dipakai di setiap modul tanpa `use`: tipe primitif,
+  `Option`/`Result`/`Vector`, iterasi, ekspresi S dan list, fungsi sekuens, makro kendali, perbandingan
+  dan trait aritmetika; setiap nama yang juga nama paket `COMMON-LISP` milik Common Lisp; dan tipe yang
+  disebut oleh semua itu. Nama lain — di antaranya kemudahan konkurensi, jaringan, dan berkas — dibawa
+  masuk dengan `use`, seperti `(use std::sync::Chan)`, atau ditulis dengan path-nya, `std::sync::Chan`
+  (daftarnya ada di [Nama yang memerlukan `use`](functions/README.md#nama-yang-memerlukan-use) pada fungsi bawaan). `use` membawa masuk
+  fungsi, variabel global, makro, tipe, trait, alias `deftype`, dan modul. `use` hanya berlaku di modul
+  tempat ia ditulis: untuk memakai nama di dalam `(module ...)`, tulis `use` di dalamnya.
 - Jalur berkualifikasi `a::...::n` diselesaikan menjadi nama modul (makro, fungsi, atau variabel global)
   dari modul yang dinamai `a::...`, atau menjadi varian atau metode statis sebuah tipe. `x::f` di posisi
   nilai (ketika `x` menamai sebuah nilai) adalah pembacaan field.
@@ -1152,7 +1161,11 @@ path turunan dan deklarasi eksplisit tidak pernah bertabrakan.
 (pub deftype ...)
 ```
 
-`pub` hanya dapat dipasang pada sebelas jenis di atas (tidak pada `module`/`use`/`impl`). Ia ditulis
+`pub` hanya dapat dipasang pada sebelas jenis di atas dan pada `use` (tidak pada `module`/`impl`).
+`(pub use path...)` **mengekspor ulang** apa yang dibawanya masuk: modul lain mencapainya lewat path
+yang melalui modul ini (`m::name`) dan membawanya masuk dengan `(use m::name)`. Hanya definisi yang
+dapat diekspor ulang; modul tidak.
+Ia ditulis
 dengan kata kunci definisi tepat setelah `pub`, bukan dalam bentuk `(pub (defun ...))` yang membungkus
 definisi dengan tanda kurung. Satu `pub` membuat tepat satu definisi menjadi publik (beberapa definisi tidak
 dapat ditandai sekaligus).
@@ -1196,6 +1209,7 @@ terperinci dan contohnya ada di
 ### 3.16 `#[test]` — fungsi uji
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1204,6 +1218,7 @@ terperinci dan contohnya ada di
 `defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `err`, dan galatnya ditampilkan, sehingga `E` harus mengimplementasikan `Error` atau `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian). `Error` ditampilkan dengan `describe-error` (pesan dan rantai penyebabnya), selain itu dengan `print-object`. `:dyn Error` juga merupakan `Error`, sehingga pengujian dapat mengumpulkan berbagai galat ke dalam satu tipe lalu mengembalikannya.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1938,6 +1953,7 @@ bukan `:dyn PeekInput` karena reader selalu menyerahkan satu jenis ini: `read-se
 sehingga semuanya bekerja pada tipe konkret apa adanya.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -2066,6 +2082,7 @@ tetap maju. Di dalamnya, `task`, `send`, `recv`, dan sisanya dapat dipakai apa a
 mana pun yang dipilih** (disiplin yang sama dimiliki `case` untuk kuncinya).
 
 ```lisp
+(use std::sync::after)
 (select                             ; receiving with a timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

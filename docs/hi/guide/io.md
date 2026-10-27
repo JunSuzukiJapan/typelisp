@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # फ़ाइल I/O, स्ट्रीम और नेटवर्किंग
 
 यह गाइड फ़ाइलें पढ़ने-लिखने, पाथनेम और सॉकेट संचार की बुनियादी बातें दिखाती है। फ़ंक्शनों की सूचियाँ [स्ट्रीम और फ़ाइलें](../reference/functions/streams-files.md) और [नेटवर्किंग](../reference/functions/network.md) में हैं।
@@ -8,6 +8,7 @@
 जो ऑपरेशन पर्यावरण के आधार पर विफल हो सकते हैं, जैसे फ़ाइल खोलना या कनेक्ट करना, वे `Result` लौटाते हैं। फ़ाइल का गायब होना प्रोग्राम की गलती नहीं है, इसलिए वह `panic` नहीं करता। परिणामों को `match` से अलग करें।
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -22,6 +23,7 @@
 सबसे आसान फ़ंक्शन पूरी फ़ाइल को एक साथ संभालते हैं।
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -32,6 +34,7 @@
 थोड़ा-थोड़ा पढ़ने या लिखने के लिए `with-open-file` से स्ट्रीम खोलें। बॉडी जिस भी तरह छोड़ी जाए, स्ट्रीम बंद हो जाती है। इसका मान `Result<बॉडी का मान, FileError>` है।
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; लिखना
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -107,6 +110,7 @@
 फ़ाइल सिस्टम ऑपरेशन:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; पैरेंट सहित उसे बनाएँ
 (probe-file "out/deep")                           ; => true (वह मौजूद है)
 (directory-p "out/deep")                          ; => true
@@ -126,6 +130,7 @@
 बुनियादी पैटर्न है हर कनेक्शन के लिए एक टास्क शुरू करना। `accept` और `read-line` डेटा आने तक **केवल उसी टास्क** को रोकते हैं, इसलिए दूसरे कनेक्शन का संचालन जारी रहता है।
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -145,6 +150,7 @@
 `with-connection` कनेक्ट करता है, अपनी बॉडी चलाता है और अंत में कनेक्शन बंद करता है। इसका मान `Result<बॉडी का मान, NetError>` है।
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -155,6 +161,7 @@
 किसी ऑपरेशन पर समय सीमा लगाने के लिए `:timeout` (सेकंड में) पास करें।
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; अगले पढ़ने पर घड़ी लगाएँ
@@ -171,6 +178,7 @@
 यदि नाम हल नहीं हो सकता, तो `err` लौटाया जाता है।
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -182,6 +190,7 @@
 `tls-connect` का उपयोग `tcp-connect` की तरह होता है और कनेक्ट करने के बाद TLS हैंडशेक करता है। सर्वर प्रमाणपत्र को स्टैंडर्ड रूट प्रमाणपत्रों के विरुद्ध सत्यापित किया जाता है। परिणाम सामान्य `socket-stream` है, इसलिए पढ़ना और लिखना TCP की तरह काम करता है।
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -194,6 +203,7 @@
 TLS सर्वर `tls-listen` को प्रमाणपत्र और निजी कुंजी फ़ाइलें (PEM) देकर बनाया जाता है।
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; TCP वाला serve जस का तस काम करता है
@@ -207,6 +217,7 @@ TLS सर्वर `tls-listen` को प्रमाणपत्र और �
 UDP स्ट्रीम नहीं है; यह एक बार में एक डेटाग्राम भेजता और पाता है। डेटा बाइट अनुक्रम (`Vector<int>`) है; स्ट्रिंग से और स्ट्रिंग में बदलने के लिए `string->utf8` / `utf8->string` का उपयोग करें।
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; भेजने के लिए भी सॉकेट चाहिए; 0 पोर्ट OS पर छोड़ देता है
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

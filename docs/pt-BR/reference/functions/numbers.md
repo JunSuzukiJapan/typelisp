@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Números
 
 Operações sobre inteiros, números de ponto flutuante, racionais, números complexos e booleanos, e outras
@@ -400,6 +400,7 @@ Um estado novo de `make-random-state` é semeado a partir do relógio de parede,
 entre execuções. Para reproduzir, use `seed-random-state`:
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; imprime os mesmos três números em toda execução

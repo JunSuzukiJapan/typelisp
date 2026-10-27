@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 數值
 
 整數、浮點數、有理數、複數、布林值的運算以及與數值相關的函式。呼叫形式的讀法見[內建函式](README.md)。
@@ -352,6 +352,7 @@ CL 的算術與比較是可變引數的，但方法只依接收者的型別解�
 `make-random-state` 的新狀態以時鐘時間作為種子，所以無法跨執行重現。需要重現時使用 `seed-random-state`：
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; 無論執行幾次都輸出同樣的 3 個數

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Zeichenketten, Zeichen und Sammlungen
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` und `Deque<T>`.
@@ -119,6 +119,7 @@ Implementiert für: `int` und die sechs Ganzzahltypen fester Breite, `bool`, `ch
 `(sxhash-string s)` (32-Bit-FNV-1a) aufrufen, das die Implementierung für `string` verwendet.
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -207,6 +208,7 @@ implementieren, wie ein Schlüssel einer `HashTable`.
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Ein Iterator über die Elemente. Die Reihenfolge ist nicht festgelegt |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -238,6 +240,7 @@ binär. `set` mit einem neuen Schlüssel und `remove` verschieben die Elemente h
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | `#{Schlüssel Wert}`-Tupel in Schlüsselreihenfolge |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 und pear 3
@@ -260,6 +263,7 @@ Eine Folge, die man an beiden Enden befüllen und entnehmen kann (Rusts `VecDequ
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Von vorne der Reihe nach |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

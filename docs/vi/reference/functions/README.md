@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Hàm dựng sẵn
 
 Danh sách các hàm dựng sẵn, phương thức và thư viện chuẩn. Về cú pháp (các dạng đặc biệt và cách định
@@ -13,6 +13,45 @@ Có ba dạng gọi.
 - Phương thức tĩnh (hàm liên kết): `(Type::name args...)`
 
 Mỗi kiểu có thể có phương thức cùng tên của riêng nó. `(+ a b)` gọi `+` của kiểu của `a`.
+
+## Các tên cần `use`
+
+Trong các tên của thư viện chuẩn, những tên sau dùng được trong mọi module mà không phải viết gì
+([tham chiếu cú pháp 3.10](../syntax.md#310-module--use--không-gian-tên)):
+
+- các kiểu nguyên thủy, `Option`/`Result`/`Vector`, phép lặp, biểu thức S và danh sách, các hàm dãy,
+  các macro điều khiển, phép so sánh và các trait số học
+- mọi tên cũng là tên trong gói `COMMON-LISP` của Common Lisp (`length`, `format`, `open`, v.v.)
+- `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, các trait luồng `Stream`,
+  `InputStream` và `OutputStream`, cùng `Hash`, mà khóa của một `HashTable` cài đặt
+- các kiểu mà hàm và biến của chúng nhắc tới
+
+Mọi tên khác được đưa vào bằng `use`, như `(use std::net::tcp-connect)`, hoặc viết theo đường dẫn,
+`std::net::tcp-connect`. Bảng liệt kê các tên đó và module của từng tên.
+
+| Module | Tên |
+|---|---|
+| `std::array` | `array-iter` |
+| `std::char` | `digit->char`, `digit-weight`, `name->char` |
+| `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
+| `std::env` | `command-line-args`, `getenv`, `home-directory` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::fmt` | `pprint-list-exhausted` |
+| `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
+| `std::hash` | `*sxhash-mask*`, `sxhash-string` |
+| `std::io` | `ByteInput`, `ByteOutput`, `PeekInput`, `binary-file-stream`, `copy-stream`, `make-peek-stream`, `peek-stream`, `read-lines`, `write-lines` |
+| `std::net` | `NetError`, `byte-stream-of`, `char-stream-of`, `datagram`, `socket-byte-stream`, `socket-listener`, `socket-stream`, `tcp-connect`, `tcp-listen`, `tls-connect`, `tls-listen`, `udp-bind`, `udp-socket`, `unix-connect`, `unix-listen`, `with-connection` |
+| `std::num` | `ParseFloatError`, `ParseIntError`, `atan2`, `parse-float`, `parse-int` |
+| `std::path` | `Pathish`, `pathname-absolute-p` |
+| `std::process` | `exit` |
+| `std::random` | `seed-random-state` |
+| `std::reader` | `ReadOutcome`, `read-from-string-preserving-whitespace`, `read-sexpr`, `read-sexpr-preserving-whitespace` |
+| `std::repl` | `heap-info` |
+| `std::string` | `left-trim`, `right-trim`, `string->utf8`, `trim`, `utf8->string` |
+| `std::symbol` | `symbol->string` |
+| `std::sync` | `Chan`, `Context`, `Mutex`, `WaitGroup`, `after`, `with-lock` |
+| `std::thread` | `Task`, `Thread`, `yield` |
+| `std::time` | `internal-time-seconds`, `timezone-daylight-p`, `timezone-offset-seconds` |
 
 ## Cách đọc các bảng
 

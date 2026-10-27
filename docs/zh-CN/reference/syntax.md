@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -790,6 +790,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (module path body...)      ; path 是 foo 或 foo::bar 这样的段序列
 (in-module path)           ; 从此到这个单元末尾都在 path 中（module 的平铺形式）
 (use path...)              ; 把函数、类型、模块作为别名引入当前命名空间
+(pub use path...)          ; 让引入的定义也能通过经过本模块的路径找到
 (import path...)           ; 与 use 相同（CL 兼容的写法）
 (shadowing-import path...) ; 明知裸名已被占用仍要取用的 use
 ```
@@ -810,6 +811,12 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
   模块的名字按 当前模块自身的定义 → `use` 的别名 → 标准库公开的名字 的顺序查找，取第一个找到的。不查找父模块。要使用父模块的定义，就把带 `pub` 的定义像 `::geo::f` 这样用从根开始的路径来写，或者用 `use` 引入。把函数作为值
   传递的位置也遵循同样的规则，第 4 步的"第一个参数的类型"是该处所期望的函数类型的第一个参数的类型
   （在期望 `(fn (pt) int)` 的位置写 `norm`，就是 `pt` 的方法 `norm`）。期望的类型尚未确定时跳过第 4 步。
+- **标准库公开的名字**不用 `use` 就能在任何模块中使用。基本类型、`Option`・`Result`・`Vector`、
+  迭代、S 表达式与列表、序列函数、控制宏、比较、算术 trait，以及与 Common Lisp 的 `COMMON-LISP`
+  包中的名字同名的东西，还有它们的类型中出现的类型，都属于此类。并发、网络、文件的便利函数等其他名字，
+  要像 `(use std::sync::Chan)` 这样引入，或写成路径 `std::sync::Chan`（列表见
+  [内置函数的“需要 `use` 的名字”](functions/README.md#需要-use-的名字)）。`use` 可以引入函数、全局变量、宏、类型、trait、
+  `deftype` 的别名和模块。`use` 只在写它的模块中生效。要在 `(module ...)` 中使用，就写在其中。
 - 限定路径 `a::...::n` 解析为 `a::...` 所指模块的名字（宏、函数、全局变量），或者类型的变体、静态
   方法。值位置上的 `x::f`（`x` 是值的名字）是字段的读取。
 - **`use` 对其后的形式生效。** 文件逐个形式读取，依赖也在检查该形式之前解析，所以在 `(use m)` **上面**写 `m::f` 会得到
@@ -867,7 +874,10 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (pub deftype ...)
 ```
 
-`pub` 只能用于上述 11 种（不能用于 `module`/`use`/`impl`）。不是用括号包住定义形式的
+`pub` 只能用于上述 11 种以及 `use`（不能用于 `module`/`impl`）。
+`(pub use path...)` 会**再导出**它引入的定义：其他模块也能通过经过本模块的路径（`m::name`）找到它，
+并用 `(use m::name)` 引入。只能再导出定义，不能再导出模块。
+不是用括号包住定义形式的
 `(pub (defun ...))` 形式，而是在 `pub` 之后紧接定义关键字。一个 `pub` 只能公开一个定义（不能一次
 指定多个定义）。
 
@@ -902,6 +912,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 ### 3.16 `#[test]` — 测试函数
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -910,6 +921,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()` 或 `Result<(), E>`（也不能有类型参数）。不需要 `pub`。返回 `Result` 的测试在返回 `err` 时失败，并显示该错误，因此 `E` 必须实现 `Error` 或 `print-object`（与 Rust 要求测试的错误类型实现 `Debug` 相同）。是 `Error` 时用 `describe-error`（消息及原因链）显示，否则用 `print-object` 显示。`:dyn Error` 也是 `Error`，因此可以把各种错误归为一个类型返回。
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1506,6 +1518,7 @@ typl --image session.typld             # REPL 也一样
 可以直接全部使用。
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1605,6 +1618,7 @@ typl --image session.typld             # REPL 也一样
 **无论选择哪个分支，通道表达式和要发送的值都从左到右各求值一次**（与 `case` 对键所持的规则相同）。
 
 ```lisp
+(use std::sync::after)
 (select                             ; 带超时的接收
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

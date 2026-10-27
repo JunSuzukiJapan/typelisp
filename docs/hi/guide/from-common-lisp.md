@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Common Lisp प्रोग्रामरों के लिए
 
 typelisp, Common Lisp (CL) का सिंटैक्स और उसके कई फ़ंक्शन नाम विरासत में लेता है, लेकिन यह स्टैटिक रूप से टाइप की गई भाषा है। इसी कारण CL कोड हमेशा जस का तस काम नहीं करता। यह गाइड उन जगहों को इकट्ठा करती है जहाँ CL के आदी लोग अक्सर अटकते हैं, साथ में यह भी कि कोड को कैसे दोबारा लिखें।
@@ -140,6 +140,7 @@ CL से तीन अंतर हैं। सभी एलिमेंट �
 - **पुनर्प्राप्त की जा सकने वाली विफलताएँ `Result<T,E>` लौटाती हैं।** कॉल करने वाला `match` से `ok` / `err` को अलग करता है। Rust के `?` जैसा कोई शॉर्टहैंड नहीं है।
 
   ```lisp
+(use std::num::parse-int)
   (match (parse-int "42x")
     ((ok n) n)
     ((err e) (progn (println "bad input: ~a" (message e)) 0)))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Tarefas e canais
 
 O vocabulário das tarefas (threads leves). `task` e `thread`, que as iniciam, e `select`, que espera várias
@@ -46,6 +46,7 @@ threads). Onde elas alternam e como isso difere do Go está em
 `make(chan int, 16)` são escritos `(Chan::new 0)` e `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -99,6 +100,7 @@ basta. É uma ferramenta para trabalho que cresce dinamicamente, ou para quando 
 handles.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: iniciar uma tarefa por entrada e reuni-las (esta linguagem não tem canais nil)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -127,6 +129,7 @@ Sua capacidade é 1, então a tarefa que envia pode terminar mesmo que ninguém 
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Trava, vincula o conteúdo a `x`, executa `body` e **sempre** libera |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -188,6 +191,7 @@ O `context.Context` do Go. É passado a um trabalho que se quer poder parar de f
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Se foi cancelado |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

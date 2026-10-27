@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -60,6 +60,7 @@ To look at the result of compilation, use `disassemble`.
 As the entry point, define a **`main` function that takes no arguments**.
 
 ```lisp
+(use std::env::command-line-args)
 ;; hello.typl
 (defun fib ((n int)) int
   (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))

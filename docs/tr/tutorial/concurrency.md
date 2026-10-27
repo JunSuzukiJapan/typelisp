@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Eşzamanlılık
 
 typelisp'te işi eşzamanlı çalıştırmak için **task'ler** (hafif thread'ler) başlatırsınız ve task'ler
@@ -38,6 +38,7 @@ bağımsız değişkeni kapasitedir (kaç değer tutabileceği). Kapasitesi 0 ol
 alan, karşı taraf orada olana kadar birlikte bekler.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; send
@@ -70,6 +71,7 @@ almasını sağlamaktır. Hangi işçi boştaysa sıradaki işi alır; bu yüzde
 olsa bile iş doğal olarak yayılır.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; how long this job takes
@@ -131,6 +133,7 @@ verilen süre geçtikten sonra tek bir değer ileten bir kanaldır. `select` ile
 bir zaman aşımı verir.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -150,6 +153,7 @@ bir zaman aşımı verir.
   beklemez.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -167,13 +171,14 @@ zaman bırakır. Gövde içinde değişkene `setf` ile atamak `Mutex`'in içeri�
 her task bittiğinde `done` çağırsın ve sayı 0'a ulaşana kadar `wait` edin.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

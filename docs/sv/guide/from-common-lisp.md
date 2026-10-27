@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # För Common Lisp-programmerare
 
 typelisp ärver syntaxen och många av funktionsnamnen från Common Lisp (CL), men är ett statiskt typat
@@ -169,6 +169,7 @@ Det finns inget `define-condition`, `handler-case`, `handler-bind`, `restart-cas
   `match`. Det finns ingen genväg som Rusts `?`.
 
   ```lisp
+(use std::num::parse-int)
   (match (parse-int "42x")
     ((ok n) n)
     ((err e) (progn (println "bad input: ~a" (message e)) 0)))

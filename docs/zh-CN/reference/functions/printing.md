@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见
@@ -146,6 +146,7 @@ CLHS 22.1.3 的打印函数。不做格式展开，直接打印一个值。流�
 （`pprint-logical-block` 不建立 `block`）。CL 一侧的惯用写法也总是写在 `loop` 之中，所以写起来没有区别。
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

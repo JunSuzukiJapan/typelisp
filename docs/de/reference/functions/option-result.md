@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option, Result und Fehlertypen
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -39,6 +39,7 @@ Clojures `->`). `(-> x (f a) (g b))` wird zu `(g (f x a) b)`. Ein Name ohne Klam
 direkt verketten:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -111,6 +112,7 @@ Implementiert man `Error` für den eigenen Fehlertyp, lässt er sich **genauso**
 Fehler:
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -129,6 +131,7 @@ Um mehrere Fehlertypen in einem `Result` zu sammeln, verwendet man `Result<T, :d
 Umwandlung ausdrücklich:
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

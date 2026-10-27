@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # E/S de fichiers, flux et réseau
 
 Ce guide présente les bases de la lecture et de l'écriture de fichiers, des noms de chemin et de la communication
@@ -12,6 +12,7 @@ Les opérations qui peuvent échouer selon l'environnement, comme ouvrir un fich
 issues avec `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -27,6 +28,7 @@ Quand on sait qu'une opération ne peut pas échouer, ou dans un petit script o�
 Les fonctions les plus simples traitent le fichier entier d'un coup.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -38,6 +40,7 @@ Pour lire ou écrire petit à petit, ouvrez un flux avec `with-open-file`. Quell
 quitté, le flux est fermé. La valeur est `Result<valeur du corps, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; écrire
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -120,6 +123,7 @@ découper un chemin en parties ou pour en construire un.
 Opérations sur le système de fichiers :
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; le créer avec ses parents
 (probe-file "out/deep")                           ; => true (il existe)
 (directory-p "out/deep")                          ; => true
@@ -141,6 +145,7 @@ Le schéma de base consiste à lancer une tâche par connexion. `accept` et `rea
 tâche** jusqu'à l'arrivée de données ; le traitement des autres connexions continue donc.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -163,6 +168,7 @@ interfaces. Pour les tâches, voir le
 `Result<valeur du corps, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -173,6 +179,7 @@ interfaces. Pour les tâches, voir le
 Pour limiter la durée d'une opération, passez `:timeout` (en secondes).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; mettre une horloge sur la prochaine lecture
@@ -193,6 +200,7 @@ continuent donc de s'exécuter pendant l'attente. Si un nom a plusieurs adresses
 Si le nom ne peut pas être résolu, un `err` est renvoyé.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -206,6 +214,7 @@ serveur est vérifié avec les certificats racines standard. Le résultat est un
 et écriture fonctionnent donc comme avec TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -218,6 +227,7 @@ et écriture fonctionnent donc comme avec TCP.
 Un serveur TLS se crée en passant à `tls-listen` les fichiers du certificat et de la clé privée (PEM).
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; le serve de TCP fonctionne tel quel
@@ -234,6 +244,7 @@ UDP n'est pas un flux ; il envoie et reçoit un datagramme à la fois. Les donn�
 (`Vector<int>`) ; on convertit depuis et vers des chaînes avec `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; même pour envoyer, il faut une socket ; 0 laisse le port au système
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

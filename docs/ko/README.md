@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp 문서 (한국어)
 
 typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최상위의 [README.md](../../README.md)(영어)를
@@ -11,6 +11,7 @@ typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최�
 태스크(경량 스레드)를 시작하고, 채널을 통해 태스크끼리 값을 주고받는다. 자세한 내용은 [동시성](tutorial/concurrency.md) 문서를 참조한다.
 
 ```lisp
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -35,6 +36,7 @@ typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최�
 `nil`은 없다. 값이 없을 수 있으면 `Option<T>`를, 실패할 수 있으면 `Result<T,E>`를 반환하고, `match`로 내용을 꺼낸다. `Option<string>`을 `string`처럼 쓰거나 `match`에서 `none`인 경우를 빠뜨리면 실행하기 전에 타입 오류가 된다. 자세한 내용은 [타입의 기초](tutorial/types.md), [오류 처리](tutorial/errors.md) 문서를 참조한다.
 
 ```lisp
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

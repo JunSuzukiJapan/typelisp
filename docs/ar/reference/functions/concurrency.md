@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # المهام والقنوات
 
 مفردات المهام (الخيوط الخفيفة). أما `task` و`thread` اللتان تبدآنها، و`select` التي تنتظر على عدة أشياء،
@@ -44,6 +44,7 @@
 `make(chan int, 16)` تُكتبان `(Chan::new 0)` و`(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -92,6 +93,7 @@
 للعمل الذي ينمو ديناميكيًا، أو عندما لا تريد الاحتفاظ بالمقابض.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: ابدأ مهمة لكل مُدخَل ثم اجمعها (لا توجد قنوات nil في هذه اللغة)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -120,6 +122,7 @@
 | `with-lock` | `(with-lock (x m) body...)` | ماكرو | يقفل ويربط المحتوى بـ `x` وينفّذ `body` و**يحرر دائمًا** |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -178,6 +181,7 @@
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | هل أُلغي |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

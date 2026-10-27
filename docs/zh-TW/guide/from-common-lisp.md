@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 給 Common Lisp 使用者
 
 typelisp 繼承了 Common Lisp（以下簡稱 CL）的語法與許多函式名稱，但它是靜態型別語言。因此 CL 的寫法不一定能直接通過。本指南整理了熟悉
@@ -146,6 +146,7 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
 - **可恢復的失敗回傳 `Result<T,E>`。** 呼叫端以 `match` 區分 `ok` / `err`。沒有相當於 Rust 的 `?` 的簡寫語法。
 
   ```lisp
+(use std::num::parse-int)
   (match (parse-int "42x")
     ((ok n) n)
     ((err e) (progn (println "bad input: ~a" (message e)) 0)))

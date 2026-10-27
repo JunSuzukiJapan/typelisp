@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # टाइप की बुनियादी बातें
 
 typelisp एक स्टैटिक रूप से टाइप की गई भाषा है। यह अध्याय समझाता है कि टाइप चेकर आपके लिए क्या करता है, वे टाइप जिनका आप सबसे अधिक उपयोग करेंगे
@@ -102,6 +102,7 @@ none
 जो ऑपरेशन विफल हो सकता है वह `Result<T,E>` लौटाता है: सफलता पर `T` का मान रखने वाला `ok`, या विफलता पर त्रुटि `E` रखने वाला `err`।
 
 ```lisp
+(use std::num::parse-int)
 (match (parse-int "42")
   ((ok n) (println "n = ~a" (+ n 1)))
   ((err e) (println "error: ~a" (message e))))

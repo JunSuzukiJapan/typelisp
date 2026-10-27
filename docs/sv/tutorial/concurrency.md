@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Samtidighet
 
 I typelisp kör man arbete samtidigt genom att starta **tasks** (lättviktstrådar), och tasks skickar
@@ -38,6 +38,7 @@ kapaciteten (hur många värden den kan hålla). På en kanal med kapacitet 0 v�
 mottagaren tills den andra sidan finns på plats.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; skicka
@@ -70,6 +71,7 @@ behandlar arbetet) ta jobb från den. Den arbetare som är ledig tar nästa jobb
 och snabba jobb blandas fördelas arbetet naturligt.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; hur lång tid det här jobbet tar
@@ -130,6 +132,7 @@ kapacitet kunde huvudtasken köa arbete utan att vänta på arbetarna.
 levererar ett värde när den angivna tiden har gått. I kombination med `select` ger den en timeout.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -148,6 +151,7 @@ levererar ett värde när den angivna tiden har gått. I kombination med `select
 - Med `(:else body...)` sist körs `:else` när ingen gren kan gå vidare direkt, och `select` väntar inte.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -165,13 +169,14 @@ variabeln med `setf` inuti kroppen ändrar innehållet i `Mutex`.
 med `add`, låt varje task anropa `done` när den är klar och `wait` tills räknaren når 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

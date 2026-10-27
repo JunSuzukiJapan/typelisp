@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Para programadores de Common Lisp
 
 typelisp hereda la sintaxis de Common Lisp (CL) y muchos de sus nombres de funciones, pero es un lenguaje
@@ -169,6 +169,7 @@ Encajan mal con el tipado estático. En su lugar se usan estas dos cosas con fin
   una forma abreviada como el `?` de Rust.
 
   ```lisp
+(use std::num::parse-int)
   (match (parse-int "42x")
     ((ok n) n)
     ((err e) (progn (println "bad input: ~a" (message e)) 0)))

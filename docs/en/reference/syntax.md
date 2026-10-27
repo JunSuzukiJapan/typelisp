@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1004,6 +1004,7 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(pub use path...)          ; make what is brought in reachable through this module's path too
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
@@ -1034,6 +1035,15 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
   passed as a value, with "the first argument's type" in step 4 being the first parameter type of the
   function type expected there (writing `norm` where `(fn (pt) int)` is expected gives `pt`'s method
   `norm`). If the expected type is not settled yet, step 4 is skipped.
+- **The names the standard library offers** can be used from every module without a `use`: the
+  primitive types, `Option`/`Result`/`Vector`, iteration, S-expressions and lists, the sequence
+  functions, the control macros, comparison and the arithmetic traits; every name that is also a name
+  of Common Lisp's `COMMON-LISP` package; and the types those mention. Any other name — the
+  concurrency, network and file conveniences among them — is brought in with a `use`, as in
+  `(use std::sync::Chan)`, or written as its path, `std::sync::Chan` (the list is in
+  [Names that need a `use`](functions/README.md#names-that-need-a-use) of the built-in functions). `use` brings in functions, global
+  variables, macros, types, traits, `deftype` aliases and modules. A `use` works only in the module it
+  is written in: to use a name inside a `(module ...)`, write the `use` inside it.
 - A qualified path `a::...::n` resolves to a module name (macro, function or global variable) of the
   module `a::...` names, or to a variant or static method of a type. `x::f` in a value position (where
   `x` names a value) is a field read.
@@ -1110,7 +1120,11 @@ nests **inside** it (`geo::point::bar`), so the derived path and an explicit dec
 (pub deftype ...)
 ```
 
-`pub` can be put only on the eleven kinds above (not on `module`/`use`/`impl`). It is written
+`pub` can be put only on the eleven kinds above and on `use` (not on `module`/`impl`).
+`(pub use path...)` **re-exports** what it brings in: other modules can reach it through a path that
+goes through this module (`m::name`), and bring it in with `(use m::name)`. Only a definition can be
+re-exported; a module cannot.
+It is written
 with the definition keyword right after `pub`, not in the form `(pub (defun ...))` wrapping the definition
 in parentheses. One `pub` makes exactly one definition public (several definitions cannot be marked at
 once).
@@ -1152,6 +1166,7 @@ examples are in
 ### 3.16 `#[test]` — test functions
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1160,6 +1175,7 @@ examples are in
 A `defun` marked `#[test]` is a test function, which `typl test` calls one at a time (the same as Rust's `#[test]`). It must take no arguments and return `()` or `Result<(), E>` (it cannot take type parameters either). It does not need `pub`. A test returning a `Result` fails by returning an `err`, and the error is shown, so `E` must implement `Error` or `print-object` (just as Rust asks a test's error type for `Debug`). An `Error` is shown by `describe-error` (the message and its chain of causes), anything else by `print-object`. `:dyn Error` is an `Error` too, so a test can gather different errors into one type and return it.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1866,6 +1882,7 @@ dispatch). The return value becomes the data read at that point. The stream is a
 type as it is.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1990,6 +2007,7 @@ and the rest can be used as they are.
 arm is chosen** (the same discipline `case` has for its keys).
 
 ```lisp
+(use std::sync::after)
 (select                             ; receiving with a timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

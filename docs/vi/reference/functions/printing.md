@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -167,6 +167,7 @@ Trong CL, `pprint-exit-if-list-exhausted` là một lối thoát phi cục bộ 
 sao cũng luôn đặt nó bên trong một `loop`, nên nó đọc giống nhau.
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

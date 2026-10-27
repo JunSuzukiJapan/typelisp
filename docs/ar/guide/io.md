@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # إدخال وإخراج الملفات والتدفقات والشبكات
 
 يعرض هذا الدليل أساسيات قراءة الملفات وكتابتها والمسارات (pathnames) والاتصال عبر المقابس (sockets).
@@ -11,6 +11,7 @@
 ولذلك لا يحدث `panic`. افصل بين النتائج بـ `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -26,6 +27,7 @@
 أسهل الدوال تتعامل مع الملف كله دفعة واحدة.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -37,6 +39,7 @@
 الجسم يُغلق التدفق. والقيمة هي `Result<قيمة الجسم, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; الكتابة
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -118,6 +121,7 @@
 عمليات نظام الملفات:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; تُنشأ مع المجلدات الأم
 (probe-file "out/deep")                           ; => true (موجود)
 (directory-p "out/deep")                          ; => true
@@ -139,6 +143,7 @@
 تصل بيانات، فيستمر التعامل مع الاتصالات الأخرى.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -160,6 +165,7 @@
 `Result<قيمة الجسم, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -170,6 +176,7 @@
 ولوضع حد زمني لعملية مرّر `:timeout` (بالثواني).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; ضع مؤقتًا على القراءة التالية
@@ -189,6 +196,7 @@
 وإذا تعذّر حل الاسم أُعيدت `err`.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -201,6 +209,7 @@
 شهادات الجذر القياسية. والنتيجة `socket-stream` عادي، فتعمل القراءة والكتابة كما مع TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -213,6 +222,7 @@
 يُنشأ خادم TLS بتمرير ملفي الشهادة والمفتاح الخاص (PEM) إلى `tls-listen`.
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; تعمل serve الخاصة بـ TCP كما هي
@@ -229,6 +239,7 @@ UDP ليس تدفقًا؛ فهو يرسل ويستقبل رسالة بيانات
 (`Vector<int>`)؛ وتُحوَّل من السلاسل النصية وإليها بـ `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; حتى الإرسال يحتاج مقبسًا؛ و0 تترك المنفذ لنظام التشغيل
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp Belgeleri (Türkçe)
 
 typelisp, statik tür denetimli bir Lisp'tir. Kurulumu ve derlenmesi için deponun kök dizinindeki
@@ -12,6 +12,7 @@ Task'ler (hafif thread'ler) başlatılır ve task'ler kanallar üzerinden birbir
 Ayrıntılar için [Eşzamanlılık](tutorial/concurrency.md) belgesine bakın.
 
 ```lisp
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -40,6 +41,7 @@ hatasıdır. Ayrıntılar için [Tür Temelleri](tutorial/types.md) ve [Hata Yö
 belgelerine bakın.
 
 ```lisp
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

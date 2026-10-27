@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # टास्क और चैनल
 
 टास्क (हल्के थ्रेड) की शब्दावली। उन्हें शुरू करने वाले `task` और `thread`, और कई चीज़ों की प्रतीक्षा करने वाला `select`, विशेष फ़ॉर्म हैं और [सिंटैक्स संदर्भ](../syntax.md#12-कंकरेंसी-टास्क) में हैं। यह अध्याय बाकी को कवर करता है: टाइप, मेथड और फ़ंक्शन।
@@ -35,6 +35,7 @@
 **टाइप आर्ग्युमेंट `the` से दिया जाता है** (`(the Vector<i32> (Vector::new))` की तरह ही लिखा जाता है)। **क्षमता हमेशा लिखनी चाहिए**: जिन दो स्थितियों को Go `make(chan int)` और `make(chan int, 16)` लिखता है वे `(Chan::new 0)` और `(Chan::new 16)` लिखी जाती हैं।
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -76,6 +77,7 @@ CL की तरह, `sleep` **सेकंड** लेता है। पू�
 **`Task<T>` के उपलब्ध होने से, इसकी Go से कम ज़रूरत पड़ती है**: `(doiter (t tasks) (wait t))` अक्सर पर्याप्त होता है। यह उस काम के लिए उपकरण है जो गतिशील रूप से बढ़ता है, या जब आप हैंडल नहीं रखना चाहते।
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: हर इनपुट के लिए एक टास्क शुरू करें और उन्हें जोड़ें (इस भाषा में nil चैनल नहीं हैं)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -102,6 +104,7 @@ Go का `time.After`। इसे `select` की टाइमआउट शा
 | `with-lock` | `(with-lock (x m) body...)` | Macro | लॉक लेता है, सामग्री को `x` से बाँधता है, `body` चलाता है, और **हमेशा** छोड़ देता है |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -150,6 +153,7 @@ Go का `context.Context`। उस काम को दिया जाता
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | रद्द हो चुका है या नहीं |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

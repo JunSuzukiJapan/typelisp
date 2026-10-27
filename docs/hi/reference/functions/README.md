@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # बिल्ट-इन फ़ंक्शन
 
 बिल्ट-इन फ़ंक्शन, मेथड और स्टैंडर्ड लाइब्रेरी की सूची। सिंटैक्स (विशेष फ़ॉर्म और चीज़ें कैसे परिभाषित करें) के लिए [सिंटैक्स संदर्भ](../syntax.md) देखें; टाइप की सूची के लिए [टाइप](../types.md) देखें।
@@ -12,6 +12,45 @@
 - स्टैटिक मेथड (असोसिएटेड फ़ंक्शन): `(Type::name args...)`
 
 हर टाइप का समान नाम का अपना मेथड हो सकता है। `(+ a b)` `a` के टाइप का `+` कॉल करता है।
+
+## `use` चाहने वाले नाम
+
+मानक लाइब्रेरी के नामों में से ये हर मॉड्यूल में कुछ भी लिखे बिना काम आते हैं
+([सिंटैक्स संदर्भ 3.10](../syntax.md#310-module--use--नेमस्पेस)):
+
+- मूल प्रकार, `Option`/`Result`/`Vector`, पुनरावृत्ति, S-अभिव्यक्तियाँ और सूचियाँ, अनुक्रम फ़ंक्शन,
+  नियंत्रण मैक्रो, तुलना और अंकगणितीय trait
+- हर वह नाम जो Common Lisp के `COMMON-LISP` पैकेज का भी नाम है (`length`, `format`, `open` आदि)
+- `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, स्ट्रीम trait `Stream`,
+  `InputStream` और `OutputStream`, और `Hash`, जिसे `HashTable` की कुंजियाँ लागू करती हैं
+- वे प्रकार जिनका इनके फ़ंक्शनों और चरों में उल्लेख है
+
+कोई भी दूसरा नाम `(use std::net::tcp-connect)` की तरह `use` से लाया जाता है, या उसके पथ
+`std::net::tcp-connect` से लिखा जाता है। तालिका ये नाम और हर एक का मॉड्यूल बताती है।
+
+| मॉड्यूल | नाम |
+|---|---|
+| `std::array` | `array-iter` |
+| `std::char` | `digit->char`, `digit-weight`, `name->char` |
+| `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
+| `std::env` | `command-line-args`, `getenv`, `home-directory` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::fmt` | `pprint-list-exhausted` |
+| `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
+| `std::hash` | `*sxhash-mask*`, `sxhash-string` |
+| `std::io` | `ByteInput`, `ByteOutput`, `PeekInput`, `binary-file-stream`, `copy-stream`, `make-peek-stream`, `peek-stream`, `read-lines`, `write-lines` |
+| `std::net` | `NetError`, `byte-stream-of`, `char-stream-of`, `datagram`, `socket-byte-stream`, `socket-listener`, `socket-stream`, `tcp-connect`, `tcp-listen`, `tls-connect`, `tls-listen`, `udp-bind`, `udp-socket`, `unix-connect`, `unix-listen`, `with-connection` |
+| `std::num` | `ParseFloatError`, `ParseIntError`, `atan2`, `parse-float`, `parse-int` |
+| `std::path` | `Pathish`, `pathname-absolute-p` |
+| `std::process` | `exit` |
+| `std::random` | `seed-random-state` |
+| `std::reader` | `ReadOutcome`, `read-from-string-preserving-whitespace`, `read-sexpr`, `read-sexpr-preserving-whitespace` |
+| `std::repl` | `heap-info` |
+| `std::string` | `left-trim`, `right-trim`, `string->utf8`, `trim`, `utf8->string` |
+| `std::symbol` | `symbol->string` |
+| `std::sync` | `Chan`, `Context`, `Mutex`, `WaitGroup`, `after`, `with-lock` |
+| `std::thread` | `Task`, `Thread`, `yield` |
+| `std::time` | `internal-time-seconds`, `timezone-daylight-p`, `timezone-offset-seconds` |
 
 ## तालिकाएँ पढ़ना
 

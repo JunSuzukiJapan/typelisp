@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # ฟังก์ชันที่มีให้ในตัว
 
 รายการฟังก์ชันที่มีให้ในตัว เมทอด และไลบรารีมาตรฐาน สำหรับไวยากรณ์ (ฟอร์มพิเศษและวิธีนิยามสิ่งต่าง ๆ)
@@ -14,6 +14,45 @@
 - เมทอดสถิต (associated function): `(Type::name args...)`
 
 แต่ละชนิดอาจมีเมทอดชื่อเดียวกันของตัวเอง `(+ a b)` เรียก `+` ของชนิดของ `a`
+
+## ชื่อที่ต้อง `use`
+
+ในบรรดาชื่อของไลบรารีมาตรฐาน ชื่อต่อไปนี้ใช้ได้ในทุกโมดูลโดยไม่ต้องเขียนอะไร
+([เอกสารอ้างอิงไวยากรณ์ 3.10](../syntax.md#310-module--use--เนมสเปซ))
+
+- ชนิดพื้นฐาน `Option`/`Result`/`Vector` การวนซ้ำ นิพจน์ S และลิสต์ ฟังก์ชันลำดับ แมโครควบคุม
+  การเปรียบเทียบ และ trait ทางคณิตศาสตร์
+- ชื่อทุกชื่อที่เป็นชื่อในแพ็กเกจ `COMMON-LISP` ของ Common Lisp ด้วย (`length` `format` `open` เป็นต้น)
+- `Error` `assert` `print-object` `HashTable` `Array` `BitVector` trait ของสตรีม `Stream`
+  `InputStream` และ `OutputStream` และ `Hash` ซึ่งคีย์ของ `HashTable` ต้อง implement
+- ชนิดที่ฟังก์ชันและตัวแปรของสิ่งเหล่านี้กล่าวถึง
+
+ชื่ออื่นใดให้นำเข้าด้วย `use` เช่น `(use std::net::tcp-connect)` หรือเขียนด้วยพาธ
+`std::net::tcp-connect` ตารางต่อไปนี้ให้ชื่อเหล่านั้นและโมดูลของแต่ละชื่อ
+
+| โมดูล | ชื่อ |
+|---|---|
+| `std::array` | `array-iter` |
+| `std::char` | `digit->char` `digit-weight` `name->char` |
+| `std::collections` | `Deque` `HashSet` `Scope` `SortedTable` `hashtable-iter` |
+| `std::env` | `command-line-args` `getenv` `home-directory` |
+| `std::error` | `WrappedError` `as-dyn-error` `assert-eq` `describe-error` `wrap-error` |
+| `std::fmt` | `pprint-list-exhausted` |
+| `std::fs` | `direction-append` `direction-input` `direction-output` `directory-p` `open-binary` `open-binary-input` `open-binary-output` `open-file` `open-input` `open-output` `read-file-lines` `read-file-string` `write-file-string` |
+| `std::hash` | `*sxhash-mask*` `sxhash-string` |
+| `std::io` | `ByteInput` `ByteOutput` `PeekInput` `binary-file-stream` `copy-stream` `make-peek-stream` `peek-stream` `read-lines` `write-lines` |
+| `std::net` | `NetError` `byte-stream-of` `char-stream-of` `datagram` `socket-byte-stream` `socket-listener` `socket-stream` `tcp-connect` `tcp-listen` `tls-connect` `tls-listen` `udp-bind` `udp-socket` `unix-connect` `unix-listen` `with-connection` |
+| `std::num` | `ParseFloatError` `ParseIntError` `atan2` `parse-float` `parse-int` |
+| `std::path` | `Pathish` `pathname-absolute-p` |
+| `std::process` | `exit` |
+| `std::random` | `seed-random-state` |
+| `std::reader` | `ReadOutcome` `read-from-string-preserving-whitespace` `read-sexpr` `read-sexpr-preserving-whitespace` |
+| `std::repl` | `heap-info` |
+| `std::string` | `left-trim` `right-trim` `string->utf8` `trim` `utf8->string` |
+| `std::symbol` | `symbol->string` |
+| `std::sync` | `Chan` `Context` `Mutex` `WaitGroup` `after` `with-lock` |
+| `std::thread` | `Task` `Thread` `yield` |
+| `std::time` | `internal-time-seconds` `timezone-daylight-p` `timezone-offset-seconds` |
 
 ## การอ่านตาราง
 

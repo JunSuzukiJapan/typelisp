@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Task e canali
 
 Il vocabolario dei task (thread leggeri). `task` e `thread`, che li avviano, e `select`, che attende su
@@ -46,6 +46,7 @@ capacità va sempre scritta**: i due casi che Go scrive `make(chan int)` e `make
 scrivono `(Chan::new 0)` e `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -100,6 +101,7 @@ va perso nemmeno quando i task vengono eseguiti su thread del sistema operativo 
 uno strumento per il lavoro che cresce dinamicamente, o per quando non vuoi conservare gli handle.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: start one task per input and join them (this language has no nil channels)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -128,6 +130,7 @@ sua capacità è 1, quindi il task che invia può terminare anche se nessuno ric
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Blocca, associa il contenuto a `x`, esegue `body` e rilascia **sempre** |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -189,6 +192,7 @@ controllando da sé `is-cancelled` o ricevendo da `done`.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Se è stato annullato |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

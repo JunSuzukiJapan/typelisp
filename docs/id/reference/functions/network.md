@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Jaringan (TCP / TLS / Domain Unix / UDP)
 
 Socket adalah anggota [stream](streams-files.md). Sebuah koneksi dilihat dalam **dua pandangan atas
@@ -80,6 +80,7 @@ mengembalikan `Option<Item>` dan tidak punya cara mengembalikan kesalahan. Jam d
 tempat, menyambung, menerima, dan "pembacaan berikutnya", dan masing-masing memiliki argumennya.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; server: one task per connection
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -145,6 +146,7 @@ Konversikan antara string dan urutan byte dengan `string->utf8` / `utf8->string`
 ([String](collections.md#1-string-string)).
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

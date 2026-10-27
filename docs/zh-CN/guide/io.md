@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 文件 I/O、流与网络
 
 本指南说明文件读写、路径名以及套接字通信的基本写法。函数一览见[流与文件](../reference/functions/streams-files.md)
@@ -10,6 +10,7 @@
 区分结果。
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -24,6 +25,7 @@
 最简便的是一次处理整个文件的函数。
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -34,6 +36,7 @@
 一点一点读写时，用 `with-open-file` 打开流。无论以何种方式退出主体，流都会被关闭。值是 `Result<主体的值, FileError>`。
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; 写入
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -111,6 +114,7 @@
 文件系统操作：
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; 连同父目录一起创建
 (probe-file "out/deep")                           ; => true（存在）
 (directory-p "out/deep")                          ; => true
@@ -130,6 +134,7 @@
 基本形式是每个连接启动一个任务。`accept` 和 `read-line` 在数据到来之前**只让该任务**停下，其他连接的处理会继续。
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -150,6 +155,7 @@
 `with-connection` 建立连接、执行主体，最后关闭。值是 `Result<主体的值, NetError>`。
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -160,6 +166,7 @@
 要限制时间时，传入 `:timeout`（秒）。
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; 给下一次读取加上计时
@@ -178,6 +185,7 @@
 无法解析时返回 `err`。
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -190,6 +198,7 @@
 `socket-stream`，读写与 TCP 相同。
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -202,6 +211,7 @@
 TLS 服务器通过把证书和私钥文件（PEM）传给 `tls-listen` 来创建。
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; 可以直接使用 TCP 的 serve
@@ -217,6 +227,7 @@ UDP 不是流，而是一次收发一个数据报。数据是字节序列（`Vec
 `utf8->string` 转换。
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; 只发送也需要套接字。0 表示交给 OS 选择
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

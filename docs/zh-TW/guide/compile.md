@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -52,6 +52,7 @@ AOT 編譯產生的執行檔會連結靜態函式庫 `libtypelisp_front.a`。發
 作為進入點，定義一個**不接受引數的 `main` 函式**。
 
 ```lisp
+(use std::env::command-line-args)
 ;; hello.typl
 (defun fib ((n int)) int
   (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))

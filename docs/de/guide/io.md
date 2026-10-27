@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Datei-E/A, Streams und Netzwerk
 
 Dieser Leitfaden zeigt die Grundlagen des Lesens und Schreibens von Dateien, der Pfadnamen und der
@@ -12,6 +12,7 @@ ein `Result` zurück. Eine fehlende Datei ist kein Fehler im Programm, daher gib
 Ergebnisse trennt man mit `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -27,6 +28,7 @@ beim Fehlschlag in Ordnung ist, holt `unwrap` den Wert heraus. Ist es ein `err`,
 Die einfachsten Funktionen behandeln die ganze Datei auf einmal.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -38,6 +40,7 @@ Um stückweise zu lesen oder zu schreiben, öffnet man mit `with-open-file` eine
 Rumpf verlassen wird, der Stream wird geschlossen. Der Wert ist `Result<Wert des Rumpfes, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; schreiben
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -121,6 +124,7 @@ einen Pfad in Teile zu zerlegen oder einen zu bauen, verwendet man einen `pathna
 Operationen auf dem Dateisystem:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; samt Elternverzeichnissen anlegen
 (probe-file "out/deep")                           ; => true (es existiert)
 (directory-p "out/deep")                          ; => true
@@ -143,6 +147,7 @@ Das Grundmuster ist, pro Verbindung einen Task zu starten. `accept` und `read-li
 an, bis Daten ankommen, daher läuft die Bearbeitung anderer Verbindungen weiter.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -164,6 +169,7 @@ Zu Tasks siehe [Kapitel 12 der Syntaxreferenz](../reference/syntax.md#12-nebenl�
 `Result<Wert des Rumpfes, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -174,6 +180,7 @@ Zu Tasks siehe [Kapitel 12 der Syntaxreferenz](../reference/syntax.md#12-nebenl�
 Um eine Operation zeitlich zu begrenzen, übergibt man `:timeout` (in Sekunden).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; eine Uhr an das nächste Lesen hängen
@@ -195,6 +202,7 @@ versucht.
 Lässt sich der Name nicht auflösen, wird ein `err` zurückgegeben.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -208,6 +216,7 @@ Serverzertifikat wird gegen die Standard-Stammzertifikate geprüft. Das Ergebnis
 `socket-stream`, daher funktionieren Lesen und Schreiben wie bei TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -220,6 +229,7 @@ Serverzertifikat wird gegen die Standard-Stammzertifikate geprüft. Das Ergebnis
 Einen TLS-Server erzeugt man, indem man `tls-listen` Zertifikats- und Schlüsseldatei (PEM) übergibt.
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; das serve von TCP funktioniert unverändert
@@ -237,6 +247,7 @@ UDP ist kein Stream; es sendet und empfängt jeweils ein Datagramm. Die Daten si
 (`Vector<int>`); umgewandelt von und zu Zeichenketten wird mit `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; auch zum Senden braucht es einen Socket; 0 überlässt den Port dem BS
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

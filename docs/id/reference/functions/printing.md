@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -174,6 +174,7 @@ ia adalah **`break` dari `loop` yang melingkupinya** (`pprint-logical-block` tid
 Idiom CL selalu menaruhnya di dalam `loop` bagaimanapun juga, sehingga terbaca sama.
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

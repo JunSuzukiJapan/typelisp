@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Довідник із синтаксису typelisp
 
 typelisp — це Лісп зі статичною типізацією, що записується S-виразами. Перелік вбудованих функцій і
@@ -999,6 +999,7 @@ Rust (`impl Point { ... }`).
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(pub use path...)          ; зробити введене доступним і шляхом цього модуля
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
@@ -1027,6 +1028,15 @@ Rust (`impl Point { ... }`).
   «тип першого аргументу» в кроці 4 — це тип першого параметра очікуваного там функціонального типу
   (`norm` там, де очікується `(fn (pt) int)`, — це метод `norm` типу `pt`). Якщо очікуваний тип ще не
   визначено, крок 4 пропускається.
+- **Імена, які пропонує стандартна бібліотека**, доступні в будь-якому модулі без `use`: примітивні
+  типи, `Option`/`Result`/`Vector`, ітерація, S-вирази та списки, функції послідовностей, керівні
+  макроси, порівняння й арифметичні трейти; будь-яке ім'я, що є і в пакеті `COMMON-LISP` мови
+  Common Lisp; і типи, які в них згадано. Будь-яке інше ім'я — серед них засоби паралельності, мережі
+  та файлів — вводять через `use`, наприклад `(use std::sync::Chan)`, або пишуть шляхом,
+  `std::sync::Chan` (список — у розділі [Імена, яким потрібен `use`](functions/README.md#імена-яким-потрібен-use) вбудованих функцій).
+  `use` вводить функції, глобальні змінні, макроси, типи, трейти, псевдоніми `deftype` і модулі.
+  `use` діє лише в тому модулі, де його написано: щоб використати ім'я всередині `(module ...)`,
+  `use` пишуть усередині нього.
 - Кваліфікований шлях `a::...::n` розв'язується в ім'я модуля (макрос, функцію або глобальну змінну)
   модуля, названого `a::...`, або у варіант чи статичний метод типу. `x::f` у позиції значення (де `x` —
   ім'я значення) — це читання поля.
@@ -1104,7 +1114,10 @@ Rust (`impl Point { ... }`).
 (pub deftype ...)
 ```
 
-`pub` можна ставити лише на одинадцять видів вище (не на `module`/`use`/`impl`). Його пишуть так, що
+`pub` можна ставити лише на одинадцять видів вище та на `use` (не на `module`/`impl`).
+`(pub use path...)` **реекспортує** те, що вводить: інші модулі дістають це шляхом через цей модуль
+(`m::name`) і вводять через `(use m::name)`. Реекспортувати можна лише визначення, а не модуль.
+Його пишуть так, що
 ключове слово визначення йде одразу після `pub`, а не у формі `(pub (defun ...))`, що обгортає визначення
 в дужки. Один `pub` робить публічним рівно одне визначення (позначити кілька відразу не можна).
 
@@ -1144,6 +1157,7 @@ Rust (`impl Point { ... }`).
 ### 3.16 `#[test]` — тестові функції
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1152,6 +1166,7 @@ Rust (`impl Point { ... }`).
 `defun` з позначкою `#[test]` — тестова функція, яку `typl test` викликає по одній (як `#[test]` у Rust). Вона не повинна приймати аргументів і має повертати `()` або `Result<(), E>` (параметрів типу в неї теж бути не може). `pub` їй не потрібен. Тест, що повертає `Result`, провалюється, якщо повертає `err`, і помилку буде показано, тому `E` має реалізовувати `Error` або `print-object` (так само, як Rust вимагає `Debug` від типу помилки тесту). `Error` показується через `describe-error` (повідомлення й ланцюжок причин), усе інше — через `print-object`. `:dyn Error` теж `Error`, тож тест може зібрати різні помилки в один тип і повернути його.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1856,6 +1871,7 @@ AOT-компілювати як є. Власні визначення вхідн
 `read-delimited-list` усі приймають `(:where (PeekInput S))`, тож усі вони працюють із конкретним типом як є.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1979,6 +1995,7 @@ AOT-компілювати як є. Власні визначення вхідн
 було обрано** (та сама дисципліна, що й у `case` для своїх ключів).
 
 ```lisp
+(use std::sync::after)
 (select                             ; receiving with a timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

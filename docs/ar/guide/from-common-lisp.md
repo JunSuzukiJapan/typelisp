@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # لمبرمجي Common Lisp
 
 ترث typelisp صياغة Common Lisp (واختصارًا CL) وكثيرًا من أسماء دواله، لكنها لغة ذات أنواع ساكنة. ولهذا
@@ -164,6 +164,7 @@
   اختصار مثل `?` في Rust.
 
   ```lisp
+(use std::num::parse-int)
   (match (parse-int "42x")
     ((ok n) n)
     ((err e) (progn (println "bad input: ~a" (message e)) 0)))

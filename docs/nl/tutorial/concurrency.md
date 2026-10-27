@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Gelijktijdigheid
 
 In typelisp voer je werk gelijktijdig uit door **taken** (lichtgewicht threads) te starten, en taken
@@ -38,6 +38,7 @@ Een kanaal `Chan<T>` is een pad waarlangs taken waarden van het type `T` doorgev
 wachten de zender en de ontvanger allebei totdat de andere kant er is.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; send
@@ -71,6 +72,7 @@ volgende opdracht, dus zelfs wanneer trage en snelle opdrachten door elkaar lope
 werk zich vanzelf.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; how long this job takes
@@ -132,6 +134,7 @@ is een kanaal dat één waarde aflevert zodra de opgegeven tijd is verstreken. G
 `select` geeft het je een timeout.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -151,6 +154,7 @@ is een kanaal dat één waarde aflevert zodra de opgegeven tijd is verstreken. G
   wacht `select` niet.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -169,13 +173,14 @@ de `Mutex`.
 met `add`, laat elke taak `done` aanroepen wanneer ze klaar is, en `wait` tot de teller 0 bereikt.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

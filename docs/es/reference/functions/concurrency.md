@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Tareas y canales
 
 El vocabulario de las tareas (hilos ligeros). `task` y `thread`, que las inician, y `select`, que espera
@@ -46,6 +46,7 @@ que escribirla siempre**: los dos casos que Go escribe como `make(chan int)` y `
 escriben `(Chan::new 0)` y `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -99,6 +100,7 @@ aunque las tareas se ejecuten en hilos de SO distintos.
 herramienta para trabajo que crece dinámicamente, o para cuando no quieres guardar los manejadores.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: iniciar una tarea por entrada y reunirlas (este lenguaje no tiene canales nil)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -127,6 +129,7 @@ capacidad es 1, así que la tarea que envía puede terminar aunque nadie reciba.
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Bloquea, liga el contenido a `x`, ejecuta `body` y **siempre** libera |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -188,6 +191,7 @@ mismo `is-cancelled` o recibiendo de `done`.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Si se ha cancelado |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Task và kênh
 
 Từ vựng về task (thread nhẹ). `task` và `thread`, vốn khởi động chúng, và `select`, vốn chờ nhiều thứ, là
@@ -45,6 +45,7 @@ chuyển đổi và điểm khác với Go nằm ở [Tham chiếu cú pháp 12.
 `(Chan::new 0)` và `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -96,6 +97,7 @@ trên các thread HĐH riêng.
 công việc tăng trưởng động, hoặc khi bạn không muốn giữ các handle.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: khởi động một task cho mỗi đầu vào và gộp chúng lại (ngôn ngữ này không có kênh nil)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -124,6 +126,7 @@ lượng của nó là 1, nên task gửi có thể kết thúc ngay cả khi kh
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Khóa, gán nội dung vào `x`, chạy `body`, và **luôn** nhả |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -185,6 +188,7 @@ của `Task<T>`.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Đã bị hủy hay chưa |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

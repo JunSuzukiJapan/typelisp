@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -61,6 +61,7 @@ Pour examiner le résultat de la compilation, utilisez `disassemble`.
 Comme point d'entrée, définissez une **fonction `main` sans argument**.
 
 ```lisp
+(use std::env::command-line-args)
 ;; hello.typl
 (defun fib ((n int)) int
   (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))

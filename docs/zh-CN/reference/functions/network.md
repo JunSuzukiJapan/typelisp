@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 网络（TCP / TLS / Unix 域 / UDP）
 
 套接字是[流](streams-files.md)的一员。连接有 `socket-stream`（字符）／`socket-byte-stream`（字节）这**同一连接的两种视图**，
@@ -64,6 +64,7 @@
 `read-item` 返回 `Option<Item>`，没有返回错误的渠道。需要计时的地方有连接、接受、"下一次读取"这 3 处，各自都有参数。
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; 服务器：每个连接一个任务
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -125,6 +126,7 @@
 字符串与字节序列之间的转换用 `string->utf8` / `utf8->string`（[字符串](collections.md#1-字符串-string)）。
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

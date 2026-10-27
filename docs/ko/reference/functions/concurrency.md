@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 태스크와 채널
 
 태스크(경량 스레드)의 어휘. 태스크를 시작하는 `task`와 `thread`, 여러 가지를 기다리는 `select`는 특수 형식이며
@@ -41,6 +41,7 @@
 `make(chan int)`와 `make(chan int, 16)`으로 쓰는 두 경우를 `(Chan::new 0)`과 `(Chan::new 16)`으로 쓴다.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -90,6 +91,7 @@ panic한다(`done`을 너무 많이 호출했거나 음수 `add`). Go와 마찬�
 일이나 핸들을 들고 있고 싶지 않을 때를 위한 도구이다.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: 입력마다 태스크를 시작해 합류한다(이 언어에는 nil 채널이 없다)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -118,6 +120,7 @@ Go의 `time.After`. `select`의 타임아웃 갈래에 그대로 쓸 수 있다
 | `with-lock` | `(with-lock (x m) body...)` | 매크로 | 잠그고, 내용을 `x`에 묶어 `body`를 실행하고, **반드시** 놓는다 |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -173,6 +176,7 @@ Go의 `context.Context`. 밖에서 멈추고 싶은 작업에 넘긴다. 멈추�
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | 취소되었는지 |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

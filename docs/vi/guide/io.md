@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Vào/ra tệp, stream và mạng
 
 Tài liệu này trình bày những điều cơ bản về đọc và ghi tệp, pathname, và giao tiếp qua socket. Danh sách
@@ -11,6 +11,7 @@ Các thao tác có thể thất bại tùy môi trường, như mở tệp hay k
 thiếu không phải là sai sót của chương trình, nên nó không `panic`. Hãy tách các kết quả bằng `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -26,6 +27,7 @@ chấp nhận được, `unwrap` lấy giá trị ra. Nếu là `err`, nó panic
 Các hàm dễ dùng nhất xử lý cả tệp trong một lần.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -37,6 +39,7 @@ Các hàm dễ dùng nhất xử lý cả tệp trong một lần.
 cách nào, stream đều được đóng. Giá trị là `Result<giá trị của thân, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; ghi
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -119,6 +122,7 @@ Các hàm nhận tên tệp chấp nhận hoặc một chuỗi hoặc một `pat
 Các thao tác trên hệ thống tệp:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; tạo nó cùng với các thư mục cha
 (probe-file "out/deep")                           ; => true (nó tồn tại)
 (directory-p "out/deep")                          ; => true
@@ -140,6 +144,7 @@ Mẫu cơ bản là khởi động một task cho mỗi kết nối. `accept` v�
 khi có dữ liệu, nên việc xử lý các kết nối khác vẫn tiếp tục.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -161,6 +166,7 @@ mạng. Về task, xem [Tham chiếu cú pháp chương 12](../reference/syntax.
 `Result<giá trị của thân, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -171,6 +177,7 @@ mạng. Về task, xem [Tham chiếu cú pháp chương 12](../reference/syntax.
 Để đặt giới hạn thời gian cho một thao tác, hãy truyền `:timeout` (tính bằng giây).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; đặt đồng hồ cho lần đọc tiếp theo
@@ -191,6 +198,7 @@ các task khác vẫn chạy trong lúc chờ. Nếu một tên có nhiều đ�
 Nếu không phân giải được tên, một `err` được trả về.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -204,6 +212,7 @@ server được xác minh theo các chứng chỉ gốc chuẩn. Kết quả là
 đọc và ghi hoạt động như với TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -216,6 +225,7 @@ server được xác minh theo các chứng chỉ gốc chuẩn. Kết quả là
 Một server TLS được tạo bằng cách truyền các tệp chứng chỉ và khóa riêng (PEM) cho `tls-listen`.
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; serve của TCP dùng nguyên trạng
@@ -232,6 +242,7 @@ UDP không phải là stream; nó gửi và nhận từng datagram một. Dữ l
 chuyển đổi qua lại với chuỗi bằng `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; gửi cũng cần một socket; 0 để HĐH chọn cổng
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

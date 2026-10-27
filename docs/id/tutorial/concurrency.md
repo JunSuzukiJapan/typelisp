@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Konkurensi
 
 Di typelisp Anda menjalankan pekerjaan secara konkuren dengan memulai **task** (thread ringan), dan
@@ -38,6 +38,7 @@ kapasitas (berapa banyak nilai yang dapat ditampung). Pada kanal berkapasitas 0,
 penerima sama-sama menunggu sampai pihak lainnya ada.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; send
@@ -71,6 +72,7 @@ berikutnya, sehingga bahkan ketika job lambat dan cepat bercampur, pekerjaan ter
 alami.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; how long this job takes
@@ -132,6 +134,7 @@ operasi. `(after seconds)` adalah kanal yang mengirimkan satu nilai setelah wakt
 berlalu. Dikombinasikan dengan `select`, ia memberi Anda batas waktu.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -151,6 +154,7 @@ berlalu. Dikombinasikan dengan `select`, ia memberi Anda batas waktu.
   berjalan, dan `select` tidak menunggu.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -168,13 +172,14 @@ badannya ditinggalkan. Menugaskan variabel itu dengan `setf` di dalam badan meng
 `add`, minta tiap task memanggil `done` saat selesai, dan `wait` sampai hitungan mencapai 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

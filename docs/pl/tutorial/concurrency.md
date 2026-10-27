@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Współbieżność
 
 W typelisp uruchamiasz pracę współbieżnie, startując **zadania** (lekkie wątki), a zadania przekazują
@@ -38,6 +38,7 @@ Kanał `Chan<T>` to droga, którą zadania przekazują sobie wartości typu `T`.
 i odbiorca czekają oboje, aż druga strona będzie na miejscu.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; wyślij
@@ -70,6 +71,7 @@ zlecenia. Zlecenie bierze ten pracownik, który jest akurat wolny, więc nawet g
 i szybkie zlecenia są wymieszane, praca rozkłada się naturalnie.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; ile trwa to zlecenie
@@ -130,6 +132,7 @@ to kanał, który dostarcza jedną wartość po upływie zadanego czasu. W poł�
 daje limit czasu (timeout).
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -149,6 +152,7 @@ daje limit czasu (timeout).
   nie czeka.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -166,13 +170,14 @@ zostanie opuszczone. Przypisanie do zmiennej za pomocą `setf` wewnątrz ciała 
 `add`, niech każde zadanie wywoła `done`, gdy się skończy, i czekaj za pomocą `wait`, aż licznik osiągnie 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

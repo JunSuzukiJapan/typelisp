@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # I/O Berkas, Stream, dan Jaringan
 
 Panduan ini menunjukkan dasar-dasar membaca dan menulis berkas, pathname, dan komunikasi socket.
@@ -12,6 +12,7 @@ mengembalikan `Result`. Berkas yang tidak ada bukan kesalahan program, sehingga 
 Pisahkan hasilnya dengan `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -27,6 +28,7 @@ tidak masalah, `unwrap` mengambil nilainya. Jika berupa `err`, ia melakukan pani
 Fungsi yang paling mudah menangani seluruh berkas sekaligus.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -38,6 +40,7 @@ Untuk membaca atau menulis sedikit demi sedikit, buka stream dengan `with-open-f
 badannya ditinggalkan, stream ditutup. Nilainya adalah `Result<nilai dari badan, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; write
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -121,6 +124,7 @@ path menjadi bagian-bagian atau untuk menyusunnya.
 Operasi sistem berkas:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; create it along with its parents
 (probe-file "out/deep")                           ; => true (it exists)
 (directory-p "out/deep")                          ; => true
@@ -143,6 +147,7 @@ Pola dasarnya adalah memulai satu task per koneksi. `accept` dan `read-line` men
 task itu** sampai data tiba, sehingga penanganan koneksi lain terus berlanjut.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -164,6 +169,7 @@ antarmuka. Untuk task, lihat [Referensi Sintaks bab 12](../reference/syntax.md#1
 `Result<nilai dari badan, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -174,6 +180,7 @@ antarmuka. Untuk task, lihat [Referensi Sintaks bab 12](../reference/syntax.md#1
 Untuk memberi batas waktu pada suatu operasi, berikan `:timeout` (dalam detik).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
@@ -195,6 +202,7 @@ bergiliran.
 Jika nama tidak dapat diselesaikan, `err` dikembalikan.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -208,6 +216,7 @@ Sertifikat server diverifikasi terhadap sertifikat akar standar. Hasilnya adalah
 biasa, sehingga membaca dan menulis bekerja seperti pada TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -220,6 +229,7 @@ biasa, sehingga membaca dan menulis bekerja seperti pada TCP.
 Server TLS dibuat dengan memberikan berkas sertifikat dan kunci privat (PEM) ke `tls-listen`.
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
@@ -236,6 +246,7 @@ UDP bukan stream; ia mengirim dan menerima satu datagram sekali waktu. Datanya a
 (`Vector<int>`); konversikan dari dan ke string dengan `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; even sending needs a socket; 0 leaves the port to the OS
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

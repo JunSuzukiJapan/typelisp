@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Hata Yönetimi
 
 typelisp'te hata yönetimi başarısızlıkları iki türe ayırır.
@@ -18,6 +18,7 @@ nasıl çıkılırsa çıkılsın temizliği çalıştıran `unwind-protect` var
 değildir ya da aralığın dışındadır.
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -94,6 +95,7 @@ iki hata türü vardır ve ikisi birden tek bir `Result<T,E>`'nin `E`'si olamaz.
 `as-dyn-error` ile dönüştürün.
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

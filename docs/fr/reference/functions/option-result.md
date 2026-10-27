@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option, Result et types d'erreur
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -38,6 +38,7 @@ traité comme `(h x)`. Le premier argument d'une méthode est son receveur, donc
 s'enchaînent tels quels :
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -109,6 +110,7 @@ Si vous implémentez `Error` pour votre propre type d'erreur, il peut être trai
 erreurs intégrées :
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -127,6 +129,7 @@ Pour réunir plusieurs types d'erreur dans un même `Result`, utilisez `Result<T
 conversion s'écrit explicitement :
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

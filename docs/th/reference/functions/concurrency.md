@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Task และ channel
 
 คำศัพท์ของ task (เธรดน้ำหนักเบา) `task` และ `thread` ที่ใช้เริ่ม task และ `select`
@@ -46,6 +46,7 @@ task เป็นแบบ **ร่วมมือ (cooperative)**: task สล�
 `make(chan int, 16)` เขียนเป็น `(Chan::new 0)` และ `(Chan::new 16)`
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -97,6 +98,7 @@ task เป็นแบบ **ร่วมมือ (cooperative)**: task สล�
 เป็นเครื่องมือสำหรับงานที่เติบโตแบบไดนามิก หรือเมื่อไม่ต้องการเก็บ handle
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: start one task per input and join them (this language has no nil channels)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -125,6 +127,7 @@ task เป็นแบบ **ร่วมมือ (cooperative)**: task สล�
 | `with-lock` | `(with-lock (x m) body...)` | แมโคร | ล็อก ผูกเนื้อหากับ `x` รัน `body` และปล่อย **เสมอ** |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -184,6 +187,7 @@ handle ที่ `(thread (f args...))` คืน
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | ถูกยกเลิกแล้วหรือไม่ |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

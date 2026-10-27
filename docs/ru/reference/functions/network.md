@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Сеть (TCP / TLS / Unix-сокеты / UDP)
 
 Сокеты входят в число [потоков](streams-files.md). Соединение видно в **двух представлениях одного и того же
@@ -72,6 +72,7 @@
 в трёх местах — при подключении, при приёме и при «следующем чтении», — и у каждого есть для этого аргумент.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; сервер: по задаче на соединение
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -136,6 +137,7 @@
 ([Строки](collections.md#1-строки-string)).
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

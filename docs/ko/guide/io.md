@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 파일 입출력, 스트림, 네트워크
 
 이 가이드에서는 파일 읽기와 쓰기, 경로명, 소켓 통신의 기본을 보인다. 함수 목록은
@@ -10,6 +10,7 @@
 아니므로 `panic`하지 않는다. `match`로 나눈다.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -25,6 +26,7 @@ panic한다.
 가장 간단한 함수는 파일 전체를 한 번에 다룬다.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -36,6 +38,7 @@ panic한다.
 `Result<본체의 값, FileError>`이다.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; 쓰기
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -116,6 +119,7 @@ panic한다.
 파일 시스템 조작:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; 부모까지 함께 만든다
 (probe-file "out/deep")                           ; => true (있다)
 (directory-p "out/deep")                          ; => true
@@ -136,6 +140,7 @@ panic한다.
 다른 연결의 처리는 계속된다.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -156,6 +161,7 @@ panic한다.
 `with-connection`은 연결하고 본체를 실행한 뒤 마지막에 연결을 닫는다. 값은 `Result<본체의 값, NetError>`이다.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -166,6 +172,7 @@ panic한다.
 연산에 시간 제한을 두려면 `:timeout`(초)을 넘긴다.
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; 다음 읽기에 시계를 붙인다
@@ -184,6 +191,7 @@ panic한다.
 이름을 해석하지 못하면 `err`이 반환된다.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -196,6 +204,7 @@ panic한다.
 결과는 보통의 `socket-stream`이므로 읽기와 쓰기는 TCP와 같다.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -208,6 +217,7 @@ panic한다.
 TLS 서버는 `tls-listen`에 인증서와 개인 키 파일(PEM)을 넘겨 만든다.
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; TCP의 serve가 그대로 동작한다
@@ -224,6 +234,7 @@ UDP는 스트림이 아니며 데이터그램을 하나씩 보내고 받는다. 
 `string->utf8` / `utf8->string`으로 한다.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; 보내기에도 소켓이 필요하다. 0은 포트를 OS에 맡긴다
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

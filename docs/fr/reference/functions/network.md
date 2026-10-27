@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Réseau (TCP / TLS / domaine Unix / UDP)
 
 Les sockets font partie des [flux](streams-files.md). Une connexion est vue sous **deux vues de la même
@@ -77,6 +77,7 @@ fermée, lire un octet juste après `unread-char`).
 connexion, l'acceptation et « la prochaine lecture », et chacun a un argument pour cela.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; serveur : une tâche par connexion
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -141,6 +142,7 @@ On convertit entre chaînes et suites d'octets avec `string->utf8` / `utf8->stri
 ([Chaînes](collections.md#1-chaînes-string)).
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

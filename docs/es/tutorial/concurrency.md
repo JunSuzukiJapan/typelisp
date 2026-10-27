@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Concurrencia
 
 En typelisp el trabajo concurrente se hace iniciando **tareas** (hilos ligeros), y las tareas se pasan
@@ -38,6 +38,7 @@ Un canal `Chan<T>` es una vía por la que las tareas se pasan valores de tipo `T
 receptor esperan los dos hasta que el otro lado está presente.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; enviar
@@ -70,6 +71,7 @@ que procesan el trabajo) tomen tareas de él. El trabajador que esté libre toma
 que aunque se mezclen trabajos lentos y rápidos, el trabajo se reparte de forma natural.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; cuánto tarda este trabajo
@@ -131,6 +133,7 @@ canal que entrega un valor una vez transcurrido el tiempo dado. Combinado con `s
 espera máximo.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -150,6 +153,7 @@ espera máximo.
   `select` no espera.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -167,13 +171,14 @@ cuerpo. Asignar a la variable con `setf` dentro del cuerpo cambia el contenido d
 `add`, haz que cada tarea llame a `done` al terminar, y haz `wait` hasta que la cuenta llegue a 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

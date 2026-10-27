@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option, Result और त्रुटि टाइप
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -30,6 +30,7 @@
 `->` मैक्रो किसी मान को क्रम से हर अगले फ़ॉर्म के पहले आर्ग्युमेंट के रूप में देता है (Clojure के `->` जैसा)। `(-> x (f a) (g b))` बन जाता है `(g (f x a) b)`। बिना कोष्ठक का नाम `h`, `(h x)` माना जाता है। मेथड का पहला आर्ग्युमेंट उसका रिसीवर होता है, इसलिए कॉम्बिनेटर जैसे के तैसे जुड़ जाते हैं:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -89,6 +90,7 @@ Rust के `std::error::Error` का अनुसरण करते हुए
 यदि आप अपने त्रुटि टाइप के लिए `Error` लागू करते हैं, तो उसे बिल्ट-इन त्रुटियों जैसे **ठीक उसी तरह** संभाला जा सकता है:
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -105,6 +107,7 @@ Rust के `std::error::Error` का अनुसरण करते हुए
 कई त्रुटि टाइप को एक `Result` में इकट्ठा करने के लिए, `Result<T, :dyn Error>` का उपयोग करें (Rust के `Box<dyn Error>` के अनुरूप), और ठोस त्रुटियों को `as-dyn-error` से चौड़ा करें। चूँकि `?` नहीं है, यह रूपांतरण स्पष्ट रूप से लिखा जाता है:
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

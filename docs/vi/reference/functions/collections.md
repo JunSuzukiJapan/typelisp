@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Chuỗi, ký tự và tập hợp
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` và `Deque<T>`.
@@ -117,6 +117,7 @@ cho số dấu phẩy động). Với kiểu của riêng bạn, hãy giữ kế
 khai cho `string` dùng.
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -202,6 +203,7 @@ dung là `HashTable<T,()>`. Kiểu phần tử phải cài đặt `Hash`, giốn
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Iterator qua các phần tử. Thứ tự không xác định |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -233,6 +235,7 @@ mới và `remove` dời các phần tử sau vị trí của nó.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Các tuple `#{khóa giá-trị}` theo thứ tự khóa |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 và pear 3
@@ -255,6 +258,7 @@ Dãy có thể thêm vào và lấy ra ở cả hai đầu (`VecDeque` của Rus
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Từ đầu, theo thứ tự |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

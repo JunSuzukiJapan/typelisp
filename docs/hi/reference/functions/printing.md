@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # प्रिंटिंग
 
 `print`/`println`/`format`, एक-आर्ग्युमेंट प्रिंटर, सुंदर प्रिंटर, `print-object`, और प्रिंटिंग को नियंत्रित करने वाले वेरिएबल। फ़ॉर्मैट निर्देशों की सूची [format.md](format.md) में है। स्ट्रीम से पढ़ना और लिखना [स्ट्रीम और फ़ाइलें](streams-files.md) में है।
@@ -126,6 +126,7 @@ CLHS 22.1.3 के प्रिंटर। फ़ॉर्मैट का व�
 CL में, `pprint-exit-if-list-exhausted` `pprint-logical-block` से नॉन-लोकल निकास है; यहाँ यह **घेरने वाले `loop` से `break`** है (`pprint-logical-block` कोई `block` स्थापित नहीं करता)। CL का मुहावरा वैसे भी इसे हमेशा `loop` के भीतर रखता है, इसलिए यह वैसा ही पढ़ा जाता है।
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

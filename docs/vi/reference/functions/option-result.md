@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option, Result và các kiểu lỗi
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -38,6 +38,7 @@ Clojure). `(-> x (f a) (g b))` trở thành `(g (f x a) b)`. Một tên không c
 như vậy:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -109,6 +110,7 @@ Nếu bạn triển khai `Error` cho kiểu lỗi của riêng mình, nó có th
 sẵn:
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -127,6 +129,7 @@ của Rust), và mở rộng các lỗi cụ thể bằng `as-dyn-error`. Vì kh
 viết tường minh:
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

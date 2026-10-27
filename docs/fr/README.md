@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Documentation de typelisp (français)
 
 typelisp est un Lisp à typage statique. Pour l'installer et le compiler, voir le
@@ -12,6 +12,7 @@ On lance des tâches (des threads légers) qui se passent des valeurs par des ca
 [Concurrence](tutorial/concurrency.md) pour plus de détails.
 
 ```lisp
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -40,6 +41,7 @@ avant même l'exécution du programme. Voir [Bases des types](tutorial/types.md)
 erreurs](tutorial/errors.md) pour plus de détails.
 
 ```lisp
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

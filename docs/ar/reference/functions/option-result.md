@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option وResult وأنواع الأخطاء
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -37,6 +37,7 @@
 الأول للتابع هو مستقبِله، لذا تتسلسل المُركِّبات كما هي:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -106,6 +107,7 @@
 إذا نفّذت `Error` لنوع الخطأ الخاص بك أمكن التعامل معه **بالطريقة نفسها** كالأخطاء المضمنة:
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -123,6 +125,7 @@
 Rust)، ووسّع الأخطاء الملموسة بـ `as-dyn-error`. ولأنه لا يوجد `?` فإن هذا التحويل يُكتب صراحة:
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

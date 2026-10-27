@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Zadania i kanały
 
 Słownictwo zadań (lekkich wątków). `task` i `thread`, które je uruchamiają, oraz `select`,
@@ -46,6 +46,7 @@ się przełączają i czym różni się to od Go, opisano w
 `make(chan int, 16)`, zapisuje się `(Chan::new 0)` i `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -97,6 +98,7 @@ na osobnych wątkach systemu operacyjnego.
 wystarcza. Jest to narzędzie dla pracy, która rośnie dynamicznie, lub gdy nie chcesz przechowywać uchwytów.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: uruchom jedno zadanie na wejście i połącz je (ten język nie ma kanałów nil)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -125,6 +127,7 @@ pojemność wynosi 1, więc zadanie wysyłające może się zakończyć, nawet j
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Zajmuje zamek, wiąże zawartość z `x`, wykonuje `body` i **zawsze** zwalnia |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -186,6 +189,7 @@ sprawdzając `is-cancelled` albo odbierając z `done`.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Czy został anulowany |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # कंकरेंसी
 
 typelisp में काम को एक साथ चलाने के लिए आप **टास्क** (हल्के थ्रेड) शुरू करते हैं, और टास्क एक-दूसरे को **चैनल** के ज़रिए मान भेजते हैं। यह मॉडल Go के goroutine और चैनल के करीब है। यह अध्याय क्रम से कवर करता है: टास्क शुरू करना और उसका परिणाम पाना, चैनल, `select`, साझा डेटा की सुरक्षा, और समर्पित OS थ्रेड। यह मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -29,6 +29,7 @@ typelisp में काम को एक साथ चलाने के ल�
 चैनल `Chan<T>` एक मार्ग है जिससे टास्क `T` टाइप के मान पास करते हैं। `Chan::new` का आर्ग्युमेंट क्षमता है (वह कितने मान रख सकता है)। क्षमता 0 वाले चैनल पर, भेजने वाला और पाने वाला दोनों तब तक प्रतीक्षा करते हैं जब तक दूसरा पक्ष वहाँ न हो।
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; भेजें
@@ -57,6 +58,7 @@ got 30
 एक आम पैटर्न है काम ले जाने वाला एक चैनल बनाना और कई वर्कर (काम को प्रोसेस करने वाले टास्क) से उससे जॉब लेने को कहना। जो भी वर्कर खाली होता है वह अगला जॉब ले लेता है, इसलिए धीमे और तेज़ जॉब मिले होने पर भी काम स्वाभाविक रूप से बँट जाता है।
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; इस जॉब में कितना समय लगता है
@@ -112,6 +114,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 `select` कई चैनल ऑपरेशनों में से जो पहले संभव हो जाए उसे करता है। `(after seconds)` एक चैनल है जो दिया गया समय बीतने पर एक मान देता है। `select` के साथ मिलाने पर यह आपको टाइमआउट देता है।
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -130,6 +133,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - अंत में `(:else body...)` होने पर, जब कोई शाखा तुरंत आगे न बढ़ सके तब `:else` चलता है, और `select` प्रतीक्षा नहीं करता।
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -144,13 +148,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 `WaitGroup` एक उपकरण है जो तब तक प्रतीक्षा करता है जब तक दी गई संख्या में टास्क समाप्त न हो जाएँ। `add` से गिनती बढ़ाएँ, हर टास्क को समाप्त होने पर `done` कॉल करने दें, और गिनती 0 होने तक `wait` करें।
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # नेटवर्किंग (TCP / TLS / Unix डोमेन / UDP)
 
 सॉकेट [स्ट्रीम](streams-files.md) के सदस्य हैं। कनेक्शन को **उसी कनेक्शन के दो दृश्यों** में देखा जाता है, `socket-stream` (कैरेक्टर) और `socket-byte-stream` (बाइट), और `read-line`/`write-line`/`read-byte`/`format` उन पर जस के तस काम करते हैं। लिसनर `socket-listener` है। **TCP, TLS और Unix डोमेन सॉकेट एक ही टाइप साझा करते हैं** (Go के `net.Conn` की तरह): कनेक्ट होने के बाद, पढ़ना और लिखना एक जैसा है, और केवल बनाने का तरीका भिन्न है। UDP स्ट्रीम नहीं बल्कि डेटाग्राम (`udp-socket`) है।
@@ -53,6 +53,7 @@
 **टाइमआउट स्पष्ट आर्ग्युमेंट या `wait-readable` हैं।** Go के `SetReadDeadline` जैसा कोई रूप नहीं है जहाँ स्ट्रीम समय सीमा ले जाती है और `read-line` विफल होता है: `read-item` `Option<Item>` लौटाता है और त्रुटि लौटाने का उसके पास कोई तरीका नहीं है। घड़ी तीन जगह चाहिए, कनेक्ट करना, स्वीकार करना और "अगला पढ़ना", और हर एक के लिए उसका आर्ग्युमेंट है।
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; सर्वर: हर कनेक्शन के लिए एक टास्क
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -113,6 +114,7 @@
 स्ट्रिंग और बाइट अनुक्रम के बीच `string->utf8` / `utf8->string` से बदलें ([स्ट्रिंग](collections.md#1-स्ट्रिंग-string))।
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Задачи и каналы
 
 Словарь задач (лёгких потоков). `task` и `thread`, которые их запускают, и `select`, который ждёт нескольких
@@ -45,6 +45,7 @@
 `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -95,6 +96,7 @@
 динамически растущей работы или для случая, когда не хочется хранить дескрипторы.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: запустить по задаче на каждый вход и объединить их (в этом языке нет nil-каналов)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -123,6 +125,7 @@
 | `with-lock` | `(with-lock (x m) body...)` | Макрос | Блокирует, связывает содержимое с `x`, выполняет `body` и **всегда** освобождает |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -182,6 +185,7 @@
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Отменён ли |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

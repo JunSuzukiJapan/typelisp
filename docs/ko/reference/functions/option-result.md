@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option, Result, 오류 타입
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -34,6 +34,7 @@
 괄호 없는 이름 `h`는 `(h x)`로 취급한다. 메서드는 첫 번째 인수가 수신자이므로 컴비네이터를 그대로 이을 수 있다:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -100,6 +101,7 @@ Rust의 `std::error::Error`를 따라 **`Error`는 타입이 아니라 트레이
 직접 만든 오류 타입에 `Error`를 구현하면 내장 오류와 **똑같이** 다룰 수 있다.
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -117,6 +119,7 @@ Rust의 `std::error::Error`를 따라 **`Error`는 타입이 아니라 트레이
 `as-dyn-error`로 넓힌다. `?`가 없으므로 이 변환은 명시적으로 쓴다.
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

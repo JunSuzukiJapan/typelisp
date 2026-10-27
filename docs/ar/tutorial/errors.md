@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # معالجة الأخطاء
 
 تقسم معالجة الأخطاء في typelisp الإخفاقات إلى نوعين.
@@ -17,6 +17,7 @@
 هذه دالة تقرأ رقم منفذ من سلسلة نصية. ويمكن أن تفشل بطريقتين: المُدخَل ليس عددًا، أو هو خارج النطاق.
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -91,6 +92,7 @@
 (خطأ من أي نوع ينفّذ `Error`). وحوّل كل خطأ بـ `as-dyn-error`.
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -867,6 +867,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (module path body...)      ; path는 foo나 foo::bar 같은 구간의 열
 (in-module path)           ; 여기서 이 단위의 끝까지 path 안(module의 평평한 형식)
 (use path...)              ; 함수, 타입, 모듈을 현재 이름공간에 별칭으로 들여온다
+(pub use path...)          ; 가져온 정의를 이 모듈을 거치는 경로로도 찾을 수 있게 한다
 (import path...)           ; use와 같다(CL 호환 표기)
 (shadowing-import path...) ; 맨 이름이 이미 쓰이고 있음을 알고도 가져오는 use
 ```
@@ -889,6 +890,13 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   쓰려면 `pub`이 붙은 정의를 `::geo::f`처럼 루트부터의 경로로 쓰거나 `use`로 가져온다. 함수를 값으로 넘기는 위치에서도 같은 규칙이며, 4의 "첫 번째 인수의 타입"은 그곳에서 기대되는
   함수 타입의 첫 번째 인수의 타입이 된다(`(fn (pt) int)`가 기대되는 위치에 `norm`이라고 쓰면 `pt`의 메서드
   `norm`). 기대되는 타입이 아직 정해지지 않았으면 4는 건너뛴다.
+- **표준 라이브러리가 공개하는 이름**은 `use` 없이 어느 모듈에서나 쓸 수 있다. 기본 타입,
+  `Option`·`Result`·`Vector`, 반복, S 식과 리스트, 열 함수, 제어 매크로, 비교, 산술 트레이트와,
+  Common Lisp의 `COMMON-LISP` 패키지에 있는 이름과 같은 이름의 것, 그리고 그것들의 타입에 나타나는
+  타입이 그렇다. 동시성·네트워크·파일의 편의 함수 등 그 밖의 이름은 `(use std::sync::Chan)`처럼
+  가져오거나 `std::sync::Chan`과 같이 경로로 쓴다(목록은 [내장 함수의 「`use`가 필요한 이름」](functions/README.md#use가-필요한-이름)).
+  `use`는 함수·전역 변수·매크로·타입·트레이트·`deftype` 별칭·모듈을 가져올 수 있다. `use`는 그것을
+  쓴 모듈에만 효과가 있다. `(module ...)` 안에서 쓴다면 그 안에 쓴다.
 - 한정 경로 `a::...::n`은 `a::...`가 가리키는 모듈의 이름(매크로·함수·전역 변수), 또는 타입의 변형·정적
   메서드로 해석된다. 값 위치의 `x::f`(`x`가 값의 이름)는 필드 읽기다.
 - **`use`는 그 뒤의 형식에 효과가 있다.** 파일은 형식 하나씩 읽히고 의존 관계도 그 형식을 검사하기 직전에 해석되므로,
@@ -951,7 +959,11 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (pub deftype ...)
 ```
 
-`pub`을 붙일 수 있는 것은 위의 11종류뿐이다(`module`/`use`/`impl`에는 붙일 수 없다).
+`pub`을 붙일 수 있는 것은 위의 11종류와 `use`뿐이다(`module`/`impl`에는 붙일 수 없다).
+`(pub use path...)`는 가져온 정의를 **재공개**한다: 다른 모듈도 이 모듈을 거치는 경로(`m::name`)로
+찾을 수 있고 `(use m::name)`로 가져올 수 있다. 재공개할 수 있는 것은 정의뿐이며 모듈은 재공개할 수
+없다.
+
 정의 형식을 괄호로 감싸는 `(pub (defun ...))` 형식이 아니라, `pub` 바로 뒤에 정의 키워드를 잇는다.
 하나의 `pub`이 공개할 수 있는 정의는 하나뿐이다(여러 정의를 한꺼번에 지정할 수 없다).
 
@@ -987,6 +999,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ### 3.16 `#[test]` — 테스트 함수
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -995,6 +1008,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 `#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()` 또는 `Result<(), E>`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다. `Result`를 반환하는 테스트는 `err`를 반환하면 실패하며 그 오류를 표시합니다. 따라서 `E`는 `Error` 또는 `print-object`를 구현해야 합니다(Rust가 테스트의 오류 타입에 `Debug`를 요구하는 것과 같음). `Error`라면 `describe-error`(메시지와 원인의 연쇄)로, 그렇지 않으면 `print-object`로 표시합니다. `:dyn Error`도 `Error`이므로 여러 오류를 하나의 타입으로 모아 반환할 수 있습니다.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1632,6 +1646,7 @@ AOT 컴파일할 수 있다. 시작점 파일 자신의 정의도 `typl file.typ
 `peek-char` / `unread-char` / `read-delimited-list`는 모두 `(:where (PeekInput S))`이므로 구체 타입에 그대로 모두 쓸 수 있다.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1741,6 +1756,7 @@ Go의 `go f(x)`와 같은 규칙이며, thunk가 아니라 호출 형식을 받�
 **어느 갈래가 선택되든 채널 식과 보낼 값은 왼쪽에서 오른쪽으로 각각 한 번 평가된다**(`case`가 키에 대해 가진 규율과 같다).
 
 ```lisp
+(use std::sync::after)
 (select                             ; 타임아웃 있는 받기
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

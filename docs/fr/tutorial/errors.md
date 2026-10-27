@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Gestion des erreurs
 
 La gestion des erreurs de typelisp répartit les échecs en deux sortes.
@@ -18,6 +18,7 @@ Voici une fonction qui lit un numéro de port depuis une chaîne. Elle peut éch
 pas un nombre, ou elle est hors limites.
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -94,6 +95,7 @@ types d'erreur, et ils ne peuvent pas être tous deux le `E` d'un même `Result<
 `as-dyn-error`.
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

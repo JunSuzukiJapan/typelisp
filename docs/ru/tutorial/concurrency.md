@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Конкурентность
 
 В typelisp работа выполняется конкурентно путём запуска **задач** (лёгких потоков), а задачи передают друг другу
@@ -35,6 +35,7 @@
 значений он может хранить). На канале ёмкости 0 отправитель и получатель оба ждут, пока появится другая сторона.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; отправить
@@ -67,6 +68,7 @@ got 30
 работа естественно распределяется.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; сколько длится это задание
@@ -127,6 +129,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 выдающий одно значение по прошествии заданного времени. В сочетании с `select` он даёт тайм-аут.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -145,6 +148,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - С `(:else body...)` в конце `:else` выполняется, когда ни одна ветвь не может выполниться сразу, и `select` не ждёт.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -162,13 +166,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 вызывает `done` по завершении, и ждите через `wait`, пока счётчик не дойдёт до 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

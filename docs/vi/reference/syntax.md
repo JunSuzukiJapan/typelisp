@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -976,6 +976,7 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 (module path body...)      ; path là một dãy các đoạn như foo hoặc foo::bar
 (in-module path)           ; từ đây đến cuối đơn vị này, nằm bên trong path (dạng phẳng của module)
 (use path...)              ; đặt bí danh cho hàm, kiểu và module vào không gian tên hiện tại
+(pub use path...)          ; cho phép truy cập cái được đưa vào cả qua đường dẫn của module này
 (import path...)           ; giống use (một cách viết tương thích CL)
 (shadowing-import path...) ; một use cố ý lấy một tên trần đã được dùng
 ```
@@ -1005,6 +1006,14 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
   như giá trị; khi đó "kiểu của đối số đầu tiên" ở bước 4 là kiểu tham số đầu tiên của kiểu hàm được mong
   đợi ở đó (viết `norm` ở nơi mong đợi `(fn (pt) int)` sẽ cho phương thức `norm` của `pt`). Nếu kiểu mong
   đợi chưa được xác định, bỏ qua bước 4.
+- **Những tên mà thư viện chuẩn cung cấp** dùng được trong mọi module mà không cần `use`: các kiểu
+  nguyên thủy, `Option`/`Result`/`Vector`, phép lặp, biểu thức S và danh sách, các hàm dãy, các macro
+  điều khiển, phép so sánh và các trait số học; mọi tên cũng là tên trong gói `COMMON-LISP` của
+  Common Lisp; và các kiểu mà chúng nhắc tới. Mọi tên khác — trong đó có các tiện ích về đồng thời,
+  mạng và tệp — được đưa vào bằng `use`, như `(use std::sync::Chan)`, hoặc viết theo đường dẫn,
+  `std::sync::Chan` (danh sách ở [Các tên cần `use`](functions/README.md#các-tên-cần-use) trong phần hàm dựng sẵn). `use` đưa vào
+  được hàm, biến toàn cục, macro, kiểu, trait, bí danh `deftype` và module. Một `use` chỉ có tác dụng
+  trong module nơi nó được viết: để dùng một tên bên trong `(module ...)`, hãy viết `use` bên trong đó.
 - Một đường dẫn đầy đủ `a::...::n` được phân giải thành một tên module (macro, hàm hoặc biến toàn cục)
   của module mà `a::...` chỉ đến, hoặc thành một biến thể hay phương thức tĩnh của một kiểu. `x::f` ở vị
   trí giá trị (khi `x` là tên một giá trị) là việc đọc trường.
@@ -1077,7 +1086,11 @@ không bao giờ va chạm.
 (pub deftype ...)
 ```
 
-`pub` chỉ đặt được cho mười một loại ở trên (không cho `module`/`use`/`impl`). Nó được viết với từ
+`pub` chỉ đặt được cho mười một loại ở trên và cho `use` (không cho `module`/`impl`).
+`(pub use path...)` **tái xuất** những gì nó đưa vào: module khác truy cập được qua đường dẫn đi qua
+module này (`m::name`) và đưa vào bằng `(use m::name)`. Chỉ tái xuất được định nghĩa, không tái xuất
+được module.
+Nó được viết với từ
 khóa định nghĩa ngay sau `pub`, không phải dạng `(pub (defun ...))` bọc định nghĩa trong ngoặc. Một `pub`
 công khai đúng một định nghĩa (không thể đánh dấu nhiều định nghĩa cùng lúc).
 
@@ -1117,6 +1130,7 @@ triển của thân). Danh sách lambda giống như của `defmacro`. Các quy 
 ### 3.16 `#[test]` — hàm kiểm thử
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1125,6 +1139,7 @@ triển của thân). Danh sách lambda giống như của `defmacro`. Các quy 
 Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` hoặc `Result<(), E>` (cũng không thể nhận tham số kiểu). Không cần `pub`. Một kiểm thử trả về `Result` sẽ thất bại khi trả về `err`, và lỗi được hiển thị, nên `E` phải cài đặt `Error` hoặc `print-object` (giống như Rust yêu cầu kiểu lỗi của kiểm thử có `Debug`). `Error` được hiển thị bằng `describe-error` (thông điệp và chuỗi nguyên nhân), còn lại bằng `print-object`. `:dyn Error` cũng là `Error`, nên một kiểm thử có thể gom các lỗi khác nhau vào một kiểu rồi trả về.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1813,6 +1828,7 @@ trở thành dữ liệu được đọc tại điểm đó. Stream là một ki
 `(:where (PeekInput S))`, nên tất cả đều hoạt động trên kiểu cụ thể nguyên trạng.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1932,6 +1948,7 @@ task khác tiếp tục tiến triển. Bên trong nó, `task`, `send`, `recv` v
 chọn** (cùng kỷ luật mà `case` có cho các khóa của nó).
 
 ```lisp
+(use std::sync::after)
 (select                             ; nhận với một timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

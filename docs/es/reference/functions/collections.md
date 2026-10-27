@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Cadenas, caracteres y colecciones
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` y `Deque<T>`.
@@ -118,6 +118,7 @@ números de coma flotante). En tus propios tipos, mantén el resultado no negati
 32 bits), que es lo que usa la implementación de `string`.
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -206,6 +207,7 @@ que una clave de `HashTable`.
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Un iterador sobre los elementos. El orden no está definido |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -237,6 +239,7 @@ Una tabla en orden ascendente de clave (el `BTreeMap` de Rust). El tipo de la cl
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Tuplas `#{clave valor}` en orden de clave |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 y pear 3
@@ -259,6 +262,7 @@ Una secuencia en la que se puede meter y sacar por ambos extremos (el `VecDeque`
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Desde el principio, en orden |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

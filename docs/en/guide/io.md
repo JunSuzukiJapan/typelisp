@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # File I/O, Streams and Networking
 
 This guide shows the basics of reading and writing files, pathnames, and socket communication. The
@@ -12,6 +12,7 @@ a `Result`. A missing file is not a mistake in the program, so it does not `pani
 outcomes with `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -27,6 +28,7 @@ When you know an operation cannot fail, or in a small script where stopping on f
 The easiest functions handle the whole file at once.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -38,6 +40,7 @@ To read or write a little at a time, open a stream with `with-open-file`. Howeve
 the stream is closed. The value is `Result<value of the body, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; write
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -120,6 +123,7 @@ path into parts or to build one.
 File system operations:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; create it along with its parents
 (probe-file "out/deep")                           ; => true (it exists)
 (directory-p "out/deep")                          ; => true
@@ -141,6 +145,7 @@ The basic pattern is to start one task per connection. `accept` and `read-line` 
 task** until data arrives, so the handling of other connections continues.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -162,6 +167,7 @@ interface. For tasks, see [Syntax Reference chapter 12](../reference/syntax.md#1
 `Result<value of the body, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -172,6 +178,7 @@ interface. For tasks, see [Syntax Reference chapter 12](../reference/syntax.md#1
 To put a time limit on an operation, pass `:timeout` (in seconds).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
@@ -192,6 +199,7 @@ tasks keep running while it waits. If a name has several addresses, they are tri
 If the name cannot be resolved, an `err` is returned.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -205,6 +213,7 @@ certificate is verified against the standard root certificates. The result is an
 `socket-stream`, so reading and writing work as with TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -217,6 +226,7 @@ certificate is verified against the standard root certificates. The result is an
 A TLS server is created by passing certificate and private key files (PEM) to `tls-listen`.
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
@@ -233,6 +243,7 @@ UDP is not a stream; it sends and receives one datagram at a time. The data is a
 (`Vector<int>`); convert to and from strings with `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; even sending needs a socket; 0 leaves the port to the OS
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

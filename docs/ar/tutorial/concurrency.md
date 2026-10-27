@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # التزامن
 
 في typelisp تُشغَّل الأعمال بالتزامن ببدء **مهام (tasks)** (خيوط خفيفة)، وتمرّر المهام القيم بعضها إلى بعض
@@ -35,6 +35,7 @@
 يمكنها حملها). وفي قناة سعتها 0 ينتظر المرسِل والمستقبِل كلاهما حتى يوجد الطرف الآخر.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; إرسال
@@ -65,6 +66,7 @@ got 30
 المهام. فأي عامل متفرغ يأخذ المهمة التالية، فحتى عند اختلاط المهام البطيئة والسريعة يتوزع العمل طبيعيًا.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; المدة التي تستغرقها هذه المهمة
@@ -123,6 +125,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 مرور الزمن المعطى. وبجمعها مع `select` تحصل على مهلة زمنية (timeout).
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -141,6 +144,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - ومع `(:else body...)` في النهاية يعمل `:else` عندما لا يستطيع أي فرع المضي في الحال، ولا تنتظر `select`.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -158,13 +162,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 انتهائها، و`wait` حتى يبلغ العدّاد 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

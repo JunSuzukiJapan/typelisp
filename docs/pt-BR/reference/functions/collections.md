@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Strings, caracteres e coleções
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` e `Deque<T>`.
@@ -117,6 +117,7 @@ números de ponto flutuante). Nos seus próprios tipos, mantenha o resultado nã
 bits), que é o que a implementação de `string` usa.
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -205,6 +206,7 @@ de `HashTable`.
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Um iterador sobre os elementos. A ordem não é definida |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -236,6 +238,7 @@ chave nova e `remove` deslocam os elementos depois da sua posição.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Tuplas `#{chave valor}` em ordem de chave |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 e pear 3
@@ -258,6 +261,7 @@ Uma sequência em que se pode pôr e tirar pelas duas pontas (o `VecDeque` do Ru
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Do início, em ordem |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

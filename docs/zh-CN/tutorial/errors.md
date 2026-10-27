@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 错误处理
 
 typelisp 的错误处理把失败分为两类来考虑。
@@ -16,6 +16,7 @@ typelisp 的错误处理把失败分为两类来考虑。
 编写一个从字符串读取端口号的函数。失败有两种情况：不是数字，或者超出范围。
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -88,6 +89,7 @@ typelisp 的错误处理把失败分为两类来考虑。
 用 `as-dyn-error` 转换。
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

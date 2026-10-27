@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option、Result 与错误类型
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -32,6 +32,7 @@
 `->` 宏把值依次作为后续各个表达式的第 1 个参数传入（与 Clojure 的 `->` 相同）。`(-> x (f a) (g b))` 变成 `(g (f x a) b)`。不带括号的名字 `h` 当作 `(h x)`。方法的第 1 个参数是接收者，所以组合子可以直接串起来：
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -97,6 +98,7 @@
 为自己的错误类型实现 `Error`，就能**以同样的方式**处理它和内置错误：
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -114,6 +116,7 @@
 `as-dyn-error` 扩展。因为没有 `?`，这个转换要明确写出：
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp 文件（繁體中文）
 
 typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫根目錄的 [README.md](../../README.md)（英文）。
@@ -10,6 +10,7 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
 啟動任務（輕量級執行緒），透過通道在任務之間傳遞值。詳見[並行](tutorial/concurrency.md)。
 
 ```lisp
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -34,6 +35,7 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
 沒有 `nil`。可能沒有值時回傳 `Option<T>`，可能失敗時回傳 `Result<T,E>`，再用 `match` 取出其中的內容。若把 `Option<string>` 當作 `string` 使用，或在 `match` 中漏寫 `none` 的情況，程式執行之前就會出現型別錯誤。詳見[型別基礎](tutorial/types.md)與[錯誤處理](tutorial/errors.md)。
 
 ```lisp
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

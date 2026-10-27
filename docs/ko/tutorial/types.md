@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 타입의 기초
 
 typelisp는 정적 타입 언어이다. 이 장에서는 타입 검사기가 해 주는 일, 자주 쓰는 타입(`Option`, `Result`, 구조체,
@@ -110,6 +110,7 @@ none
 실패할 수 있는 처리는 `Result<T,E>`를 반환한다. 성공하면 `T`의 값을 가진 `ok`, 실패하면 오류 `E`를 가진 `err`이다.
 
 ```lisp
+(use std::num::parse-int)
 (match (parse-int "42")
   ((ok n) (println "n = ~a" (+ n 1)))
   ((err e) (println "error: ~a" (message e))))

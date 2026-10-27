@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # เครือข่าย (TCP / TLS / Unix Domain / UDP)
 
 ซ็อกเก็ตเป็นสมาชิกของ[สตรีม](streams-files.md) การเชื่อมต่อถูกมองใน **สองมุมมองของการเชื่อมต่อเดียวกัน**
@@ -76,6 +76,7 @@
 และแต่ละที่มีอาร์กิวเมนต์สำหรับมัน
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; server: one task per connection
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -140,6 +141,7 @@
 ([สตริง](collections.md#1-สตริง-string))
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

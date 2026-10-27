@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 錯誤處理
 
 typelisp 的錯誤處理把失敗分成兩類來考慮。
@@ -16,6 +16,7 @@ typelisp 的錯誤處理把失敗分成兩類來考慮。
 撰寫一個從字串讀取埠號的函式。失敗有兩種情況：不是數字，或者超出範圍。
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -86,6 +87,7 @@ typelisp 的錯誤處理把失敗分成兩類來考慮。
 `Result<T,E>` 的 `E` 中。這時把 `E` 設為 `:dyn Error`（實作了 `Error` 的某種錯誤），各個錯誤用 `as-dyn-error` 轉換。
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Concorrência
 
 No typelisp o trabalho concorrente é feito iniciando **tarefas** (threads leves), e as tarefas passam valores
@@ -38,6 +38,7 @@ a capacidade (quantos valores ele pode guardar). Em um canal de capacidade 0, qu
 esperam ambos até o outro lado estar presente.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; enviar
@@ -70,6 +71,7 @@ trabalho) pegarem trabalhos dele. O worker que estiver livre pega o próximo tra
 trabalhos lentos e rápidos se misturam, o trabalho se distribui naturalmente.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; quanto tempo este trabalho leva
@@ -128,6 +130,7 @@ capacidade maior, a tarefa principal poderia enfileirar trabalho sem esperar pel
 que entrega um valor depois que o tempo dado passa. Combinado com `select`, ele dá um tempo limite.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -147,6 +150,7 @@ que entrega um valor depois que o tempo dado passa. Combinado com `select`, ele 
   não espera.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -164,13 +168,14 @@ Atribuir à variável com `setf` dentro do corpo muda o conteúdo do `Mutex`.
 `add`, faça cada tarefa chamar `done` ao terminar e faça `wait` até a contagem chegar a 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

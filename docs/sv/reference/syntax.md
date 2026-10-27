@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1003,6 +1003,7 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 (module path body...)      ; path är en följd av segment som foo eller foo::bar
 (in-module path)           ; härifrån till slutet av den här enheten, inuti path (den platta formen av module)
 (use path...)              ; ge funktioner, typer och moduler alias i den aktuella namnrymden
+(pub use path...)          ; gör det som tas in nåbart även via den här modulens väg
 (import path...)           ; samma som use (en CL-kompatibel stavning)
 (shadowing-import path...) ; ett use som medvetet tar ett bart namn som redan används
 ```
@@ -1033,6 +1034,15 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
   för det första argumentet" i steg 4 är då den första parametertypen i den funktionstyp som förväntas där
   (att skriva `norm` där `(fn (pt) int)` förväntas ger metoden `norm` hos `pt`). Är den förväntade typen
   inte bestämd än hoppas steg 4 över.
+- **Namnen som standardbiblioteket erbjuder** kan användas i varje modul utan `use`: de primitiva
+  typerna, `Option`/`Result`/`Vector`, iteration, S-uttryck och listor, sekvensfunktionerna,
+  styrmakrona, jämförelse och de aritmetiska traitsen; varje namn som också är ett namn i Common Lisps
+  paket `COMMON-LISP`; och typerna som dessa nämner. Alla andra namn — bland dem hjälpmedlen för
+  samtidighet, nätverk och filer — tas in med en `use`, som `(use std::sync::Chan)`, eller skrivs med
+  sin väg, `std::sync::Chan` (listan finns i [Namn som behöver en `use`](functions/README.md#namn-som-behöver-en-use) bland de inbyggda
+  funktionerna). `use` tar in funktioner, globala variabler, makron, typer, traits, `deftype`-alias
+  och moduler. En `use` gäller bara i modulen där den står: för att använda ett namn i en
+  `(module ...)` skriver man `use` där inne.
 - En kvalificerad sökväg `a::...::n` löses upp till ett modulnamn (makro, funktion eller global variabel) i
   den modul som `a::...` namnger, eller till en variant eller statisk metod hos en typ. `x::f` i en
   värdeposition (där `x` namnger ett värde) är en fältläsning.
@@ -1109,7 +1119,11 @@ aldrig.
 (pub deftype ...)
 ```
 
-`pub` kan bara sättas på de elva sorterna ovan (inte på `module`/`use`/`impl`). Det skrivs med
+`pub` kan bara sättas på de elva sorterna ovan och på `use` (inte på `module`/`impl`).
+`(pub use path...)` **återexporterar** det som tas in: andra moduler når det genom en väg via den här
+modulen (`m::name`) och tar in det med `(use m::name)`. Bara en definition kan återexporteras, inte en
+modul.
+Det skrivs med
 definitionens nyckelord direkt efter `pub`, inte i formen `(pub (defun ...))` som omsluter definitionen med
 parenteser. Ett `pub` gör exakt en definition publik (flera definitioner kan inte markeras på en gång).
 
@@ -1150,6 +1164,7 @@ exemplen finns i
 ### 3.16 `#[test]` — testfunktioner
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1158,6 +1173,7 @@ exemplen finns i
 En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en i taget (som Rusts `#[test]`). Den får inte ta några argument och måste returnera `()` eller `Result<(), E>` (den kan inte heller ta typparametrar). Den behöver inte `pub`. Ett test som returnerar ett `Result` misslyckas genom att returnera ett `err`, och felet visas, så `E` måste implementera `Error` eller `print-object` (precis som Rust kräver `Debug` av ett tests feltyp). Ett `Error` visas med `describe-error` (meddelandet och kedjan av orsaker), allt annat med `print-object`. Även `:dyn Error` är ett `Error`, så ett test kan samla olika fel i en typ och returnera den.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1865,6 +1881,7 @@ dispatch). Returvärdet blir den data som lästes på det stället. Strömmen ä
 den konkreta typen som den är.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1988,6 +2005,7 @@ och resten användas som de är.
 vilken gren som väljs** (samma disciplin som `case` har för sina nycklar).
 
 ```lisp
+(use std::sync::after)
 (select                             ; ta emot med en timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

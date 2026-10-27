@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option、Result 與錯誤型別
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -32,6 +32,7 @@
 `->` 巨集把值依序作為後續各個運算式的第 1 個引數傳入（與 Clojure 的 `->` 相同）。`(-> x (f a) (g b))` 變成 `(g (f x a) b)`。不帶括號的名稱 `h` 視為 `(h x)`。方法的第 1 個引數是接收者，所以組合子可以直接串起來：
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -95,6 +96,7 @@
 為自己的錯誤型別實作 `Error`，就能**以同樣的方式**處理它與內建錯誤：
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -112,6 +114,7 @@
 因為沒有 `?`，這個轉換要明確寫出：
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 类型基础
 
 typelisp 是静态类型语言。本章介绍类型检查能为你做什么、常用的类型（`Option`、`Result`、结构体、枚举）以及
@@ -106,6 +106,7 @@ none
 可能失败的操作返回 `Result<T,E>`：成功时是持有值 `T` 的 `ok`，失败时是持有错误 `E` 的 `err`。
 
 ```lisp
+(use std::num::parse-int)
 (match (parse-int "42")
   ((ok n) (println "n = ~a" (+ n 1)))
   ((err e) (println "error: ~a" (message e))))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Nombres
 
 Les opérations sur les entiers, les nombres à virgule flottante, les rationnels, les nombres complexes et les
@@ -404,6 +404,7 @@ Un nouvel état de `make-random-state` est initialisé à partir de l'horloge ; 
 exécution à l'autre. Pour reproduire, utilisez `seed-random-state` :
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; affiche les trois mêmes nombres à chaque exécution

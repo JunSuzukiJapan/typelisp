@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1004,6 +1004,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(pub use path...)          ; içeri alınanı bu modülün yoluyla da ulaşılır kılar
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
@@ -1031,6 +1032,15 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
   4. adımdaki "ilk argümanın türü" o zaman orada beklenen fonksiyon türünün ilk parametresinin türüdür
   (`(fn (pt) int)` beklenen yere `norm` yazmak `pt`'nin `norm` metodunu verir). Beklenen tür henüz
   belirlenmediyse 4. adım atlanır.
+- **Standart kütüphanenin sunduğu adlar** her modülde `use` olmadan kullanılabilir: ilkel tipler,
+  `Option`/`Result`/`Vector`, yineleme, S-ifadeleri ve listeler, dizi fonksiyonları, denetim
+  makroları, karşılaştırma ve aritmetik trait'ler; Common Lisp'in `COMMON-LISP` paketinde de bulunan
+  her ad; ve bunların andığı tipler. Başka her ad — eşzamanlılık, ağ ve dosya kolaylıkları da dahil —
+  `(use std::sync::Chan)` gibi bir `use` ile içeri alınır ya da yoluyla, `std::sync::Chan` diye yazılır
+  (liste, yerleşik fonksiyonlarda [`use` gerektiren adlar](functions/README.md#use-gerektiren-adlar) bölümündedir). `use` fonksiyonları,
+  global değişkenleri, makroları, tipleri, trait'leri, `deftype` takma adlarını ve modülleri içeri
+  alabilir. Bir `use` yalnızca yazıldığı modülde geçerlidir: bir adı `(module ...)` içinde kullanmak
+  için `use` onun içine yazılır.
 - Nitelikli bir `a::...::n` yolu, `a::...`'nın adlandırdığı modülün bir modül adına (makro, fonksiyon
   veya global değişken) ya da bir türün varyantına veya statik metoduna çözülür. Değer konumundaki `x::f`
   (`x` bir değerin adıyken) bir alan okumasıdır.
@@ -1105,7 +1115,11 @@ bu yüzden türetilen yol ile açık bir bildirim asla çakışmaz.
 (pub deftype ...)
 ```
 
-`pub` yalnızca yukarıdaki on bir türe konabilir (`module`/`use`/`impl`'e konamaz). Tanım anahtar
+`pub` yalnızca yukarıdaki on bir türe ve `use`'a konabilir (`module`/`impl`'e konamaz).
+`(pub use path...)` içeri aldığını **yeniden dışa aktarır**: başka modüller ona bu modülden geçen bir
+yolla (`m::name`) ulaşır ve onu `(use m::name)` ile içeri alır. Yalnızca bir tanım yeniden dışa
+aktarılabilir; bir modül aktarılamaz.
+Tanım anahtar
 sözcüğü `pub`'ın hemen ardından gelecek şekilde yazılır; tanımı parantez içine alan `(pub (defun ...))`
 biçiminde değil. Bir `pub` tam olarak bir tanımı açık yapar (birden fazla tanım bir kerede işaretlenemez).
 
@@ -1146,6 +1160,7 @@ bölümündedir.
 ### 3.16 `#[test]` — test fonksiyonları
 
 ```lisp
+(use std::error::assert-eq)
 #[test]
 (defun adds () ()
   (assert-eq (+ 1 2) 3))
@@ -1154,6 +1169,7 @@ bölümündedir.
 `#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `err` döndürdüğünde başarısız olur ve hata gösterilir; bu yüzden `E`, `Error` ya da `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi). Bir `Error`, `describe-error` ile (mesaj ve nedenler zinciri), diğer her şey `print-object` ile gösterilir. `:dyn Error` de bir `Error` olduğundan, bir test farklı hataları tek bir türde toplayıp döndürebilir.
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
@@ -1866,6 +1882,7 @@ okuyucu her zaman bu tek türü geçirir: `read-sexpr` / `read-char` / `peek-cha
 çalışır.
 
 ```lisp
+(use std::reader::read-sexpr)
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
@@ -1988,6 +2005,7 @@ C fonksiyonu (`defffi`) çağırmak yalnızca o thread'i durdurur ve diğer task
 değerlendirilir** (`case`'in anahtarları için sahip olduğu aynı disiplin).
 
 ```lisp
+(use std::sync::after)
 (select                             ; receiving with a timeout
   ((v (recv ch))          (println "~a" (unwrap v)))
   ((z (recv (after 0.5))) (println "timeout")))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Nebenläufigkeit
 
 In typelisp lässt man Arbeit nebenläufig ablaufen, indem man **Tasks** (leichtgewichtige Threads) startet,
@@ -38,6 +38,7 @@ ist die Kapazität (wie viele Werte er aufnehmen kann). Bei einem Kanal mit Kapa
 Empfänger jeweils, bis die andere Seite da ist.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; senden
@@ -70,6 +71,7 @@ die die Arbeit erledigen) daraus Aufträge holen zu lassen. Der Worker, der gera
 Auftrag, sodass sich die Arbeit von selbst verteilt, auch wenn langsame und schnelle Aufträge gemischt sind.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; wie lange dieser Auftrag dauert
@@ -131,6 +133,7 @@ Kanal, der einen Wert liefert, sobald die angegebene Zeit vergangen ist. Zusamme
 Zeitlimit.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -150,6 +153,7 @@ Zeitlimit.
   nicht.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -167,13 +171,14 @@ Rumpf verlassen wird. Eine Zuweisung an die Variable mit `setf` im Rumpf ändert
 Zähler mit `add`, lässt jeden Task beim Ende `done` aufrufen und wartet mit `wait`, bis der Zähler 0 erreicht.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

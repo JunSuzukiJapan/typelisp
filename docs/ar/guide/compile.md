@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -60,6 +60,7 @@ Tools.
 عرّف كنقطة دخول **دالة `main` لا تأخذ وسائط**.
 
 ```lisp
+(use std::env::command-line-args)
 ;; hello.typl
 (defun fib ((n int)) int
   (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))

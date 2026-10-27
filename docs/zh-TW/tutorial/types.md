@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 型別基礎
 
 typelisp 是靜態型別語言。本章說明型別檢查能為你做什麼、常用的型別（`Option`、`Result`、結構、列舉）以及泛型。閱讀本章前請先讀
@@ -104,6 +104,7 @@ none
 可能失敗的操作回傳 `Result<T,E>`：成功時是持有值 `T` 的 `ok`，失敗時是持有錯誤 `E` 的 `err`。
 
 ```lisp
+(use std::num::parse-int)
 (match (parse-int "42")
   ((ok n) (println "n = ~a" (+ n 1)))
   ((err e) (println "error: ~a" (message e))))

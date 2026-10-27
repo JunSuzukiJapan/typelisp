@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Stampa
 
 `print`/`println`/`format`, i printer a un argomento, il pretty printer, `print-object` e le variabili che
@@ -173,6 +173,7 @@ In CL, `pprint-exit-if-list-exhausted` è un'uscita non locale da `pprint-logica
 lo mette comunque sempre dentro un `loop`, quindi si legge allo stesso modo.
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

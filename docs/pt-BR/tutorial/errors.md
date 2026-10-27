@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Tratamento de erros
 
 O tratamento de erros no typelisp divide as falhas em dois tipos.
@@ -18,6 +18,7 @@ Esta é uma função que lê um número de porta de uma string. Ela pode falhar 
 número, ou está fora do intervalo.
 
 ```lisp
+(use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
     ((ok n) (if (and (>= n 1) (<= n 65535))
@@ -93,6 +94,7 @@ de erro, e eles não podem ser ambos o `E` de um mesmo `Result<T,E>`. Nesse caso
 erro de qualquer tipo que implemente `Error`). Converta cada erro com `as-dyn-error`.
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
     ((ok n) (as-dyn-error (check-workers n)))

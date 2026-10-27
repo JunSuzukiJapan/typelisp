@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -109,6 +109,7 @@
 इनके लिए लागू: `int` और छह निश्चित चौड़ाई वाले पूर्णांक, `bool`, `char`, `string` और `symbol` (फ़्लोटिंग-पॉइंट संख्याओं के लिए नहीं)। अपने टाइप के लिए, परिणाम को `*sxhash-mask*` (2^30-1) से `logand` करके गैर-ऋणात्मक रखें। स्ट्रिंग को हैश करने के लिए, आप `(sxhash-string s)` (32-बिट FNV-1a) कॉल कर सकते हैं, जिसे `string` का इम्प्लीमेंटेशन उपयोग करता है।
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -183,6 +184,7 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | तत्वों का इटरेटर। क्रम तय नहीं है |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -210,6 +212,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | कुंजी के क्रम में `#{कुंजी मान}` टपल |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 और pear 3
@@ -232,6 +235,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | आगे से क्रम में |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

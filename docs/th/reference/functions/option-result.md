@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Option, Result และชนิดข้อผิดพลาด
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -33,6 +33,7 @@
 แมโคร `->` ส่งค่าเป็นอาร์กิวเมนต์ตัวแรกให้แต่ละฟอร์มถัดไปตามลำดับ (เหมือน `->` ของ Clojure) `(-> x (f a) (g b))` จะกลายเป็น `(g (f x a) b)` ชื่อที่ไม่มีวงเล็บ `h` ถือเป็น `(h x)` อาร์กิวเมนต์ตัวแรกของเมธอดคือตัวรับ จึงต่อคอมบิเนเตอร์เป็นสายได้ตามที่เป็นอยู่:
 
 ```lisp
+(use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 
@@ -105,6 +106,7 @@
 ข้อผิดพลาดที่มีให้ในตัว:
 
 ```lisp
+(use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
   (message ((self Self)) string (append "io failed: " self::path))
@@ -123,6 +125,7 @@
 แปลงนี้จึงเขียนอย่างชัดเจน:
 
 ```lisp
+(use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
     ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Netzwerk (TCP / TLS / Unix-Domain / UDP)
 
 Sockets gehören zu den [Streams](streams-files.md). Eine Verbindung wird in **zwei Sichten derselben
@@ -78,6 +78,7 @@ keinen Fehler zurückgeben. Eine Uhr wird an drei Stellen gebraucht, beim Verbin
 „nächsten Lesen“, und jede hat ein Argument dafür.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen std::net::tls-connect std::net::tls-listen std::net::with-connection)
 ;; Server: ein Task pro Verbindung
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
@@ -142,6 +143,7 @@ Zwischen Zeichenketten und Bytefolgen wandelt man mit `string->utf8` / `utf8->st
 ([Zeichenketten](collections.md#1-zeichenketten-string)).
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)

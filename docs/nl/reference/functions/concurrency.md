@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Taken en kanalen
 
 De woordenschat van taken (lichtgewicht threads). `task` en `thread`, die ze starten, en `select`, dat
@@ -49,6 +49,7 @@ die Go als `make(chan int)` en `make(chan int, 16)` schrijft, worden hier `(Chan
 `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -106,6 +107,7 @@ volstaat vaak. Het is een hulpmiddel voor werk dat dynamisch groeit, of voor wan
 niet wilt bewaren.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: start one task per input and join them (this language has no nil channels)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -134,6 +136,7 @@ De capaciteit is 1, dus de verzendende taak kan eindigen ook als niemand ontvang
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Vergrendelt, bindt de inhoud aan `x`, voert `body` uit en geeft **altijd** vrij |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -196,6 +199,7 @@ te controleren of door op `done` te ontvangen.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Of hij geannuleerd is |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

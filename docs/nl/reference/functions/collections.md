@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Strings, tekens en collecties
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` en `Deque<T>`.
@@ -118,6 +118,7 @@ het met `logand` te combineren met `*sxhash-mask*` (2^30-1). Om een string te ha
 `(sxhash-string s)` (32-bits FNV-1a) aanroepen, dat de implementatie voor `string` gebruikt.
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -206,6 +207,7 @@ implementeren, net als een sleutel van een `HashTable`.
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Een iterator over de elementen. De volgorde ligt niet vast |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -237,6 +239,7 @@ nieuwe sleutel en `remove` schuiven de elementen na die positie op.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | `#{sleutel waarde}`-tupels op sleutelvolgorde |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 en pear 3
@@ -259,6 +262,7 @@ Een reeks waaraan je aan beide kanten kunt toevoegen en uithalen (Rusts `VecDequ
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Van voren af, op volgorde |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

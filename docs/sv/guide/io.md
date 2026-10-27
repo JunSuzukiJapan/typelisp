@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Fil-I/O, strömmar och nätverk
 
 Den här guiden visar grunderna i att läsa och skriva filer, pathnames och socketkommunikation.
@@ -11,6 +11,7 @@ Operationer som kan misslyckas beroende på miljön, som att öppna en fil eller
 `Result`. En saknad fil är inget fel i programmet, så den ger inte `panic`. Skilj utfallen åt med `match`.
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -26,6 +27,7 @@ stoppa vid misslyckande, tar `unwrap` ut värdet. Om det är ett `err` ger det p
 De enklaste funktionerna hanterar hela filen på en gång.
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -37,6 +39,7 @@ För att läsa eller skriva lite i taget öppnar man en ström med `with-open-fi
 stängs strömmen. Värdet är `Result<kroppens värde, FileError>`.
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; skriva
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -119,6 +122,7 @@ för att dela upp en sökväg i delar eller bygga en.
 Filsystemsoperationer:
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; skapa den tillsammans med sina föräldrar
 (probe-file "out/deep")                           ; => true (den finns)
 (directory-p "out/deep")                          ; => true
@@ -140,6 +144,7 @@ Det grundläggande mönstret är att starta en task per anslutning. `accept` och
 **bara den tasken** tills data kommer, så hanteringen av andra anslutningar fortsätter.
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -161,6 +166,7 @@ gränssnitt. För tasks, se [Syntaxreferens kapitel 12](../reference/syntax.md#1
 `Result<kroppens värde, NetError>`.
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -171,6 +177,7 @@ gränssnitt. För tasks, se [Syntaxreferens kapitel 12](../reference/syntax.md#1
 För att sätta en tidsgräns på en operation skickar man `:timeout` (i sekunder).
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; sätt en klocka på nästa läsning
@@ -191,6 +198,7 @@ tasks fortsätter köra medan den väntar. Om ett namn har flera adresser pröva
 Om namnet inte kan lösas upp returneras ett `err`.
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -204,6 +212,7 @@ Servercertifikatet verifieras mot standardrotcertifikaten. Resultatet är en van
 läsning och skrivning fungerar som med TCP.
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -216,6 +225,7 @@ läsning och skrivning fungerar som med TCP.
 En TLS-server skapas genom att skicka certifikat- och privatnyckelfiler (PEM) till `tls-listen`.
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; TCP-varianten av serve fungerar som den är
@@ -232,6 +242,7 @@ UDP är inte en ström; det skickar och tar emot ett datagram i taget. Datan är
 (`Vector<int>`); konvertera till och från strängar med `string->utf8` / `utf8->string`.
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; även för att skicka behövs en socket; 0 låter OS välja port
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

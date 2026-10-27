@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 任务与通道
 
 任务（轻量级线程）的词汇。启动它们的 `task`・`thread` 和多路等待的 `select` 是特殊形式，见
@@ -40,6 +40,7 @@
 `make(chan int)` 和 `make(chan int, 16)` 的两种情况，在这里写成 `(Chan::new 0)` 和 `(Chan::new 16)`。
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -87,6 +88,7 @@ panic。
 持有句柄的情况准备的工具。
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in：每个输入启动一个任务再汇合（本语言没有 nil 通道）
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -114,6 +116,7 @@ Go 的 `time.After`。可以直接写在 `select` 的超时分支中（[语法�
 | `with-lock` | `(with-lock (x m) body...)` | 宏 | 加锁，把内容绑定到 `x` 执行 `body`，**一定**释放 |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -167,6 +170,7 @@ Go 的 `context.Context`。传给想要能从外部停止的工作。停止是**
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | 是否已被取消 |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

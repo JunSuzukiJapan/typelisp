@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 檔案 I/O、串流與網路
 
 本指南說明檔案讀寫、路徑名稱以及 socket 通訊的基本寫法。函式一覽見[串流與檔案](../reference/functions/streams-files.md)與
@@ -9,6 +9,7 @@
 開啟檔案、建立連線等取決於環境而可能失敗的操作會回傳 `Result`。檔案不存在不是程式的錯誤，所以不會 panic。用 `match` 區分結果。
 
 ```lisp
+(use std::fs::read-file-string)
 (match (read-file-string "config.txt")
   ((ok text) (println "~a" text))
   ((err e) (println "error: ~a" (message e))))
@@ -23,6 +24,7 @@
 最簡便的是一次處理整個檔案的函式。
 
 ```lisp
+(use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
 (read-file-lines "copy.txt")       ; => (ok #("abc"))
@@ -33,6 +35,7 @@
 一點一點讀寫時，用 `with-open-file` 開啟串流。無論以何種方式離開本體，串流都會被關閉。值是 `Result<本體的值, FileError>`。
 
 ```lisp
+(use std::fs::direction-input std::fs::direction-output)
 ;; 寫入
 (match (with-open-file (out "notes.txt" direction-output)
          (write-line out "first")
@@ -109,6 +112,7 @@
 檔案系統操作：
 
 ```lisp
+(use std::fs::directory-p)
 (unwrap (ensure-directories-exist "out/deep/"))   ; 連同上層目錄一起建立
 (probe-file "out/deep")                           ; => true（存在）
 (directory-p "out/deep")                          ; => true
@@ -128,6 +132,7 @@ socket 連線也是串流，所以 `read-line` 與 `write-line` 可以直接使�
 基本形式是每個連線啟動一個任務。`accept` 與 `read-line` 在資料抵達之前**只讓該任務**停下，其他連線的處理會繼續。
 
 ```lisp
+(use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
           ((some line) (write-line c (upcase line)))
@@ -148,6 +153,7 @@ socket 連線也是串流，所以 `read-line` 與 `write-line` 可以直接使�
 `with-connection` 建立連線、執行本體，最後關閉。值是 `Result<本體的值, NetError>`。
 
 ```lisp
+(use std::net::with-connection)
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
@@ -158,6 +164,7 @@ socket 連線也是串流，所以 `read-line` 與 `write-line` 可以直接使�
 要限制時間時，傳入 `:timeout`（秒）。
 
 ```lisp
+(use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
 (if (wait-readable c 5.0) (read-line c) (Option::none))   ; 為下一次讀取加上計時
@@ -176,6 +183,7 @@ socket 連線也是串流，所以 `read-line` 與 `write-line` 可以直接使�
 無法解析時回傳 `err`。
 
 ```lisp
+(use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
   ((ok c) (close c))
   ((err e) (println "~a" (message e))))
@@ -188,6 +196,7 @@ socket 連線也是串流，所以 `read-line` 與 `write-line` 可以直接使�
 TCP 相同。
 
 ```lisp
+(use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
   ((ok c)
    (progn
@@ -200,6 +209,7 @@ TCP 相同。
 TLS 伺服器透過把憑證與私鑰檔案（PEM）傳給 `tls-listen` 來建立。
 
 ```lisp
+(use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
           ((ok c) (progn (task (serve c)) ()))   ; 可以直接使用 TCP 的 serve
@@ -214,6 +224,7 @@ TLS 伺服器透過把憑證與私鑰檔案（PEM）傳給 `tls-listen` 來建�
 UDP 不是串流，而是一次收發一個資料包。資料是位元組序列（`Vector<int>`），與字串之間以 `string->utf8` / `utf8->string` 轉換。
 
 ```lisp
+(use std::net::udp-bind std::string::string->utf8 std::string::utf8->string)
 (let ((a (unwrap (udp-bind "127.0.0.1" 0)))          ; 只傳送也需要 socket。0 表示交給 OS 選擇
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))

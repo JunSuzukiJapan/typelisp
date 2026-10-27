@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Funkcje wbudowane
 
 Lista funkcji wbudowanych, metod i biblioteki standardowej. Składnię (formy specjalne i sposoby
@@ -14,6 +14,46 @@ Istnieją trzy formy wywołania.
 - Metody statyczne (funkcje powiązane): `(Type::name args...)`
 
 Każdy typ może mieć własną metodę o tej samej nazwie. `(+ a b)` wywołuje `+` typu `a`.
+
+## Nazwy, które wymagają `use`
+
+Spośród nazw biblioteki standardowej tych można używać w każdym module, nic nie pisząc
+([opis składni 3.10](../syntax.md#310-module--use--przestrzenie-nazw)):
+
+- typy proste, `Option`/`Result`/`Vector`, iteracja, S-wyrażenia i listy, funkcje sekwencji, makra
+  sterujące, porównanie i traity arytmetyczne
+- każda nazwa, która jest też nazwą pakietu `COMMON-LISP` z Common Lisp (`length`, `format`, `open`
+  itd.)
+- `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, traity strumieni `Stream`,
+  `InputStream` i `OutputStream` oraz `Hash`, który implementują klucze `HashTable`
+- typy, o których mówią ich funkcje i zmienne
+
+Każdą inną nazwę wprowadza się przez `use`, jak `(use std::net::tcp-connect)`, albo pisze się jej
+ścieżkę, `std::net::tcp-connect`. Tabela podaje te nazwy i moduł każdej z nich.
+
+| Moduł | Nazwy |
+|---|---|
+| `std::array` | `array-iter` |
+| `std::char` | `digit->char`, `digit-weight`, `name->char` |
+| `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
+| `std::env` | `command-line-args`, `getenv`, `home-directory` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::fmt` | `pprint-list-exhausted` |
+| `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
+| `std::hash` | `*sxhash-mask*`, `sxhash-string` |
+| `std::io` | `ByteInput`, `ByteOutput`, `PeekInput`, `binary-file-stream`, `copy-stream`, `make-peek-stream`, `peek-stream`, `read-lines`, `write-lines` |
+| `std::net` | `NetError`, `byte-stream-of`, `char-stream-of`, `datagram`, `socket-byte-stream`, `socket-listener`, `socket-stream`, `tcp-connect`, `tcp-listen`, `tls-connect`, `tls-listen`, `udp-bind`, `udp-socket`, `unix-connect`, `unix-listen`, `with-connection` |
+| `std::num` | `ParseFloatError`, `ParseIntError`, `atan2`, `parse-float`, `parse-int` |
+| `std::path` | `Pathish`, `pathname-absolute-p` |
+| `std::process` | `exit` |
+| `std::random` | `seed-random-state` |
+| `std::reader` | `ReadOutcome`, `read-from-string-preserving-whitespace`, `read-sexpr`, `read-sexpr-preserving-whitespace` |
+| `std::repl` | `heap-info` |
+| `std::string` | `left-trim`, `right-trim`, `string->utf8`, `trim`, `utf8->string` |
+| `std::symbol` | `symbol->string` |
+| `std::sync` | `Chan`, `Context`, `Mutex`, `WaitGroup`, `after`, `with-lock` |
+| `std::thread` | `Task`, `Thread`, `yield` |
+| `std::time` | `internal-time-seconds`, `timezone-daylight-p`, `timezone-offset-seconds` |
 
 ## Jak czytać tabele
 

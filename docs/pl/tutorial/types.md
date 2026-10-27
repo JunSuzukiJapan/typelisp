@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Podstawy typów
 
 typelisp jest językiem typowanym statycznie. Ten rozdział wyjaśnia, co dla ciebie robi sprawdzanie typów,
@@ -116,6 +116,7 @@ Operacja, która może się nie powieść, zwraca `Result<T,E>`: `ok` z wartośc
 z błędem `E` w razie porażki.
 
 ```lisp
+(use std::num::parse-int)
 (match (parse-int "42")
   ((ok n) (println "n = ~a" (+ n 1)))
   ((err e) (println "error: ~a" (message e))))

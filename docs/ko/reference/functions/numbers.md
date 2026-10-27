@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -369,6 +369,7 @@ CL의 `numberp`/`integerp`/`floatp` 같은 **타입 술어는 없다**. 정적 �
 `make-random-state`의 새 상태는 벽시계로 시드되므로 실행마다 재현할 수 없다. 재현하려면 `seed-random-state`를 쓴다.
 
 ```lisp
+(use std::random::seed-random-state)
 (let ((s (seed-random-state 12345)))
   (println "~a ~a ~a" (random 100 s) (random 100 s) (random 100 s)))
 ;; 실행할 때마다 같은 세 수를 출력한다

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Chaînes, caractères et collections
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` et `Deque<T>`.
@@ -118,6 +118,7 @@ nombres à virgule flottante). Pour vos propres types, gardez le résultat posit
 32 bits), qu'utilise l'implémentation pour `string`.
 
 ```lisp
+(use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
@@ -205,6 +206,7 @@ comme une clé de `HashTable`.
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Un itérateur sur les éléments. L'ordre n'est pas défini |
 
 ```lisp
+(use std::collections::HashSet)
 (let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
@@ -236,6 +238,7 @@ dichotomique. `set` d'une nouvelle clé et `remove` décalent les éléments qui
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Des tuples `#{clé valeur}` dans l'ordre des clés |
 
 ```lisp
+(use std::collections::SortedTable)
 (let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 et pear 3
@@ -258,6 +261,7 @@ Une séquence où l'on peut ajouter et retirer aux deux bouts (le `VecDeque` de 
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Depuis le début, dans l'ordre |
 
 ```lisp
+(use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>

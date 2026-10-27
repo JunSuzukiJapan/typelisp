@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # typelisp दस्तावेज़ (हिन्दी)
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है। इसे इंस्टॉल और बिल्ड करने के लिए रिपॉज़िटरी के शीर्ष स्तर पर मौजूद
@@ -11,6 +11,7 @@ typelisp एक स्टैटिक रूप से टाइप किया
 टास्क (हल्के थ्रेड) शुरू किए जाते हैं, और वे चैनलों के ज़रिए एक-दूसरे को मान भेजते हैं। विस्तार के लिए [कंकरेंसी](tutorial/concurrency.md) देखें।
 
 ```lisp
+(use std::sync::Chan)
 (defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
   (doiter (n jobs)
     (sleep 0.1)
@@ -35,6 +36,7 @@ typelisp एक स्टैटिक रूप से टाइप किया
 `nil` नहीं है। जिस फ़ंक्शन का मान न हो सकता है वह `Option<T>` लौटाता है, और जो विफल हो सकता है वह `Result<T,E>` लौटाता है; अंदर का मान `match` से निकाला जाता है। `Option<string>` को `string` की तरह इस्तेमाल करना, या `match` में `none` वाला मामला छोड़ देना, प्रोग्राम चलने से पहले ही टाइप त्रुटि है। विस्तार के लिए [टाइप की बुनियादी बातें](tutorial/types.md) और [त्रुटि प्रबंधन](tutorial/errors.md) देखें।
 
 ```lisp
+(use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
     (1 (Option::some "alice"))

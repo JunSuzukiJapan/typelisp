@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Concurrence
 
 En typelisp, on exécute du travail de façon concurrente en lançant des **tâches** (des threads légers), et les
@@ -39,6 +39,7 @@ Un canal `Chan<T>` est un chemin par lequel les tâches se passent des valeurs d
 récepteur attendent tous deux que l'autre côté soit là.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; envoyer
@@ -71,6 +72,7 @@ plusieurs workers (des tâches qui traitent le travail). Le worker libre prend l
 quand des travaux lents et rapides sont mélangés, le travail se répartit naturellement.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; durée de ce travail
@@ -129,6 +131,7 @@ grande, la tâche principale pourrait mettre du travail en file sans attendre le
 un canal qui livre une valeur une fois le temps donné écoulé. Combiné avec `select`, il donne un délai d'attente.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -148,6 +151,7 @@ un canal qui livre une valeur une fois le temps donné écoulé. Combiné avec `
   n'attend pas.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -166,13 +170,14 @@ quitté. Affecter la variable avec `setf` dans le corps change le contenu du `Mu
 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Tasks och kanaler
 
 Vokabulären för tasks (lättviktstrådar). `task` och `thread`, som startar dem, och `select`, som väntar
@@ -45,6 +45,7 @@ hur detta skiljer sig från Go finns i [Syntaxreferens 12.5](../syntax.md#125-va
 `make(chan int, 16)` skrivs `(Chan::new 0)` och `(Chan::new 16)`.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
@@ -97,6 +98,7 @@ när tasks körs på separata OS-trådar.
 är ett verktyg för arbete som växer dynamiskt, eller för när du inte vill behålla handtagen.
 
 ```lisp
+(use std::sync::Chan)
 ;; fan-in: starta en task per indata och slå ihop dem (det här språket har inga nil-kanaler)
 (defvar (left i32) 0)
 (defun drain ((in Chan<i32>) (out Chan<i32>)) ()
@@ -125,6 +127,7 @@ kapacitet är 1, så den sändande tasken kan bli klar även om ingen tar emot.
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Låser, binder innehållet till `x`, kör `body` och släpper **alltid** |
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
@@ -186,6 +189,7 @@ kontrollera `is-cancelled` eller ta emot på `done`.
 | `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Om den har avbrutits |
 
 ```lisp
+(use std::sync::Chan std::sync::Context)
 (defun worker ((ctx Context) (jobs Chan<int>)) ()
   (loop
     (select

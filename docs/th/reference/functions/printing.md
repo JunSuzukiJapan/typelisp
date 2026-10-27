@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # การพิมพ์
 
 `print`/`println`/`format`, ตัวพิมพ์แบบหนึ่งอาร์กิวเมนต์, pretty printer, `print-object` และ
@@ -169,6 +169,7 @@ logical block ไม่รับอาร์กิวเมนต์สตรี
 ใส่มันไว้ใน `loop` เสมออยู่แล้ว จึงอ่านเหมือนกัน
 
 ```lisp
+(use std::fmt::pprint-list-exhausted)
 (setf *print-right-margin* 24)
 (pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
   (loop (pprint-exit-if-list-exhausted)

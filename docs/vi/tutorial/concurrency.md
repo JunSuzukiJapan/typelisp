@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # Lập trình đồng thời
 
 Trong typelisp, bạn chạy công việc đồng thời bằng cách khởi động các **task** (thread nhẹ), và các task
@@ -38,6 +38,7 @@ lượng (kênh chứa được bao nhiêu giá trị). Trên một kênh có du
 cho đến khi bên kia có mặt.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; gửi
@@ -70,6 +71,7 @@ việc từ đó. Worker nào rảnh sẽ lấy việc kế tiếp, nên ngay c�
 việc vẫn được phân tán một cách tự nhiên.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; việc này mất bao lâu
@@ -131,6 +133,7 @@ một kênh phát ra một giá trị khi thời gian cho trước đã trôi qu
 timeout.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -150,6 +153,7 @@ timeout.
   chờ.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -167,13 +171,14 @@ dung vào một biến, chạy thân, và luôn nhả khóa dù thân được r
 mỗi task gọi `done` khi kết thúc, và `wait` cho đến khi bộ đếm về 0.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

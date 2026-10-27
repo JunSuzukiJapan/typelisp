@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
 # 동시성
 
 typelisp에서는 **태스크**(경량 스레드)를 시작해서 처리를 동시에 진행하고, 태스크끼리는 **채널**을 통해 값을
@@ -33,6 +33,7 @@ typelisp에서는 **태스크**(경량 스레드)를 시작해서 처리를 동�
 개수)이다. 용량 0의 채널에서는 보내는 쪽과 받는 쪽이 서로 상대가 올 때까지 기다린다.
 
 ```lisp
+(use std::sync::Chan)
 (defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n)
     (send ch (* i 10)))        ; 보내기
@@ -62,6 +63,7 @@ got 30
 워커가 다음 일을 가져가므로 느린 일과 빠른 일이 섞여 있어도 일이 자연스럽게 나뉜다.
 
 ```lisp
+(use std::sync::Chan)
 (defstruct job
   (id int)
   (seconds f64))                  ; 이 일에 걸리는 시간
@@ -119,6 +121,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 채널이다. `select`와 함께 쓰면 타임아웃이 된다.
 
 ```lisp
+(use std::sync::Chan std::sync::after)
 (defun late-send ((ch Chan<string>) (sec f64)) ()
   (sleep sec)
   (send ch "done"))
@@ -137,6 +140,7 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - 마지막에 `(:else 본체...)`를 쓰면 바로 진행할 수 있는 갈래가 없을 때 `:else`가 실행되고 `select`는 기다리지 않는다.
 
 ```lisp
+(use std::sync::Chan)
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
@@ -153,13 +157,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 `done`을 호출하게 하고, 개수가 0이 될 때까지 `wait`한다.
 
 ```lisp
+(use std::sync::Mutex std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the WaitGroup (WaitGroup::new))))
+      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()
