@@ -1342,9 +1342,9 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — **型名**を先頭に置くフィールド分解（struct 専用）。上の構造体の
   パターンと同じ形で書く。例: `(defstruct point (x f64) (y f64))` に対し `(point :x :y)`。
-- 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。スクルーティニーの型の変種として
-  解決される。例: `(defenum color (red) (blue))` の値に対して `(red)` `(blue)`。修飾形
-  `(EnumType::VariantName ...)` でも書ける。
+- 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。`(use EnumType::*)` などで取り込んで
+  見えている裸の名前として解決される（構成子を呼ぶときと同じ可視性規則）。例: `(defenum color (red) (blue))` の
+  `(use color::*)` 後に `(red)` `(blue)`。修飾形 `(EnumType::VariantName ...)` なら `use` は要らない。
 - `(the Type pattern)` — 型全体でのdowncast（丸ごと束縛）。フィールド分解せず、値をそのまま
   `pattern` へ渡す。可変な struct の同一性を保ったまま取り出せる唯一の書き方であり、`Vector<T>`/
   `HashTable<K,V>` を `Sexpr` から取り出す唯一の手段でもある（両者はフィールド分解形を持たない）。
