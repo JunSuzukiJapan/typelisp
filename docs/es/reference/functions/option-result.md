@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result y tipos de error
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ cualquier tipo: los tipos de error concretos incorporados y los tipos que escrib
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Con `none`/`err`, devuelve el resultado de `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Convierte `(some v)` en `(ok v)` y `none` en `(err e)` |
 
-Los constructores son `Option::some`/`Option::none`/`Result::ok`/`Result::err` (o, tras
-`(use Option)`/`(use Result)`, los nombres simples `some`/`none`/`ok`/`err`).
+Los constructores `some`/`none`/`ok`/`err` se pueden usar como nombres simples en cualquier módulo sin `use`.
+También se pueden escribir con el nombre del tipo, como en `Option::some`.
 
 La bifurcación se escribe explícitamente con `match`, o se encadena con `map`/`and-then` y los demás
 de arriba. No hay sintaxis equivalente al `?` de Rust.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Модулі та розкладання по файлах
 
 Цей посібник пояснює, як скласти програму з кількох файлів. Докладні правила наведено в розділах 3.10–3.13
@@ -99,6 +99,8 @@ typl main.typl        # => 25
 (use geometry)              ; bring in a module; write geometry::dist2 to use it
 (use geometry::dist2)       ; bring in a function; use it by the bare name dist2
 (use geometry::point)       ; bring in a type; write point::new, point::origin, and point in type annotations
+(use geometry::point::new)  ; bring in a type's static method; use it by the bare name new
+(use geometry::shape::*)    ; make all of a type's constructors and public static methods usable by bare names
 (use a::f b::g)             ; several can be written together
 ```
 
@@ -107,7 +109,9 @@ typl main.typl        # => 25
 - Запис повного шляху `geometry::dist2` без `use` модуля теж не розв'язується. Лише `use`
   спричиняє завантаження файлу.
 - `use` для назви, чия гола форма вже зайнята, дає попередження. Коли ви все одно хочете її
-  підключити, використовуйте `shadowing-import`.
+  підключити, використовуйте `shadowing-import`. Для конструкторів і статичних методів типу це не попередження, а помилка.
+- `(use geometry::point)` підключає лише назву типу. Щоб писати `point::new` як `new`, напишіть
+  `(use geometry::point::new)` або `(use geometry::point::*)`.
 - Модуль у каталозі записується як `(use geo::shapes)`, а далі до нього звертаються за останньою
   частиною (`shapes::...`).
 

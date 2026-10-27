@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1004,6 +1004,8 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(use Type::member)         ; make one constructor or static method of a type usable by its bare name
+(use Type::*)              ; make all of a type's constructors and public static methods usable by bare names
 (pub use path...)          ; make what is brought in reachable through this module's path too
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
@@ -1011,9 +1013,20 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
 
 - `module` creates a namespace. **Types are not namespaces** (as in Rust, a type only has static methods
   and methods).
-- `use`-ing a type makes an enum's variants and the type's public static methods available by bare
-  name too (for example, after `(use Option)`, `some`/`none` can be called without
-  `Option::some`/`Option::none`).
+- `(use Type)` brings in only the type's name. An enum's variants and static methods are written through
+  the type's name, as in `Option::some` or `Chan::new`. Even after `(use std::sync::Chan)`, a bare
+  `(new 1)` is an error unless a function named `new` is defined somewhere.
+- To use a type's constructors and static methods by bare names, bring them in one at a time, as in
+  `(use std::sync::Chan::new)`, or bring in all the constructors and public static methods with
+  `(use Type::*)` (a struct's constructor is not included, since a struct is made with `make-instance`).
+  They cannot be re-exported with `pub use`.
+- The same bare name cannot be brought in from two different types
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` is an error, since both have `new`). Bringing in a
+  name that is the same as a function, global variable or macro the module defines is also an error. To
+  replace it knowingly, use `shadowing-import`.
+- `Option`'s `some`/`none` and `Result`'s `ok`/`err` are offered to every module by the standard
+  library, so they can be used by bare name without a `use` (the same as Rust's prelude bringing in
+  `Some`/`None`/`Ok`/`Err`).
 - **A name has one meaning.** Functions, global variables and macros share one namespace, and within
   one module no two of them can have the same name (an error whichever is defined first). Functions and
   variables do not have separate namespaces as in CL. For the same name in different modules, the
@@ -1022,7 +1035,8 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
   this):
   1. Locals (parameters, and the bindings of `let`, `labels`, `macrolet` and `symbol-macrolet`)
   2. If the module name `n` is a macro, that macro
-  3. The variants of a `use`d enum, and the static methods of a `use`d type
+  3. Constructors and static methods: those brought in by `use`, and the constructors of `Sexpr` (`sym`,
+     `int` and so on) and of `Option`/`Result`, which the standard library offers
   4. The method `n` of the first argument's type (methods are looked up from **the type of the
      first argument only**)
   5. If the module name `n` is a function or a global variable, that (for a global variable, the
@@ -1407,10 +1421,10 @@ instance of a `defstruct`/`defenum` (chapter 3) that was implicitly converted to
   written in the same form as the struct patterns above. For example, for
   `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
 - A bare variant name `(VariantName sub-pattern...)` — extracts a variant of a `defenum`. Resolved as a
-  bare name visible after `(use EnumType)` (the same visibility rules as when calling the constructor).
-  For example, for `(defenum color (red) (blue))`, `(red)` `(blue)` after `(use color)`. If variant names
-  of several visible enums clash, it is an ambiguity error, so the qualified form
-  `(EnumType::VariantName ...)` can be written too (no `use` needed).
+  bare name made visible by bringing it in, for example with `(use EnumType::*)` (the same visibility
+  rules as when calling the constructor). For example, for `(defenum color (red) (blue))`, `(red)`
+  `(blue)` after `(use color::*)`. With the qualified form `(EnumType::VariantName ...)`, no `use` is
+  needed.
 - `(the Type pattern)` — a downcast of the whole type (binding it as a whole). It does not decompose
   fields; it passes the value to `pattern` as it is. The only way to take out a mutable struct while
   keeping its identity, and also the only way to take a `Vector<T>`/`HashTable<K,V>` out of an `Sexpr`

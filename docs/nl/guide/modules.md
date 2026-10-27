@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Modules en bestandsindeling
 
 Deze handleiding legt uit hoe je een programma samenstelt dat uit meerdere bestanden bestaat. De
@@ -102,6 +102,8 @@ De lijst met definities die `pub` kunnen krijgen staat in
 (use geometry)              ; bring in a module; write geometry::dist2 to use it
 (use geometry::dist2)       ; bring in a function; use it by the bare name dist2
 (use geometry::point)       ; bring in a type; write point::new, point::origin, and point in type annotations
+(use geometry::point::new)  ; bring in a type's static method; use it by the bare name new
+(use geometry::shape::*)    ; make all of a type's constructors and public static methods usable by bare names
 (use a::f b::g)             ; several can be written together
 ```
 
@@ -110,7 +112,9 @@ De lijst met definities die `pub` kunnen krijgen staat in
 - Het volledige pad `geometry::dist2` schrijven zonder de module met `use` binnen te halen wordt ook
   niet opgelost. Alleen `use` zorgt ervoor dat een bestand wordt geladen.
 - Een naam met `use` binnenhalen waarvan de kale vorm al bezet is, geeft een waarschuwing. Wil je
-  hem toch binnenhalen, gebruik dan `shadowing-import`.
+  hem toch binnenhalen, gebruik dan `shadowing-import`. Bij constructors en statische methoden van een type is het een fout, geen waarschuwing.
+- `(use geometry::point)` haalt alleen de naam van het type binnen. Om `point::new` als `new` te schrijven,
+  schrijf je `(use geometry::point::new)` of `(use geometry::point::*)`.
 - Een module in een map schrijf je als `(use geo::shapes)`, en daarna verwijs je ernaar met het
   laatste deel (`shapes::...`).
 

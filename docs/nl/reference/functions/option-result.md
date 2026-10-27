@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result en foutentypes
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ schrijft, passen er net zo goed (hoofdstuk 3).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Levert bij `none`/`err` het resultaat van `f` op |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Maakt van `(some v)` een `(ok v)` en van `none` een `(err e)` |
 
-De constructors zijn `Option::some`/`Option::none`/`Result::ok`/`Result::err` (of, na
-`(use Option)`/`(use Result)`, de kale namen `some`/`none`/`ok`/`err`).
+De constructors `some`/`none`/`ok`/`err` zijn in elke module zonder `use` als kale namen te gebruiken.
+Ze kunnen ook met de typenaam worden geschreven, zoals `Option::some`.
 
 Vertakken schrijf je expliciet met `match`, of je ketent met `map`/`and-then` en de andere
 hierboven. Er is geen syntaxis die overeenkomt met Rusts `?`.

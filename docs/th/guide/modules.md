@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # โมดูลและการจัดวางไฟล์
 
 คู่มือนี้อธิบายวิธีประกอบโปรแกรมที่ประกอบด้วยหลายไฟล์ กฎโดยละเอียดอยู่ในหัวข้อ 3.10 ถึง 3.13 ของ
@@ -97,6 +97,8 @@ typl main.typl        # => 25
 (use geometry)              ; bring in a module; write geometry::dist2 to use it
 (use geometry::dist2)       ; bring in a function; use it by the bare name dist2
 (use geometry::point)       ; bring in a type; write point::new, point::origin, and point in type annotations
+(use geometry::point::new)  ; bring in a type's static method; use it by the bare name new
+(use geometry::shape::*)    ; make all of a type's constructors and public static methods usable by bare names
 (use a::f b::g)             ; several can be written together
 ```
 
@@ -105,7 +107,9 @@ typl main.typl        # => 25
 - การเขียนพาธเต็ม `geometry::dist2` โดยไม่ได้ `use` โมดูลก็แก้ไขไม่ได้เช่นกัน มีเพียง
   `use` เท่านั้นที่ทำให้ไฟล์ถูกโหลด
 - การ `use` ชื่อที่ชื่อเปล่าของมันถูกใช้ไปแล้วจะให้คำเตือน หากตั้งใจนำเข้ามาอยู่ดี
-  ให้ใช้ `shadowing-import`
+  ให้ใช้ `shadowing-import`สำหรับคอนสตรัคเตอร์และเมธอดสแตติกของชนิด จะเป็นข้อผิดพลาด ไม่ใช่คำเตือน
+- `(use geometry::point)` นำเข้าเฉพาะชื่อของชนิดเท่านั้น หากต้องการเขียน `point::new` เป็น `new` ให้เขียน
+  `(use geometry::point::new)` หรือ `(use geometry::point::*)`
 - โมดูลที่อยู่ในไดเรกทอรีเขียนเป็น `(use geo::shapes)` และหลังจากนั้นอ้างถึงด้วยส่วนสุดท้ายของชื่อ
   (`shapes::...`)
 

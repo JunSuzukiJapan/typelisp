@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option、Result 与错误类型
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -22,8 +22,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | 遇到 `none`/`err` 时返回 `f` 的结果 |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | 把 `(some v)` 变成 `(ok v)`，把 `none` 变成 `(err e)` |
 
-构造函数是 `Option::some`/`Option::none`/`Result::ok`/`Result::err`（或者在 `(use Option)`/`(use Result)` 之后
-使用裸名字 `some`/`none`/`ok`/`err`）。
+构造函数 `some`/`none`/`ok`/`err` 无需 `use`，在任何模块中都可以用裸名字使用。
+也可以像 `Option::some` 这样带上类型名书写。
 
 分支用 `match` 明确写出，或用上面的 `map`/`and-then` 等串起来。没有相当于 Rust 的 `?` 的语法。
 

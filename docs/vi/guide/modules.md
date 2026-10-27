@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Module và cách bố trí tệp
 
 Tài liệu này giải thích cách ghép một chương trình gồm nhiều tệp. Các quy tắc chi tiết nằm ở các mục
@@ -97,6 +97,8 @@ Danh sách các định nghĩa có thể nhận `pub` nằm ở
 (use geometry)              ; đưa một module vào; viết geometry::dist2 để dùng
 (use geometry::dist2)       ; đưa một hàm vào; dùng bằng tên trần dist2
 (use geometry::point)       ; đưa một kiểu vào; viết point::new, point::origin, và point trong chú thích kiểu
+(use geometry::point::new)  ; đưa một phương thức tĩnh của kiểu vào; dùng bằng tên trần new
+(use geometry::shape::*)    ; cho phép dùng mọi hàm khởi tạo và phương thức tĩnh công khai của kiểu bằng tên trần
 (use a::f b::g)             ; có thể viết nhiều mục cùng lúc
 ```
 
@@ -105,7 +107,9 @@ Danh sách các định nghĩa có thể nhận `pub` nằm ở
 - Viết đường dẫn đầy đủ `geometry::dist2` mà không `use` module cũng không phân giải được. Chỉ có
   `use` mới khiến một tệp được nạp.
 - `use` một tên mà dạng trần của nó đã bị chiếm sẽ cho cảnh báo. Khi bạn chủ ý muốn đưa nó vào, hãy
-  dùng `shadowing-import`.
+  dùng `shadowing-import`. Với hàm khởi tạo và phương thức tĩnh của kiểu, đây là lỗi chứ không phải cảnh báo.
+- `(use geometry::point)` chỉ đưa vào tên của kiểu. Muốn viết `point::new` thành `new`, hãy viết
+  `(use geometry::point::new)` hoặc `(use geometry::point::*)`.
 - Module nằm trong một thư mục được viết là `(use geo::shapes)`, và sau đó được gọi bằng phần cuối
   của nó (`shapes::...`).
 

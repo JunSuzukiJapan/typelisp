@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Concurrence
 
 En typelisp, on exécute du travail de façon concurrente en lançant des **tâches** (des threads légers), et les
@@ -170,14 +170,14 @@ quitté. Affecter la variable avec `setf` dans le corps change le contenu du `Mu
 0.
 
 ```lisp
-(use std::sync::Mutex std::sync::with-lock)
+(use std::sync::Mutex std::sync::WaitGroup std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

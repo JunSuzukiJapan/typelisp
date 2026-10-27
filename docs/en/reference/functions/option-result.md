@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result and Error Types
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ fit there just the same (chapter 3).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | On `none`/`err`, returns the result of `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Turns `(some v)` into `(ok v)` and `none` into `(err e)` |
 
-The constructors are `Option::some`/`Option::none`/`Result::ok`/`Result::err` (or, after
-`(use Option)`/`(use Result)`, the bare names `some`/`none`/`ok`/`err`).
+The constructors `some`/`none`/`ok`/`err` can be used as bare names in any module without a `use`.
+They can also be written with the type's name, as in `Option::some`.
 
 Branching is written explicitly with `match`, or chained with `map`/`and-then` and the others above.
 There is no syntax corresponding to Rust's `?`.

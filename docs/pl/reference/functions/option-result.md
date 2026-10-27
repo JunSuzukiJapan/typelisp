@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result i typy błędów
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ pasują tam tak samo (rozdział 3).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Przy `none`/`err` zwraca wynik `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Zamienia `(some v)` na `(ok v)`, a `none` na `(err e)` |
 
-Konstruktorami są `Option::some`/`Option::none`/`Result::ok`/`Result::err` (lub, po
-`(use Option)`/`(use Result)`, same nazwy `some`/`none`/`ok`/`err`).
+Konstruktorów `some`/`none`/`ok`/`err` można używać jako samych nazw w każdym module bez `use`.
+Można je też zapisać z nazwą typu, np. `Option::some`.
 
 Rozgałęzienie zapisuje się jawnie przez `match` albo łączy w łańcuch przez `map`/`and-then` i
 pozostałe powyżej. Nie ma składni odpowiadającej `?` z Rusta.

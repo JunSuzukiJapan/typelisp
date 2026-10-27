@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result и типы ошибок
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | При `none`/`err` возвращает результат `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Превращает `(some v)` в `(ok v)`, а `none` — в `(err e)` |
 
-Конструкторы — `Option::some`/`Option::none`/`Result::ok`/`Result::err` (или, после `(use Option)`/`(use Result)`,
-голые имена `some`/`none`/`ok`/`err`).
+Конструкторы `some`/`none`/`ok`/`err` можно использовать как голые имена в любом модуле без `use`.
+Их также можно писать с именем типа, например `Option::some`.
 
 Ветвление записывается явно через `match` или в виде цепочки через `map`/`and-then` и остальные
 методы выше. Синтаксиса, соответствующего `?` в Rust, нет.

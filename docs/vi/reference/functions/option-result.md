@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result và các kiểu lỗi
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ như nhau (chương 3).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Gặp `none`/`err` thì trả về kết quả của `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Biến `(some v)` thành `(ok v)` và `none` thành `(err e)` |
 
-Các hàm khởi tạo là `Option::some`/`Option::none`/`Result::ok`/`Result::err` (hoặc, sau
-`(use Option)`/`(use Result)`, các tên trần `some`/`none`/`ok`/`err`).
+Các hàm khởi tạo `some`/`none`/`ok`/`err` dùng được dưới dạng tên trần trong mọi mô-đun mà không cần `use`.
+Cũng có thể viết kèm tên kiểu, như `Option::some`.
 
 Rẽ nhánh được viết tường minh bằng `match`, hoặc nối chuỗi bằng `map`/`and-then` và các phương thức
 khác ở trên. Không có cú pháp tương ứng với `?` của Rust.

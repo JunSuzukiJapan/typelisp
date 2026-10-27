@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -867,6 +867,8 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (module path body...)      ; path는 foo나 foo::bar 같은 구간의 열
 (in-module path)           ; 여기서 이 단위의 끝까지 path 안(module의 평평한 형식)
 (use path...)              ; 함수, 타입, 모듈을 현재 이름공간에 별칭으로 들여온다
+(use Type::member)         ; 타입의 생성자나 정적 메서드 하나를 맨 이름으로 쓸 수 있게 한다
+(use Type::*)              ; 타입의 생성자와 공개된 정적 메서드를 모두 맨 이름으로 쓸 수 있게 한다
 (pub use path...)          ; 가져온 정의를 이 모듈을 거치는 경로로도 찾을 수 있게 한다
 (import path...)           ; use와 같다(CL 호환 표기)
 (shadowing-import path...) ; 맨 이름이 이미 쓰이고 있음을 알고도 가져오는 use
@@ -874,15 +876,17 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 
 - `module`은 이름공간을 만든다. **타입은 이름공간이 아니다**(Rust처럼 타입은 정적 메서드와 메서드를 가질
   뿐이다).
-- `use`로 타입을 들여오면 열거형의 변형과 그 타입의 공개된 정적 메서드도 맨 이름으로 쓸 수 있다
-  (예: `(use Option)` 뒤에는 `some`/`none`을 `Option::some`/`Option::none` 없이 호출할 수 있다).
+- `(use Type)`로 들여오는 것은 타입 이름뿐이다. 열거형의 변형과 정적 메서드는 `Option::some`이나 `Chan::new`처럼 타입 이름을 통해 쓴다. `(use std::sync::Chan)` 뒤에도 맨 `(new 1)`은 `new`라는 함수가 어디에도 정의되어 있지 않으면 오류다.
+- 타입의 생성자와 정적 메서드를 맨 이름으로 쓰려면 `(use std::sync::Chan::new)`처럼 하나씩 들여오거나, `(use Type::*)`로 생성자와 공개된 정적 메서드를 모두 들여온다(구조체의 생성자는 `make-instance`로 만들므로 포함하지 않는다). `pub use`로 다시 공개할 수는 없다.
+- 같은 맨 이름을 서로 다른 두 타입에서 들여올 수는 없다(`(use std::sync::Chan::* std::sync::WaitGroup::*)`는 둘 다 `new`가 있으므로 오류). 모듈이 정의한 함수·전역 변수·매크로와 같은 이름을 들여오는 것도 오류다. 알고서 바꾸려면 `shadowing-import`를 쓴다.
+- `Option`의 `some`/`none`과 `Result`의 `ok`/`err`는 표준 라이브러리가 모든 모듈에 공개하므로 `use` 없이 맨 이름으로 쓸 수 있다(Rust의 prelude가 `Some`/`None`/`Ok`/`Err`를 들여오는 것과 같다).
 - **한 이름은 한 가지 뜻을 가진다**. 함수·전역 변수·매크로는 한 이름공간에 들어가며, 같은 모듈에서 그중
   두 개에 같은 이름을 붙일 수 없다(어떤 순서로 정의해도 오류). CL처럼 함수와 변수의 이름공간이 나뉘어
   있지 않다. 다른 모듈의 같은 이름이라면 가까운 쪽이 보인다.
 - 맨 이름 `n`의 해석(호출 `(n a ...)`의 위치. 특수 형식의 이름은 이보다 먼저 정해진다):
   1. 지역(인수, `let`·`labels`·`macrolet`·`symbol-macrolet`의 바인딩)
   2. 모듈의 이름 `n`이 매크로라면 그 매크로
-  3. `use`한 열거형의 변형, `use`한 타입의 정적 메서드
+  3. 생성자와 정적 메서드: `use`로 들여온 것, 표준 라이브러리가 공개하는 `Sexpr`의 생성자(`sym`, `int` 등)와 `Option`/`Result`의 생성자
   4. 첫 번째 인수의 타입의 메서드 `n`(메서드는 **첫 번째 인수의 타입만**으로 찾는다)
   5. 모듈의 이름 `n`이 함수나 전역 변수라면 그것(전역 변수라면 그 값인 함수를 호출한다)
 
@@ -1219,10 +1223,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — **타입 이름**을 앞에 두는 필드 분해(struct 전용). 위의 구조체의 패턴과
   같은 형태로 쓴다. 예: `(defstruct point (x f64) (y f64))`에 대해 `(point :x :y)`.
-- 맨 변형 이름 `(VariantName sub-pattern...)` — `defenum`의 변형을 꺼낸다. `(use EnumType)` 뒤에 보이는 맨 이름으로 해석된다
-  (생성자를 호출할 때와 같은 가시성 규칙). 예: `(defenum color (red) (blue))`에 대해 `(use color)` 뒤에 `(red)` `(blue)`.
-  보이는 여러 열거형의 변형 이름이 겹치면 모호성 오류가 되므로 한정 형식 `(EnumType::VariantName ...)`도 쓸 수 있다(`use`가
-  필요 없다).
+- 맨 변형 이름 `(VariantName sub-pattern...)` — `defenum`의 변형을 꺼낸다. `(use EnumType::*)` 등으로 들여와 보이는 맨 이름으로 해석된다(생성자를 호출할 때와 같은 가시성 규칙). 예: `(defenum color (red) (blue))`의 `(use color::*)` 뒤에 `(red)` `(blue)`. 한정 형식 `(EnumType::VariantName ...)`이면 `use`가 필요 없다.
 - `(the Type pattern)` — 타입 전체로 다운캐스트(통째로 묶기). 필드를 분해하지 않고 값을 그대로 `pattern`에 넘긴다. 가변
   구조체를 동일성을 유지한 채 꺼내는 유일한 방법이며, `Sexpr`에서 `Vector<T>`/`HashTable<K,V>`를 꺼내는 유일한 수단이기도
   하다(둘 다 필드 분해 형식이 없다). 예: `(the point p)` 뒤에 `(setf p::x 9)`는 리스트 안의 원래 인스턴스에도 반영된다.

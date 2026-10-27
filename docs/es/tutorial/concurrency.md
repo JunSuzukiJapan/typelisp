@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Concurrencia
 
 En typelisp el trabajo concurrente se hace iniciando **tareas** (hilos ligeros), y las tareas se pasan
@@ -171,14 +171,14 @@ cuerpo. Asignar a la variable con `setf` dentro del cuerpo cambia el contenido d
 `add`, haz que cada tarea llame a `done` al terminar, y haz `wait` hasta que la cuenta llegue a 0.
 
 ```lisp
-(use std::sync::Mutex std::sync::with-lock)
+(use std::sync::Mutex std::sync::WaitGroup std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

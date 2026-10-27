@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1006,6 +1006,8 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
 (module path body...)      ; path to ciąg segmentów, takich jak foo lub foo::bar
 (in-module path)           ; od tego miejsca do końca tej jednostki, wewnątrz path (płaska forma module)
 (use path...)              ; aliasuje funkcje, typy i moduły w bieżącej przestrzeni nazw
+(use Type::member)         ; udostępnia pod gołą nazwą jeden konstruktor lub metodę statyczną typu
+(use Type::*)              ; udostępnia pod gołymi nazwami wszystkie konstruktory i publiczne metody statyczne typu
 (pub use path...)          ; udostępnia to, co wprowadzono, także przez ścieżkę tego modułu
 (import path...)           ; to samo co use (zapis zgodny z CL)
 (shadowing-import path...) ; use, które świadomie przejmuje nazwę już używaną
@@ -1013,8 +1015,20 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
 
 - `module` tworzy przestrzeń nazw. **Typy nie są przestrzeniami nazw** (jak w Rust, typ ma tylko metody
   statyczne i metody).
-- `use` typu udostępnia pod gołą nazwą także warianty enumu oraz publiczne metody statyczne typu (na
-  przykład po `(use Option)` można wywoływać `some`/`none` bez `Option::some`/`Option::none`).
+- `(use Type)` dołącza tylko nazwę typu. Warianty enumu i metody statyczne zapisuje się przez nazwę
+  typu, np. `Option::some` lub `Chan::new`. Nawet po `(use std::sync::Chan)` gołe `(new 1)` jest błędem,
+  chyba że gdzieś zdefiniowano funkcję o nazwie `new`.
+- Aby używać konstruktorów i metod statycznych typu pod gołymi nazwami, dołącza się je po jednym, np.
+  `(use std::sync::Chan::new)`, albo wszystkie konstruktory i publiczne metody statyczne naraz przez
+  `(use Type::*)` (konstruktor struktury się do nich nie zalicza, bo strukturę tworzy się przez
+  `make-instance`). Nie można ich ponownie eksportować przez `pub use`.
+- Tej samej gołej nazwy nie można dołączyć z dwóch różnych typów
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` jest błędem, bo oba mają `new`). Błędem jest też
+  dołączenie nazwy takiej samej jak funkcja, zmienna globalna lub makro zdefiniowane w module. Aby
+  świadomie zastąpić, używa się `shadowing-import`.
+- Biblioteka standardowa udostępnia każdemu modułowi `some`/`none` z `Option` i `ok`/`err` z `Result`,
+  więc można ich używać pod gołą nazwą bez `use` (tak jak prelude Rusta dołącza
+  `Some`/`None`/`Ok`/`Err`).
 - **Nazwa ma jedno znaczenie.** Funkcje, zmienne globalne i makra dzielą jedną przestrzeń nazw i w jednym
   module żadne dwie z nich nie mogą mieć tej samej nazwy (błąd bez względu na kolejność definicji).
   Funkcje i zmienne nie mają osobnych przestrzeni nazw jak w CL. Dla tej samej nazwy w różnych modułach
@@ -1023,7 +1037,8 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
   wcześniej):
   1. Lokalne (parametry oraz wiązania `let`, `labels`, `macrolet` i `symbol-macrolet`)
   2. Jeśli nazwa modułu `n` jest makrem, to makro
-  3. Warianty enumu dołączonego przez `use` oraz metody statyczne typu dołączonego przez `use`
+  3. Konstruktory i metody statyczne: dołączone przez `use` oraz konstruktory `Sexpr` (`sym`, `int`
+     itd.) i `Option`/`Result` udostępniane przez bibliotekę standardową
   4. Metoda `n` typu pierwszego argumentu (metod szuka się **tylko według typu pierwszego argumentu**)
   5. Jeśli nazwa modułu `n` jest funkcją lub zmienną globalną, to ona (dla zmiennej globalnej wywoływana
      jest funkcja będąca jej wartością)
@@ -1406,11 +1421,10 @@ instancji `defstruct`/`defenum` (rozdział 3), która została niejawnie skonwer
 - `(TypeName :slot pattern...)` — rozkład pól z **nazwą typu** na początku (tylko struktury), zapisywany w
   tej samej formie co wzorce struktur powyżej. Na przykład dla `(defstruct point (x f64) (y f64))` —
   `(point :x :y)`.
-- Goła nazwa wariantu `(VariantName sub-pattern...)` — wyjmuje wariant `defenum`. Rozstrzygana jako goła
-  nazwa widoczna po `(use EnumType)` (te same reguły widoczności co przy wywoływaniu konstruktora).
-  Na przykład dla `(defenum color (red) (blue))`, `(red)` `(blue)` po `(use color)`. Jeśli nazwy wariantów
-  kilku widocznych enumeracji kolidują, jest to błąd niejednoznaczności, więc można też zapisać formę kwalifikowaną
-  `(EnumType::VariantName ...)` (bez potrzeby `use`).
+- Goła nazwa wariantu `(VariantName sub-pattern...)` — wyciąga wariant `defenum`. Rozwiązywana jako goła
+  nazwa widoczna dzięki dołączeniu, np. przez `(use EnumType::*)` (te same zasady widoczności co przy
+  wywołaniu konstruktora). Na przykład dla `(defenum color (red) (blue))` po `(use color::*)` `(red)`
+  `(blue)`. W formie kwalifikowanej `(EnumType::VariantName ...)` `use` nie jest potrzebne.
 - `(the Type pattern)` — rzutowanie w dół całego typu (wiążące go jako całość). Nie rozkłada
   pól; przekazuje wartość do `pattern` bez zmian. Jedyny sposób wyjęcia zmiennej struktury z zachowaniem jej
   tożsamości, a także jedyny sposób wyjęcia `Vector<T>`/`HashTable<K,V>` z `Sexpr`

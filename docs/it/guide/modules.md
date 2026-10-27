@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Moduli e organizzazione dei file
 
 Questa guida spiega come mettere insieme un programma composto da più file. Le regole dettagliate si
@@ -101,6 +101,8 @@ L'elenco delle definizioni che possono ricevere `pub` si trova nel
 (use geometry)              ; bring in a module; write geometry::dist2 to use it
 (use geometry::dist2)       ; bring in a function; use it by the bare name dist2
 (use geometry::point)       ; bring in a type; write point::new, point::origin, and point in type annotations
+(use geometry::point::new)  ; bring in a type's static method; use it by the bare name new
+(use geometry::shape::*)    ; make all of a type's constructors and public static methods usable by bare names
 (use a::f b::g)             ; several can be written together
 ```
 
@@ -109,7 +111,9 @@ L'elenco delle definizioni che possono ricevere `pub` si trova nel
 - Anche scrivere il percorso completo `geometry::dist2` senza aver fatto `use` del modulo non si
   risolve. Solo `use` fa caricare un file.
 - Fare `use` di un nome la cui forma semplice è già occupata produce un avviso. Quando vuoi comunque
-  importarlo, usa `shadowing-import`.
+  importarlo, usa `shadowing-import`. Per i costruttori e i metodi statici di un tipo è un errore, non un avviso.
+- `(use geometry::point)` importa solo il nome del tipo. Per scrivere `point::new` come `new`, scrivete
+  `(use geometry::point::new)` o `(use geometry::point::*)`.
 - Un modulo dentro una directory si scrive `(use geo::shapes)`, e dopo si fa riferimento ad esso con
   la sua ultima parte (`shapes::...`).
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1020,6 +1020,8 @@ valores mediante `:dyn`, envuélvelos en una estructura, como en `(defstruct fla
 (module path body...)      ; path es una secuencia de segmentos como foo o foo::bar
 (in-module path)           ; desde aquí hasta el final de esta unidad, dentro de path (la forma plana de module)
 (use path...)              ; crea alias de funciones, tipos y módulos en el espacio de nombres actual
+(use Type::member)         ; hace usable por nombre desnudo un constructor o método estático de un tipo
+(use Type::*)              ; hace usables por nombre desnudo todos los constructores y métodos estáticos públicos de un tipo
 (pub use path...)          ; hace que lo traído se alcance también por la ruta de este módulo
 (import path...)           ; lo mismo que use (una escritura compatible con CL)
 (shadowing-import path...) ; un use que toma a sabiendas un nombre simple ya en uso
@@ -1027,9 +1029,21 @@ valores mediante `:dyn`, envuélvelos en una estructura, como en `(defstruct fla
 
 - `module` crea un espacio de nombres. **Los tipos no son espacios de nombres** (como en Rust, un tipo solo
   tiene métodos estáticos y métodos).
-- Hacer `use` de un tipo hace que las variantes de un enum y los métodos estáticos públicos del tipo también
-  estén disponibles por nombre desnudo (por ejemplo, tras `(use Option)`, `some`/`none` se pueden llamar sin
-  `Option::some`/`Option::none`).
+- `(use Type)` trae solo el nombre del tipo. Las variantes de un enum y los métodos estáticos se
+  escriben a través del nombre del tipo, como `Option::some` o `Chan::new`. Incluso tras
+  `(use std::sync::Chan)`, un `(new 1)` desnudo es un error a menos que haya una función llamada `new`
+  definida en algún lugar.
+- Para usar los constructores y métodos estáticos de un tipo por nombre desnudo, se traen uno a uno,
+  como `(use std::sync::Chan::new)`, o se traen todos los constructores y métodos estáticos públicos con
+  `(use Type::*)` (el constructor de un struct no se incluye, porque un struct se crea con
+  `make-instance`). No se pueden reexportar con `pub use`.
+- No se puede traer el mismo nombre desnudo desde dos tipos distintos
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` es un error, porque ambos tienen `new`). También
+  es un error traer un nombre igual al de una función, variable global o macro que define el módulo.
+  Para reemplazarlo a sabiendas, se usa `shadowing-import`.
+- La biblioteca estándar ofrece a todos los módulos `some`/`none` de `Option` y `ok`/`err` de `Result`,
+  así que se pueden usar por nombre desnudo sin `use` (igual que el prelude de Rust trae
+  `Some`/`None`/`Ok`/`Err`).
 - **Un nombre tiene un solo significado.** Las funciones, las variables globales y las macros comparten un
   espacio de nombres, y dentro de un módulo dos de ellas no pueden tener el mismo nombre (es un error sea
   cual sea la que se defina primero). Funciones y variables no tienen espacios de nombres separados como en
@@ -1038,8 +1052,8 @@ valores mediante `:dyn`, envuélvelos en una estructura, como en `(defstruct fla
   especiales se fijan antes de esto):
   1. Locales (parámetros, y los enlaces de `let`, `labels`, `macrolet` y `symbol-macrolet`)
   2. Si el nombre de módulo `n` es una macro, esa macro
-  3. Las variantes de un enum incorporado con `use`, y los métodos estáticos de un tipo incorporado con
-     `use`
+  3. Constructores y métodos estáticos: los traídos con `use`, y los constructores de `Sexpr` (`sym`,
+     `int`, etc.) y de `Option`/`Result` que ofrece la biblioteca estándar
   4. El método `n` del tipo del primer argumento (los métodos se buscan **solo por el tipo del primer
      argumento**)
   5. Si el nombre de módulo `n` es una función o una variable global, eso (para una variable global, se
@@ -1429,11 +1443,11 @@ implícitamente en `Sexpr`, como en `(list p 42)`:
 - `(TypeName :slot pattern...)` — descomposición de campos con el **nombre del tipo** primero (solo
   structs), escrita en la misma forma que los patrones de estructura de arriba. Por ejemplo, para
   `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
-- Un nombre de variante simple `(VariantName sub-pattern...)` — extrae una variante de un `defenum`. Se resuelve
-  como un nombre simple visible tras `(use EnumType)` (las mismas reglas de visibilidad que al llamar al
-  constructor). Por ejemplo, para `(defenum color (red) (blue))`, `(red)` `(blue)` tras `(use color)`. Si los
-  nombres de variante de varias enumeraciones visibles chocan, es un error de ambigüedad, así que también se
-  puede escribir la forma calificada `(EnumType::VariantName ...)` (no hace falta `use`).
+- Un nombre de variante desnudo `(VariantName sub-pattern...)` — extrae una variante de un `defenum`. Se
+  resuelve como un nombre desnudo visible por haberlo traído, por ejemplo con `(use EnumType::*)` (las
+  mismas reglas de visibilidad que al llamar al constructor). Por ejemplo, para
+  `(defenum color (red) (blue))`, `(red)` `(blue)` tras `(use color::*)`. Con la forma calificada
+  `(EnumType::VariantName ...)` no hace falta `use`.
 - `(the Type pattern)` — una conversión descendente del tipo entero (ligándolo entero). No descompone los
   campos; pasa el valor a `pattern` tal cual. La única forma de sacar una estructura mutable conservando su
   identidad, y también la única forma de sacar un `Vector<T>`/`HashTable<K,V>` de un `Sexpr` (no tienen forma

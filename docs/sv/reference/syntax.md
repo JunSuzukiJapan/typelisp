@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1003,6 +1003,8 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 (module path body...)      ; path är en följd av segment som foo eller foo::bar
 (in-module path)           ; härifrån till slutet av den här enheten, inuti path (den platta formen av module)
 (use path...)              ; ge funktioner, typer och moduler alias i den aktuella namnrymden
+(use Type::member)         ; gör en konstruktor eller statisk metod i en typ användbar under det nakna namnet
+(use Type::*)              ; gör alla en typs konstruktorer och publika statiska metoder användbara under nakna namn
 (pub use path...)          ; gör det som tas in nåbart även via den här modulens väg
 (import path...)           ; samma som use (en CL-kompatibel stavning)
 (shadowing-import path...) ; ett use som medvetet tar ett bart namn som redan används
@@ -1010,9 +1012,20 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 
 - `module` skapar en namnrymd. **Typer är inte namnrymder** (som i Rust har en typ bara statiska metoder och
   metoder).
-- Att göra `use` på en typ gör även en enums varianter och typens publika statiska metoder tillgängliga under
-  det nakna namnet (till exempel kan `some`/`none` efter `(use Option)` anropas utan
-  `Option::some`/`Option::none`).
+- `(use Type)` tar bara in typens namn. En enums varianter och statiska metoder skrivs genom typens
+  namn, som `Option::some` eller `Chan::new`. Även efter `(use std::sync::Chan)` är ett naket `(new 1)`
+  ett fel, om ingen funktion med namnet `new` är definierad någonstans.
+- För att använda en typs konstruktorer och statiska metoder under nakna namn tar man in dem en i taget,
+  som `(use std::sync::Chan::new)`, eller tar in alla konstruktorer och publika statiska metoder med
+  `(use Type::*)` (en structs konstruktor ingår inte, eftersom en struct skapas med `make-instance`). De
+  kan inte återexporteras med `pub use`.
+- Samma nakna namn kan inte tas in från två olika typer
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` är ett fel, eftersom båda har `new`). Att ta in
+  ett namn som är detsamma som en funktion, global variabel eller ett makro som modulen definierar är
+  också ett fel. För att medvetet ersätta används `shadowing-import`.
+- Standardbiblioteket erbjuder alla moduler `some`/`none` från `Option` och `ok`/`err` från `Result`, så
+  de kan användas under det nakna namnet utan `use` (på samma sätt som Rusts prelude tar in
+  `Some`/`None`/`Ok`/`Err`).
 - **Ett namn har en betydelse.** Funktioner, globala variabler och makron delar en namnrymd, och inom en
   modul kan inte två av dem ha samma namn (ett fel oavsett vilken som definieras först). Funktioner och
   variabler har inte separata namnrymder som i CL. För samma namn i olika moduler är det närmaste synligt.
@@ -1020,8 +1033,8 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
   detta):
   1. Lokala (parametrar samt bindningarna i `let`, `labels`, `macrolet` och `symbol-macrolet`)
   2. Om modulnamnet `n` är ett makro, det makrot
-  3. Varianterna i en enum som tagits in med `use`, och de statiska metoderna i en typ som tagits in med
-     `use`
+  3. Konstruktorer och statiska metoder: de som tagits in med `use`, och konstruktorerna för `Sexpr`
+     (`sym`, `int` med flera) och för `Option`/`Result` som standardbiblioteket erbjuder
   4. Metoden `n` hos typen för det första argumentet (metoder söks **bara utifrån typen hos det första
      argumentet**)
   5. Om modulnamnet `n` är en funktion eller en global variabel, den (för en global variabel anropas
@@ -1404,11 +1417,11 @@ som i `(list p 42)`:
 
 - `(TypeName :slot pattern...)` — fältuppdelning med **typnamnet** först (bara structar), skriven i samma
   form som structmönstren ovan. Till exempel för `(defstruct point (x f64) (y f64))`: `(point :x :y)`.
-- Ett bart variantnamn `(VariantName sub-pattern...)` — tar ut en variant av en `defenum`. Löses upp som
-  ett bart namn som syns efter `(use EnumType)` (samma synlighetsregler som när konstruktorn anropas).
-  Till exempel för `(defenum color (red) (blue))`, `(red)` `(blue)` efter `(use color)`. Om variantnamn i
-  flera synliga enums krockar är det ett tvetydighetsfel, så den kvalificerade formen
-  `(EnumType::VariantName ...)` kan också skrivas (inget `use` behövs).
+- Ett naket variantnamn `(VariantName sub-pattern...)` — tar ut en variant ur en `defenum`. Löses som
+  ett naket namn som blivit synligt genom att tas in, till exempel med `(use EnumType::*)` (samma
+  synlighetsregler som när konstruktorn anropas). Till exempel för `(defenum color (red) (blue))`,
+  `(red)` `(blue)` efter `(use color::*)`. Med den kvalificerade formen `(EnumType::VariantName ...)`
+  behövs inget `use`.
 - `(the Type pattern)` — en nedkastning av hela typen (att binda den som helhet). Den delar inte upp
   fält; den skickar värdet till `pattern` som det är. Det enda sättet att ta ut en föränderlig struct
   samtidigt som dess identitet behålls, och också det enda sättet att ta ut en

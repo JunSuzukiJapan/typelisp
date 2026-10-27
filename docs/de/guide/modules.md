@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Module und Dateiaufteilung
 
 Dieser Leitfaden erklärt, wie man ein Programm aus mehreren Dateien zusammenstellt. Die genauen Regeln stehen
@@ -101,6 +101,8 @@ Die Liste der Definitionen, die `pub` tragen können, steht in
 (use geometry)              ; ein Modul hereinholen; zum Verwenden schreibt man geometry::dist2
 (use geometry::dist2)       ; eine Funktion hereinholen; man verwendet sie mit dem einfachen Namen dist2
 (use geometry::point)       ; einen Typ hereinholen; point::new, point::origin und point in Typangaben
+(use geometry::point::new)  ; eine statische Methode eines Typs hereinholen; man verwendet sie mit dem einfachen Namen new
+(use geometry::shape::*)    ; alle Konstruktoren und öffentlichen statischen Methoden eines Typs mit einfachen Namen verwendbar machen
 (use a::f b::g)             ; mehrere lassen sich zusammen schreiben
 ```
 
@@ -109,7 +111,9 @@ Die Liste der Definitionen, die `pub` tragen können, steht in
 - Den vollen Pfad `geometry::dist2` zu schreiben, ohne das Modul mit `use` hereinzuholen, wird ebenfalls nicht
   aufgelöst. Nur `use` sorgt dafür, dass eine Datei geladen wird.
 - Ein `use` eines Namens, dessen einfache Form bereits belegt ist, erzeugt eine Warnung. Will man ihn trotzdem
-  hereinholen, verwendet man `shadowing-import`.
+  hereinholen, verwendet man `shadowing-import`. Bei Konstruktoren und statischen Methoden eines Typs ist es keine Warnung, sondern ein Fehler.
+- `(use geometry::point)` holt nur den Namen des Typs herein. Will man `point::new` als `new` schreiben,
+  schreibt man `(use geometry::point::new)` oder `(use geometry::point::*)`.
 - Ein Modul in einem Verzeichnis schreibt man `(use geo::shapes)`, und danach wird es mit seinem letzten Teil
   angesprochen (`shapes::...`).
 

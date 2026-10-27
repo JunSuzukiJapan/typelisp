@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Moduły i układ plików
 
 Ten przewodnik wyjaśnia, jak złożyć program składający się z kilku plików. Szczegółowe reguły znajdują się w
@@ -100,6 +100,8 @@ Lista definicji, które mogą przyjmować `pub`, znajduje się w
 (use geometry)              ; wprowadź moduł; pisz geometry::dist2, aby go użyć
 (use geometry::dist2)       ; wprowadź funkcję; używaj jej pod samą nazwą dist2
 (use geometry::point)       ; wprowadź typ; pisz point::new, point::origin oraz point w adnotacjach typów
+(use geometry::point::new)  ; wprowadź metodę statyczną typu; używaj jej pod samą nazwą new
+(use geometry::shape::*)    ; udostępnij pod samymi nazwami wszystkie konstruktory i publiczne metody statyczne typu
 (use a::f b::g)             ; można zapisać kilka naraz
 ```
 
@@ -108,7 +110,9 @@ Lista definicji, które mogą przyjmować `pub`, znajduje się w
 - Zapisanie pełnej ścieżki `geometry::dist2` bez `use` dla modułu również się nie rozwiązuje. Tylko
   `use` powoduje załadowanie pliku.
 - Wprowadzenie przez `use` nazwy, której sama postać jest już zajęta, daje ostrzeżenie. Gdy mimo to chcesz ją
-  wprowadzić, użyj `shadowing-import`.
+  wprowadzić, użyj `shadowing-import`. W przypadku konstruktorów i metod statycznych typu jest to błąd, a nie ostrzeżenie.
+- `(use geometry::point)` wprowadza tylko nazwę typu. Aby pisać `point::new` jako `new`, napisz
+  `(use geometry::point::new)` lub `(use geometry::point::*)`.
 - Moduł wewnątrz katalogu zapisuje się `(use geo::shapes)`, a potem odwołuje się do niego przez jego
   ostatnią część (`shapes::...`).
 

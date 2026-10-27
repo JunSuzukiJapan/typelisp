@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result, dan Tipe Kesalahan
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ dengan `defstruct`/`defenum`, cocok di sana sama saja (bab 3).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Pada `none`/`err`, mengembalikan hasil `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Mengubah `(some v)` menjadi `(ok v)` dan `none` menjadi `(err e)` |
 
-Konstruktornya adalah `Option::some`/`Option::none`/`Result::ok`/`Result::err` (atau, setelah
-`(use Option)`/`(use Result)`, nama polos `some`/`none`/`ok`/`err`).
+Konstruktor `some`/`none`/`ok`/`err` dapat dipakai sebagai nama polos di modul mana pun tanpa `use`.
+Konstruktor ini juga dapat ditulis dengan nama tipenya, seperti `Option::some`.
 
 Percabangan ditulis secara eksplisit dengan `match`, atau dirangkai dengan `map`/`and-then` dan yang
 lain di atas. Tidak ada sintaks yang setara dengan `?` milik Rust.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option وResult وأنواع الأخطاء
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | عند `none`/`err` تُرجع نتيجة `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | تحوّل `(some v)` إلى `(ok v)` و`none` إلى `(err e)` |
 
-المُنشِئات هي `Option::some`/`Option::none`/`Result::ok`/`Result::err` (أو الأسماء المجردة
-`some`/`none`/`ok`/`err` بعد `(use Option)`/`(use Result)`).
+يمكن استخدام المُنشِئات `some`/`none`/`ok`/`err` كأسماء مجردة في أي وحدة دون `use`.
+ويمكن أيضًا كتابتها مع اسم النوع، مثل `Option::some`.
 
 يُكتب التفرع صراحة بـ `match`، أو يُسلسَل بـ `map`/`and-then` وغيرهما مما سبق. ولا توجد صياغة تقابل
 `?` في Rust.

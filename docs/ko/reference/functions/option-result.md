@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result, 오류 타입
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -22,8 +22,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err`이면 `f`의 결과를 돌려준다 |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)`를 `(ok v)`로, `none`을 `(err e)`로 바꾼다 |
 
-생성자는 `Option::some`/`Option::none`/`Result::ok`/`Result::err`이다(`(use Option)`/`(use Result)` 뒤에는 맨 이름
-`some`/`none`/`ok`/`err`).
+생성자 `some`/`none`/`ok`/`err`는 `use` 없이 어느 모듈에서나 맨 이름으로 쓸 수 있다.
+`Option::some`처럼 타입 이름을 붙여 쓸 수도 있다.
 
 분기는 `match`로 명시하거나, 위의 `map`/`and-then` 등으로 잇는다. Rust의 `?`에 해당하는 구문은 없다.
 

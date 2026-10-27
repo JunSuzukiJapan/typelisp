@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -774,21 +774,25 @@ vtable 進行動態分派：
 (module path body...)      ; path 是 foo 或 foo::bar 這樣的區段序列
 (in-module path)           ; 從這裡到這個單元的結尾都在 path 中（module 的平鋪形式）
 (use path...)              ; 把函式、型別、模組以別名引入目前的命名空間
+(use Type::member)         ; 讓型別的一個建構函式或靜態方法可以用裸名使用
+(use Type::*)              ; 讓型別的建構函式與公開的靜態方法全部可以用裸名使用
 (pub use path...)          ; 讓引入的定義也能透過經過本模組的路徑找到
 (import path...)           ; 與 use 相同（CL 相容的寫法）
 (shadowing-import path...) ; 明知裸名稱已被占用仍要取用的 use
 ```
 
 - `module` 建立命名空間。**型別不是命名空間**（與 Rust 一樣，型別只擁有靜態方法與方法）。
-- 以 `use` 引入型別後，列舉的變體與該型別公開的靜態方法也可以用裸名使用（例：`(use Option)` 之後，
-  不寫 `Option::some`/`Option::none` 也能呼叫 `some`/`none`）。
+- `(use Type)` 引入的只有型別的名稱。列舉的變體與靜態方法要透過型別名稱書寫，如 `Option::some` 或 `Chan::new`。即使在 `(use std::sync::Chan)` 之後，只要沒有在任何地方定義名為 `new` 的函式，裸的 `(new 1)` 就是錯誤。
+- 要以裸名使用型別的建構函式與靜態方法，可以像 `(use std::sync::Chan::new)` 這樣逐一引入，或用 `(use Type::*)` 引入全部建構函式與公開的靜態方法（結構體的建構函式不包含在內，因為結構體以 `make-instance` 建立）。不能用 `pub use` 再匯出。
+- 不能從兩個不同的型別引入同一個裸名（`(use std::sync::Chan::* std::sync::WaitGroup::*)` 是錯誤，因為兩者都有 `new`）。引入與該模組定義的函式、全域變數、巨集同名的名稱也是錯誤。明知如此仍要取代時，使用 `shadowing-import`。
+- `Option` 的 `some`/`none` 與 `Result` 的 `ok`/`err` 由標準函式庫向所有模組公開，所以不用 `use` 也能以裸名使用（與 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
 - **一個名稱只有一個意義**。函式、全域變數與巨集屬於同一個命名空間，在同一模組中其中任意兩個都不能
   取同一個名稱（無論以什麼順序定義都是錯誤）。不像 CL 那樣把函式與變數的命名空間分開。不同模組中的
   同名名稱，較近的那個可見。
 - 裸名 `n` 的解析（呼叫 `(n a ...)` 的位置。特殊形式的名稱在此之前決定）：
   1. 區域（參數，以及 `let`、`labels`、`macrolet`、`symbol-macrolet` 的繫結）
   2. 模組的名稱 `n` 是巨集時，該巨集
-  3. `use` 的列舉的變體、`use` 的型別的靜態方法
+  3. 建構函式與靜態方法：以 `use` 引入的，以及標準函式庫公開的 `Sexpr` 的建構函式（`sym`、`int` 等）與 `Option`/`Result` 的建構函式
   4. 第一個引數的型別的方法 `n`（方法**只**依**第一個引數的型別**尋找）
   5. 模組的名稱 `n` 是函式或全域變數時，就是它（全域變數時呼叫其值所代表的函式）
 
@@ -1098,9 +1102,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 
 - `(TypeName :slot pattern...)` — 以**型別名稱**開頭的欄位分解（僅限 struct）。與上面的結構的模式
   寫法相同。例：對於 `(defstruct point (x f64) (y f64))`，寫 `(point :x :y)`。
-- 裸變體名稱 `(VariantName sub-pattern...)` —— 取出 `defenum` 的變體。以 `(use EnumType)` 之後可見的裸名稱解析（與呼叫建構函式時的可見性規則
-  相同）。例：對 `(defenum color (red) (blue))`，在 `(use color)` 之後寫 `(red)` `(blue)`。多個可見的 enum 的變體名稱衝突時會得到歧義錯誤，所以
-  也可以寫限定形式 `(EnumType::VariantName ...)`（不需要 `use`）。
+- 裸變體名 `(VariantName sub-pattern...)` — 取出 `defenum` 的變體。解析為透過 `(use EnumType::*)` 等引入而可見的裸名（與呼叫建構函式時相同的可見性規則）。例：`(defenum color (red) (blue))` 在 `(use color::*)` 之後寫 `(red)` `(blue)`。使用限定形式 `(EnumType::VariantName ...)` 則不需要 `use`。
 - `(the Type pattern)` —— 以整個型別進行向下轉型（整體繫結）。不拆解欄位，把值原樣交給 `pattern`。是在保持可變 struct 同一性的同時取出它的唯一
   寫法，也是從 `Sexpr` 取出 `Vector<T>`/`HashTable<K,V>` 的唯一手段（兩者沒有欄位拆解形式）。例：在 `(the point p)` 之後 `(setf p::x 9)`，也會
   反映到串列中的原實例。

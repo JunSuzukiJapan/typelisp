@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Modüller ve Dosya Düzeni
 
 Bu kılavuz, birkaç dosyadan oluşan bir programın nasıl bir araya getirileceğini anlatır. Ayrıntılı
@@ -100,6 +100,8 @@ typl main.typl        # => 25
 (use geometry)              ; bring in a module; write geometry::dist2 to use it
 (use geometry::dist2)       ; bring in a function; use it by the bare name dist2
 (use geometry::point)       ; bring in a type; write point::new, point::origin, and point in type annotations
+(use geometry::point::new)  ; bring in a type's static method; use it by the bare name new
+(use geometry::shape::*)    ; make all of a type's constructors and public static methods usable by bare names
 (use a::f b::g)             ; several can be written together
 ```
 
@@ -108,7 +110,9 @@ typl main.typl        # => 25
 - Modülü `use` etmeden tam yolu `geometry::dist2` yazmak da çözümlenmez. Bir dosyanın yüklenmesine
   yalnızca `use` yol açar.
 - Çıplak biçimi zaten alınmış bir adı `use` etmek uyarı verir. Yine de almak istediğinizde
-  `shadowing-import` kullanın.
+  `shadowing-import` kullanın. Bir türün yapıcıları ve statik metotları için bu bir uyarı değil, hatadır.
+- `(use geometry::point)` yalnızca türün adını getirir. `point::new`'i `new` olarak yazmak için
+  `(use geometry::point::new)` ya da `(use geometry::point::*)` yazın.
 - Bir dizinin içindeki modül `(use geo::shapes)` diye yazılır ve bundan sonra son bölümüyle
   (`shapes::...`) anılır.
 

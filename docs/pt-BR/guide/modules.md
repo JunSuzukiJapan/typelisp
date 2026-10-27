@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Módulos e organização de arquivos
 
 Este guia explica como montar um programa composto por vários arquivos. As regras detalhadas estão nas
@@ -100,6 +100,8 @@ A lista de definições que podem levar `pub` está em
 (use geometry)              ; trazer um módulo; para usá-lo escreve-se geometry::dist2
 (use geometry::dist2)       ; trazer uma função; usa-se pelo nome simples dist2
 (use geometry::point)       ; trazer um tipo; point::new, point::origin e point nas anotações de tipo
+(use geometry::point::new)  ; trazer um método estático de um tipo; usa-se pelo nome simples new
+(use geometry::shape::*)    ; tornar utilizáveis por nomes simples todos os construtores e métodos estáticos públicos de um tipo
 (use a::f b::g)             ; vários podem ser escritos juntos
 ```
 
@@ -108,7 +110,9 @@ A lista de definições que podem levar `pub` está em
 - Escrever o caminho completo `geometry::dist2` sem fazer `use` do módulo também não se resolve. Só o `use`
   faz um arquivo ser carregado.
 - Fazer `use` de um nome cuja forma simples já está em uso dá um aviso. Quando quiser trazê-lo mesmo assim,
-  use `shadowing-import`.
+  use `shadowing-import`. Para construtores e métodos estáticos de um tipo, é um erro, não um aviso.
+- `(use geometry::point)` traz apenas o nome do tipo. Para escrever `point::new` como `new`, escreva
+  `(use geometry::point::new)` ou `(use geometry::point::*)`.
 - Um módulo dentro de um diretório é escrito `(use geo::shapes)`, e daí em diante é referido pela última parte
   (`shapes::...`).
 

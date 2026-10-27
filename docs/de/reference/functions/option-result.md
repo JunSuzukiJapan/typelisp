@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result und Fehlertypen
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ beliebiger Typ sein: Die eingebauten konkreten Fehlertypen und selbst geschriebe
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Bei `none`/`err` wird das Ergebnis von `f` zurückgegeben |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Macht aus `(some v)` ein `(ok v)` und aus `none` ein `(err e)` |
 
-Die Konstruktoren sind `Option::some`/`Option::none`/`Result::ok`/`Result::err` (oder nach
-`(use Option)`/`(use Result)` die bloßen Namen `some`/`none`/`ok`/`err`).
+Die Konstruktoren `some`/`none`/`ok`/`err` sind in jedem Modul ohne `use` als bloße Namen verwendbar.
+Man kann sie auch mit dem Typnamen schreiben, etwa `Option::some`.
 
 Verzweigungen schreibt man ausdrücklich mit `match` oder verkettet sie mit `map`/`and-then` und den
 anderen Methoden oben. Eine Syntax, die Rusts `?` entspricht, gibt es nicht.

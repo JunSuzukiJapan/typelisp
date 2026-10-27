@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Modul dan Tata Letak Berkas
 
 Panduan ini menjelaskan cara menyusun program yang terdiri dari beberapa berkas. Aturan terperinci
@@ -101,6 +101,8 @@ Daftar definisi yang dapat diberi `pub` ada di
 (use geometry)              ; bring in a module; write geometry::dist2 to use it
 (use geometry::dist2)       ; bring in a function; use it by the bare name dist2
 (use geometry::point)       ; bring in a type; write point::new, point::origin, and point in type annotations
+(use geometry::point::new)  ; bring in a type's static method; use it by the bare name new
+(use geometry::shape::*)    ; make all of a type's constructors and public static methods usable by bare names
 (use a::f b::g)             ; several can be written together
 ```
 
@@ -109,7 +111,9 @@ Daftar definisi yang dapat diberi `pub` ada di
 - Menulis path lengkap `geometry::dist2` tanpa meng-`use` modulnya juga tidak dapat diselesaikan.
   Hanya `use` yang menyebabkan sebuah berkas dimuat.
 - Meng-`use` nama yang bentuk polosnya sudah terpakai menghasilkan peringatan. Jika memang ingin
-  membawanya masuk, gunakan `shadowing-import`.
+  membawanya masuk, gunakan `shadowing-import`. Untuk konstruktor dan metode statis sebuah tipe, ini adalah galat, bukan peringatan.
+- `(use geometry::point)` hanya membawa masuk nama tipenya. Untuk menulis `point::new` sebagai `new`, tulis
+  `(use geometry::point::new)` atau `(use geometry::point::*)`.
 - Modul di dalam direktori ditulis `(use geo::shapes)`, dan setelah itu dirujuk dengan bagian
   terakhirnya (`shapes::...`).
 

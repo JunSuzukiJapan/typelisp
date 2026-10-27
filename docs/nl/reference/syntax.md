@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1044,6 +1044,8 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(use Type::member)         ; make one constructor or static method of a type usable by its bare name
+(use Type::*)              ; make all of a type's constructors and public static methods usable by bare names
 (pub use path...)          ; maakt wat binnengehaald is ook bereikbaar via het pad van dit module
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
@@ -1051,9 +1053,21 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
 
 - `module` maakt een naamruimte. **Types zijn geen naamruimten** (zoals in Rust heeft een type alleen statische
   methoden en methoden).
-- Een `use` van een type maakt de varianten van een enum en de publieke statische methoden van het type ook
-  onder de kale naam beschikbaar (bijvoorbeeld na `(use Option)` kunnen `some`/`none` zonder
-  `Option::some`/`Option::none` worden aangeroepen).
+- `(use Type)` haalt alleen de naam van het type binnen. De varianten van een enum en de statische
+  methoden schrijf je via de typenaam, zoals `Option::some` of `Chan::new`. Ook na
+  `(use std::sync::Chan)` is een kale `(new 1)` een fout, tenzij er ergens een functie met de naam `new`
+  is gedefinieerd.
+- Om de constructors en statische methoden van een type onder de kale naam te gebruiken, haal je ze één
+  voor één binnen, zoals `(use std::sync::Chan::new)`, of haal je alle constructors en publieke
+  statische methoden binnen met `(use Type::*)` (de constructor van een struct hoort er niet bij, want
+  een struct maak je met `make-instance`). Met `pub use` kun je ze niet opnieuw exporteren.
+- Dezelfde kale naam kan niet uit twee verschillende types worden binnengehaald
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` is een fout, want beide hebben `new`). Een naam
+  binnenhalen die gelijk is aan een functie, globale variabele of macro die de module definieert, is ook
+  een fout. Om bewust te vervangen gebruik je `shadowing-import`.
+- De standaardbibliotheek biedt `some`/`none` van `Option` en `ok`/`err` van `Result` aan elke module
+  aan, dus ze zijn zonder `use` onder de kale naam te gebruiken (zoals de prelude van Rust
+  `Some`/`None`/`Ok`/`Err` binnenhaalt).
 - **Een naam heeft één betekenis.** Functies, globale variabelen en macro's delen één naamruimte, en binnen
   één module kunnen geen twee ervan dezelfde naam hebben (een fout, welke er ook eerst wordt gedefinieerd).
   Functies en variabelen hebben geen gescheiden naamruimten zoals in CL. Bij dezelfde naam in verschillende
@@ -1062,8 +1076,8 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   daarvoor al vast):
   1. Lokalen (parameters, en de bindingen van `let`, `labels`, `macrolet` en `symbol-macrolet`)
   2. Als de modulenaam `n` een macro is, die macro
-  3. De varianten van een met `use` binnengehaalde enum, en de statische methoden van een met `use`
-     binnengehaald type
+  3. Constructors en statische methoden: de met `use` binnengehaalde, en de constructors van `Sexpr`
+     (`sym`, `int` enzovoort) en van `Option`/`Result` die de standaardbibliotheek aanbiedt
   4. De methode `n` van het type van het eerste argument (methoden worden **alleen via het type van het
      eerste argument** gezocht)
   5. Als de modulenaam `n` een functie of een globale variabele is, die (bij een globale variabele wordt de
@@ -1463,10 +1477,10 @@ krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
   dezelfde vorm als de structpatronen hierboven. Bijvoorbeeld voor `(defstruct point (x f64) (y f64))`:
   `(point :x :y)`.
 - Een kale variantnaam `(VariantName sub-pattern...)` — haalt een variant van een `defenum` eruit. Wordt
-  opgelost als een kale naam die na `(use EnumType)` zichtbaar is (dezelfde zichtbaarheidsregels als bij het
-  aanroepen van de constructor). Bijvoorbeeld, voor `(defenum color (red) (blue))`, `(red)` `(blue)` na
-  `(use color)`. Als variantnamen van meerdere zichtbare enums botsen, is het een dubbelzinnigheidsfout,
-  dus de gekwalificeerde vorm `(EnumType::VariantName ...)` kan ook worden geschreven (geen `use` nodig).
+  opgelost als een kale naam die zichtbaar is doordat hij is binnengehaald, bijvoorbeeld met
+  `(use EnumType::*)` (dezelfde zichtbaarheidsregels als bij het aanroepen van de constructor).
+  Bijvoorbeeld voor `(defenum color (red) (blue))` na `(use color::*)` `(red)` `(blue)`. Met de
+  gekwalificeerde vorm `(EnumType::VariantName ...)` is geen `use` nodig.
 - `(the Type pattern)` — een downcast van het hele type (het als geheel bindend). Het ontleedt geen velden;
   het geeft de waarde zoals ze is aan `pattern`. De enige manier om een veranderlijke struct eruit te halen
   met behoud van zijn identiteit, en ook de enige manier om een `Vector<T>`/`HashTable<K,V>` uit een

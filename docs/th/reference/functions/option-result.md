@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result และชนิดข้อผิดพลาด
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | ถ้าเป็น `none`/`err` จะคืนผลของ `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | เปลี่ยน `(some v)` เป็น `(ok v)` และ `none` เป็น `(err e)` |
 
-ตัวสร้างคือ `Option::some`/`Option::none`/`Result::ok`/`Result::err` (หรือหลัง
-`(use Option)`/`(use Result)` ใช้ชื่อเปล่า `some`/`none`/`ok`/`err`)
+ตัวสร้าง `some`/`none`/`ok`/`err` ใช้เป็นชื่อเปล่าได้ในทุกโมดูลโดยไม่ต้อง `use`
+และเขียนพร้อมชื่อชนิดแบบ `Option::some` ก็ได้
 
 การแตกแขนงเขียนอย่างชัดแจ้งด้วย `match` หรือต่อกันเป็นสายด้วย `map`/`and-then` และเมธอดอื่นข้างบน ไม่มีไวยากรณ์ที่ตรงกับ `?` ของ Rust
 

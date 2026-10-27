@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Modules et découpage en fichiers
 
 Ce guide explique comment assembler un programme composé de plusieurs fichiers. Les règles détaillées se trouvent
@@ -102,6 +102,8 @@ La liste des définitions qui peuvent porter `pub` se trouve dans
 (use geometry)              ; importer un module ; écrire geometry::dist2 pour l'utiliser
 (use geometry::dist2)       ; importer une fonction ; l'utiliser par le nom nu dist2
 (use geometry::point)       ; importer un type ; écrire point::new, point::origin, et point dans les annotations de type
+(use geometry::point::new)  ; importer une méthode statique d'un type ; l'utiliser par le nom nu new
+(use geometry::shape::*)    ; rendre utilisables par leurs noms nus tous les constructeurs et méthodes statiques publiques d'un type
 (use a::f b::g)             ; on peut en écrire plusieurs ensemble
 ```
 
@@ -110,7 +112,9 @@ La liste des définitions qui peuvent porter `pub` se trouve dans
 - Écrire le chemin complet `geometry::dist2` sans avoir importé le module avec `use` ne se résout pas non plus.
   Seul `use` provoque le chargement d'un fichier.
 - Importer avec `use` un nom dont la forme nue est déjà prise donne un avertissement. Quand vous voulez quand même
-  l'importer, utilisez `shadowing-import`.
+  l'importer, utilisez `shadowing-import`. Pour les constructeurs et les méthodes statiques d'un type, c'est une erreur et non un avertissement.
+- `(use geometry::point)` n'importe que le nom du type. Pour écrire `point::new` sous la forme `new`, écrivez
+  `(use geometry::point::new)` ou `(use geometry::point::*)`.
 - Un module à l'intérieur d'un répertoire s'écrit `(use geo::shapes)`, et ensuite on y fait référence par sa
   dernière partie (`shapes::...`).
 

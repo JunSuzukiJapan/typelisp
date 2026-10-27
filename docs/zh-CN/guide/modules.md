@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # 模块与文件结构
 
 本指南说明如何组织由多个文件构成的程序。详细的语法规则见[语法参考](../reference/syntax.md#310-module--use--命名空间)
@@ -93,12 +93,15 @@ typl main.typl        # => 25
 (use geometry)              ; 引入模块。写成 geometry::dist2 来使用
 (use geometry::dist2)       ; 引入函数。可以用裸名字 dist2
 (use geometry::point)       ; 引入类型。可以写 point::new、point::origin 以及类型注解中的 point
+(use geometry::point::new)  ; 引入类型的静态方法。可以用裸名字 new
+(use geometry::shape::*)    ; 让类型的构造函数和公开的静态方法全部可以用裸名字使用
 (use a::f b::g)             ; 可以一次写多个
 ```
 
 - **`use` 只对其后的形式生效。** 请放在文件开头。在 `use` 之前写 `geometry::dist2` 会得到 `unresolved path`。
 - 不 `use` 模块而直接写完整路径 `geometry::dist2` 也无法解析。读入文件的契机只有 `use`。
-- 对已被占用的裸名字再 `use` 同名的东西会产生警告。明知如此仍要引入时，使用 `shadowing-import`。
+- 对已被占用的裸名字再 `use` 同名的东西会产生警告。明知如此仍要引入时，使用 `shadowing-import`。如果是类型的构造函数或静态方法，则不是警告而是错误。
+- `(use geometry::point)` 引入的只有类型的名字。想把 `point::new` 写成 `new` 时，写 `(use geometry::point::new)` 或 `(use geometry::point::*)`。
 - 目录中的模块写成 `(use geo::shapes)`，引入后用最后一部分（`shapes::...`）引用。
 
 ### trait 方法的调用方式

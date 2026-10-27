@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option、Result 與錯誤型別
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -22,8 +22,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | 遇到 `none`/`err` 時傳回 `f` 的結果 |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | 把 `(some v)` 變成 `(ok v)`，把 `none` 變成 `(err e)` |
 
-建構函式是 `Option::some`/`Option::none`/`Result::ok`/`Result::err`（或者在 `(use Option)`/`(use Result)` 之後使用裸名稱
-`some`/`none`/`ok`/`err`）。
+建構函式 `some`/`none`/`ok`/`err` 不需 `use`，在任何模組中都可以用裸名稱使用。
+也可以像 `Option::some` 這樣加上型別名稱書寫。
 
 分支用 `match` 明確寫出，或用上面的 `map`/`and-then` 等串起來。沒有相當於 Rust 的 `?` 的語法。
 

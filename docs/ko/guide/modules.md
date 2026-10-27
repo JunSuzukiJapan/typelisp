@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # 모듈과 파일 구성
 
 이 가이드에서는 여러 파일로 된 프로그램을 구성하는 방법을 설명한다. 자세한 규칙은
@@ -93,13 +93,17 @@ typl main.typl        # => 25
 (use geometry)              ; 모듈을 들여온다. geometry::dist2로 쓴다
 (use geometry::dist2)       ; 함수를 들여온다. 맨 이름 dist2로 쓴다
 (use geometry::point)       ; 타입을 들여온다. point::new, point::origin, 타입 표기의 point
+(use geometry::point::new)  ; 타입의 정적 메서드를 들여온다. 맨 이름 new로 쓴다
+(use geometry::shape::*)    ; 타입의 생성자와 공개된 정적 메서드를 모두 맨 이름으로 쓸 수 있게 한다
 (use a::f b::g)             ; 여러 개를 한꺼번에 쓸 수 있다
 ```
 
 - **`use`는 그 뒤의 형식에만 효과가 있다.** 파일의 맨 앞에 쓴다. `use`보다 위에 `geometry::dist2`를 쓰면
   `unresolved path`가 된다.
 - 모듈을 `use`하지 않고 전체 경로 `geometry::dist2`를 써도 해석되지 않는다. 파일을 읽게 하는 것은 `use`뿐이다.
-- 맨 이름이 이미 쓰이고 있는 이름을 `use`하면 경고가 나온다. 그래도 들여오려면 `shadowing-import`를 쓴다.
+- 맨 이름이 이미 쓰이고 있는 이름을 `use`하면 경고가 나온다. 그래도 들여오려면 `shadowing-import`를 쓴다. 타입의 생성자나 정적 메서드라면 경고가 아니라 오류다.
+- `(use geometry::point)`로 들여오는 것은 타입 이름뿐이다. `point::new`를 `new`로 쓰고 싶으면
+  `(use geometry::point::new)`나 `(use geometry::point::*)`를 쓴다.
 - 디렉터리 안의 모듈은 `(use geo::shapes)`라고 쓰고, 그 뒤로는 마지막 부분(`shapes::...`)으로 가리킨다.
 
 ### 트레이트 메서드 호출하기

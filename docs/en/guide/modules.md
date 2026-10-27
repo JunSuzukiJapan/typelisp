@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Modules and File Layout
 
 This guide explains how to put together a program made of several files. The detailed rules are in
@@ -100,6 +100,8 @@ The list of definitions that can take `pub` is in
 (use geometry)              ; bring in a module; write geometry::dist2 to use it
 (use geometry::dist2)       ; bring in a function; use it by the bare name dist2
 (use geometry::point)       ; bring in a type; write point::new, point::origin, and point in type annotations
+(use geometry::point::new)  ; bring in a type's static method; use it by the bare name new
+(use geometry::shape::*)    ; make all of a type's constructors and public static methods usable by bare names
 (use a::f b::g)             ; several can be written together
 ```
 
@@ -108,7 +110,9 @@ The list of definitions that can take `pub` is in
 - Writing the full path `geometry::dist2` without `use`-ing the module does not resolve either. Only
   `use` causes a file to be loaded.
 - `use`-ing a name whose bare form is already taken gives a warning. When you mean to bring it in
-  anyway, use `shadowing-import`.
+  anyway, use `shadowing-import`. For a type's constructors and static methods it is an error, not a warning.
+- `(use geometry::point)` brings in only the type's name. To write `point::new` as `new`, write
+  `(use geometry::point::new)` or `(use geometry::point::*)`.
 - A module inside a directory is written `(use geo::shapes)`, and after that it is referred to by its
   last part (`shapes::...`).
 

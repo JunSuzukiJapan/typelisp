@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -976,6 +976,8 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 (module path body...)      ; path là một dãy các đoạn như foo hoặc foo::bar
 (in-module path)           ; từ đây đến cuối đơn vị này, nằm bên trong path (dạng phẳng của module)
 (use path...)              ; đặt bí danh cho hàm, kiểu và module vào không gian tên hiện tại
+(use Type::member)         ; cho phép dùng một hàm khởi tạo hoặc phương thức tĩnh của kiểu bằng tên trần
+(use Type::*)              ; cho phép dùng mọi hàm khởi tạo và phương thức tĩnh công khai của kiểu bằng tên trần
 (pub use path...)          ; cho phép truy cập cái được đưa vào cả qua đường dẫn của module này
 (import path...)           ; giống use (một cách viết tương thích CL)
 (shadowing-import path...) ; một use cố ý lấy một tên trần đã được dùng
@@ -983,9 +985,20 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 
 - `module` tạo một không gian tên. **Kiểu không phải là không gian tên** (như trong Rust, một kiểu chỉ có
   phương thức tĩnh và phương thức).
-- `use` một kiểu làm cho các biến thể của enum và các phương thức tĩnh công khai của kiểu đó cũng dùng được
-  bằng tên trần (ví dụ, sau `(use Option)`, có thể gọi `some`/`none` mà không cần
-  `Option::some`/`Option::none`).
+- `(use Type)` chỉ đưa vào tên của kiểu. Các biến thể của enum và các phương thức tĩnh được viết thông
+  qua tên kiểu, như `Option::some` hay `Chan::new`. Ngay cả sau `(use std::sync::Chan)`, `(new 1)` trần
+  vẫn là lỗi trừ khi có một hàm tên `new` được định nghĩa ở đâu đó.
+- Để dùng hàm khởi tạo và phương thức tĩnh của kiểu bằng tên trần, hãy đưa từng cái vào, như
+  `(use std::sync::Chan::new)`, hoặc đưa vào toàn bộ hàm khởi tạo và phương thức tĩnh công khai bằng
+  `(use Type::*)` (hàm khởi tạo của struct không tính, vì struct được tạo bằng `make-instance`). Không
+  thể tái xuất chúng bằng `pub use`.
+- Không thể đưa vào cùng một tên trần từ hai kiểu khác nhau
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` là lỗi, vì cả hai đều có `new`). Đưa vào một tên
+  trùng với hàm, biến toàn cục hay macro mà mô-đun định nghĩa cũng là lỗi. Muốn cố ý thay thế thì dùng
+  `shadowing-import`.
+- Thư viện chuẩn cung cấp `some`/`none` của `Option` và `ok`/`err` của `Result` cho mọi mô-đun, nên có
+  thể dùng chúng bằng tên trần mà không cần `use` (giống như prelude của Rust đưa vào
+  `Some`/`None`/`Ok`/`Err`).
 - **Một tên chỉ có một nghĩa.** Hàm, biến toàn cục và macro dùng chung một không gian tên, và trong một
   module không thể có hai trong số chúng trùng tên (lỗi bất kể cái nào được định nghĩa trước). Hàm và biến
   không có không gian tên riêng như trong CL. Với cùng một tên ở các module khác nhau, cái gần hơn được
@@ -993,7 +1006,8 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 - Phân giải một tên trần `n` (ở vị trí gọi `(n a ...)`; tên của các dạng đặc biệt được xác định trước đó):
   1. Biến cục bộ (tham số, và các ràng buộc của `let`, `labels`, `macrolet` và `symbol-macrolet`)
   2. Nếu tên module `n` là một macro, macro đó
-  3. Các biến thể của enum đã `use`, và các phương thức tĩnh của kiểu đã `use`
+  3. Hàm khởi tạo và phương thức tĩnh: những cái được đưa vào bằng `use`, và hàm khởi tạo của `Sexpr`
+     (`sym`, `int`, v.v.) cùng của `Option`/`Result` mà thư viện chuẩn cung cấp
   4. Phương thức `n` của kiểu đối số đầu tiên (phương thức được tìm **chỉ theo kiểu của đối số đầu
      tiên**)
   5. Nếu tên module `n` là một hàm hoặc biến toàn cục, thì đó (với biến toàn cục, hàm là giá trị của nó
@@ -1363,11 +1377,10 @@ thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy 
 
 - `(TypeName :slot pattern...)` — phân rã trường với **tên kiểu** đứng đầu (chỉ struct), viết cùng dạng
   với các mẫu struct ở trên. Ví dụ, với `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
-- Một tên variant trần `(VariantName sub-pattern...)` — lấy ra một variant của một `defenum`. Được phân giải
-  như một tên trần nhìn thấy được sau `(use EnumType)` (cùng quy tắc hiển thị như khi gọi hàm khởi tạo). Ví dụ,
-  với `(defenum color (red) (blue))`, là `(red)` `(blue)` sau `(use color)`. Nếu tên variant của nhiều enum nhìn
-  thấy được va chạm, đó là lỗi mơ hồ, nên cũng có thể viết dạng có tiền tố `(EnumType::VariantName ...)`
-  (không cần `use`).
+- Tên biến thể trần `(VariantName sub-pattern...)` — lấy ra một biến thể của `defenum`. Được giải như
+  một tên trần đã thấy được nhờ được đưa vào, ví dụ bằng `(use EnumType::*)` (cùng quy tắc khả kiến như
+  khi gọi hàm khởi tạo). Ví dụ, với `(defenum color (red) (blue))`, `(red)` `(blue)` sau
+  `(use color::*)`. Với dạng có tiền tố `(EnumType::VariantName ...)` thì không cần `use`.
 - `(the Type pattern)` — một downcast của toàn bộ kiểu (gán nó như một tổng thể). Nó không phân rã các trường;
   nó truyền giá trị cho `pattern` nguyên trạng. Cách duy nhất để lấy ra một struct khả biến mà vẫn giữ đồng nhất
   của nó, và cũng là cách duy nhất để lấy một `Vector<T>`/`HashTable<K,V>` ra khỏi một `Sexpr` (chúng không có

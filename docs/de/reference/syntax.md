@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1036,6 +1036,8 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
 (module path body...)      ; path ist eine Folge von Segmenten wie foo oder foo::bar
 (in-module path)           ; ab hier bis zum Ende dieser Einheit innerhalb von path (die flache Form von module)
 (use path...)              ; Funktionen, Typen und Module als Alias in den aktuellen Namensraum holen
+(use Type::member)         ; einen Konstruktor oder eine statische Methode eines Typs unter dem bloßen Namen verwendbar machen
+(use Type::*)              ; alle Konstruktoren und öffentlichen statischen Methoden eines Typs unter bloßen Namen verwendbar machen
 (pub use path...)          ; Hereingeholtes auch über den Pfad dieses Moduls erreichbar machen
 (import path...)           ; dasselbe wie use (eine CL-kompatible Schreibweise)
 (shadowing-import path...) ; ein use, das bewusst einen bereits verwendeten bloßen Namen nimmt
@@ -1043,9 +1045,21 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
 
 - `module` erzeugt einen Namensraum. **Typen sind keine Namensräume** (wie in Rust hat ein Typ nur statische
   Methoden und Methoden).
-- Ein `use` eines Typs macht die Varianten eines Enums und die öffentlichen statischen Methoden des Typs
-  auch unter dem bloßen Namen verfügbar (zum Beispiel lassen sich nach `(use Option)` `some`/`none` ohne
-  `Option::some`/`Option::none` aufrufen).
+- `(use Type)` holt nur den Namen des Typs herein. Die Varianten eines Enums und die statischen Methoden
+  schreibt man über den Typnamen, etwa `Option::some` oder `Chan::new`. Auch nach
+  `(use std::sync::Chan)` ist ein bloßes `(new 1)` ein Fehler, solange nirgends eine Funktion namens
+  `new` definiert ist.
+- Um Konstruktoren und statische Methoden eines Typs unter bloßen Namen zu verwenden, holt man sie
+  einzeln herein, etwa `(use std::sync::Chan::new)`, oder mit `(use Type::*)` alle Konstruktoren und
+  öffentlichen statischen Methoden (der Konstruktor eines Structs gehört nicht dazu, denn ein Struct
+  wird mit `make-instance` erzeugt). Mit `pub use` lassen sie sich nicht re-exportieren.
+- Derselbe bloße Name kann nicht aus zwei verschiedenen Typen hereingeholt werden
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` ist ein Fehler, da beide `new` haben). Ebenso ist
+  es ein Fehler, einen Namen hereinzuholen, der einer Funktion, globalen Variable oder Makro des Moduls
+  gleicht. Um bewusst zu ersetzen, verwendet man `shadowing-import`.
+- `some`/`none` von `Option` und `ok`/`err` von `Result` bietet die Standardbibliothek jedem Modul an,
+  daher sind sie ohne `use` unter dem bloßen Namen verwendbar (wie Rusts Prelude
+  `Some`/`None`/`Ok`/`Err` hereinholt).
 - **Ein Name hat eine Bedeutung.** Funktionen, globale Variablen und Makros teilen sich einen
   Namensraum, und innerhalb eines Moduls können keine zwei von ihnen denselben Namen haben (ein Fehler,
   egal welcher zuerst definiert wird). Funktionen und Variablen haben keine getrennten Namensräume wie in
@@ -1054,8 +1068,8 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
   vorher fest):
   1. Lokale (Parameter sowie die Bindungen von `let`, `labels`, `macrolet` und `symbol-macrolet`)
   2. Wenn der Modulname `n` ein Makro ist, dieses Makro
-  3. Die Varianten eines per `use` eingebundenen Enums und die statischen Methoden eines per `use`
-     eingebundenen Typs
+  3. Konstruktoren und statische Methoden: die per `use` hereingeholten, sowie die Konstruktoren von
+     `Sexpr` (`sym`, `int` usw.) und von `Option`/`Result`, die die Standardbibliothek anbietet
   4. Die Methode `n` des Typs des ersten Arguments (Methoden werden **nur über den Typ des ersten
      Arguments** gesucht)
   5. Wenn der Modulname `n` eine Funktion oder eine globale Variable ist, diese (bei einer globalen
@@ -1450,11 +1464,11 @@ in `(list p 42)`:
 - `(TypeName :slot pattern...)` — Feldzerlegung mit dem **Typnamen** vorn (nur Strukturen), in derselben
   Form wie die Strukturmuster oben geschrieben. Zum Beispiel für `(defstruct point (x f64) (y f64))`:
   `(point :x :y)`.
-- Ein bloßer Variantenname `(VariantName sub-pattern...)` — holt eine Variante eines `defenum` heraus. Aufgelöst
-  als bloßer Name, der nach `(use EnumType)` sichtbar ist (dieselben Sichtbarkeitsregeln wie beim Aufruf des
-  Konstruktors). Zum Beispiel für `(defenum color (red) (blue))` nach `(use color)` `(red)` `(blue)`. Kollidieren
-  Variantennamen mehrerer sichtbarer Enums, ist es ein Mehrdeutigkeitsfehler, daher lässt sich auch die
-  qualifizierte Form `(EnumType::VariantName ...)` schreiben (kein `use` nötig).
+- Ein bloßer Variantenname `(VariantName sub-pattern...)` — entnimmt eine Variante eines `defenum`. Wird
+  als bloßer Name aufgelöst, der durch Hereinholen sichtbar ist, etwa mit `(use EnumType::*)` (dieselben
+  Sichtbarkeitsregeln wie beim Aufruf des Konstruktors). Zum Beispiel für `(defenum color (red) (blue))`
+  nach `(use color::*)` `(red)` `(blue)`. Mit der qualifizierten Form `(EnumType::VariantName ...)` ist
+  kein `use` nötig.
 - `(the Type pattern)` — ein Downcast des ganzen Typs (bindet ihn als Ganzes). Es zerlegt keine Felder; es
   übergibt den Wert unverändert an `pattern`. Die einzige Möglichkeit, eine veränderliche Struktur unter Erhalt
   ihrer Identität herauszuholen, und auch die einzige Möglichkeit, einen `Vector<T>`/`HashTable<K,V>` aus einem

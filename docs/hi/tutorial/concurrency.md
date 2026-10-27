@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # कंकरेंसी
 
 typelisp में काम को एक साथ चलाने के लिए आप **टास्क** (हल्के थ्रेड) शुरू करते हैं, और टास्क एक-दूसरे को **चैनल** के ज़रिए मान भेजते हैं। यह मॉडल Go के goroutine और चैनल के करीब है। यह अध्याय क्रम से कवर करता है: टास्क शुरू करना और उसका परिणाम पाना, चैनल, `select`, साझा डेटा की सुरक्षा, और समर्पित OS थ्रेड। यह मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -148,14 +148,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 `WaitGroup` एक उपकरण है जो तब तक प्रतीक्षा करता है जब तक दी गई संख्या में टास्क समाप्त न हो जाएँ। `add` से गिनती बढ़ाएँ, हर टास्क को समाप्त होने पर `done` कॉल करने दें, और गिनती 0 होने तक `wait` करें।
 
 ```lisp
-(use std::sync::Mutex std::sync::with-lock)
+(use std::sync::Mutex std::sync::WaitGroup std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

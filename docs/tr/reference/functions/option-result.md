@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result ve Hata Türleri
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ türler oraya aynı şekilde uyar (3. bölüm).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err` ise `f`'nin sonucunu döndürür |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)`'yi `(ok v)`'ye, `none`'ı `(err e)`'ye çevirir |
 
-Yapıcılar `Option::some`/`Option::none`/`Result::ok`/`Result::err`'dır (ya da
-`(use Option)`/`(use Result)`'tan sonra çıplak `some`/`none`/`ok`/`err` adları).
+`some`/`none`/`ok`/`err` yapıcıları, `use` olmadan her modülde çıplak adlarıyla kullanılabilir.
+`Option::some` gibi tür adıyla da yazılabilirler.
 
 Dallanma `match` ile açıkça yazılır ya da yukarıdaki `map`/`and-then` ve diğerleriyle zincirlenir.
 Rust'taki `?`'ye karşılık gelen bir sözdizimi yoktur.

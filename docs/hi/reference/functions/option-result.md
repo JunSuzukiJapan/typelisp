@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result और त्रुटि टाइप
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -21,7 +21,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err` पर `f` का परिणाम लौटाता है |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)` को `(ok v)` में और `none` को `(err e)` में बदलता है |
 
-कंस्ट्रक्टर `Option::some`/`Option::none`/`Result::ok`/`Result::err` हैं (या `(use Option)`/`(use Result)` के बाद, नंगे नाम `some`/`none`/`ok`/`err`)।
+कंस्ट्रक्टर `some`/`none`/`ok`/`err` बिना `use` के किसी भी मॉड्यूल में नंगे नामों के रूप में इस्तेमाल किए जा सकते हैं।
+इन्हें `Option::some` की तरह टाइप के नाम के साथ भी लिखा जा सकता है।
 
 शाखा `match` से स्पष्ट रूप से लिखी जाती है, या ऊपर के `map`/`and-then` आदि से जोड़ी जाती है। Rust के `?` के समकक्ष कोई सिंटैक्स नहीं है।
 

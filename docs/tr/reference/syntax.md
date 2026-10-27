@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1004,6 +1004,8 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(use Type::member)         ; make one constructor or static method of a type usable by its bare name
+(use Type::*)              ; make all of a type's constructors and public static methods usable by bare names
 (pub use path...)          ; içeri alınanı bu modülün yoluyla da ulaşılır kılar
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
@@ -1011,9 +1013,19 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 
 - `module` bir ad alanı oluşturur. **Türler ad alanı değildir** (Rust'taki gibi bir türün yalnızca statik
   metotları ve metotları vardır).
-- Bir türü `use` etmek, bir enum'un varyantlarını ve türün açık statik metotlarını da çıplak adla
-  kullanılabilir kılar (örneğin `(use Option)`'dan sonra `some`/`none`, `Option::some`/`Option::none`
-  yazılmadan çağrılabilir).
+- `(use Type)` yalnızca türün adını getirir. Bir enum'un varyantları ve statik metotlar, `Option::some`
+  ya da `Chan::new` gibi türün adı üzerinden yazılır. `(use std::sync::Chan)`'dan sonra bile, bir yerde
+  `new` adlı bir fonksiyon tanımlanmadıkça çıplak `(new 1)` hatadır.
+- Bir türün yapıcılarını ve statik metotlarını çıplak adla kullanmak için onları
+  `(use std::sync::Chan::new)` gibi tek tek getirin ya da `(use Type::*)` ile tüm yapıcıları ve açık
+  statik metotları getirin (bir struct'ın yapıcısı dahil değildir, çünkü struct `make-instance` ile
+  oluşturulur). Bunlar `pub use` ile yeniden dışa aktarılamaz.
+- Aynı çıplak ad iki farklı türden getirilemez (`(use std::sync::Chan::* std::sync::WaitGroup::*)`
+  hatadır, çünkü ikisinde de `new` vardır). Modülün tanımladığı bir fonksiyon, global değişken ya da
+  makroyla aynı adı getirmek de hatadır. Bilerek değiştirmek için `shadowing-import` kullanılır.
+- Standart kütüphane `Option`'ın `some`/`none`'ını ve `Result`'ın `ok`/`err`'ini her modüle sunar; bu
+  yüzden `use` olmadan çıplak adla kullanılabilirler (Rust'ın prelude'unun `Some`/`None`/`Ok`/`Err`'i
+  getirmesi gibi).
 - **Bir adın tek bir anlamı vardır.** Fonksiyonlar, global değişkenler ve makrolar tek bir ad alanını
   paylaşır ve bir modül içinde bunlardan ikisi aynı adı taşıyamaz (hangisi önce tanımlanırsa tanımlansın
   hatadır). CL'deki gibi fonksiyon ve değişken için ayrı ad alanları yoktur. Farklı modüllerde aynı ad
@@ -1021,7 +1033,8 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 - Çıplak bir `n` adının çözülmesi (`(n a ...)` çağrı konumunda; özel form adları bundan önce belirlenir):
   1. Yereller (parametreler ve `let`, `labels`, `macrolet`, `symbol-macrolet` bağlamaları)
   2. `n` modül adı bir makroysa, o makro
-  3. `use` edilen bir enum'un varyantları ve `use` edilen bir türün statik metotları
+  3. Yapıcılar ve statik metotlar: `use` ile getirilenler ve standart kütüphanenin sunduğu `Sexpr`
+     (`sym`, `int` vb.) ile `Option`/`Result` yapıcıları
   4. İlk argümanın türünün `n` metodu (metotlar **yalnızca ilk argümanın türüne göre** aranır)
   5. `n` modül adı bir fonksiyon veya global değişkense, o (global değişkende değeri olan fonksiyon
      çağrılır)
@@ -1403,11 +1416,10 @@ dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıka
 - `(TypeName :slot pattern...)` — **tür adı** başta olacak şekilde alan ayrıştırma (yalnızca struct),
   yukarıdaki yapı desenleriyle aynı biçimde yazılır. Örneğin `(defstruct point (x f64) (y f64))` için
   `(point :x :y)`.
-- Bir çıplak varyant adı `(VariantName sub-pattern...)` — bir `defenum`'un bir varyantını çıkarır.
-  `(use EnumType)`'tan sonra görünen çıplak bir ad olarak çözümlenir (yapıcıyı çağırırken geçerli olan
-  aynı görünürlük kuralları). Örneğin `(defenum color (red) (blue))` için `(use color)`'dan sonra `(red)`
-  `(blue)`. Görünen birkaç enum'un varyant adları çakışırsa bir belirsizlik hatasıdır; bu yüzden nitelikli
-  biçim `(EnumType::VariantName ...)` de yazılabilir (`use` gerekmez).
+- Çıplak varyant adı `(VariantName sub-pattern...)` — bir `defenum`'un varyantını çıkarır. Örneğin
+  `(use EnumType::*)` ile getirilerek görünür olan çıplak ad olarak çözülür (yapıcıyı çağırırkenki
+  görünürlük kurallarıyla aynı). Örneğin `(defenum color (red) (blue))` için `(use color::*)`'dan sonra
+  `(red)` `(blue)`. Nitelikli biçim `(EnumType::VariantName ...)` ile `use` gerekmez.
 - `(the Type pattern)` — tüm türün aşağı dönüşümü (bütün olarak bağlama). Alanları ayrıştırmaz; değeri
   olduğu gibi `pattern`'e geçirir. Kimliğini koruyarak değiştirilebilir bir struct'ı çıkarmanın tek yolu
   ve ayrıca bir `Vector<T>`/`HashTable<K,V>`'yi bir `Sexpr`'ten çıkarmanın da tek yolu (alan ayrıştırma

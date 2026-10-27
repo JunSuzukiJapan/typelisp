@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Moduler och filuppdelning
 
 Den här guiden förklarar hur man sätter ihop ett program som består av flera filer. De detaljerade
@@ -98,6 +98,8 @@ Listan över definitioner som kan ta `pub` finns i
 (use geometry)              ; hämta in en modul; skriv geometry::dist2 för att använda den
 (use geometry::dist2)       ; hämta in en funktion; använd den med det bara namnet dist2
 (use geometry::point)       ; hämta in en typ; skriv point::new, point::origin, och point i typannoteringar
+(use geometry::point::new)  ; hämta in en statisk metod för en typ; använd den med det bara namnet new
+(use geometry::shape::*)    ; gör alla en typs konstruktorer och publika statiska metoder användbara med bara namn
 (use a::f b::g)             ; flera kan skrivas tillsammans
 ```
 
@@ -106,7 +108,9 @@ Listan över definitioner som kan ta `pub` finns i
 - Att skriva hela sökvägen `geometry::dist2` utan att ha gjort `use` på modulen löses inte heller upp.
   Bara `use` gör att en fil läses in.
 - Att göra `use` på ett namn vars bara form redan är upptagen ger en varning. När du ändå menar att
-  hämta in det, använd `shadowing-import`.
+  hämta in det, använd `shadowing-import`. För en typs konstruktorer och statiska metoder är det ett fel, inte en varning.
+- `(use geometry::point)` hämtar bara in typens namn. För att skriva `point::new` som `new`, skriv
+  `(use geometry::point::new)` eller `(use geometry::point::*)`.
 - En modul i en katalog skrivs `(use geo::shapes)`, och därefter refereras den med sin sista del
   (`shapes::...`).
 

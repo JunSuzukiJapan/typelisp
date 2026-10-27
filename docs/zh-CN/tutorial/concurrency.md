@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # 并发
 
 在 typelisp 中，通过启动**任务**（轻量级线程）让多项工作并发进行，任务之间通过**通道**传递值。这与 Go 的
@@ -155,14 +155,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 `WaitGroup` 是等待一定数量任务完成的工具。用 `add` 增加计数，各任务结束时调用 `done`，用 `wait` 等到计数变为 0。
 
 ```lisp
-(use std::sync::Mutex std::sync::with-lock)
+(use std::sync::Mutex std::sync::WaitGroup std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

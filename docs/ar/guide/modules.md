@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # الوحدات وتنظيم الملفات
 
 يشرح هذا الدليل كيفية تجميع برنامج مكوّن من عدة ملفات. القواعد التفصيلية موجودة في الأقسام من 3.10 إلى
@@ -95,6 +95,8 @@ typl main.typl        # => 25
 (use geometry)              ; جلب وحدة؛ اكتب geometry::dist2 لاستخدامها
 (use geometry::dist2)       ; جلب دالة؛ تُستخدم بالاسم المجرد dist2
 (use geometry::point)       ; جلب نوع؛ اكتب point::new وpoint::origin، وpoint في توصيفات الأنواع
+(use geometry::point::new)  ; جلب دالة ساكنة لنوع؛ تُستخدم بالاسم المجرد new
+(use geometry::shape::*)    ; جعل كل مُنشِئات النوع ودواله الساكنة العامة قابلة للاستخدام بأسمائها المجردة
 (use a::f b::g)             ; يمكن كتابة عدة عناصر معًا
 ```
 
@@ -103,7 +105,9 @@ typl main.typl        # => 25
 - كتابة المسار الكامل `geometry::dist2` دون عمل `use` للوحدة لا تُحَلّ أيضًا. فالذي يتسبب في تحميل
   ملف هو `use` وحده.
 - عمل `use` لاسم يكون شكله المجرد مأخوذًا بالفعل يعطي تحذيرًا. وعندما تريد جلبه رغم ذلك فاستخدم
-  `shadowing-import`.
+  `shadowing-import`. أما مع مُنشِئات النوع ودواله الساكنة فهذا خطأ وليس تحذيرًا.
+- `(use geometry::point)` يجلب اسم النوع فقط. لكتابة `point::new` على هيئة `new`، اكتب
+  `(use geometry::point::new)` أو `(use geometry::point::*)`.
 - تُكتب الوحدة الموجودة داخل مجلد على الصورة `(use geo::shapes)`، وبعد ذلك يُشار إليها بجزئها الأخير
   (`shapes::...`).
 

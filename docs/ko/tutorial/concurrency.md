@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # 동시성
 
 typelisp에서는 **태스크**(경량 스레드)를 시작해서 처리를 동시에 진행하고, 태스크끼리는 **채널**을 통해 값을
@@ -157,14 +157,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 `done`을 호출하게 하고, 개수가 0이 될 때까지 `wait`한다.
 
 ```lisp
-(use std::sync::Mutex std::sync::with-lock)
+(use std::sync::Mutex std::sync::WaitGroup std::sync::with-lock)
 (defun add-many ((counter Mutex<int>) (n int)) ()
   (dotimes (i n)
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
 (let ((counter (the Mutex<int> (Mutex::new 0)))
-      (wg (the std::sync::WaitGroup (std::sync::WaitGroup::new))))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

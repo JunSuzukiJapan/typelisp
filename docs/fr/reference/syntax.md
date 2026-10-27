@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1016,6 +1016,8 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
 (module path body...)      ; path est une suite de segments comme foo ou foo::bar
 (in-module path)           ; d'ici à la fin de cette unité, à l'intérieur de path (la forme plate de module)
 (use path...)              ; crée des alias de fonctions, types et modules dans l'espace de noms courant
+(use Type::member)         ; rend un constructeur ou une méthode statique d'un type utilisable par son nom nu
+(use Type::*)              ; rend tous les constructeurs et méthodes statiques publiques d'un type utilisables par leurs noms nus
 (pub use path...)          ; rendre ce qui est importé accessible aussi par le chemin de ce module
 (import path...)           ; identique à use (une écriture compatible CL)
 (shadowing-import path...) ; un use qui prend sciemment un nom nu déjà utilisé
@@ -1023,9 +1025,20 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
 
 - `module` crée un espace de noms. **Les types ne sont pas des espaces de noms** (comme en Rust, un type n'a que
   des méthodes statiques et des méthodes).
-- Faire `use` d'un type rend aussi disponibles par nom nu les variantes d'une énumération et les méthodes
-  statiques publiques du type (par exemple, après `(use Option)`, `some`/`none` s'appellent sans
-  `Option::some`/`Option::none`).
+- `(use Type)` n'importe que le nom du type. Les variantes d'une énumération et les méthodes statiques
+  s'écrivent à travers le nom du type, comme `Option::some` ou `Chan::new`. Même après
+  `(use std::sync::Chan)`, un `(new 1)` nu est une erreur si aucune fonction nommée `new` n'est définie.
+- Pour utiliser par nom nu les constructeurs et méthodes statiques d'un type, on les importe un par un,
+  comme `(use std::sync::Chan::new)`, ou on importe tous les constructeurs et méthodes statiques
+  publiques avec `(use Type::*)` (le constructeur d'une structure n'en fait pas partie, car une
+  structure se crée avec `make-instance`). On ne peut pas les réexporter avec `pub use`.
+- On ne peut pas importer le même nom nu depuis deux types différents
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` est une erreur, car les deux ont `new`). Importer
+  un nom identique à une fonction, une variable globale ou une macro que définit le module est aussi une
+  erreur. Pour remplacer en connaissance de cause, on utilise `shadowing-import`.
+- La bibliothèque standard offre à tous les modules `some`/`none` d'`Option` et `ok`/`err` de `Result` :
+  ils s'utilisent donc par nom nu sans `use` (comme le prélude de Rust importe
+  `Some`/`None`/`Ok`/`Err`).
 - **Un nom n'a qu'un sens.** Les fonctions, les variables globales et les macros partagent un espace de
   noms, et dans un même module deux d'entre elles ne peuvent pas porter le même nom (c'est une erreur, quel
   que soit l'ordre de définition). Les fonctions et les variables n'ont pas d'espaces de noms séparés comme
@@ -1034,8 +1047,8 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
   avant) :
   1. Les locaux (paramètres, et liaisons de `let`, `labels`, `macrolet` et `symbol-macrolet`)
   2. Si le nom de module `n` est une macro, cette macro
-  3. Les variantes d'une énumération importée par `use`, et les méthodes statiques d'un type importé par
-     `use`
+  3. Constructeurs et méthodes statiques : ceux importés par `use`, et les constructeurs de `Sexpr`
+     (`sym`, `int`, etc.) et d'`Option`/`Result` qu'offre la bibliothèque standard
   4. La méthode `n` du type du premier argument (les méthodes sont cherchées **uniquement d'après le type
      du premier argument**)
   5. Si le nom de module `n` est une fonction ou une variable globale, celle-ci (pour une variable globale,
@@ -1423,11 +1436,11 @@ dans `(list p 42)` :
 - `(TypeName :slot pattern...)` — décomposition des champs avec le **nom du type** en tête (structures
   seulement), écrite sous la même forme que les motifs de structure ci-dessus. Par exemple, pour
   `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
-- Un nom de variante nu `(VariantName sub-pattern...)` — extrait une variante d'un `defenum`. Résolu comme un nom nu
-  visible après `(use EnumType)` (les mêmes règles de visibilité que pour l'appel du constructeur). Par exemple, pour
-  `(defenum color (red) (blue))`, `(red)` `(blue)` après `(use color)`. Si des noms de variantes de plusieurs
-  énumérations visibles entrent en conflit, c'est une erreur d'ambiguïté ; la forme qualifiée
-  `(EnumType::VariantName ...)` peut donc aussi s'écrire (pas besoin de `use`).
+- Un nom de variante nu `(VariantName sub-pattern...)` — extrait une variante d'un `defenum`. Résolu
+  comme un nom nu rendu visible par une importation, par exemple `(use EnumType::*)` (mêmes règles de
+  visibilité que pour appeler le constructeur). Par exemple, pour `(defenum color (red) (blue))`,
+  `(red)` `(blue)` après `(use color::*)`. Avec la forme qualifiée `(EnumType::VariantName ...)`, aucun
+  `use` n'est nécessaire.
 - `(the Type pattern)` — un transtypage descendant du type entier (le lie comme un tout). Il ne décompose pas les
   champs ; il passe la valeur telle quelle à `pattern`. Le seul moyen d'extraire une structure mutable en gardant son
   identité, et aussi le seul moyen de tirer un `Vector<T>`/`HashTable<K,V>` d'un `Sexpr` (ils n'ont pas de forme de

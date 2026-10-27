@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result і типи помилок
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | При `none`/`err` повертає результат `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Перетворює `(some v)` на `(ok v)`, а `none` — на `(err e)` |
 
-Конструктори — це `Option::some`/`Option::none`/`Result::ok`/`Result::err` (або, після
-`(use Option)`/`(use Result)`, голі назви `some`/`none`/`ok`/`err`).
+Конструктори `some`/`none`/`ok`/`err` можна використовувати як голі назви в будь-якому модулі без `use`.
+Їх також можна писати з назвою типу, наприклад `Option::some`.
 
 Розгалуження записується явно через `match` або ланцюжком через `map`/`and-then` та інші методи
 вище. Синтаксису, що відповідає `?` у Rust, немає.

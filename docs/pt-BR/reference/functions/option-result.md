@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result e tipos de erro
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ ali igualmente (capítulo 3).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Com `none`/`err`, devolve o resultado de `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Transforma `(some v)` em `(ok v)` e `none` em `(err e)` |
 
-Os construtores são `Option::some`/`Option::none`/`Result::ok`/`Result::err` (ou, depois de
-`(use Option)`/`(use Result)`, os nomes simples `some`/`none`/`ok`/`err`).
+Os construtores `some`/`none`/`ok`/`err` podem ser usados como nomes simples em qualquer módulo, sem `use`.
+Também podem ser escritos com o nome do tipo, como em `Option::some`.
 
 A ramificação é escrita explicitamente com `match`, ou encadeada com `map`/`and-then` e os demais
 acima. Não há sintaxe correspondente ao `?` do Rust.

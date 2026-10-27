@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # 模組與檔案結構
 
 本指南說明如何組織由多個檔案構成的程式。詳細的語法規則見[語法參考](../reference/syntax.md#310-module--use--命名空間)的 3.10 至 3.13 節。
@@ -92,12 +92,15 @@ typl main.typl        # => 25
 (use geometry)              ; 引入模組。寫成 geometry::dist2 來使用
 (use geometry::dist2)       ; 引入函式。可以用裸名稱 dist2
 (use geometry::point)       ; 引入型別。可以寫 point::new、point::origin 以及型別註記中的 point
+(use geometry::point::new)  ; 引入型別的靜態方法。可以用裸名稱 new
+(use geometry::shape::*)    ; 讓型別的建構函式和公開的靜態方法全部可以用裸名稱使用
 (use a::f b::g)             ; 可以一次寫多個
 ```
 
 - **`use` 只對其後的形式生效。** 請放在檔案開頭。在 `use` 之前寫 `geometry::dist2` 會得到 `unresolved path`。
 - 不 `use` 模組而直接寫完整路徑 `geometry::dist2` 也無法解析。讀入檔案的契機只有 `use`。
-- 對已被占用的裸名稱再 `use` 同名的東西會產生警告。明知如此仍要引入時，使用 `shadowing-import`。
+- 對已被占用的裸名稱再 `use` 同名的東西會產生警告。明知如此仍要引入時，使用 `shadowing-import`。如果是型別的建構函式或靜態方法，則不是警告而是錯誤。
+- `(use geometry::point)` 引入的只有型別的名稱。想把 `point::new` 寫成 `new` 時，寫 `(use geometry::point::new)` 或 `(use geometry::point::*)`。
 - 目錄中的模組寫成 `(use geo::shapes)`，引入後以最後一部分（`shapes::...`）參照。
 
 ### trait 方法的呼叫方式

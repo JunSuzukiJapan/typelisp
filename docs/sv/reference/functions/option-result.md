@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result och feltyper
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ vilken typ som helst: de inbyggda konkreta feltyperna, och typer du skriver sjä
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Vid `none`/`err` returneras resultatet av `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Gör om `(some v)` till `(ok v)` och `none` till `(err e)` |
 
-Konstruktorerna är `Option::some`/`Option::none`/`Result::ok`/`Result::err` (eller, efter
-`(use Option)`/`(use Result)`, de bara namnen `some`/`none`/`ok`/`err`).
+Konstruktorerna `some`/`none`/`ok`/`err` kan användas som bara namn i alla moduler utan `use`.
+De kan också skrivas med typens namn, som i `Option::some`.
 
 Förgreningar skrivs uttryckligen med `match`, eller kedjas med `map`/`and-then` och de andra ovan.
 Det finns ingen syntax som motsvarar Rusts `?`.

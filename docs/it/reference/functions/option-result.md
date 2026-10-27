@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
 # Option, Result e tipi di errore
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -23,8 +23,8 @@ vi si adattano allo stesso modo (capitolo 3).
 | `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Con `none`/`err`, restituisce il risultato di `f` |
 | `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Trasforma `(some v)` in `(ok v)` e `none` in `(err e)` |
 
-I costruttori sono `Option::some`/`Option::none`/`Result::ok`/`Result::err` (oppure, dopo
-`(use Option)`/`(use Result)`, i nomi semplici `some`/`none`/`ok`/`err`).
+I costruttori `some`/`none`/`ok`/`err` si possono usare come nomi semplici in qualsiasi modulo senza `use`.
+Si possono anche scrivere con il nome del tipo, come in `Option::some`.
 
 La diramazione si scrive esplicitamente con `match`, oppure si concatena con `map`/`and-then` e gli
 altri qui sopra. Non c'è una sintassi corrispondente al `?` di Rust.

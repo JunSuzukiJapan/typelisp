@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1045,6 +1045,8 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(use Type::member)         ; make one constructor or static method of a type usable by its bare name
+(use Type::*)              ; make all of a type's constructors and public static methods usable by bare names
 (pub use path...)          ; membuat yang dibawa masuk juga tercapai lewat path modul ini
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
@@ -1052,9 +1054,20 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 
 - `module` membuat ruang nama. **Tipe bukan ruang nama** (seperti di Rust, tipe hanya memiliki metode statis
   dan metode).
-- Melakukan `use` pada sebuah tipe membuat varian enum dan metode statis publik tipe itu juga tersedia
-  dengan nama polos (misalnya, setelah `(use Option)`, `some`/`none` dapat dipanggil tanpa
-  `Option::some`/`Option::none`).
+- `(use Type)` hanya membawa masuk nama tipenya. Varian enum dan metode statis ditulis melalui nama
+  tipe, seperti `Option::some` atau `Chan::new`. Bahkan setelah `(use std::sync::Chan)`, `(new 1)` polos
+  adalah galat kecuali ada fungsi bernama `new` yang didefinisikan di suatu tempat.
+- Untuk memakai konstruktor dan metode statis sebuah tipe dengan nama polos, bawa masuk satu per satu,
+  seperti `(use std::sync::Chan::new)`, atau bawa masuk semua konstruktor dan metode statis publik
+  dengan `(use Type::*)` (konstruktor struct tidak termasuk, karena struct dibuat dengan
+  `make-instance`). Semuanya tidak dapat diekspor ulang dengan `pub use`.
+- Nama polos yang sama tidak dapat dibawa masuk dari dua tipe yang berbeda
+  (`(use std::sync::Chan::* std::sync::WaitGroup::*)` adalah galat, karena keduanya memiliki `new`).
+  Membawa masuk nama yang sama dengan fungsi, variabel global, atau makro yang didefinisikan modul juga
+  galat. Untuk menggantinya dengan sengaja, gunakan `shadowing-import`.
+- Pustaka standar menawarkan `some`/`none` milik `Option` dan `ok`/`err` milik `Result` ke setiap modul,
+  sehingga dapat dipakai dengan nama polos tanpa `use` (sama seperti prelude Rust yang membawa masuk
+  `Some`/`None`/`Ok`/`Err`).
 - **Sebuah nama hanya punya satu arti.** Fungsi, variabel global, dan makro berbagi satu ruang nama, dan
   dalam satu modul tidak boleh ada dua di antaranya yang bernama sama (galat, mana pun yang didefinisikan
   lebih dulu). Fungsi dan variabel tidak punya ruang nama terpisah seperti di CL. Untuk nama yang sama di
@@ -1062,7 +1075,8 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 - Resolusi nama polos `n` (di posisi pemanggilan `(n a ...)`; nama bentuk khusus ditetapkan sebelumnya):
   1. Lokal (parameter, dan pengikatan `let`, `labels`, `macrolet`, serta `symbol-macrolet`)
   2. Jika nama modul `n` adalah makro, makro itu
-  3. Varian enum yang di-`use`, dan metode statis tipe yang di-`use`
+  3. Konstruktor dan metode statis: yang dibawa masuk dengan `use`, serta konstruktor `Sexpr` (`sym`,
+     `int`, dan sebagainya) dan `Option`/`Result` yang ditawarkan pustaka standar
   4. Metode `n` dari tipe argumen pertama (metode dicari **hanya berdasarkan tipe argumen pertama**)
   5. Jika nama modul `n` adalah fungsi atau variabel global, itulah (untuk variabel global, fungsi yang
      menjadi nilainya dipanggil)
@@ -1458,12 +1472,11 @@ instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, d
 - `(TypeName :slot pattern...)` — penguraian field dengan **nama tipe** di depan (khusus struct), ditulis
   dalam bentuk yang sama dengan pola struct di atas. Misalnya, untuk `(defstruct point (x f64) (y f64))`,
   `(point :x :y)`.
-- Nama varian polos `(VariantName sub-pattern...)` — mengekstrak varian dari `defenum`. Diselesaikan
-  sebagai nama polos yang terlihat setelah `(use EnumType)` (aturan keterlihatan yang sama seperti
-  saat memanggil konstruktor). Misalnya, untuk `(defenum color (red) (blue))`, `(red)` `(blue)`
-  setelah `(use color)`. Jika nama varian dari beberapa enum yang terlihat bentrok, itu adalah
-  kesalahan ambiguitas, sehingga bentuk terkualifikasi `(EnumType::VariantName ...)` juga dapat
-  ditulis (tanpa perlu `use`).
+- Nama varian polos `(VariantName sub-pattern...)` — mengekstrak varian dari `defenum`. Diresolusi
+  sebagai nama polos yang terlihat karena dibawa masuk, misalnya dengan `(use EnumType::*)` (aturan
+  visibilitas yang sama seperti saat memanggil konstruktor). Misalnya, untuk
+  `(defenum color (red) (blue))`, `(red)` `(blue)` setelah `(use color::*)`. Dengan bentuk
+  berkualifikasi `(EnumType::VariantName ...)`, `use` tidak diperlukan.
 - `(the Type pattern)` — downcast seluruh tipe (mengikatnya secara utuh). Ia tidak mendekomposisi
   field; ia menyerahkan nilai ke `pattern` apa adanya. Satu-satunya cara mengambil struct mutable
   dengan mempertahankan identitasnya, dan juga satu-satunya cara mengambil

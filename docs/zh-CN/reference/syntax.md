@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -790,21 +790,25 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (module path body...)      ; path 是 foo 或 foo::bar 这样的段序列
 (in-module path)           ; 从此到这个单元末尾都在 path 中（module 的平铺形式）
 (use path...)              ; 把函数、类型、模块作为别名引入当前命名空间
+(use Type::member)         ; 让类型的一个构造函数或静态方法可以用裸名使用
+(use Type::*)              ; 让类型的构造函数和公开的静态方法全部可以用裸名使用
 (pub use path...)          ; 让引入的定义也能通过经过本模块的路径找到
 (import path...)           ; 与 use 相同（CL 兼容的写法）
 (shadowing-import path...) ; 明知裸名已被占用仍要取用的 use
 ```
 
 - `module` 创建命名空间。**类型不是命名空间**（与 Rust 一样，类型只拥有静态方法和方法）。
-- 用 `use` 引入类型后，枚举的变体和该类型公开的静态方法也可以用裸名使用（例：`(use Option)` 之后，
-  不写 `Option::some`/`Option::none` 也能调用 `some`/`none`）。
+- `(use Type)` 引入的只有类型的名字。枚举的变体和静态方法要通过类型名书写，如 `Option::some` 或 `Chan::new`。即使在 `(use std::sync::Chan)` 之后，只要没有在任何地方定义名为 `new` 的函数，裸的 `(new 1)` 就是错误。
+- 要用裸名使用类型的构造函数和静态方法，可以像 `(use std::sync::Chan::new)` 这样逐个引入，或用 `(use Type::*)` 引入全部构造函数和公开的静态方法（结构体的构造函数不包括在内，因为结构体用 `make-instance` 创建）。不能用 `pub use` 再导出。
+- 不能从两个不同的类型引入同一个裸名（`(use std::sync::Chan::* std::sync::WaitGroup::*)` 是错误，因为两者都有 `new`）。引入与该模块定义的函数、全局变量、宏同名的名字也是错误。明知如此仍要替换时，使用 `shadowing-import`。
+- `Option` 的 `some`/`none` 和 `Result` 的 `ok`/`err` 由标准库向所有模块公开，所以不用 `use` 也能用裸名使用（与 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
 - **一个名字只有一个含义**。函数、全局变量和宏属于同一个命名空间，在同一模块中它们中的任意两个都不能
   取同一个名字（无论以什么顺序定义都会报错）。不像 CL 那样把函数和变量的命名空间分开。不同模块中的
   同名名字，较近的那个可见。
 - 裸名 `n` 的解析（调用 `(n a ...)` 的位置。特殊形式的名字在此之前决定）：
   1. 局部（参数，以及 `let`、`labels`、`macrolet`、`symbol-macrolet` 的绑定）
   2. 模块的名字 `n` 是宏时，该宏
-  3. `use` 的枚举的变体、`use` 的类型的静态方法
+  3. 构造函数和静态方法：用 `use` 引入的，以及标准库公开的 `Sexpr` 的构造函数（`sym`、`int` 等）和 `Option`/`Result` 的构造函数
   4. 第一个参数的类型的方法 `n`（方法**只**根据**第一个参数的类型**查找）
   5. 模块的名字 `n` 是函数或全局变量时，就是它（全局变量时调用其值所表示的函数）
 
@@ -1121,9 +1125,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — 以**类型名**开头的字段分解（仅限 struct）。与上面的结构体模式
   写法相同。例：对于 `(defstruct point (x f64) (y f64))`，写 `(point :x :y)`。
-- 裸变体名 `(VariantName sub-pattern...)` —— 取出 `defenum` 的变体。作为 `(use EnumType)` 之后可见的裸名解析（与调用构造函数时的
-  可见性规则相同）。例：对 `(defenum color (red) (blue))`，在 `(use color)` 之后写 `(red)` `(blue)`。多个可见的 enum 的变体名冲突
-  时会得到歧义错误，所以也可以写限定形式 `(EnumType::VariantName ...)`（不需要 `use`）。
+- 裸变体名 `(VariantName sub-pattern...)` — 取出 `defenum` 的变体。解析为通过 `(use EnumType::*)` 等引入而可见的裸名（与调用构造函数时相同的可见性规则）。例：`(defenum color (red) (blue))` 在 `(use color::*)` 之后写 `(red)` `(blue)`。使用限定形式 `(EnumType::VariantName ...)` 则不需要 `use`。
 - `(the Type pattern)` —— 以整个类型进行向下转换（整体绑定）。不拆解字段，把值原样交给 `pattern`。是在保持可变 struct 同一性的
   同时取出它的唯一写法，也是从 `Sexpr` 取出 `Vector<T>`/`HashTable<K,V>` 的唯一手段（两者没有字段拆解形式）。例：在
   `(the point p)` 之后 `(setf p::x 9)`，也会反映到列表中的原实例。

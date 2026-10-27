@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -948,21 +948,25 @@ dispatch ผ่าน vtable:
 (module path body...)      ; path is a sequence of segments such as foo or foo::bar
 (in-module path)           ; from here to the end of this unit, inside path (the flat form of module)
 (use path...)              ; alias functions, types and modules into the current namespace
+(use Type::member)         ; make one constructor or static method of a type usable by its bare name
+(use Type::*)              ; make all of a type's constructors and public static methods usable by bare names
 (pub use path...)          ; ทำให้สิ่งที่นำเข้ามาเข้าถึงได้ผ่านพาธของโมดูลนี้ด้วย
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
 
 - `module` สร้างเนมสเปซ **ชนิดไม่ใช่เนมสเปซ** (เหมือน Rust ชนิดมีเพียงเมทอดสถิตและเมทอด)
-- การ `use` ชนิดทำให้ variant ของ enum และเมทอดสถิตที่เปิดเผยของชนิดนั้นใช้ด้วยชื่อเปล่าได้ด้วย (เช่น หลัง
-  `(use Option)` เรียก `some`/`none` ได้โดยไม่ต้องเขียน `Option::some`/`Option::none`)
+- `(use Type)` นำเข้าเฉพาะชื่อของชนิด variant ของ enum และเมทอดสถิตเขียนผ่านชื่อชนิด เช่น `Option::some` หรือ `Chan::new` แม้หลัง `(use std::sync::Chan)` แล้ว `(new 1)` แบบชื่อเปล่าก็เป็นข้อผิดพลาด หากไม่มีฟังก์ชันชื่อ `new` นิยามไว้ที่ใด
+- หากต้องการใช้คอนสตรัคเตอร์และเมทอดสถิตของชนิดด้วยชื่อเปล่า ให้นำเข้าทีละตัว เช่น `(use std::sync::Chan::new)` หรือนำเข้าคอนสตรัคเตอร์และเมทอดสถิตที่เปิดเผยทั้งหมดด้วย `(use Type::*)` (ไม่รวมคอนสตรัคเตอร์ของ struct เพราะ struct สร้างด้วย `make-instance`) ส่งออกซ้ำด้วย `pub use` ไม่ได้
+- นำเข้าชื่อเปล่าเดียวกันจากสองชนิดที่ต่างกันไม่ได้ (`(use std::sync::Chan::* std::sync::WaitGroup::*)` เป็นข้อผิดพลาด เพราะทั้งสองมี `new`) การนำเข้าชื่อที่ซ้ำกับฟังก์ชัน ตัวแปรโกลบอล หรือแมโครที่โมดูลนิยามไว้ก็เป็นข้อผิดพลาดเช่นกัน หากตั้งใจแทนที่ให้ใช้ `shadowing-import`
+- ไลบรารีมาตรฐานเปิดเผย `some`/`none` ของ `Option` และ `ok`/`err` ของ `Result` ให้ทุกโมดูล จึงใช้ด้วยชื่อเปล่าได้โดยไม่ต้อง `use` (เหมือน prelude ของ Rust ที่นำเข้า `Some`/`None`/`Ok`/`Err`)
 - **ชื่อหนึ่งมีความหมายเดียว** ฟังก์ชัน ตัวแปรโกลบอล และแมโครอยู่ในเนมสเปซเดียวกัน และภายในโมดูลเดียว
   สองสิ่งในนั้นตั้งชื่อซ้ำกันไม่ได้ (เป็นข้อผิดพลาดไม่ว่านิยามอันไหนก่อน) ฟังก์ชันและตัวแปรไม่มีเนมสเปซแยกกัน
   เหมือนใน CL สำหรับชื่อเดียวกันในโมดูลต่างกัน อันที่ใกล้กว่าจะมองเห็น
 - การแก้ไขชื่อเปล่า `n` (ในตำแหน่งการเรียก `(n a ...)` ชื่อของ special form ถูกกำหนดก่อนหน้านี้):
   1. ตัวแปรท้องถิ่น (พารามิเตอร์ และการผูกของ `let` `labels` `macrolet` และ `symbol-macrolet`)
   2. ถ้าชื่อโมดูล `n` เป็นแมโคร ก็คือแมโครนั้น
-  3. variant ของ enum ที่ `use` และเมทอดสถิตของชนิดที่ `use`
+  3. คอนสตรัคเตอร์และเมทอดสถิต: ที่นำเข้าด้วย `use` และคอนสตรัคเตอร์ของ `Sexpr` (`sym`, `int` ฯลฯ) และของ `Option`/`Result` ที่ไลบรารีมาตรฐานเปิดเผย
   4. เมทอด `n` ของชนิดของอาร์กิวเมนต์ตัวแรก (เมทอดถูกค้นหา **จากชนิดของอาร์กิวเมนต์ตัวแรกเท่านั้น**)
   5. ถ้าชื่อโมดูล `n` เป็นฟังก์ชันหรือตัวแปรโกลบอล ก็คือสิ่งนั้น (สำหรับตัวแปรโกลบอล จะเรียกฟังก์ชันที่เป็นค่า
      ของมัน)
@@ -1329,11 +1333,7 @@ literal ที่ไม่ใช่ immediate (สตริง / จำนวน
 
 - `(TypeName :slot pattern...)` — การแยกฟิลด์โดยมี **ชื่อชนิด** นำหน้า (เฉพาะ struct) เขียนในรูปเดียวกับ
   แพตเทิร์นของ struct ข้างต้น เช่น สำหรับ `(defstruct point (x f64) (y f64))` คือ `(point :x :y)`
-- ชื่อ variant เปล่า `(VariantName sub-pattern...)` — ดึง variant ของ `defenum` ออกมา แก้ไขเป็น
-  ชื่อเปล่าที่มองเห็นหลัง `(use EnumType)` (กฎการมองเห็นเดียวกับตอนเรียกตัวสร้าง)
-  ตัวอย่างเช่น สำหรับ `(defenum color (red) (blue))` คือ `(red)` `(blue)` หลัง `(use color)` หากชื่อ variant
-  ของหลาย enum ที่มองเห็นชนกัน จะเป็นข้อผิดพลาดความกำกวม ดังนั้นเขียนรูปแบบที่มีตัวกำกับ
-  `(EnumType::VariantName ...)` ได้ด้วย (ไม่ต้อง `use`)
+- ชื่อ variant เปล่า `(VariantName sub-pattern...)` — ดึง variant ของ `defenum` ออกมา แก้เป็นชื่อเปล่าที่มองเห็นได้เพราะนำเข้าไว้ เช่นด้วย `(use EnumType::*)` (กฎการมองเห็นเดียวกับตอนเรียกคอนสตรัคเตอร์) เช่น สำหรับ `(defenum color (red) (blue))` หลัง `(use color::*)` ใช้ `(red)` `(blue)` ได้ ถ้าเขียนแบบระบุชนิด `(EnumType::VariantName ...)` ก็ไม่ต้อง `use`
 - `(the Type pattern)` — downcast ของทั้งชนิด (ผูกทั้งก้อน) ไม่แยก
   ฟิลด์ แต่ส่งค่าให้ `pattern` ตามที่เป็น วิธีเดียวที่จะดึง struct ที่เปลี่ยนแปลงได้ออกมาโดย
   คงเอกลักษณ์ และเป็นวิธีเดียวที่จะดึง `Vector<T>`/`HashTable<K,V>` ออกจาก `Sexpr`
