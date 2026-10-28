@@ -86,6 +86,20 @@ fn is_unsafe_form(heap: &Heap, v: Value) -> bool {
 /// none; `name<T1,T2,...>` — which the reader reads as `(%type-apply name T1
 /// T2 ...)`, the same structure a generic type in a type position is —
 /// declares them, each a plain name.
+/// The symbol a definition's name is written with: `name`, or the head of
+/// `name<T...>` — what a `return-from` naming the definition's implicit block
+/// reads as.
+fn definition_symbol(heap: &Heap, v: Value) -> Result<SymRef, Error> {
+    let head = match v {
+        Value::Cons(_) if crate::types::is_type_application(heap, v) => heap.list_to_vec(v)?.get(1).copied(),
+        other => Some(other),
+    };
+    match head {
+        Some(Value::Symbol(id)) => Ok(id),
+        _ => Err(Error::TypeError("a definition's name must be a plain name, with its type parameters after it".into())),
+    }
+}
+
 fn generic_header(heap: &Heap, v: Value) -> Result<(String, Vec<String>), Error> {
     match v {
         Value::Symbol(id) => Ok((heap.symbol_spelling(id).to_string(), Vec::new())),
@@ -338,7 +352,15 @@ impl Definable for TraitDef {
 /// no extra node for the evaluator to walk, and no extra basic block, slot or
 /// root-depth read for the island to emit.
 struct BlockFrame {
-    name: String,
+    /// The symbol the `block` (or the definition) was written with, which a
+    /// `return-from` is matched against.
+    name: SymRef,
+    /// The block's name in the core IR: unique within the checker, and
+    /// spelled so that no source can write it (`'` ends a symbol), so two
+    /// blocks whose names read alike — one a macro of another module made —
+    /// stay apart there too. No space: the island keeps the names of the
+    /// blocks in scope in one string, separated by spaces.
+    label: Box<str>,
     /// The accumulated exit type: the seed (a `defun`'s declared return type,
     /// or `Never` for a bare `block`) joined with every `return-from`'s value.
     ty: Type,
@@ -447,6 +469,8 @@ enum MethodTemplate {
 /// header, shared between definition checking and template specialization.
 struct MethodSig {
     method: String,
+    /// The symbol the method's name is written with — its implicit block's.
+    method_sym: SymRef,
     /// The method's own type parameters, from its name (`map<U>` -> `["u"]`)
     /// — the ones its receiver does not supply, inferred at each call from
     /// the arguments the way a generic `defun`'s are.
@@ -1069,6 +1093,8 @@ pub struct Checker {
     /// Makes each `macrolet` binding's synthesized name unique, so two
     /// occurrences of the same local macro name never share a body.
     local_macro_seq: Cell<u32>,
+    /// Serial number for [`BlockFrame::label`].
+    block_seq: Cell<u32>,
     /// Instantiations requested but not yet generated — see [`SpecRequest`].
     /// Always empty outside `check_form`.
     spec_pending: RefCell<Vec<SpecRequest>>,
@@ -1208,6 +1234,7 @@ impl Checker {
             generic_method_templates: HashMap::new(),
             spec_memo: RefCell::new(HashSet::new()),
             local_macro_seq: Cell::new(0),
+            block_seq: Cell::new(0),
             spec_pending: RefCell::new(Vec::new()),
             type_var_bindings: BTreeMap::new(),
             type_uses: RefCell::new(Vec::new()),
@@ -3451,7 +3478,7 @@ impl Checker {
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
-            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
+            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, definition_symbol(heap, parts[0])?, &ret)?;
         let lowered = self.lowered_all(heap, &body)?;
         self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &lowered)
     }
@@ -3603,7 +3630,7 @@ impl Checker {
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
-            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
+            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, definition_symbol(heap, parts[0])?, &ret)?;
         let lowered = self.lowered_all(heap, &body)?;
         self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &lowered)
     }
@@ -3965,7 +3992,7 @@ impl Checker {
         parts: &[Value],
         mangled: SymRef,
     ) -> Result<TopLevelForm, Error> {
-        let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
+        let MethodSig { method_sym, instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts, &[])?;
         let type_fq = type_fq.expect("a receiver that is not abstract names a type");
         // The receiver is the first parameter, not a field beside them: the
@@ -3982,7 +4009,7 @@ impl Checker {
         let env = Env::new().extended(all.clone())?;
         // The *written* name, not the mangled one: the body's own
         // `(return-from NAME ...)` was written against the name in the source.
-        let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], &method, &ret)?;
+        let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], method_sym, &ret)?;
         let lowered = self.lowered_all(heap, &body)?;
         self.info.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, &lowered)
     }
@@ -4058,9 +4085,8 @@ impl Checker {
         let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
-        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
-            self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
+            self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], definition_symbol(heap, tmpl.parts[0])?, &ret)?;
         let lowered = self.lowered_all(heap, &body)?;
         self.info.defun_form(heap, mangled, &params, &ret, &lowered)
     }
@@ -4130,9 +4156,8 @@ impl Checker {
         let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
-        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
-            self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
+            self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], definition_symbol(heap, tmpl.parts[0])?, &ret)?;
         let lowered = self.lowered_all(heap, &body)?;
         self.info.defun_form(heap, mangled, &params, &ret, &lowered)
     }
@@ -6560,7 +6585,7 @@ impl Checker {
             let (elems, locs) = self.subst_method_item(heap, *m, &subst, impl_where, false)?;
             let sig = self.parse_defmethod_sig_inner(heap, &elems, &locs, true)?;
             let MethodSig {
-                method, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
+                method_sym, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
             } = sig;
             // The rebuilt header slots (`elems[..body_start]`: the receiver
             // list always, the return type and merged `where` when
@@ -6582,7 +6607,7 @@ impl Checker {
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
-            let body = self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
+            let body = self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, method_sym, &ret)?;
             for c in &body {
                 self.verified(c)?;
             }
@@ -6636,7 +6661,7 @@ impl Checker {
         for (elems, locs) in items {
             let sig = self.parse_defmethod_sig_inner(heap, elems, locs, true)?;
             let MethodSig {
-                method, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
+                method_sym, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
             } = sig;
             // Keyed by the type variable's name — what `is_self_tvar` matches.
             bounds.entry(SELF_TYPE_VAR.to_string()).or_default().push(self_bound.clone());
@@ -6647,7 +6672,7 @@ impl Checker {
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
-            let body = self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
+            let body = self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, method_sym, &ret)?;
             for c in &body {
                 self.verified(c)?;
             }
@@ -7542,6 +7567,7 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         let MethodSig {
             method,
+            method_sym,
             own_params,
             instance,
             self_name,
@@ -7866,7 +7892,7 @@ impl Checker {
             self.enter_specialization(ns, bindings)
         });
         let checked =
-            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &method, &ret);
+            self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, method_sym, &ret);
         if let Some((sn, sl, sb)) = saved {
             self.exit_specialization(sn, sl, sb);
         }
@@ -7990,6 +8016,7 @@ impl Checker {
         let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
         Ok(MethodSig {
             method,
+            method_sym: definition_symbol(heap, parts[0])?,
             own_params,
             instance,
             self_name,
@@ -10212,7 +10239,7 @@ impl Checker {
         let bindings = heap
             .list_to_vec(args[0])
             .map_err(|_| Error::TypeError("macrolet: the binding list must be a proper list".into()))?;
-        let mut scope: HashMap<String, (Path, MacroShape)> = HashMap::new();
+        let mut scope: HashMap<SymRef, (Path, MacroShape)> = HashMap::new();
         for b in bindings {
             let parts_locs = heap.list_to_vec_locs(b).map_err(|_| {
                 Error::TypeError("macrolet: each binding is (name (params) body...)".into())
@@ -10223,7 +10250,7 @@ impl Checker {
                 return Err(Error::TypeError("macrolet: each binding is (name (params) body...)".into()));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => super::verify::bound_name(id, "macrolet")?,
+                Value::Symbol(id) => super::verify::bound_symbol(id, "macrolet")?,
                 _ => return Err(Error::TypeError("macrolet: the binding name must be a symbol".into())),
             };
             let param_vals = heap.list_to_vec(parts[1])?;
@@ -10247,7 +10274,7 @@ impl Checker {
             // monomorphization — from sharing a body.
             let seq = self.local_macro_seq.get();
             self.local_macro_seq.set(seq + 1);
-            let path = Path::root(&format!(" macrolet {} {}", seq, name));
+            let path = Path::root(&format!(" macrolet {} {}", seq, name.name()));
             let doc = take_leading_docstring(heap, &parts, 2);
             let body_start = if doc.is_some() { 3 } else { 2 };
             let form = self.defmacro_body(
@@ -10257,7 +10284,7 @@ impl Checker {
             heap.push_root(form);
             let installed = interp.install(heap, form);
             heap.pop_root();
-            installed.map_err(|e| Error::TypeError(format!("macrolet `{}`: {}", name, e)))?;
+            installed.map_err(|e| Error::TypeError(format!("macrolet `{}`: {}", name.name(), e)))?;
             scope.insert(name, (path, shape));
         }
         let result = self.info.with_local_macros(scope, || {
@@ -10420,15 +10447,15 @@ impl Checker {
                 let saved = self.loop_stack.replace(Vec::new());
                 let saved_blocks = self.block_stack.replace(Vec::new());
                 let result = self.with_own_arena(|| {
-                    self.check_block_body(heap, interp, &fn_env, &raw_body, &body_locs, name.name(), ret.clone(), Some(&ret))
+                    self.check_block_body(heap, interp, &fn_env, &raw_body, &body_locs, name, ret.clone(), Some(&ret))
                 });
                 self.block_stack.replace(saved_blocks);
                 self.loop_stack.replace(saved);
-                let (body, _, used) = result?;
+                let (body, _, used, label) = result?;
                 let bound: Vec<SymRef> = params.iter().map(|(n, _)| *n).chain(names.iter().copied()).collect();
                 let lowered = self.lowered_all(heap, &body)?;
                 self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, &format!("the `labels` function `{}`", name.name()))?;
-                let body = self.implicit_block(name.name(), &ret, body, used)?;
+                let body = self.implicit_block(label, &ret, body, used)?;
                 defs.push((name, params, ret, body));
             }
             let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
@@ -14018,15 +14045,15 @@ impl Checker {
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
-        let name = Self::escape_name(heap, args.first().copied(), "block")?;
+        let name = Self::escape_name(args.first().copied(), "block")?;
         let seed = expected.filter(|t| non_never(t).is_some()).cloned().unwrap_or(Type::Never);
-        let (body, ty, used) = self.check_block_body(
+        let (body, ty, used, label) = self.check_block_body(
             heap,
             interp,
             env,
             &args[1..],
             arg_locs.get(1..).unwrap_or(&[]),
-            &name,
+            name,
             seed,
             expected,
         )?;
@@ -14039,13 +14066,14 @@ impl Checker {
             return Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty));
         }
         let seq = Checked::of(Node::Let { binds: Vec::new(), body }, ty.clone());
-        Ok(Checked::of(Node::Block { name: name.as_str().into(), ty: ty.clone(), body: Box::new(seq) }, ty))
+        Ok(Checked::of(Node::Block { name: label, ty: ty.clone(), body: Box::new(seq) }, ty))
     }
 
     /// Check a body sequence with a fresh [`Self::block_stack`] frame named
     /// `name`, seeded at `seed`. Returns the checked body, the frame's exit
-    /// type joined with the body's own, and whether any `return-from` named
-    /// it. The frame is popped even if checking the body fails.
+    /// type joined with the body's own, whether any `return-from` named it,
+    /// and its name in the core IR ([`BlockFrame::label`]). The frame is
+    /// popped even if checking the body fails.
     ///
     /// Shared by `block` and by every definition form's implicit block, which
     /// is why the seed is a parameter: a `defun`'s is its declared return
@@ -14059,11 +14087,14 @@ impl Checker {
         env: &Env,
         body: &[Value],
         body_locs: &[Option<Loc>],
-        name: &str,
+        name: SymRef,
         seed: Type,
         expected: Option<&Type>,
-    ) -> Result<(Vec<Checked>, Type, bool), Error> {
-        self.block_stack.borrow_mut().push(BlockFrame { name: name.to_string(), ty: seed, used: false });
+    ) -> Result<(Vec<Checked>, Type, bool, Box<str>), Error> {
+        let seq = self.block_seq.get();
+        self.block_seq.set(seq + 1);
+        let label = format!("{}'{}", name.name(), seq).into_boxed_str();
+        self.block_stack.borrow_mut().push(BlockFrame { name, label, ty: seed, used: false });
         let result = self.check_seq(heap, interp, env, body, body_locs, expected);
         let frame = self.block_stack.borrow_mut().pop().expect("pushed above");
         let (mut body, body_ty) = result?;
@@ -14077,7 +14108,7 @@ impl Checker {
             };
             body.push(disagreeing(last, what, ty.clone()));
         }
-        Ok((body, ty, frame.used))
+        Ok((body, ty, frame.used, frame.label))
     }
 
     /// A definition's body, with CL's implicit block named after the thing
@@ -14094,22 +14125,22 @@ impl Checker {
         env: &Env,
         body: &[Value],
         body_locs: &[Option<Loc>],
-        name: &str,
+        name: SymRef,
         ret: &Type,
     ) -> Result<Vec<Checked>, Error> {
-        let (body, _, used) =
+        let (body, _, used, label) =
             self.check_block_body(heap, interp, env, body, body_locs, name, ret.clone(), Some(ret))?;
-        self.implicit_block(name, ret, body, used)
+        self.implicit_block(label, ret, body, used)
     }
 
-    /// A definition's checked `body` inside its implicit block `name`, which
-    /// is a node only when a `return-from` `used` it.
-    fn implicit_block(&self, name: &str, ret: &Type, body: Vec<Checked>, used: bool) -> Result<Vec<Checked>, Error> {
+    /// A definition's checked `body` inside its implicit block, named `label`
+    /// in the core IR, which is a node only when a `return-from` `used` it.
+    fn implicit_block(&self, label: Box<str>, ret: &Type, body: Vec<Checked>, used: bool) -> Result<Vec<Checked>, Error> {
         if !used {
             return Ok(body);
         }
         let seq = Checked::of(Node::Let { binds: Vec::new(), body }, ret.clone());
-        let block = Node::Block { name: name.into(), ty: ret.clone(), body: Box::new(seq) };
+        let block = Node::Block { name: label, ty: ret.clone(), body: Box::new(seq) };
         Ok(vec![Checked::of(block, ret.clone())])
     }
 
@@ -14128,13 +14159,13 @@ impl Checker {
                 "return-from: (return-from name) or (return-from name value)".into(),
             ));
         }
-        let name = Self::escape_name(heap, args.first().copied(), "return-from")?;
+        let name = Self::escape_name(args.first().copied(), "return-from")?;
         let seed = {
             let stack = self.block_stack.borrow();
             // Innermost wins, so a `block` may shadow an outer one of the same
             // name — CL's rule, and the reason this searches backwards.
             let frame = stack.iter().rev().find(|f| f.name == name).ok_or_else(|| {
-                Error::TypeError(format!("return-from: no enclosing block named `{}`", name))
+                Error::TypeError(format!("return-from: no enclosing block named `{}`", name.name()))
             })?;
             non_never(&frame.ty).cloned()
         };
@@ -14143,8 +14174,8 @@ impl Checker {
             None => None,
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
-        let split = self.contribute_block_exit(&name, ty)?;
-        let node = Node::ReturnFrom { name: name.as_str().into(), value: value.map(Box::new) };
+        let (split, label) = self.contribute_block_exit(name, ty)?;
+        let node = Node::ReturnFrom { name: label, value: value.map(Box::new) };
         Ok(disagreeing_if(Checked::of(node, Type::Never), split))
     }
 
@@ -14153,9 +14184,9 @@ impl Checker {
     /// Not a quoted datum and not a path: a block name is resolved where it is
     /// written, so anything that would need looking up somewhere else is a
     /// spelling this form does not have.
-    fn escape_name(heap: &Heap, arg: Option<Value>, who: &str) -> Result<String, Error> {
+    fn escape_name(arg: Option<Value>, who: &str) -> Result<SymRef, Error> {
         match arg {
-            Some(Value::Symbol(id)) => Ok(heap.symbol_spelling(id).to_string()),
+            Some(Value::Symbol(id)) => Ok(id),
             Some(_) => Err(Error::TypeError(format!("{}: the name must be a bare symbol", who))),
             None => Err(Error::TypeError(format!("{}: missing the block name", who))),
         }
@@ -14163,18 +14194,19 @@ impl Checker {
 
     /// Unify a `return-from` value's type into the named block's accumulated
     /// exit type — [`Self::contribute_loop_exit`]'s named counterpart.
-    /// What the types disagree on, if they do, is left for checking.
-    fn contribute_block_exit(&self, name: &str, ty: Type) -> Result<Option<Disagreement>, Error> {
+    /// What the types disagree on, if they do, is left for checking; the
+    /// block's name in the core IR comes back with it.
+    fn contribute_block_exit(&self, name: SymRef, ty: Type) -> Result<(Option<Disagreement>, Box<str>), Error> {
         let mut stack = self.block_stack.borrow_mut();
         let frame = stack
             .iter_mut()
             .rev()
             .find(|f| f.name == name)
-            .ok_or_else(|| Error::TypeError(format!("return-from: no enclosing block named `{}`", name)))?;
+            .ok_or_else(|| Error::TypeError(format!("return-from: no enclosing block named `{}`", name.name())))?;
         let (joined, split) = join_or_first(&frame.ty, &ty);
         frame.ty = joined;
         frame.used = true;
-        Ok(split)
+        Ok((split, frame.label.clone()))
     }
 
     /// Unify a `break`/`return` value's type into the nearest enclosing loop's

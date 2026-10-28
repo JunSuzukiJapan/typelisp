@@ -127,7 +127,7 @@ pub(super) struct Plan {
     /// CL's unnamed extended `loop` establishes `block nil`; there is no
     /// `nil` here and `break`/`return` already leave the nearest loop, so an
     /// unnamed loop needs no block and gets none.
-    pub named: Option<String>,
+    pub named: Option<SymRef>,
     pub vars: Vec<Var>,
     /// `:repeat n` — an iteration count, independent of any variable.
     pub repeat: Option<Value>,
@@ -284,7 +284,7 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
             let Some(name) = var_name(name_v) else {
                 return Err(err(":named needs a block name".to_string()));
             };
-            plan.named = Some(name.name().to_string());
+            plan.named = Some(name);
         }
     }
 
@@ -772,8 +772,7 @@ pub(super) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result
         None => out,
         Some(name) => {
             let head = b.sym("block");
-            let label = b.sym(name);
-            b.list(&[head, label, out])?
+            b.list(&[head, Value::Symbol(*name), out])?
         }
     };
     // The scope drops here, unrooting `out` — the caller re-roots before it

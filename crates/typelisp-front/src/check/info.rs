@@ -219,7 +219,7 @@ pub(super) struct Info {
     ///
     /// A `RefCell` because expression checking is `&self` — the whole reason
     /// `macrolet` needed a table of its own rather than the registry's.
-    local_macros: RefCell<Vec<HashMap<String, (Path, MacroShape)>>>,
+    local_macros: RefCell<Vec<HashMap<SymRef, (Path, MacroShape)>>>,
     /// `symbol-macrolet` scopes, innermost last: name -> the form the name
     /// stands for.
     ///
@@ -386,7 +386,7 @@ impl Info {
         // global one of the same name for the extent of its body, which is
         // what "lexically scoped macro definition" means.
         for scope in self.local_macros.borrow().iter().rev() {
-            if let Some(found) = scope.get(sym.name()) {
+            if let Some(found) = scope.get(&sym) {
                 return Some(found.clone());
             }
         }
@@ -397,7 +397,7 @@ impl Info {
     }
 
     /// Runs `body` with `scope`'s `macrolet` bindings in view, innermost.
-    pub(super) fn with_local_macros<R>(&self, scope: HashMap<String, (Path, MacroShape)>, body: impl FnOnce() -> R) -> R {
+    pub(super) fn with_local_macros<R>(&self, scope: HashMap<SymRef, (Path, MacroShape)>, body: impl FnOnce() -> R) -> R {
         self.local_macros.borrow_mut().push(scope);
         let result = body();
         self.local_macros.borrow_mut().pop();
