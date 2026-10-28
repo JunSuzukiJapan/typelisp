@@ -498,14 +498,14 @@ fn arg_keyword(args: &[Value], i: usize, who: &str) -> Result<SymRef, PrintError
 /// `print-rt`, …), not the surface syntax: `format`/`print`/`println`/
 /// `pprint` and `pprint-logical-block` are special forms, and what survives
 /// checking is a call to one of the names below.
-pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, PrintError>> {
-    let r = match name {
+pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Result<Value, PrintError>> {
+    let r = match name.well_known() {
         // `format`'s `bool` destination: builds the text, and additionally
         // writes it when the destination is `true` (CL's `t`). The string it
         // returns is always the laid-out text; the *write* goes through
         // `emit`, which merges into an open logical block rather than jumping
         // the queue past that block's buffered output.
-        "format-rt" => (|| {
+        wk::F_FORMAT_RT => (|| {
             let dest = arg_bool(args, 0, "format")?;
             let control = arg_str(heap, args, 1, "format")?.to_string();
             let list = *args.get(2).ok_or_else(|| PrintError::Shape("format: expected 3 arguments".into()))?;
@@ -517,17 +517,17 @@ pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Resu
             }
             Ok(heap.alloc_string(text))
         })(),
-        "print-rt" | "println-rt" => (|| {
-            let control = arg_str(heap, args, 0, name)?.to_string();
+        wk::F_PRINT_RT | wk::F_PRINTLN_RT => (|| {
+            let control = arg_str(heap, args, 0, name.name())?.to_string();
             let list = *args.get(1).ok_or_else(|| PrintError::Shape(format!("{}: expected 2 arguments", name)))?;
             let out = build_format(heap, &control, list).map_err(PrintError::Raise)?;
             let opts = current_opts(heap).map_err(PrintError::Raise)?;
-            emit(heap, out, name == "println-rt", &opts).map_err(PrintError::Raise)?;
+            emit(heap, out, name.is(wk::F_PRINTLN_RT), &opts).map_err(PrintError::Raise)?;
             Ok(Value::Empty)
         })(),
         // `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular`, which pass
         // their own name so one builtin serves all four.
-        "pprint-rt" => (|| {
+        wk::F_PPRINT_RT => (|| {
             let which = arg_str(heap, args, 0, "pprint")?.to_string();
             let value = *args.get(1).ok_or_else(|| PrintError::Shape("pprint: expected 3 arguments".into()))?;
             let colinc = arg_int(args, 2, "pprint")?;
@@ -536,7 +536,7 @@ pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Resu
             emit(heap, out, false, &opts).map_err(PrintError::Raise)?;
             Ok(Value::Empty)
         })(),
-        "pprint-block-start-rt" => (|| {
+        wk::F_PPRINT_BLOCK_START_RT => (|| {
             let obj = *args.first().ok_or_else(|| PrintError::Shape("pprint-logical-block: expected 4 arguments".into()))?;
             let prefix = arg_str(heap, args, 1, "pprint-logical-block")?.to_string();
             let per_line = arg_bool(args, 2, "pprint-logical-block")?;
@@ -545,8 +545,8 @@ pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Resu
             block_start(heap, obj, &prefix, per_line, &suffix, &opts);
             Ok(Value::Empty)
         })(),
-        "pprint-block-end-rt" => block_end(heap).map(|()| Value::Empty).map_err(PrintError::Raise),
-        "pprint-newline" => (|| {
+        wk::F_PPRINT_BLOCK_END_RT => block_end(heap).map(|()| Value::Empty).map_err(PrintError::Raise),
+        wk::F_PPRINT_NEWLINE => (|| {
             let kw = arg_keyword(args, 0, "pprint-newline")?;
             let kind = match kw.well_known() {
                 wk::KW_LINEAR => NewlineKind::Linear,
@@ -563,7 +563,7 @@ pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Resu
             record_op(Op::Newline(kind));
             Ok(Value::Empty)
         })(),
-        "pprint-indent" => (|| {
+        wk::F_PPRINT_INDENT => (|| {
             let kw = arg_keyword(args, 0, "pprint-indent")?;
             let kind = match kw.well_known() {
                 wk::KW_BLOCK => IndentKind::Block,
@@ -574,7 +574,7 @@ pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Resu
             record_op(Op::Indent(kind, n));
             Ok(Value::Empty)
         })(),
-        "pprint-tab" => (|| {
+        wk::F_PPRINT_TAB => (|| {
             let kw = arg_keyword(args, 0, "pprint-tab")?;
             let kind = match kw.well_known() {
                 wk::KW_LINE => TabKind::Line,
@@ -599,8 +599,8 @@ pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Resu
             record_op(Op::Tab { kind, colnum, colinc });
             Ok(Value::Empty)
         })(),
-        "pprint-pop" => Ok(pop(heap)),
-        "pprint-list-exhausted" => Ok(Value::Bool(list_exhausted(heap))),
+        wk::F_PPRINT_POP => Ok(pop(heap)),
+        wk::F_PPRINT_LIST_EXHAUSTED => Ok(Value::Bool(list_exhausted(heap))),
         _ => return None,
     };
     Some(r)

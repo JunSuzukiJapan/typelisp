@@ -9,7 +9,7 @@
 //! depending on which side of the compile boundary made it.
 
 use crate::stream_builtin::ArgError;
-use typelisp_mem::{spec, Heap, StdModule, TypeSpec, Value};
+use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeSpec, Value};
 
 /// The type `Option<(fn (string-input-stream char) Option<Sexpr>)>` — what
 /// `get-macro-character` answers with.
@@ -42,7 +42,8 @@ fn found(heap: &mut Heap, f: Option<Value>) -> Value {
 }
 
 /// Every readtable builtin, or `None` if `name` isn't one.
-pub fn readtable_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, ArgError>> {
+pub fn readtable_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Result<Value, ArgError>> {
+    let name = sym.name();
     macro_rules! ch {
         ($i:expr) => {
             match character(args, $i, name) {
@@ -51,23 +52,23 @@ pub fn readtable_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<
             }
         };
     }
-    Some(match name {
-        "set-macro-character" => {
+    Some(match sym.well_known() {
+        wk::F_SET_MACRO_CHARACTER => {
             let c = ch!(0);
             heap.set_macro_character(c, args[1]);
             Ok(Value::Empty)
         }
-        "get-macro-character" => {
+        wk::F_GET_MACRO_CHARACTER => {
             let c = ch!(0);
             let f = heap.macro_character(c);
             Ok(found(heap, f))
         }
-        "set-dispatch-macro-character" => {
+        wk::F_SET_DISPATCH_MACRO_CHARACTER => {
             let (d, s) = (ch!(0), ch!(1));
             heap.set_dispatch_macro_character(d, s, args[2]);
             Ok(Value::Empty)
         }
-        "get-dispatch-macro-character" => {
+        wk::F_GET_DISPATCH_MACRO_CHARACTER => {
             let (d, s) = (ch!(0), ch!(1));
             let f = heap.dispatch_macro_character(d, s);
             Ok(found(heap, f))

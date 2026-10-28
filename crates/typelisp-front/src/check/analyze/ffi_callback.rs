@@ -123,7 +123,7 @@ impl Checker {
         let function = core::path_form(heap, &target);
         let function = self.quoted(heap, function, sexpr_ty());
         let ty = Checked::type_value(fn_ty);
-        Ok(Checked::of(Node::Call { path: Path::internal(ADDRESS_BUILTIN), args: vec![function, ty] }, Type::Ptr))
+        Ok(Checked::of(Node::Call { path: Path::internal_builtin(ADDRESS_BUILTIN), args: vec![function, ty] }, Type::Ptr))
     }
 
     /// A path for a lifted definition, in the current namespace, that names

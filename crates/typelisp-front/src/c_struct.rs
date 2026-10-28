@@ -8,35 +8,35 @@
 //! (`compile::externs`) and is answered by [`eval`] in the interpreter. Both
 //! run the same `c_mem` functions.
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{wk, Heap, SymRef, Value};
 use typelisp_rt::c_mem;
 
 use crate::check::repr::Repr;
 use crate::eval::EvalError;
 
 /// `()` → the new arena's id.
-pub const ARENA_OPEN: &str = " c-arena-open";
+pub const ARENA_OPEN: u32 = wk::F_C_ARENA_OPEN;
 /// `(ARENA)` → `()`: frees what the arena owns.
-pub const ARENA_CLOSE: &str = " c-arena-close";
+pub const ARENA_CLOSE: u32 = wk::F_C_ARENA_CLOSE;
 /// `(ARENA COUNT SIZE ALIGN OFFSET TYPE ...)` → the block's address.
-pub const ALLOC: &str = " c-alloc";
+pub const ALLOC: u32 = wk::F_C_ALLOC;
 /// `(ADDR TYPE)` → `ADDR`, if it points at a live `TYPE`.
-pub const PTR_CHECK: &str = " c-ptr-check";
+pub const PTR_CHECK: u32 = wk::F_C_PTR_CHECK;
 /// `(ADDR I SIZE TYPE)` → the address of the `I`th element.
-pub const INDEX: &str = " c-index";
+pub const INDEX: u32 = wk::F_C_INDEX;
 /// `(ADDR OFFSET)` → the address of a field.
-pub const OFFSET: &str = " c-offset";
+pub const OFFSET: u32 = wk::F_C_OFFSET;
 /// `(ADDR OFFSET KIND)` → the value.
-pub const LOAD: &str = " c-load";
+pub const LOAD: u32 = wk::F_C_LOAD;
 /// `(ADDR OFFSET KIND VALUE)` → `()`.
-pub const STORE: &str = " c-store";
+pub const STORE: u32 = wk::F_C_STORE;
 
 /// The variable the owning `unsafe` binds its arena to. Unwritable for the
 /// same reason the builtins' names are.
 pub const ARENA_VAR: &str = " c-arena";
 
 /// Each builtin with the `typelisp_rt` shim compiled code calls for it.
-pub const BUILTINS: [(&str, &str); 8] = [
+pub const BUILTINS: [(u32, &str); 8] = [
     (ARENA_OPEN, "rt_c_arena_open"),
     (ARENA_CLOSE, "rt_c_arena_close"),
     (ALLOC, "rt_c_alloc"),
@@ -48,8 +48,8 @@ pub const BUILTINS: [(&str, &str); 8] = [
 ];
 
 /// The shim for `name`, if it is one of these builtins.
-pub fn rt_symbol(name: &str) -> Option<&'static str> {
-    BUILTINS.iter().find(|(n, _)| *n == name).map(|(_, s)| *s)
+pub fn rt_symbol(name: SymRef) -> Option<&'static str> {
+    BUILTINS.iter().find(|(n, _)| name.is(*n)).map(|(_, s)| *s)
 }
 
 /// How a value of load/store kind `kind` is represented — what the
@@ -66,12 +66,12 @@ pub fn kind_repr(kind: i64) -> Repr {
 
 /// The interpreter's answer to a call of builtin `name`, or `None` if `name`
 /// is not one of these.
-pub(crate) fn eval(heap: &mut Heap, name: &str, argv: &[Value]) -> Option<Result<Value, EvalError>> {
+pub(crate) fn eval(heap: &mut Heap, name: SymRef, argv: &[Value]) -> Option<Result<Value, EvalError>> {
     rt_symbol(name)?;
     Some(eval_known(heap, name, argv))
 }
 
-fn eval_known(heap: &mut Heap, name: &str, argv: &[Value]) -> Result<Value, EvalError> {
+fn eval_known(heap: &mut Heap, name: SymRef, argv: &[Value]) -> Result<Value, EvalError> {
     let word = |i: usize| -> Result<i64, EvalError> {
         match argv.get(i) {
             Some(Value::Int(n)) => Ok(*n),
@@ -87,7 +87,7 @@ fn eval_known(heap: &mut Heap, name: &str, argv: &[Value]) -> Result<Value, Eval
             .ok_or_else(|| EvalError::Internal(format!("{}: argument {} is not a type: {}", name, i, n)))
     };
     let raised = EvalError::Panic;
-    Ok(match name {
+    Ok(match name.well_known() {
         ARENA_OPEN => Value::Int(c_mem::arena_open() as i64),
         ARENA_CLOSE => {
             c_mem::arena_close(word(0)? as u64).map_err(EvalError::Internal)?;

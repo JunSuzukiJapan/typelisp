@@ -42,7 +42,8 @@ use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue, InstructionValue, IntValue, PointerValue};
 use inkwell::AddressSpace;
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::symbols::member_symbol;
+use typelisp_mem::{wk, Heap, SymRef, Value};
 
 use crate::eval::interp::{
     expect_str, expect_struct_box, scope_clone_frames_heap, scope_pop_frame_heap, scope_push_frame_heap,
@@ -58,109 +59,109 @@ use crate::types::Path;
 /// Every arm holds [`crate::compile::COMPILE_LOCK`] for its duration — see
 /// that constant's doc comment for why concurrent access to the one
 /// process-wide LLVM `Context` must never happen.
-pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: SymRef, args: &[Value]) -> Option<Result<Value, EvalError>> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::LLVM_MODULE) {
-        return match method {
-            "create" => Some(llvm_module_create(heap, args)),
-            "add-function" => Some(llvm_module_add_function(heap, args)),
-            "verify" => Some(llvm_module_verify(args)),
-            "to-string" => Some(llvm_module_to_string(heap, args)),
-            "get-function" => Some(llvm_module_get_function(heap, args)),
-            "add-function-with-env" => Some(llvm_module_add_function_with_env(heap, args)),
-            "add-coroutine-function" => Some(llvm_module_add_coroutine_function(heap, args)),
+        return match method.well_known() {
+            wk::M_CREATE => Some(llvm_module_create(heap, args)),
+            wk::M_ADD_FUNCTION => Some(llvm_module_add_function(heap, args)),
+            wk::M_VERIFY => Some(llvm_module_verify(args)),
+            wk::M_TO_STRING => Some(llvm_module_to_string(heap, args)),
+            wk::M_GET_FUNCTION => Some(llvm_module_get_function(heap, args)),
+            wk::M_ADD_FUNCTION_WITH_ENV => Some(llvm_module_add_function_with_env(heap, args)),
+            wk::M_ADD_COROUTINE_FUNCTION => Some(llvm_module_add_coroutine_function(heap, args)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::LLVM_FUNCTION) {
-        return match method {
-            "append-block" => Some(llvm_function_append_block(heap, args)),
-            "function-param" => Some(llvm_function_param(args)),
+        return match method.well_known() {
+            wk::M_APPEND_BLOCK => Some(llvm_function_append_block(heap, args)),
+            wk::M_FUNCTION_PARAM => Some(llvm_function_param(args)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::LLVM_BUILDER) {
-        return match method {
-            "create" => Some(llvm_builder_create()),
-            "position-at-end" => Some(llvm_builder_position_at_end(args)),
-            "const-word" => Some(llvm_builder_const_word(args)),
-            "build-ret" => Some(llvm_builder_build_ret(args)),
-            "load-arg" => Some(llvm_builder_load_arg(args)),
-            "build-add" => Some(llvm_builder_build_int_op(args, "add", Builder::build_int_add)),
-            "build-sub" => Some(llvm_builder_build_int_op(args, "sub", Builder::build_int_sub)),
-            "build-mul" => Some(llvm_builder_build_int_op(args, "mul", Builder::build_int_mul)),
-            "build-and" => Some(llvm_builder_build_int_op(args, "and", Builder::build_and)),
-            "build-or" => Some(llvm_builder_build_int_op(args, "or", Builder::build_or)),
-            "build-xor" => Some(llvm_builder_build_int_op(args, "xor", Builder::build_xor)),
-            "build-select" => Some(llvm_builder_build_select(args)),
-            "build-shl" => Some(llvm_builder_build_int_op(args, "shl", Builder::build_left_shift)),
-            "build-lshr" => Some(llvm_builder_build_int_op(args, "lshr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, false, name))),
-            "build-ashr" => Some(llvm_builder_build_int_op(args, "ashr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, true, name))),
-            "build-fadd" => Some(llvm_builder_build_float_op(args, "fadd", Builder::build_float_add)),
-            "build-fsub" => Some(llvm_builder_build_float_op(args, "fsub", Builder::build_float_sub)),
-            "build-fmul" => Some(llvm_builder_build_float_op(args, "fmul", Builder::build_float_mul)),
-            "build-fdiv" => Some(llvm_builder_build_float_op(args, "fdiv", Builder::build_float_div)),
-            "build-frem" => Some(llvm_builder_build_float_op(args, "frem", Builder::build_float_rem)),
-            "build-fcmp-lt" => Some(llvm_builder_build_fcmp(args, "fcmp_lt", inkwell::FloatPredicate::OLT)),
-            "build-fcmp-le" => Some(llvm_builder_build_fcmp(args, "fcmp_le", inkwell::FloatPredicate::OLE)),
-            "build-fcmp-gt" => Some(llvm_builder_build_fcmp(args, "fcmp_gt", inkwell::FloatPredicate::OGT)),
-            "build-fcmp-ge" => Some(llvm_builder_build_fcmp(args, "fcmp_ge", inkwell::FloatPredicate::OGE)),
-            "build-fcmp-eq" => Some(llvm_builder_build_fcmp(args, "fcmp_eq", inkwell::FloatPredicate::OEQ)),
-            "build-fcmp-ne" => Some(llvm_builder_build_fcmp(args, "fcmp_ne", inkwell::FloatPredicate::UNE)),
-            "build-fsqrt" => Some(llvm_builder_build_float_unary_intrinsic(args, "fsqrt", "llvm.sqrt.f64")),
-            "build-ffloor" => Some(llvm_builder_build_float_unary_intrinsic(args, "ffloor", "llvm.floor.f64")),
-            "build-fceil" => Some(llvm_builder_build_float_unary_intrinsic(args, "fceil", "llvm.ceil.f64")),
-            "build-fround" => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.rint.f64")),
-            "build-ftrunc" => Some(llvm_builder_build_float_unary_intrinsic(args, "ftrunc", "llvm.trunc.f64")),
-            "build-fpow" => Some(llvm_builder_build_fpow(args)),
-            "build-fmaxnum" => Some(llvm_builder_build_float_binary_intrinsic(args, "fmaxnum", "llvm.maxnum.f64")),
-            "build-fminnum" => Some(llvm_builder_build_float_binary_intrinsic(args, "fminnum", "llvm.minnum.f64")),
-            "build-fsin" => Some(llvm_builder_build_float_unary_intrinsic(args, "fsin", "llvm.sin.f64")),
-            "build-fcos" => Some(llvm_builder_build_float_unary_intrinsic(args, "fcos", "llvm.cos.f64")),
-            "build-fexp" => Some(llvm_builder_build_float_unary_intrinsic(args, "fexp", "llvm.exp.f64")),
-            "build-flog" => Some(llvm_builder_build_float_unary_intrinsic(args, "flog", "llvm.log.f64")),
-            "build-fptosi" => Some(llvm_builder_build_fptosi(args)),
-            "build-sitofp" => Some(llvm_builder_build_sitofp(args)),
-            "build-fround32" => Some(llvm_builder_build_fround32(args)),
-            "build-sadd-overflow" => Some(llvm_builder_build_int_overflow(args, "sadd", "llvm.sadd.with.overflow")),
-            "build-ssub-overflow" => Some(llvm_builder_build_int_overflow(args, "ssub", "llvm.ssub.with.overflow")),
-            "build-smul-overflow" => Some(llvm_builder_build_int_overflow(args, "smul", "llvm.smul.with.overflow")),
-            "alloca-args" => Some(llvm_builder_alloca_args(args)),
-            "store-arg" => Some(llvm_builder_store_arg(args)),
-            "scratch-slot" => Some(llvm_builder_scratch_slot(args)),
-            "build-call" => Some(llvm_builder_build_call(args)),
-            "load-env" => Some(llvm_builder_load_env(args)),
-            "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
-            "build-make-closure" => Some(llvm_builder_build_make_closure(args)),
-            "load-raw" => Some(llvm_builder_load_raw(args)),
-            "build-slot-ptr" => Some(llvm_builder_build_slot_ptr(args)),
-            "frame-slot" => Some(llvm_builder_frame_slot(args)),
-            "frame-slot-rooted" => Some(llvm_builder_frame_slot_rooted(args)),
-            "coroutine-begin" => Some(llvm_builder_coroutine_begin(args)),
-            "coroutine-call" => Some(llvm_builder_coroutine_call(args)),
-            "coroutine-suspend" => Some(llvm_builder_coroutine_suspend(args)),
-            "coroutine-unwind" => Some(llvm_builder_coroutine_unwind(args)),
-            "frame-set-handler" => Some(llvm_builder_frame_set_handler(args)),
-            "frame-clear-handler" => Some(llvm_builder_frame_clear_handler(args)),
-            "coroutine-call-env" => Some(llvm_builder_coroutine_call_env(args)),
-            "coroutine-apply" => Some(llvm_builder_coroutine_apply(args)),
-            "coroutine-dyn-call" => Some(llvm_builder_coroutine_dyn_call(args)),
-            "coroutine-end" => Some(llvm_builder_coroutine_end(args)),
-            "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
-            "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
-            "build-icmp-gt" => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
-            "build-icmp-ge" => Some(llvm_builder_build_icmp(args, "icmp_ge", inkwell::IntPredicate::SGE)),
-            "build-icmp-eq" => Some(llvm_builder_build_icmp(args, "icmp_eq", inkwell::IntPredicate::EQ)),
-            "build-icmp-ne" => Some(llvm_builder_build_icmp(args, "icmp_ne", inkwell::IntPredicate::NE)),
-            "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
-            "build-br" => Some(llvm_builder_build_br(args)),
-            "block-terminated?" => Some(llvm_builder_block_terminated(args)),
-            "build-malloc" => Some(llvm_builder_build_malloc(args)),
-            "build-free" => Some(llvm_builder_build_free(args)),
-            "build-int-to-ptr" => Some(llvm_builder_build_int_to_ptr(args)),
-            "build-ptr-to-int" => Some(llvm_builder_build_ptr_to_int(args)),
-            "build-fn-address" => Some(llvm_builder_build_fn_address(args)),
-            "load-type" => Some(llvm_builder_load_type(args)),
+        return match method.well_known() {
+            wk::M_CREATE => Some(llvm_builder_create()),
+            wk::M_POSITION_AT_END => Some(llvm_builder_position_at_end(args)),
+            wk::M_CONST_WORD => Some(llvm_builder_const_word(args)),
+            wk::M_BUILD_RET => Some(llvm_builder_build_ret(args)),
+            wk::M_LOAD_ARG => Some(llvm_builder_load_arg(args)),
+            wk::M_BUILD_ADD => Some(llvm_builder_build_int_op(args, "add", Builder::build_int_add)),
+            wk::M_BUILD_SUB => Some(llvm_builder_build_int_op(args, "sub", Builder::build_int_sub)),
+            wk::M_BUILD_MUL => Some(llvm_builder_build_int_op(args, "mul", Builder::build_int_mul)),
+            wk::M_BUILD_AND => Some(llvm_builder_build_int_op(args, "and", Builder::build_and)),
+            wk::M_BUILD_OR => Some(llvm_builder_build_int_op(args, "or", Builder::build_or)),
+            wk::M_BUILD_XOR => Some(llvm_builder_build_int_op(args, "xor", Builder::build_xor)),
+            wk::M_BUILD_SELECT => Some(llvm_builder_build_select(args)),
+            wk::M_BUILD_SHL => Some(llvm_builder_build_int_op(args, "shl", Builder::build_left_shift)),
+            wk::M_BUILD_LSHR => Some(llvm_builder_build_int_op(args, "lshr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, false, name))),
+            wk::M_BUILD_ASHR => Some(llvm_builder_build_int_op(args, "ashr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, true, name))),
+            wk::M_BUILD_FADD => Some(llvm_builder_build_float_op(args, "fadd", Builder::build_float_add)),
+            wk::M_BUILD_FSUB => Some(llvm_builder_build_float_op(args, "fsub", Builder::build_float_sub)),
+            wk::M_BUILD_FMUL => Some(llvm_builder_build_float_op(args, "fmul", Builder::build_float_mul)),
+            wk::M_BUILD_FDIV => Some(llvm_builder_build_float_op(args, "fdiv", Builder::build_float_div)),
+            wk::M_BUILD_FREM => Some(llvm_builder_build_float_op(args, "frem", Builder::build_float_rem)),
+            wk::M_BUILD_FCMP_LT => Some(llvm_builder_build_fcmp(args, "fcmp_lt", inkwell::FloatPredicate::OLT)),
+            wk::M_BUILD_FCMP_LE => Some(llvm_builder_build_fcmp(args, "fcmp_le", inkwell::FloatPredicate::OLE)),
+            wk::M_BUILD_FCMP_GT => Some(llvm_builder_build_fcmp(args, "fcmp_gt", inkwell::FloatPredicate::OGT)),
+            wk::M_BUILD_FCMP_GE => Some(llvm_builder_build_fcmp(args, "fcmp_ge", inkwell::FloatPredicate::OGE)),
+            wk::M_BUILD_FCMP_EQ => Some(llvm_builder_build_fcmp(args, "fcmp_eq", inkwell::FloatPredicate::OEQ)),
+            wk::M_BUILD_FCMP_NE => Some(llvm_builder_build_fcmp(args, "fcmp_ne", inkwell::FloatPredicate::UNE)),
+            wk::M_BUILD_FSQRT => Some(llvm_builder_build_float_unary_intrinsic(args, "fsqrt", "llvm.sqrt.f64")),
+            wk::M_BUILD_FFLOOR => Some(llvm_builder_build_float_unary_intrinsic(args, "ffloor", "llvm.floor.f64")),
+            wk::M_BUILD_FCEIL => Some(llvm_builder_build_float_unary_intrinsic(args, "fceil", "llvm.ceil.f64")),
+            wk::M_BUILD_FROUND => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.rint.f64")),
+            wk::M_BUILD_FTRUNC => Some(llvm_builder_build_float_unary_intrinsic(args, "ftrunc", "llvm.trunc.f64")),
+            wk::M_BUILD_FPOW => Some(llvm_builder_build_fpow(args)),
+            wk::M_BUILD_FMAXNUM => Some(llvm_builder_build_float_binary_intrinsic(args, "fmaxnum", "llvm.maxnum.f64")),
+            wk::M_BUILD_FMINNUM => Some(llvm_builder_build_float_binary_intrinsic(args, "fminnum", "llvm.minnum.f64")),
+            wk::M_BUILD_FSIN => Some(llvm_builder_build_float_unary_intrinsic(args, "fsin", "llvm.sin.f64")),
+            wk::M_BUILD_FCOS => Some(llvm_builder_build_float_unary_intrinsic(args, "fcos", "llvm.cos.f64")),
+            wk::M_BUILD_FEXP => Some(llvm_builder_build_float_unary_intrinsic(args, "fexp", "llvm.exp.f64")),
+            wk::M_BUILD_FLOG => Some(llvm_builder_build_float_unary_intrinsic(args, "flog", "llvm.log.f64")),
+            wk::M_BUILD_FPTOSI => Some(llvm_builder_build_fptosi(args)),
+            wk::M_BUILD_SITOFP => Some(llvm_builder_build_sitofp(args)),
+            wk::M_BUILD_FROUND32 => Some(llvm_builder_build_fround32(args)),
+            wk::M_BUILD_SADD_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "sadd", "llvm.sadd.with.overflow")),
+            wk::M_BUILD_SSUB_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "ssub", "llvm.ssub.with.overflow")),
+            wk::M_BUILD_SMUL_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "smul", "llvm.smul.with.overflow")),
+            wk::M_ALLOCA_ARGS => Some(llvm_builder_alloca_args(args)),
+            wk::M_STORE_ARG => Some(llvm_builder_store_arg(args)),
+            wk::M_SCRATCH_SLOT => Some(llvm_builder_scratch_slot(args)),
+            wk::M_BUILD_CALL => Some(llvm_builder_build_call(args)),
+            wk::M_LOAD_ENV => Some(llvm_builder_load_env(args)),
+            wk::M_BUILD_CALL_WITH_ENV => Some(llvm_builder_build_call_with_env(args)),
+            wk::M_BUILD_MAKE_CLOSURE => Some(llvm_builder_build_make_closure(args)),
+            wk::M_LOAD_RAW => Some(llvm_builder_load_raw(args)),
+            wk::M_BUILD_SLOT_PTR => Some(llvm_builder_build_slot_ptr(args)),
+            wk::M_FRAME_SLOT => Some(llvm_builder_frame_slot(args)),
+            wk::M_FRAME_SLOT_ROOTED => Some(llvm_builder_frame_slot_rooted(args)),
+            wk::M_COROUTINE_BEGIN => Some(llvm_builder_coroutine_begin(args)),
+            wk::M_COROUTINE_CALL => Some(llvm_builder_coroutine_call(args)),
+            wk::M_COROUTINE_SUSPEND => Some(llvm_builder_coroutine_suspend(args)),
+            wk::M_COROUTINE_UNWIND => Some(llvm_builder_coroutine_unwind(args)),
+            wk::M_FRAME_SET_HANDLER => Some(llvm_builder_frame_set_handler(args)),
+            wk::M_FRAME_CLEAR_HANDLER => Some(llvm_builder_frame_clear_handler(args)),
+            wk::M_COROUTINE_CALL_ENV => Some(llvm_builder_coroutine_call_env(args)),
+            wk::M_COROUTINE_APPLY => Some(llvm_builder_coroutine_apply(args)),
+            wk::M_COROUTINE_DYN_CALL => Some(llvm_builder_coroutine_dyn_call(args)),
+            wk::M_COROUTINE_END => Some(llvm_builder_coroutine_end(args)),
+            wk::M_BUILD_ICMP_LT => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
+            wk::M_BUILD_ICMP_LE => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
+            wk::M_BUILD_ICMP_GT => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
+            wk::M_BUILD_ICMP_GE => Some(llvm_builder_build_icmp(args, "icmp_ge", inkwell::IntPredicate::SGE)),
+            wk::M_BUILD_ICMP_EQ => Some(llvm_builder_build_icmp(args, "icmp_eq", inkwell::IntPredicate::EQ)),
+            wk::M_BUILD_ICMP_NE => Some(llvm_builder_build_icmp(args, "icmp_ne", inkwell::IntPredicate::NE)),
+            wk::M_BUILD_COND_BR => Some(llvm_builder_build_cond_br(args)),
+            wk::M_BUILD_BR => Some(llvm_builder_build_br(args)),
+            wk::M_BLOCK_TERMINATED_P => Some(llvm_builder_block_terminated(args)),
+            wk::M_BUILD_MALLOC => Some(llvm_builder_build_malloc(args)),
+            wk::M_BUILD_FREE => Some(llvm_builder_build_free(args)),
+            wk::M_BUILD_INT_TO_PTR => Some(llvm_builder_build_int_to_ptr(args)),
+            wk::M_BUILD_PTR_TO_INT => Some(llvm_builder_build_ptr_to_int(args)),
+            wk::M_BUILD_FN_ADDRESS => Some(llvm_builder_build_fn_address(args)),
+            wk::M_LOAD_TYPE => Some(llvm_builder_load_type(args)),
             _ => None,
         };
     }
@@ -2265,8 +2266,12 @@ enum LlvmRetK {
 /// One dispatchable builtin: `(type_key, method)` plus its marshaling
 /// shape, keyed in [`llvm_op_table`] by [`compile::symbols::llvm_op_id`].
 struct LlvmOp {
+    /// The receiver type's vocabulary symbol: `wk::LLVM_MODULE` ...,
+    /// `wk::SCOPE` for the native scope.
+    ty: u32,
+    /// The receiver type as the op id spells it.
     type_key: &'static str,
-    method: String,
+    method: SymRef,
     args: Vec<LlvmArgK>,
     ret: LlvmRetK,
 }
@@ -2313,21 +2318,22 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
     static TABLE: std::sync::OnceLock<HashMap<i64, LlvmOp>> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
         let mut t: HashMap<i64, LlvmOp> = HashMap::new();
-        let insert = |t: &mut HashMap<i64, LlvmOp>, type_key: &'static str, method: String, args: Vec<LlvmArgK>, ret: LlvmRetK| {
-            let id = crate::compile::symbols::llvm_op_id(type_key, &method);
-            if t.insert(id, LlvmOp { type_key, method, args, ret }).is_some() {
+        let insert = |t: &mut HashMap<i64, LlvmOp>, ty: u32, type_key: &'static str, method: &str, args: Vec<LlvmArgK>, ret: LlvmRetK| {
+            let id = crate::compile::symbols::llvm_op_id(type_key, method);
+            let method = member_symbol(method);
+            if t.insert(id, LlvmOp { ty, type_key, method, args, ret }).is_some() {
                 panic!("llvm_op_table: op id collision on {}", id);
             }
         };
-        for (type_key, def) in [
-            ("llvm-module", crate::check::registry::llvm_module_def()),
-            ("llvm-function", crate::check::registry::llvm_function_def()),
-            ("llvm-builder", crate::check::registry::llvm_builder_def()),
+        for (ty, type_key, def) in [
+            (wk::LLVM_MODULE, "llvm-module", crate::check::registry::llvm_module_def()),
+            (wk::LLVM_FUNCTION, "llvm-function", crate::check::registry::llvm_function_def()),
+            (wk::LLVM_BUILDER, "llvm-builder", crate::check::registry::llvm_builder_def()),
         ] {
             for (method, af) in def.assoc {
                 let args = af.sig.params.iter().map(llvm_arg_kind).collect();
                 let ret = llvm_ret_kind(&af.sig.ret);
-                insert(&mut t, type_key, method, args, ret);
+                insert(&mut t, ty, type_key, &method, args, ret);
             }
         }
         use LlvmArgK::{Handle as H, Str as S};
@@ -2336,12 +2342,12 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
         // island bitcode — this table, and so the marshaling shape, is Rust
         // side and free to change with it.
         const SC: LlvmArgK = LlvmArgK::Scope;
-        insert(&mut t, "native-scope", "new".to_string(), vec![], LlvmRetK::Scope);
-        insert(&mut t, "native-scope", "clone-frames".to_string(), vec![SC], LlvmRetK::Scope);
-        insert(&mut t, "native-scope", "push-frame".to_string(), vec![SC], LlvmRetK::Unit);
-        insert(&mut t, "native-scope", "pop-frame".to_string(), vec![SC], LlvmRetK::Unit);
-        insert(&mut t, "native-scope", "get".to_string(), vec![SC, S], LlvmRetK::OptHandle);
-        insert(&mut t, "native-scope", "set".to_string(), vec![SC, S, H], LlvmRetK::Unit);
+        insert(&mut t, wk::SCOPE, "native-scope", "new", vec![], LlvmRetK::Scope);
+        insert(&mut t, wk::SCOPE, "native-scope", "clone-frames", vec![SC], LlvmRetK::Scope);
+        insert(&mut t, wk::SCOPE, "native-scope", "push-frame", vec![SC], LlvmRetK::Unit);
+        insert(&mut t, wk::SCOPE, "native-scope", "pop-frame", vec![SC], LlvmRetK::Unit);
+        insert(&mut t, wk::SCOPE, "native-scope", "get", vec![SC, S], LlvmRetK::OptHandle);
+        insert(&mut t, wk::SCOPE, "native-scope", "set", vec![SC, S, H], LlvmRetK::Unit);
         t
     })
 }
@@ -2424,7 +2430,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
     // island's `Scope<llvm-value>`/`Scope<llvm-function>` that is the same
     // `Value::Int(handle)` this produced before scopes moved to the heap, so
     // the option box the committed bitcode unwraps is bit-identical.
-    if op.type_key == "native-scope" && op.method == "get" {
+    if op.ty == wk::SCOPE && op.method.is(wk::M_GET) {
         let found = match (expect_struct_box(&vals[0]), expect_str(heap, &vals[1])) {
             (Ok(id), Ok(name)) => heap.scope_get(id, &name),
             (Err(e), _) | (_, Err(e)) => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: {:?}", e)),
@@ -2445,19 +2451,19 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         let option = heap.alloc_option(ty, found);
         return crate::compile::runtime::encode(option);
     }
-    let result: Result<Value, EvalError> = if op.type_key == "native-scope" {
-        match op.method.as_str() {
-            "new" => Ok(heap.alloc_scope()),
-            "clone-frames" => scope_clone_frames_heap(heap, &vals),
-            "push-frame" => scope_push_frame_heap(heap, &vals),
-            "pop-frame" => scope_pop_frame_heap(heap, &vals),
+    let result: Result<Value, EvalError> = if op.ty == wk::SCOPE {
+        match op.method.well_known() {
+            wk::M_NEW => Ok(heap.alloc_scope()),
+            wk::M_CLONE_FRAMES => scope_clone_frames_heap(heap, &vals),
+            wk::M_PUSH_FRAME => scope_push_frame_heap(heap, &vals),
+            wk::M_POP_FRAME => scope_pop_frame_heap(heap, &vals),
             // The element type is irrelevant here: the value arrives already
             // in its stored form, so `set` stores the word as given.
-            "set" => scope_set_raw(heap, &vals),
-            other => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", other)),
+            wk::SET => scope_set_raw(heap, &vals),
+            _ => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", op.method)),
         }
     } else {
-        match eval_llvm_builtin_method(heap, &Path::in_ns(typelisp_mem::NsId::CORE, op.type_key), &op.method, &vals) {
+        match eval_llvm_builtin_method(heap, &Path::builtin(op.ty), op.method, &vals) {
             Some(r) => r,
             None => rt_llvm_fatal(&format!("rt_llvm_call: {} has no builtin method {}", op.type_key, op.method)),
         }

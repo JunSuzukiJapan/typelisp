@@ -716,23 +716,26 @@ fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
 /// the same way it does for `int`'s own. This list and the island's lowering
 /// are one decision written twice; `tests/int_default_test.rs` runs each of
 /// them in both tiers.
-pub(super) fn int_boundary_raw(type_name: &Path, method: &str) -> bool {
+pub(super) fn int_boundary_raw(type_name: &Path, method: SymRef) -> bool {
     use crate::types::path_is_builtin;
     // `rational`'s shims (`typelisp_rt::rational`) speak tagged words
     // throughout, the `int` answers included.
     if path_is_builtin(type_name, typelisp_mem::wk::INT) || path_is_builtin(type_name, typelisp_mem::wk::REPR_RATIONAL) {
         return false;
     }
-    if path_is_builtin(type_name, typelisp_mem::wk::CHAN) && matches!(method, "len" | "cap") {
+    if path_is_builtin(type_name, typelisp_mem::wk::CHAN) && matches!(method.well_known(), wk::M_LEN | wk::M_CAP) {
         return false;
     }
-    !matches!(method, "float->int" | "ratio->int" | "numerator" | "denominator" | "int->int" | "ash" | "logbitp")
+    !matches!(
+        method.well_known(),
+        wk::M_FLOAT_TO_INT | wk::M_RATIO_TO_INT | wk::M_NUMERATOR | wk::M_DENOMINATOR | wk::M_INT_TO_INT | wk::M_ASH | wk::M_LOGBITP
+    )
 }
 
 /// [`int_boundary_raw`] for a free builtin: `sexpr-int` answers the tagged
 /// word an `int` node already is.
-pub(super) fn int_boundary_native_fn(name: &str) -> bool {
-    name == "sexpr-int"
+pub(super) fn int_boundary_native_fn(name: SymRef) -> bool {
+    name.is(wk::F_SEXPR_INT)
 }
 
 /// The `(TEMPLATE...)` list a `defstruct`/`defenum` form carries: each
@@ -7296,7 +7299,7 @@ impl Checker {
             // body is only code-generated once specialized, so the slot must
             // name the specialization — the same rewrite `check_assoc_call`
             // does for a static call.
-            let mut name = typelisp_mem::symbols::intern(m);
+            let mut name = typelisp_mem::symbols::member_symbol(m);
             if !def.params.is_empty()
                 && self.generic_method_templates.contains_key(&(type_fq.clone(), m.clone()))
             {
@@ -8201,7 +8204,7 @@ impl Checker {
                 self.info.method_definition_form(
                     &mut s,
                     &type_fq,
-                    typelisp_mem::symbols::intern(field_name),
+                    typelisp_mem::symbols::member_symbol(field_name),
                     true,
                     &type_params,
                     &[(internal_local("self"), recv_ty.clone())],
@@ -8238,7 +8241,7 @@ impl Checker {
                 self.info.method_definition_form(
                     &mut s,
                     &type_fq,
-                    typelisp_mem::symbols::intern(&setter_name),
+                    typelisp_mem::symbols::member_symbol(&setter_name),
                     true,
                     &type_params,
                     &[(internal_local("self"), recv_ty.clone()), (internal_local("value"), field_ty.clone())],
@@ -9835,7 +9838,7 @@ impl Checker {
                         self.request_print_object(&Type::Rational);
                         let node = Node::Assoc {
                             owner: Path::primitive("ratio"),
-                            method: typelisp_mem::symbols::intern("ratio->rational"),
+                            method: typelisp_mem::symbols::well_known_symbol(wk::M_RATIO_TO_RATIONAL),
                             instance: true,
                             ret: Type::Rational,
                             args: vec![typed],
@@ -9982,8 +9985,8 @@ impl Checker {
             wk::RETURN => return self.check_return(heap, interp, env, args, arg_locs),
             wk::LIST => return self.check_list_lit(heap, interp, env, args, arg_locs),
             wk::FORMAT => return self.check_format(heap, interp, env, args, arg_locs),
-            wk::PRINT => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
-            wk::PRINTLN => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
+            wk::PRINT => return self.check_print_like(heap, interp, env, wk::F_PRINT_RT, Type::Unit, args, arg_locs),
+            wk::PRINTLN => return self.check_print_like(heap, interp, env, wk::F_PRINTLN_RT, Type::Unit, args, arg_locs),
             wk::EPRINT | wk::EPRINTLN => return self.check_eprint(heap, interp, env, head_sym, args, arg_locs),
             // These two are *shadowable* special forms: a local binding named
             // `read` (a lambda called `(read)`, say) must keep winning, the
@@ -11046,7 +11049,7 @@ impl Checker {
     fn name_written_for(&self, ty: &Type, method: &str) -> SymRef {
         match (ty, self.written_instantiation(ty)) {
             (Type::Named(type_fq, _), Some(args)) => method_specialization(type_fq, method, &args),
-            _ => typelisp_mem::symbols::intern(method),
+            _ => typelisp_mem::symbols::member_symbol(method),
         }
     }
 
@@ -11253,7 +11256,7 @@ impl Checker {
         // specialization drain.
         if let Some(what) = self.validate_where_bounds(&format!("{}::{}", type_fq, method), &af.sig.bounds, &subst, &env.bounds) {
             let ty = subst_apply(&af.sig.ret, &subst);
-            let node = Node::Assoc { owner: type_fq.clone(), method: typelisp_mem::symbols::intern(method), instance, ret: ty.clone(), args: typed };
+            let node = Node::Assoc { owner: type_fq.clone(), method: typelisp_mem::symbols::member_symbol(method), instance, ret: ty.clone(), args: typed };
             return Ok(disagreeing(Checked::of(node, ty.clone()), what, ty));
         }
         // Monomorphization, method side: a call on a generic owner whose
@@ -12337,12 +12340,12 @@ impl Checker {
         // rebuilt here, so the form and the builtin cannot drift apart.
         let ret = self
             .info.reg
-            .fn_sig(&Path::internal("ed-open"))
+            .fn_sig(&Path::internal_builtin(wk::F_ED_OPEN))
             .map(|sig| sig.ret.clone())
             .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
         let file = self.str_literal(heap, &file)?;
         let line = self.literal(heap, wk::INT, Some(Value::Int(line)), Type::Int);
-        Ok(Checked::of(Node::Call { path: Path::internal("ed-open"), args: vec![file, line] }, ret))
+        Ok(Checked::of(Node::Call { path: Path::internal_builtin(wk::F_ED_OPEN), args: vec![file, line] }, ret))
     }
 
     /// `(documentation ...)`'s result baked in: `Option::some` of the
@@ -14570,7 +14573,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, "format", &control_text, control, &items, nth_loc(arg_locs, 1))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        Ok(Checked::of(Node::Call { path: Path::internal("format-rt"), args: vec![dest, control, list] }, Type::Str))
+        Ok(Checked::of(Node::Call { path: Path::internal_builtin(wk::F_FORMAT_RT), args: vec![dest, control, list] }, Type::Str))
     }
 
     /// `(format stream control args…)` — CL's stream destination.
@@ -14702,7 +14705,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        builtin: &str,
+        builtin: u32,
         ret: Type,
         args: &[Value],
         arg_locs: &[Option<Loc>],
@@ -14710,10 +14713,10 @@ impl Checker {
         if args.is_empty() {
             return Err(Error::TypeError(format!(
                 "{}: expected at least a control string",
-                if builtin == "println-rt" { "println" } else { "print" }
+                if builtin == wk::F_PRINTLN_RT { "println" } else { "print" }
             )));
         }
-        let what = if builtin == "println-rt" { "println" } else { "print" };
+        let what = if builtin == wk::F_PRINTLN_RT { "println" } else { "print" };
         let control_text = self.control_string(heap, what, args[0])?;
         let control = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
         let mut items = Vec::new();
@@ -14723,7 +14726,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, what, &control_text, control, &items, nth_loc(arg_locs, 0))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        Ok(Checked::of(Node::Call { path: Path::internal(builtin), args: vec![control, list] }, ret))
+        Ok(Checked::of(Node::Call { path: Path::internal_builtin(builtin), args: vec![control, list] }, ret))
     }
 
     /// The `pprint` family — `(pprint x)`, `(pprint-fill x)`,
@@ -14767,7 +14770,7 @@ impl Checker {
             None => self.literal(heap, wk::INT_ANY_WIDTH, Some(Value::Int(16)), Type::I32),
         };
         let which = self.str_literal(heap, form)?;
-        Ok(Checked::of(Node::Call { path: Path::internal("pprint-rt"), args: vec![which, value, colinc] }, Type::Unit))
+        Ok(Checked::of(Node::Call { path: Path::internal_builtin(wk::F_PPRINT_RT), args: vec![which, value, colinc] }, Type::Unit))
     }
 
     /// `(pprint-logical-block (obj :prefix "(" :suffix ")") body…)` — CLHS
@@ -14842,12 +14845,12 @@ impl Checker {
         // a `let` with no bindings. The block's own value is `unit` — the body
         // is run for its printing effect.
         let flag = self.literal(&mut s, wk::BOOL, Some(Value::Bool(per_line)), Type::Bool);
-        let start = Node::Call { path: Path::internal("pprint-block-start-rt"), args: vec![obj, prefix, flag, suffix] };
+        let start = Node::Call { path: Path::internal_builtin(wk::F_PPRINT_BLOCK_START_RT), args: vec![obj, prefix, flag, suffix] };
         let mut seq = vec![Checked::of(start, Type::Unit)];
         for (i, &form) in args[1..].iter().enumerate() {
             seq.push(self.check_at(&mut s, interp, env, form, None, nth_loc(arg_locs, 1 + i))?);
         }
-        let end = Node::Call { path: Path::internal("pprint-block-end-rt"), args: Vec::new() };
+        let end = Node::Call { path: Path::internal_builtin(wk::F_PPRINT_BLOCK_END_RT), args: Vec::new() };
         seq.push(Checked::of(end, Type::Unit));
         Ok(Checked::of(Node::Let { binds: Vec::new(), body: seq }, Type::Unit))
     }
@@ -15005,7 +15008,7 @@ impl Checker {
         // `(intern NAME)`: CL's current package is the module the call is
         // written in, which only the checker knows, so it becomes the second
         // argument here — the module's path as `intern` reads one.
-        if sig.builtin && args.len() == 1 && name.std_builtin_name() == Some("intern") {
+        if sig.builtin && args.len() == 1 && name.std_builtin().is_some_and(|s| s.is(wk::INTERN)) {
             let ns = heap.alloc_string(typelisp_mem::symbols::ns_path(self.info.ns).join("::"));
             heap.push_root(ns);
             let r = self.check_call(heap, interp, env, name, &[args[0], ns], &[arg_locs[0].clone(), None]);
@@ -17034,7 +17037,7 @@ fn fn_specialization(base: &Path, args: &[Type]) -> Path {
 fn written_member(type_fq: &Path, method: &str, inst: Option<&[Type]>) -> SymRef {
     match inst {
         Some(args) => method_specialization(type_fq, method, args),
-        None => typelisp_mem::symbols::intern(method),
+        None => typelisp_mem::symbols::member_symbol(method),
     }
 }
 
@@ -17044,7 +17047,7 @@ fn written_member(type_fq: &Path, method: &str, inst: Option<&[Type]>) -> SymRef
 /// `impl` wrote it.
 fn method_specialization(type_fq: &Path, method: &str, args: &[Type]) -> SymRef {
     let ids: Vec<TypeId> = args.iter().map(crate::type_key::type_id).collect();
-    specialization(Generic::Method(type_fq.ns(), type_fq.name_symbol(), typelisp_mem::symbols::intern(method)), &ids)
+    specialization(Generic::Method(type_fq.ns(), type_fq.name_symbol(), typelisp_mem::symbols::member_symbol(method)), &ids)
 }
 
 pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<Value, Error> {

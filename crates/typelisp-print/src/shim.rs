@@ -34,7 +34,8 @@
 //! boundary would turn that into an abort.
 
 use typelisp_abi::{active_heap, encode, fatal, raise, tagged_arg};
-use typelisp_mem::Value;
+use typelisp_mem::symbols::well_known_symbol;
+use typelisp_mem::{wk, Value};
 
 use crate::runtime::{print_builtin, PrintError};
 
@@ -44,12 +45,12 @@ use crate::runtime::{print_builtin, PrintError};
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread.
-unsafe fn run(name: &str, args: Vec<Value>) -> Value {
-    match print_builtin(active_heap(), name, &args) {
+unsafe fn run(name: u32, args: Vec<Value>) -> Value {
+    match print_builtin(active_heap(), well_known_symbol(name), &args) {
         Some(Ok(v)) => v,
         Some(Err(PrintError::Raise(msg))) => raise(msg),
         Some(Err(PrintError::Shape(msg))) => fatal(&msg),
-        None => fatal(&format!("print shim: \"{}\" is not a printing builtin", name)),
+        None => fatal(&format!("print shim: \"{}\" is not a printing builtin", well_known_symbol(name))),
     }
 }
 
@@ -80,14 +81,14 @@ pub unsafe extern "C-unwind" fn rt_format(args: *const i64, argc: u32) -> i64 {
     let dest = Value::Bool(*args != 0);
     let control = tagged_arg(args, 1);
     let list = tagged_arg(args, 2);
-    encode(run("format-rt", vec![dest, control, list]))
+    encode(run(wk::F_FORMAT_RT, vec![dest, control, list]))
 }
 
 /// Generates `rt_print`/`rt_println`, which differ only in the trailing
 /// newline. `args[0]` is the control string, `args[1]` the argument list;
 /// both return `()`, which is a bare `0`.
 macro_rules! print_shim {
-    ($shim:ident, $name:literal) => {
+    ($shim:ident, $name:expr) => {
         /// `print`/`println` for compiled code — see [`crate::runtime::print_builtin`].
         ///
         /// # Safety
@@ -103,8 +104,8 @@ macro_rules! print_shim {
     };
 }
 
-print_shim!(rt_print, "print-rt");
-print_shim!(rt_println, "println-rt");
+print_shim!(rt_print, wk::F_PRINT_RT);
+print_shim!(rt_println, wk::F_PRINTLN_RT);
 
 /// `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular` — `args[0]` names
 /// which (as a string, so one shim serves all four), `args[1]` is the object
@@ -120,7 +121,7 @@ pub unsafe extern "C-unwind" fn rt_pprint(args: *const i64, argc: u32) -> i64 {
     let which = tagged_arg(args, 0);
     let value = tagged_arg(args, 1);
     let colinc = Value::Int(*args.add(2));
-    run("pprint-rt", vec![which, value, colinc]);
+    run(wk::F_PPRINT_RT, vec![which, value, colinc]);
     0
 }
 
@@ -139,7 +140,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_start(args: *const i64, argc: u3
     let prefix = tagged_arg(args, 1);
     let per_line = Value::Bool(*args.add(2) != 0);
     let suffix = tagged_arg(args, 3);
-    run("pprint-block-start-rt", vec![obj, prefix, per_line, suffix]);
+    run(wk::F_PPRINT_BLOCK_START_RT, vec![obj, prefix, per_line, suffix]);
     0
 }
 
@@ -150,7 +151,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_start(args: *const i64, argc: u3
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_block_end(_args: *const i64, _argc: u32) -> i64 {
-    run("pprint-block-end-rt", Vec::new());
+    run(wk::F_PPRINT_BLOCK_END_RT, Vec::new());
     0
 }
 
@@ -163,7 +164,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_end(_args: *const i64, _argc: u3
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_newline(args: *const i64, argc: u32) -> i64 {
     check_argc(argc, 1, "rt_pprint_newline");
-    run("pprint-newline", vec![tagged_arg(args, 0)]);
+    run(wk::F_PPRINT_NEWLINE, vec![tagged_arg(args, 0)]);
     0
 }
 
@@ -178,7 +179,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_indent(args: *const i64, argc: u32) ->
     check_argc(argc, 2, "rt_pprint_indent");
     let kind = tagged_arg(args, 0);
     let n = Value::Int(*args.add(1));
-    run("pprint-indent", vec![kind, n]);
+    run(wk::F_PPRINT_INDENT, vec![kind, n]);
     0
 }
 
@@ -194,7 +195,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_tab(args: *const i64, argc: u32) -> i6
     let kind = tagged_arg(args, 0);
     let colnum = Value::Int(*args.add(1));
     let colinc = Value::Int(*args.add(2));
-    run("pprint-tab", vec![kind, colnum, colinc]);
+    run(wk::F_PPRINT_TAB, vec![kind, colnum, colinc]);
     0
 }
 
@@ -206,7 +207,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_tab(args: *const i64, argc: u32) -> i6
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_pop(_args: *const i64, _argc: u32) -> i64 {
-    encode(run("pprint-pop", Vec::new()))
+    encode(run(wk::F_PPRINT_POP, Vec::new()))
 }
 
 /// `(pprint-list-exhausted)` — a bare `0`/`1`.
@@ -216,7 +217,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_pop(_args: *const i64, _argc: u32) -> 
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_list_exhausted(_args: *const i64, _argc: u32) -> i64 {
-    match run("pprint-list-exhausted", Vec::new()) {
+    match run(wk::F_PPRINT_LIST_EXHAUSTED, Vec::new()) {
         Value::Bool(b) => i64::from(b),
         other => fatal(&format!("rt_pprint_list_exhausted: expected a bool, got {:?}", other)),
     }

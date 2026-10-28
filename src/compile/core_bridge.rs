@@ -1219,7 +1219,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         return Err(malformed(heap, form));
     }
     let type_name = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
-    let method = symbol_field(heap, form, 1)?;
+    let method = symbol_field_sym(heap, form, 1)?;
     let Value::Bool(instance) = parts[2] else { return Err(malformed(heap, form)) };
     let ret = Repr::read(heap, parts[3]).ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, parts[4])?;
@@ -1232,21 +1232,21 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // instance call with, so its representation is the first of the list.
     let self_repr = if instance { reprs.first().unwrap_or(&ret) } else { &ret }.clone();
 
-    if path_is_builtin(&type_name, typelisp_mem::wk::VECTOR) && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_vector_op(heap, &method, &self_repr, ret_type, &args, cx);
+    if path_is_builtin(&type_name, typelisp_mem::wk::VECTOR) && VECTOR_BUILTIN_METHODS.contains(&method.well_known()) {
+        return translate_vector_op(heap, method, &self_repr, ret_type, &args, cx);
     }
-    if path_is_builtin(&type_name, typelisp_mem::wk::HASHTABLE) && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_hashtable_op(heap, &method, &self_repr, ret_type, &args, cx);
+    if path_is_builtin(&type_name, typelisp_mem::wk::HASHTABLE) && HASHTABLE_BUILTIN_METHODS.contains(&method.well_known()) {
+        return translate_hashtable_op(heap, method, &self_repr, ret_type, &args, cx);
     }
     // `(wait t)` — the method-shaped member of the suspending set. Its answer
     // is *typed* (`Task<T>` -> `T`), which is the whole reason suspension is a
     // node carrying a kind rather than a name the island sniffs: a `call` node
     // has room for its arguments' representations and not for its result's.
-    if let Some(shim) = crate::compile::externs::rt_suspend_method_symbol(&type_name, &method) {
+    if let Some(shim) = crate::compile::externs::rt_suspend_method_symbol(&type_name, method) {
         if type_name.is_std() {
             // `(send ch v)`: the value is the one argument whose meaning the
             // driver cannot recover from its word, so it crosses tagged.
-            if method == "send" {
+            if method.is(wk::SEND) {
                 let elem = reprs.get(1).cloned().unwrap_or(Repr::Sexpr);
                 let tag = Some((1usize, elem.field_kind()));
                 return suspend_node(heap, shim, ret.field_kind(), tag, &reprs, &args, cx, None);
@@ -1259,7 +1259,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             // `(Chan::new cap)` carries the channel's own key the same way:
             // the handle is built by the scheduler, which has no type to read
             // `T` off.
-            if method == "recv" || method == "new" {
+            if method.is(wk::RECV) || method.is(wk::M_NEW) {
                 let key = type_ref(heap, ret_type)?;
                 return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, Some(key));
             }
@@ -1269,7 +1269,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // A builtin static method with a shim of its own (`Thread::current-id`)
     // is an ordinary call of that shim: nothing is waited for, and there is
     // no compiled body to call.
-    if let Some(shim) = crate::compile::externs::rt_static_method_symbol(&type_name, &method) {
+    if let Some(shim) = crate::compile::externs::rt_static_method_symbol(&type_name, method) {
         if type_name.is_std() && !instance {
             let name_v = heap.alloc_string(shim.to_string());
             let mut f = Items::new(heap);
@@ -1279,7 +1279,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         }
     }
     if let Some(key) = llvm_op_key(&type_name, &self_repr) {
-        let opid = Value::Int(llvm_op_id(key, &method));
+        let opid = Value::Int(llvm_op_id(key, method.name()));
         let mut f = Items::new(heap);
         f.push(opid);
         arg_pairs(&mut f, &reprs, &args, cx)?;
@@ -1291,10 +1291,10 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // names, and calls every other one by `SYMBOL`
     // ([`ConcreteNames::method_symbol`]), the name its body was compiled
     // under.
-    let symbol = ConcreteNames::method_symbol(&type_name, &method);
+    let symbol = ConcreteNames::method_symbol(&type_name, method.name());
     let mut f = Items::new(heap);
     f.push(builtin_receiver(&type_name));
-    let method_v = f.heap().alloc_string(method);
+    let method_v = f.heap().alloc_string(method.name().to_string());
     f.push(method_v);
     f.push(Value::Bool(instance));
     let symbol_v = f.heap().alloc_string(symbol);
@@ -1333,21 +1333,21 @@ fn llvm_op_key(type_name: &Path, self_repr: &Repr) -> Option<&'static str> {
 /// returns `Option<T>` and needs that type to build the result with.
 fn translate_vector_op(
     heap: &mut Heap,
-    method: &str,
+    method: SymRef,
     self_repr: &Repr,
     ret_type: Value,
     args: &[Value],
     cx: Ctx,
 ) -> Result<Value, Error> {
     let kind = match self_repr {
-        Repr::Vector(t) if method != "new" => t.field_kind(),
+        Repr::Vector(t) if !method.is(wk::M_NEW) => t.field_kind(),
         _ => 0,
     };
-    let method_v = heap.alloc_string(method.to_string());
+    let method_v = heap.alloc_string(method.name().to_string());
     let mut f = Items::new(heap);
     f.push(method_v);
     f.push(Value::Int(kind));
-    if method == "new" {
+    if method.is(wk::M_NEW) {
         // The instantiated type, not the bare `vector`: this *is* the
         // value's runtime identity, and a pattern that tests it was compiled
         // from the same type (`Checker::pattern_form`).
@@ -1359,7 +1359,7 @@ fn translate_vector_op(
             f.push(v);
         }
     }
-    if method == "pop" {
+    if method.is(wk::M_POP) {
         // `pop`'s result *is* this `Option<T>`.
         let name = type_ref(f.heap(), ret_type)?;
         f.push(name);
@@ -1375,7 +1375,7 @@ fn translate_vector_op(
 /// primitives build nothing, so they leave it empty.
 fn translate_hashtable_op(
     heap: &mut Heap,
-    method: &str,
+    method: SymRef,
     self_repr: &Repr,
     ret_type: Value,
     args: &[Value],
@@ -1385,7 +1385,7 @@ fn translate_hashtable_op(
         Repr::HashTable(k, v) => (k.field_kind(), v.field_kind()),
         _ => (0, 0),
     };
-    let method_v = heap.alloc_string(method.to_string());
+    let method_v = heap.alloc_string(method.name().to_string());
     let mut f = Items::new(heap);
     f.push(method_v);
     f.push(Value::Int(kk));
@@ -1394,10 +1394,10 @@ fn translate_hashtable_op(
     // identity it must carry. `new` builds the table itself;
     // `keys`/`values`/`entries` build a `Vector<_>`. The ops that build
     // nothing (`count`, `clear`, and the whole bucket family) leave it empty.
-    let builds_a_box = matches!(method, "new" | "keys" | "values" | "entries");
+    let builds_a_box = matches!(method.well_known(), wk::M_NEW | wk::M_KEYS | wk::M_VALUES | wk::M_ENTRIES);
     let result_name = if builds_a_box { type_ref(f.heap(), ret_type)? } else { Value::Empty };
     f.push(result_name);
-    if method != "new" {
+    if !method.is(wk::M_NEW) {
         for a in args {
             let v = to_island(f.heap(), *a, cx)?;
             f.push(v);
@@ -3286,6 +3286,19 @@ mod tests {
         core::print(&h, island)
     }
 
+    /// An `assoc` names its method by the member symbol the checker writes
+    /// (`member_symbol`), which a fixture read as text cannot spell.
+    fn as_member_name(h: &mut Heap, form: Value) {
+        let Ok(head) = h.car(form) else { return };
+        if !matches!(head, Value::Symbol(s) if s.is(wk::ASSOC)) {
+            return;
+        }
+        let slot = h.cdr(form).and_then(|rest| h.cdr(rest)).expect("an assoc has a method field");
+        if let Ok(Value::Symbol(m)) = h.car(slot) {
+            h.set_car(slot, Value::Symbol(typelisp_mem::symbols::member_symbol(m.name()))).expect("setting a cons's car");
+        }
+    }
+
     /// The promoted globals the `global`/`set-global` examples refer to.
     fn globals() -> HashMap<Path, usize> {
         [(Path::root("counter"), 3usize), (Path::of(&["m", "total"]), 7)]
@@ -3304,6 +3317,7 @@ mod tests {
         assert_eq!(vs.len(), 1, "expected one form in {:?}", src);
         let core_form = vs.pop().unwrap();
         h.push_root(core_form);
+        as_member_name(&mut h, core_form);
         // What the driver does before translating a function body: the
         // bindings something nested captures have to be cells from the start.
         let cells = typelisp_front::check::freevars::names_captured_by_nested(&h, &[core_form])

@@ -17,7 +17,7 @@
 //! signature still lives in the registry with the others, since the checker
 //! needs it.
 
-use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
+use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeId, TypeSpec, Value};
 
 use crate::stream::with_streams;
 use crate::stream_builtin::{int, lookup, text, ArgError};
@@ -27,55 +27,55 @@ const NET_ERROR: TypeSpec = TypeSpec::Named(StdModule::NET, "NetError", &[]);
 /// The runtime type each builtin's *result* carries — [`crate::
 /// stream_builtin::RESULT_TYPES`]'s companion, checked against the registry
 /// by the same guard test and for the same reason.
-pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
-    ("net-resolve-begin", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
-    ("net-resolve-finish", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])]), NET_ERROR])),
-    ("net-connect-begin", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
-    ("net-connect-finish", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-listen", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
-    ("net-tls-listen", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
-    ("net-unix-connect", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
-    ("net-unix-listen", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
-    ("net-accept", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::I32]), NET_ERROR])),
-    ("net-fill", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
-    ("net-pop-byte", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
-    ("net-pop-char", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::CHAR]), NET_ERROR])),
-    ("net-buffered-p", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::BOOL, NET_ERROR])),
-    ("net-push-string", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-push-byte", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-flush", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
-    ("net-socket-error", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), NET_ERROR])),
-    ("net-peer-subject", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), NET_ERROR])),
-    ("net-server-name", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), NET_ERROR])),
-    ("net-set-nodelay", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-set-keepalive", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-set-keepalive-period", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-tls-add-certificate", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-shutdown-write", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-local-address", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, NET_ERROR])),
-    ("net-peer-address", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, NET_ERROR])),
-    ("net-tls-start", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
-    ("net-tls-handshake", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
-    ("net-udp-bind", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
-    ("net-udp-send-to", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::BOOL, NET_ERROR])),
-    ("net-udp-recv", TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::INT])]), NET_ERROR])),
-    ("net-udp-last-sender", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, NET_ERROR])),
+pub const RESULT_TYPES: &[(u32, TypeSpec)] = &[
+    (wk::F_NET_RESOLVE_BEGIN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
+    (wk::F_NET_RESOLVE_FINISH, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])]), NET_ERROR])),
+    (wk::F_NET_CONNECT_BEGIN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
+    (wk::F_NET_CONNECT_FINISH, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_LISTEN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
+    (wk::F_NET_TLS_LISTEN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
+    (wk::F_NET_UNIX_CONNECT, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
+    (wk::F_NET_UNIX_LISTEN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
+    (wk::F_NET_ACCEPT, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::I32]), NET_ERROR])),
+    (wk::F_NET_FILL, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
+    (wk::F_NET_POP_BYTE, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
+    (wk::F_NET_POP_CHAR, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::CHAR]), NET_ERROR])),
+    (wk::F_NET_BUFFERED_P, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::BOOL, NET_ERROR])),
+    (wk::F_NET_PUSH_STRING, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_PUSH_BYTE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_FLUSH, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
+    (wk::F_NET_SOCKET_ERROR, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), NET_ERROR])),
+    (wk::F_NET_PEER_SUBJECT, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), NET_ERROR])),
+    (wk::F_NET_SERVER_NAME, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), NET_ERROR])),
+    (wk::F_NET_SET_NODELAY, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_SET_KEEPALIVE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_SET_KEEPALIVE_PERIOD, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_TLS_ADD_CERTIFICATE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_SHUTDOWN_WRITE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_LOCAL_ADDRESS, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, NET_ERROR])),
+    (wk::F_NET_PEER_ADDRESS, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, NET_ERROR])),
+    (wk::F_NET_TLS_START, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, NET_ERROR])),
+    (wk::F_NET_TLS_HANDSHAKE, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT]), NET_ERROR])),
+    (wk::F_NET_UDP_BIND, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, NET_ERROR])),
+    (wk::F_NET_UDP_SEND_TO, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::BOOL, NET_ERROR])),
+    (wk::F_NET_UDP_RECV, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::INT])]), NET_ERROR])),
+    (wk::F_NET_UDP_LAST_SENDER, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, NET_ERROR])),
 ];
 
 /// The type of the value inside the `Result`, for the builtins whose payload
 /// is itself a box.
-pub const INNER_TYPES: &[(&str, TypeSpec)] = &[
-    ("net-resolve-finish", TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])])),
-    ("net-tls-handshake", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
-    ("net-udp-recv", TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::INT])])),
-    ("net-accept", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::I32])),
-    ("net-fill", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
-    ("net-flush", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
-    ("net-socket-error", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("net-peer-subject", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("net-server-name", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("net-pop-byte", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
-    ("net-pop-char", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::CHAR])),
+pub const INNER_TYPES: &[(u32, TypeSpec)] = &[
+    (wk::F_NET_RESOLVE_FINISH, TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])])),
+    (wk::F_NET_TLS_HANDSHAKE, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
+    (wk::F_NET_UDP_RECV, TypeSpec::Named(StdModule::OPTION, "Option", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::INT])])),
+    (wk::F_NET_ACCEPT, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::I32])),
+    (wk::F_NET_FILL, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
+    (wk::F_NET_FLUSH, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
+    (wk::F_NET_SOCKET_ERROR, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_NET_PEER_SUBJECT, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_NET_SERVER_NAME, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_NET_POP_BYTE, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
+    (wk::F_NET_POP_CHAR, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::CHAR])),
 ];
 
 /// A `bool` argument.
@@ -95,21 +95,21 @@ fn opt_text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Option<S
     }
 }
 
-fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
+fn result_ok(heap: &mut Heap, name: SymRef, v: Value) -> Value {
     let key = lookup(RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 0, vec![v])
 }
 
 /// `Err(NetError(msg))`. `NetError` has one variant (index 0) carrying the
 /// message, the shape every built-in error type has.
-fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
+fn result_err(heap: &mut Heap, name: SymRef, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
     let err_val = heap.alloc_enum(TypeId::NET_ERROR, 0, vec![msg_val]);
     let key = lookup(RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
-fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
+fn option_value(heap: &mut Heap, name: SymRef, v: Option<Value>) -> Value {
     heap.alloc_option(lookup(INNER_TYPES, name, "inner"), v)
 }
 
@@ -139,12 +139,13 @@ fn bytes(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Result<Vec<
 /// Every `net-*` builtin that answers with a value, or `None` if `name`
 /// isn't one. The `Ok`/`Err` of the return is about the arguments' shape,
 /// exactly as in [`crate::stream_builtin::stream_builtin`].
-pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, ArgError>> {
+pub fn net_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Result<Value, ArgError>> {
+    let name = sym.name();
     macro_rules! wrap {
         ($e:expr, $ok:expr) => {
             match $e {
-                Ok(v) => Ok(result_ok(heap, name, $ok(v))),
-                Err(m) => Ok(result_err(heap, name, m)),
+                Ok(v) => Ok(result_ok(heap, sym, $ok(v))),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         };
     }
@@ -153,10 +154,10 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         ($e:expr, $ok:expr) => {
             match $e {
                 Ok(v) => {
-                    let inner = option_value(heap, name, v.map($ok));
-                    Ok(result_ok(heap, name, inner))
+                    let inner = option_value(heap, sym, v.map($ok));
+                    Ok(result_ok(heap, sym, inner))
                 }
-                Err(m) => Ok(result_err(heap, name, m)),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         };
     }
@@ -169,36 +170,36 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         };
     }
 
-    Some(match name {
-        "net-resolve-begin" => {
+    Some(match sym.well_known() {
+        wk::F_NET_RESOLVE_BEGIN => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             wrap!(with_streams(heap, |t| t.net_resolve_begin(&host, port)), |v: i64| Value::Int(v))
         }
         // The addresses as a `Vector<string>` box — `file-list-directory`'s
         // shape, safe for its reason: nothing between the element
         // allocations and the box can collect.
-        "net-resolve-finish" => {
+        wk::F_NET_RESOLVE_FINISH => {
             let h = arg!(int(args, 0, name));
             match with_streams(heap, |t| t.net_resolve_finish(h)) {
                 Ok(Some(all)) => {
                     let elems: Vec<Value> = all.into_iter().map(|a| heap.alloc_string(a)).collect();
                     let key = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING]));
                     let vec_val = heap.alloc_struct(key, elems);
-                    let ov = option_value(heap, name, Some(vec_val));
-                    Ok(result_ok(heap, name, ov))
+                    let ov = option_value(heap, sym, Some(vec_val));
+                    Ok(result_ok(heap, sym, ov))
                 }
                 Ok(None) => {
-                    let ov = option_value(heap, name, None);
-                    Ok(result_ok(heap, name, ov))
+                    let ov = option_value(heap, sym, None);
+                    Ok(result_ok(heap, sym, ov))
                 }
-                Err(m) => Ok(result_err(heap, name, m)),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         }
-        "net-connect-begin" => {
+        wk::F_NET_CONNECT_BEGIN => {
             let addr = arg!(text(heap, args, 0, name));
             wrap!(with_streams(heap, |t| t.net_connect_begin(&addr)), |v: i64| Value::Int(v))
         }
-        "net-tls-start" => {
+        wk::F_NET_TLS_START => {
             let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             let ca = arg!(opt_text(heap, args, 2, name));
             let (cert, key) = (arg!(opt_text(heap, args, 3, name)), arg!(opt_text(heap, args, 4, name)));
@@ -207,7 +208,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
                 |_v: ()| Value::Empty
             )
         }
-        "net-tls-listen" => {
+        wk::F_NET_TLS_LISTEN => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             let (cert, key) = (arg!(text(heap, args, 2, name)), arg!(text(heap, args, 3, name)));
             let client_ca = arg!(opt_text(heap, args, 4, name));
@@ -215,142 +216,142 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
         }
         // The text as a string box inside the `Option`: allocated first,
         // then boxed, with nothing that can collect in between.
-        "net-socket-error" | "net-peer-subject" | "net-server-name" => {
+        wk::F_NET_SOCKET_ERROR | wk::F_NET_PEER_SUBJECT | wk::F_NET_SERVER_NAME => {
             let h = arg!(int(args, 0, name));
-            let answer = with_streams(heap, |t| match name {
-                "net-socket-error" => t.net_socket_error(h),
-                "net-peer-subject" => t.net_peer_subject(h),
+            let answer = with_streams(heap, |t| match sym.well_known() {
+                wk::F_NET_SOCKET_ERROR => t.net_socket_error(h),
+                wk::F_NET_PEER_SUBJECT => t.net_peer_subject(h),
                 _ => t.net_server_name(h),
             });
             match answer {
                 Ok(what) => {
                     let inner = what.map(|m| heap.alloc_string(m));
-                    let ov = option_value(heap, name, inner);
-                    Ok(result_ok(heap, name, ov))
+                    let ov = option_value(heap, sym, inner);
+                    Ok(result_ok(heap, sym, ov))
                 }
-                Err(m) => Ok(result_err(heap, name, m)),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         }
-        "net-set-nodelay" => {
+        wk::F_NET_SET_NODELAY => {
             let (h, on) = (arg!(int(args, 0, name)), arg!(flag(args, 1, name)));
             wrap!(with_streams(heap, |t| t.net_set_nodelay(h, on)), |_v: ()| Value::Empty)
         }
-        "net-set-keepalive" => {
+        wk::F_NET_SET_KEEPALIVE => {
             let (h, on) = (arg!(int(args, 0, name)), arg!(flag(args, 1, name)));
             wrap!(with_streams(heap, |t| t.net_set_keepalive(h, on)), |_v: ()| Value::Empty)
         }
-        "net-set-keepalive-period" => {
+        wk::F_NET_SET_KEEPALIVE_PERIOD => {
             let (h, secs) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
             wrap!(with_streams(heap, |t| t.net_set_keepalive_period(h, secs)), |_v: ()| Value::Empty)
         }
-        "net-tls-add-certificate" => {
+        wk::F_NET_TLS_ADD_CERTIFICATE => {
             let (h, host) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             let (cert, key) = (arg!(text(heap, args, 2, name)), arg!(text(heap, args, 3, name)));
             wrap!(with_streams(heap, |t| t.net_tls_add_certificate(h, &host, &cert, &key)), |_v: ()| Value::Empty)
         }
-        "net-tls-handshake" => {
+        wk::F_NET_TLS_HANDSHAKE => {
             let h = arg!(int(args, 0, name));
             wrap_option!(with_streams(heap, |t| t.net_tls_handshake(h)), Value::Int)
         }
-        "net-udp-bind" => {
+        wk::F_NET_UDP_BIND => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             wrap!(with_streams(heap, |t| t.net_udp_bind(&host, port)), |v: i64| Value::Int(v))
         }
-        "net-udp-send-to" => {
+        wk::F_NET_UDP_SEND_TO => {
             let (h, addr) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             match arg!(bytes(heap, args, 2, name)) {
                 Ok(data) => wrap!(with_streams(heap, |t| t.net_udp_send_to(h, &addr, &data)), |v: bool| Value::Bool(v)),
-                Err(m) => Ok(result_err(heap, name, m)),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         }
         // The datagram as a `Vector<int>` box. Allocating every element
         // before the box is safe for `file-list-directory`'s reason:
         // `Value::Int` allocates nothing and `alloc_struct` never collects.
-        "net-udp-recv" => {
+        wk::F_NET_UDP_RECV => {
             let h = arg!(int(args, 0, name));
             match with_streams(heap, |t| t.net_udp_recv(h)) {
                 Ok(Some(data)) => {
                     let elems: Vec<Value> = data.into_iter().map(|b| Value::Int(b as i64)).collect();
                     let key = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::VEC, "Vector", &[spec::INT]));
                     let vec_val = heap.alloc_struct(key, elems);
-                    let ov = option_value(heap, name, Some(vec_val));
-                    Ok(result_ok(heap, name, ov))
+                    let ov = option_value(heap, sym, Some(vec_val));
+                    Ok(result_ok(heap, sym, ov))
                 }
                 Ok(None) => {
-                    let ov = option_value(heap, name, None);
-                    Ok(result_ok(heap, name, ov))
+                    let ov = option_value(heap, sym, None);
+                    Ok(result_ok(heap, sym, ov))
                 }
-                Err(m) => Ok(result_err(heap, name, m)),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         }
-        "net-udp-last-sender" => {
+        wk::F_NET_UDP_LAST_SENDER => {
             let h = arg!(int(args, 0, name));
             match with_streams(heap, |t| t.net_udp_last_sender(h)) {
                 Ok(s) => {
                     let sv = heap.alloc_string(s);
-                    Ok(result_ok(heap, name, sv))
+                    Ok(result_ok(heap, sym, sv))
                 }
-                Err(m) => Ok(result_err(heap, name, m)),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         }
-        "net-connect-finish" => {
+        wk::F_NET_CONNECT_FINISH => {
             let h = arg!(int(args, 0, name));
             wrap!(with_streams(heap, |t| t.net_connect_finish(h)), |_v: ()| Value::Empty)
         }
-        "net-listen" => {
+        wk::F_NET_LISTEN => {
             let (host, port) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             wrap!(with_streams(heap, |t| t.net_listen(&host, port)), |v: i64| Value::Int(v))
         }
-        "net-unix-connect" => {
+        wk::F_NET_UNIX_CONNECT => {
             let path = arg!(text(heap, args, 0, name));
             wrap!(with_streams(heap, |t| t.net_unix_connect(&path)), |v: i64| Value::Int(v))
         }
-        "net-unix-listen" => {
+        wk::F_NET_UNIX_LISTEN => {
             let path = arg!(text(heap, args, 0, name));
             wrap!(with_streams(heap, |t| t.net_unix_listen(&path)), |v: i64| Value::Int(v))
         }
-        "net-accept" => {
+        wk::F_NET_ACCEPT => {
             let h = arg!(int(args, 0, name));
             wrap_option!(with_streams(heap, |t| t.net_accept(h)), Value::Int)
         }
-        "net-fill" => {
+        wk::F_NET_FILL => {
             let h = arg!(int(args, 0, name));
             wrap_option!(with_streams(heap, |t| t.net_fill(h)), |n: usize| Value::Int(n as i64))
         }
-        "net-pop-byte" => {
+        wk::F_NET_POP_BYTE => {
             let h = arg!(int(args, 0, name));
             wrap_option!(with_streams(heap, |t| t.net_pop_byte(h)), |b: u8| Value::Int(b as i64))
         }
-        "net-pop-char" => {
+        wk::F_NET_POP_CHAR => {
             let h = arg!(int(args, 0, name));
             wrap_option!(with_streams(heap, |t| t.net_pop_char(h)), Value::Char)
         }
-        "net-buffered-p" => {
+        wk::F_NET_BUFFERED_P => {
             let h = arg!(int(args, 0, name));
             wrap!(with_streams(heap, |t| t.net_buffered(h)), |v: bool| Value::Bool(v))
         }
-        "net-push-string" => {
+        wk::F_NET_PUSH_STRING => {
             let (h, s) = (arg!(int(args, 0, name)), arg!(text(heap, args, 1, name)));
             wrap!(with_streams(heap, |t| t.net_push_string(h, &s)), |_v: ()| Value::Empty)
         }
-        "net-push-byte" => {
+        wk::F_NET_PUSH_BYTE => {
             let (h, b) = (arg!(int(args, 0, name)), arg!(int(args, 1, name)));
             match u8::try_from(b) {
                 Ok(b) => wrap!(with_streams(heap, |t| t.net_push_byte(h, b)), |_v: ()| Value::Empty),
-                Err(_) => Ok(result_err(heap, name, format!("write-byte: {} is not a byte (0..255)", b))),
+                Err(_) => Ok(result_err(heap, sym, format!("write-byte: {} is not a byte (0..255)", b))),
             }
         }
-        "net-flush" => {
+        wk::F_NET_FLUSH => {
             let h = arg!(int(args, 0, name));
             wrap_option!(with_streams(heap, |t| t.net_flush(h)), Value::Int)
         }
-        "net-shutdown-write" => {
+        wk::F_NET_SHUTDOWN_WRITE => {
             let h = arg!(int(args, 0, name));
             wrap!(with_streams(heap, |t| t.net_shutdown_write(h)), |_v: ()| Value::Empty)
         }
-        "net-local-address" | "net-peer-address" => {
+        wk::F_NET_LOCAL_ADDRESS | wk::F_NET_PEER_ADDRESS => {
             let h = arg!(int(args, 0, name));
-            let r = if name == "net-local-address" {
+            let r = if sym.is(wk::F_NET_LOCAL_ADDRESS) {
                 with_streams(heap, |t| t.net_local_address(h))
             } else {
                 with_streams(heap, |t| t.net_peer_address(h))
@@ -358,9 +359,9 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             match r {
                 Ok(s) => {
                     let sv = heap.alloc_string(s);
-                    Ok(result_ok(heap, name, sv))
+                    Ok(result_ok(heap, sym, sv))
                 }
-                Err(m) => Ok(result_err(heap, name, m)),
+                Err(m) => Ok(result_err(heap, sym, m)),
             }
         }
         _ => return None,

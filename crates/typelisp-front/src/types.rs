@@ -87,6 +87,12 @@ impl Path {
         Path::in_ns(internal_ns(), name)
     }
 
+    /// The internal builtin whose name is the vocabulary symbol `k`
+    /// (`wk::F_C_ALLOC` ...), in the library's internal module.
+    pub fn internal_builtin(k: u32) -> Path {
+        Path::of_symbol(internal_ns(), symbols::well_known_symbol(k))
+    }
+
     /// The built-in type whose name is the vocabulary symbol `ty`
     /// (`wk::OPTION` ...), in the module that defines it: `%core` for the
     /// LLVM handle types, which only the compiler island works with, and
@@ -108,11 +114,11 @@ impl Path {
         Path::in_ns(NsId::STD, name)
     }
 
-    /// The name of the free builtin this path names, if it names one where
+    /// The symbol of the free builtin this path names, if it names one where
     /// builtins are registered: `std` or a module inside it. The same last
     /// segment anywhere else is somebody's own definition.
-    pub fn std_builtin_name(&self) -> Option<&'static str> {
-        in_std(self.ns).then(|| self.last_segment())
+    pub fn std_builtin(&self) -> Option<SymRef> {
+        in_std(self.ns).then_some(self.name)
     }
 
     /// Whether this path is inside the standard library — `std` or a module

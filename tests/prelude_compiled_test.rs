@@ -16,7 +16,7 @@ fn f(name: &str) -> CompileTarget {
 
 /// A method of a primitive type (`std::primitive`).
 fn m(type_name: &str, name: &str) -> CompileTarget {
-    CompileTarget::Method(Path::primitive(type_name), typelisp_mem::symbols::intern(name))
+    CompileTarget::Method(Path::primitive(type_name), typelisp_mem::symbols::member_symbol(name))
 }
 
 /// A prelude-loaded environment, with the compiled bodies (`compiled = true`)
@@ -79,8 +79,8 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
     let (_heap, _chk, interp) = env(true);
     for target in [
         // was: `stream-read-char` / `stream-write-string`
-        CompileTarget::Method(Path::in_ns(typelisp::std_module("io"), "file-stream"), typelisp_mem::symbols::intern("read-char")),
-        CompileTarget::Method(Path::in_ns(typelisp::std_module("io"), "string-output-stream"), typelisp_mem::symbols::intern("write-string")),
+        CompileTarget::Method(Path::in_ns(typelisp::std_module("io"), "file-stream"), typelisp_mem::symbols::member_symbol("read-char")),
+        CompileTarget::Method(Path::in_ns(typelisp::std_module("io"), "string-output-stream"), typelisp_mem::symbols::member_symbol("write-string")),
         // was: `char::char->string`
         CompileTarget::Fn(Path::internal("reader-whitespacep")),
         // was: `random-state-next` / `make-random-state-fresh`

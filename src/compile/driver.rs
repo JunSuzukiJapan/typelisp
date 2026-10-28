@@ -776,7 +776,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // and `get`/`set`/`remove`/`maphash`/`size` — are deliberately
             // absent from that list, so they are validated and transitively
             // compiled like any other method.
-            if path_is_builtin(&key.0, typelisp_mem::wk::HASHTABLE) && HASHTABLE_BUILTIN_METHODS.contains(&key.1.name()) {
+            if path_is_builtin(&key.0, typelisp_mem::wk::HASHTABLE) && HASHTABLE_BUILTIN_METHODS.contains(&key.1.well_known()) {
                 return false;
             }
             // `llvm-*`/`scope` builtin methods are natively lowered to
@@ -813,18 +813,18 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // `core_bridge` lowers it to a plain `rt_*` call, and there is no
             // function for the graph to reach either.
             if key.0.is_std()
-                && (crate::compile::externs::rt_suspend_method_symbol(&key.0, key.1.name()).is_some()
-                    || crate::compile::externs::rt_static_method_symbol(&key.0, key.1.name()).is_some())
+                && (crate::compile::externs::rt_suspend_method_symbol(&key.0, key.1).is_some()
+                    || crate::compile::externs::rt_static_method_symbol(&key.0, key.1).is_some())
             {
                 return false;
             }
-            interp.root.borrow().has_method(&key.0, key.1.name())
+            interp.root.borrow().has_method(&key.0, key.1)
                 || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
-                || !is_native_lowered_primitive_method(&key.0, key.1.name())
+                || !is_native_lowered_primitive_method(&key.0, key.1)
         })
         .collect();
     for (type_name, method) in &method_targets {
-        if !interp.root.borrow().has_method(type_name, method.name()) {
+        if !interp.root.borrow().has_method(type_name, *method) {
             return Err(EvalError::Uncompilable {
                 caller: node.link_name(),
                 target: typelisp_mem::ConcreteNames::method_link(type_name, method.name()),

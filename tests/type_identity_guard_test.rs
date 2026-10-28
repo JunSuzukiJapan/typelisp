@@ -299,6 +299,7 @@ fn the_runtime_result_types_match_the_registry() {
         .chain(typelisp_rt::sys_builtin::RESULT_TYPES)
         .chain(typelisp_rt::net_builtin::RESULT_TYPES)
     {
+        let name = typelisp_mem::BUILTIN_SYMBOLS[*name as usize];
         check(spec, &sig_of(name).ret, &format!("`{}`'s result", name));
     }
     check(&typelisp_read::shim::READ_RESULT_TYPE, &sig_of("read").ret, "`read`'s result");
@@ -316,6 +317,7 @@ fn the_runtime_result_types_match_the_registry() {
         }
     };
     for (name, spec) in typelisp_rt::stream_builtin::INNER_TYPES.iter().chain(typelisp_rt::net_builtin::INNER_TYPES) {
+        let name = typelisp_mem::BUILTIN_SYMBOLS[*name as usize];
         check(spec, &ok_payload(name), &format!("`{}`'s inner value", name));
     }
     check(&typelisp_read::shim::READ_DATUM_PAIR_TYPE, &ok_payload("read-datum-at"), "`read-datum-at`'s pair");
@@ -407,15 +409,21 @@ fn the_builtin_symbols_report_their_own_wk_constant() {
     for (i, name) in BUILTIN_SYMBOLS.iter().enumerate() {
         // Each entry is interned in the module that owns it: a colon-spelled
         // one is the keyword of that name, a standard library name `std`'s,
-        // an IR name `%core`'s, every other one a reserved word every module
+        // an IR name `%core`'s, a member `HOMED_VOCABULARY` places its first
+        // listed module's, every other one a reserved word every module
         // holds.
         let i32_index = i as u32;
-        let interned = match name.strip_prefix(':') {
-            Some(kw) => heap.intern_keyword(kw),
-            None if typelisp::mem::symbols::CORE_VOCABULARY.contains(&i32_index) => {
+        let home = typelisp::mem::symbols::HOMED_VOCABULARY.iter().find(|(_, members)| members.contains(&i32_index));
+        let interned = match (home, name.strip_prefix(':')) {
+            (Some((path, _)), _) => {
+                let ns = typelisp::mem::symbols::ns_of(&path.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+                Value::Symbol(typelisp::mem::symbols::intern_in(ns, name))
+            }
+            (None, Some(kw)) => heap.intern_keyword(kw),
+            (None, None) if typelisp::mem::symbols::CORE_VOCABULARY.contains(&i32_index) => {
                 Value::Symbol(typelisp::mem::symbols::intern_in(typelisp::NsId::CORE, name))
             }
-            None => heap.intern_symbol(name),
+            (None, None) => heap.intern_symbol(name),
         };
         let Value::Symbol(sym) = interned else {
             panic!("intern_symbol always returns a symbol");

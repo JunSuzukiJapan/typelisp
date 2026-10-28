@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::{Path, TypeId};
+use crate::{Path, SymRef, TypeId};
 
 use super::interp::{EnumDef, FnDef};
 use super::value::Slot;
@@ -73,7 +73,7 @@ pub struct ModuleScope {
     /// method's own definition site (a `defmethod` always lives alongside
     /// its type for this purpose, matching how the checker's `AdtDef::assoc`
     /// is itself part of the type's own definition).
-    pub(crate) methods: HashMap<(String, String), Rc<FnDef>>,
+    pub(crate) methods: HashMap<(SymRef, SymRef), Rc<FnDef>>,
     /// `defvar`/`defconstant`, by unqualified name.
     pub(crate) globals: HashMap<String, Slot>,
     /// `defstruct`/`defenum`, by unqualified name.
@@ -219,8 +219,8 @@ impl ModuleScope {
     }
 
     /// [`Self::get_fn`]'s twin for a `(type, method)` pair.
-    pub fn get_method(&self, type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
-        self.find(&type_name.parent())?.methods.get(&(type_name.last_segment().to_string(), method.to_string())).cloned()
+    pub fn get_method(&self, type_name: &Path, method: SymRef) -> Option<Rc<FnDef>> {
+        self.find(&type_name.parent())?.methods.get(&(type_name.name_symbol(), method)).cloned()
     }
 
     /// Whether `path`'s `FnDef` already has a JIT/AOT-compiled form — the
@@ -232,7 +232,7 @@ impl ModuleScope {
     }
 
     /// [`Self::fn_compiled`]'s twin for a `(type, method)` pair.
-    pub fn method_compiled(&self, type_name: &Path, method: &str) -> bool {
+    pub fn method_compiled(&self, type_name: &Path, method: SymRef) -> bool {
         self.get_method(type_name, method).is_some_and(|f| f.compiled.borrow().is_some())
     }
 
@@ -249,7 +249,7 @@ impl ModuleScope {
 
     /// Whether a `(type, method)` pair is registered at all — the direct
     /// replacement for the old `Interp::methods.contains_key` check.
-    pub fn has_method(&self, type_name: &Path, method: &str) -> bool {
+    pub fn has_method(&self, type_name: &Path, method: SymRef) -> bool {
         self.get_method(type_name, method).is_some()
     }
 

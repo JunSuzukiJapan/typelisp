@@ -2181,14 +2181,10 @@ impl Heap {
     /// *method* (`i32::+`) and `None` for a free built-in (`eval`). See
     /// [`BoxedObj::Builtin`].
     ///
-    /// `name` is interned, so the box holds only permanent indices and
-    /// allocating one never triggers a collection (like
+    /// `name` is the builtin's own symbol, so the box holds only permanent
+    /// references and allocating one never triggers a collection (like
     /// [`alloc_cell`](Self::alloc_cell)).
-    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: &str, ret_type: Option<TypeId>) -> Value {
-        let name = match self.intern_string(name) {
-            Value::Str(id) => id,
-            _ => unreachable!("intern_string always returns Value::Str"),
-        };
+    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: SymRef, ret_type: Option<TypeId>) -> Value {
         self.alloc_boxed(BoxedObj::Builtin { recv_type, name, ret_type })
     }
 
@@ -2208,15 +2204,13 @@ impl Heap {
         }
     }
 
-    /// A built-in function value's name. Panics like
-    /// [`builtin_fn_recv`](Self::builtin_fn_recv). See `path_segments`'s doc
-    /// comment for why this returns a mapped guard rather than `&str`.
-    pub fn builtin_fn_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        let name = match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
+    /// A built-in function value's symbol. Panics like
+    /// [`builtin_fn_recv`](Self::builtin_fn_recv).
+    pub fn builtin_fn_name(&self, id: BoxId) -> SymRef {
+        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::Builtin { name, .. }) => *name,
             _ => panic!("BoxId does not hold a Builtin"),
-        };
-        self.string(name)
+        }
     }
 
     /// The runtime identity of what a built-in function value returns — see
@@ -2847,13 +2841,9 @@ impl Heap {
                     stack.push(v);
                 }
             }
-            // A built-in function value's `name` is already permanently
-            // rooted (`intern_string`) and its `recv_type` is a permanent
-            // `PathId`, so nothing here can be swept — tracing the name
-            // anyway keeps "a live box keeps its own constituents live" true
-            // from the mark phase alone, the same belt-and-suspenders the
-            // `Map` arm below applies to its interned string keys.
-            BoxedObj::Builtin { name, .. } => stack.push(Value::Str(*name)),
+            // A built-in function value holds a symbol and a `PathId`, both
+            // permanent, so there is nothing to trace.
+            BoxedObj::Builtin { .. } => {}
             // An interpreted closure keeps its own code alive, not just its
             // captures: `params`/`body` are cons cells like any other, and
             // nothing else necessarily refers to a `lambda`'s body once the

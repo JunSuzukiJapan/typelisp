@@ -19,7 +19,7 @@
 //! evaluator asks any of these questions: they are asked while *compiling*,
 //! by `symbols`, `core_bridge`, `driver`, `aot` and the two bootstrappers.
 
-use typelisp_mem::wk;
+use typelisp_mem::{wk, SymRef};
 
 /// The `typelisp_rt` shim a *free* builtin call lowers to, or
 /// `None` for an ordinary function whose name gets mangled instead.
@@ -43,43 +43,43 @@ use typelisp_mem::wk;
 /// name it cannot find. Naming the shim here, where the "is it a builtin?"
 /// decision already lives, leaves the island nothing to re-derive; it calls
 /// whatever the bridge named.
-pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
+pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
     // The memory behind `def-c-struct`s and typed pointers.
     if let Some(sym) = typelisp_front::c_struct::rt_symbol(name) {
         return Some(sym);
     }
-    Some(match name {
+    Some(match name.well_known() {
         // A C callback's entry address — `typelisp_front::ffi_callback`.
         typelisp_front::ffi_callback::ADDRESS_BUILTIN => "rt_ffi_callback_address",
-        "sexpr-car" => "rt_car",
-        "sexpr-cdr" => "rt_cdr",
-        "sexpr-cons" => "rt_cons",
-        "sexpr-consp" => "rt_consp",
-        "sexpr-null" => "rt_null",
-        "sexpr-atom" => "rt_atom",
-        "sexpr-symp" => "rt_symp",
-        "sexpr-int" => "rt_sexpr_int",
-        "sexpr-i32" => "rt_sexpr_i32",
-        "sexpr-bool" => "rt_sexpr_bool",
-        "sexpr-char" => "rt_sexpr_char",
-        "sexpr-f64" => "rt_sexpr_f64",
-        "sexpr-f32" => "rt_sexpr_f32",
+        wk::F_SEXPR_CAR => "rt_car",
+        wk::F_SEXPR_CDR => "rt_cdr",
+        wk::F_SEXPR_CONS => "rt_cons",
+        wk::F_SEXPR_CONSP => "rt_consp",
+        wk::F_SEXPR_NULL => "rt_null",
+        wk::F_SEXPR_ATOM => "rt_atom",
+        wk::F_SEXPR_SYMP => "rt_symp",
+        wk::F_SEXPR_INT => "rt_sexpr_int",
+        wk::F_SEXPR_I32 => "rt_sexpr_i32",
+        wk::F_SEXPR_BOOL => "rt_sexpr_bool",
+        wk::F_SEXPR_CHAR => "rt_sexpr_char",
+        wk::F_SEXPR_F64 => "rt_sexpr_f64",
+        wk::F_SEXPR_F32 => "rt_sexpr_f32",
         // One shim per narrow width, not one taking the width as an operand:
         // a builtin accessor is called with exactly its own arguments, and
         // the type it reads is in its name.
-        "sexpr-i8" => "rt_sexpr_i8",
-        "sexpr-i16" => "rt_sexpr_i16",
-        "sexpr-u8" => "rt_sexpr_u8",
-        "sexpr-u16" => "rt_sexpr_u16",
-        "sexpr-u32" => "rt_sexpr_u32",
-        "sexpr-str" => "rt_sexpr_str",
-        "sexpr-sym-name" => "rt_sym_name",
+        wk::F_SEXPR_I8 => "rt_sexpr_i8",
+        wk::F_SEXPR_I16 => "rt_sexpr_i16",
+        wk::F_SEXPR_U8 => "rt_sexpr_u8",
+        wk::F_SEXPR_U16 => "rt_sexpr_u16",
+        wk::F_SEXPR_U32 => "rt_sexpr_u32",
+        wk::F_SEXPR_STR => "rt_sexpr_str",
+        wk::F_SEXPR_SYM_NAME => "rt_sym_name",
         // `symbol->string` is `sexpr-sym-name` under the checker's `symbol`
         // type rather than `sexpr`'s — the same shim, since both spellings
         // carry the same interned `Value::Symbol`.
-        "symbol->string" => "rt_sym_name",
-        "intern" => "rt_intern",
-        "keywordp" => "rt_keywordp",
+        wk::F_SYMBOL_TO_STRING => "rt_sym_name",
+        wk::INTERN => "rt_intern",
+        wk::F_KEYWORDP => "rt_keywordp",
         // The small system builtins (`sys_builtin`): parsing, the clock, and
         // process exit. Each is a thin edge over one shared implementation
         // the interpreter calls too.
@@ -87,45 +87,45 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // (`registry`'s root `fns`), not methods, so they map here rather
         // than through `native_lowered_primitive_methods`. Both are the same
         // `typelisp_rt::equality` the interpreter calls.
-        "equal" => "rt_sexpr_equal",
-        "equalp" => "rt_sexpr_equalp",
-        "parse-float" => "rt_parse_float",
-        "get-universal-time" => "rt_get_universal_time",
-        "get-internal-real-time" => "rt_get_internal_real_time",
+        wk::M_EQUAL => "rt_sexpr_equal",
+        wk::M_EQUALP => "rt_sexpr_equalp",
+        wk::F_PARSE_FLOAT => "rt_parse_float",
+        wk::F_GET_UNIVERSAL_TIME => "rt_get_universal_time",
+        wk::F_GET_INTERNAL_REAL_TIME => "rt_get_internal_real_time",
         // The environment and the running implementation (CLHS 25.1, plus
         // `command-line-args`/`getenv`, which CL has no equivalent of).
-        "command-line-args" => "rt_command_line_args",
-        "getenv" => "rt_getenv",
-        "home-directory" => "rt_home_directory",
-        "lisp-implementation-version" => "rt_lisp_implementation_version",
-        "machine-type" => "rt_machine_type",
-        "software-type" => "rt_software_type",
+        wk::F_COMMAND_LINE_ARGS => "rt_command_line_args",
+        wk::F_GETENV => "rt_getenv",
+        wk::F_HOME_DIRECTORY => "rt_home_directory",
+        wk::F_LISP_IMPLEMENTATION_VERSION => "rt_lisp_implementation_version",
+        wk::F_MACHINE_TYPE => "rt_machine_type",
+        wk::F_SOFTWARE_TYPE => "rt_software_type",
         // The four CLHS 25.1 names that ask the running host, and the two
         // time-zone primitives under `decode-`/`encode-universal-time`.
-        "get-internal-run-time" => "rt_get_internal_run_time",
-        "machine-instance" => "rt_machine_instance",
-        "machine-version" => "rt_machine_version",
-        "software-version" => "rt_software_version",
-        "timezone-offset-seconds" => "rt_timezone_offset_seconds",
-        "timezone-daylight-p" => "rt_timezone_daylight_p",
-        "exit" => "rt_exit",
+        wk::F_GET_INTERNAL_RUN_TIME => "rt_get_internal_run_time",
+        wk::F_MACHINE_INSTANCE => "rt_machine_instance",
+        wk::F_MACHINE_VERSION => "rt_machine_version",
+        wk::F_SOFTWARE_VERSION => "rt_software_version",
+        wk::F_TIMEZONE_OFFSET_SECONDS => "rt_timezone_offset_seconds",
+        wk::F_TIMEZONE_DAYLIGHT_P => "rt_timezone_daylight_p",
+        wk::F_EXIT => "rt_exit",
         // `read` (`typelisp_read::shim`), which could not lower while the
         // reader was a module of this crate: a shim naming it would have had
         // to reach up into `typelisp`, which depends on the runtime rather
         // than the other way round.
-        "read" => "rt_read",
-        "read-datum-at" => "rt_read_datum_at",
+        wk::F_READ => "rt_read",
+        wk::F_READ_DATUM_AT => "rt_read_datum_at",
         // `eval` (`typelisp_front::shim`), the last of the six builtins that
         // used to make a caller uncompilable. Its implementation is the
         // checker and the interpreter, which is why they are a crate below
         // this one — see that module's doc comment for how the shim finds an
         // environment on each of the two paths.
-        "eval" => "rt_eval",
+        wk::F_EVAL => "rt_eval",
         // `macroexpand-1`/`macroexpand` reach the same two environments
         // `eval` does, and for the same reason: expanding a macro means
         // running its body, which is the interpreter.
-        "macroexpand-1" => "rt_macroexpand_1",
-        "macroexpand" => "rt_macroexpand",
+        wk::F_MACROEXPAND_1 => "rt_macroexpand_1",
+        wk::F_MACROEXPAND => "rt_macroexpand",
         // The printing family. `format`/`print`/`println`/`pprint` and
         // `pprint-logical-block` are special forms; the names here are what
         // the checker lowered them to (`Checker::check_format`/
@@ -133,48 +133,48 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // The last four are ordinary builtins (`registry`'s root `fns`).
         // All eleven run `typelisp_print::runtime::print_builtin`, the same
         // implementation `Interp::eval_builtin` runs.
-        "format-rt" => "rt_format",
-        "print-rt" => "rt_print",
-        "println-rt" => "rt_println",
-        "pprint-rt" => "rt_pprint",
-        "pprint-block-start-rt" => "rt_pprint_block_start",
-        "pprint-block-end-rt" => "rt_pprint_block_end",
-        "pprint-newline" => "rt_pprint_newline",
-        "pprint-indent" => "rt_pprint_indent",
-        "pprint-tab" => "rt_pprint_tab",
-        "pprint-pop" => "rt_pprint_pop",
-        "pprint-list-exhausted" => "rt_pprint_list_exhausted",
+        wk::F_FORMAT_RT => "rt_format",
+        wk::F_PRINT_RT => "rt_print",
+        wk::F_PRINTLN_RT => "rt_println",
+        wk::F_PPRINT_RT => "rt_pprint",
+        wk::F_PPRINT_BLOCK_START_RT => "rt_pprint_block_start",
+        wk::F_PPRINT_BLOCK_END_RT => "rt_pprint_block_end",
+        wk::F_PPRINT_NEWLINE => "rt_pprint_newline",
+        wk::F_PPRINT_INDENT => "rt_pprint_indent",
+        wk::F_PPRINT_TAB => "rt_pprint_tab",
+        wk::F_PPRINT_POP => "rt_pprint_pop",
+        wk::F_PPRINT_LIST_EXHAUSTED => "rt_pprint_list_exhausted",
         // The `random-state` builtins. Nothing about a random-state lives
         // outside the heap, so all four lower.
-        "random-state-next" => "rt_random_state_next",
-        "random-state-copy" => "rt_random_state_copy",
-        "make-random-state-fresh" => "rt_make_random_state_fresh",
-        "seed-random-state" => "rt_seed_random_state",
+        wk::F_RANDOM_STATE_NEXT => "rt_random_state_next",
+        wk::F_RANDOM_STATE_COPY => "rt_random_state_copy",
+        wk::F_MAKE_RANDOM_STATE_FRESH => "rt_make_random_state_fresh",
+        wk::F_SEED_RANDOM_STATE => "rt_seed_random_state",
         // The stream/file builtins. Every one is a thin conversion around
         // `typelisp_rt::stream_builtin::stream_builtin`, which the
         // interpreter calls too — see `Interp::eval_stream_builtin`. They can
         // lower at all only because the stream *table* lives in
         // `typelisp-rt` (see `typelisp_rt::stream`'s module docs): an
         // AOT-linked executable has no interpreter to keep it on.
-        "stream-stdin" => "rt_stream_stdin",
-        "stream-stdout" => "rt_stream_stdout",
-        "stream-stderr" => "rt_stream_stderr",
-        "stream-string-input" => "rt_stream_string_input",
-        "stream-string-output" => "rt_stream_string_output",
-        "stream-open-file" => "rt_stream_open_file",
-        "stream-close" => "rt_stream_close",
-        "stream-open-p" => "rt_stream_open_p",
-        "stream-describe" => "rt_stream_describe",
-        "stream-input-p" => "rt_stream_input_p",
-        "stream-output-p" => "rt_stream_output_p",
-        "stream-read-char" => "rt_stream_read_char",
-        "stream-read-byte" => "rt_stream_read_byte",
-        "stream-write-byte" => "rt_stream_write_byte",
-        "stream-unread-char" => "rt_stream_unread_char",
-        "set-macro-character" => "rt_set_macro_character",
-        "get-macro-character" => "rt_get_macro_character",
-        "set-dispatch-macro-character" => "rt_set_dispatch_macro_character",
-        "get-dispatch-macro-character" => "rt_get_dispatch_macro_character",
+        wk::F_STREAM_STDIN => "rt_stream_stdin",
+        wk::F_STREAM_STDOUT => "rt_stream_stdout",
+        wk::F_STREAM_STDERR => "rt_stream_stderr",
+        wk::F_STREAM_STRING_INPUT => "rt_stream_string_input",
+        wk::F_STREAM_STRING_OUTPUT => "rt_stream_string_output",
+        wk::F_STREAM_OPEN_FILE => "rt_stream_open_file",
+        wk::F_STREAM_CLOSE => "rt_stream_close",
+        wk::F_STREAM_OPEN_P => "rt_stream_open_p",
+        wk::F_STREAM_DESCRIBE => "rt_stream_describe",
+        wk::F_STREAM_INPUT_P => "rt_stream_input_p",
+        wk::F_STREAM_OUTPUT_P => "rt_stream_output_p",
+        wk::F_STREAM_READ_CHAR => "rt_stream_read_char",
+        wk::F_STREAM_READ_BYTE => "rt_stream_read_byte",
+        wk::F_STREAM_WRITE_BYTE => "rt_stream_write_byte",
+        wk::F_STREAM_UNREAD_CHAR => "rt_stream_unread_char",
+        wk::F_SET_MACRO_CHARACTER => "rt_set_macro_character",
+        wk::F_GET_MACRO_CHARACTER => "rt_get_macro_character",
+        wk::F_SET_DISPATCH_MACRO_CHARACTER => "rt_set_dispatch_macro_character",
+        wk::F_GET_DISPATCH_MACRO_CHARACTER => "rt_get_dispatch_macro_character",
         // **The `rt_suspend_` prefix is load-bearing**, and this table is the
         // only place that decides which builtins suspend: `core_bridge` reads
         // the prefix and emits a `(suspend ...)` node instead of a `(call
@@ -183,70 +183,70 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // `sleep` used to lower to `rt_sleep`, which stops the *thread*. That
         // was the reason it could not be compiled at all: with tasks the same
         // source would mean two different things on the two sides, silently.
-        "sleep" => "rt_suspend_sleep",
-        "yield" => "rt_suspend_yield",
+        wk::F_SLEEP => "rt_suspend_sleep",
+        wk::F_YIELD => "rt_suspend_yield",
         // `(net-wait h interest)` parks the task on a socket: the third of
         // the free builtins that suspend, and the reason the prelude's
         // `socket-stream` methods can wait without any of them blocking.
-        "net-wait" => "rt_suspend_io",
-        "net-wait-for" => "rt_suspend_io_for",
+        wk::F_NET_WAIT => "rt_suspend_io",
+        wk::F_NET_WAIT_FOR => "rt_suspend_io_for",
         // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
         // `disassemble` have no row and never will — those are
         // interpreter-only forms, the same category `compile`/`compile-file`/
         // `dump` are in (`docs/ja/reference/syntax.md` §10). These three are ordinary
         // builtins: the heap statistics and the dribble sink are the
         // runtime's own, and launching an editor is a process call.
-        "heap-info" => "rt_heap_info",
-        "dribble-start" => "rt_dribble_start",
-        "dribble-stop" => "rt_dribble_stop",
-        "ed-open" => "rt_ed_open",
-        "stream-listen" => "rt_stream_listen",
-        "stream-position" => "rt_stream_position",
-        "stream-write-string" => "rt_stream_write_string",
-        "stream-at-line-start" => "rt_stream_at_line_start",
-        "stream-finish-output" => "rt_stream_finish_output",
-        "stream-take-output-string" => "rt_stream_take_output_string",
-        "file-exists-p" => "rt_file_exists_p",
-        "file-delete" => "rt_file_delete",
-        "file-truename" => "rt_file_truename",
-        "file-modified-date" => "rt_file_modified_date",
-        "file-owner-name" => "rt_file_owner_name",
-        "file-directory-p" => "rt_file_directory_p",
-        "file-list-directory" => "rt_file_list_directory",
-        "file-create-directories" => "rt_file_create_directories",
-        "file-rename" => "rt_file_rename",
-        "net-resolve-begin" => "rt_net_resolve_begin",
-        "net-resolve-finish" => "rt_net_resolve_finish",
-        "net-tls-start" => "rt_net_tls_start",
-        "net-tls-listen" => "rt_net_tls_listen",
-        "net-socket-error" => "rt_net_socket_error",
-        "net-peer-subject" => "rt_net_peer_subject",
-        "net-server-name" => "rt_net_server_name",
-        "net-set-nodelay" => "rt_net_set_nodelay",
-        "net-set-keepalive" => "rt_net_set_keepalive",
-        "net-set-keepalive-period" => "rt_net_set_keepalive_period",
-        "net-tls-add-certificate" => "rt_net_tls_add_certificate",
-        "net-tls-handshake" => "rt_net_tls_handshake",
-        "net-udp-bind" => "rt_net_udp_bind",
-        "net-udp-send-to" => "rt_net_udp_send_to",
-        "net-udp-recv" => "rt_net_udp_recv",
-        "net-udp-last-sender" => "rt_net_udp_last_sender",
-        "net-connect-begin" => "rt_net_connect_begin",
-        "net-connect-finish" => "rt_net_connect_finish",
-        "net-listen" => "rt_net_listen",
-        "net-unix-connect" => "rt_net_unix_connect",
-        "net-unix-listen" => "rt_net_unix_listen",
-        "net-accept" => "rt_net_accept",
-        "net-fill" => "rt_net_fill",
-        "net-pop-byte" => "rt_net_pop_byte",
-        "net-pop-char" => "rt_net_pop_char",
-        "net-buffered-p" => "rt_net_buffered_p",
-        "net-push-string" => "rt_net_push_string",
-        "net-push-byte" => "rt_net_push_byte",
-        "net-flush" => "rt_net_flush",
-        "net-shutdown-write" => "rt_net_shutdown_write",
-        "net-local-address" => "rt_net_local_address",
-        "net-peer-address" => "rt_net_peer_address",
+        wk::F_HEAP_INFO => "rt_heap_info",
+        wk::F_DRIBBLE_START => "rt_dribble_start",
+        wk::F_DRIBBLE_STOP => "rt_dribble_stop",
+        wk::F_ED_OPEN => "rt_ed_open",
+        wk::F_STREAM_LISTEN => "rt_stream_listen",
+        wk::F_STREAM_POSITION => "rt_stream_position",
+        wk::F_STREAM_WRITE_STRING => "rt_stream_write_string",
+        wk::F_STREAM_AT_LINE_START => "rt_stream_at_line_start",
+        wk::F_STREAM_FINISH_OUTPUT => "rt_stream_finish_output",
+        wk::F_STREAM_TAKE_OUTPUT_STRING => "rt_stream_take_output_string",
+        wk::F_FILE_EXISTS_P => "rt_file_exists_p",
+        wk::F_FILE_DELETE => "rt_file_delete",
+        wk::F_FILE_TRUENAME => "rt_file_truename",
+        wk::F_FILE_MODIFIED_DATE => "rt_file_modified_date",
+        wk::F_FILE_OWNER_NAME => "rt_file_owner_name",
+        wk::F_FILE_DIRECTORY_P => "rt_file_directory_p",
+        wk::F_FILE_LIST_DIRECTORY => "rt_file_list_directory",
+        wk::F_FILE_CREATE_DIRECTORIES => "rt_file_create_directories",
+        wk::F_FILE_RENAME => "rt_file_rename",
+        wk::F_NET_RESOLVE_BEGIN => "rt_net_resolve_begin",
+        wk::F_NET_RESOLVE_FINISH => "rt_net_resolve_finish",
+        wk::F_NET_TLS_START => "rt_net_tls_start",
+        wk::F_NET_TLS_LISTEN => "rt_net_tls_listen",
+        wk::F_NET_SOCKET_ERROR => "rt_net_socket_error",
+        wk::F_NET_PEER_SUBJECT => "rt_net_peer_subject",
+        wk::F_NET_SERVER_NAME => "rt_net_server_name",
+        wk::F_NET_SET_NODELAY => "rt_net_set_nodelay",
+        wk::F_NET_SET_KEEPALIVE => "rt_net_set_keepalive",
+        wk::F_NET_SET_KEEPALIVE_PERIOD => "rt_net_set_keepalive_period",
+        wk::F_NET_TLS_ADD_CERTIFICATE => "rt_net_tls_add_certificate",
+        wk::F_NET_TLS_HANDSHAKE => "rt_net_tls_handshake",
+        wk::F_NET_UDP_BIND => "rt_net_udp_bind",
+        wk::F_NET_UDP_SEND_TO => "rt_net_udp_send_to",
+        wk::F_NET_UDP_RECV => "rt_net_udp_recv",
+        wk::F_NET_UDP_LAST_SENDER => "rt_net_udp_last_sender",
+        wk::F_NET_CONNECT_BEGIN => "rt_net_connect_begin",
+        wk::F_NET_CONNECT_FINISH => "rt_net_connect_finish",
+        wk::F_NET_LISTEN => "rt_net_listen",
+        wk::F_NET_UNIX_CONNECT => "rt_net_unix_connect",
+        wk::F_NET_UNIX_LISTEN => "rt_net_unix_listen",
+        wk::F_NET_ACCEPT => "rt_net_accept",
+        wk::F_NET_FILL => "rt_net_fill",
+        wk::F_NET_POP_BYTE => "rt_net_pop_byte",
+        wk::F_NET_POP_CHAR => "rt_net_pop_char",
+        wk::F_NET_BUFFERED_P => "rt_net_buffered_p",
+        wk::F_NET_PUSH_STRING => "rt_net_push_string",
+        wk::F_NET_PUSH_BYTE => "rt_net_push_byte",
+        wk::F_NET_FLUSH => "rt_net_flush",
+        wk::F_NET_SHUTDOWN_WRITE => "rt_net_shutdown_write",
+        wk::F_NET_LOCAL_ADDRESS => "rt_net_local_address",
+        wk::F_NET_PEER_ADDRESS => "rt_net_peer_address",
         _ => return None,
     })
 }
@@ -261,22 +261,22 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
 /// spelled in `core_bridge` so that "which builtins suspend" stays a question
 /// this module answers — the free functions are already decided by the
 /// `rt_suspend_` prefix in [`rt_builtin_symbol`].
-pub(crate) fn rt_suspend_method_symbol(type_name: &crate::Path, method: &str) -> Option<&'static str> {
+pub(crate) fn rt_suspend_method_symbol(type_name: &crate::Path, method: SymRef) -> Option<&'static str> {
     let ty = typelisp_front::types::builtin_type(type_name)?;
-    match (ty, method) {
-        (wk::TASK_TYPE, "wait") => Some("rt_suspend_wait"),
+    match (ty, method.well_known()) {
+        (wk::TASK_TYPE, wk::M_WAIT) => Some("rt_suspend_wait"),
         // A thread is a task to the scheduler, and `join` is `wait`.
-        (wk::THREAD_TYPE, "join") => Some("rt_suspend_wait"),
+        (wk::THREAD_TYPE, wk::M_JOIN) => Some("rt_suspend_wait"),
         // Every channel operation, including the four that never wait: the
         // table of channels is the scheduler's, and the driver is the only
         // way to it (`typelisp_abi::call_state::SUSPEND_CHAN_NEW` says why
         // it cannot live anywhere lower).
-        (wk::CHAN, "new") => Some("rt_suspend_chan_new"),
-        (wk::CHAN, "len") => Some("rt_suspend_chan_len"),
-        (wk::CHAN, "cap") => Some("rt_suspend_chan_cap"),
-        (wk::CHAN, "close") => Some("rt_suspend_chan_close"),
-        (wk::CHAN, "send") => Some("rt_suspend_chan_send"),
-        (wk::CHAN, "recv") => Some("rt_suspend_chan_recv"),
+        (wk::CHAN, wk::M_NEW) => Some("rt_suspend_chan_new"),
+        (wk::CHAN, wk::M_LEN) => Some("rt_suspend_chan_len"),
+        (wk::CHAN, wk::M_CAP) => Some("rt_suspend_chan_cap"),
+        (wk::CHAN, wk::M_CLOSE) => Some("rt_suspend_chan_close"),
+        (wk::CHAN, wk::SEND) => Some("rt_suspend_chan_send"),
+        (wk::CHAN, wk::RECV) => Some("rt_suspend_chan_recv"),
         _ => None,
     }
 }
@@ -285,11 +285,11 @@ pub(crate) fn rt_suspend_method_symbol(type_name: &crate::Path, method: &str) ->
 /// `None`. The free-function table is keyed by bare name, and these need
 /// their owner type too — the same reason [`rt_suspend_method_symbol`] is a
 /// table of its own.
-pub(crate) fn rt_static_method_symbol(type_name: &crate::Path, method: &str) -> Option<&'static str> {
+pub(crate) fn rt_static_method_symbol(type_name: &crate::Path, method: SymRef) -> Option<&'static str> {
     let ty = typelisp_front::types::builtin_type(type_name)?;
-    match (ty, method) {
-        (wk::THREAD_TYPE, "current-id") => Some("rt_thread_current_id"),
-        (wk::THREAD_TYPE, "available-parallelism") => Some("rt_thread_available_parallelism"),
+    match (ty, method.well_known()) {
+        (wk::THREAD_TYPE, wk::M_CURRENT_ID) => Some("rt_thread_current_id"),
+        (wk::THREAD_TYPE, wk::M_AVAILABLE_PARALLELISM) => Some("rt_thread_available_parallelism"),
         _ => None,
     }
 }
@@ -329,33 +329,36 @@ pub(crate) const RT_SUSPEND_BOOL_ANSWER: &str = "rt_suspend_io_for";
 ///
 /// [`rt_builtin_symbol`] answers for a bare name, and a name is not a
 /// function: a builtin lives in the module of the standard library the
-/// registry keeps it in ([`typelisp_front::types::Path::std_builtin_name`]),
+/// registry keeps it in ([`typelisp_front::types::Path::std_builtin`]),
 /// and the same last segment anywhere else is somebody's own function, which
 /// has to reach its own compiled body.
 pub(crate) fn builtin_shim(path: &crate::Path) -> Option<&'static str> {
-    let name = path.std_builtin_name()?;
+    let name = path.std_builtin()?;
     let shim = rt_builtin_symbol(name)?;
-    (builtin_homes().get(name) == Some(&path.ns())).then_some(shim)
+    (builtin_homes().get(&name.well_known()) == Some(&path.ns())).then_some(shim)
 }
 
 pub(crate) fn is_rt_builtin(path: &crate::Path) -> bool {
     builtin_shim(path).is_some()
 }
 
-/// The module the registry keeps each free builtin in, by the builtin's name
-/// — `std` for one the checker lowers to without a signature
+/// The module the registry keeps each free builtin in, by the builtin's
+/// vocabulary symbol — the internal module for one the checker lowers to
+/// without a signature
 /// ([`typelisp_front::check::registry::lowered_builtins`]).
-fn builtin_homes() -> &'static std::collections::HashMap<String, typelisp_mem::NsId> {
-    static HOMES: std::sync::OnceLock<std::collections::HashMap<String, typelisp_mem::NsId>> = std::sync::OnceLock::new();
+fn builtin_homes() -> &'static std::collections::HashMap<u32, typelisp_mem::NsId> {
+    static HOMES: std::sync::OnceLock<std::collections::HashMap<u32, typelisp_mem::NsId>> = std::sync::OnceLock::new();
     HOMES.get_or_init(|| {
         let reg = typelisp_front::check::Registry::with_builtins();
-        let mut homes: std::collections::HashMap<String, typelisp_mem::NsId> = typelisp_front::check::registry::lowered_builtins()
-            .map(|name| (name.to_string(), typelisp_front::types::internal_ns()))
+        let mut homes: std::collections::HashMap<u32, typelisp_mem::NsId> = typelisp_front::check::registry::lowered_builtins()
+            .map(|k| (k, typelisp_front::types::internal_ns()))
             .collect();
         for ns in reg.namespaces() {
             for (name, sig) in ns.fns.iter() {
                 if sig.builtin {
-                    let prev = homes.insert(name.to_string(), ns.ns);
+                    let k = typelisp_front::types::Path::in_ns(ns.ns, name).name_symbol().well_known();
+                    assert!(k != typelisp_mem::NOT_WELL_KNOWN, "builtin `{}` is not in the vocabulary", name);
+                    let prev = homes.insert(k, ns.ns);
                     assert!(prev.is_none(), "builtin `{}` is registered in two modules", name);
                 }
             }
@@ -383,8 +386,8 @@ fn builtin_homes() -> &'static std::collections::HashMap<String, typelisp_mem::N
 /// `rt_llvm_call` process abort rather than a catchable error. Catching them
 /// here keeps `(compile bad-fn)` a clean `EvalError` — the behavior the
 /// interpreted island used to give from `get-function` directly.
-pub(crate) fn is_native_lowered_primitive_method(type_name: &crate::Path, method: &str) -> bool {
-    typelisp_front::types::builtin_type(type_name).is_some_and(|ty| native_lowered_primitive_methods(ty).contains(&method))
+pub(crate) fn is_native_lowered_primitive_method(type_name: &crate::Path, method: SymRef) -> bool {
+    typelisp_front::types::builtin_type(type_name).is_some_and(|ty| native_lowered_primitive_methods(ty).contains(&method.well_known()))
 }
 
 /// The methods [`is_native_lowered_primitive_method`] answers `true` for, as
@@ -396,7 +399,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_name: &crate::Path, method
 /// Rust claims and the island does not lower — is unaskable of a predicate,
 /// because there is nothing to enumerate. That gap is not hypothetical; it is
 /// how `char->string` survived here.
-pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [&'static str] {
+pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
     match ty {
         // `eq`/`eql`/`equal`/`equalp` are four names for `=` on an integer
         // (`registry::int_assoc`'s doc comment: same-type operands, nothing to
@@ -408,28 +411,28 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [&'static st
         // different is upstream — the checker registers only conversions for
         // them, so the arithmetic listed here can never be asked for.
         wk::I32 | wk::I8 | wk::I16 | wk::U8 | wk::U16 | wk::U32 | wk::C_LONG | wk::C_ULONG => &[
-            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "eq", "eql", "equal", "equalp", "/=",
-            "int->int", "int->ratio", "int->float", "int->char",
-            "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
-            "int->c-long", "int->c-ulong",
+            wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_MOD, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE, wk::RETIRED_EQUALS, wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP, wk::M_OP_NE,
+            wk::M_INT_TO_INT, wk::M_INT_TO_RATIO, wk::M_INT_TO_FLOAT, wk::M_INT_TO_CHAR,
+            wk::M_INT_TO_I8, wk::M_INT_TO_I16, wk::M_INT_TO_I32, wk::M_INT_TO_U8, wk::M_INT_TO_U16, wk::M_INT_TO_U32,
+            wk::M_INT_TO_C_LONG, wk::M_INT_TO_C_ULONG,
             // The `Option`-returning halves. No prelude definition reaches
             // them; they are lowered so a user's own `(try-as u8 n)` can be
             // compiled — see `docs/ja/reference/syntax.md` §10.
-            "try-int->char",
-            "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
-            "try-int->c-long", "try-int->c-ulong",
-            "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
-            "ash", "logbitp",
+            wk::M_TRY_INT_TO_CHAR,
+            wk::M_TRY_INT_TO_I8, wk::M_TRY_INT_TO_I16, wk::M_TRY_INT_TO_I32, wk::M_TRY_INT_TO_U8, wk::M_TRY_INT_TO_U16, wk::M_TRY_INT_TO_U32,
+            wk::M_TRY_INT_TO_C_LONG, wk::M_TRY_INT_TO_C_ULONG,
+            wk::M_MAX, wk::M_MIN, wk::M_LOGAND, wk::M_LOGIOR, wk::M_LOGXOR, wk::M_LOGTEST, wk::M_LOGNOT, wk::M_LOGCOUNT, wk::M_INTEGER_LENGTH,
+            wk::M_ASH, wk::M_LOGBITP,
         ],
         // `eq`/`eql` are `StrId` identity (`string_identity_eq`) and lower to
         // an `icmp eq` on the two tagged words; `equal`/`equalp` are content
         // comparisons and go through `rt_str_eq`/`rt_str_equalp`.
         wk::STRING => &[
-            "length", "ref", "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "append", "substring",
+            wk::M_LENGTH, wk::M_REF, wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP, wk::M_LT, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE, wk::M_APPEND, wk::M_SUBSTRING,
             // `upcase`/`downcase` are one `rt_str_*` call each, ASCII-only on
             // both tiers because both tiers run the same shim's rule — the
             // same shape and the same reasoning as `char`'s pair below.
-            "upcase", "downcase",
+            wk::M_UPCASE, wk::M_DOWNCASE,
         ],
         // `char->string` is here *and* in `char-native-method?` now. It was
         // here alone once, and that is worth remembering: this list is what
@@ -446,41 +449,41 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [&'static st
         // `char`/`string` catalog in the prelude is written on code points
         // and `string::ref` instead (cl-parity-plan.md Phase 2's note 1).
         wk::CHAR => &[
-            "eq", "eql", "equal", "equalp", "lt", "<", "<=", ">", ">=", "char->int", "char->string",
-            "upcase", "downcase", "alphap", "digitp",
+            wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP, wk::M_LT, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE, wk::M_CHAR_TO_INT, wk::M_CHAR_TO_STRING,
+            wk::M_UPCASE, wk::M_DOWNCASE, wk::M_ALPHAP, wk::M_DIGITP,
         ],
         wk::F64 | wk::F32 => &[
-            "+", "-", "*", "/", "expt", "sqrt", "floor", "ceiling", "round", "truncate",
-            "float->int", "float->ratio", "float->f32", "float->f64",
+            wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_EXPT, wk::M_SQRT, wk::M_FLOOR, wk::M_CEILING, wk::M_ROUND, wk::M_TRUNCATE,
+            wk::M_FLOAT_TO_INT, wk::M_FLOAT_TO_RATIO, wk::M_FLOAT_TO_F32, wk::M_FLOAT_TO_F64,
             // Same reason as the integer `try-*` group above: no prelude
             // caller, lowered so a user's `(try-as f32 x)` can compile.
-            "try-float->f32", "try-float->f64",
-            "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
-            "max", "min", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
-            "asinh", "acosh", "atanh", "exp", "log",
+            wk::M_TRY_FLOAT_TO_F32, wk::M_TRY_FLOAT_TO_F64,
+            wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE, wk::RETIRED_EQUALS, wk::M_OP_NE, wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP,
+            wk::M_MAX, wk::M_MIN, wk::M_SIN, wk::M_COS, wk::M_TAN, wk::M_ASIN, wk::M_ACOS, wk::M_ATAN, wk::M_SINH, wk::M_COSH, wk::M_TANH,
+            wk::M_ASINH, wk::M_ACOSH, wk::M_ATANH, wk::M_EXP, wk::M_LOG,
         ],
         // `int` (fixnum ∪ bignum): everything `integer_assoc` registers is
         // lowered — the arithmetic and comparisons as an overflow-checked
         // fast path over two fixnum words with an `rt_integer_*` slow path,
         // the rest as one `rt_integer_*` call each.
         wk::INT => &[
-            "+", "-", "*", "/", "truncate", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
-            "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
-            "ash", "logbitp",
-            "int->float", "int->ratio", "int->int", "int->char", "try-int->char",
-            "int->i8", "int->i16", "int->i32", "int->u8", "int->u16", "int->u32",
-            "int->c-long", "int->c-ulong",
-            "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
-            "try-int->c-long", "try-int->c-ulong",
+            wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_TRUNCATE, wk::M_MOD, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE, wk::RETIRED_EQUALS, wk::M_OP_NE, wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP,
+            wk::M_MAX, wk::M_MIN, wk::M_LOGAND, wk::M_LOGIOR, wk::M_LOGXOR, wk::M_LOGTEST, wk::M_LOGNOT, wk::M_LOGCOUNT, wk::M_INTEGER_LENGTH,
+            wk::M_ASH, wk::M_LOGBITP,
+            wk::M_INT_TO_FLOAT, wk::M_INT_TO_RATIO, wk::M_INT_TO_INT, wk::M_INT_TO_CHAR, wk::M_TRY_INT_TO_CHAR,
+            wk::M_INT_TO_I8, wk::M_INT_TO_I16, wk::M_INT_TO_I32, wk::M_INT_TO_U8, wk::M_INT_TO_U16, wk::M_INT_TO_U32,
+            wk::M_INT_TO_C_LONG, wk::M_INT_TO_C_ULONG,
+            wk::M_TRY_INT_TO_I8, wk::M_TRY_INT_TO_I16, wk::M_TRY_INT_TO_I32, wk::M_TRY_INT_TO_U8, wk::M_TRY_INT_TO_U16, wk::M_TRY_INT_TO_U32,
+            wk::M_TRY_INT_TO_C_LONG, wk::M_TRY_INT_TO_C_ULONG,
         ],
         wk::RATIO => &[
-            "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
-            "ratio->int", "ratio->float", "numerator", "denominator", "max", "min", "ratio->rational",
+            wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE, wk::RETIRED_EQUALS, wk::M_OP_NE, wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP,
+            wk::M_RATIO_TO_INT, wk::M_RATIO_TO_FLOAT, wk::M_NUMERATOR, wk::M_DENOMINATOR, wk::M_MAX, wk::M_MIN, wk::M_RATIO_TO_RATIONAL,
         ],
         // `rational` (`int` ∪ `ratio`): one `rt_rational_*` call each.
         wk::REPR_RATIONAL => &[
-            "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp", "max", "min",
-            "rational->int", "try-rational->int", "rational->ratio", "rational->float", "numerator", "denominator",
+            wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE, wk::RETIRED_EQUALS, wk::M_OP_NE, wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP, wk::M_MAX, wk::M_MIN,
+            wk::M_RATIONAL_TO_INT, wk::M_TRY_RATIONAL_TO_INT, wk::M_RATIONAL_TO_RATIO, wk::M_RATIONAL_TO_FLOAT, wk::M_NUMERATOR, wk::M_DENOMINATOR,
         ],
         // `Sexpr` values are raw tagged `i64` handles in compiled code, and
         // interned symbols/`nil`/small atoms are handle-identical, so `eq`
@@ -492,16 +495,16 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [&'static st
         // `typelisp_rt::equality` the interpreter uses. The free-function
         // `equal`/`equalp` reach their shims through `rt_builtin_symbol`
         // instead, being calls rather than methods.
-        wk::SEXPR => &["eq", "eql"],
+        wk::SEXPR => &[wk::M_EQ, wk::M_EQL],
         // `bool`'s four comparison names are one operation
         // (`registry::bool_assoc`: two immediate values, nothing to fold or
         // recurse into), and a compiled `bool` is a raw `0`/`1`, so all four
         // are the same `icmp eq`.
-        wk::BOOL => &["eq", "eql", "equal", "equalp"],
+        wk::BOOL => &[wk::M_EQ, wk::M_EQL, wk::M_EQUAL, wk::M_EQUALP],
         // A compiled `symbol` is the interned `Value::Symbol` handle, so
         // identity *is* handle equality — the same `icmp eq` as `sexpr`'s
         // `eq`. `registry::symbol_assoc` registers only these two.
-        wk::SYMBOL => &["eq", "eql"],
+        wk::SYMBOL => &[wk::M_EQ, wk::M_EQL],
         _ => &[],
     }
 }
@@ -1235,7 +1238,7 @@ mod native_method_list_tests {
             for &ty in *type_locals {
                 let type_local = typelisp_mem::symbols::well_known_symbol(ty).name();
                 let mut rust: Vec<String> =
-                    native_lowered_primitive_methods(ty).iter().map(|m| m.to_string()).collect();
+                    native_lowered_primitive_methods(ty).iter().map(|&m| typelisp_mem::symbols::well_known_symbol(m).name().to_string()).collect();
                 rust.sort();
                 let island_only: Vec<&String> = island.iter().filter(|m| !rust.contains(m)).collect();
                 let rust_only: Vec<&String> = rust.iter().filter(|m| !island.contains(m)).collect();
@@ -1275,7 +1278,7 @@ mod native_method_list_tests {
                     if !f.builtin {
                         continue;
                     }
-                    if !native_lowered_primitive_methods(ty).contains(&method.as_str()) {
+                    if !native_lowered_primitive_methods(ty).contains(&typelisp_mem::symbols::member_symbol(method).well_known()) {
                         gaps.push(format!("{}::{}", type_local, method));
                     }
                 }

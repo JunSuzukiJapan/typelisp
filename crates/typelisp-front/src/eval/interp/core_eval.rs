@@ -438,7 +438,7 @@ impl Interp {
         let has_native_dispatcher = self.dyn_dispatch_compiled.borrow().contains(&trait_path);
         if has_native_dispatcher {
             for (type_name, method) in &slots {
-                if !self.root.borrow().method_compiled(type_name, method.name()) {
+                if !self.root.borrow().method_compiled(type_name, *method) {
                     let target = crate::CompileTarget::Method(type_name.clone(), *method);
                     (crate::eval::interp::backend_compile_function()?)(self, &mut s, &target)?;
                 }
@@ -592,7 +592,7 @@ impl Interp {
             // fixed signature in `typelisp_rt`, so there is nothing for the
             // reference site to say. `""` records that absence rather than a
             // key nobody wrote.
-            None => Ok(heap.alloc_builtin_fn(None, path.last_segment(), None)),
+            None => Ok(heap.alloc_builtin_fn(None, path.name_symbol(), None)),
         }
     }
 
@@ -600,8 +600,8 @@ impl Interp {
     /// for a method.
     fn methodref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
         let type_name = path_field(heap, form, 0, "methodref")?;
-        let method = sym_field(heap, form, 1, "methodref")?;
-        let f = self.root.borrow().get_method(&type_name, &method);
+        let method = self.sym_field(heap, form, 1, "methodref")?;
+        let f = self.root.borrow().get_method(&type_name, method);
         match f {
             Some(f) => self.reify(heap, &f),
             None => {
@@ -609,7 +609,7 @@ impl Interp {
                     unreachable!("Heap::intern_path always returns Value::Path")
                 };
                 let ret = type_field(heap, form, 3, "methodref")?;
-                Ok(heap.alloc_builtin_fn(Some(recv), &method, Some(ret)))
+                Ok(heap.alloc_builtin_fn(Some(recv), method, Some(ret)))
             }
         }
     }
@@ -652,7 +652,7 @@ impl Interp {
     pub fn target_def(&self, target: &crate::CompileTarget) -> Option<Rc<FnDef>> {
         match target {
             crate::CompileTarget::Fn(path) => self.root.borrow().get_fn(path),
-            crate::CompileTarget::Method(type_name, method) => self.root.borrow().get_method(type_name, method.name()),
+            crate::CompileTarget::Method(type_name, method) => self.root.borrow().get_method(type_name, *method),
         }
     }
 
@@ -1788,7 +1788,7 @@ impl Interp {
                     .borrow_mut()
                     .get_or_create(&type_name.parent())
                     .methods
-                    .insert((type_name.last_segment().to_string(), method.name().to_string()), Rc::new(def));
+                    .insert((type_name.name_symbol(), method), Rc::new(def));
                 self.printer_tables_changed();
                 Ok(None)
             }
@@ -3385,7 +3385,7 @@ mod tests {
             unreachable!("Heap::intern_path always returns Value::Path")
         };
         let i32 = crate::type_key::type_id(&crate::Type::I32);
-        let plus = h.alloc_builtin_fn(Some(recv), "+", Some(i32));
+        let plus = h.alloc_builtin_fn(Some(recv), typelisp_mem::symbols::well_known_symbol(typelisp_mem::wk::M_OP_ADD), Some(i32));
         h.push_root(plus);
         let name = match core_symbol("f") {
             Value::Symbol(id) => id,

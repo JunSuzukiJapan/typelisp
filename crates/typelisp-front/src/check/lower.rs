@@ -307,7 +307,7 @@ fn lower_assoc(
 ) -> Result<Value, Error> {
     let builtin = info.reg.type_def(owner).and_then(|d| d.assoc.get(method.name())).is_some_and(|af| af.builtin);
     if builtin {
-        if let Some(folded) = fold::fold_builtin_method(heap, owner, method.name(), args, ret)? {
+        if let Some(folded) = fold::fold_builtin_method(heap, owner, method, args, ret)? {
             return Ok(folded);
         }
     }
@@ -414,7 +414,7 @@ impl Info {
         let boundary = self
             .reg
             .fn_sig(r)
-            .filter(|sig| sig.builtin && !sig.ffi && !int_boundary_native_fn(r.last_segment()))
+            .filter(|sig| sig.builtin && !sig.ffi && !int_boundary_native_fn(r.name_symbol()))
             .map(|sig| (sig.params.clone(), sig.ret.clone()));
         let mut f = Items::new(heap);
         let path = core::path_form(f.heap(), r);
@@ -471,7 +471,7 @@ impl Info {
             .reg
             .type_def(type_name)
             .and_then(|d| d.assoc.get(method.name()))
-            .filter(|af| af.builtin && int_boundary_raw(type_name, method.name()))
+            .filter(|af| af.builtin && int_boundary_raw(type_name, method))
             .map(|af| (af.sig.params.clone(), af.sig.ret.clone()));
         let declared_int = |i: usize| boundary.as_ref().and_then(|(ps, _)| ps.get(i)).is_some_and(|t| *t == Type::Int);
         // An untagged argument is a raw word from here on, and its
@@ -921,8 +921,7 @@ impl Info {
         let mut f = Items::new(heap);
         let tp = core::path_form(f.heap(), trait_path);
         f.push(tp);
-        let m = f.heap().intern_symbol(method);
-        f.push(m);
+        f.push(Value::Symbol(typelisp_mem::symbols::member_symbol(method)));
         f.push(Value::Int(slot as i64));
         let targets = vtable_form(f.heap(), impl_targets)?;
         f.push(targets);

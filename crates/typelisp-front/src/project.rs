@@ -819,7 +819,7 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
 fn is_readtable_registration(heap: &Heap, form: Value) -> bool {
     core::op_sym(heap, form).map(|s| s.well_known()) == Some(wk::CALL)
         && core::path_field(heap, form, 0).is_some_and(|p| {
-            matches!(p.std_builtin_name(), Some("set-macro-character" | "set-dispatch-macro-character"))
+            p.std_builtin().is_some_and(|s| s.is(wk::F_SET_MACRO_CHARACTER) || s.is(wk::F_SET_DISPATCH_MACRO_CHARACTER))
         })
 }
 

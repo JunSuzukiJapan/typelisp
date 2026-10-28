@@ -1998,7 +1998,7 @@ impl Interp {
                 let type_name = path_field(heap, form, 0, "assoc")?;
                 let method = self.sym_field(heap, form, 1, "assoc")?;
                 let name = typelisp_mem::ConcreteNames::method_link(&type_name, method.name());
-                let Some(f) = self.root.borrow().get_method(&type_name, method.name()) else {
+                let Some(f) = self.root.borrow().get_method(&type_name, method) else {
                     return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
                 };
                 let target = crate::CompileTarget::Method(type_name, method);
@@ -2300,22 +2300,22 @@ impl Interp {
         // `(yield)` gives up the rest of this turn — not a builtin, for the
         // same reason `wait` is not: a builtin answers with a value, and this
         // has to say "stop here" instead.
-        if path.std_builtin_name() == Some("yield") {
+        if path.std_builtin().is_some_and(|s| s.is(wk::F_YIELD)) {
             return Ok((State::Blocked(Waiting::Yield), None));
         }
         // `(sleep secs)` is the same shape: it has to say "not before then",
         // which no builtin's return value can. Intercepted here rather than
         // left to `eval_builtin`, whose implementation stops the whole OS
         // thread — with tasks, that would stop every one of them.
-        if path.std_builtin_name() == Some("sleep") {
+        if path.std_builtin().is_some_and(|s| s.is(wk::F_SLEEP)) {
             return self.sleep_until(heap, &argv);
         }
         // `(net-wait h interest)` — "not before this socket is ready" — is
         // the third shape of the same thing.
-        if path == crate::Path::internal("net-wait") {
+        if path == crate::Path::internal_builtin(wk::F_NET_WAIT) {
             return Ok((State::Blocked(io_wait(heap, &argv, None)?), None));
         }
-        if path == crate::Path::internal("net-wait-for") {
+        if path == crate::Path::internal_builtin(wk::F_NET_WAIT_FOR) {
             let secs = argv.get(2).copied().ok_or_else(|| EvalError::Internal("net-wait-for: no timeout".to_string()))?;
             let d = io_deadline(super::rt_f64(heap, &secs)?)?;
             return Ok((State::Blocked(io_wait(heap, &argv, Some(d))?), None));
@@ -2323,7 +2323,7 @@ impl Interp {
         // A C callback's entry address — the checker's lowering of a callback
         // argument (`analyze::ffi_callback`). The answer is a raw word, which
         // is how the interpreter carries a `ptr`.
-        if path.std_builtin_name() == Some(crate::ffi_callback::ADDRESS_BUILTIN) {
+        if path.std_builtin().is_some_and(|s| s.is(wk::F_FFI_CALLBACK_ADDRESS)) {
             let function = argv.first().and_then(|v| core::path_value(heap, *v));
             let ty = match argv.get(1) {
                 Some(Value::Int(n)) => u32::try_from(*n).ok().and_then(typelisp_mem::TypeId::from_index),
@@ -2337,7 +2337,7 @@ impl Interp {
         }
         // The memory behind `def-c-struct`s and typed pointers
         // (`analyze::c_struct`'s lowering).
-        if let Some(name) = path.std_builtin_name() {
+        if let Some(name) = path.std_builtin() {
             if let Some(result) = crate::c_struct::eval(heap, name, &argv) {
                 return Ok((State::Apply(result?), None));
             }
@@ -2349,7 +2349,7 @@ impl Interp {
         // Otherwise a built-in operator, which lives in the standard
         // library's module or its internal module. Dispatched on the resolved
         // path, not on the name as written.
-        if let Some(name) = path.std_builtin_name() {
+        if let Some(name) = path.std_builtin() {
             if let Some(result) = self.eval_builtin(heap, name, &argv) {
                 return Ok((State::Apply(result?), None));
             }
@@ -2430,11 +2430,11 @@ impl Interp {
             // the very same `eval_builtin`/`eval_builtin_method` a direct call
             // site goes through; the box carries only which name.
             Value::Boxed(id) if heap.is_builtin_fn(id) => {
-                let name = heap.builtin_fn_name(id).to_string();
+                let name = heap.builtin_fn_name(id);
                 let v = match heap.builtin_fn_recv(id) {
-                    None => match self.eval_builtin(heap, &name, &argv) {
+                    None => match self.eval_builtin(heap, name, &argv) {
                         Some(r) => r?,
-                        None => return Err(EvalError::NoSuchFunction(name)),
+                        None => return Err(EvalError::NoSuchFunction(name.name().to_string())),
                     },
                     Some(pid) => {
                         let type_name = crate::check::core::path_value(heap, Value::Path(pid))
@@ -2442,10 +2442,10 @@ impl Interp {
                         let ret_type = heap
                             .builtin_fn_ret_type(id)
                             .expect("a builtin method's value carries its result type");
-                        match super::eval_builtin_method(heap, &type_name, &name, &argv, ret_type) {
+                        match super::eval_builtin_method(heap, &type_name, name, &argv, ret_type) {
                             Some(r) => r?,
                             None => {
-                                return Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, &name)))
+                                return Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, name.name())))
                             }
                         }
                     }
@@ -2508,7 +2508,7 @@ impl Interp {
         argv: Vec<Value>,
     ) -> Result<(State, Option<Frame>), EvalError> {
         let type_name = path_field(heap, form, 0, "assoc")?;
-        let method = sym_field(heap, form, 1, "assoc")?;
+        let method = self.sym_field(heap, form, 1, "assoc")?;
         // The result's runtime identity, for the built-in methods that build a
         // box: `Vector::new` has no field to read an instantiation off.
         let ret_type = type_field(heap, form, 5, "assoc")?;
@@ -2517,8 +2517,8 @@ impl Interp {
         // *suspend*, and a builtin answers with a value or an error, with no way
         // to say "not yet". Intercepted here, where a `State` can say it.
         // `Thread<T>::join` is the same wait: a thread is a task.
-        if (method == "wait" && crate::types::path_is_builtin(&type_name, typelisp_mem::wk::TASK_TYPE))
-            || (method == "join" && crate::types::path_is_builtin(&type_name, typelisp_mem::wk::THREAD_TYPE))
+        if (method.is(wk::M_WAIT) && crate::types::path_is_builtin(&type_name, typelisp_mem::wk::TASK_TYPE))
+            || (method.is(wk::M_JOIN) && crate::types::path_is_builtin(&type_name, typelisp_mem::wk::THREAD_TYPE))
         {
             let on = task_id_of(heap, argv.first().copied())?;
             return Ok((State::Blocked(Waiting::Task(on)), None));
@@ -2533,8 +2533,8 @@ impl Interp {
         // fall through to ordinary resolution, and a monomorphized one
         // arrives under a mangled name that matches none of these.
         if crate::types::path_is_builtin(&type_name, typelisp_mem::wk::CHAN) {
-            let op = match method.as_str() {
-                "new" => match argv.first() {
+            let op = match method.well_known() {
+                wk::M_NEW => match argv.first() {
                     // `ret_type` is the channel's own type (`Chan<int>`), which
                     // the handle is built under.
                     Some(Value::Int(n)) => ChanOp::New(*n, ret_type),
@@ -2545,10 +2545,10 @@ impl Interp {
                         )))
                     }
                 },
-                "len" => ChanOp::Len(chan_id_of(heap, argv.first().copied())?),
-                "cap" => ChanOp::Cap(chan_id_of(heap, argv.first().copied())?),
-                "close" => ChanOp::Close(chan_id_of(heap, argv.first().copied())?),
-                "send" => {
+                wk::M_LEN => ChanOp::Len(chan_id_of(heap, argv.first().copied())?),
+                wk::M_CAP => ChanOp::Cap(chan_id_of(heap, argv.first().copied())?),
+                wk::M_CLOSE => ChanOp::Close(chan_id_of(heap, argv.first().copied())?),
+                wk::SEND => {
                     let c = chan_id_of(heap, argv.first().copied())?;
                     let v = argv.get(1).copied().ok_or_else(|| {
                         EvalError::Internal("send: no value to send".to_string())
@@ -2558,7 +2558,7 @@ impl Interp {
                 // `ret_type` *is* the `Option<T>` this answer is built with —
                 // the assoc node's result identity, the same slot
                 // `Vector<T>::pop` reads.
-                "recv" => ChanOp::Recv(chan_id_of(heap, argv.first().copied())?, ret_type),
+                wk::RECV => ChanOp::Recv(chan_id_of(heap, argv.first().copied())?, ret_type),
                 _ => return self.finish_assoc_resolved(heap, form, argv, type_name, method, ret_type),
             };
             return Ok((State::Blocked(Waiting::Chan(op)), None));
@@ -2580,15 +2580,15 @@ impl Interp {
         form: Value,
         argv: Vec<Value>,
         type_name: crate::Path,
-        method: String,
+        method: SymRef,
         ret_type: TypeId,
     ) -> Result<(State, Option<Frame>), EvalError> {
-        let f = self.root.borrow().get_method(&type_name, &method);
+        let f = self.root.borrow().get_method(&type_name, method);
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
-            None => match super::eval_builtin_method(heap, &type_name, &method, &argv, ret_type) {
+            None => match super::eval_builtin_method(heap, &type_name, method, &argv, ret_type) {
                 Some(result) => Ok((State::Apply(result?), None)),
-                None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, &method))),
+                None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, method.name()))),
             },
         }
     }
@@ -2628,7 +2628,7 @@ impl Interp {
         argv[0] = inner;
         // Visibility was settled where the value was boxed, so this is the
         // direct lookup, not `resolve_method`'s `home`-relative one.
-        let f = self.root.borrow().get_method(&target_type, target_method.name());
+        let f = self.root.borrow().get_method(&target_type, target_method);
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
             None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&target_type, target_method.name()))),

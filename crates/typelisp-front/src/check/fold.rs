@@ -36,7 +36,7 @@
 //! * A local bound to a literal — `(let ((x 5)) (+ x 1))` — which would need
 //!   constant propagation, not folding.
 
-use typelisp_mem::{wk, Error, Heap, Value};
+use typelisp_mem::{wk, Error, Heap, SymRef, Value};
 
 use crate::check::core;
 use crate::check::lower::Arg;
@@ -96,7 +96,7 @@ fn foldable_receiver(type_name: &Path) -> bool {
 pub(super) fn fold_builtin_method(
     heap: &mut Heap,
     type_name: &Path,
-    method: &str,
+    method: SymRef,
     args: &[Arg],
     ret: &Type,
 ) -> Result<Option<Value>, Error> {

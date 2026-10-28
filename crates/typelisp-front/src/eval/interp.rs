@@ -414,7 +414,7 @@ pub(crate) fn print_object_target(heap: &Heap, v: Value) -> Option<(Path, SymRef
     let typelisp_mem::TypeShape::Named(ns, ty, args) = typelisp_mem::type_shape(crate::type_key::heap_type_id(heap, id)?) else {
         return None;
     };
-    let method = typelisp_mem::symbols::intern("print-object");
+    let method = typelisp_mem::symbols::member_symbol("print-object");
     let name = if args.is_empty() {
         method
     } else {
@@ -979,7 +979,7 @@ impl Interp {
             .map(|(type_name, method)| {
                 self.root
                     .borrow()
-                    .get_method(type_name, method.name())
+                    .get_method(type_name, *method)
                     .and_then(|f| f.compiled.borrow().as_ref().map(|c| (c.address(), c.body_abi())))
                     .unwrap_or((0, typelisp_abi::BODY_ABI_CLASSIC))
             })
@@ -1514,7 +1514,7 @@ impl Interp {
         let f = self
             .root
             .borrow()
-            .get_method(&type_path, method.name())
+            .get_method(&type_path, method)
             .ok_or_else(|| EvalError::Internal(format!("vtable slot names `{}::{}`, which is not registered", type_path, method.name())))?;
         let v = self.reify(heap, &f)?;
         Ok(typelisp_rt::encode(v))
@@ -1955,7 +1955,7 @@ impl Interp {
     /// `random-state-next` have no natural receiver to dispatch on, so they
     /// stay free functions too — `random`/`make-random-state`/
     /// `random-state-p` are ordinary prelude `defun`s built on top of them.)
-    fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+    fn eval_builtin(&self, heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Result<Value, EvalError>> {
         // The printing builtins, ahead of the match so there is one list of
         // their names rather than two. Most are what a special form lowered
         // to — `format`/`print`/`println`/`pprint` and `pprint-logical-block`
@@ -1978,13 +1978,13 @@ impl Interp {
                 PrintError::Shape(msg) => EvalError::Internal(msg),
             }));
         }
-        match name {
+        match name.well_known() {
             // `(compile-file "source.typl" "output")`: AOT-compiles an
             // independent source file straight to a native executable —
             // see `compile::aot::compile_file`'s doc comment for why this
             // runs against a *fresh* `Heap`/`Checker`/`Interp` rather than
             // the caller's (`self`'s), unlike `compile` above.
-            "compile-file" => {
+            wk::F_COMPILE_FILE => {
                 let source_path = match expect_str(heap, &args[0]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
@@ -2005,7 +2005,7 @@ impl Interp {
             }
             // `(dump "path")`: this session's environment, written where
             // `typl --image` can pick it up — see `compile::dump::dump_image`.
-            "dump" => {
+            wk::F_DUMP => {
                 let path = match expect_str(heap, &args[0]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
@@ -2020,12 +2020,12 @@ impl Interp {
                         .map_err(EvalError::Panic),
                 )
             }
-            name if name.starts_with("stream-") || name.starts_with("file-") => {
+            wk::F_FILE_CREATE_DIRECTORIES | wk::F_FILE_DELETE | wk::F_FILE_DIRECTORY_P | wk::F_FILE_EXISTS_P | wk::F_FILE_LIST_DIRECTORY | wk::F_FILE_MODIFIED_DATE | wk::F_FILE_OWNER_NAME | wk::F_FILE_RENAME | wk::F_FILE_TRUENAME | wk::F_STREAM_AT_LINE_START | wk::F_STREAM_CLOSE | wk::F_STREAM_DESCRIBE | wk::F_STREAM_FINISH_OUTPUT | wk::F_STREAM_INPUT_P | wk::F_STREAM_LISTEN | wk::F_STREAM_OPEN_FILE | wk::F_STREAM_OPEN_P | wk::F_STREAM_OUTPUT_P | wk::F_STREAM_POSITION | wk::F_STREAM_READ_BYTE | wk::F_STREAM_READ_CHAR | wk::F_STREAM_STDERR | wk::F_STREAM_STDIN | wk::F_STREAM_STDOUT | wk::F_STREAM_STRING_INPUT | wk::F_STREAM_STRING_OUTPUT | wk::F_STREAM_TAKE_OUTPUT_STRING | wk::F_STREAM_UNREAD_CHAR | wk::F_STREAM_WRITE_BYTE | wk::F_STREAM_WRITE_STRING => {
                 self.eval_stream_builtin(heap, name, args)
             }
             // The sockets. `net-wait` never arrives here: `finish_call`
             // intercepts it, as it does `sleep`, because it stops the task.
-            name if name.starts_with("net-") => {
+            wk::F_NET_ACCEPT | wk::F_NET_BUFFERED_P | wk::F_NET_CONNECT_BEGIN | wk::F_NET_CONNECT_FINISH | wk::F_NET_FILL | wk::F_NET_FLUSH | wk::F_NET_LISTEN | wk::F_NET_LOCAL_ADDRESS | wk::F_NET_PEER_ADDRESS | wk::F_NET_PEER_SUBJECT | wk::F_NET_POP_BYTE | wk::F_NET_POP_CHAR | wk::F_NET_PUSH_BYTE | wk::F_NET_PUSH_STRING | wk::F_NET_RESOLVE_BEGIN | wk::F_NET_RESOLVE_FINISH | wk::F_NET_SERVER_NAME | wk::F_NET_SET_KEEPALIVE | wk::F_NET_SET_KEEPALIVE_PERIOD | wk::F_NET_SET_NODELAY | wk::F_NET_SHUTDOWN_WRITE | wk::F_NET_SOCKET_ERROR | wk::F_NET_TLS_ADD_CERTIFICATE | wk::F_NET_TLS_HANDSHAKE | wk::F_NET_TLS_LISTEN | wk::F_NET_TLS_START | wk::F_NET_UDP_BIND | wk::F_NET_UDP_LAST_SENDER | wk::F_NET_UDP_RECV | wk::F_NET_UDP_SEND_TO | wk::F_NET_UNIX_CONNECT | wk::F_NET_UNIX_LISTEN | wk::F_NET_WAIT | wk::F_NET_WAIT_FOR => {
                 Some(match typelisp_rt::net_builtin::net_builtin(heap, name, args)? {
                     Ok(v) => Ok(v),
                     Err(e) => Err(EvalError::Internal(e)),
@@ -2034,49 +2034,46 @@ impl Interp {
             // The readtable (CLHS 23.1). Routed by name rather than by
             // prefix: `set-`/`get-` are far too common to claim, and there
             // are only four.
-            "set-macro-character"
-            | "get-macro-character"
-            | "set-dispatch-macro-character"
-            | "get-dispatch-macro-character" => {
+            wk::F_SET_MACRO_CHARACTER | wk::F_GET_MACRO_CHARACTER | wk::F_SET_DISPATCH_MACRO_CHARACTER | wk::F_GET_DISPATCH_MACRO_CHARACTER => {
                 Some(match typelisp_rt::readtable::readtable_builtin(heap, name, args)? {
                     Ok(v) => Ok(v),
                     Err(e) => Err(EvalError::Internal(e)),
                 })
             }
-            "make-random-state-fresh" => Some(eval_make_random_state_fresh(heap, args)),
-            "seed-random-state" => Some(eval_seed_random_state(heap, args)),
-            "random-state-copy" => Some(eval_random_state_copy(heap, args)),
-            "random-state-next" => Some(eval_random_state_next(heap, args)),
-            "get-universal-time" => Some(eval_get_universal_time(heap, args)),
-            "get-internal-real-time" => Some(eval_get_internal_real_time(heap, args)),
-            "get-internal-run-time" => Some(eval_get_internal_run_time(heap, args)),
+            wk::F_MAKE_RANDOM_STATE_FRESH => Some(eval_make_random_state_fresh(heap, args)),
+            wk::F_SEED_RANDOM_STATE => Some(eval_seed_random_state(heap, args)),
+            wk::F_RANDOM_STATE_COPY => Some(eval_random_state_copy(heap, args)),
+            wk::F_RANDOM_STATE_NEXT => Some(eval_random_state_next(heap, args)),
+            wk::F_GET_UNIVERSAL_TIME => Some(eval_get_universal_time(heap, args)),
+            wk::F_GET_INTERNAL_REAL_TIME => Some(eval_get_internal_real_time(heap, args)),
+            wk::F_GET_INTERNAL_RUN_TIME => Some(eval_get_internal_run_time(heap, args)),
             // The environment and the running implementation. Each is one
             // call into `typelisp_rt::sys_builtin`, the same implementation
             // the compiled shims wrap — the `file-*` half of Phase 9c needs
             // no arm here at all, since the `starts_with("file-")` guard
             // above already routes it to `eval_stream_builtin`.
-            "command-line-args" => Some(Ok(typelisp_rt::sys_builtin::command_line_args(heap))),
-            "getenv" => Some(match &args[0] {
+            wk::F_COMMAND_LINE_ARGS => Some(Ok(typelisp_rt::sys_builtin::command_line_args(heap))),
+            wk::F_GETENV => Some(match &args[0] {
                 Value::Str(id) => {
                     let name = heap.string(*id).to_string();
                     Ok(typelisp_rt::sys_builtin::getenv(heap, &name))
                 }
                 other => Err(EvalError::Panic(format!("getenv: argument is not a string, got {:?}", other))),
             }),
-            "home-directory" => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
+            wk::F_HOME_DIRECTORY => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
             // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
             // `disassemble` are *not* here — those are special forms with
             // their own core nodes, the same way `compile` is.
-            "heap-info" => Some(Ok(typelisp_rt::sys_builtin::heap_info(heap))),
-            "dribble-start" => Some(match &args[0] {
+            wk::F_HEAP_INFO => Some(Ok(typelisp_rt::sys_builtin::heap_info(heap))),
+            wk::F_DRIBBLE_START => Some(match &args[0] {
                 Value::Str(id) => {
                     let path = heap.string(*id).to_string();
                     Ok(typelisp_rt::sys_builtin::dribble_start(heap, &path))
                 }
                 other => Err(EvalError::Panic(format!("dribble: argument is not a string, got {:?}", other))),
             }),
-            "dribble-stop" => Some(Ok(typelisp_rt::sys_builtin::dribble_stop(heap))),
-            "ed-open" => Some(match (&args[0], &args[1]) {
+            wk::F_DRIBBLE_STOP => Some(Ok(typelisp_rt::sys_builtin::dribble_stop(heap))),
+            wk::F_ED_OPEN => Some(match (&args[0], &args[1]) {
                 (Value::Str(id), Value::Int(line)) => {
                     let path = heap.string(*id).to_string();
                     let line = *line;
@@ -2084,49 +2081,49 @@ impl Interp {
                 }
                 other => Err(EvalError::Panic(format!("ed: arguments are not a string and a line, got {:?}", other))),
             }),
-            "sleep" => Some(match rt_f64(heap, &args[0]) {
+            wk::F_SLEEP => Some(match rt_f64(heap, &args[0]) {
                 Ok(secs) => typelisp_rt::sys_builtin::sleep(heap, secs).map(|()| Value::Empty).map_err(EvalError::Panic),
                 Err(e) => Err(e),
             }),
-            "lisp-implementation-version" => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),
-            "machine-type" => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
-            "software-type" => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),
+            wk::F_LISP_IMPLEMENTATION_VERSION => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),
+            wk::F_MACHINE_TYPE => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
+            wk::F_SOFTWARE_TYPE => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),
             // The three that have to ask the host, and the two that ask it
             // what the local time zone was at a given instant. `file-author`
             // needs no arm for the same reason the rest of the `file-*`
             // family does not — the prefix guard above routed it already.
-            "machine-instance" => Some(Ok(typelisp_rt::sys_builtin::machine_instance(heap))),
-            "machine-version" => Some(Ok(typelisp_rt::sys_builtin::machine_version(heap))),
-            "software-version" => Some(Ok(typelisp_rt::sys_builtin::software_version(heap))),
-            "timezone-offset-seconds" => Some(match int_pair(args, "timezone-offset-seconds") {
+            wk::F_MACHINE_INSTANCE => Some(Ok(typelisp_rt::sys_builtin::machine_instance(heap))),
+            wk::F_MACHINE_VERSION => Some(Ok(typelisp_rt::sys_builtin::machine_version(heap))),
+            wk::F_SOFTWARE_VERSION => Some(Ok(typelisp_rt::sys_builtin::software_version(heap))),
+            wk::F_TIMEZONE_OFFSET_SECONDS => Some(match int_pair(args, "timezone-offset-seconds") {
                 Ok((day, sec)) => Ok(typelisp_rt::sys_builtin::timezone_offset_seconds(heap, day, sec)),
                 Err(e) => Err(e),
             }),
-            "timezone-daylight-p" => Some(match int_pair(args, "timezone-daylight-p") {
+            wk::F_TIMEZONE_DAYLIGHT_P => Some(match int_pair(args, "timezone-daylight-p") {
                 Ok((day, sec)) => Ok(typelisp_rt::sys_builtin::timezone_daylight_p(heap, day, sec)),
                 Err(e) => Err(e),
             }),
-            "parse-float" => Some(eval_parse_float(heap, args)),
+            wk::F_PARSE_FLOAT => Some(eval_parse_float(heap, args)),
             // Both pass `self` as the evaluator: an interpreted `(read ...)`
             // honours `#.` and the readtable, the way CL's does. The compiled
             // shims have no `Interp` to pass and go through the thread-local
             // registration instead (`typelisp_read::runtime`).
-            "read" => Some(self.eval_read(heap, args)),
-            "read-datum-at" => Some(self.eval_read_datum_at(heap, args)),
-            "eval" => Some(self.eval_form(heap, &args[0])),
-            "macroexpand-1" => Some(self.macroexpand_1_form(heap, args[0])),
-            "macroexpand" => Some(self.macroexpand_form(heap, args[0])),
+            wk::F_READ => Some(self.eval_read(heap, args)),
+            wk::F_READ_DATUM_AT => Some(self.eval_read_datum_at(heap, args)),
+            wk::F_EVAL => Some(self.eval_form(heap, &args[0])),
+            wk::F_MACROEXPAND_1 => Some(self.macroexpand_1_form(heap, args[0])),
+            wk::F_MACROEXPAND => Some(self.macroexpand_form(heap, args[0])),
             // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
             // free-function `Sexpr` overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
             // in `eval_builtin_method`). Rust builtins since Phase 5 fenced
             // `match` off `Sexpr`; see `sexpr_equal`/`sexpr_equalp`.
-            "equal" => Some(sexpr_equal(heap, args)),
-            "equalp" => Some(sexpr_equalp(heap, args)),
+            wk::M_EQUAL => Some(sexpr_equal(heap, args)),
+            wk::M_EQUALP => Some(sexpr_equalp(heap, args)),
             // `exit`: terminates the process immediately via the OS, never
             // returning — `rt_i64` truncates to `i32` the same way every
             // other `i32`-typed builtin extracts its argument.
-            "exit" => match rt_i64(&args[0]) {
+            wk::F_EXIT => match rt_i64(&args[0]) {
                 Ok(code) => std::process::exit(code as i32),
                 Err(e) => Some(Err(e)),
             },
@@ -2135,21 +2132,21 @@ impl Interp {
             // there (`Names::read`), so it hands back the symbol a source
             // spelling of it in that module is, creating one only when the
             // module sees none — CL's `intern`.
-            "symbol->string" => Some(match args[0] {
+            wk::F_SYMBOL_TO_STRING => Some(match args[0] {
                 Value::Symbol(id) => {
                     let name = id.name().to_string();
                     Ok(str_rt(heap, name))
                 }
                 _ => Err(EvalError::Panic("symbol->string: not a symbol".into())),
             }),
-            "intern" => Some((|| {
+            wk::INTERN => Some((|| {
                 let name = rt_str(heap, &args[0])?;
                 let module = rt_str(heap, &args[1])?;
                 let ns = typelisp_mem::symbols::ns_named(&module)
                     .ok_or_else(|| EvalError::Panic(format!("intern: no module named `{}`", module)))?;
                 Ok(Value::Symbol(heap.names().read(ns, &name)))
             })()),
-            "keywordp" => Some(match args[0] {
+            wk::F_KEYWORDP => Some(match args[0] {
                 Value::Symbol(id) => Ok(Value::Bool(id.is_keyword())),
                 _ => Err(EvalError::Panic("keywordp: not a symbol".into())),
             }),
@@ -2166,7 +2163,7 @@ impl Interp {
             // generic `cons<T,U>` pair. `sexpr-consp`/`sexpr-null`/`sexpr-atom`
             // read the runtime tag directly (no `match`), so they survive
             // Phase 5's `match`-to-enum fence.
-            "sexpr-cons" => match (args.first(), args.get(1)) {
+            wk::F_SEXPR_CONS => match (args.first(), args.get(1)) {
                 (Some(a), Some(b)) => {
                     // core-build-ok: this *is* `cons`, over user data; both
                     // arguments are already rooted as evaluated call arguments.
@@ -2180,29 +2177,29 @@ impl Interp {
             // each side. Only a non-empty non-cons (an int, a string, ...)
             // is still an error: that is a genuine type confusion, where the
             // empty list is an ordinary end of a list walk.
-            "sexpr-car" => match args.first() {
+            wk::F_SEXPR_CAR => match args.first() {
                 Some(v) if v.is_empty() => Some(Ok(Value::Empty)),
                 Some(v) => {
                     Some(heap.car(*v).map_err(|_| EvalError::Panic("sexpr-car: not a cons".into())))
                 }
                 None => Some(Err(EvalError::Internal("sexpr-car: expected one argument".into()))),
             },
-            "sexpr-cdr" => match args.first() {
+            wk::F_SEXPR_CDR => match args.first() {
                 Some(v) if v.is_empty() => Some(Ok(Value::Empty)),
                 Some(v) => {
                     Some(heap.cdr(*v).map_err(|_| EvalError::Panic("sexpr-cdr: not a cons".into())))
                 }
                 None => Some(Err(EvalError::Internal("sexpr-cdr: expected one argument".into()))),
             },
-            "sexpr-consp" => match args.first() {
+            wk::F_SEXPR_CONSP => match args.first() {
                 Some(v) => Some(Ok(Value::Bool(v.is_cons()))),
                 None => Some(Err(EvalError::Internal("sexpr-consp: expected one argument".into()))),
             },
-            "sexpr-null" => match args.first() {
+            wk::F_SEXPR_NULL => match args.first() {
                 Some(v) => Some(Ok(Value::Bool(v.is_empty()))),
                 None => Some(Err(EvalError::Internal("sexpr-null: expected one argument".into()))),
             },
-            "sexpr-atom" => match args.first() {
+            wk::F_SEXPR_ATOM => match args.first() {
                 Some(v) => Some(Ok(Value::Bool(!v.is_cons()))),
                 None => Some(Err(EvalError::Internal("sexpr-atom: expected one argument".into()))),
             },
@@ -2217,7 +2214,7 @@ impl Interp {
             // `sexpr-int`: an `int` node is its own value — a fixnum or a
             // bignum box — so the read is the identity, after the check that
             // it is one (and canonical).
-            "sexpr-int" => match args.first() {
+            wk::F_SEXPR_INT => match args.first() {
                 Some(v @ Value::Int(_)) | Some(v @ Value::Boxed(_)) => Some(expect_int(heap, v).map(|_| *v).map_err(|_| {
                     EvalError::Panic("sexpr-int: expected an int Sexpr node".into())
                 })),
@@ -2231,24 +2228,24 @@ impl Interp {
             // these variants exist to prevent. The result is the plain
             // normalized word, because that is what a statically typed `u8`
             // is everywhere outside a `Sexpr`.
-            name @ ("sexpr-i8" | "sexpr-i16" | "sexpr-u8" | "sexpr-u16" | "sexpr-u32" | "sexpr-i32") => {
-                let (width, signed) = match name {
-                    "sexpr-i8" => (8u8, true),
-                    "sexpr-i16" => (16, true),
-                    "sexpr-u8" => (8, false),
-                    "sexpr-u16" => (16, false),
-                    "sexpr-u32" => (32, false),
+            wk::F_SEXPR_I8 | wk::F_SEXPR_I16 | wk::F_SEXPR_U8 | wk::F_SEXPR_U16 | wk::F_SEXPR_U32 | wk::F_SEXPR_I32 => {
+                let (width, signed) = match name.well_known() {
+                    wk::F_SEXPR_I8 => (8u8, true),
+                    wk::F_SEXPR_I16 => (16, true),
+                    wk::F_SEXPR_U8 => (8, false),
+                    wk::F_SEXPR_U16 => (16, false),
+                    wk::F_SEXPR_U32 => (32, false),
                     _ => (32, true),
                 };
                 match args.first() {
                     Some(Value::Boxed(id)) if heap.is_narrow(*id, width, signed) => {
                         Some(Ok(Value::Int(heap.narrow_box(*id).expect("just tested").value)))
                     }
-                    Some(_) => Some(Err(EvalError::Panic(format!("{name}: expected a {} Sexpr node", &name[6..])))),
+                    Some(_) => Some(Err(EvalError::Panic(format!("{name}: expected a {} Sexpr node", &name.name()[6..])))),
                     _ => Some(Err(EvalError::Internal(format!("{name}: expected a Sexpr argument")))),
                 }
             }
-            "sexpr-bool" => match args.first() {
+            wk::F_SEXPR_BOOL => match args.first() {
                 Some(Value::Bool(b)) => Some(Ok(Value::Bool(*b))),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-bool: expected a Bool Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-bool: expected a Sexpr argument".into()))),
@@ -2259,7 +2256,7 @@ impl Interp {
             // (compiled code previously had no way to build/read a bare `char`
             // literal at all, an oversight discovered while implementing
             // `quote`, whose `Char` leaf needs exactly this).
-            "sexpr-char" => match args.first() {
+            wk::F_SEXPR_CHAR => match args.first() {
                 Some(Value::Char(c)) => Some(Ok(Value::Char(*c))),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-char: expected a Char Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-char: expected a Sexpr argument".into()))),
@@ -2272,19 +2269,19 @@ impl Interp {
             // single `sexpr-float` would have to widen an `f32` to answer
             // with the `f64` its return type promised, which is the width
             // being thrown away at exactly the point the value is read.
-            "sexpr-f64" => match args.first() {
+            wk::F_SEXPR_F64 => match args.first() {
                 // The node *is* the float box since the scalar
                 // unification, so reading the payload out is the identity.
                 Some(v @ Value::Boxed(id)) if heap.is_f64(*id) => Some(Ok(*v)),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-f64: expected an f64 Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-f64: expected a Sexpr argument".into()))),
             },
-            "sexpr-f32" => match args.first() {
+            wk::F_SEXPR_F32 => match args.first() {
                 Some(v @ Value::Boxed(id)) if heap.is_f32(*id) => Some(Ok(*v)),
                 Some(_) => Some(Err(EvalError::Panic("sexpr-f32: expected an f32 Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-f32: expected a Sexpr argument".into()))),
             },
-            "sexpr-str" => match args.first() {
+            wk::F_SEXPR_STR => match args.first() {
                 // The node *is* the heap string since the scalar
                 // unification, so reading the payload out is the identity.
                 Some(v @ Value::Str(_)) => Some(Ok(*v)),
@@ -2293,7 +2290,7 @@ impl Interp {
             },
             // `(Sym v)` binds `v : Symbol`, then `symbol->string` reads its name;
             // this fuses the two, matching the old defun `(symbol->string v)`.
-            "sexpr-sym-name" => match args.first() {
+            wk::F_SEXPR_SYM_NAME => match args.first() {
                 Some(Value::Symbol(id)) => {
                     let name = id.name().to_string();
                     Some(Ok(str_rt(heap, name)))
@@ -2305,7 +2302,7 @@ impl Interp {
             // with a *non-panic* fallback rewrites to (`form-is-borrowed?` in
             // `compiler.rs`) — a peer of `sexpr-consp`/`sexpr-null`/`sexpr-atom`,
             // reading the tag directly.
-            "sexpr-symp" => match args.first() {
+            wk::F_SEXPR_SYMP => match args.first() {
                 Some(v) => Some(Ok(Value::Bool(matches!(v, Value::Symbol(_))))),
                 None => Some(Err(EvalError::Internal("sexpr-symp: expected one argument".into()))),
             },
@@ -2353,7 +2350,7 @@ impl Interp {
         if self.printing.borrow().contains(&v) {
             return Ok(None);
         }
-        let Some(f) = self.root.borrow().get_method(&type_path, method.name()) else {
+        let Some(f) = self.root.borrow().get_method(&type_path, method) else {
             return Ok(None);
         };
         if !is_print_object_sig(&f) {
@@ -2910,22 +2907,22 @@ pub(crate) fn narrow_variant(variant: usize) -> Option<(u8, bool)> {
 /// comparisons, the division and the remainder below stay plain `i64`
 /// operations for the unsigned types too: a normalized `u32` is a
 /// non-negative `i64`.
-fn eval_int_builtin(name: &str, args: &[Value], width: u32, signed: bool) -> Option<Result<Value, EvalError>> {
+fn eval_int_builtin(name: SymRef, args: &[Value], width: u32, signed: bool) -> Option<Result<Value, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(Value::Int(a)), Some(Value::Int(b))) => (*a, *b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two integers", name)))),
     };
     let norm = |v: i64| Value::Int(crate::types::normalize_int(v, width, signed));
-    let v = match name {
+    let v = match name.well_known() {
         // Wrapping, then cut: the low `width` bits of a 64-bit sum are the
         // sum's own low `width` bits, so the wide operation is a correct way
         // to compute the narrow one. `wrapping_*` rather than `+`/`-`/`*`
         // only because Rust's own overflow check would fire on the 64-bit
         // intermediate, which is not the overflow anyone asked about.
-        "+" => norm(a.wrapping_add(b)),
-        "-" => norm(a.wrapping_sub(b)),
-        "*" => norm(a.wrapping_mul(b)),
-        "/" => {
+        wk::M_OP_ADD => norm(a.wrapping_add(b)),
+        wk::M_OP_SUB => norm(a.wrapping_sub(b)),
+        wk::M_OP_MUL => norm(a.wrapping_mul(b)),
+        wk::M_OP_DIV => {
             if b == 0 {
                 return Some(Err(EvalError::Panic("divide by zero".into())));
             }
@@ -2941,7 +2938,7 @@ fn eval_int_builtin(name: &str, args: &[Value], width: u32, signed: bool) -> Opt
             }
             norm(a / b)
         }
-        "mod" => {
+        wk::M_MOD => {
             if b == 0 {
                 return Some(Err(EvalError::Panic("mod by zero".into())));
             }
@@ -2952,28 +2949,28 @@ fn eval_int_builtin(name: &str, args: &[Value], width: u32, signed: bool) -> Opt
             let r = a.wrapping_rem(b);
             norm(if r != 0 && (r < 0) != (b < 0) { r + b } else { r })
         }
-        "<" => Value::Bool(a < b),
-        "<=" => Value::Bool(a <= b),
-        ">" => Value::Bool(a > b),
-        ">=" => Value::Bool(a >= b),
-        "=" => Value::Bool(a == b),
-        "/=" => Value::Bool(a != b),
-        "max" => norm(a.max(b)),
-        "min" => norm(a.min(b)),
+        wk::M_OP_LT => Value::Bool(a < b),
+        wk::M_OP_LE => Value::Bool(a <= b),
+        wk::M_OP_GT => Value::Bool(a > b),
+        wk::M_OP_GE => Value::Bool(a >= b),
+        wk::RETIRED_EQUALS => Value::Bool(a == b),
+        wk::M_OP_NE => Value::Bool(a != b),
+        wk::M_MAX => norm(a.max(b)),
+        wk::M_MIN => norm(a.min(b)),
         // Bitwise: the operands' bits above `width` are the extension, and
         // the result's have to be the extension of the *result* — which for
         // an unsigned `and`/`or`/`xor` they already are, but for `xor` on
         // signed operands (or `lognot`, below) they are not.
-        "logand" => norm(a & b),
-        "logior" => norm(a | b),
-        "logxor" => norm(a ^ b),
+        wk::M_LOGAND => norm(a & b),
+        wk::M_LOGIOR => norm(a | b),
+        wk::M_LOGXOR => norm(a ^ b),
         // `(ash integer count)`: positive `count` shifts left, negative
         // shifts right (arithmetic — sign-extending), matching CL §12.10.
         // Shifts by `width` or more places are clamped rather than handed to
         // Rust's `<<`/`>>`: the result at that point is just `0` (left), and
         // for a right shift `0` or, for a signed negative operand, `-1` —
         // the sign bit smeared across every bit.
-        "ash" => {
+        wk::M_ASH => {
             let w = i64::from(width);
             norm(if b >= 0 {
                 if b >= w { 0 } else { a.wrapping_shl(b as u32) }
@@ -2988,8 +2985,8 @@ fn eval_int_builtin(name: &str, args: &[Value], width: u32, signed: bool) -> Opt
         // zero.
         // `a` is the integer and `b` the bit position — the argument order
         // reversed when the position became an `i32` (`registry::int_assoc`).
-        "logbitp" => Value::Bool(if b >= i64::from(width) { signed && a < 0 } else { (a >> b) & 1 == 1 }),
-        "logtest" => Value::Bool((a & b) != 0),
+        wk::M_LOGBITP => Value::Bool(if b >= i64::from(width) { signed && a < 0 } else { (a >> b) & 1 == 1 }),
+        wk::M_LOGTEST => Value::Bool((a & b) != 0),
         _ => unreachable!(),
     };
     Some(Ok(v))
@@ -3086,24 +3083,24 @@ fn try_int_to_char(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<
 /// a zero divisor — IEEE-754 division yields `inf`/`NaN` instead, the natural
 /// float semantics (no "can't express nonzero" gap to plug). `mod`/`rem` are
 /// defined in `prelude.rs` as typelisp methods (`a - b*floor|truncate(a/b)`).
-fn eval_float_builtin(heap: &mut Heap, name: &str, args: &[Value], single: bool) -> Option<Result<Value, EvalError>> {
+fn eval_float_builtin(heap: &mut Heap, name: SymRef, args: &[Value], single: bool) -> Option<Result<Value, EvalError>> {
     let (a, b) = match (args.first().map(|v| expect_float(heap, v)), args.get(1).map(|v| expect_float(heap, v))) {
         (Some(Ok(a)), Some(Ok(b))) => (a, b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two floats", name)))),
     };
-    let v = match name {
-        "+" => float_at(heap, a + b, single),
-        "-" => float_at(heap, a - b, single),
-        "*" => float_at(heap, a * b, single),
-        "/" => float_at(heap, a / b, single),
-        "<" => Value::Bool(a < b),
-        "<=" => Value::Bool(a <= b),
-        ">" => Value::Bool(a > b),
-        ">=" => Value::Bool(a >= b),
-        "=" => Value::Bool(a == b),
-        "/=" => Value::Bool(a != b),
-        "max" => float_at(heap, a.max(b), single),
-        "min" => float_at(heap, a.min(b), single),
+    let v = match name.well_known() {
+        wk::M_OP_ADD => float_at(heap, a + b, single),
+        wk::M_OP_SUB => float_at(heap, a - b, single),
+        wk::M_OP_MUL => float_at(heap, a * b, single),
+        wk::M_OP_DIV => float_at(heap, a / b, single),
+        wk::M_OP_LT => Value::Bool(a < b),
+        wk::M_OP_LE => Value::Bool(a <= b),
+        wk::M_OP_GT => Value::Bool(a > b),
+        wk::M_OP_GE => Value::Bool(a >= b),
+        wk::RETIRED_EQUALS => Value::Bool(a == b),
+        wk::M_OP_NE => Value::Bool(a != b),
+        wk::M_MAX => float_at(heap, a.max(b), single),
+        wk::M_MIN => float_at(heap, a.min(b), single),
         _ => unreachable!(),
     };
     Some(Ok(v))
@@ -3169,18 +3166,30 @@ fn try_int_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, r
     Ok(heap.alloc_option(ret_type, fits.then_some(Value::Int(n))))
 }
 
-/// The target width and signedness a `int->W`/`try-int->W` method name
-/// carries, or `None` for any other method — the `W` is the only place a
-/// width cast's target can be written (`registry::int_assoc`, which builds
-/// the names from the same lists). A method is still named by its spelling
-/// (stage 7 of the explicit-symbols plan makes it a symbol).
-fn width_cast_target(method: &str, prefix: &str) -> Option<(u32, bool)> {
-    let target = method.strip_prefix(prefix)?;
-    crate::types::INT_TYPES
-        .iter()
-        .chain(crate::types::C_WORD_TYPES.iter())
-        .find(|t| t.scalar_name() == Some(target))
-        .and_then(crate::types::int_width_signed)
+/// Whether `method` is a `try-int->W` cast rather than an `int->W` one, and
+/// `W`'s width and signedness — `None` for any other method. The pairs are
+/// [`crate::types::int_width_signed`]'s, for the targets
+/// `registry::int_assoc` gives these casts.
+fn width_cast_target(method: SymRef) -> Option<(bool, u32, bool)> {
+    Some(match method.well_known() {
+        wk::M_INT_TO_I8 => (false, 8, true),
+        wk::M_INT_TO_I16 => (false, 16, true),
+        wk::M_INT_TO_I32 => (false, 32, true),
+        wk::M_INT_TO_U8 => (false, 8, false),
+        wk::M_INT_TO_U16 => (false, 16, false),
+        wk::M_INT_TO_U32 => (false, 32, false),
+        wk::M_INT_TO_C_LONG => (false, 64, true),
+        wk::M_INT_TO_C_ULONG => (false, 64, false),
+        wk::M_TRY_INT_TO_I8 => (true, 8, true),
+        wk::M_TRY_INT_TO_I16 => (true, 16, true),
+        wk::M_TRY_INT_TO_I32 => (true, 32, true),
+        wk::M_TRY_INT_TO_U8 => (true, 8, false),
+        wk::M_TRY_INT_TO_U16 => (true, 16, false),
+        wk::M_TRY_INT_TO_U32 => (true, 32, false),
+        wk::M_TRY_INT_TO_C_LONG => (true, 64, true),
+        wk::M_TRY_INT_TO_C_ULONG => (true, 64, false),
+        _ => return None,
+    })
 }
 
 /// The `BigRational` behind a `ratio` value — see [`expect_bignum`] for why
@@ -3259,9 +3268,9 @@ fn int_rt(heap: &mut Heap, n: BigInt) -> Value {
 /// toward zero and `mod` floors, both panicking on a zero divisor like every
 /// other numeric type here; the fixed-width types' `MIN / -1` overflow simply
 /// promotes. `/` is CL's, a `rational` (`eval_rational_builtin`).
-fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+fn eval_integer_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Result<Value, EvalError>> {
     use num_integer::Integer;
-    if name == "ash" || name == "logbitp" {
+    if name.is(wk::M_ASH) || name.is(wk::M_LOGBITP) {
         return Some(eval_integer_shift(heap, name, args));
     }
     let (a, b) = match (args.first(), args.get(1)) {
@@ -3274,17 +3283,17 @@ fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<R
     if let (IntArg::Fix(x), IntArg::Fix(y)) = (&a, &b) {
         let (x, y) = (*x, *y);
         let wide = |heap: &mut Heap, n: i128| heap.canonical_int(n);
-        let v = match name {
-            "+" => wide(heap, i128::from(x) + i128::from(y)),
-            "-" => wide(heap, i128::from(x) - i128::from(y)),
-            "*" => wide(heap, i128::from(x) * i128::from(y)),
-            "truncate" => {
+        let v = match name.well_known() {
+            wk::M_OP_ADD => wide(heap, i128::from(x) + i128::from(y)),
+            wk::M_OP_SUB => wide(heap, i128::from(x) - i128::from(y)),
+            wk::M_OP_MUL => wide(heap, i128::from(x) * i128::from(y)),
+            wk::M_TRUNCATE => {
                 if y == 0 {
                     return Some(Err(EvalError::Panic("divide by zero".into())));
                 }
                 wide(heap, i128::from(x) / i128::from(y))
             }
-            "mod" => {
+            wk::M_MOD => {
                 if y == 0 {
                     return Some(Err(EvalError::Panic("mod by zero".into())));
                 }
@@ -3294,51 +3303,51 @@ fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<R
                 let r = x % y;
                 wide(heap, if r != 0 && ((r < 0) != (y < 0)) { r + y } else { r })
             }
-            "<" => Value::Bool(x < y),
-            "<=" => Value::Bool(x <= y),
-            ">" => Value::Bool(x > y),
-            ">=" => Value::Bool(x >= y),
-            "=" => Value::Bool(x == y),
-            "/=" => Value::Bool(x != y),
-            "max" => Value::Int(x.max(y)),
-            "min" => Value::Int(x.min(y)),
-            "logand" => Value::Int(x & y),
-            "logior" => Value::Int(x | y),
-            "logxor" => Value::Int(x ^ y),
-            "logtest" => Value::Bool(x & y != 0),
+            wk::M_OP_LT => Value::Bool(x < y),
+            wk::M_OP_LE => Value::Bool(x <= y),
+            wk::M_OP_GT => Value::Bool(x > y),
+            wk::M_OP_GE => Value::Bool(x >= y),
+            wk::RETIRED_EQUALS => Value::Bool(x == y),
+            wk::M_OP_NE => Value::Bool(x != y),
+            wk::M_MAX => Value::Int(x.max(y)),
+            wk::M_MIN => Value::Int(x.min(y)),
+            wk::M_LOGAND => Value::Int(x & y),
+            wk::M_LOGIOR => Value::Int(x | y),
+            wk::M_LOGXOR => Value::Int(x ^ y),
+            wk::M_LOGTEST => Value::Bool(x & y != 0),
             _ => unreachable!("eval_integer_builtin: {}", name),
         };
         return Some(Ok(v));
     }
     let (a, b) = (a.into_big(), b.into_big());
-    let v = match name {
-        "+" => int_rt(heap, &a + &b),
-        "-" => int_rt(heap, &a - &b),
-        "*" => int_rt(heap, &a * &b),
-        "truncate" => {
+    let v = match name.well_known() {
+        wk::M_OP_ADD => int_rt(heap, &a + &b),
+        wk::M_OP_SUB => int_rt(heap, &a - &b),
+        wk::M_OP_MUL => int_rt(heap, &a * &b),
+        wk::M_TRUNCATE => {
             if b.is_zero() {
                 return Some(Err(EvalError::Panic("divide by zero".into())));
             }
             int_rt(heap, &a / &b)
         }
-        "mod" => {
+        wk::M_MOD => {
             if b.is_zero() {
                 return Some(Err(EvalError::Panic("mod by zero".into())));
             }
             int_rt(heap, a.mod_floor(&b))
         }
-        "<" => Value::Bool(a < b),
-        "<=" => Value::Bool(a <= b),
-        ">" => Value::Bool(a > b),
-        ">=" => Value::Bool(a >= b),
-        "=" => Value::Bool(a == b),
-        "/=" => Value::Bool(a != b),
-        "max" => int_rt(heap, if a >= b { a } else { b }),
-        "min" => int_rt(heap, if a <= b { a } else { b }),
-        "logand" => int_rt(heap, &a & &b),
-        "logior" => int_rt(heap, &a | &b),
-        "logxor" => int_rt(heap, &a ^ &b),
-        "logtest" => Value::Bool(!(&a & &b).is_zero()),
+        wk::M_OP_LT => Value::Bool(a < b),
+        wk::M_OP_LE => Value::Bool(a <= b),
+        wk::M_OP_GT => Value::Bool(a > b),
+        wk::M_OP_GE => Value::Bool(a >= b),
+        wk::RETIRED_EQUALS => Value::Bool(a == b),
+        wk::M_OP_NE => Value::Bool(a != b),
+        wk::M_MAX => int_rt(heap, if a >= b { a } else { b }),
+        wk::M_MIN => int_rt(heap, if a <= b { a } else { b }),
+        wk::M_LOGAND => int_rt(heap, &a & &b),
+        wk::M_LOGIOR => int_rt(heap, &a | &b),
+        wk::M_LOGXOR => int_rt(heap, &a ^ &b),
+        wk::M_LOGTEST => Value::Bool(!(&a & &b).is_zero()),
         _ => unreachable!("eval_integer_builtin: {}", name),
     };
     Some(Ok(v))
@@ -3346,7 +3355,7 @@ fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<R
 
 /// `int`'s `ash`/`logbitp` — [`eval_bignum_shift`] over either shape, with
 /// the result demoted when it fits.
-fn eval_integer_shift(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Value, EvalError> {
+fn eval_integer_shift(heap: &mut Heap, name: SymRef, args: &[Value]) -> Result<Value, EvalError> {
     let n = match args.first() {
         Some(v) => expect_int(heap, v)?.into_big(),
         None => return Err(EvalError::Internal(format!("{}: expected an int receiver", name))),
@@ -3355,15 +3364,15 @@ fn eval_integer_shift(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Val
         Some(v) => rt_i64(v)?,
         None => return Err(EvalError::Internal(format!("{}: expected a bit count", name))),
     };
-    Ok(match name {
-        "ash" => {
+    Ok(match name.well_known() {
+        wk::M_ASH => {
             if count >= 0 {
                 int_rt(heap, n << (count as u64))
             } else {
                 int_rt(heap, n >> ((-count) as u64))
             }
         }
-        "logbitp" => Value::Bool(if count < 0 {
+        wk::M_LOGBITP => Value::Bool(if count < 0 {
             n.sign() == num_bigint::Sign::Minus
         } else {
             ((n >> (count as u64)) & BigInt::from(1)) == BigInt::from(1)
@@ -3375,16 +3384,16 @@ fn eval_integer_shift(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Val
 /// Unary `int` builtins (`lognot`/`logcount`/`integer-length`) — the
 /// "infinite two's complement" reading [`bignum_unary`] gives, on either
 /// shape.
-fn integer_unary(heap: &mut Heap, args: &[Value], name: &str) -> Result<Value, EvalError> {
+fn integer_unary(heap: &mut Heap, args: &[Value], name: SymRef) -> Result<Value, EvalError> {
     let a = expect_int(heap, &args[0])?.into_big();
-    let v = match name {
-        "lognot" => int_rt(heap, !&a),
-        "logcount" => {
+    let v = match name.well_known() {
+        wk::M_LOGNOT => int_rt(heap, !&a),
+        wk::M_LOGCOUNT => {
             let n = if a.sign() == num_bigint::Sign::Minus { !&a } else { a.clone() };
             let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| d.count_ones() as u64).sum();
             int_rt(heap, BigInt::from(count))
         }
-        "integer-length" => {
+        wk::M_INTEGER_LENGTH => {
             let bits = if a.sign() == num_bigint::Sign::Minus { (-(&a) - 1u32).magnitude().bits() } else { a.magnitude().bits() };
             int_rt(heap, BigInt::from(bits))
         }
@@ -3432,29 +3441,29 @@ fn width_to_int(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Re
 
 /// `int->float`/`int->ratio`/`int->char`/`try-int->char` on an `int`
 /// receiver.
-fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
+fn integer_conversion(heap: &mut Heap, method: SymRef, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let a = expect_int(heap, &args[0])?;
-    match method {
-        "int->float" => {
+    match method.well_known() {
+        wk::M_INT_TO_FLOAT => {
             let f = match &a {
                 IntArg::Fix(n) => *n as f64,
                 IntArg::Big(n) => n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == num_bigint::Sign::Minus { -1.0 } else { 1.0 })),
             };
             Ok(heap.alloc_f64(f))
         }
-        "int->ratio" => Ok(ratio_rt(heap, BigRational::from_integer(a.into_big()))),
-        "int->char" | "try-int->char" => {
+        wk::M_INT_TO_RATIO => Ok(ratio_rt(heap, BigRational::from_integer(a.into_big()))),
+        wk::M_INT_TO_CHAR | wk::M_TRY_INT_TO_CHAR => {
             let c = match &a {
                 IntArg::Fix(n) if *n >= 0 && *n <= i64::from(u32::MAX) => char::from_u32(*n as u32),
                 _ => None,
             };
-            if method == "int->char" {
+            if method.is(wk::M_INT_TO_CHAR) {
                 c.map(Value::Char).ok_or_else(|| EvalError::Panic(format!("int->char: {} is not a valid Unicode scalar value", a.into_big())))
             } else {
                 Ok(heap.alloc_option(ret_type, c.map(Value::Char)))
             }
         }
-        "int->int" => Ok(args[0]),
+        wk::M_INT_TO_INT => Ok(args[0]),
         _ => Err(EvalError::Internal(format!("integer_conversion: {}", method))),
     }
 }
@@ -3464,7 +3473,7 @@ fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_type: T
 /// divisor). CL's `mod`/`rem`/`expt`/`abs`/`signum` on rationals live in
 /// `prelude.rs` as typelisp methods built from these plus the
 /// `ratio->bignum`/`bignum->ratio` truncation pair.
-fn eval_ratio_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+fn eval_ratio_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Result<Value, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(a), Some(b)) => match (expect_ratio(heap, a), expect_ratio(heap, b)) {
             (Ok(a), Ok(b)) => (a, b),
@@ -3472,24 +3481,24 @@ fn eval_ratio_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         },
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two ratios", name)))),
     };
-    let v = match name {
-        "+" => ratio_rt(heap, &a + &b),
-        "-" => ratio_rt(heap, &a - &b),
-        "*" => ratio_rt(heap, &a * &b),
-        "/" => {
+    let v = match name.well_known() {
+        wk::M_OP_ADD => ratio_rt(heap, &a + &b),
+        wk::M_OP_SUB => ratio_rt(heap, &a - &b),
+        wk::M_OP_MUL => ratio_rt(heap, &a * &b),
+        wk::M_OP_DIV => {
             if b.is_zero() {
                 return Some(Err(EvalError::Panic("divide by zero".into())));
             }
             ratio_rt(heap, &a / &b)
         }
-        "<" => Value::Bool(a < b),
-        "<=" => Value::Bool(a <= b),
-        ">" => Value::Bool(a > b),
-        ">=" => Value::Bool(a >= b),
-        "=" => Value::Bool(a == b),
-        "/=" => Value::Bool(a != b),
-        "max" => ratio_rt(heap, if a >= b { a } else { b }),
-        "min" => ratio_rt(heap, if a <= b { a } else { b }),
+        wk::M_OP_LT => Value::Bool(a < b),
+        wk::M_OP_LE => Value::Bool(a <= b),
+        wk::M_OP_GT => Value::Bool(a > b),
+        wk::M_OP_GE => Value::Bool(a >= b),
+        wk::RETIRED_EQUALS => Value::Bool(a == b),
+        wk::M_OP_NE => Value::Bool(a != b),
+        wk::M_MAX => ratio_rt(heap, if a >= b { a } else { b }),
+        wk::M_MIN => ratio_rt(heap, if a <= b { a } else { b }),
         _ => unreachable!(),
     };
     Some(Ok(v))
@@ -3499,53 +3508,53 @@ fn eval_ratio_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
 /// `int`'s `/`: the operands read as rationals whichever of `int`/`ratio`
 /// they are, and an arithmetic result comes back normalized
 /// (`typelisp_rt::rational::rational_result`).
-fn eval_rational_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+fn eval_rational_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Result<Value, EvalError>> {
     use typelisp_rt::rational::{rational_of, rational_result};
     let (a, b) = match (args.first().and_then(|v| rational_of(heap, *v)), args.get(1).and_then(|v| rational_of(heap, *v))) {
         (Some(a), Some(b)) => (a, b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two rationals", name)))),
     };
-    let v = match name {
-        "+" => rational_result(heap, a + b),
-        "-" => rational_result(heap, a - b),
-        "*" => rational_result(heap, a * b),
-        "/" => {
+    let v = match name.well_known() {
+        wk::M_OP_ADD => rational_result(heap, a + b),
+        wk::M_OP_SUB => rational_result(heap, a - b),
+        wk::M_OP_MUL => rational_result(heap, a * b),
+        wk::M_OP_DIV => {
             if b.is_zero() {
                 return Some(Err(EvalError::Panic("divide by zero".into())));
             }
             rational_result(heap, a / b)
         }
-        "<" => Value::Bool(a < b),
-        "<=" => Value::Bool(a <= b),
-        ">" => Value::Bool(a > b),
-        ">=" => Value::Bool(a >= b),
-        "=" => Value::Bool(a == b),
-        "/=" => Value::Bool(a != b),
-        "max" => rational_result(heap, if a >= b { a } else { b }),
-        "min" => rational_result(heap, if a <= b { a } else { b }),
+        wk::M_OP_LT => Value::Bool(a < b),
+        wk::M_OP_LE => Value::Bool(a <= b),
+        wk::M_OP_GT => Value::Bool(a > b),
+        wk::M_OP_GE => Value::Bool(a >= b),
+        wk::RETIRED_EQUALS => Value::Bool(a == b),
+        wk::M_OP_NE => Value::Bool(a != b),
+        wk::M_MAX => rational_result(heap, if a >= b { a } else { b }),
+        wk::M_MIN => rational_result(heap, if a <= b { a } else { b }),
         _ => unreachable!("eval_rational_builtin: {}", name),
     };
     Some(Ok(v))
 }
 
 /// `rational`'s one-argument conversions, and `ratio->rational`.
-fn rational_unary(heap: &mut Heap, name: &str, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
+fn rational_unary(heap: &mut Heap, name: SymRef, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     use typelisp_rt::rational::{rational_of, rational_result};
     let r = args
         .first()
         .and_then(|v| rational_of(heap, *v))
         .ok_or_else(|| EvalError::Internal(format!("{}: expected a rational", name)))?;
-    Ok(match name {
-        "ratio->rational" => rational_result(heap, r),
-        "rational->int" => heap.int_from_bigint(r.to_integer()),
-        "try-rational->int" => {
+    Ok(match name.well_known() {
+        wk::M_RATIO_TO_RATIONAL => rational_result(heap, r),
+        wk::M_RATIONAL_TO_INT => heap.int_from_bigint(r.to_integer()),
+        wk::M_TRY_RATIONAL_TO_INT => {
             let inner = if r.is_integer() { Some(heap.int_from_bigint(r.to_integer())) } else { None };
             heap.alloc_option(ret_type, inner)
         }
-        "rational->ratio" => heap.alloc_ratio(r),
-        "rational->float" => heap.alloc_f64(r.to_f64().ok_or_else(|| EvalError::Internal("rational->float: conversion failed".into()))?),
-        "numerator" => heap.int_from_bigint(r.numer().clone()),
-        "denominator" => heap.int_from_bigint(r.denom().clone()),
+        wk::M_RATIONAL_TO_RATIO => heap.alloc_ratio(r),
+        wk::M_RATIONAL_TO_FLOAT => heap.alloc_f64(r.to_f64().ok_or_else(|| EvalError::Internal("rational->float: conversion failed".into()))?),
+        wk::M_NUMERATOR => heap.int_from_bigint(r.numer().clone()),
+        wk::M_DENOMINATOR => heap.int_from_bigint(r.denom().clone()),
         _ => unreachable!("rational_unary: {}", name),
     })
 }
@@ -3796,51 +3805,51 @@ fn is_float_receiver(type_name: &Path) -> bool {
 pub(crate) fn eval_builtin_method(
     heap: &mut Heap,
     type_name: &Path,
-    method: &str,
+    method: SymRef,
     args: &[Value],
     ret_type: TypeId,
 ) -> Option<Result<Value, EvalError>> {
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::HASHTABLE) {
-        return match method {
+        return match method.well_known() {
             // `ret_type` is the *result's* runtime identity, spelled by the
             // checker (`Checker::assoc_form`): these builders have no field to
             // read an instantiation off, and `Vector<i32>` and `Vector<i64>`
             // share a representation, so nothing here could derive it.
-            "new" => Some(Ok(crate::type_key::alloc_hashtable_of(heap, ret_type))),
+            wk::M_NEW => Some(Ok(crate::type_key::alloc_hashtable_of(heap, ret_type))),
             // `get`/`set`/`remove` are prelude methods, written on these
             // five — see `registry::hashtable_def`.
-            "bucket-count" => Some(hashtable_bucket_count(heap, args)),
-            "bucket-key" => Some(hashtable_bucket_key(heap, args)),
-            "bucket-value" => Some(hashtable_bucket_value(heap, args)),
-            "bucket-put" => Some(hashtable_bucket_put(heap, args)),
-            "bucket-delete" => Some(hashtable_bucket_delete(heap, args)),
-            "count" => Some(hashtable_count(heap, args)),
-            "clear" => Some(hashtable_clear(heap, args)),
-            "keys" => Some(hashtable_keys(heap, args, ret_type)),
-            "values" => Some(hashtable_values(heap, args, ret_type)),
-            "entries" => Some(hashtable_entries(heap, args, ret_type)),
+            wk::M_BUCKET_COUNT => Some(hashtable_bucket_count(heap, args)),
+            wk::M_BUCKET_KEY => Some(hashtable_bucket_key(heap, args)),
+            wk::M_BUCKET_VALUE => Some(hashtable_bucket_value(heap, args)),
+            wk::M_BUCKET_PUT => Some(hashtable_bucket_put(heap, args)),
+            wk::M_BUCKET_DELETE => Some(hashtable_bucket_delete(heap, args)),
+            wk::M_COUNT => Some(hashtable_count(heap, args)),
+            wk::M_CLEAR => Some(hashtable_clear(heap, args)),
+            wk::M_KEYS => Some(hashtable_keys(heap, args, ret_type)),
+            wk::M_VALUES => Some(hashtable_values(heap, args, ret_type)),
+            wk::M_ENTRIES => Some(hashtable_entries(heap, args, ret_type)),
             _ => None,
         };
     }
     // `join` is intercepted before this, as `Task<T>::wait` is.
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::THREAD_TYPE) {
-        return match method {
-            "current-id" => Some(Ok(Value::Int(typelisp_rt::sys_builtin::thread_current_id()))),
-            "available-parallelism" => {
+        return match method.well_known() {
+            wk::M_CURRENT_ID => Some(Ok(Value::Int(typelisp_rt::sys_builtin::thread_current_id()))),
+            wk::M_AVAILABLE_PARALLELISM => {
                 Some(typelisp_rt::sys_builtin::thread_available_parallelism().map(Value::Int).map_err(EvalError::Panic))
             }
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::VECTOR) {
-        return match method {
+        return match method.well_known() {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
-            "new" => Some(Ok(crate::type_key::alloc_struct_of(heap, ret_type, Vec::new()))),
-            "push" => Some(vector_push(heap, args)),
-            "get" => Some(vector_get(heap, args)),
-            "set" => Some(vector_set(heap, args)),
-            "len" => Some(vector_len(heap, args)),
-            "pop" => Some(vector_pop(heap, args, ret_type)),
+            wk::M_NEW => Some(Ok(crate::type_key::alloc_struct_of(heap, ret_type, Vec::new()))),
+            wk::M_PUSH => Some(vector_push(heap, args)),
+            wk::M_GET => Some(vector_get(heap, args)),
+            wk::SET => Some(vector_set(heap, args)),
+            wk::M_LEN => Some(vector_len(heap, args)),
+            wk::M_POP => Some(vector_pop(heap, args, ret_type)),
             _ => None,
         };
     }
@@ -3848,81 +3857,80 @@ pub(crate) fn eval_builtin_method(
         // One representation: every `Scope<V>` is a `StructPayload::Frames`
         // heap box, and the element needs no encode or decode, so `V` never
         // enters into it — see this function's doc comment.
-        if method == "new" {
+        if method.is(wk::M_NEW) {
             return Some(Ok(heap.alloc_scope()));
         }
-        return match method {
-            "clone-frames" => Some(scope_clone_frames_heap(heap, args)),
-            "push-frame" => Some(scope_push_frame_heap(heap, args)),
-            "pop-frame" => Some(scope_pop_frame_heap(heap, args)),
-            "get" => Some(scope_get_heap(heap, args, ret_type)),
-            "set" => Some(scope_set_heap(heap, args)),
+        return match method.well_known() {
+            wk::M_CLONE_FRAMES => Some(scope_clone_frames_heap(heap, args)),
+            wk::M_PUSH_FRAME => Some(scope_push_frame_heap(heap, args)),
+            wk::M_POP_FRAME => Some(scope_pop_frame_heap(heap, args)),
+            wk::M_GET => Some(scope_get_heap(heap, args, ret_type)),
+            wk::SET => Some(scope_set_heap(heap, args)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::STRING) {
-        return match method {
-            "upcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_uppercase()).map(|s| str_rt(heap, s))),
-            "downcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_lowercase()).map(|s| str_rt(heap, s))),
-            "length" => Some(string_length(heap, args)),
-            "ref" => Some(string_ref(heap, args)),
-            "substring" => Some(string_substring(heap, args)),
-            "append" => Some(string_append(heap, args)),
-            "lt" => Some(string_lt(heap, args)),
-            "<" | "<=" | ">" | ">=" => Some(string_compare(heap, method, args)),
+        return match method.well_known() {
+            wk::M_UPCASE => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_uppercase()).map(|s| str_rt(heap, s))),
+            wk::M_DOWNCASE => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_lowercase()).map(|s| str_rt(heap, s))),
+            wk::M_LENGTH => Some(string_length(heap, args)),
+            wk::M_REF => Some(string_ref(heap, args)),
+            wk::M_SUBSTRING => Some(string_substring(heap, args)),
+            wk::M_APPEND => Some(string_append(heap, args)),
+            wk::M_LT => Some(string_lt(heap, args)),
+            wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE => Some(string_compare(heap, method, args)),
             // `eq`/`eql`: true identity (`Rc::ptr_eq` — see the string table's
             // doc comment). `equal`/`equalp`: content comparison, the
             // (case-sensitive/-insensitive) CL predicates a naive "string
             // equality" actually means — see `registry::string_assoc`'s doc
             // comment and `docs/cl-equivalence-catalog.md`'s eq/eql/equal/
             // equalp section.
-            "eq" | "eql" => Some(string_identity_eq(args)),
-            "equal" => Some(string_content_eq(heap, args)),
-            "equalp" => Some(string_content_eqp(heap, args)),
+            wk::M_EQ | wk::M_EQL => Some(string_identity_eq(args)),
+            wk::M_EQUAL => Some(string_content_eq(heap, args)),
+            wk::M_EQUALP => Some(string_content_eqp(heap, args)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::CHAR) {
-        return match method {
-            "upcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_uppercase()))),
-            "downcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_lowercase()))),
-            "lt" => Some(char_lt(args)),
-            "<" | "<=" | ">" | ">=" => Some(char_compare(method, args)),
-            "alphap" => Some(expect_char(&args[0]).map(|c| Value::Bool(c.is_ascii_alphabetic()))),
-            "digitp" => Some(expect_char(&args[0]).map(|c| Value::Bool(c.is_ascii_digit()))),
+        return match method.well_known() {
+            wk::M_UPCASE => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_uppercase()))),
+            wk::M_DOWNCASE => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_lowercase()))),
+            wk::M_LT => Some(char_lt(args)),
+            wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE => Some(char_compare(method, args)),
+            wk::M_ALPHAP => Some(expect_char(&args[0]).map(|c| Value::Bool(c.is_ascii_alphabetic()))),
+            wk::M_DIGITP => Some(expect_char(&args[0]).map(|c| Value::Bool(c.is_ascii_digit()))),
             // `eq`/`eql`/`equal` all coincide (immediate scalar, and CL's
             // own `equal` on characters is defined to be `eql`); `equalp`
             // is case-insensitive (see `registry::char_assoc`'s doc comment).
-            "eq" | "eql" | "equal" => Some(char_eq(args)),
-            "equalp" => Some(char_eqp(args)),
-            "char->string" => Some(expect_char(&args[0]).map(|c| c.to_string()).map(|s| str_rt(heap, s))),
-            "char->int" => Some(char_to_int(args)),
+            wk::M_EQ | wk::M_EQL | wk::M_EQUAL => Some(char_eq(args)),
+            wk::M_EQUALP => Some(char_eqp(args)),
+            wk::M_CHAR_TO_STRING => Some(expect_char(&args[0]).map(|c| c.to_string()).map(|s| str_rt(heap, s))),
+            wk::M_CHAR_TO_INT => Some(char_to_int(args)),
             _ => None,
         };
     }
     if let Some((width, signed)) = int_receiver_width(type_name) {
-        return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
-            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_int_builtin(method, args, width, signed),
-            "lognot" => Some(int_lognot(args, width, signed)),
-            "logcount" => Some(int_logcount(args, width)),
-            "integer-length" => Some(int_integer_length(args, width)),
+        return match method.well_known() {
+            wk::M_OP_ADD | wk::M_OP_SUB | wk::M_OP_MUL | wk::M_OP_DIV | wk::M_MOD | wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE | wk::RETIRED_EQUALS | wk::M_OP_NE | wk::M_MAX | wk::M_MIN | wk::M_LOGAND | wk::M_LOGIOR | wk::M_LOGXOR | wk::M_ASH | wk::M_LOGBITP | wk::M_LOGTEST => eval_int_builtin(method, args, width, signed),
+            wk::M_LOGNOT => Some(int_lognot(args, width, signed)),
+            wk::M_LOGCOUNT => Some(int_logcount(args, width)),
+            wk::M_INTEGER_LENGTH => Some(int_integer_length(args, width)),
             // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
             // `=` (see `registry::int_assoc`'s doc comment for why every one
             // of these four is meaningful to register even though none can
             // diverge from `=` here).
-            "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args, width, signed),
-            "int->float" => Some(int_to_float(heap, args)),
-            "int->char" => Some(int_to_char(args)),
-            "try-int->char" => Some(try_int_to_char(heap, args, ret_type)),
-            "int->int" => Some(width_to_int(heap, args, width, signed)),
-            "int->ratio" => Some(int_to_ratio(heap, args)),
-            _ if width_cast_target(method, "int->").is_some() => {
-                let (w, sg) = width_cast_target(method, "int->").expect("just matched");
+            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => eval_int_builtin(typelisp_mem::symbols::well_known_symbol(wk::RETIRED_EQUALS), args, width, signed),
+            wk::M_INT_TO_FLOAT => Some(int_to_float(heap, args)),
+            wk::M_INT_TO_CHAR => Some(int_to_char(args)),
+            wk::M_TRY_INT_TO_CHAR => Some(try_int_to_char(heap, args, ret_type)),
+            wk::M_INT_TO_INT => Some(width_to_int(heap, args, width, signed)),
+            wk::M_INT_TO_RATIO => Some(int_to_ratio(heap, args)),
+            _ if width_cast_target(method).is_some_and(|(try_variant, _, _)| !try_variant) => {
+                let (_, w, sg) = width_cast_target(method).expect("just matched");
                 Some(int_to_width(args, w, sg))
             }
-            _ if width_cast_target(method, "try-int->").is_some() => {
-                let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
+            _ if width_cast_target(method).is_some_and(|(try_variant, _, _)| try_variant) => {
+                let (_, w, sg) = width_cast_target(method).expect("just matched");
                 Some(try_int_to_width(heap, args, w, sg, ret_type))
             }
             _ => None,
@@ -3932,94 +3940,88 @@ pub(crate) fn eval_builtin_method(
         // `f32` is binary32 and `f64` binary64: the receiver's own width says
         // what each result is rounded to (`float_at`).
         let single = crate::types::path_is_builtin(type_name, typelisp_mem::wk::F32);
-        return match method {
-            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
+        return match method.well_known() {
+            wk::M_OP_ADD | wk::M_OP_SUB | wk::M_OP_MUL | wk::M_OP_DIV | wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE | wk::RETIRED_EQUALS | wk::M_OP_NE | wk::M_MAX | wk::M_MIN => {
                 eval_float_builtin(heap, method, args, single)
             }
-            "eq" | "eql" | "equal" | "equalp" => eval_float_builtin(heap, "=", args, single),
-            "float->f32" => Some(float_to_width(heap, args, true)),
-            "float->f64" => Some(float_to_width(heap, args, false)),
-            "try-float->f32" => Some(try_float_to_f32(heap, args, ret_type)),
+            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => eval_float_builtin(heap, typelisp_mem::symbols::well_known_symbol(wk::RETIRED_EQUALS), args, single),
+            wk::M_FLOAT_TO_F32 => Some(float_to_width(heap, args, true)),
+            wk::M_FLOAT_TO_F64 => Some(float_to_width(heap, args, false)),
+            wk::M_TRY_FLOAT_TO_F32 => Some(try_float_to_f32(heap, args, ret_type)),
             // Always `some`: widening is exact.
-            "try-float->f64" => Some(float_to_width(heap, args, false).map(|v| {
+            wk::M_TRY_FLOAT_TO_F64 => Some(float_to_width(heap, args, false).map(|v| {
                 let some = Some(v);
                 heap.alloc_option(ret_type, some)
             })),
-            "expt" => Some(float_expt(heap, args, single)),
-            "sqrt" => Some(float_unary(heap, args, f64::sqrt, single)),
-            "floor" => Some(float_unary(heap, args, f64::floor, single)),
-            "ceiling" => Some(float_unary(heap, args, f64::ceil, single)),
-            "round" => Some(float_unary(heap, args, f64::round_ties_even, single)),
-            "truncate" => Some(float_unary(heap, args, f64::trunc, single)),
-            "sin" => Some(float_unary(heap, args, f64::sin, single)),
-            "cos" => Some(float_unary(heap, args, f64::cos, single)),
-            "tan" => Some(float_unary(heap, args, f64::tan, single)),
-            "asin" => Some(float_unary(heap, args, f64::asin, single)),
-            "acos" => Some(float_unary(heap, args, f64::acos, single)),
-            "atan" => Some(float_unary(heap, args, f64::atan, single)),
-            "sinh" => Some(float_unary(heap, args, f64::sinh, single)),
-            "cosh" => Some(float_unary(heap, args, f64::cosh, single)),
-            "tanh" => Some(float_unary(heap, args, f64::tanh, single)),
-            "asinh" => Some(float_unary(heap, args, f64::asinh, single)),
-            "acosh" => Some(float_unary(heap, args, f64::acosh, single)),
-            "atanh" => Some(float_unary(heap, args, f64::atanh, single)),
-            "exp" => Some(float_unary(heap, args, f64::exp, single)),
-            "log" => Some(float_unary(heap, args, f64::ln, single)),
-            "float->int" => Some(float_to_int(heap, args)),
-            "float->ratio" => Some(float_to_ratio(heap, args)),
+            wk::M_EXPT => Some(float_expt(heap, args, single)),
+            wk::M_SQRT => Some(float_unary(heap, args, f64::sqrt, single)),
+            wk::M_FLOOR => Some(float_unary(heap, args, f64::floor, single)),
+            wk::M_CEILING => Some(float_unary(heap, args, f64::ceil, single)),
+            wk::M_ROUND => Some(float_unary(heap, args, f64::round_ties_even, single)),
+            wk::M_TRUNCATE => Some(float_unary(heap, args, f64::trunc, single)),
+            wk::M_SIN => Some(float_unary(heap, args, f64::sin, single)),
+            wk::M_COS => Some(float_unary(heap, args, f64::cos, single)),
+            wk::M_TAN => Some(float_unary(heap, args, f64::tan, single)),
+            wk::M_ASIN => Some(float_unary(heap, args, f64::asin, single)),
+            wk::M_ACOS => Some(float_unary(heap, args, f64::acos, single)),
+            wk::M_ATAN => Some(float_unary(heap, args, f64::atan, single)),
+            wk::M_SINH => Some(float_unary(heap, args, f64::sinh, single)),
+            wk::M_COSH => Some(float_unary(heap, args, f64::cosh, single)),
+            wk::M_TANH => Some(float_unary(heap, args, f64::tanh, single)),
+            wk::M_ASINH => Some(float_unary(heap, args, f64::asinh, single)),
+            wk::M_ACOSH => Some(float_unary(heap, args, f64::acosh, single)),
+            wk::M_ATANH => Some(float_unary(heap, args, f64::atanh, single)),
+            wk::M_EXP => Some(float_unary(heap, args, f64::exp, single)),
+            wk::M_LOG => Some(float_unary(heap, args, f64::ln, single)),
+            wk::M_FLOAT_TO_INT => Some(float_to_int(heap, args)),
+            wk::M_FLOAT_TO_RATIO => Some(float_to_ratio(heap, args)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::INT) {
-        return match method {
-            "+" | "-" | "*" | "truncate" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
-            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_integer_builtin(heap, method, args),
+        return match method.well_known() {
+            wk::M_OP_ADD | wk::M_OP_SUB | wk::M_OP_MUL | wk::M_TRUNCATE | wk::M_MOD | wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE | wk::RETIRED_EQUALS | wk::M_OP_NE | wk::M_MAX | wk::M_MIN | wk::M_LOGAND | wk::M_LOGIOR | wk::M_LOGXOR | wk::M_ASH | wk::M_LOGBITP | wk::M_LOGTEST => eval_integer_builtin(heap, method, args),
             // CL's `/`: the `rational` quotient.
-            "/" => eval_rational_builtin(heap, method, args),
-            "lognot" | "logcount" | "integer-length" => Some(integer_unary(heap, args, method)),
-            "eq" | "eql" | "equal" | "equalp" => eval_integer_builtin(heap, "=", args),
-            "int->float" | "int->ratio" | "int->char" | "try-int->char" | "int->int" => {
+            wk::M_OP_DIV => eval_rational_builtin(heap, method, args),
+            wk::M_LOGNOT | wk::M_LOGCOUNT | wk::M_INTEGER_LENGTH => Some(integer_unary(heap, args, method)),
+            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => eval_integer_builtin(heap, typelisp_mem::symbols::well_known_symbol(wk::RETIRED_EQUALS), args),
+            wk::M_INT_TO_FLOAT | wk::M_INT_TO_RATIO | wk::M_INT_TO_CHAR | wk::M_TRY_INT_TO_CHAR | wk::M_INT_TO_INT => {
                 Some(integer_conversion(heap, method, args, ret_type))
             }
-            _ if width_cast_target(method, "int->").is_some() => {
-                let (w, sg) = width_cast_target(method, "int->").expect("just matched");
-                Some(integer_to_width(heap, args, w, sg, false, ret_type))
-            }
-            _ if width_cast_target(method, "try-int->").is_some() => {
-                let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
-                Some(integer_to_width(heap, args, w, sg, true, ret_type))
+            _ if width_cast_target(method).is_some() => {
+                let (try_variant, w, sg) = width_cast_target(method).expect("just matched");
+                Some(integer_to_width(heap, args, w, sg, try_variant, ret_type))
             }
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::RATIO) {
-        return match method {
-            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
+        return match method.well_known() {
+            wk::M_OP_ADD | wk::M_OP_SUB | wk::M_OP_MUL | wk::M_OP_DIV | wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE | wk::RETIRED_EQUALS | wk::M_OP_NE | wk::M_MAX | wk::M_MIN => {
                 eval_ratio_builtin(heap, method, args)
             }
-            "eq" | "eql" | "equal" | "equalp" => eval_ratio_builtin(heap, "=", args),
-            "ratio->int" => Some(ratio_to_int(heap, args)),
-            "ratio->float" => Some(ratio_to_float(heap, args)),
-            "numerator" => Some(ratio_numerator(heap, args)),
-            "denominator" => Some(ratio_denominator(heap, args)),
-            "ratio->rational" => Some(rational_unary(heap, method, args, ret_type)),
+            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => eval_ratio_builtin(heap, typelisp_mem::symbols::well_known_symbol(wk::RETIRED_EQUALS), args),
+            wk::M_RATIO_TO_INT => Some(ratio_to_int(heap, args)),
+            wk::M_RATIO_TO_FLOAT => Some(ratio_to_float(heap, args)),
+            wk::M_NUMERATOR => Some(ratio_numerator(heap, args)),
+            wk::M_DENOMINATOR => Some(ratio_denominator(heap, args)),
+            wk::M_RATIO_TO_RATIONAL => Some(rational_unary(heap, method, args, ret_type)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::REPR_RATIONAL) {
-        return match method {
-            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
+        return match method.well_known() {
+            wk::M_OP_ADD | wk::M_OP_SUB | wk::M_OP_MUL | wk::M_OP_DIV | wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE | wk::RETIRED_EQUALS | wk::M_OP_NE | wk::M_MAX | wk::M_MIN => {
                 eval_rational_builtin(heap, method, args)
             }
-            "eq" | "eql" | "equal" | "equalp" => eval_rational_builtin(heap, "=", args),
-            "rational->int" | "try-rational->int" | "rational->ratio" | "rational->float" | "numerator"
-            | "denominator" => Some(rational_unary(heap, method, args, ret_type)),
+            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => eval_rational_builtin(heap, typelisp_mem::symbols::well_known_symbol(wk::RETIRED_EQUALS), args),
+            wk::M_RATIONAL_TO_INT | wk::M_TRY_RATIONAL_TO_INT | wk::M_RATIONAL_TO_RATIO | wk::M_RATIONAL_TO_FLOAT | wk::M_NUMERATOR | wk::M_DENOMINATOR => Some(rational_unary(heap, method, args, ret_type)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::BOOL) {
-        return match method {
-            "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
+        return match method.well_known() {
+            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => Some(bool_eq(args)),
             _ => None,
         };
     }
@@ -4027,14 +4029,14 @@ pub(crate) fn eval_builtin_method(
         // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
         // `Sexpr::Sym`, so `eq`/`eql` reuse the `Sexpr` comparisons (interned
         // id identity — same name => same id => `eq`).
-        return match method {
-            "eq" => Some(sexpr_eq(heap, args)),
-            "eql" => Some(sexpr_eql(heap, args)),
+        return match method.well_known() {
+            wk::M_EQ => Some(sexpr_eq(heap, args)),
+            wk::M_EQL => Some(sexpr_eql(heap, args)),
             _ => None,
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::SEXPR) {
-        return match method {
+        return match method.well_known() {
             // `eq`/`eql` now diverge, as anticipated by this arm's own prior
             // history (see `sexpr_eql`'s doc comment): `Sexpr::f64` became
             // heap-boxed (`Value::Boxed`, see `BoxedObj`) for the `Sexpr`/
@@ -4043,8 +4045,8 @@ pub(crate) fn eval_builtin_method(
             // are `prelude.rs` free functions (structural recursion via
             // `match`), not registered here, the same as `length`/`append`
             // for `Sexpr` lists.
-            "eq" => Some(sexpr_eq(heap, args)),
-            "eql" => Some(sexpr_eql(heap, args)),
+            wk::M_EQ => Some(sexpr_eq(heap, args)),
+            wk::M_EQL => Some(sexpr_eql(heap, args)),
             _ => None,
         };
     }
@@ -4111,7 +4113,7 @@ pub struct FfiDecl {
 pub type FnBody = (Vec<(SymRef, Repr)>, Vec<Value>);
 
 /// One `llvm-*`/native-scope builtin, as the island calls it.
-pub type LlvmBuiltinFn = fn(&mut Heap, &Path, &str, &[Value]) -> Option<Result<Value, EvalError>>;
+pub type LlvmBuiltinFn = fn(&mut Heap, &Path, SymRef, &[Value]) -> Option<Result<Value, EvalError>>;
 
 /// `(compile name)`.
 pub type CompileFn = fn(&Interp, &mut Heap, &crate::CompileTarget) -> Result<Value, EvalError>;
@@ -4227,10 +4229,10 @@ pub(crate) fn backend_disassemble_function() -> Result<DisassembleFn, EvalError>
 fn eval_llvm_builtin_method(
     heap: &mut Heap,
     type_name: &Path,
-    method: &str,
+    method: SymRef,
     args: &[Value],
 ) -> Option<Result<Value, EvalError>> {
-    match backend(&format!("`{}`", typelisp_mem::ConcreteNames::method_link(type_name, method))) {
+    match backend(&format!("`{}`", typelisp_mem::ConcreteNames::method_link(type_name, method.name()))) {
         Ok(b) => (b.llvm_builtin)(heap, type_name, method, args),
         Err(e) => Some(Err(e)),
     }
@@ -4279,7 +4281,7 @@ impl Interp {
     fn eval_stream_builtin(
         &self,
         heap: &mut Heap,
-        name: &str,
+        name: SymRef,
         args: &[Value],
     ) -> Option<Result<Value, EvalError>> {
         Some(match typelisp_rt::stream_builtin::stream_builtin(heap, name, args)? {
@@ -4864,14 +4866,14 @@ fn string_lt(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// The `<`/`<=`/`>`/`>=` comparison operators on `string`, lexicographic (byte
 /// order) — the counterpart of `eval_int_builtin`'s numeric comparisons, kept
 /// in one function for the same reason (one match over the operator symbol).
-fn string_compare(heap: &Heap, method: &str, args: &[Value]) -> Result<Value, EvalError> {
+fn string_compare(heap: &Heap, method: SymRef, args: &[Value]) -> Result<Value, EvalError> {
     let a = expect_str(heap, &args[0])?;
     let b = expect_str(heap, &args[1])?;
-    Ok(Value::Bool(match method {
-        "<" => *a < *b,
-        "<=" => *a <= *b,
-        ">" => *a > *b,
-        ">=" => *a >= *b,
+    Ok(Value::Bool(match method.well_known() {
+        wk::M_OP_LT => *a < *b,
+        wk::M_OP_LE => *a <= *b,
+        wk::M_OP_GT => *a > *b,
+        wk::M_OP_GE => *a >= *b,
         other => return Err(EvalError::Internal(format!("string_compare: not a comparison operator: {}", other))),
     }))
 }
@@ -4887,14 +4889,14 @@ fn char_lt(args: &[Value]) -> Result<Value, EvalError> {
 /// The `<`/`<=`/`>`/`>=` comparison operators on `char`, by Unicode scalar
 /// value (a compiled `char` is a raw `i64` code point, so this matches the
 /// integer `icmp`s `compiler.rs` emits for the same operators).
-fn char_compare(method: &str, args: &[Value]) -> Result<Value, EvalError> {
+fn char_compare(method: SymRef, args: &[Value]) -> Result<Value, EvalError> {
     let a = expect_char(&args[0])?;
     let b = expect_char(&args[1])?;
-    Ok(Value::Bool(match method {
-        "<" => a < b,
-        "<=" => a <= b,
-        ">" => a > b,
-        ">=" => a >= b,
+    Ok(Value::Bool(match method.well_known() {
+        wk::M_OP_LT => a < b,
+        wk::M_OP_LE => a <= b,
+        wk::M_OP_GT => a > b,
+        wk::M_OP_GE => a >= b,
         other => return Err(EvalError::Internal(format!("char_compare: not a comparison operator: {}", other))),
     }))
 }

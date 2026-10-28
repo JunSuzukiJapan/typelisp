@@ -674,7 +674,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 fn print_object_receiver(target: &CompileTarget) -> Option<typelisp_mem::TypeId> {
     use typelisp_mem::specialization::{specialized, Generic};
     let CompileTarget::Method(type_path, method) = target else { return None };
-    let print_object = typelisp_mem::symbols::intern("print-object");
+    let print_object = typelisp_mem::symbols::member_symbol("print-object");
     let args = match specialized(*method) {
         Some((Generic::Method(_, _, base), args)) if base == print_object => args,
         None if *method == print_object => Vec::new(),

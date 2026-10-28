@@ -7,8 +7,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use typelisp_mem::symbols::NOT_WELL_KNOWN;
-use typelisp_mem::{NsId, SymRef};
+use typelisp_mem::{wk, NsId, SymRef};
 
 use crate::{Error, Loc, Path, Type, Value};
 use super::registry::{AssocFn, Namespace, Registry, TraitBound, TypeAlias, VarInfo};
@@ -139,7 +138,7 @@ impl Env {
     /// makes this the one place a reserved name can be refused.
     pub(super) fn extended_with_locs(&self, binds: Vec<(SymRef, Type, Option<Loc>)>) -> Result<Env, Error> {
         for (name, _, _) in &binds {
-            if is_reserved_name(name.name()) {
+            if is_reserved_name(*name) {
                 return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
             }
         }
@@ -168,8 +167,8 @@ impl Env {
 /// `task` and `thread` were closed when they arrived, before anything had the
 /// chance to depend on them (`task` replaced `go` on 2026-09-25, when no
 /// program used `task` as a name).
-pub(super) fn is_reserved_name(name: &str) -> bool {
-    name == "task" || name == "thread"
+pub(super) fn is_reserved_name(name: SymRef) -> bool {
+    name.is(wk::TASK) || name.is(wk::THREAD)
 }
 
 /// See the module documentation.
@@ -312,9 +311,9 @@ impl Info {
                 return Some(found);
             }
         }
-        // A member of the fixed vocabulary belongs to every module alike, so
+        // A member of the shared vocabulary belongs to every module alike, so
         // where it was made says nothing about which definition it names.
-        if sym.home() != here.ns && sym.well_known() == NOT_WELL_KNOWN {
+        if sym.home() != here.ns && !sym.is_shared_vocabulary() {
             if let Some(found) = at(sym.home(), sym) {
                 return Some(found);
             }

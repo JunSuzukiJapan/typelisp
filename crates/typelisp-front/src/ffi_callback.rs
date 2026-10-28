@@ -25,7 +25,7 @@ use crate::types::{Path, Type};
 /// The leading space is deliberate. The reader never produces a symbol that
 /// starts with one, so no program can call this by name or define a function
 /// that a compiled call site would mistake for it.
-pub const ADDRESS_BUILTIN: &str = " ffi-callback-address";
+pub const ADDRESS_BUILTIN: u32 = typelisp_mem::wk::F_FFI_CALLBACK_ADDRESS;
 
 /// One callback entry: the top-level function C is handed, and the function
 /// type C calls it at — a `(fn (T...) R)` with no `&rest`.

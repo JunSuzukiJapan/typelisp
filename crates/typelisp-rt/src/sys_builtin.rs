@@ -18,7 +18,7 @@
 //! `std::time` machinery in with it — see this crate's own module docs on how
 //! archive-member granularity decides what an AOT binary pays for.
 
-use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
+use typelisp_mem::{spec, wk, Heap, StdModule, TypeId, TypeSpec, Value};
 
 // The types these results are built with come from `typelisp_mem`'s
 // pre-interned table — same standing exception (and same guard test) as
@@ -31,30 +31,30 @@ const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(StdModule::NUM, "ParseFloatE
 /// table [`crate::stream_builtin::RESULT_TYPES`] keeps, for the same reason
 /// (a type's identity includes its instantiation, and this crate has no
 /// checker to ask), checked against the registry by the same guard test.
-pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
-    ("parse-float", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::F64, PARSE_FLOAT_ERROR])),
-    ("command-line-args", TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])),
-    ("getenv", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("home-directory", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("machine-instance", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("machine-version", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("software-version", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    ("timezone-offset-seconds", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
-    ("timezone-daylight-p", TypeSpec::Named(StdModule::OPTION, "Option", &[spec::BOOL])),
-    ("dribble-start", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
-    ("dribble-stop", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
-    ("ed-open", TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
+pub const RESULT_TYPES: &[(u32, TypeSpec)] = &[
+    (wk::F_PARSE_FLOAT, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::F64, PARSE_FLOAT_ERROR])),
+    (wk::F_COMMAND_LINE_ARGS, TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])),
+    (wk::F_GETENV, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_HOME_DIRECTORY, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_MACHINE_INSTANCE, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_MACHINE_VERSION, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_SOFTWARE_VERSION, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
+    (wk::F_TIMEZONE_OFFSET_SECONDS, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
+    (wk::F_TIMEZONE_DAYLIGHT_P, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::BOOL])),
+    (wk::F_DRIBBLE_START, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
+    (wk::F_DRIBBLE_STOP, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
+    (wk::F_ED_OPEN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
 ];
 
-fn type_of(name: &str) -> TypeId {
+fn type_of(name: u32) -> TypeId {
     match RESULT_TYPES.iter().find(|(n, _)| *n == name) {
         Some((_, ty)) => typelisp_mem::intern_spec(ty),
-        None => crate::fatal(&format!("sys_builtin: no result type for `{}`", name)),
+        None => crate::fatal(&format!("sys_builtin: no result type for `{}`", typelisp_mem::BUILTIN_SYMBOLS[name as usize])),
     }
 }
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
-fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
+fn result_ok(heap: &mut Heap, name: u32, v: Value) -> Value {
     let key = type_of(name);
     heap.alloc_enum(key, 0, vec![v])
 }
@@ -62,7 +62,7 @@ fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
 /// `Err(<ErrType>(msg))`: the concrete single-variant error type of the
 /// failing builtin, wrapped in `Result`'s `err`. The error types take no type
 /// arguments, so their own keys are unchanged by the instantiation rule.
-fn result_err(heap: &mut Heap, name: &str, err_type_key: TypeId, msg: String) -> Value {
+fn result_err(heap: &mut Heap, name: u32, err_type_key: TypeId, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
     let err_val = heap.alloc_enum(err_type_key, 0, vec![msg_val]);
     let key = type_of(name);
@@ -76,11 +76,11 @@ pub fn parse_float(heap: &mut Heap, s: &str) -> Value {
     match s.parse::<f64>() {
         Ok(f) => {
             let v = heap.alloc_f64(f);
-            result_ok(heap, "parse-float", v)
+            result_ok(heap, wk::F_PARSE_FLOAT, v)
         }
         Err(_) => result_err(
             heap,
-            "parse-float",
+            wk::F_PARSE_FLOAT,
             TypeId::PARSE_FLOAT_ERROR,
             format!("parse-float: invalid float literal: {:?}", s),
         ),
@@ -192,7 +192,7 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
     };
     let elems: Vec<Value> = args.into_iter().map(|a| heap.alloc_string(a)).collect();
     {
-        let key = type_of("command-line-args");
+        let key = type_of(wk::F_COMMAND_LINE_ARGS);
         heap.alloc_struct(key, elems)
     }
 }
@@ -208,7 +208,7 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
 /// answer a `Option<string>` can give.
 pub fn getenv(heap: &mut Heap, name: &str) -> Value {
     let v = std::env::var(name).ok().map(|s| heap.alloc_string(s));
-    option_value(heap, "getenv", v)
+    option_value(heap, wk::F_GETENV, v)
 }
 
 /// `(home-directory)`: `$HOME`, or `none` when it is unset — the primitive
@@ -220,7 +220,7 @@ pub fn getenv(heap: &mut Heap, name: &str) -> Value {
 /// real one.
 pub fn home_directory(heap: &mut Heap) -> Value {
     let v = std::env::var("HOME").ok().map(|s| heap.alloc_string(s));
-    option_value(heap, "home-directory", v)
+    option_value(heap, wk::F_HOME_DIRECTORY, v)
 }
 
 /// `Some(v)`/`None` under the instantiation `name`'s key spells — the
@@ -228,7 +228,7 @@ pub fn home_directory(heap: &mut Heap) -> Value {
 /// decides). Spelled again here rather than shared with
 /// [`crate::stream_builtin`] so neither module has to be linked for the
 /// other's sake (see this module's note on archive-member granularity).
-fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
+fn option_value(heap: &mut Heap, name: u32, v: Option<Value>) -> Value {
     heap.alloc_option(type_of(name), v)
 }
 
@@ -312,7 +312,7 @@ pub fn get_internal_run_time() -> i64 {
 /// `(machine-instance)` (CLHS 25.1): the host's name, or `none`.
 pub fn machine_instance(heap: &mut Heap) -> Value {
     let v = crate::os::host_name().map(|s| heap.alloc_string(s));
-    option_value(heap, "machine-instance", v)
+    option_value(heap, wk::F_MACHINE_INSTANCE, v)
 }
 
 /// `(machine-version)` (CLHS 25.1): the hardware this is *running* on
@@ -322,7 +322,7 @@ pub fn machine_instance(heap: &mut Heap) -> Value {
 /// architecture this binary was *built* for.
 pub fn machine_version(heap: &mut Heap) -> Value {
     let v = crate::os::machine_version().map(|s| heap.alloc_string(s));
-    option_value(heap, "machine-version", v)
+    option_value(heap, wk::F_MACHINE_VERSION, v)
 }
 
 /// `(software-version)` (CLHS 25.1): the OS release string (`uname -r`,
@@ -330,7 +330,7 @@ pub fn machine_version(heap: &mut Heap) -> Value {
 /// compile-time constant and needs no call.
 pub fn software_version(heap: &mut Heap) -> Value {
     let v = crate::os::os_release().map(|s| heap.alloc_string(s));
-    option_value(heap, "software-version", v)
+    option_value(heap, wk::F_SOFTWARE_VERSION, v)
 }
 
 /// The seconds a universal time is west of Greenwich in the *local* zone —
@@ -348,14 +348,14 @@ pub fn software_version(heap: &mut Heap) -> Value {
 /// once, into an `f64`, where the fraction survives.
 pub fn timezone_offset_seconds(heap: &mut Heap, day: i64, second: i64) -> Value {
     let v = local_zone(day, second).map(|(west, _)| Value::Int(west as i64));
-    option_value(heap, "timezone-offset-seconds", v)
+    option_value(heap, wk::F_TIMEZONE_OFFSET_SECONDS, v)
 }
 
 /// Whether daylight saving time is in force locally at that universal time —
 /// `decode-universal-time`'s `daylight-p`, CL's eighth returned value.
 pub fn timezone_daylight_p(heap: &mut Heap, day: i64, second: i64) -> Value {
     let v = local_zone(day, second).map(|(_, dst)| Value::Bool(dst));
-    option_value(heap, "timezone-daylight-p", v)
+    option_value(heap, wk::F_TIMEZONE_DAYLIGHT_P, v)
 }
 
 /// `(seconds west, daylight in force)` for a universal time, or `None` when
@@ -410,8 +410,8 @@ pub fn heap_info(heap: &mut Heap) -> Value {
 /// module's docs for why it is a crate below this one.
 pub fn dribble_start(heap: &mut Heap, path: &str) -> Value {
     match typelisp_abi::dribble::start(path) {
-        Ok(()) => result_ok(heap, "dribble-start", Value::Empty),
-        Err(e) => result_err(heap, "dribble-start", TypeId::FILE_ERROR, format!("dribble: {}: {}", path, e)),
+        Ok(()) => result_ok(heap, wk::F_DRIBBLE_START, Value::Empty),
+        Err(e) => result_err(heap, wk::F_DRIBBLE_START, TypeId::FILE_ERROR, format!("dribble: {}: {}", path, e)),
     }
 }
 
@@ -423,8 +423,8 @@ pub fn dribble_start(heap: &mut Heap, path: &str) -> Value {
 /// transcript reported as a complete one.
 pub fn dribble_stop(heap: &mut Heap) -> Value {
     match typelisp_abi::dribble::stop() {
-        Ok(()) => result_ok(heap, "dribble-stop", Value::Empty),
-        Err(e) => result_err(heap, "dribble-stop", TypeId::FILE_ERROR, format!("dribble: {}", e)),
+        Ok(()) => result_ok(heap, wk::F_DRIBBLE_STOP, Value::Empty),
+        Err(e) => result_err(heap, wk::F_DRIBBLE_STOP, TypeId::FILE_ERROR, format!("dribble: {}", e)),
     }
 }
 
@@ -451,7 +451,7 @@ pub fn dribble_stop(heap: &mut Heap) -> Value {
 /// Waits for the editor to exit (CL's `ed` returns when editing is done), and
 /// reports a non-zero exit rather than swallowing it.
 pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
-    let err = |heap: &mut Heap, msg: String| result_err(heap, "ed-open", TypeId::FILE_ERROR, msg);
+    let err = |heap: &mut Heap, msg: String| result_err(heap, wk::F_ED_OPEN, TypeId::FILE_ERROR, msg);
     let spec = match std::env::var("VISUAL").ok().filter(|s| !s.trim().is_empty()) {
         Some(v) => v,
         None => match std::env::var("EDITOR").ok().filter(|s| !s.trim().is_empty()) {
@@ -474,7 +474,7 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
     }
     // Native for as long as the editor runs.
     match heap.native(|| cmd.status()) {
-        Ok(st) if st.success() => result_ok(heap, "ed-open", Value::Empty),
+        Ok(st) if st.success() => result_ok(heap, wk::F_ED_OPEN, Value::Empty),
         Ok(st) => err(heap, format!("ed: {} exited with {}", program, st)),
         Err(e) => err(heap, format!("ed: cannot run {}: {}", program, e)),
     }

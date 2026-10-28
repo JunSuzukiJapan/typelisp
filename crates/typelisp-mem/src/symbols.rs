@@ -664,6 +664,365 @@ well_known_symbols! {
     C_ULONG => "c-ulong"
     NEVER => "!"
     SELF_TYPE => "Self"
+
+    "Appended for the explicit-symbols plan's stage 7b (2026-10-28): the names
+     of the built-in methods, which their dispatch compares a method's symbol
+     against. Owned by `%member`, where the name of every type's member is
+     made ([`member_symbol`]); the four spelled like an older member of this
+     table (`=`, `set`, `send`, `recv`) are that member, taken into `%member`."
+    M_OP_MUL => "*"
+    M_OP_ADD => "+"
+    M_OP_SUB => "-"
+    M_OP_DIV => "/"
+    M_OP_NE => "/="
+    M_OP_LT => "<"
+    M_OP_LE => "<="
+    M_OP_GT => ">"
+    M_OP_GE => ">="
+    M_ACOS => "acos"
+    M_ACOSH => "acosh"
+    M_ADD_COROUTINE_FUNCTION => "add-coroutine-function"
+    M_ADD_FUNCTION => "add-function"
+    M_ADD_FUNCTION_WITH_ENV => "add-function-with-env"
+    M_ALLOCA_ARGS => "alloca-args"
+    M_ALPHAP => "alphap"
+    M_APPEND => "append"
+    M_APPEND_BLOCK => "append-block"
+    M_ASH => "ash"
+    M_ASIN => "asin"
+    M_ASINH => "asinh"
+    M_ATAN => "atan"
+    M_ATANH => "atanh"
+    M_AVAILABLE_PARALLELISM => "available-parallelism"
+    M_BLOCK_TERMINATED_P => "block-terminated?"
+    M_BUCKET_COUNT => "bucket-count"
+    M_BUCKET_DELETE => "bucket-delete"
+    M_BUCKET_KEY => "bucket-key"
+    M_BUCKET_PUT => "bucket-put"
+    M_BUCKET_VALUE => "bucket-value"
+    M_BUILD_ADD => "build-add"
+    M_BUILD_AND => "build-and"
+    M_BUILD_ASHR => "build-ashr"
+    M_BUILD_BR => "build-br"
+    M_BUILD_CALL => "build-call"
+    M_BUILD_CALL_WITH_ENV => "build-call-with-env"
+    M_BUILD_COND_BR => "build-cond-br"
+    M_BUILD_FADD => "build-fadd"
+    M_BUILD_FCEIL => "build-fceil"
+    M_BUILD_FCMP_EQ => "build-fcmp-eq"
+    M_BUILD_FCMP_GE => "build-fcmp-ge"
+    M_BUILD_FCMP_GT => "build-fcmp-gt"
+    M_BUILD_FCMP_LE => "build-fcmp-le"
+    M_BUILD_FCMP_LT => "build-fcmp-lt"
+    M_BUILD_FCMP_NE => "build-fcmp-ne"
+    M_BUILD_FCOS => "build-fcos"
+    M_BUILD_FDIV => "build-fdiv"
+    M_BUILD_FEXP => "build-fexp"
+    M_BUILD_FFLOOR => "build-ffloor"
+    M_BUILD_FLOG => "build-flog"
+    M_BUILD_FMAXNUM => "build-fmaxnum"
+    M_BUILD_FMINNUM => "build-fminnum"
+    M_BUILD_FMUL => "build-fmul"
+    M_BUILD_FN_ADDRESS => "build-fn-address"
+    M_BUILD_FPOW => "build-fpow"
+    M_BUILD_FPTOSI => "build-fptosi"
+    M_BUILD_FREE => "build-free"
+    M_BUILD_FREM => "build-frem"
+    M_BUILD_FROUND => "build-fround"
+    M_BUILD_FROUND32 => "build-fround32"
+    M_BUILD_FSIN => "build-fsin"
+    M_BUILD_FSQRT => "build-fsqrt"
+    M_BUILD_FSUB => "build-fsub"
+    M_BUILD_FTRUNC => "build-ftrunc"
+    M_BUILD_ICMP_EQ => "build-icmp-eq"
+    M_BUILD_ICMP_GE => "build-icmp-ge"
+    M_BUILD_ICMP_GT => "build-icmp-gt"
+    M_BUILD_ICMP_LE => "build-icmp-le"
+    M_BUILD_ICMP_LT => "build-icmp-lt"
+    M_BUILD_ICMP_NE => "build-icmp-ne"
+    M_BUILD_INT_TO_PTR => "build-int-to-ptr"
+    M_BUILD_LSHR => "build-lshr"
+    M_BUILD_MAKE_CLOSURE => "build-make-closure"
+    M_BUILD_MALLOC => "build-malloc"
+    M_BUILD_MUL => "build-mul"
+    M_BUILD_OR => "build-or"
+    M_BUILD_PTR_TO_INT => "build-ptr-to-int"
+    M_BUILD_RET => "build-ret"
+    M_BUILD_SADD_OVERFLOW => "build-sadd-overflow"
+    M_BUILD_SELECT => "build-select"
+    M_BUILD_SHL => "build-shl"
+    M_BUILD_SITOFP => "build-sitofp"
+    M_BUILD_SLOT_PTR => "build-slot-ptr"
+    M_BUILD_SMUL_OVERFLOW => "build-smul-overflow"
+    M_BUILD_SSUB_OVERFLOW => "build-ssub-overflow"
+    M_BUILD_SUB => "build-sub"
+    M_BUILD_XOR => "build-xor"
+    M_CAP => "cap"
+    M_CEILING => "ceiling"
+    M_CHAR_TO_INT => "char->int"
+    M_CHAR_TO_STRING => "char->string"
+    M_CLEAR => "clear"
+    M_CLONE_FRAMES => "clone-frames"
+    M_CLOSE => "close"
+    M_CONST_WORD => "const-word"
+    M_COROUTINE_APPLY => "coroutine-apply"
+    M_COROUTINE_BEGIN => "coroutine-begin"
+    M_COROUTINE_CALL => "coroutine-call"
+    M_COROUTINE_CALL_ENV => "coroutine-call-env"
+    M_COROUTINE_DYN_CALL => "coroutine-dyn-call"
+    M_COROUTINE_END => "coroutine-end"
+    M_COROUTINE_SUSPEND => "coroutine-suspend"
+    M_COROUTINE_UNWIND => "coroutine-unwind"
+    M_COS => "cos"
+    M_COSH => "cosh"
+    M_COUNT => "count"
+    M_CREATE => "create"
+    M_CURRENT_ID => "current-id"
+    M_DENOMINATOR => "denominator"
+    M_DIGITP => "digitp"
+    M_DOWNCASE => "downcase"
+    M_ENTRIES => "entries"
+    M_EQ => "eq"
+    M_EQL => "eql"
+    M_EQUAL => "equal"
+    M_EQUALP => "equalp"
+    M_EXP => "exp"
+    M_EXPT => "expt"
+    M_FLOAT_TO_F32 => "float->f32"
+    M_FLOAT_TO_F64 => "float->f64"
+    M_FLOAT_TO_INT => "float->int"
+    M_FLOAT_TO_RATIO => "float->ratio"
+    M_FLOOR => "floor"
+    M_FRAME_CLEAR_HANDLER => "frame-clear-handler"
+    M_FRAME_SET_HANDLER => "frame-set-handler"
+    M_FRAME_SLOT => "frame-slot"
+    M_FRAME_SLOT_ROOTED => "frame-slot-rooted"
+    M_FUNCTION_PARAM => "function-param"
+    M_GET => "get"
+    M_GET_FUNCTION => "get-function"
+    M_INT_TO_C_LONG => "int->c-long"
+    M_INT_TO_C_ULONG => "int->c-ulong"
+    M_INT_TO_CHAR => "int->char"
+    M_INT_TO_FLOAT => "int->float"
+    M_INT_TO_I16 => "int->i16"
+    M_INT_TO_I32 => "int->i32"
+    M_INT_TO_I8 => "int->i8"
+    M_INT_TO_INT => "int->int"
+    M_INT_TO_RATIO => "int->ratio"
+    M_INT_TO_U16 => "int->u16"
+    M_INT_TO_U32 => "int->u32"
+    M_INT_TO_U8 => "int->u8"
+    M_INTEGER_LENGTH => "integer-length"
+    M_JOIN => "join"
+    M_KEYS => "keys"
+    M_LEN => "len"
+    M_LENGTH => "length"
+    M_LOAD_ARG => "load-arg"
+    M_LOAD_ENV => "load-env"
+    M_LOAD_RAW => "load-raw"
+    M_LOAD_TYPE => "load-type"
+    M_LOG => "log"
+    M_LOGAND => "logand"
+    M_LOGBITP => "logbitp"
+    M_LOGCOUNT => "logcount"
+    M_LOGIOR => "logior"
+    M_LOGNOT => "lognot"
+    M_LOGTEST => "logtest"
+    M_LOGXOR => "logxor"
+    M_LT => "lt"
+    M_MAX => "max"
+    M_MIN => "min"
+    M_MOD => "mod"
+    M_NEW => "new"
+    M_NUMERATOR => "numerator"
+    M_POP => "pop"
+    M_POP_FRAME => "pop-frame"
+    M_POSITION_AT_END => "position-at-end"
+    M_PUSH => "push"
+    M_PUSH_FRAME => "push-frame"
+    M_RATIO_TO_FLOAT => "ratio->float"
+    M_RATIO_TO_INT => "ratio->int"
+    M_RATIO_TO_RATIONAL => "ratio->rational"
+    M_RATIONAL_TO_FLOAT => "rational->float"
+    M_RATIONAL_TO_INT => "rational->int"
+    M_RATIONAL_TO_RATIO => "rational->ratio"
+    M_REF => "ref"
+    M_ROUND => "round"
+    M_SCRATCH_SLOT => "scratch-slot"
+    M_SIN => "sin"
+    M_SINH => "sinh"
+    M_SQRT => "sqrt"
+    M_STORE_ARG => "store-arg"
+    M_SUBSTRING => "substring"
+    M_TAN => "tan"
+    M_TANH => "tanh"
+    M_TO_STRING => "to-string"
+    M_TRUNCATE => "truncate"
+    M_TRY_FLOAT_TO_F32 => "try-float->f32"
+    M_TRY_FLOAT_TO_F64 => "try-float->f64"
+    M_TRY_INT_TO_C_LONG => "try-int->c-long"
+    M_TRY_INT_TO_C_ULONG => "try-int->c-ulong"
+    M_TRY_INT_TO_CHAR => "try-int->char"
+    M_TRY_INT_TO_I16 => "try-int->i16"
+    M_TRY_INT_TO_I32 => "try-int->i32"
+    M_TRY_INT_TO_I8 => "try-int->i8"
+    M_TRY_INT_TO_U16 => "try-int->u16"
+    M_TRY_INT_TO_U32 => "try-int->u32"
+    M_TRY_INT_TO_U8 => "try-int->u8"
+    M_TRY_RATIONAL_TO_INT => "try-rational->int"
+    M_UPCASE => "upcase"
+    M_VALUES => "values"
+    M_VERIFY => "verify"
+    M_WAIT => "wait"
+    "Appended for the explicit-symbols plan's stage 7b (2026-10-28): the names
+     of the built-in free functions, each owned by the module that defines it
+     ([`HOMED_VOCABULARY`]), so a call's path names the function by the
+     vocabulary symbol and its dispatch compares that. `intern`, an older
+     member, is the one spelled like one, and `equal`/`equalp` are the
+     methods' names above, taken into `std::cmp`."
+    F_COMPILE_FILE => "compile-file"
+    F_DUMP => "dump"
+    F_DRIBBLE_START => "dribble-start"
+    F_DRIBBLE_STOP => "dribble-stop"
+    F_ED_OPEN => "ed-open"
+    F_FILE_CREATE_DIRECTORIES => "file-create-directories"
+    F_FILE_DELETE => "file-delete"
+    F_FILE_DIRECTORY_P => "file-directory-p"
+    F_FILE_EXISTS_P => "file-exists-p"
+    F_FILE_LIST_DIRECTORY => "file-list-directory"
+    F_FILE_MODIFIED_DATE => "file-modified-date"
+    F_FILE_OWNER_NAME => "file-owner-name"
+    F_FILE_RENAME => "file-rename"
+    F_FILE_TRUENAME => "file-truename"
+    F_MAKE_RANDOM_STATE_FRESH => "make-random-state-fresh"
+    F_NET_ACCEPT => "net-accept"
+    F_NET_BUFFERED_P => "net-buffered-p"
+    F_NET_CONNECT_BEGIN => "net-connect-begin"
+    F_NET_CONNECT_FINISH => "net-connect-finish"
+    F_NET_FILL => "net-fill"
+    F_NET_FLUSH => "net-flush"
+    F_NET_LISTEN => "net-listen"
+    F_NET_LOCAL_ADDRESS => "net-local-address"
+    F_NET_PEER_ADDRESS => "net-peer-address"
+    F_NET_PEER_SUBJECT => "net-peer-subject"
+    F_NET_POP_BYTE => "net-pop-byte"
+    F_NET_POP_CHAR => "net-pop-char"
+    F_NET_PUSH_BYTE => "net-push-byte"
+    F_NET_PUSH_STRING => "net-push-string"
+    F_NET_RESOLVE_BEGIN => "net-resolve-begin"
+    F_NET_RESOLVE_FINISH => "net-resolve-finish"
+    F_NET_SERVER_NAME => "net-server-name"
+    F_NET_SET_KEEPALIVE => "net-set-keepalive"
+    F_NET_SET_KEEPALIVE_PERIOD => "net-set-keepalive-period"
+    F_NET_SET_NODELAY => "net-set-nodelay"
+    F_NET_SHUTDOWN_WRITE => "net-shutdown-write"
+    F_NET_SOCKET_ERROR => "net-socket-error"
+    F_NET_TLS_ADD_CERTIFICATE => "net-tls-add-certificate"
+    F_NET_TLS_HANDSHAKE => "net-tls-handshake"
+    F_NET_TLS_LISTEN => "net-tls-listen"
+    F_NET_TLS_START => "net-tls-start"
+    F_NET_UDP_BIND => "net-udp-bind"
+    F_NET_UDP_LAST_SENDER => "net-udp-last-sender"
+    F_NET_UDP_RECV => "net-udp-recv"
+    F_NET_UDP_SEND_TO => "net-udp-send-to"
+    F_NET_UNIX_CONNECT => "net-unix-connect"
+    F_NET_UNIX_LISTEN => "net-unix-listen"
+    F_NET_WAIT => "net-wait"
+    F_NET_WAIT_FOR => "net-wait-for"
+    F_RANDOM_STATE_COPY => "random-state-copy"
+    F_RANDOM_STATE_NEXT => "random-state-next"
+    F_READ_DATUM_AT => "read-datum-at"
+    F_STREAM_AT_LINE_START => "stream-at-line-start"
+    F_STREAM_CLOSE => "stream-close"
+    F_STREAM_DESCRIBE => "stream-describe"
+    F_STREAM_FINISH_OUTPUT => "stream-finish-output"
+    F_STREAM_INPUT_P => "stream-input-p"
+    F_STREAM_LISTEN => "stream-listen"
+    F_STREAM_OPEN_FILE => "stream-open-file"
+    F_STREAM_OPEN_P => "stream-open-p"
+    F_STREAM_OUTPUT_P => "stream-output-p"
+    F_STREAM_POSITION => "stream-position"
+    F_STREAM_READ_BYTE => "stream-read-byte"
+    F_STREAM_READ_CHAR => "stream-read-char"
+    F_STREAM_STDERR => "stream-stderr"
+    F_STREAM_STDIN => "stream-stdin"
+    F_STREAM_STDOUT => "stream-stdout"
+    F_STREAM_STRING_INPUT => "stream-string-input"
+    F_STREAM_STRING_OUTPUT => "stream-string-output"
+    F_STREAM_TAKE_OUTPUT_STRING => "stream-take-output-string"
+    F_STREAM_UNREAD_CHAR => "stream-unread-char"
+    F_STREAM_WRITE_BYTE => "stream-write-byte"
+    F_STREAM_WRITE_STRING => "stream-write-string"
+    F_COMMAND_LINE_ARGS => "command-line-args"
+    F_GETENV => "getenv"
+    F_HOME_DIRECTORY => "home-directory"
+    F_LISP_IMPLEMENTATION_VERSION => "lisp-implementation-version"
+    F_MACHINE_INSTANCE => "machine-instance"
+    F_MACHINE_TYPE => "machine-type"
+    F_MACHINE_VERSION => "machine-version"
+    F_SOFTWARE_TYPE => "software-type"
+    F_SOFTWARE_VERSION => "software-version"
+    F_EVAL => "eval"
+    F_MACROEXPAND => "macroexpand"
+    F_MACROEXPAND_1 => "macroexpand-1"
+    F_PPRINT_INDENT => "pprint-indent"
+    F_PPRINT_LIST_EXHAUSTED => "pprint-list-exhausted"
+    F_PPRINT_NEWLINE => "pprint-newline"
+    F_PPRINT_POP => "pprint-pop"
+    F_PPRINT_TAB => "pprint-tab"
+    F_PARSE_FLOAT => "parse-float"
+    F_EXIT => "exit"
+    F_SEED_RANDOM_STATE => "seed-random-state"
+    F_GET_DISPATCH_MACRO_CHARACTER => "get-dispatch-macro-character"
+    F_GET_MACRO_CHARACTER => "get-macro-character"
+    F_READ => "read"
+    F_SET_DISPATCH_MACRO_CHARACTER => "set-dispatch-macro-character"
+    F_SET_MACRO_CHARACTER => "set-macro-character"
+    F_HEAP_INFO => "heap-info"
+    F_SEXPR_ATOM => "sexpr-atom"
+    F_SEXPR_BOOL => "sexpr-bool"
+    F_SEXPR_CAR => "sexpr-car"
+    F_SEXPR_CDR => "sexpr-cdr"
+    F_SEXPR_CHAR => "sexpr-char"
+    F_SEXPR_CONS => "sexpr-cons"
+    F_SEXPR_CONSP => "sexpr-consp"
+    F_SEXPR_F32 => "sexpr-f32"
+    F_SEXPR_F64 => "sexpr-f64"
+    F_SEXPR_I16 => "sexpr-i16"
+    F_SEXPR_I32 => "sexpr-i32"
+    F_SEXPR_I8 => "sexpr-i8"
+    F_SEXPR_INT => "sexpr-int"
+    F_SEXPR_NULL => "sexpr-null"
+    F_SEXPR_STR => "sexpr-str"
+    F_SEXPR_SYM_NAME => "sexpr-sym-name"
+    F_SEXPR_SYMP => "sexpr-symp"
+    F_SEXPR_U16 => "sexpr-u16"
+    F_SEXPR_U32 => "sexpr-u32"
+    F_SEXPR_U8 => "sexpr-u8"
+    F_KEYWORDP => "keywordp"
+    F_SYMBOL_TO_STRING => "symbol->string"
+    F_SLEEP => "sleep"
+    F_YIELD => "yield"
+    F_GET_INTERNAL_REAL_TIME => "get-internal-real-time"
+    F_GET_INTERNAL_RUN_TIME => "get-internal-run-time"
+    F_GET_UNIVERSAL_TIME => "get-universal-time"
+    F_TIMEZONE_DAYLIGHT_P => "timezone-daylight-p"
+    F_TIMEZONE_OFFSET_SECONDS => "timezone-offset-seconds"
+    F_FORMAT_RT => "format-rt"
+    F_PRINT_RT => "print-rt"
+    F_PRINTLN_RT => "println-rt"
+    F_PPRINT_RT => "pprint-rt"
+    F_PPRINT_BLOCK_START_RT => "pprint-block-start-rt"
+    F_PPRINT_BLOCK_END_RT => "pprint-block-end-rt"
+    F_C_ARENA_OPEN => " c-arena-open"
+    F_C_ARENA_CLOSE => " c-arena-close"
+    F_C_ALLOC => " c-alloc"
+    F_C_PTR_CHECK => " c-ptr-check"
+    F_C_INDEX => " c-index"
+    F_C_OFFSET => " c-offset"
+    F_C_LOAD => " c-load"
+    F_C_STORE => " c-store"
+    F_FFI_CALLBACK_ADDRESS => " ffi-callback-address"
 }
 
 
@@ -723,6 +1082,14 @@ impl std::fmt::Debug for SymRef {
     }
 }
 
+/// How the symbol is written ([`SymRef::spelling`]) — what a message naming
+/// it shows.
+impl std::fmt::Display for SymRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.spelling())
+    }
+}
+
 impl SymRef {
     fn header(&self) -> &'static Symbol {
         // SAFETY: the only way to obtain a `SymRef` is from the table, which
@@ -773,6 +1140,16 @@ impl SymRef {
     /// why this exists and why it is never an identity test.
     pub fn well_known(&self) -> u32 {
         self.header().well_known
+    }
+
+    /// Whether this is a member of the vocabulary every module holds alike —
+    /// a reserved word, a keyword, or a name of `std`'s or the core IR's —
+    /// so that where it was made says nothing about which definition it
+    /// names. A member [`HOMED_VOCABULARY`] places in a module is that
+    /// module's, like any symbol made there, even when the module is `std`
+    /// (`dump`).
+    pub fn is_shared_vocabulary(&self) -> bool {
+        self.well_known() != NOT_WELL_KNOWN && self.well_known() < FIRST_HOMED
     }
 
     /// Whether this is the vocabulary member `konst` names.
@@ -948,6 +1325,254 @@ pub const CORE_VOCABULARY: &[u32] = &[
     wk::TYPE_REF, wk::TYPE_VALUE,
 ];
 
+/// The module the names of every type's members are made in, the root's
+/// child `%member` ([`member_symbol`]): a member is no module's definition,
+/// so its name is read in no module a program is written in.
+pub const MEMBER_MODULE: &str = "%member";
+
+/// The first member of the vocabulary that [`HOMED_VOCABULARY`] places:
+/// every member from here on is made in its module.
+const FIRST_HOMED: u32 = wk::M_OP_MUL;
+
+/// The names of the built-in methods, owned by [`MEMBER_MODULE`].
+pub const MEMBER_VOCABULARY: &[u32] = &[
+    wk::M_OP_MUL,
+    wk::M_OP_ADD,
+    wk::M_OP_SUB,
+    wk::M_OP_DIV,
+    wk::M_OP_NE,
+    wk::M_OP_LT,
+    wk::M_OP_LE,
+    wk::RETIRED_EQUALS,
+    wk::M_OP_GT,
+    wk::M_OP_GE,
+    wk::M_ACOS,
+    wk::M_ACOSH,
+    wk::M_ADD_COROUTINE_FUNCTION,
+    wk::M_ADD_FUNCTION,
+    wk::M_ADD_FUNCTION_WITH_ENV,
+    wk::M_ALLOCA_ARGS,
+    wk::M_ALPHAP,
+    wk::M_APPEND,
+    wk::M_APPEND_BLOCK,
+    wk::M_ASH,
+    wk::M_ASIN,
+    wk::M_ASINH,
+    wk::M_ATAN,
+    wk::M_ATANH,
+    wk::M_AVAILABLE_PARALLELISM,
+    wk::M_BLOCK_TERMINATED_P,
+    wk::M_BUCKET_COUNT,
+    wk::M_BUCKET_DELETE,
+    wk::M_BUCKET_KEY,
+    wk::M_BUCKET_PUT,
+    wk::M_BUCKET_VALUE,
+    wk::M_BUILD_ADD,
+    wk::M_BUILD_AND,
+    wk::M_BUILD_ASHR,
+    wk::M_BUILD_BR,
+    wk::M_BUILD_CALL,
+    wk::M_BUILD_CALL_WITH_ENV,
+    wk::M_BUILD_COND_BR,
+    wk::M_BUILD_FADD,
+    wk::M_BUILD_FCEIL,
+    wk::M_BUILD_FCMP_EQ,
+    wk::M_BUILD_FCMP_GE,
+    wk::M_BUILD_FCMP_GT,
+    wk::M_BUILD_FCMP_LE,
+    wk::M_BUILD_FCMP_LT,
+    wk::M_BUILD_FCMP_NE,
+    wk::M_BUILD_FCOS,
+    wk::M_BUILD_FDIV,
+    wk::M_BUILD_FEXP,
+    wk::M_BUILD_FFLOOR,
+    wk::M_BUILD_FLOG,
+    wk::M_BUILD_FMAXNUM,
+    wk::M_BUILD_FMINNUM,
+    wk::M_BUILD_FMUL,
+    wk::M_BUILD_FN_ADDRESS,
+    wk::M_BUILD_FPOW,
+    wk::M_BUILD_FPTOSI,
+    wk::M_BUILD_FREE,
+    wk::M_BUILD_FREM,
+    wk::M_BUILD_FROUND,
+    wk::M_BUILD_FROUND32,
+    wk::M_BUILD_FSIN,
+    wk::M_BUILD_FSQRT,
+    wk::M_BUILD_FSUB,
+    wk::M_BUILD_FTRUNC,
+    wk::M_BUILD_ICMP_EQ,
+    wk::M_BUILD_ICMP_GE,
+    wk::M_BUILD_ICMP_GT,
+    wk::M_BUILD_ICMP_LE,
+    wk::M_BUILD_ICMP_LT,
+    wk::M_BUILD_ICMP_NE,
+    wk::M_BUILD_INT_TO_PTR,
+    wk::M_BUILD_LSHR,
+    wk::M_BUILD_MAKE_CLOSURE,
+    wk::M_BUILD_MALLOC,
+    wk::M_BUILD_MUL,
+    wk::M_BUILD_OR,
+    wk::M_BUILD_PTR_TO_INT,
+    wk::M_BUILD_RET,
+    wk::M_BUILD_SADD_OVERFLOW,
+    wk::M_BUILD_SELECT,
+    wk::M_BUILD_SHL,
+    wk::M_BUILD_SITOFP,
+    wk::M_BUILD_SLOT_PTR,
+    wk::M_BUILD_SMUL_OVERFLOW,
+    wk::M_BUILD_SSUB_OVERFLOW,
+    wk::M_BUILD_SUB,
+    wk::M_BUILD_XOR,
+    wk::M_CAP,
+    wk::M_CEILING,
+    wk::M_CHAR_TO_INT,
+    wk::M_CHAR_TO_STRING,
+    wk::M_CLEAR,
+    wk::M_CLONE_FRAMES,
+    wk::M_CLOSE,
+    wk::M_CONST_WORD,
+    wk::M_COROUTINE_APPLY,
+    wk::M_COROUTINE_BEGIN,
+    wk::M_COROUTINE_CALL,
+    wk::M_COROUTINE_CALL_ENV,
+    wk::M_COROUTINE_DYN_CALL,
+    wk::M_COROUTINE_END,
+    wk::M_COROUTINE_SUSPEND,
+    wk::M_COROUTINE_UNWIND,
+    wk::M_COS,
+    wk::M_COSH,
+    wk::M_COUNT,
+    wk::M_CREATE,
+    wk::M_CURRENT_ID,
+    wk::M_DENOMINATOR,
+    wk::M_DIGITP,
+    wk::M_DOWNCASE,
+    wk::M_ENTRIES,
+    wk::M_EQ,
+    wk::M_EQL,
+    wk::M_EQUAL,
+    wk::M_EQUALP,
+    wk::M_EXP,
+    wk::M_EXPT,
+    wk::M_FLOAT_TO_F32,
+    wk::M_FLOAT_TO_F64,
+    wk::M_FLOAT_TO_INT,
+    wk::M_FLOAT_TO_RATIO,
+    wk::M_FLOOR,
+    wk::M_FRAME_CLEAR_HANDLER,
+    wk::M_FRAME_SET_HANDLER,
+    wk::M_FRAME_SLOT,
+    wk::M_FRAME_SLOT_ROOTED,
+    wk::M_FUNCTION_PARAM,
+    wk::M_GET,
+    wk::M_GET_FUNCTION,
+    wk::M_INT_TO_C_LONG,
+    wk::M_INT_TO_C_ULONG,
+    wk::M_INT_TO_CHAR,
+    wk::M_INT_TO_FLOAT,
+    wk::M_INT_TO_I16,
+    wk::M_INT_TO_I32,
+    wk::M_INT_TO_I8,
+    wk::M_INT_TO_INT,
+    wk::M_INT_TO_RATIO,
+    wk::M_INT_TO_U16,
+    wk::M_INT_TO_U32,
+    wk::M_INT_TO_U8,
+    wk::M_INTEGER_LENGTH,
+    wk::M_JOIN,
+    wk::M_KEYS,
+    wk::M_LEN,
+    wk::M_LENGTH,
+    wk::M_LOAD_ARG,
+    wk::M_LOAD_ENV,
+    wk::M_LOAD_RAW,
+    wk::M_LOAD_TYPE,
+    wk::M_LOG,
+    wk::M_LOGAND,
+    wk::M_LOGBITP,
+    wk::M_LOGCOUNT,
+    wk::M_LOGIOR,
+    wk::M_LOGNOT,
+    wk::M_LOGTEST,
+    wk::M_LOGXOR,
+    wk::M_LT,
+    wk::M_MAX,
+    wk::M_MIN,
+    wk::M_MOD,
+    wk::M_NEW,
+    wk::M_NUMERATOR,
+    wk::M_POP,
+    wk::M_POP_FRAME,
+    wk::M_POSITION_AT_END,
+    wk::M_PUSH,
+    wk::M_PUSH_FRAME,
+    wk::M_RATIO_TO_FLOAT,
+    wk::M_RATIO_TO_INT,
+    wk::M_RATIO_TO_RATIONAL,
+    wk::M_RATIONAL_TO_FLOAT,
+    wk::M_RATIONAL_TO_INT,
+    wk::M_RATIONAL_TO_RATIO,
+    wk::RECV,
+    wk::M_REF,
+    wk::M_ROUND,
+    wk::M_SCRATCH_SLOT,
+    wk::SEND,
+    wk::SET,
+    wk::M_SIN,
+    wk::M_SINH,
+    wk::M_SQRT,
+    wk::M_STORE_ARG,
+    wk::M_SUBSTRING,
+    wk::M_TAN,
+    wk::M_TANH,
+    wk::M_TO_STRING,
+    wk::M_TRUNCATE,
+    wk::M_TRY_FLOAT_TO_F32,
+    wk::M_TRY_FLOAT_TO_F64,
+    wk::M_TRY_INT_TO_C_LONG,
+    wk::M_TRY_INT_TO_C_ULONG,
+    wk::M_TRY_INT_TO_CHAR,
+    wk::M_TRY_INT_TO_I16,
+    wk::M_TRY_INT_TO_I32,
+    wk::M_TRY_INT_TO_I8,
+    wk::M_TRY_INT_TO_U16,
+    wk::M_TRY_INT_TO_U32,
+    wk::M_TRY_INT_TO_U8,
+    wk::M_TRY_RATIONAL_TO_INT,
+    wk::M_UPCASE,
+    wk::M_VALUES,
+    wk::M_VERIFY,
+    wk::M_WAIT,
+];
+
+/// The vocabulary members owned by a module the table makes along with them,
+/// by the module's path from the root: each built-in free function's name in
+/// the module that defines it, and the built-in methods' names in
+/// [`MEMBER_MODULE`]. A member is made in the first module that lists it —
+/// a function's ahead of the members', since a name is looked for in the
+/// module it was made in — and taken by pointer into any later one, as is a
+/// member an older group already owns. None of these is exported: a name the standard library offers
+/// is offered by `std::prelude`.
+pub const HOMED_VOCABULARY: &[(&[&str], &[u32])] = &[
+    (&["std"], &[wk::F_COMPILE_FILE, wk::F_DUMP]),
+    (&["std", "%internal"], &[wk::F_DRIBBLE_START, wk::F_DRIBBLE_STOP, wk::F_ED_OPEN, wk::F_FILE_CREATE_DIRECTORIES, wk::F_FILE_DELETE, wk::F_FILE_DIRECTORY_P, wk::F_FILE_EXISTS_P, wk::F_FILE_LIST_DIRECTORY, wk::F_FILE_MODIFIED_DATE, wk::F_FILE_OWNER_NAME, wk::F_FILE_RENAME, wk::F_FILE_TRUENAME, wk::F_MAKE_RANDOM_STATE_FRESH, wk::F_NET_ACCEPT, wk::F_NET_BUFFERED_P, wk::F_NET_CONNECT_BEGIN, wk::F_NET_CONNECT_FINISH, wk::F_NET_FILL, wk::F_NET_FLUSH, wk::F_NET_LISTEN, wk::F_NET_LOCAL_ADDRESS, wk::F_NET_PEER_ADDRESS, wk::F_NET_PEER_SUBJECT, wk::F_NET_POP_BYTE, wk::F_NET_POP_CHAR, wk::F_NET_PUSH_BYTE, wk::F_NET_PUSH_STRING, wk::F_NET_RESOLVE_BEGIN, wk::F_NET_RESOLVE_FINISH, wk::F_NET_SERVER_NAME, wk::F_NET_SET_KEEPALIVE, wk::F_NET_SET_KEEPALIVE_PERIOD, wk::F_NET_SET_NODELAY, wk::F_NET_SHUTDOWN_WRITE, wk::F_NET_SOCKET_ERROR, wk::F_NET_TLS_ADD_CERTIFICATE, wk::F_NET_TLS_HANDSHAKE, wk::F_NET_TLS_LISTEN, wk::F_NET_TLS_START, wk::F_NET_UDP_BIND, wk::F_NET_UDP_LAST_SENDER, wk::F_NET_UDP_RECV, wk::F_NET_UDP_SEND_TO, wk::F_NET_UNIX_CONNECT, wk::F_NET_UNIX_LISTEN, wk::F_NET_WAIT, wk::F_NET_WAIT_FOR, wk::F_RANDOM_STATE_COPY, wk::F_RANDOM_STATE_NEXT, wk::F_READ_DATUM_AT, wk::F_STREAM_AT_LINE_START, wk::F_STREAM_CLOSE, wk::F_STREAM_DESCRIBE, wk::F_STREAM_FINISH_OUTPUT, wk::F_STREAM_INPUT_P, wk::F_STREAM_LISTEN, wk::F_STREAM_OPEN_FILE, wk::F_STREAM_OPEN_P, wk::F_STREAM_OUTPUT_P, wk::F_STREAM_POSITION, wk::F_STREAM_READ_BYTE, wk::F_STREAM_READ_CHAR, wk::F_STREAM_STDERR, wk::F_STREAM_STDIN, wk::F_STREAM_STDOUT, wk::F_STREAM_STRING_INPUT, wk::F_STREAM_STRING_OUTPUT, wk::F_STREAM_TAKE_OUTPUT_STRING, wk::F_STREAM_UNREAD_CHAR, wk::F_STREAM_WRITE_BYTE, wk::F_STREAM_WRITE_STRING, wk::F_FORMAT_RT, wk::F_PRINT_RT, wk::F_PRINTLN_RT, wk::F_PPRINT_RT, wk::F_PPRINT_BLOCK_START_RT, wk::F_PPRINT_BLOCK_END_RT, wk::F_C_ARENA_OPEN, wk::F_C_ARENA_CLOSE, wk::F_C_ALLOC, wk::F_C_PTR_CHECK, wk::F_C_INDEX, wk::F_C_OFFSET, wk::F_C_LOAD, wk::F_C_STORE, wk::F_FFI_CALLBACK_ADDRESS]),
+    (&["std", "cmp"], &[wk::M_EQUAL, wk::M_EQUALP]),
+    (&["std", "env"], &[wk::F_COMMAND_LINE_ARGS, wk::F_GETENV, wk::F_HOME_DIRECTORY, wk::F_LISP_IMPLEMENTATION_VERSION, wk::F_MACHINE_INSTANCE, wk::F_MACHINE_TYPE, wk::F_MACHINE_VERSION, wk::F_SOFTWARE_TYPE, wk::F_SOFTWARE_VERSION]),
+    (&["std", "eval"], &[wk::F_EVAL, wk::F_MACROEXPAND, wk::F_MACROEXPAND_1]),
+    (&["std", "fmt"], &[wk::F_PPRINT_INDENT, wk::F_PPRINT_LIST_EXHAUSTED, wk::F_PPRINT_NEWLINE, wk::F_PPRINT_POP, wk::F_PPRINT_TAB]),
+    (&["std", "num"], &[wk::F_PARSE_FLOAT]),
+    (&["std", "process"], &[wk::F_EXIT]),
+    (&["std", "random"], &[wk::F_SEED_RANDOM_STATE]),
+    (&["std", "reader"], &[wk::F_GET_DISPATCH_MACRO_CHARACTER, wk::F_GET_MACRO_CHARACTER, wk::F_READ, wk::F_SET_DISPATCH_MACRO_CHARACTER, wk::F_SET_MACRO_CHARACTER]),
+    (&["std", "repl"], &[wk::F_HEAP_INFO]),
+    (&["std", "sexpr"], &[wk::F_SEXPR_ATOM, wk::F_SEXPR_BOOL, wk::F_SEXPR_CAR, wk::F_SEXPR_CDR, wk::F_SEXPR_CHAR, wk::F_SEXPR_CONS, wk::F_SEXPR_CONSP, wk::F_SEXPR_F32, wk::F_SEXPR_F64, wk::F_SEXPR_I16, wk::F_SEXPR_I32, wk::F_SEXPR_I8, wk::F_SEXPR_INT, wk::F_SEXPR_NULL, wk::F_SEXPR_STR, wk::F_SEXPR_SYM_NAME, wk::F_SEXPR_SYMP, wk::F_SEXPR_U16, wk::F_SEXPR_U32, wk::F_SEXPR_U8]),
+    (&["std", "symbol"], &[wk::INTERN, wk::F_KEYWORDP, wk::F_SYMBOL_TO_STRING]),
+    (&["std", "thread"], &[wk::F_SLEEP, wk::F_YIELD]),
+    (&["std", "time"], &[wk::F_GET_INTERNAL_REAL_TIME, wk::F_GET_INTERNAL_RUN_TIME, wk::F_GET_UNIVERSAL_TIME, wk::F_TIMEZONE_DAYLIGHT_P, wk::F_TIMEZONE_OFFSET_SECONDS]),
+    (&[MEMBER_MODULE], MEMBER_VOCABULARY),
+];
+
 /// The standard library module's segment under the root.
 pub const STD_MODULE: &str = "std";
 
@@ -1018,27 +1643,28 @@ impl SymTable {
         // The system module owns the reserved words. A keyword belongs to the
         // keyword module under its name without the colon, a standard
         // library name to `std` (which exports it), an IR name to `%core`.
-        let vocabulary: Vec<SymRef> = BUILTIN_SYMBOLS
+        // A member of [`HOMED_VOCABULARY`] appended since is made below, in
+        // its module, once the modules can be named.
+        let mut vocabulary: Vec<Option<SymRef>> = BUILTIN_SYMBOLS
             .iter()
             .enumerate()
             .map(|(i, name)| {
                 let i = i as u32;
-                if let Some(kw) = name.strip_prefix(':') {
-                    t.create(NsId::KEYWORD, kw, i)
+                if i >= FIRST_HOMED {
+                    None
+                } else if let Some(kw) = name.strip_prefix(':') {
+                    Some(t.create(NsId::KEYWORD, kw, i))
                 } else if STD_VOCABULARY.contains(&i) {
                     let sym = t.create(NsId::STD, name, i);
                     t.std_exports.insert((*name).into(), sym);
-                    sym
+                    Some(sym)
                 } else if CORE_VOCABULARY.contains(&i) {
-                    t.create(NsId::CORE, name, i)
+                    Some(t.create(NsId::CORE, name, i))
                 } else {
-                    t.create(NsId::SYSTEM, name, i)
+                    Some(t.create(NsId::SYSTEM, name, i))
                 }
             })
             .collect();
-        WELL_KNOWN
-            .set(vocabulary.into_boxed_slice())
-            .unwrap_or_else(|_| unreachable!("the table is built exactly once"));
         // Every module but the keyword one holds the reserved words.
         let reserved = t.nodes[NsId::SYSTEM.0 as usize].syms.clone();
         for ns in [NsId::ROOT, NsId::STD, NsId::CORE] {
@@ -1051,6 +1677,26 @@ impl SymTable {
             t.nodes[id.0 as usize].name = Some(name);
             t.nodes[NsId::ROOT.0 as usize].children.insert(name, id);
         }
+        for (path, members) in HOMED_VOCABULARY {
+            let ns = path.iter().fold(NsId::ROOT, |ns, segment| t.child(ns, segment));
+            for &i in *members {
+                let name = BUILTIN_SYMBOLS[i as usize];
+                match vocabulary[i as usize] {
+                    Some(sym) => {
+                        t.nodes[ns.0 as usize].syms.insert(name.into(), sym);
+                    }
+                    None => vocabulary[i as usize] = Some(t.create(ns, name, i)),
+                }
+            }
+        }
+        let vocabulary: Vec<SymRef> = vocabulary
+            .into_iter()
+            .enumerate()
+            .map(|(i, sym)| sym.unwrap_or_else(|| panic!("`{}` is in no group of the vocabulary", BUILTIN_SYMBOLS[i])))
+            .collect();
+        WELL_KNOWN
+            .set(vocabulary.into_boxed_slice())
+            .unwrap_or_else(|_| unreachable!("the table is built exactly once"));
         t
     }
 
@@ -1290,6 +1936,15 @@ pub const KEYWORD_MODULE: &str = "keyword";
 /// building core-IR tags.
 pub fn intern(name: &str) -> SymRef {
     intern_in(NsId::ROOT, name)
+}
+
+/// The symbol a member of a type — a method — is named by: made in
+/// [`MEMBER_MODULE`], where a built-in method's name is the vocabulary
+/// symbol its dispatch compares against.
+pub fn member_symbol(name: &str) -> SymRef {
+    static MEMBER: OnceLock<NsId> = OnceLock::new();
+    let ns = *MEMBER.get_or_init(|| child_ns(NsId::ROOT, MEMBER_MODULE));
+    intern_in(ns, name)
 }
 
 /// Makes `sym` visible in `into` under its own name, by pointer.
@@ -1646,7 +2301,7 @@ impl SessionNames {
         let mut at = if first.name().is_empty() {
             PathStep::Module(NsId::ROOT)
         } else {
-            let home = (first.well_known() == NOT_WELL_KNOWN).then(|| first.home());
+            let home = (!first.is_shared_vocabulary()).then(|| first.home());
             [Some(ns), home]
                 .into_iter()
                 .flatten()
