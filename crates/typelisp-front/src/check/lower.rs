@@ -132,7 +132,7 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
         }
         Node::DynCall { trait_path, method, slot, targets, args: cs } => {
             let a = args(s, info, cs)?;
-            info.dyn_call_form(s, trait_path, method, *slot, targets, &a)
+            info.dyn_call_form(s, trait_path, *method, *slot, targets, &a)
         }
         Node::Let { binds, body } => {
             let mut lowered = Vec::with_capacity(binds.len());
@@ -305,7 +305,7 @@ fn lower_assoc(
     ret: &Type,
     args: &[Arg],
 ) -> Result<Value, Error> {
-    let builtin = info.reg.type_def(owner).and_then(|d| d.assoc.get(method.name())).is_some_and(|af| af.builtin);
+    let builtin = info.reg.type_def(owner).and_then(|d| d.assoc.get(method)).is_some_and(|af| af.builtin);
     if builtin {
         if let Some(folded) = fold::fold_builtin_method(heap, owner, method, args, ret)? {
             return Ok(folded);
@@ -470,7 +470,7 @@ impl Info {
         let boundary = self
             .reg
             .type_def(type_name)
-            .and_then(|d| d.assoc.get(method.name()))
+            .and_then(|d| d.assoc.get(method))
             .filter(|af| af.builtin && int_boundary_raw(type_name, method))
             .map(|af| (af.sig.params.clone(), af.sig.ret.clone()));
         let declared_int = |i: usize| boundary.as_ref().and_then(|(ps, _)| ps.get(i)).is_some_and(|t| *t == Type::Int);
@@ -913,7 +913,7 @@ impl Info {
         &self,
         heap: &mut Heap,
         trait_path: &Path,
-        method: &str,
+        method: SymRef,
         slot: usize,
         impl_targets: &[(Path, SymRef)],
         args: &[Arg],
@@ -921,7 +921,7 @@ impl Info {
         let mut f = Items::new(heap);
         let tp = core::path_form(f.heap(), trait_path);
         f.push(tp);
-        f.push(Value::Symbol(typelisp_mem::symbols::member_symbol(method)));
+        f.push(Value::Symbol(method));
         f.push(Value::Int(slot as i64));
         let targets = vtable_form(f.heap(), impl_targets)?;
         f.push(targets);
@@ -1165,8 +1165,9 @@ impl Info {
         let mut f = Items::new(heap);
         let path = core::path_form(f.heap(), name);
         f.push(path);
-        let names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
-        let names = forms::sym_list(f.heap(), &names)?;
+        let mut names = Items::new(f.heap());
+        names.extend(variants.iter().map(|v| Value::Symbol(v.name)));
+        let names = names.finish_list()?;
         f.push(names);
         let mut vs = Items::new(f.heap());
         for v in variants {

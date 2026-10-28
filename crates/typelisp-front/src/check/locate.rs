@@ -157,7 +157,7 @@ pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option
         wk::CALL | wk::FNREF => def_locs.fns.get(&core::path_field(heap, node, 0)?).cloned(),
         // `(assoc PATH SYM ...)`, `(methodref PATH SYM ...)`.
         wk::ASSOC | wk::METHODREF => {
-            def_locs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_name_field(heap, node, 1)?)).cloned()
+            def_locs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_field(heap, node, 1)?)).cloned()
         }
         wk::CONSTRUCT => def_locs.types.get(&core::path_field(heap, node, 0)?).cloned(),
         // `(compile-fn (fn PATH))` or `(compile-fn (method PATH SYM))`.
@@ -167,7 +167,7 @@ pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option
                 wk::FN => def_locs.fns.get(&core::path_field(heap, target, 0)?).cloned(),
                 wk::METHOD => def_locs
                     .methods
-                    .get(&(core::path_field(heap, target, 0)?, core::sym_name_field(heap, target, 1)?))
+                    .get(&(core::path_field(heap, target, 0)?, core::sym_field(heap, target, 1)?))
                     .cloned(),
                 _ => None,
             }
@@ -188,13 +188,13 @@ pub fn doc_for<'a>(heap: &Heap, node: Value, docs: &'a Docs) -> Option<&'a str> 
     let found = match core::op_sym(heap, node)?.well_known() {
         wk::GLOBAL | wk::SET_GLOBAL => docs.vars.get(&core::path_field(heap, node, 0)?),
         wk::CALL | wk::FNREF => docs.fns.get(&core::path_field(heap, node, 0)?),
-        wk::ASSOC | wk::METHODREF => docs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_name_field(heap, node, 1)?)),
+        wk::ASSOC | wk::METHODREF => docs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_field(heap, node, 1)?)),
         wk::CONSTRUCT => docs.types.get(&core::path_field(heap, node, 0)?),
         wk::COMPILE_FN => {
             let target = core::field(heap, node, 0)?;
             match core::op_sym(heap, target)?.well_known() {
                 wk::FN => docs.fns.get(&core::path_field(heap, target, 0)?),
-                wk::METHOD => docs.methods.get(&(core::path_field(heap, target, 0)?, core::sym_name_field(heap, target, 1)?)),
+                wk::METHOD => docs.methods.get(&(core::path_field(heap, target, 0)?, core::sym_field(heap, target, 1)?)),
                 _ => None,
             }
         }

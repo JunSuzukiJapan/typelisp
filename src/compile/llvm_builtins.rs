@@ -2318,9 +2318,8 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
     static TABLE: std::sync::OnceLock<HashMap<i64, LlvmOp>> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
         let mut t: HashMap<i64, LlvmOp> = HashMap::new();
-        let insert = |t: &mut HashMap<i64, LlvmOp>, ty: u32, type_key: &'static str, method: &str, args: Vec<LlvmArgK>, ret: LlvmRetK| {
-            let id = crate::compile::symbols::llvm_op_id(type_key, method);
-            let method = member_symbol(method);
+        let insert = |t: &mut HashMap<i64, LlvmOp>, ty: u32, type_key: &'static str, method: SymRef, args: Vec<LlvmArgK>, ret: LlvmRetK| {
+            let id = crate::compile::symbols::llvm_op_id(type_key, method.name());
             if t.insert(id, LlvmOp { ty, type_key, method, args, ret }).is_some() {
                 panic!("llvm_op_table: op id collision on {}", id);
             }
@@ -2333,7 +2332,7 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
             for (method, af) in def.assoc {
                 let args = af.sig.params.iter().map(llvm_arg_kind).collect();
                 let ret = llvm_ret_kind(&af.sig.ret);
-                insert(&mut t, ty, type_key, &method, args, ret);
+                insert(&mut t, ty, type_key, method, args, ret);
             }
         }
         use LlvmArgK::{Handle as H, Str as S};
@@ -2342,12 +2341,12 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
         // island bitcode — this table, and so the marshaling shape, is Rust
         // side and free to change with it.
         const SC: LlvmArgK = LlvmArgK::Scope;
-        insert(&mut t, wk::SCOPE, "native-scope", "new", vec![], LlvmRetK::Scope);
-        insert(&mut t, wk::SCOPE, "native-scope", "clone-frames", vec![SC], LlvmRetK::Scope);
-        insert(&mut t, wk::SCOPE, "native-scope", "push-frame", vec![SC], LlvmRetK::Unit);
-        insert(&mut t, wk::SCOPE, "native-scope", "pop-frame", vec![SC], LlvmRetK::Unit);
-        insert(&mut t, wk::SCOPE, "native-scope", "get", vec![SC, S], LlvmRetK::OptHandle);
-        insert(&mut t, wk::SCOPE, "native-scope", "set", vec![SC, S, H], LlvmRetK::Unit);
+        insert(&mut t, wk::SCOPE, "native-scope", member_symbol("new"), vec![], LlvmRetK::Scope);
+        insert(&mut t, wk::SCOPE, "native-scope", member_symbol("clone-frames"), vec![SC], LlvmRetK::Scope);
+        insert(&mut t, wk::SCOPE, "native-scope", member_symbol("push-frame"), vec![SC], LlvmRetK::Unit);
+        insert(&mut t, wk::SCOPE, "native-scope", member_symbol("pop-frame"), vec![SC], LlvmRetK::Unit);
+        insert(&mut t, wk::SCOPE, "native-scope", member_symbol("get"), vec![SC, S], LlvmRetK::OptHandle);
+        insert(&mut t, wk::SCOPE, "native-scope", member_symbol("set"), vec![SC, S, H], LlvmRetK::Unit);
         t
     })
 }

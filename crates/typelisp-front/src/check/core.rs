@@ -106,7 +106,7 @@ pub enum Node {
     },
     /// A call through a trait object's vtable slot `slot`; `targets` are the
     /// bodies it may reach.
-    DynCall { trait_path: crate::Path, method: Box<str>, slot: usize, targets: Vec<(crate::Path, SymRef)>, args: Vec<Checked> },
+    DynCall { trait_path: crate::Path, method: SymRef, slot: usize, targets: Vec<(crate::Path, SymRef)>, args: Vec<Checked> },
     /// `binds` in scope for `body`, which runs in order; each binding is its
     /// name, its type and its value. With no bindings this is `progn`.
     Let { binds: Vec<(SymRef, Type, Checked)>, body: Vec<Checked> },
@@ -715,6 +715,14 @@ pub fn path_value(heap: &Heap, v: Value) -> Option<crate::Path> {
 /// reports the mismatch as an internal error instead: a walk over checked forms
 /// looking for what they mention has nowhere to report to, and every field it
 /// does not recognize is simply not the one it was after.
+pub fn sym_field(heap: &Heap, form: Value, i: usize) -> Option<SymRef> {
+    match field(heap, form, i)? {
+        Value::Symbol(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// [`sym_field`]'s symbol's spelling.
 pub fn sym_name_field(heap: &Heap, form: Value, i: usize) -> Option<String> {
     match field(heap, form, i)? {
         Value::Symbol(id) => Some(heap.symbol_spelling(id).to_string()),

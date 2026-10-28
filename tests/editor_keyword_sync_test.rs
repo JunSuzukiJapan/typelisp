@@ -109,15 +109,15 @@ fn collect_namespace(reg: &Registry, ns: &Namespace, out: &mut BTreeSet<String>,
     out.extend(ns.vars.keys().map(str::to_string));
     for (name, def) in &ns.types {
         out.insert(name.to_string());
-        out.extend(def.assoc.keys().cloned());
+        out.extend(def.assoc.keys().map(|m| m.name().to_string()));
         for field in &def.field_names {
-            fields.insert(field.clone());
+            fields.insert(field.name().to_string());
             fields.insert(format!("set-{field}"));
         }
     }
     for (name, def) in &ns.traits {
         out.insert(name.to_string());
-        out.extend(def.methods.keys().cloned());
+        out.extend(def.methods.keys().map(|m| m.name().to_string()));
     }
     for (name, child) in reg.children(ns.ns) {
         if name != INTERNAL_MODULE {

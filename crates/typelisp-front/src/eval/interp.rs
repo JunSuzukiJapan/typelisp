@@ -759,8 +759,8 @@ impl Interp {
         // Its elements do print, though, and they are all of the one type
         // argument: a uniform template says so.
         let vector = Path::builtin(typelisp_mem::wk::VECTOR);
-        root.get_or_create(&vector.parent()).types.insert(
-            vector.last_segment().to_string(),
+        root.insert_type(
+            &vector,
             scope::TypeEntry::Struct {
                 reprs: Vec::new(),
                 templates: scope::FieldTemplates::Uniform(crate::type_key::field_template(&["T".to_string()], &crate::Type::Var("T".to_string()))),
@@ -776,8 +776,8 @@ impl Interp {
         use crate::check::registry::{chan_of, task_of, thread_of};
         for handle_of in [task_of, thread_of, chan_of] {
             let crate::Type::Named(handle, _) = handle_of(crate::Type::Int) else { unreachable!("a handle type is named") };
-            root.get_or_create(&handle.parent()).types.insert(
-                handle.last_segment().to_string(),
+            root.insert_type(
+                &handle,
                 scope::TypeEntry::Struct {
                     reprs: Vec::new(),
                     templates: scope::FieldTemplates::Positional(vec![crate::type_key::type_id(&crate::Type::Int)]),
@@ -811,7 +811,7 @@ impl Interp {
                 .into_iter()
                 .map(|v| {
                     let reprs = v.fields.iter().map(|t| Repr::of_by(t, &|_| None)).collect();
-                    (v.name, reprs)
+                    (v.name.name().to_string(), reprs)
                 })
                 .collect();
             root.register_enum(&name, EnumDef { variants, templates });
@@ -1015,7 +1015,7 @@ impl Interp {
     /// the same reason [`Self::enum_variant_descriptors`] is.
     pub fn field_name_descriptors(&self) -> Vec<(Path, i64, String)> {
         let mut raw = Vec::new();
-        self.root.borrow().collect_field_names(&[], &mut raw);
+        self.root.borrow().collect_field_names(&mut raw);
         let mut out: Vec<(Path, i64, String)> = raw.into_iter().map(|(path, index, name)| (path, index as i64, name)).collect();
         out.sort_by_cached_key(|(path, index, _)| (path.to_string(), *index));
         out
@@ -1029,7 +1029,7 @@ impl Interp {
     /// is.
     pub fn field_template_descriptors(&self) -> Vec<(Path, i64, i64, crate::TypeId)> {
         let mut raw = Vec::new();
-        self.root.borrow().collect_field_templates(&[], &mut raw);
+        self.root.borrow().collect_field_templates(&mut raw);
         let mut out: Vec<(Path, i64, i64, crate::TypeId)> = raw
             .into_iter()
             .map(|(path, variant, index, t)| {

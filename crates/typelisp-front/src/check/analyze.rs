@@ -33,6 +33,7 @@ mod c_struct;
 mod ffi_callback;
 pub use attribute::{TestCase, TestForms, TestReturn};
 use c_struct::type_mentions_typed_ptr;
+use super::members::Members;
 use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, InstImpls, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, TypeAlias, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
@@ -261,7 +262,7 @@ impl SpawnKind {
 /// Bundles [`Checker::check_assoc_call`]'s arguments to keep its arity down.
 struct AssocCall<'a> {
     type_fq: &'a Path,
-    method: &'a str,
+    method: SymRef,
     /// `Some` for an instance call (already-checked receiver, fills the
     /// method's first parameter slot); `None` for a static call.
     receiver: Option<Checked>,
@@ -416,7 +417,7 @@ enum SpecRequest {
     /// for every instantiation, and its [`method_specialization`] for
     /// one written for a single instantiation (which has only its own type
     /// parameters left).
-    Method { type_fq: Path, template: String, args: Vec<Type>, mangled: SymRef },
+    Method { type_fq: Path, template: SymRef, args: Vec<Type>, mangled: SymRef },
     /// A `BlanketImpl` at one concrete `target` type — the whole `impl`,
     /// since a blanket's methods are only ever wanted together.
     Blanket { trait_path: Path, target: Type },
@@ -432,7 +433,17 @@ struct CheckMark {
     spec_pending: usize,
     /// Restored wholesale rather than truncated: a set has no length to cut
     /// back to, and it is small (one top-level form's instantiations).
-    spec_memo: HashSet<(Path, Option<String>)>,
+    spec_memo: HashSet<SpecKey>,
+}
+
+/// What one specialization request is of, for deduping (`spec_memo`): a
+/// function's specialization, a method's (its owner and its specialized
+/// name), or a blanket `impl` at one type.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum SpecKey {
+    Fn(Path),
+    Method(Path, SymRef),
+    Blanket(Path, TypeId),
 }
 
 /// A generic associated method, retained for per-instantiation
@@ -468,7 +479,8 @@ enum MethodTemplate {
 /// [`Checker::parse_defmethod_sig`]'s output — a `defmethod` form's parsed
 /// header, shared between definition checking and template specialization.
 struct MethodSig {
-    method: String,
+    /// The method's member symbol, its own type parameters left off.
+    method: SymRef,
     /// The symbol the method's name is written with — its implicit block's.
     method_sym: SymRef,
     /// The method's own type parameters, from its name (`map<U>` -> `["u"]`)
@@ -895,9 +907,9 @@ enum UseTarget {
 /// one, as `(name, None)`: which one a call means is decided at the call
 /// (`Checker::select_method`).
 fn importable_members(def: &AdtDef) -> Vec<(String, Option<usize>)> {
-    let ctors = def.variants.iter().enumerate().filter(|(_, v)| v.name != STRUCT_CTOR).map(|(i, v)| (v.name.clone(), Some(i)));
-    let statics: BTreeMap<&String, &AssocFn> = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter()).collect();
-    let statics = statics.into_iter().filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.clone(), None));
+    let ctors = def.variants.iter().enumerate().filter(|(_, v)| v.name != typelisp_mem::symbols::member_symbol(STRUCT_CTOR)).map(|(i, v)| (v.name.name().to_string(), Some(i)));
+    let statics: crate::check::members::Members<&AssocFn> = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter()).collect();
+    let statics = statics.into_iter().filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.name().to_string(), None));
     ctors.chain(statics).collect()
 }
 
@@ -911,8 +923,8 @@ pub(super) enum Resolved {
     /// An enum variant: brought in by `use`, or written `Type::variant`.
     Ctor(Path, usize),
     /// A type's associated function: a static method brought in by `use`, or
-    /// any member written `Type::name`.
-    Member(Path, String),
+    /// any member written `Type::name`, by its member symbol.
+    Member(Path, SymRef),
     /// A method of the receiver's type.
     Method(MethodTarget),
     /// A module-level value: a function or a global variable.
@@ -944,7 +956,7 @@ pub(super) enum MethodTarget {
     /// A trait method of a `where`-bounded type variable. `method` is the
     /// trait's name for it, which for an operator (`+`) is the trait method
     /// it stands for (`add`).
-    Bound { bound: TraitBound, method: String },
+    Bound { bound: TraitBound, method: SymRef },
 }
 
 /// The name a `defstruct`'s one constructor is registered under — what
@@ -1077,7 +1089,7 @@ pub struct Checker {
     /// Every generic method's retained template, keyed by `(owner type
     /// path, method name)` — the [`method_specialization`]'s name for a method written
     /// for one instantiation of its type. See [`MethodTemplate`].
-    generic_method_templates: HashMap<(Path, String), MethodTemplate>,
+    generic_method_templates: HashMap<(Path, SymRef), MethodTemplate>,
     /// Instantiations already requested *during the current top-level form* —
     /// a free function as `(mangled path, None)`, a method as
     /// `(owner type path, Some(mangled method))` — so one form's many calls
@@ -1092,7 +1104,7 @@ pub struct Checker {
     /// The cost — a later form re-generating an instantiation an earlier
     /// form already produced, and `Interp::exec` silently overwriting the
     /// identical earlier registration — is compile-time-only.
-    spec_memo: RefCell<HashSet<(Path, Option<String>)>>,
+    spec_memo: RefCell<HashSet<SpecKey>>,
     /// Makes each `macrolet` binding's synthesized name unique, so two
     /// occurrences of the same local macro name never share a body.
     local_macro_seq: Cell<u32>,
@@ -1305,7 +1317,9 @@ impl Checker {
             if cat == crate::dump::cat::FN_TEMPLATE {
                 fn_templates.push((crate::dump::parse_path(&key), bincode_read(&bytes)?));
             } else {
-                method_templates.push((crate::dump::parse_method_key(&key)?, bincode_read(&bytes)?));
+                let (owner, _) = crate::dump::parse_method_key(&key)?;
+                let (name, template): (crate::owned_form::OwnedSym, crate::dump::WireMethodTemplate) = bincode_read(&bytes)?;
+                method_templates.push((owner, name, template));
             }
             Ok(())
         })?;
@@ -1344,7 +1358,8 @@ impl Checker {
             self.generic_fn_templates
                 .insert(path, FnTemplate { parts, ns: typelisp_mem::symbols::ns_of(&t.ns), type_params: t.type_params });
         }
-        for (key, t) in delta.method_templates {
+        for (owner, name, t) in delta.method_templates {
+            let key = (owner, name.symbol());
             let restored = match t {
                 crate::dump::WireMethodTemplate::Form { parts, ns, written_vars, own_vars } => {
                     MethodTemplate::Form { parts: rebuild(&parts, heap)?, ns: typelisp_mem::symbols::ns_of(&ns), written_vars, own_vars }
@@ -1396,9 +1411,9 @@ impl Checker {
             visit(crate::dump::cat::FN_TEMPLATE, path.to_string(), bytes, hash)?;
         }
 
-        let mut methods: Vec<(&(Path, String), &MethodTemplate)> =
+        let mut methods: Vec<(&(Path, SymRef), &MethodTemplate)> =
             self.generic_method_templates.iter().collect();
-        methods.sort_by_key(|(k, _)| (k.0.to_string(), k.1.clone()));
+        methods.sort_by_key(|(k, _)| (k.0.to_string(), k.1.name().to_string()));
         for (key, t) in methods {
             let w = match t {
                 MethodTemplate::Form { parts, ns, written_vars, own_vars } => crate::dump::WireMethodTemplate::Form {
@@ -1410,8 +1425,8 @@ impl Checker {
                 MethodTemplate::Getter { index } => crate::dump::WireMethodTemplate::Getter { index: *index },
                 MethodTemplate::Setter { index } => crate::dump::WireMethodTemplate::Setter { index: *index },
             };
-            let (bytes, hash) = crate::dump::wire(&w)?;
-            visit(crate::dump::cat::METHOD_TEMPLATE, typelisp_mem::ConcreteNames::method_link(&key.0, &key.1), bytes, hash)?;
+            let (bytes, hash) = crate::dump::wire(&(crate::owned_form::OwnedSym::of(key.1), w))?;
+            visit(crate::dump::cat::METHOD_TEMPLATE, typelisp_mem::ConcreteNames::method_link(&key.0, key.1.name()), bytes, hash)?;
         }
         Ok(())
     }
@@ -2414,7 +2429,9 @@ impl Checker {
     ) -> Option<Resolved> {
         match written {
             Written::Bare(sym) => {
-                let name = sym.name();
+                // A method is found on the receiver's type by its name, wherever
+                // the call was written: its member symbol.
+                let name = typelisp_mem::symbols::member_symbol(sym.name());
                 if env.get(sym).is_some() {
                     return Some(Resolved::Local);
                 }
@@ -2441,12 +2458,12 @@ impl Checker {
             Written::Path(PathTarget::Member(ty, member)) => {
                 let type_fq = self.info.type_at(&ty)?;
                 let def = self.info.reg.type_def(&type_fq)?;
-                let member = member.name();
-                if let Some(idx) = def.variants.iter().position(|v| v.name == member) {
+                if let Some(idx) = def.variants.iter().position(|v| v.name == typelisp_mem::symbols::member_symbol(member.name())) {
                     return Some(Resolved::Ctor(type_fq, idx));
                 }
+                let member = typelisp_mem::symbols::member_symbol(member.name());
                 if def.method_defs(member).any(|(af, _)| self.info.assoc_visible(&type_fq, af)) {
-                    Some(Resolved::Member(type_fq, member.to_string()))
+                    Some(Resolved::Member(type_fq, member))
                 } else {
                     None
                 }
@@ -2796,7 +2813,7 @@ impl Checker {
     /// the specialization, mirroring [`Self::fn_ref_node`]. A non-generic
     /// method keeps its own type, so a mismatch with `expected` is reported by
     /// `check`'s ordinary reconciliation.
-    fn method_value(&self, type_fq: &Path, name: &str, expected: Option<&Type>) -> Result<Checked, Error> {
+    fn method_value(&self, type_fq: &Path, name: SymRef, expected: Option<&Type>) -> Result<Checked, Error> {
         let def = self.info.reg.type_def(type_fq).expect("the resolution found the method on this type");
         // The receiver is the expected function's first parameter, which is
         // also how the resolution found this method.
@@ -2806,8 +2823,7 @@ impl Checker {
         };
         let (af, inst) = self.select_method(def, name, receiver, None)?;
         // A method written for one instantiation has its own name there.
-        let template_sym = written_member(type_fq, name, inst.as_deref());
-        let template = template_sym.name().to_string();
+        let template = written_member(type_fq, name, inst.as_deref());
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
         // A method written for one instantiation (`(impl Box<int> ...)`)
         // mentions none of the owner's parameters, so it has one type, like a
@@ -2818,7 +2834,7 @@ impl Checker {
             let ret = af.sig.ret.clone();
             // Called through a function value, this method still builds the box.
             self.request_print_object(&ret);
-            let node = Node::MethodRef { owner: type_fq.clone(), method: template_sym, params, ret };
+            let node = Node::MethodRef { owner: type_fq.clone(), method: template, params, ret };
             return Ok(Checked::of(node, ty));
         }
         let not_here = || {
@@ -2839,11 +2855,11 @@ impl Checker {
         }
         let targs: Vec<Type> = all.iter().map(|p| subst[p.as_str()].clone()).collect();
         if targs.iter().any(|t| self.type_is_open(t))
-            || !self.generic_method_templates.contains_key(&(type_fq.clone(), template.clone()))
+            || !self.generic_method_templates.contains_key(&(type_fq.clone(), template))
         {
             return Err(not_here());
         }
-        let mangled = self.request_method_specialization(type_fq, &template, name, targs);
+        let mangled = self.request_method_specialization(type_fq, template, name, targs);
         let resolved_ty = subst_apply(&ty, &subst);
         let (params, ret) = match &resolved_ty {
             Type::Fn(ps, _, r) => (ps.clone(), (**r).clone()),
@@ -2903,9 +2919,9 @@ impl Checker {
             return self.c_field_get(heap, interp, recv, method);
         }
         let Type::Named(type_fq, targs) = &recv.ty else { return None };
-        let method = &match tuple_element_field(&recv.ty, method) {
-            Ok(Some(field)) => field,
-            Ok(None) => method.to_string(),
+        let method = match tuple_element_field(&recv.ty, method) {
+            Ok(Some(field)) => typelisp_mem::symbols::member_symbol(&field),
+            Ok(None) => typelisp_mem::symbols::member_symbol(method),
             Err(e) => return Some(Err(e)),
         };
         let af = self.info.reg.type_def(type_fq)?.method_at(method, targs)?;
@@ -3571,7 +3587,7 @@ impl Checker {
                 )));
             }
             let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
-            optionals.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
+            optionals.push(OptKeyParam { name: typelisp_mem::symbols::intern_keyword(pname.name()), decl_ty: decl_ty.clone(), default });
         }
         let mut keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
@@ -3583,7 +3599,7 @@ impl Checker {
                 )));
             }
             let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
-            keys.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
+            keys.push(OptKeyParam { name: typelisp_mem::symbols::intern_keyword(pname.name()), decl_ty: decl_ty.clone(), default });
         }
 
         let sig = FnSig {
@@ -3731,7 +3747,7 @@ impl Checker {
     fn request_fn_specialization(&self, base: &Path, args: Vec<Type>) -> Path {
         let mangled = fn_specialization(base, &args);
         let mut memo = self.spec_memo.borrow_mut();
-        if memo.insert((mangled.clone(), None)) {
+        if memo.insert(SpecKey::Fn(mangled.clone())) {
             self.spec_pending.borrow_mut().push(SpecRequest::Fn {
                 base: base.clone(),
                 args,
@@ -3761,7 +3777,8 @@ impl Checker {
         if args.is_empty() {
             return;
         }
-        if !self.generic_method_templates.contains_key(&(path.clone(), "print-object".to_string())) {
+        let print_object = typelisp_mem::symbols::member_symbol("print-object");
+        if !self.generic_method_templates.contains_key(&(path.clone(), print_object)) {
             return;
         }
         // Only if the impl's own `where` clause holds at these arguments.
@@ -3775,7 +3792,7 @@ impl Checker {
         if !self.print_object_bounds_hold(path, args) {
             return;
         }
-        self.request_method_specialization(path, "print-object", "print-object", args.clone());
+        self.request_method_specialization(path, print_object, print_object, args.clone());
     }
 
     /// Whether the `print-object` impl on the generic type `path` accepts the
@@ -3784,7 +3801,7 @@ impl Checker {
     /// keyed by (see the `cons-cell` impls in the prelude).
     fn print_object_bounds_hold(&self, path: &Path, args: &[Type]) -> bool {
         let Some(def) = self.info.reg.type_def(path) else { return false };
-        let Some(af) = def.assoc.get("print-object") else { return false };
+        let Some(af) = def.assoc.get(typelisp_mem::symbols::member_symbol("print-object")) else { return false };
         if af.sig.bounds.is_empty() {
             return true;
         }
@@ -3796,13 +3813,13 @@ impl Checker {
         })
     }
 
-    fn request_method_specialization(&self, type_fq: &Path, template: &str, base: &str, args: Vec<Type>) -> SymRef {
+    fn request_method_specialization(&self, type_fq: &Path, template: SymRef, base: SymRef, args: Vec<Type>) -> SymRef {
         let mangled = method_specialization(type_fq, base, &args);
         let mut memo = self.spec_memo.borrow_mut();
-        if memo.insert((type_fq.clone(), Some(mangled.name().to_string()))) {
+        if memo.insert(SpecKey::Method(type_fq.clone(), mangled)) {
             self.spec_pending.borrow_mut().push(SpecRequest::Method {
                 type_fq: type_fq.clone(),
-                template: template.to_string(),
+                template,
                 args,
                 mangled,
             });
@@ -4137,12 +4154,12 @@ impl Checker {
         let mut optionals = Vec::with_capacity(optionals_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &optionals_raw {
             let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
-            optionals.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
+            optionals.push(OptKeyParam { name: typelisp_mem::symbols::intern_keyword(pname.name()), decl_ty: decl_ty.clone(), default });
         }
         let mut keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
             let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
-            keys.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
+            keys.push(OptKeyParam { name: typelisp_mem::symbols::intern_keyword(pname.name()), decl_ty: decl_ty.clone(), default });
         }
 
         let mut params: Vec<(SymRef, Type)> = required.clone();
@@ -4504,9 +4521,9 @@ impl Checker {
         name: &str,
         fq_name: &Path,
         supertraits: &[TraitBound],
-        method_order: &[String],
-    ) -> Result<(Vec<String>, Vec<Path>), Error> {
-        let mut order: Vec<String> = Vec::new();
+        method_order: &[SymRef],
+    ) -> Result<(Vec<SymRef>, Vec<Path>), Error> {
+        let mut order: Vec<SymRef> = Vec::new();
         let mut owner: Vec<Path> = Vec::new();
         for sup in supertraits {
             let Some(sdef) = self.info.reg.trait_def(&sup.trait_path) else {
@@ -5056,13 +5073,13 @@ impl Checker {
         for (i, fname) in def.field_names.iter().enumerate() {
             // A slot's visibility lives on its accessor, which is where
             // `check_defstruct` put it.
-            let public = def.assoc.get(fname).map(|af| af.sig.public).unwrap_or(false);
+            let public = def.assoc.get(*fname).map(|af| af.sig.public).unwrap_or(false);
             let default = defaults
                 .and_then(|d| d.get(i))
                 .and_then(|d| d.as_ref())
                 .map(|owned| SlotDefault::Inherited(owned.clone()));
             out.push(StructField {
-                name: fname.clone(),
+                name: fname.name().to_string(),
                 ty: subst_apply(&def.variants[0].fields[i], &subst),
                 public,
                 default,
@@ -5259,21 +5276,21 @@ impl Checker {
             TraitDef {
                 name: fq_name.clone(),
                 assoc_types: Vec::new(),
-                methods: BTreeMap::new(),
+                methods: Members::new(),
                 method_order: Vec::new(),
                 public,
                 builtin: false,
                 supertraits: Vec::new(),
                 vtable_order: Vec::new(),
                 vtable_owner: Vec::new(),
-                defaults: BTreeMap::new(),
+                defaults: Members::new(),
             },
         );
         let mut assoc_types = Vec::new();
-        let mut methods = BTreeMap::new();
+        let mut methods = Members::new();
         // Source order, kept alongside `methods` for vtable slot numbering.
-        let mut method_order: Vec<String> = Vec::new();
-        let mut defaults: BTreeMap<String, TraitDefault> = BTreeMap::new();
+        let mut method_order: Vec<SymRef> = Vec::new();
+        let mut defaults: Members<TraitDefault> = Members::new();
         // The same items as live `Value`s, for the declaration-time body check
         // below — which needs the written forms, not the `OwnedForm`s the
         // registry keeps for `impl` to replay.
@@ -5282,7 +5299,7 @@ impl Checker {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
-                Some(Value::Symbol(id)) => heap.symbol_spelling(*id).to_string(),
+                Some(Value::Symbol(id)) => *id,
                 _ => return Err(Error::TypeError("deftrait: item must start with a symbol".into())),
             };
             if is_symbol(elems[0], wk::KW_TYPE) {
@@ -5325,7 +5342,8 @@ impl Checker {
             // `method_order` is the vtable layout, so it must stay in step
             // with `methods` — a duplicated name would silently give the
             // trait two slots for one entry.
-            if methods.contains_key(&head) {
+            let head = typelisp_mem::symbols::member_symbol(head.name());
+            if methods.contains_key(head) {
                 return Err(Error::TypeError(format!("deftrait: duplicate method `{}`", head)));
             }
             if at < elems.len() {
@@ -5336,14 +5354,14 @@ impl Checker {
                     .iter()
                     .map(|v| crate::owned_form::value_to_owned(heap, *v))
                     .collect::<Result<Vec<_>, _>>()?;
-                defaults.insert(head.clone(), TraitDefault { item, ns: self.info.ns });
+                defaults.insert(head, TraitDefault { item, ns: self.info.ns });
                 default_written
                     .push((elems.clone(), elem_locs.iter().map(|(_, l)| l.clone()).collect()));
             }
             if let Some(d) = mdoc {
-                self.info.reg.docs.trait_methods.insert((fq_name.clone(), head.clone()), d);
+                self.info.reg.docs.trait_methods.insert((fq_name.clone(), head), d);
             }
-            method_order.push(head.clone());
+            method_order.push(head);
             methods.insert(head, sig);
         }
         let (vtable_order, vtable_owner) =
@@ -5659,14 +5677,14 @@ impl Checker {
         // a default body. Appended *after* the written ones so a default that
         // calls a sibling method (`(not-equals ... (not (equals self other)))`)
         // finds the `impl`'s own `equals` already registered.
-        let written: Vec<String> = method_forms
+        let written: Vec<SymRef> = method_forms
             .iter()
             .map(|m| match heap.list_to_vec(*m)?.first() {
-                Some(Value::Symbol(id)) => Ok(heap.symbol_spelling(*id).to_string()),
+                Some(Value::Symbol(id)) => Ok(typelisp_mem::symbols::member_symbol(id.name())),
                 _ => Err(Error::TypeError("impl: method name must be a symbol".into())),
             })
             .collect::<Result<_, Error>>()?;
-        let defaulted: Vec<(String, Vec<crate::owned_form::OwnedForm>, typelisp_mem::NsId)> = self
+        let defaulted: Vec<(SymRef, Vec<crate::owned_form::OwnedForm>, typelisp_mem::NsId)> = self
             .info.reg
             .trait_def(&trait_fq)
             .map(|t| {
@@ -5674,7 +5692,7 @@ impl Checker {
                     .iter()
                     .filter(|m| !written.contains(m))
                     .filter_map(|m| {
-                        t.defaults.get(m).map(|d| (m.clone(), d.item.clone(), d.ns.clone()))
+                        t.defaults.get(*m).map(|d| (*m, d.item.clone(), d.ns))
                     })
                     .collect()
             })
@@ -6013,7 +6031,7 @@ impl Checker {
         trait_fq: &Path,
         target_fq: &Path,
         target_ty: &Type,
-        written: &[String],
+        written: &[SymRef],
         assoc_concrete: &BTreeMap<String, Type>,
     ) -> Result<(), Error> {
         let Some(tdef) = self.info.reg.trait_def(trait_fq) else { return Ok(()) };
@@ -6056,14 +6074,14 @@ impl Checker {
             Type::Named(_, args) => args.as_slice(),
             _ => &[],
         };
-        for m in &tdef.method_order {
+        for &m in &tdef.method_order {
             let Some(af) = def.method_at(m, targs) else {
                 return Err(Error::TypeError(format!(
                     "impl {} {}: missing method `{}` (`{}` declares no default body for it)",
                     trait_fq, target_fq, m, trait_fq
                 )));
             };
-            let want = &tdef.methods[m];
+            let want = tdef.methods.get(m).expect("`method_order` lists the trait's own methods");
             let want_params: Vec<Type> = want.params.iter().map(|t| subst_apply(t, &subst)).collect();
             let want_ret = subst_apply(&want.ret, &subst);
             let want_instance = want.params.first().is_some_and(is_self_tvar);
@@ -6122,7 +6140,7 @@ impl Checker {
     ///
     /// Returns the trait path; the caller reads the signature template off it
     /// and requests materialization.
-    fn blanket_method_owner(&self, ty: &Type, type_fq: &Path, method: &str) -> Option<Path> {
+    fn blanket_method_owner(&self, ty: &Type, type_fq: &Path, method: SymRef) -> Option<Path> {
         self.info.reg.type_def(type_fq)?;
         let mut candidates: Vec<Path> =
             self.info.reg.namespaces().flat_map(|ns| ns.blanket_impls.iter().map(|b| b.trait_path.clone())).collect();
@@ -6138,7 +6156,7 @@ impl Checker {
         let mut found: Option<Path> = None;
         for tp in candidates {
             let Some(tdef) = self.info.reg.trait_def(&tp) else { continue };
-            if !tdef.vtable_order.iter().any(|m| m == method) {
+            if !tdef.vtable_order.contains(&method) {
                 continue;
             }
             let tb = TraitBound { trait_path: tp.clone(), assoc: BTreeMap::new() };
@@ -6166,7 +6184,7 @@ impl Checker {
         receiver: Checked,
         type_fq: &Path,
         trait_path: &Path,
-        method: &str,
+        method: SymRef,
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
@@ -6328,9 +6346,9 @@ impl Checker {
         // anything for. Answering "yes, covered" for it is still right — every
         // concrete type it stands for is covered, and each of those requests
         // its own materialization when it arrives.
-        if let Some(fq) = type_fq {
+        if type_fq.is_some() {
             if !self.type_is_open(ty) {
-                self.request_blanket_materialization(&tb.trait_path, &fq, ty);
+                self.request_blanket_materialization(&tb.trait_path, ty);
             }
         }
         true
@@ -6338,9 +6356,8 @@ impl Checker {
 
     /// Queue a blanket impl's materialization at one concrete type, deduped
     /// through the same `spec_memo` monomorphization uses.
-    fn request_blanket_materialization(&self, trait_path: &Path, type_fq: &Path, ty: &Type) {
-        let key = ConcreteNames::blanket_instance(trait_path, &ConcreteNames::type_key(ty));
-        if self.spec_memo.borrow_mut().insert((type_fq.clone(), Some(key))) {
+    fn request_blanket_materialization(&self, trait_path: &Path, ty: &Type) {
+        if self.spec_memo.borrow_mut().insert(SpecKey::Blanket(trait_path.clone(), crate::type_key::type_id(ty))) {
             self.spec_pending.borrow_mut().push(SpecRequest::Blanket {
                 trait_path: trait_path.clone(),
                 target: ty.clone(),
@@ -6779,7 +6796,7 @@ impl Checker {
     /// `dyn_vtable_slots`) pull it in. An instantiation's own `impl` is not
     /// skipped: it was checked, and has code, under that instantiation's
     /// name.
-    fn dyn_impl_targets(&self, trait_path: &Path, method: &str) -> Vec<(Path, SymRef)> {
+    fn dyn_impl_targets(&self, trait_path: &Path, method: SymRef) -> Vec<(Path, SymRef)> {
         let mut out = Vec::new();
         for ty in self.info.reg.trait_impls(trait_path) {
             let Some(def) = self.info.reg.type_def(&ty) else { continue };
@@ -6800,7 +6817,7 @@ impl Checker {
     /// Whether the built-in `Sexpr` type has a visible instance method named
     /// `method` — how a trait-object receiver decides between dispatching
     /// through its vtable and falling back to the `Sexpr` catalog.
-    fn sexpr_has_instance_method(&self, method: &str) -> bool {
+    fn sexpr_has_instance_method(&self, method: SymRef) -> bool {
         self.info.reg
             .type_def(&Path::builtin(typelisp_mem::wk::SEXPR))
             .and_then(|d| d.assoc.get(method))
@@ -6906,7 +6923,7 @@ impl Checker {
     fn dyn_super_vtables(
         &self,
         trait_path: &Path,
-        order: &[String],
+        order: &[SymRef],
         slots: &[(Path, SymRef)],
     ) -> Vec<(Path, Vec<(Path, SymRef)>)> {
         let mut out = Vec::new();
@@ -7011,13 +7028,13 @@ impl Checker {
         receiver: Checked,
         trait_path: &Path,
         pins: &[Type],
-        method: &str,
+        method: SymRef,
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let own_subst = self.dyn_assoc_subst(trait_path, pins)?;
         let tdef = self.check_object_safe(trait_path)?;
-        let Some(slot) = tdef.vtable_order.iter().position(|n| n == method) else {
+        let Some(slot) = tdef.vtable_order.iter().position(|n| *n == method) else {
             return Err(Error::TypeError(format!(
                 "`{}` is not a method of `{}` — a `:dyn {}` value can only call the trait's own or inherited methods",
                 method, trait_path, trait_path
@@ -7060,7 +7077,7 @@ impl Checker {
             typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
         }
         let targets = self.dyn_impl_targets(trait_path, method);
-        let node = Node::DynCall { trait_path: trait_path.clone(), method: method.into(), slot, targets, args: typed };
+        let node = Node::DynCall { trait_path: trait_path.clone(), method, slot, targets, args: typed };
         Ok(Checked::of(node, ret))
     }
 
@@ -7090,7 +7107,7 @@ impl Checker {
         // names the declaring trait when it isn't `trait_path` itself, since
         // that's where the offending signature has to be fixed.
         for (m, decl) in tdef.vtable_order.iter().zip(tdef.vtable_owner.iter()) {
-            let Some((_, sig)) = self.info.reg.trait_method(tdef, m) else {
+            let Some((_, sig)) = self.info.reg.trait_method(tdef, *m) else {
                 return Err(Error::TypeError(format!(
                     "dyn {}: method `{}`, inherited from `{}`, has no registered signature",
                     trait_path, m, decl
@@ -7270,10 +7287,10 @@ impl Checker {
         // What an instantiation's own `impl` wrote, and what a blanket impl
         // materializes for a generic type's instantiation (which goes in the
         // same place), has that instantiation's name.
-        let inst_name = |m: &str| self.name_written_for(concrete, m);
+        let inst_name = |m: SymRef| self.name_written_for(concrete, m);
         let own = def.insts.get(&ConcreteNames::type_args(&targs));
         let mut slots = Vec::with_capacity(tdef.vtable_order.len());
-        for (m, decl) in tdef.vtable_order.iter().zip(tdef.vtable_owner.iter()) {
+        for (&m, decl) in tdef.vtable_order.iter().zip(tdef.vtable_owner.iter()) {
             if own.is_some_and(|i| i.assoc.contains_key(m)) {
                 slots.push((type_fq.clone(), inst_name(m)));
                 continue;
@@ -7299,9 +7316,9 @@ impl Checker {
             // body is only code-generated once specialized, so the slot must
             // name the specialization — the same rewrite `check_assoc_call`
             // does for a static call.
-            let mut name = typelisp_mem::symbols::member_symbol(m);
+            let mut name = m;
             if !def.params.is_empty()
-                && self.generic_method_templates.contains_key(&(type_fq.clone(), m.clone()))
+                && self.generic_method_templates.contains_key(&(type_fq.clone(), m))
             {
                 if targs.len() != def.params.len() || targs.iter().any(|t| self.type_is_open(t)) {
                     return Err(Error::TypeError(format!(
@@ -7671,10 +7688,9 @@ impl Checker {
         // the method has at `box<int>` whichever `impl` wrote it. So the same
         // method may not also be written for every instantiation.
         let inst_args = self.written_instantiation(&recv_ty);
-        let def_sym = written_member(&type_fq, &method, inst_args.as_deref());
-        let def_name = def_sym.name().to_string();
+        let def_name = written_member(&type_fq, method, inst_args.as_deref());
         if let Some(def) = self.info.reg.type_def(&type_fq) {
-            if inst_args.is_some() && def.assoc.contains_key(&method) {
+            if inst_args.is_some() && def.assoc.contains_key(method) {
                 return Err(Error::TypeError(format!(
                     "method {}::{}: `{}` has a `{}` for every instantiation already, so an `impl` of `{}` \
                      cannot define its own (a method is written either for every instantiation of a type \
@@ -7686,7 +7702,7 @@ impl Checker {
                 let mut written_for: Vec<String> = def
                     .insts
                     .values()
-                    .filter(|i| i.assoc.contains_key(&method))
+                    .filter(|i| i.assoc.contains_key(method))
                     .map(|i| format!("`{}`", Type::Named(type_fq.clone(), i.args.clone())))
                     .collect();
                 if !written_for.is_empty() {
@@ -7714,7 +7730,7 @@ impl Checker {
                 heap.push_permanent_root(p);
             }
             self.generic_method_templates.insert(
-                (type_fq.clone(), def_name.clone()),
+                (type_fq.clone(), def_name),
                 MethodTemplate::Form {
                     parts: parts.to_vec(),
                     ns: self.info.ns,
@@ -7796,7 +7812,7 @@ impl Checker {
                 )));
             }
             let default = self.check_opt_key_default(heap, interp, pname.name(), &decl_ty, *default_raw)?;
-            sig_optionals.push(OptKeyParam { name: pname.name().to_string(), decl_ty, default });
+            sig_optionals.push(OptKeyParam { name: typelisp_mem::symbols::intern_keyword(pname.name()), decl_ty, default });
         }
         let mut sig_keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
@@ -7810,7 +7826,7 @@ impl Checker {
                 )));
             }
             let default = self.check_opt_key_default(heap, interp, pname.name(), &decl_ty, *default_raw)?;
-            sig_keys.push(OptKeyParam { name: pname.name().to_string(), decl_ty, default });
+            sig_keys.push(OptKeyParam { name: typelisp_mem::symbols::intern_keyword(pname.name()), decl_ty, default });
         }
         // The bounds are keyed by type-variable *name*, so they move too —
         // `validate_where_bounds` looks its keys up in the same `subst`
@@ -7845,11 +7861,11 @@ impl Checker {
             keys: sig_keys,
         };
         let previous = self.info.reg.type_def(&type_fq).and_then(|d| match &inst_args {
-            Some(args) => d.insts.get(&ConcreteNames::type_args(args)).and_then(|i| i.assoc.get(&method)),
-            None => d.assoc.get(&method),
+            Some(args) => d.insts.get(&ConcreteNames::type_args(args)).and_then(|i| i.assoc.get(method)),
+            None => d.assoc.get(method),
         });
         if let Some(e) = previous {
-            self.check_redef_outcome("method", &method, e.builtin())?;
+            self.check_redef_outcome("method", method.name(), e.builtin())?;
         }
         if let Some(def) = self.info.reg.type_def_mut(&type_fq) {
             let af = AssocFn { sig, instance, builtin: false };
@@ -7859,18 +7875,18 @@ impl Checker {
                         .entry(ConcreteNames::type_args(args))
                         .or_insert_with(|| InstImpls::new(args.clone()))
                         .assoc
-                        .insert(method.clone(), af);
+                        .insert(method, af);
                 }
                 None => {
-                    def.assoc.insert(method.clone(), af);
+                    def.assoc.insert(method, af);
                 }
             }
         }
         if let Some(loc) = def_loc {
-            self.info.reg.def_locs.methods.insert((type_fq.clone(), def_name.clone()), loc);
+            self.info.reg.def_locs.methods.insert((type_fq.clone(), def_name), loc);
         }
         if let Some(doc) = doc {
-            self.info.reg.docs.methods.insert((type_fq.clone(), def_name.clone()), doc);
+            self.info.reg.docs.methods.insert((type_fq.clone(), def_name), doc);
         }
 
         let mut binds: Vec<(SymRef, Type, Option<Loc>)> = Vec::new();
@@ -7911,7 +7927,7 @@ impl Checker {
         }
         all.extend(params);
         let lowered = self.lowered_all(heap, &body)?;
-        self.info.method_definition_form(heap, &type_fq, def_sym, instance, &type_params, &all, &ret, &lowered)
+        self.info.method_definition_form(heap, &type_fq, def_name, instance, &type_params, &all, &ret, &lowered)
     }
 
     /// Parses a `defmethod` form's name, receiver, parameters, and return
@@ -8018,7 +8034,7 @@ impl Checker {
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
         Ok(MethodSig {
-            method,
+            method: typelisp_mem::symbols::member_symbol(&method),
             method_sym: definition_symbol(heap, parts[0])?,
             own_params,
             instance,
@@ -8125,7 +8141,7 @@ impl Checker {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
-            assoc: BTreeMap::new(),
+            assoc: Members::new(),
             public,
             builtin: false,
             stdlib: self.stdlib,
@@ -8153,7 +8169,7 @@ impl Checker {
         if fields.is_empty() {
             return Err(Error::TypeError("defstruct: needs at least one field".into()));
         }
-        let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        let field_names: Vec<SymRef> = fields.iter().map(|f| typelisp_mem::symbols::member_symbol(&f.name)).collect();
         let field_types: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
         for f in &fields {
             Self::reject_raw_word_storage(&f.ty, "the field", &f.name)?;
@@ -8166,7 +8182,7 @@ impl Checker {
         let recv_targs: Vec<Type> = type_params.iter().map(|p| Type::Var(p.clone())).collect();
         let recv_ty = Type::Named(type_fq.clone(), recv_targs);
 
-        let mut assoc = BTreeMap::new();
+        let mut assoc = Members::new();
         // The bundle's members, each rooted from the moment it is built. The
         // loop below allocates once per accessor, so an accessor finished two
         // fields ago is exactly as collectible as the one being built now —
@@ -8174,10 +8190,12 @@ impl Checker {
         // `(defstruct ...)` node goes first because the type has to exist
         // before its methods.
         let mut members = Items::new(heap);
-        let def_node = self.info.defstruct_form(members.heap(), &type_fq, &type_params, &field_types, &field_names)?;
+        let written_names: Vec<String> = field_names.iter().map(|f| f.name().to_string()).collect();
+        let def_node = self.info.defstruct_form(members.heap(), &type_fq, &type_params, &field_types, &written_names)?;
         members.push(def_node);
         for (i, field) in fields.iter().enumerate() {
             let (field_name, field_ty) = (&field.name, &field.ty);
+            let getter_name = typelisp_mem::symbols::member_symbol(field_name);
             let field_public = field.public;
             let getter_sig = FnSig {
                 ffi: false,
@@ -8191,7 +8209,7 @@ impl Checker {
                 optionals: Vec::new(),
                 keys: Vec::new(),
             };
-            assoc.insert(field_name.clone(), AssocFn { sig: getter_sig, instance: true, builtin: false });
+            assoc.insert(getter_name, AssocFn { sig: getter_sig, instance: true, builtin: false });
             let getter = {
                 // The intermediates (`self`, then the `field-get` around it)
                 // have to stay rooted until the method node holding them is
@@ -8204,7 +8222,7 @@ impl Checker {
                 self.info.method_definition_form(
                     &mut s,
                     &type_fq,
-                    typelisp_mem::symbols::member_symbol(field_name),
+                    getter_name,
                     true,
                     &type_params,
                     &[(internal_local("self"), recv_ty.clone())],
@@ -8216,7 +8234,7 @@ impl Checker {
 
             // Setter (`set-car`/`set-cdr`'s `set-` prefix, no `!` — see
             // `Checker::check_setf`, which calls this via `(setf p::x v)`).
-            let setter_name = format!("set-{}", field_name);
+            let setter_name = typelisp_mem::symbols::member_symbol(&format!("set-{}", field_name));
             let setter_sig = FnSig {
                 ffi: false,
                 type_params: vec![],
@@ -8229,7 +8247,7 @@ impl Checker {
                 optionals: Vec::new(),
                 keys: Vec::new(),
             };
-            assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
+            assoc.insert(setter_name, AssocFn { sig: setter_sig, instance: true, builtin: false });
             let setter = {
                 let mut s = RootScope::new(members.heap());
                 let self_var = forms::var_form(&mut s, internal_local("self"))?;
@@ -8241,7 +8259,7 @@ impl Checker {
                 self.info.method_definition_form(
                     &mut s,
                     &type_fq,
-                    typelisp_mem::symbols::member_symbol(&setter_name),
+                    setter_name,
                     true,
                     &type_params,
                     &[(internal_local("self"), recv_ty.clone()), (internal_local("value"), field_ty.clone())],
@@ -8261,7 +8279,7 @@ impl Checker {
             // template kinds — see `Checker::synthesize_accessor`.
             if !type_params.is_empty() {
                 self.generic_method_templates
-                    .insert((type_fq.clone(), field_name.clone()), MethodTemplate::Getter { index: i });
+                    .insert((type_fq.clone(), getter_name), MethodTemplate::Getter { index: i });
                 self.generic_method_templates
                     .insert((type_fq.clone(), setter_name), MethodTemplate::Setter { index: i });
             }
@@ -8270,7 +8288,7 @@ impl Checker {
         let def = AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
-            variants: vec![Variant { name: STRUCT_CTOR.to_string(), fields: field_types }],
+            variants: vec![Variant { name: typelisp_mem::symbols::member_symbol(STRUCT_CTOR), fields: field_types }],
             assoc,
             public,
             builtin: false,
@@ -8589,7 +8607,7 @@ impl Checker {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
-            assoc: BTreeMap::new(),
+            assoc: Members::new(),
             public,
             builtin: false,
             stdlib: self.stdlib,
@@ -8627,7 +8645,7 @@ impl Checker {
             for f in &fields {
                 Self::reject_raw_word_storage(f, "the variant", &vname)?;
             }
-            variants.push(Variant { name: vname, fields });
+            variants.push(Variant { name: typelisp_mem::symbols::member_symbol(&vname), fields });
         }
         if variants.is_empty() {
             return Err(Error::TypeError("defenum: needs at least one variant".into()));
@@ -8642,7 +8660,7 @@ impl Checker {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: variants.clone(),
-            assoc: BTreeMap::new(),
+            assoc: Members::new(),
             public,
             builtin: false,
             stdlib: self.stdlib,
@@ -9162,7 +9180,7 @@ impl Checker {
             }
             None => {
                 module.ctors.remove(name);
-                module.static_uses.insert(name.to_string(), (*target, name.to_string()));
+                module.static_uses.insert(name.to_string(), (*target, typelisp_mem::symbols::member_symbol(name)));
             }
         }
         Ok(())
@@ -9644,7 +9662,7 @@ impl Checker {
                             self.fn_ref_node(fq, expected)?
                         }
                         Some(Resolved::Method(MethodTarget::Assoc(type_fq))) => {
-                            self.method_value(&type_fq, name, expected)?
+                            self.method_value(&type_fq, typelisp_mem::symbols::member_symbol(name), expected)?
                         }
                         Some(Resolved::Method(_)) => {
                             return Err(Error::TypeError(format!(
@@ -9667,7 +9685,7 @@ impl Checker {
                             // the receiver has none by this name: as with a
                             // call, say whose method it is rather than that
                             // the name is unbound.
-                            let owners = self.types_with_instance_method(name);
+                            let owners = self.types_with_instance_method(typelisp_mem::symbols::member_symbol(name));
                             if let (Some(r), false) = (receiver(), owners.is_empty()) {
                                 return Err(Error::TypeError(format!(
                                     "no method `{}` for type `{}` (the first parameter of the function this value \
@@ -10084,15 +10102,16 @@ impl Checker {
                 heap,
                 interp,
                 env,
-                AssocCall { type_fq: &type_fq, method: &method, receiver: None, expected, first_arg: None },
+                AssocCall { type_fq: &type_fq, method, receiver: None, expected, first_arg: None },
                 args,
                 arg_locs,
             ),
             Some(Resolved::Method(target)) => {
                 let recv = peeked.expect("a method is found only through the receiver's type, which checked the receiver");
-                match self.rational_contagion(heap, interp, env, &head, &target, &recv, &args[1..], &arg_locs[1..])? {
+                let method = typelisp_mem::symbols::member_symbol(&head);
+                match self.rational_contagion(heap, interp, env, method, &target, &recv, &args[1..], &arg_locs[1..])? {
                     Some(call) => Ok(call),
-                    None => self.check_method_call(heap, interp, env, target, recv, &head, &args[1..], &arg_locs[1..]),
+                    None => self.check_method_call(heap, interp, env, target, recv, method, &args[1..], &arg_locs[1..]),
                 }
             }
             Some(Resolved::Value(ModuleValue::Fn(fq))) => {
@@ -10102,7 +10121,7 @@ impl Checker {
                 let callee = Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty);
                 self.check_apply(heap, interp, env, callee, args, arg_locs)
             }
-            None => self.report_unresolved_call(heap, interp, env, &head, args, arg_locs),
+            None => self.report_unresolved_call(heap, interp, env, typelisp_mem::symbols::member_symbol(&head), args, arg_locs),
         }
     }
 
@@ -10653,7 +10672,7 @@ impl Checker {
                 let instance = self
                     .info.reg
                     .type_def(&type_fq)
-                    .is_some_and(|d| d.method_defs(&member).all(|(af, _)| af.instance));
+                    .is_some_and(|d| d.method_defs(member).all(|(af, _)| af.instance));
                 if instance {
                     return Err(Error::TypeError(format!(
                         "`{}::{}` is an instance method; call it as ({} obj ...)",
@@ -10664,7 +10683,7 @@ impl Checker {
                     heap,
                     interp,
                     env,
-                    AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected, first_arg: None },
+                    AssocCall { type_fq: &type_fq, method: member, receiver: None, expected, first_arg: None },
                     args,
                     arg_locs,
                 )
@@ -10698,7 +10717,7 @@ impl Checker {
     /// The test that lets an `Option<Sexpr>` receiver reach that table
     /// without shadowing `Option`'s own methods — see the receiver match in
     /// [`Self::receiver_method`].
-    fn sexpr_has_method(&self, method: &str) -> bool {
+    fn sexpr_has_method(&self, method: SymRef) -> bool {
         self.info.reg
             .type_def(&Path::builtin(typelisp_mem::wk::SEXPR))
             .is_some_and(|d| d.assoc.get(method).is_some_and(|af| af.instance))
@@ -10721,7 +10740,7 @@ impl Checker {
     /// Every receiver-type lookup goes through here. Three separate copies
     /// of this decision are what let a value pattern keep working on a
     /// `Sexpr` scrutinee while quietly failing on an `Option<Sexpr>` one.
-    fn assoc_receiver_path(&self, ty: &Type, method: &str) -> Option<Path> {
+    fn assoc_receiver_path(&self, ty: &Type, method: SymRef) -> Option<Path> {
         match ty {
             t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::builtin(typelisp_mem::wk::SEXPR)),
             other => nominal_path(other),
@@ -10736,9 +10755,9 @@ impl Checker {
     /// catalog, which a trait object answers to as the value it wraps); a
     /// method in the type's own table; a method a blanket impl supplies; a
     /// trait method of a `where`-bounded type variable.
-    fn receiver_method(&self, env: &Env, ty: &Type, name: &str) -> Option<MethodTarget> {
+    fn receiver_method(&self, env: &Env, ty: &Type, name: SymRef) -> Option<MethodTarget> {
         if let Type::Dyn(trait_path, pins) = ty {
-            if self.info.reg.trait_def(trait_path).is_some_and(|t| t.vtable_order.iter().any(|m| m == name)) {
+            if self.info.reg.trait_def(trait_path).is_some_and(|t| t.vtable_order.contains(&name)) {
                 return Some(MethodTarget::Dyn { trait_path: trait_path.clone(), pins: pins.clone() });
             }
             return self.sexpr_has_instance_method(name).then_some(MethodTarget::DynSexpr);
@@ -10773,9 +10792,9 @@ impl Checker {
     /// always wins: this is a fallback for a name no bound has, never a rename.
     /// Inherited methods count: bounding `T` by `Ord` makes `Eq`'s `equals`
     /// callable on it, since `Ord` obliges every implementor to implement `Eq`.
-    fn bound_method(&self, env: &Env, type_var: &str, name: &str) -> Option<(TraitBound, String)> {
+    fn bound_method(&self, env: &Env, type_var: &str, name: SymRef) -> Option<(TraitBound, SymRef)> {
         let bounds = env.bounds.get(type_var)?;
-        let declares = |m: &str| {
+        let declares = |m: SymRef| {
             bounds.iter().any(|tb| self.info.reg.trait_def(&tb.trait_path).is_some_and(|t| self.info.reg.trait_method(t, m).is_some()))
         };
         let method = match trait_operator_method(name) {
@@ -10785,7 +10804,7 @@ impl Checker {
         bounds
             .iter()
             .find(|tb| self.info.reg.trait_def(&tb.trait_path).is_some_and(|t| self.info.reg.trait_method(t, method).is_some()))
-            .map(|tb| (tb.clone(), method.to_string()))
+            .map(|tb| (tb.clone(), method))
     }
 
     /// CL's contagion between the two kinds of rational: an arithmetic or
@@ -10805,15 +10824,18 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        op: &str,
+        op: SymRef,
         target: &MethodTarget,
         recv: &Checked,
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Option<Checked>, Error> {
-        const OPERATORS: [&str; 12] = ["+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "max", "min"];
+        const OPERATORS: [u32; 12] = [
+            wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE,
+            wk::RETIRED_EQUALS, wk::M_OP_NE, wk::M_MAX, wk::M_MIN,
+        ];
         let rational_kind = |t: &Type| matches!(t, Type::Int | Type::Ratio | Type::Rational);
-        if !OPERATORS.contains(&op) || !matches!(recv.ty, Type::Int | Type::Ratio) || args.len() != 1 {
+        if !OPERATORS.contains(&op.well_known()) || !matches!(recv.ty, Type::Int | Type::Ratio) || args.len() != 1 {
             return Ok(None);
         }
         let MethodTarget::Assoc(own) = target else {
@@ -10853,7 +10875,7 @@ impl Checker {
         env: &Env,
         target: MethodTarget,
         recv: Checked,
-        method: &str,
+        method: SymRef,
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
@@ -10895,7 +10917,7 @@ impl Checker {
                     .info.reg
                     .trait_def(&bound.trait_path)
                     .ok_or_else(|| Error::TypeError(format!("unknown trait `{}`", bound.trait_path)))?;
-                let (decl, sig) = self.info.reg.trait_method(tdef, &method).ok_or_else(|| {
+                let (decl, sig) = self.info.reg.trait_method(tdef, method).ok_or_else(|| {
                     Error::TypeError(format!("`{}` is not a method of `{}`", method, bound.trait_path))
                 })?;
                 let decl_path = decl.name.clone();
@@ -10931,7 +10953,7 @@ impl Checker {
                 // (other Self)) Self)` — returns the receiver's type.
                 assoc.insert(SELF_TYPE_VAR.to_string(), recv.ty.clone());
                 let ret_ty = subst_apply(&sig.ret, &assoc);
-                Ok(Checked::of(Node::ErasedGeneric { what: method.as_str().into() }, ret_ty))
+                Ok(Checked::of(Node::ErasedGeneric { what: method.name().into() }, ret_ty))
             }
         }
     }
@@ -10945,7 +10967,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        method: &str,
+        method: SymRef,
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
@@ -10958,7 +10980,7 @@ impl Checker {
         // name may be a function of the library this module has not brought
         // in.
         if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
-            if !self.check_object_safe(&trait_path)?.vtable_order.iter().any(|n| n == method) {
+            if !self.check_object_safe(&trait_path)?.vtable_order.contains(&method) {
                 return Err(Error::TypeError(format!(
                     "no function `{}` is visible here, and it is not a method of `{}` either — a `:dyn {}` value can only call the trait's own or inherited methods",
                     method, trait_path, trait_path
@@ -11008,7 +11030,7 @@ impl Checker {
     /// — the types a failed method call could have meant. Named the way the
     /// current module writes them (`NameView`). Sorted, so the message is
     /// the same from run to run.
-    fn types_with_instance_method(&self, method: &str) -> Vec<String> {
+    fn types_with_instance_method(&self, method: SymRef) -> Vec<String> {
         let view = typelisp_print::shared::name_view();
         let mut out = Vec::new();
         for def in self.info.reg.namespaces().flat_map(|ns| ns.types.values()) {
@@ -11046,10 +11068,10 @@ impl Checker {
     /// blanket `impl` materialized at `ty` registers it under, so a call or a
     /// vtable slot naming it before the materialization runs names it the
     /// same way.
-    fn name_written_for(&self, ty: &Type, method: &str) -> SymRef {
+    fn name_written_for(&self, ty: &Type, method: SymRef) -> SymRef {
         match (ty, self.written_instantiation(ty)) {
             (Type::Named(type_fq, _), Some(args)) => method_specialization(type_fq, method, &args),
-            _ => typelisp_mem::symbols::member_symbol(method),
+            _ => method,
         }
     }
 
@@ -11063,7 +11085,7 @@ impl Checker {
     fn select_method(
         &self,
         def: &AdtDef,
-        method: &str,
+        method: SymRef,
         receiver: Option<&Type>,
         expected: Option<&Type>,
     ) -> Result<(AssocFn, Option<Vec<Type>>), Error> {
@@ -11102,7 +11124,7 @@ impl Checker {
         let by_return: Vec<&InstImpls> = statics
             .iter()
             .copied()
-            .filter(|i| expected.is_some_and(|e| i.assoc[method].sig.ret == *e))
+            .filter(|i| expected.is_some_and(|e| i.assoc.get(method).is_some_and(|af| af.sig.ret == *e)))
             .collect();
         let chosen = match (statics.as_slice(), by_return.as_slice()) {
             ([one], _) | (_, [one]) => *one,
@@ -11123,7 +11145,8 @@ impl Checker {
                 )));
             }
         };
-        Ok((chosen.assoc[method].clone(), Some(chosen.args.clone())))
+        let af = chosen.assoc.get(method).expect("`statics` holds the instantiations with this method");
+        Ok((af.clone(), Some(chosen.args.clone())))
     }
 
     /// Check a call to a type-associated function. For an instance method the
@@ -11256,7 +11279,7 @@ impl Checker {
         // specialization drain.
         if let Some(what) = self.validate_where_bounds(&format!("{}::{}", type_fq, method), &af.sig.bounds, &subst, &env.bounds) {
             let ty = subst_apply(&af.sig.ret, &subst);
-            let node = Node::Assoc { owner: type_fq.clone(), method: typelisp_mem::symbols::member_symbol(method), instance, ret: ty.clone(), args: typed };
+            let node = Node::Assoc { owner: type_fq.clone(), method, instance, ret: ty.clone(), args: typed };
             return Ok(disagreeing(Checked::of(node, ty.clone()), what, ty));
         }
         // Monomorphization, method side: a call on a generic owner whose
@@ -11271,14 +11294,14 @@ impl Checker {
         // (`twice <int>`), and is a template only through its own type
         // parameters.
         let mut method_name = written_member(type_fq, method, inst.as_deref());
-        let template = method_name.name().to_string();
+        let template = method_name;
         if (!def.params.is_empty() || !af.sig.type_params.is_empty())
-            && self.generic_method_templates.contains_key(&(type_fq.clone(), template.clone()))
+            && self.generic_method_templates.contains_key(&(type_fq.clone(), template))
         {
             let targs: Vec<Type> =
                 def.params.iter().chain(&af.sig.type_params).map(|p| subst[p.as_str()].clone()).collect();
             if !targs.iter().any(|t| self.type_is_open(t)) {
-                method_name = self.request_method_specialization(type_fq, &template, method, targs);
+                method_name = self.request_method_specialization(type_fq, template, method, targs);
             }
         }
         let ty = subst_apply(&af.sig.ret, &subst);
@@ -11346,11 +11369,11 @@ impl Checker {
                     who
                 )));
             }
-            let mut supplied: HashMap<String, Checked> = HashMap::new();
+            let mut supplied: HashMap<SymRef, Checked> = HashMap::new();
             let mut i = 0;
             while i < tail.len() {
                 let kw = match tail[i] {
-                    Value::Symbol(id) if id.is_keyword() => id.name().to_string(),
+                    Value::Symbol(id) if id.is_keyword() => id,
                     Value::Symbol(id) => {
                         return Err(Error::TypeError(format!(
                             "{}: expected a `:name` keyword, got `{}`",
@@ -11361,10 +11384,10 @@ impl Checker {
                     _ => return Err(Error::TypeError(format!("{}: expected a `:name` keyword, got a non-symbol", who))),
                 };
                 let Some(key) = sig.keys.iter().find(|k| k.name == kw) else {
-                    return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", who, kw)));
+                    return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", who, kw.name())));
                 };
                 if supplied.contains_key(&kw) {
-                    return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", who, kw)));
+                    return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", who, kw.name())));
                 }
                 let st = subst_apply(&key.decl_ty, subst);
                 let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
@@ -11826,7 +11849,7 @@ impl Checker {
             ))
         })?;
         let owner = prim_type_path(&src.ty).expect("as_conversion only matches primitive source types");
-        let method = if try_variant { try_method.unwrap_or(panic_method) } else { panic_method };
+        let method = typelisp_mem::symbols::member_symbol(if try_variant { try_method.unwrap_or(panic_method) } else { panic_method });
         let called = self.check_assoc_call(
             heap,
             interp,
@@ -11886,13 +11909,13 @@ impl Checker {
         // family asked for it.
         let family = if target.is_int_family() || target.is_c_word() { "int" } else { "float" };
         let name = target.scalar_name().expect("a width cast's target is a scalar");
-        let method = if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) };
+        let method = typelisp_mem::symbols::member_symbol(&if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) });
         let owner = prim_type_path(&src.ty).expect("a width cast's source is a primitive type");
         self.check_assoc_call(
             heap,
             interp,
             env,
-            AssocCall { type_fq: &owner, method: &method, receiver: Some(src), expected: None, first_arg: None },
+            AssocCall { type_fq: &owner, method, receiver: Some(src), expected: None, first_arg: None },
             &[],
             &[],
         )
@@ -11941,7 +11964,7 @@ impl Checker {
     /// ([`method_specialization`]) when only one instantiation wrote it.
     /// Several instantiations writing it need the name to say which, as
     /// `Type<args>::member` ([`Self::instantiated_member`]).
-    fn member_body_name(&self, type_fq: &Path, member: &str, who: &str) -> Result<SymRef, Error> {
+    fn member_body_name(&self, type_fq: &Path, member: SymRef, who: &str) -> Result<SymRef, Error> {
         let def = self.info.reg.type_def(type_fq).expect("the resolution found the member on this type");
         if def.assoc.contains_key(member) {
             return Ok(written_member(type_fq, member, None));
@@ -11970,7 +11993,7 @@ impl Checker {
     /// A written `Type<args>::member` — a method one instantiation's own
     /// `impl` wrote, named by that instantiation: the type and the method's
     /// name there.
-    fn instantiated_member(&self, ty: &Type, member: &str, who: &str) -> Result<(Path, SymRef), Error> {
+    fn instantiated_member(&self, ty: &Type, member: SymRef, who: &str) -> Result<(Path, SymRef), Error> {
         let ty = self.canon(ty);
         let (type_fq, args) = match &ty {
             Type::Named(type_fq, args) => (type_fq, args),
@@ -12030,14 +12053,14 @@ impl Checker {
         // the same `fns` table a `defun` goes in — so a `CompileTarget::Fn`
         // reaches it.
         let method_target = |type_fq: Path, method: SymRef| {
-            if self.generic_method_templates.contains_key(&(type_fq.clone(), method.name().to_string())) {
+            if self.generic_method_templates.contains_key(&(type_fq.clone(), method)) {
                 return Err(generic_err());
             }
             Ok(CompileTarget::Method(type_fq, method))
         };
         let (target, written) = match written_name {
             WrittenName::Instantiated(ty, member) => {
-                let (type_fq, method) = self.instantiated_member(ty, member, who)?;
+                let (type_fq, method) = self.instantiated_member(ty, *member, who)?;
                 return method_target(type_fq, method);
             }
             WrittenName::Bare(sym) => (None, Written::Bare(*sym)),
@@ -12046,7 +12069,7 @@ impl Checker {
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Fn(path))) | Some(Resolved::Macro(path, _)) => fn_target(path),
             Some(Resolved::Member(type_fq, member)) => {
-                let method = self.member_body_name(&type_fq, &member, who)?;
+                let method = self.member_body_name(&type_fq, member, who)?;
                 method_target(type_fq, method)
             }
             Some(Resolved::Value(ModuleValue::Var(..))) => {
@@ -12237,8 +12260,8 @@ impl Checker {
         // rule (`Self::resolve_name`), with no receiver.
         let written = match written_name {
             WrittenName::Instantiated(ty, member) => {
-                let (type_fq, method) = self.instantiated_member(ty, member, who)?;
-                return Ok(DefRef::Method(type_fq, method.name().to_string()));
+                let (type_fq, method) = self.instantiated_member(ty, *member, who)?;
+                return Ok(DefRef::Method(type_fq, method));
             }
             WrittenName::Bare(sym) => Written::Bare(*sym),
             WrittenName::Path(target, _) => Written::Path(*target),
@@ -12248,8 +12271,8 @@ impl Checker {
             Some(Resolved::Value(ModuleValue::Fn(path))) => return Ok(DefRef::Fn(path)),
             Some(Resolved::Macro(path, _)) => return Ok(DefRef::Macro(path)),
             Some(Resolved::Member(type_fq, member)) => {
-                let method = self.member_body_name(&type_fq, &member, who)?;
-                return Ok(DefRef::Method(type_fq, method.name().to_string()));
+                let method = self.member_body_name(&type_fq, member, who)?;
+                return Ok(DefRef::Method(type_fq, method));
             }
             Some(Resolved::Ctor(..)) => {
                 return Err(Error::TypeError(format!(
@@ -12724,11 +12747,11 @@ impl Checker {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv_name, field)));
         };
         let field = tuple_element_field(&recv.ty, field)?.unwrap_or_else(|| field.to_string());
-        let setter = format!("set-{}", field);
+        let setter = typelisp_mem::symbols::member_symbol(&format!("set-{}", field));
         let is_field_setter = self
             .info.reg
             .type_def(type_fq)
-            .and_then(|d| d.method_at(&setter, targs))
+            .and_then(|d| d.method_at(setter, targs))
             .is_some_and(|af| af.instance && self.info.assoc_visible(type_fq, af));
         if !is_field_setter {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", type_fq, field)));
@@ -12738,7 +12761,7 @@ impl Checker {
             heap,
             interp,
             env,
-            AssocCall { type_fq: &type_fq, method: &setter, receiver: Some(recv), expected: None, first_arg: None },
+            AssocCall { type_fq: &type_fq, method: setter, receiver: Some(recv), expected: None, first_arg: None },
             std::slice::from_ref(&value),
             &[value_loc],
         )
@@ -12805,16 +12828,16 @@ impl Checker {
             return Err(Error::TypeError(format!("setf: `{}` has no settable accessor `{}`", recv.ty, accessor)));
         };
         let (type_fq, targs) = (type_fq.clone(), targs.clone());
-        let mut candidates = vec![format!("set-{}", accessor)];
+        let mut candidates = vec![typelisp_mem::symbols::member_symbol(&format!("set-{}", accessor))];
         if accessor == "get" {
-            candidates.push("set".to_string());
+            candidates.push(typelisp_mem::symbols::member_symbol("set"));
         }
         // `method_at`, not the type's own table: a setter an `impl` for one
         // instantiation defines is that instantiation's.
         let setter = candidates.iter().find(|name| {
             self.info.reg
                 .type_def(&type_fq)
-                .and_then(|d| d.method_at(name.as_str(), &targs))
+                .and_then(|d| d.method_at(**name, &targs))
                 .is_some_and(|af| af.instance && self.info.assoc_visible(&type_fq, af))
         });
         let Some(setter) = setter else {
@@ -12828,7 +12851,7 @@ impl Checker {
             heap,
             interp,
             env,
-            AssocCall { type_fq: &type_fq, method: setter, receiver: Some(recv), expected: None, first_arg: None },
+            AssocCall { type_fq: &type_fq, method: *setter, receiver: Some(recv), expected: None, first_arg: None },
             &call_args,
             &arg_locs,
         )
@@ -12960,7 +12983,7 @@ impl Checker {
                     return Err(Error::TypeError(format!(
                         "make-instance {}: the arguments after the type are pairs of a slot keyword and a value, such as `:{} v`",
                         tname,
-                        field_names.first().map(String::as_str).unwrap_or("slot"),
+                        field_names.first().map(|f| f.name()).unwrap_or("slot"),
                     )))
                 }
             };
@@ -12968,7 +12991,7 @@ impl Checker {
                 Some(v) => *v,
                 None => return Err(Error::TypeError(format!("make-instance {}: `:{}` has no value", tname, slot))),
             };
-            let i = match field_names.iter().position(|f| *f == slot) {
+            let i = match field_names.iter().position(|f| *f == typelisp_mem::symbols::member_symbol(&slot)) {
                 Some(i) => i,
                 None => {
                     return Err(Error::TypeError(format!(
@@ -12982,7 +13005,7 @@ impl Checker {
             if given[i].is_some() {
                 return Err(Error::TypeError(format!("make-instance {}: slot `{}` is given twice", tname, slot)));
             }
-            let visible = def.assoc.get(&slot).map(|af| self.info.assoc_visible(&type_fq, af)).unwrap_or(false);
+            let visible = def.assoc.get(typelisp_mem::symbols::member_symbol(&slot)).map(|af| self.info.assoc_visible(&type_fq, af)).unwrap_or(false);
             if !visible && hidden.is_none() {
                 hidden = Some(slot);
             }
@@ -14514,7 +14537,7 @@ impl Checker {
                 (crate::CompileTarget::Fn(path.clone()), args.first())
             }
             Node::Assoc { owner, method, args, .. } => {
-                if self.info.reg.type_def(owner).and_then(|def| def.assoc.get(method.name())).is_some_and(|af| af.builtin) {
+                if self.info.reg.type_def(owner).and_then(|def| def.assoc.get(*method)).is_some_and(|af| af.builtin) {
                     return Err(not_a_definition());
                 }
                 (crate::CompileTarget::Method(owner.clone(), *method), args.first())
@@ -15224,7 +15247,7 @@ impl Checker {
         // `supplied_keys`/`supplied_opts` hold pass 1's already-checked
         // values (unify already applied) — pass 2 below only needs to fill
         // in whatever they're missing, using the now-final `subst`.
-        let mut supplied_keys: HashMap<String, Checked> = HashMap::new();
+        let mut supplied_keys: HashMap<SymRef, Checked> = HashMap::new();
         let mut opt_supplied_n = 0usize;
         let mut opt_supplied: Vec<Checked> = Vec::new();
         let mut rest_typed: Vec<Checked> = Vec::new();
@@ -15243,7 +15266,7 @@ impl Checker {
             let mut i = 0;
             while i < tail.len() {
                 let kw_name = match tail[i] {
-                    Value::Symbol(id) if id.is_keyword() => id.name().to_string(),
+                    Value::Symbol(id) if id.is_keyword() => id,
                     Value::Symbol(id) => {
                         return Err(Error::TypeError(format!(
                             "{}: expected a `:name` keyword, got `{}`",
@@ -15259,10 +15282,10 @@ impl Checker {
                     }
                 };
                 let Some(key) = sig.keys.iter().find(|k| k.name == kw_name) else {
-                    return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", name, kw_name)));
+                    return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", name, kw_name.name())));
                 };
                 if supplied_keys.contains_key(&kw_name) {
-                    return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", name, kw_name)));
+                    return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", name, kw_name.name())));
                 }
                 let val_loc = nth_loc(tail_locs, i + 1);
                 let st = subst_apply(&key.decl_ty, &subst);
@@ -16267,7 +16290,7 @@ impl Checker {
         }
         let Ok((adt_name, targs)) = self.expect_adt(expected) else { return Ok(None) };
         let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
-        let Some(variant) = def.variants.iter().position(|vr| vr.name == name) else { return Ok(None) };
+        let Some(variant) = def.variants.iter().position(|vr| vr.name == typelisp_mem::symbols::member_symbol(&name)) else { return Ok(None) };
         self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, false).map(Some)
     }
 
@@ -16329,7 +16352,7 @@ impl Checker {
         // Exactly the lookup the `equals` call will make — its own table, a
         // blanket impl, a bounded type variable, a trait object — rather than
         // a second copy of it, which missed the blanket impls.
-        self.receiver_method(env, ty, "equals").is_some()
+        self.receiver_method(env, ty, typelisp_mem::symbols::member_symbol("equals")).is_some()
     }
 
     fn check_ctor_pattern(
@@ -16460,7 +16483,7 @@ impl Checker {
             let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
             return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, 0, &parts, &parts_locs, false);
         }
-        let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(|| {
+        let variant = def.variants.iter().position(|vr| vr.name == typelisp_mem::symbols::member_symbol(&ctor)).ok_or_else(|| {
             Error::TypeError(format!("`{}` is not a constructor of `{}`", ctor, adt_name))
         })?;
         self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, false)
@@ -16484,10 +16507,10 @@ impl Checker {
                 "pattern `{}`: a struct pattern names its slots, ({} :{} pattern...) or ({} :{}) to bind `{}`, but {}",
                 adt_name,
                 adt_name.last_segment(),
-                field_names.first().map(String::as_str).unwrap_or("slot"),
+                field_names.first().map(|f| f.name()).unwrap_or("slot"),
                 adt_name.last_segment(),
-                field_names.first().map(String::as_str).unwrap_or("slot"),
-                field_names.first().map(String::as_str).unwrap_or("slot"),
+                field_names.first().map(|f| f.name()).unwrap_or("slot"),
+                field_names.first().map(|f| f.name()).unwrap_or("slot"),
                 got
             ))
         };
@@ -16502,7 +16525,7 @@ impl Checker {
             let Some(slot) = keyword(rest[k].0) else {
                 return Err(shape(&format!("`{}` is not a slot keyword", core::print(heap, rest[k].0))));
             };
-            let Some(i) = field_names.iter().position(|f| *f == slot) else {
+            let Some(i) = field_names.iter().position(|f| *f == typelisp_mem::symbols::member_symbol(&slot)) else {
                 return Err(Error::TypeError(format!(
                     "pattern `{}`: no slot `{}` (its slots are {})",
                     adt_name,
@@ -16600,7 +16623,7 @@ impl Checker {
                     heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
                 if let Some(type_fq) = self.info.type_at(&ty) {
                     if let Some(def) = self.info.reg.type_def(&type_fq) {
-                        if let Some(idx) = def.variants.iter().position(|vr| vr.name == member.name()) {
+                        if let Some(idx) = def.variants.iter().position(|vr| vr.name == typelisp_mem::symbols::member_symbol(member.name())) {
                             no_generics(&type_fq, def)?;
                             // `color::red` — the type sits in the token's
                             // second-to-last segment.
@@ -16662,7 +16685,7 @@ impl Checker {
             };
             let (adt_name, targs) = self.expect_adt(&ty)?;
             let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
-            let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(must_name)?;
+            let variant = def.variants.iter().position(|vr| vr.name == typelisp_mem::symbols::member_symbol(&ctor)).ok_or_else(must_name)?;
             let (pat, binds) =
                 self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &sub, &sub_locs, true)?;
             return Ok((Pattern::TypeTest(ty, Box::new(pat)), binds));
@@ -17034,10 +17057,10 @@ fn fn_specialization(base: &Path, args: &[Type]) -> Path {
 /// The name `type_fq`'s `method` has as written for the instantiation
 /// `inst`, `None` for every instantiation: the name itself, or its
 /// [`method_specialization`] at those arguments.
-fn written_member(type_fq: &Path, method: &str, inst: Option<&[Type]>) -> SymRef {
+fn written_member(type_fq: &Path, method: SymRef, inst: Option<&[Type]>) -> SymRef {
     match inst {
         Some(args) => method_specialization(type_fq, method, args),
-        None => typelisp_mem::symbols::member_symbol(method),
+        None => method,
     }
 }
 
@@ -17045,9 +17068,9 @@ fn written_member(type_fq: &Path, method: &str, inst: Option<&[Type]>) -> SymRef
 /// the owner's, then the method's own. What a method written for one
 /// instantiation is named too, so a call names it the same way whichever
 /// `impl` wrote it.
-fn method_specialization(type_fq: &Path, method: &str, args: &[Type]) -> SymRef {
+fn method_specialization(type_fq: &Path, method: SymRef, args: &[Type]) -> SymRef {
     let ids: Vec<TypeId> = args.iter().map(crate::type_key::type_id).collect();
-    specialization(Generic::Method(type_fq.ns(), type_fq.name_symbol(), typelisp_mem::symbols::member_symbol(method)), &ids)
+    specialization(Generic::Method(type_fq.ns(), type_fq.name_symbol(), method), &ids)
 }
 
 pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<Value, Error> {
@@ -17295,27 +17318,34 @@ fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
 /// operators), and this is the other half of that choice. A name absent from
 /// the table is passed through unchanged, and so is one a bound declares
 /// itself.
-fn trait_operator_method(op: &str) -> Option<&'static str> {
-    Some(match op {
-        "+" => "add",
-        "-" => "sub",
-        "*" => "mul",
-        "/" => "div",
-        "rem" => "remainder",
-        "logand" => "bit-and",
-        "logior" => "bit-or",
-        "logxor" => "bit-xor",
-        "lognot" => "bit-not",
+fn trait_operator_method(op: SymRef) -> Option<SymRef> {
+    const TABLE: [(&str, &str); 15] = [
+        ("+", "add"),
+        ("-", "sub"),
+        ("*", "mul"),
+        ("/", "div"),
+        ("rem", "remainder"),
+        ("logand", "bit-and"),
+        ("logior", "bit-or"),
+        ("logxor", "bit-xor"),
+        ("lognot", "bit-not"),
         // `Eq`/`Ord` predate the arithmetic traits and already had these four
         // under spelled-out names; the operators reach them the same way.
-        "=" => "equals",
-        "/=" => "not-equals",
-        "<" => "less",
-        "<=" => "less-equal",
-        ">" => "greater",
-        ">=" => "greater-equal",
-        _ => return None,
-    })
+        ("=", "equals"),
+        ("/=", "not-equals"),
+        ("<", "less"),
+        ("<=", "less-equal"),
+        (">", "greater"),
+        (">=", "greater-equal"),
+    ];
+    static MEMBERS: std::sync::OnceLock<Vec<(SymRef, SymRef)>> = std::sync::OnceLock::new();
+    let members = MEMBERS.get_or_init(|| {
+        TABLE
+            .iter()
+            .map(|(o, m)| (typelisp_mem::symbols::member_symbol(o), typelisp_mem::symbols::member_symbol(m)))
+            .collect()
+    });
+    members.iter().find(|(o, _)| *o == op).map(|(_, m)| *m)
 }
 
 fn int_lit_ty(expected: Option<&Type>) -> Type {
@@ -17589,7 +17619,7 @@ fn unevaluated_name(heap: &Heap, ns: typelisp_mem::NsId, v: Value, who: &str, ms
             let parts = heap.list_to_vec(v)?;
             match parts.as_slice() {
                 [_, ty, Value::Symbol(member)] => {
-                    Ok(WrittenName::Instantiated(crate::types::parse_type(heap, ns, *ty)?, heap.symbol_spelling(*member).to_string()))
+                    Ok(WrittenName::Instantiated(crate::types::parse_type(heap, ns, *ty)?, typelisp_mem::symbols::member_symbol(member.name())))
                 }
                 _ => Err(Error::TypeError(msg.into())),
             }
@@ -17606,7 +17636,8 @@ enum WrittenName {
     Bare(typelisp_mem::SymRef),
     /// A `::` path: where it leads, and how it is spelled.
     Path(PathTarget, String),
-    Instantiated(Type, String),
+    /// A `Type<args>::member` path: the type, and the member's symbol.
+    Instantiated(Type, SymRef),
 }
 
 impl WrittenName {
@@ -17632,7 +17663,7 @@ enum DefRef {
     Type(Path),
     Trait(Path),
     Macro(Path),
-    Method(Path, String),
+    Method(Path, SymRef),
 }
 
 /// Whether `v` is `(%value-member p x)`, the reader's `p::x`.

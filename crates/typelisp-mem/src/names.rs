@@ -146,14 +146,6 @@ impl ConcreteNames {
     pub fn method_symbol(type_path: impl Display, method: &str) -> String {
         Self::symbol(&Self::method_link(type_path, method))
     }
-
-    /// The key a blanket `impl` of `trait_path` materialized at the type
-    /// `target_key` is remembered under among the specializations already
-    /// asked for — kept apart from every specialization's name by its
-    /// leading word and space.
-    pub fn blanket_instance(trait_path: impl Display, target_key: &str) -> String {
-        format!("blanket {} {}", trait_path, target_key)
-    }
 }
 
 #[cfg(test)]

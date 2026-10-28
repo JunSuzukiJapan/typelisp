@@ -11,6 +11,7 @@ pub mod freevars;
 pub mod forms;
 pub mod repr;
 pub mod registry;
+pub mod members;
 mod info;
 mod lower;
 mod verify;

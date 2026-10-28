@@ -1,18 +1,19 @@
-//! A runtime mirror of the checker's module tree
-//! ([`crate::check::registry::Namespace`]), replacing the flat `Path`-keyed
-//! tables [`Interp`](super::interp::Interp) used to hold for every top-level
+//! A runtime mirror of the checker's modules
+//! ([`crate::check::registry::Namespace`]), holding every top-level
 //! `defun`/`defmethod`/`defvar`/`defstruct`/`defenum`. Each definition is
-//! registered at the tree node for its own defining module, under its own
-//! unqualified name — so no single table spans the whole program.
+//! registered with its own defining module, under the symbol its name reads
+//! as there — so no single table spans the whole program.
 //!
 //! Nothing here resolves a name. A reference arrives already resolved — the
-//! checker wrote the absolute `Path` it found into the node — and is looked
-//! up by walking straight down by that path's segments
+//! checker wrote the `Path` it found into the node — and is looked up by that
+//! path's module and symbol
 //! ([`ModuleScope::get_fn`]/[`get_global`]/[`get_method`]). Visibility was the
 //! checker's question too, so there is no `pub` check either.
 
 use std::collections::HashMap;
 use std::rc::Rc;
+
+use typelisp_mem::NsId;
 
 use crate::{Path, SymRef, TypeId};
 
@@ -62,76 +63,84 @@ impl FieldTemplates {
     }
 }
 
-/// One node of the runtime module tree, rooted at `Interp`'s own `root`.
+/// One module's runtime definitions, keyed by the symbols their names read
+/// as there — the symbol a [`Path`] to the definition holds.
+#[derive(Default)]
+pub(crate) struct ModuleTables {
+    /// `defun`/`defmacro`, by name — defined directly in this module.
+    pub(crate) fns: HashMap<SymRef, Rc<FnDef>>,
+    /// `defmethod`, by (the owning type's name, the method's member symbol)
+    /// — stored with the *type's* defining module, not the method's own
+    /// definition site (a `defmethod` always lives alongside its type for
+    /// this purpose, matching how the checker's `AdtDef::assoc` is itself
+    /// part of the type's own definition).
+    pub(crate) methods: HashMap<(SymRef, SymRef), Rc<FnDef>>,
+    /// `defvar`/`defconstant`, by name.
+    pub(crate) globals: HashMap<SymRef, Slot>,
+    /// `defstruct`/`defenum`, by name.
+    pub(crate) types: HashMap<SymRef, TypeEntry>,
+}
+
+/// The runtime definitions of every module, rooted at `Interp`'s own `root`:
+/// one [`ModuleTables`] per module that defines something, found by the
+/// module's [`NsId`] — the module a [`Path`] names.
 #[derive(Default)]
 pub struct ModuleScope {
-    /// `defun`/`defmacro`, by unqualified name — defined directly in this
-    /// module (not a descendant).
-    pub(crate) fns: HashMap<String, Rc<FnDef>>,
-    /// `defmethod`, by (the owning type's unqualified name, method name) —
-    /// stored at the tree node for the *type's* defining module, not the
-    /// method's own definition site (a `defmethod` always lives alongside
-    /// its type for this purpose, matching how the checker's `AdtDef::assoc`
-    /// is itself part of the type's own definition).
-    pub(crate) methods: HashMap<(SymRef, SymRef), Rc<FnDef>>,
-    /// `defvar`/`defconstant`, by unqualified name.
-    pub(crate) globals: HashMap<String, Slot>,
-    /// `defstruct`/`defenum`, by unqualified name.
-    pub(crate) types: HashMap<String, TypeEntry>,
-    /// Child modules, by unqualified name.
-    pub(crate) children: HashMap<String, ModuleScope>,
+    modules: HashMap<NsId, ModuleTables>,
 }
 
 impl ModuleScope {
-    /// Descend through child modules along `segs`; `None` if any segment is
-    /// missing.
-    pub(crate) fn find(&self, segs: &[String]) -> Option<&ModuleScope> {
-        let mut ns = self;
-        for seg in segs {
-            ns = ns.children.get(seg)?;
-        }
-        Some(ns)
+    /// The tables of module `ns`, if it defines anything.
+    fn module(&self, ns: NsId) -> Option<&ModuleTables> {
+        self.modules.get(&ns)
     }
 
-    /// Descend through child modules along `segs`, creating any missing
-    /// intermediate node. The tree's only mutating-descent entry point —
-    /// every registration (`Interp::exec`'s `Defun`/`Defmethod`/`Defvar`/
-    /// `Defmacro`/`Defstruct`/`Defenum`/`Module` arms) reaches its target
-    /// node this way, from the absolute `Path` the checker already baked
-    /// onto the `TopLevel` node. This is never itself a visibility decision
-    /// — the checker placed the definition at this exact path uniquely, so
-    /// there is nothing to gate here.
-    pub(crate) fn get_or_create(&mut self, segs: &[String]) -> &mut ModuleScope {
-        let mut ns = self;
-        for seg in segs {
-            ns = ns.children.entry(seg.clone()).or_default();
-        }
-        ns
+    /// The tables of module `ns`, made empty if it has none yet. Never a
+    /// visibility decision: the checker placed the definition at this exact
+    /// path, so there is nothing to gate here.
+    pub(crate) fn module_mut(&mut self, ns: NsId) -> &mut ModuleTables {
+        self.modules.entry(ns).or_default()
     }
 
-    /// THE registration point for a `TypeEntry::Enum` in this tree — the only
-    /// place that inserts one, so an enum's variant names live in exactly one
-    /// table no matter where the definition came from. Both a user
-    /// `defenum`'s exec (`Interp::exec`'s `TopLevel::Defenum` arm) and
-    /// `Interp::new`'s seeding of the built-in sum types
-    /// (`crate::check::registry::builtin_sum_defs` — `Option`/`Result`/the
-    /// error types, which are registered with the checker but never `exec`'d)
-    /// call this rather than inserting into `types` themselves.
+    /// Registers the function or macro `def` at `path`, replacing whatever
+    /// was there.
+    pub(crate) fn insert_fn(&mut self, path: &Path, def: Rc<FnDef>) {
+        self.module_mut(path.ns()).fns.insert(path.name_symbol(), def);
+    }
+
+    /// Registers the method `method` of the type at `type_name`.
+    pub(crate) fn insert_method(&mut self, type_name: &Path, method: SymRef, def: Rc<FnDef>) {
+        self.module_mut(type_name.ns()).methods.insert((type_name.name_symbol(), method), def);
+    }
+
+    /// Registers the global variable at `path`.
+    pub(crate) fn insert_global(&mut self, path: &Path, slot: Slot) {
+        self.module_mut(path.ns()).globals.insert(path.name_symbol(), slot);
+    }
+
+    /// Registers the type at `path`.
+    pub(crate) fn insert_type(&mut self, path: &Path, entry: TypeEntry) {
+        self.module_mut(path.ns()).types.insert(path.name_symbol(), entry);
+    }
+
+    /// THE registration point for a `TypeEntry::Enum` — the only place that
+    /// inserts one, so an enum's variant names live in exactly one table no
+    /// matter where the definition came from. Both a user `defenum`'s exec
+    /// (`Interp::exec`'s `TopLevel::Defenum` arm) and `Interp::new`'s seeding
+    /// of the built-in sum types (`crate::check::registry::builtin_sum_defs`
+    /// — `Option`/`Result`/the error types, which are registered with the
+    /// checker but never `exec`'d) call this rather than inserting a
+    /// `TypeEntry::Enum` themselves.
     pub(crate) fn register_enum(&mut self, name: &Path, def: EnumDef) {
-        self.get_or_create(&name.parent()).types.insert(name.last_segment().to_string(), TypeEntry::Enum(def));
+        self.insert_type(name, TypeEntry::Enum(def));
     }
 
-    /// The type registered at `name`, walking down the module chain directly
-    /// rather than through [`Self::collect_struct_and_enum_types`]: the
-    /// printer asks once per value it renders, and that one builds a map of
-    /// every type in the program.
+    /// The type registered at `name` — the printer asks once per value it
+    /// renders.
     fn type_entry(&self, name: &Path) -> Result<&TypeEntry, String> {
-        let unknown = || format!("internal error: no type `{}` is registered", name);
-        let mut ns = self;
-        for seg in name.parent() {
-            ns = ns.children.get(&seg).ok_or_else(unknown)?;
-        }
-        ns.types.get(name.last_segment()).ok_or_else(unknown)
+        self.module(name.ns())
+            .and_then(|m| m.types.get(&name.name_symbol()))
+            .ok_or_else(|| format!("internal error: no type `{}` is registered", name))
     }
 
     /// The name of `variant` of the enum registered at `name` — the printer's
@@ -175,58 +184,52 @@ impl ModuleScope {
         }
     }
 
-    /// Every registered struct's field names, as `(path, index, name)` in tree
-    /// order — for an AOT executable's startup registration
+    /// Every registered type, with its path.
+    fn all_types(&self) -> impl Iterator<Item = (Path, &TypeEntry)> {
+        self.modules.iter().flat_map(|(ns, m)| m.types.iter().map(move |(name, entry)| (Path::of_symbol(*ns, *name), entry)))
+    }
+
+    /// Every registered struct's field names, as `(path, index, name)` — for
+    /// an AOT executable's startup registration
     /// (`typelisp_print::aot::rt_print_field_name`) and a worker thread's
     /// printer snapshot, the same two readers [`Self::collect_field_templates`]
     /// has.
-    pub(crate) fn collect_field_names(&self, prefix: &[String], out: &mut Vec<(Path, usize, String)>) {
-        for (name, entry) in &self.types {
+    pub(crate) fn collect_field_names(&self, out: &mut Vec<(Path, usize, String)>) {
+        for (path, entry) in self.all_types() {
             if let TypeEntry::Struct { names, .. } = entry {
-                let mut segs = prefix.to_vec();
-                segs.push(name.clone());
-                let path = Path::from_segments(segs);
                 for (i, n) in names.iter().enumerate() {
-                    out.push((path.clone(), i, n.clone()));
+                    out.push((path, i, n.clone()));
                 }
             }
         }
-        for (name, child) in &self.children {
-            let mut segs = prefix.to_vec();
-            segs.push(name.clone());
-            child.collect_field_names(&segs, out);
-        }
     }
 
-    /// A free function/macro's own `FnDef`, found by direct descent to its
-    /// already-fully-qualified `Path` — no ancestor-chain search, no
-    /// visibility check (registration is never a visibility decision, see
-    /// [`Self::get_or_create`]'s doc comment). Used by every consumer that
-    /// already has a resolved target in hand rather than a bare name to
+    /// A free function/macro's own `FnDef`, found by its already-resolved
+    /// `Path` — no search, no visibility check (registration is never a
+    /// visibility decision, see [`Self::module_mut`]). Used by every consumer
+    /// that already has a resolved target in hand rather than a bare name to
     /// search for: `MacroExpander::expand_macro`'s checker-driven lookup,
     /// and the JIT/SCC machinery's "is this already compiled" checks.
     pub fn get_fn(&self, path: &Path) -> Option<Rc<FnDef>> {
-        self.find(&path.parent())?.fns.get(path.last_segment()).cloned()
+        self.module(path.ns())?.fns.get(&path.name_symbol()).cloned()
     }
 
-    /// A global's own `Slot`, found by direct descent to its already-fully-
-    /// qualified `Path` — no ancestor-chain search (used by
+    /// A global's own `Slot`, found by its already-resolved `Path` (used by
     /// `Interp::promote_global`, always called with a `collect_global_targets`
-    /// result, i.e. an already-resolved absolute path, never a bare name to
-    /// search for).
+    /// result, never a bare name to search for).
     pub(crate) fn get_global(&self, path: &Path) -> Option<Slot> {
-        self.find(&path.parent())?.globals.get(path.last_segment()).cloned()
+        self.module(path.ns())?.globals.get(&path.name_symbol()).cloned()
     }
 
     /// [`Self::get_fn`]'s twin for a `(type, method)` pair.
     pub fn get_method(&self, type_name: &Path, method: SymRef) -> Option<Rc<FnDef>> {
-        self.find(&type_name.parent())?.methods.get(&(type_name.name_symbol(), method)).cloned()
+        self.module(type_name.ns())?.methods.get(&(type_name.name_symbol(), method)).cloned()
     }
 
     /// Whether `path`'s `FnDef` already has a JIT/AOT-compiled form — the
     /// direct replacement for the old `Interp::compiled: HashMap<Path, _>`'s
     /// `contains_key` check (see [`super::interp::FnDef::compiled`]'s doc
-    /// comment for why this now lives on the node itself).
+    /// comment for why this now lives on the definition itself).
     pub fn fn_compiled(&self, path: &Path) -> bool {
         self.get_fn(path).is_some_and(|f| f.compiled.borrow().is_some())
     }
@@ -236,15 +239,15 @@ impl ModuleScope {
         self.get_method(type_name, method).is_some_and(|f| f.compiled.borrow().is_some())
     }
 
-    /// Register `def` under `name` in this module, replacing whatever was
-    /// there. The raw door: the interpreter's own `defun`/`defmethod`
-    /// execution goes through `Interp::register_fn`, which builds the `FnDef`
-    /// out of a checked core form. This is for a caller that already holds
-    /// one — the backend's SCC tests build two mutually recursive `FnDef`s
-    /// directly, because the checker's forward-reference rules will not let
-    /// that call graph be written as source.
-    pub fn define_fn(&mut self, name: String, def: Rc<FnDef>) {
-        self.fns.insert(name, def);
+    /// Register `def` at `path`, replacing whatever was there. The raw door:
+    /// the interpreter's own `defun`/`defmethod` execution goes through
+    /// `Interp::register_fn`, which builds the `FnDef` out of a checked core
+    /// form. This is for a caller that already holds one — the backend's SCC
+    /// tests build two mutually recursive `FnDef`s directly, because the
+    /// checker's forward-reference rules will not let that call graph be
+    /// written as source.
+    pub fn define_fn(&mut self, path: &Path, def: Rc<FnDef>) {
+        self.insert_fn(path, def);
     }
 
     /// Whether a `(type, method)` pair is registered at all — the direct
@@ -254,28 +257,17 @@ impl ModuleScope {
     }
 
     /// Every registered free function/macro's own unqualified name, across
-    /// every module in the tree — the direct replacement for the old
-    /// `Interp::fns.keys()` full-table scan (`Interp::function_names`, a
-    /// tooling/test-only "enumerate everything regardless of module"
-    /// consumer).
+    /// every module — for `Interp::function_names`, a tooling/test-only
+    /// "enumerate everything regardless of module" consumer.
     pub(crate) fn all_fn_names(&self) -> Vec<String> {
-        let mut out = Vec::new();
-        self.collect_fn_names(&mut out);
-        out
+        self.modules.values().flat_map(|m| m.fns.keys().map(|name| name.name().to_string())).collect()
     }
 
-    fn collect_fn_names(&self, out: &mut Vec<String>) {
-        out.extend(self.fns.keys().cloned());
-        for child in self.children.values() {
-            child.collect_fn_names(out);
-        }
-    }
-
-    /// Flatten the whole tree's `TypeEntry`s back into the
-    /// `(HashSet<Path>, HashMap<Path, EnumDef>)` shape `compile::core_bridge`
-    /// (deliberately `Registry`-free, see that module's own doc comment)
-    /// expects as a plain snapshot — the same "flatten once for the compile
-    /// boundary" treatment `compiled_globals` already gets when cloned into
+    /// Flatten every `TypeEntry` into the `(HashMap<Path, Vec<Repr>>,
+    /// HashMap<Path, EnumDef>)` shape `compile::core_bridge` (deliberately
+    /// `Registry`-free, see that module's own doc comment) expects as a plain
+    /// snapshot — the same "flatten once for the compile boundary" treatment
+    /// `compiled_globals` already gets when cloned into
     /// `core_bridge::Ctx::globals`. Called once per JIT/AOT compile, not on
     /// any interpreted hot path.
     pub fn collect_struct_and_enum_types(
@@ -283,65 +275,7 @@ impl ModuleScope {
     ) -> (HashMap<Path, Vec<crate::check::repr::Repr>>, HashMap<Path, EnumDef>) {
         let mut structs = HashMap::new();
         let mut enums = HashMap::new();
-        self.collect_types_into(&[], &mut structs, &mut enums);
-        (structs, enums)
-    }
-
-    /// Every registered type's field type templates, for an AOT executable's
-    /// startup registration (`typelisp_print::aot::rt_print_field_template`):
-    /// `(path, variant or None, field index or None for every field,
-    /// template)`, in tree order.
-    /// Every function and method registered anywhere under this node — what
-    /// a worker thread's printer is given a snapshot of (`worker_print`), and
-    /// where a `~/name/` directive's definition is found.
-    pub(crate) fn collect_defs(&self, out: &mut Vec<Rc<FnDef>>) {
-        out.extend(self.fns.values().cloned());
-        out.extend(self.methods.values().cloned());
-        for child in self.children.values() {
-            child.collect_defs(out);
-        }
-    }
-
-    pub(crate) fn collect_field_templates(&self, prefix: &[String], out: &mut Vec<(Path, Option<usize>, Option<usize>, TypeId)>) {
-        for (name, entry) in &self.types {
-            let mut segs = prefix.to_vec();
-            segs.push(name.clone());
-            let path = Path::from_segments(segs);
-            match entry {
-                TypeEntry::Struct { templates: FieldTemplates::Positional(ts), .. } => {
-                    for (i, t) in ts.iter().enumerate() {
-                        out.push((path.clone(), None, Some(i), *t));
-                    }
-                }
-                TypeEntry::Struct { templates: FieldTemplates::Uniform(t), .. } => {
-                    out.push((path.clone(), None, None, *t));
-                }
-                TypeEntry::Enum(def) => {
-                    for (v, ts) in def.templates.iter().enumerate() {
-                        for (i, t) in ts.iter().enumerate() {
-                            out.push((path.clone(), Some(v), Some(i), *t));
-                        }
-                    }
-                }
-            }
-        }
-        for (name, child) in &self.children {
-            let mut segs = prefix.to_vec();
-            segs.push(name.clone());
-            child.collect_field_templates(&segs, out);
-        }
-    }
-
-    fn collect_types_into(
-        &self,
-        prefix: &[String],
-        structs: &mut HashMap<Path, Vec<crate::check::repr::Repr>>,
-        enums: &mut HashMap<Path, EnumDef>,
-    ) {
-        for (name, entry) in &self.types {
-            let mut segs = prefix.to_vec();
-            segs.push(name.clone());
-            let path = Path::from_segments(segs);
+        for (path, entry) in self.all_types() {
             match entry {
                 TypeEntry::Struct { reprs, .. } => {
                     structs.insert(path, reprs.clone());
@@ -351,10 +285,42 @@ impl ModuleScope {
                 }
             }
         }
-        for (name, child) in &self.children {
-            let mut segs = prefix.to_vec();
-            segs.push(name.clone());
-            child.collect_types_into(&segs, structs, enums);
+        (structs, enums)
+    }
+
+    /// Every function and method registered anywhere — what a worker
+    /// thread's printer is given a snapshot of (`worker_print`), and where a
+    /// `~/name/` directive's definition is found.
+    pub(crate) fn collect_defs(&self, out: &mut Vec<Rc<FnDef>>) {
+        for m in self.modules.values() {
+            out.extend(m.fns.values().cloned());
+            out.extend(m.methods.values().cloned());
+        }
+    }
+
+    /// Every registered type's field type templates, for an AOT executable's
+    /// startup registration (`typelisp_print::aot::rt_print_field_template`):
+    /// `(path, variant or None, field index or None for every field,
+    /// template)`.
+    pub(crate) fn collect_field_templates(&self, out: &mut Vec<(Path, Option<usize>, Option<usize>, TypeId)>) {
+        for (path, entry) in self.all_types() {
+            match entry {
+                TypeEntry::Struct { templates: FieldTemplates::Positional(ts), .. } => {
+                    for (i, t) in ts.iter().enumerate() {
+                        out.push((path, None, Some(i), *t));
+                    }
+                }
+                TypeEntry::Struct { templates: FieldTemplates::Uniform(t), .. } => {
+                    out.push((path, None, None, *t));
+                }
+                TypeEntry::Enum(def) => {
+                    for (v, ts) in def.templates.iter().enumerate() {
+                        for (i, t) in ts.iter().enumerate() {
+                            out.push((path, Some(v), Some(i), *t));
+                        }
+                    }
+                }
+            }
         }
     }
 }

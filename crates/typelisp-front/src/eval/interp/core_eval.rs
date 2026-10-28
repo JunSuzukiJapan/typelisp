@@ -1784,11 +1784,7 @@ impl Interp {
                     sig: Some((param_reprs, ret)),
                     compiled: RefCell::new(None),
                 };
-                self.root
-                    .borrow_mut()
-                    .get_or_create(&type_name.parent())
-                    .methods
-                    .insert((type_name.name_symbol(), method), Rc::new(def));
+                self.root.borrow_mut().insert_method(&type_name, method, Rc::new(def));
                 self.printer_tables_changed();
                 Ok(None)
             }
@@ -1827,11 +1823,7 @@ impl Interp {
                     sig: Some(sig),
                     compiled: RefCell::new(None),
                 };
-                self.root
-                    .borrow_mut()
-                    .get_or_create(&name.parent())
-                    .fns
-                    .insert(name.last_segment().to_string(), Rc::new(def));
+                self.root.borrow_mut().insert_fn(&name, Rc::new(def));
                 Ok(None)
             }
             // `(defvar PATH REPR MUTABLE FORM)`
@@ -1860,11 +1852,7 @@ impl Interp {
                 let mut s = RootScope::new(heap);
                 s.push_root(v);
                 let slot = self.slot(&mut s, v);
-                self.root
-                    .borrow_mut()
-                    .get_or_create(&name.parent())
-                    .globals
-                    .insert(name.last_segment().to_string(), slot);
+                self.root.borrow_mut().insert_global(&name, slot);
                 drop(s);
                 self.printer_tables_changed();
                 Ok(None)
@@ -1891,8 +1879,8 @@ impl Interp {
                         names.len()
                     )));
                 }
-                self.root.borrow_mut().get_or_create(&name.parent()).types.insert(
-                    name.last_segment().to_string(),
+                self.root.borrow_mut().insert_type(
+                    &name,
                     scope::TypeEntry::Struct {
                         reprs: fields,
                         templates: scope::FieldTemplates::Positional(templates),
@@ -1944,18 +1932,14 @@ impl Interp {
                 self.printer_tables_changed();
                 Ok(None)
             }
-            // `(module PATH BODY...)` — ensures the tree node exists (a
-            // "mkdir -p") before its body registers into it. It does not have
-            // to *stay* current: every nested definition's own path is
-            // absolute regardless of nesting, so registration is direct
-            // descent from `self.root` rather than relative to a cursor.
+            // `(module PATH BODY...)` — its body, in order. Every nested
+            // definition's own path names its module, so there is nothing to
+            // set up for the module itself.
             //
             // Not permanently rooted itself: each definition inside roots its
             // own form, which is one root per definition and covers everything
             // that outlives this call. The module's own spine does not.
             "module" => {
-                let path = path_field(heap, tl, 0, "module")?;
-                self.root.borrow_mut().get_or_create(&path.segments());
                 let body = body_forms(heap, tl, 1, "module")?;
                 let mut s = RootScope::new(heap);
                 s.push_root(tl);
@@ -2000,11 +1984,7 @@ impl Interp {
                     sig: Some((param_reprs, ret)),
                     compiled: RefCell::new(Some(thunk)),
                 };
-                self.root
-                    .borrow_mut()
-                    .get_or_create(&name.parent())
-                    .fns
-                    .insert(name.last_segment().to_string(), Rc::new(def));
+                self.root.borrow_mut().insert_fn(&name, Rc::new(def));
                 Ok(None)
             }
             // `(expr FORM)`
@@ -2107,11 +2087,7 @@ impl Interp {
         heap.push_permanent_root(tl);
         let def =
             FnDef { ffi: false, target: crate::CompileTarget::Fn(name), params, body, rest, lambda, sig: Some((param_reprs, ret)), compiled: RefCell::new(None) };
-        self.root
-            .borrow_mut()
-            .get_or_create(&name.parent())
-            .fns
-            .insert(name.last_segment().to_string(), Rc::new(def));
+        self.root.borrow_mut().insert_fn(&name, Rc::new(def));
     }
 }
 

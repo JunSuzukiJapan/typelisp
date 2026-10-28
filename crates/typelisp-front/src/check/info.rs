@@ -446,7 +446,7 @@ impl Info {
     pub(super) fn sexpr_variant(&self, name: &str) -> (Path, usize) {
         let path = Path::builtin(typelisp_mem::wk::SEXPR);
         let def = self.reg.type_def(&path).expect("sexpr is built in");
-        let idx = def.variants.iter().position(|v| v.name == name).expect("sexpr has the variant");
+        let idx = def.variants.iter().position(|v| v.name == typelisp_mem::symbols::member_symbol(name)).expect("sexpr has the variant");
         (path, idx)
     }
 
@@ -484,7 +484,7 @@ impl Info {
     /// to the `(type path, method name)` of the static associated function it
     /// names — the static-method counterpart of [`Self::resolve_ctor`],
     /// found the same way.
-    pub(super) fn resolve_static_use(&self, sym: SymRef) -> Option<(Path, String)> {
+    pub(super) fn resolve_static_use(&self, sym: SymRef) -> Option<(Path, SymRef)> {
         self.find_named(sym, |m, k| m.static_uses.get_sym(k).cloned()).map(|(_, member)| member)
     }
 

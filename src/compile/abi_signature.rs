@@ -345,11 +345,11 @@ fn sig_text(sig: &FnSig) -> String {
     let mut params: Vec<String> = sig.params.iter().map(|t| t.to_string()).collect();
     if !sig.optionals.is_empty() {
         params.push("&optional".to_string());
-        params.extend(sig.optionals.iter().map(|p| format!("{}: {}", p.name, p.decl_ty)));
+        params.extend(sig.optionals.iter().map(|p| format!("{}: {}", p.name.name(), p.decl_ty)));
     }
     if !sig.keys.is_empty() {
         params.push("&key".to_string());
-        params.extend(sig.keys.iter().map(|p| format!("{}: {}", p.name, p.decl_ty)));
+        params.extend(sig.keys.iter().map(|p| format!("{}: {}", p.name.name(), p.decl_ty)));
     }
     if let Some(rest) = &sig.rest {
         params.push(format!("&rest {}", rest));

@@ -1124,7 +1124,7 @@ mod scc_tests {
             heap.push_permanent_root(call);
             heap.pop_root();
             interp.root.borrow_mut().define_fn(
-                name.to_string(),
+                &Path::root(name),
                 Rc::new(FnDef { ffi: false,
                     target: crate::CompileTarget::Fn(Path::root(name)),
                     params: vec![],
@@ -1274,11 +1274,11 @@ mod native_method_list_tests {
                 let def = registry
                     .type_def(&crate::Path::builtin(ty))
                     .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));
-                for (method, f) in &def.assoc {
+                for (method, f) in def.assoc.iter() {
                     if !f.builtin {
                         continue;
                     }
-                    if !native_lowered_primitive_methods(ty).contains(&typelisp_mem::symbols::member_symbol(method).well_known()) {
+                    if !native_lowered_primitive_methods(ty).contains(&method.well_known()) {
                         gaps.push(format!("{}::{}", type_local, method));
                     }
                 }

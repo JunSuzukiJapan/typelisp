@@ -2110,11 +2110,7 @@ impl Interp {
                     sig: Some((reprs, ret)),
                     compiled: std::cell::RefCell::new(None),
                 };
-                self.root
-                    .borrow_mut()
-                    .get_or_create(&path.parent())
-                    .fns
-                    .insert(path.last_segment().to_string(), Rc::new(def));
+                self.root.borrow_mut().insert_fn(&path, Rc::new(def));
                 self.thread_entries.borrow_mut().insert(key, path.clone());
                 path
             }

@@ -30,7 +30,7 @@
 //! output on load is nobody's idea of a dump), nor is `Registry::def_locs`,
 //! which only `typl-lsp` reads.
 
-use typelisp_mem::wk;
+use typelisp_mem::{wk, SymRef};
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
 use std::collections::BTreeMap;
@@ -287,7 +287,9 @@ pub struct CheckerDelta {
     /// Kept typed rather than in `entries` because applying one has to rebuild
     /// its forms in the live heap and permanently root them.
     pub fn_templates: Vec<(Path, WireFnTemplate)>,
-    pub method_templates: Vec<((Path, String), WireMethodTemplate)>,
+    /// The template's owner, its name (written down, since an
+    /// instantiation's own method is named by a specialization), and it.
+    pub method_templates: Vec<(Path, crate::owned_form::OwnedSym, WireMethodTemplate)>,
 }
 
 /// Serializes `value` and returns the bytes together with their hash.
@@ -353,8 +355,8 @@ fn walk(
     doc_table!(cat::DOC_VAR, docs.vars, |p: &Path| p.to_string());
     doc_table!(cat::DOC_TRAIT, docs.traits, |p: &Path| p.to_string());
     doc_table!(cat::DOC_MACRO, docs.macros, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_METHOD, docs.methods, |k: &(Path, String)| typelisp_mem::ConcreteNames::method_link(&k.0, &k.1));
-    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods, |k: &(Path, String)| typelisp_mem::ConcreteNames::method_link(&k.0, &k.1));
+    doc_table!(cat::DOC_METHOD, docs.methods, |k: &(Path, SymRef)| typelisp_mem::ConcreteNames::method_link(&k.0, k.1.name()));
+    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods, |k: &(Path, SymRef)| typelisp_mem::ConcreteNames::method_link(&k.0, k.1.name()));
 
     for (tag, ty) in throw_tags {
         let (bytes, hash) = wire(ty)?;
@@ -402,7 +404,13 @@ fn walk_ns(
         let (bytes, hash) = wire(&typelisp_mem::symbols::ns_path(*m))?;
         visit(cat::MOD_ALIAS, path, name, bytes, hash)?;
     }
-    table!(cat::STATIC_USE, ns.static_uses);
+    // The member as its symbol written down, as a `Path`'s name is.
+    let mut rows: Vec<_> = ns.static_uses.iter().collect();
+    rows.sort_by_key(|(name, _)| *name);
+    for (name, (ty, member)) in rows {
+        let (bytes, hash) = wire(&(ty, crate::owned_form::OwnedSym::of(*member)))?;
+        visit(cat::STATIC_USE, path, name, bytes, hash)?;
+    }
     table!(cat::TYPE_ALIAS, ns.type_aliases);
     table!(cat::C_STRUCT, ns.c_structs);
     // Positional, not keyed: at most one blanket `impl` may cover any trait,
@@ -513,8 +521,9 @@ pub fn apply_entries(
                 reg.module_mut(module).mod_aliases.insert(e.name, typelisp_mem::symbols::ns_of(&v));
             }
             cat::STATIC_USE => {
-                let v: (Path, String) = bincode::deserialize(&e.payload).map_err(|err| read_failed("static use", err))?;
-                reg.module_mut(module).static_uses.insert(e.name, v);
+                let (ty, member): (Path, crate::owned_form::OwnedSym) =
+                    bincode::deserialize(&e.payload).map_err(|err| read_failed("static use", err))?;
+                reg.module_mut(module).static_uses.insert(e.name, (ty, member.symbol()));
             }
             cat::TYPE_ALIAS => {
                 let v: TypeAlias = bincode::deserialize(&e.payload).map_err(|err| read_failed("type alias", err))?;
@@ -590,9 +599,9 @@ fn doc_text(payload: &[u8]) -> Result<String, String> {
 
 /// A method entry's name back into the registry's key — the inverse of the
 /// [`typelisp_mem::ConcreteNames::method_link`] the walk wrote it with.
-pub fn parse_method_key(key: &str) -> Result<(Path, String), String> {
+pub fn parse_method_key(key: &str) -> Result<(Path, SymRef), String> {
     match typelisp_mem::ConcreteNames::split_method_link(key) {
-        Some((path, method)) => Ok((parse_path(path), method.to_string())),
+        Some((path, method)) => Ok((parse_path(path), typelisp_mem::symbols::member_symbol(method))),
         None => Err(format!("dump: `{}` is not a method key", key)),
     }
 }

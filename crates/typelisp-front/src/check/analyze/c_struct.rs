@@ -208,7 +208,7 @@ impl Checker {
             let (Some((Value::Symbol(fid), _)), Some((tv, tloc)), 2) = (items.first(), items.get(1), items.len()) else {
                 return Err(Error::TypeError(format!("def-c-struct {}: each field is (name type)", name)));
             };
-            let fname = heap.symbol_spelling(*fid).to_string();
+            let fname = typelisp_mem::symbols::member_symbol(fid.name());
             if fields.iter().any(|f| f.name == fname) {
                 return Err(Error::TypeError(format!("def-c-struct {}: field `{}` is declared twice", name, fname)));
             }
@@ -674,10 +674,11 @@ impl Checker {
     }
 
     fn c_field(&self, s: &Path, field: &str) -> Result<CField, Error> {
+        let member = typelisp_mem::symbols::member_symbol(field);
         self.c_struct_def(s)?
             .fields
             .into_iter()
-            .find(|f| f.name == field)
+            .find(|f| f.name == member)
             .ok_or_else(|| Error::TypeError(format!("C struct `{}` has no field `{}`", s, field)))
     }
 }

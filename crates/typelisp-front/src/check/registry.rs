@@ -8,12 +8,18 @@ use std::collections::{BTreeMap, HashMap};
 use crate::{Loc, Path, Type};
 use typelisp_mem::symbols::{self, NsId, SymRef};
 use typelisp_mem::{wk, ConcreteNames};
+use super::members::Members;
 
 /// One constructor of a data type: a name and its field types. Field types may
 /// reference the enclosing type's parameters as `Type::Named(param, [])`.
+/// The name is the constructor's member symbol
+/// ([`symbols::member_symbol`]): a pattern finds it on the type it matches by
+/// the name written, wherever it was written, as a method call finds a
+/// method.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Variant {
-    pub name: String,
+    #[serde(with = "crate::owned_form::sym_serde")]
+    pub name: SymRef,
     pub fields: Vec<Type>,
 }
 
@@ -122,7 +128,10 @@ impl FnSig {
 /// see `Checker::check_defun_opt_key`.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OptKeyParam {
-    pub name: String,
+    /// The keyword a call passes it with (`:name`) — for an `&optional`
+    /// parameter, which is passed by position, only what a message calls it.
+    #[serde(with = "crate::owned_form::sym_serde")]
+    pub name: SymRef,
     /// The declared type as written — always the plain (non-`Option`-
     /// wrapped) type, even when `default` is absent. See
     /// [`Self::effective_ty`] for the type actually bound in the callee's
@@ -248,8 +257,9 @@ pub struct AdtDef {
     /// Type-parameter names, e.g. `["T"]` for `Option<T>`.
     pub params: Vec<String>,
     pub variants: Vec<Variant>,
-    /// Associated functions / methods, keyed by (unqualified) name.
-    pub assoc: BTreeMap<String, AssocFn>,
+    /// Associated functions / methods, keyed by member symbol
+    /// ([`symbols::member_symbol`]).
+    pub assoc: Members<AssocFn>,
     /// Visible outside its defining module.
     pub public: bool,
     /// See [`FnSig::builtin`].
@@ -267,7 +277,8 @@ pub struct AdtDef {
     /// has no name). Non-empty only for a `Struct`, where it backs field
     /// accessor/setter generation (`Checker::check_defstruct`) — the
     /// `Variant`'s own `fields: Vec<Type>` still holds the parallel types.
-    pub field_names: Vec<String>,
+    #[serde(with = "super::members::member_list_serde")]
+    pub field_names: Vec<SymRef>,
     /// Traits this type has an `impl` for (`Checker::check_impl`), by the
     /// trait's [`Path`]. Each `impl`ed method is inserted into `assoc` like
     /// an ordinary `defmethod` — so an instance call on a *concrete* receiver
@@ -301,16 +312,16 @@ pub struct AdtDef {
 pub struct InstImpls {
     /// The type arguments, every one concrete.
     pub args: Vec<Type>,
-    /// Methods, keyed by the name the source wrote (`twice`, not
-    /// `twice <int>`).
-    pub assoc: BTreeMap<String, AssocFn>,
+    /// Methods, keyed by the member symbol of the name the source wrote
+    /// (`twice`, not `twice <int>`).
+    pub assoc: Members<AssocFn>,
     pub impls: Vec<Path>,
     pub trait_assoc: BTreeMap<Path, BTreeMap<String, Type>>,
 }
 
 impl InstImpls {
     pub fn new(args: Vec<Type>) -> Self {
-        InstImpls { args, assoc: BTreeMap::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
+        InstImpls { args, assoc: Members::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
     }
 }
 
@@ -318,7 +329,7 @@ impl AdtDef {
     /// `name` for a value of this type with type arguments `args`: the
     /// instantiation's own definition, or the one covering every
     /// instantiation.
-    pub fn method_at(&self, name: &str, args: &[Type]) -> Option<&AssocFn> {
+    pub fn method_at(&self, name: SymRef, args: &[Type]) -> Option<&AssocFn> {
         match self.insts.get(&ConcreteNames::type_args(args)).and_then(|i| i.assoc.get(name)) {
             Some(af) => Some(af),
             None => self.assoc.get(name),
@@ -327,7 +338,7 @@ impl AdtDef {
 
     /// Every definition of `name`: the one covering every instantiation, or
     /// each instantiation's own (with that instantiation).
-    pub fn method_defs<'a>(&'a self, name: &'a str) -> impl Iterator<Item = (&'a AssocFn, Option<&'a InstImpls>)> + 'a {
+    pub fn method_defs<'a>(&'a self, name: SymRef) -> impl Iterator<Item = (&'a AssocFn, Option<&'a InstImpls>)> + 'a {
         self.assoc
             .get(name)
             .map(|af| (af, None))
@@ -359,14 +370,15 @@ pub struct TraitDef {
     pub name: Path,
     /// Associated type names (lowercase), e.g. `["item"]` for `Iter`.
     pub assoc_types: Vec<String>,
-    /// Method signature templates, keyed by (unqualified) method name. Each
+    /// Method signature templates, keyed by member symbol. Each
     /// signature's `params`/`ret` may mention `Self` and `assoc_types` as
     /// type variables (`Type::Var("Self")` etc.).
-    pub methods: BTreeMap<String, FnSig>,
+    pub methods: Members<FnSig>,
     /// This trait's *own* method names in `deftrait` source order. Always the
     /// same length as `methods`. Not the vtable layout — see
     /// [`Self::vtable_order`], which prepends the inherited methods.
-    pub method_order: Vec<String>,
+    #[serde(with = "crate::check::members::member_list_serde")]
+    pub method_order: Vec<SymRef>,
     /// Visible outside its defining module.
     pub public: bool,
     pub builtin: bool,
@@ -392,7 +404,8 @@ pub struct TraitDef {
     /// `Y`'s leftmost supertrait spine, so upcasting a `:dyn Y` to a `:dyn X`
     /// along that spine reuses the very same vtable and slot numbers — a
     /// purely type-level operation (`Checker::coerce_to_dyn`).
-    pub vtable_order: Vec<String>,
+    #[serde(with = "crate::check::members::member_list_serde")]
+    pub vtable_order: Vec<SymRef>,
     /// Parallel to [`Self::vtable_order`]: the trait that *declares* each
     /// entry (this trait's own path for its own methods). Lets a lookup find
     /// the declaring `TraitDef` — and hence the `FnSig` and the pin
@@ -402,7 +415,7 @@ pub struct TraitDef {
     /// [`Self::method_order`]. `Checker::check_impl` synthesizes an ordinary
     /// `defmethod` from one whenever an `impl` omits that method, so nothing
     /// downstream of the checker ever learns a body was defaulted.
-    pub defaults: BTreeMap<String, TraitDefault>,
+    pub defaults: Members<TraitDefault>,
 }
 
 /// A `deftrait` method that was written with a body — Rust's default method
@@ -477,7 +490,10 @@ pub struct CStructDef {
 /// One field of a [`CStructDef`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CField {
-    pub name: String,
+    /// The field's member symbol ([`symbols::member_symbol`]): `p::x` finds
+    /// it on the struct by the name written.
+    #[serde(with = "crate::owned_form::sym_serde")]
+    pub name: SymRef,
     /// A C scalar type, `ptr`, a `Type::PtrTo`, or a `Type::CStruct` held
     /// by value.
     pub ty: Type,
@@ -637,7 +653,7 @@ pub struct Namespace {
     /// separate since a constructor and a static method are looked up
     /// through different machinery (`check_construct` vs `check_assoc_call`)
     /// — see `Checker::check_use`/`Checker::check_list`.
-    pub static_uses: Names<(Path, String)>,
+    pub static_uses: Names<(Path, SymRef)>,
     /// `def-c-struct`s defined directly here, keyed by unqualified name. In
     /// the type/trait name space ([`Self::types`] and [`Self::type_aliases`]
     /// refuse the same name), but a table of its own: a C struct is not a
@@ -774,7 +790,7 @@ impl Namespace {
     /// the current namespace).
     pub fn register_ctors(&mut self, type_path: &Path, variants: &[Variant]) {
         for (i, v) in variants.iter().enumerate() {
-            self.ctors.entry(v.name.clone()).or_insert((type_path.clone(), i));
+            self.ctors.entry(v.name.name()).or_insert((type_path.clone(), i));
         }
     }
 }
@@ -795,7 +811,7 @@ impl Namespace {
 #[derive(Clone, Default)]
 pub struct DefLocs {
     pub fns: HashMap<Path, Loc>,
-    pub methods: HashMap<(Path, String), Loc>,
+    pub methods: HashMap<(Path, SymRef), Loc>,
     pub types: HashMap<Path, Loc>,
     pub vars: HashMap<Path, Loc>,
     pub traits: HashMap<Path, Loc>,
@@ -839,7 +855,8 @@ pub struct DefLocs {
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Docs {
     pub fns: HashMap<Path, String>,
-    pub methods: HashMap<(Path, String), String>,
+    #[serde(with = "super::members::method_table_serde")]
+    pub methods: HashMap<(Path, SymRef), String>,
     pub types: HashMap<Path, String>,
     pub vars: HashMap<Path, String>,
     pub traits: HashMap<Path, String>,
@@ -848,7 +865,8 @@ pub struct Docs {
     /// path, method name). Only a method with a default body can carry one:
     /// in a bodyless signature a trailing string is the return value, with
     /// nothing to tell the two apart.
-    pub trait_methods: HashMap<(Path, String), String>,
+    #[serde(with = "super::members::method_table_serde")]
+    pub trait_methods: HashMap<(Path, SymRef), String>,
 }
 
 /// The checker's symbol table: one [`Namespace`] per module the session has.
@@ -1413,9 +1431,9 @@ impl Registry {
     pub fn trait_method<'a>(
         &'a self,
         tdef: &'a TraitDef,
-        method: &str,
+        method: SymRef,
     ) -> Option<(&'a TraitDef, &'a FnSig)> {
-        let slot = tdef.vtable_order.iter().position(|m| m == method)?;
+        let slot = tdef.vtable_order.iter().position(|m| *m == method)?;
         let owner = &tdef.vtable_owner[slot];
         // Own methods dominate: skip the second lookup (and work even while
         // `check_deftrait`'s self-referential stub is the registered entry).
@@ -1456,6 +1474,12 @@ impl Registry {
     }
 }
 
+/// A built-in catalog of members, written by their names, as the member
+/// table their symbols key.
+pub fn members_of<T>(by_name: BTreeMap<String, T>) -> Members<T> {
+    by_name.into_iter().map(|(name, v)| (symbols::member_symbol(&name), v)).collect()
+}
+
 /// A built-in type: public, and with none of what only a user definition
 /// carries (field names, `impl`s, trait-associated types).
 fn builtin_adt(
@@ -1469,7 +1493,7 @@ fn builtin_adt(
         name,
         params: params.iter().map(|p| p.to_string()).collect(),
         variants,
-        assoc,
+        assoc: members_of(assoc),
         public: true,
         builtin: true,
         stdlib: true,
@@ -1484,16 +1508,16 @@ fn builtin_adt(
 /// `Option<T> = Some(T) | None`.
 fn option_def() -> AdtDef {
     builtin_adt(Path::builtin(typelisp_mem::wk::OPTION), &["T"], AdtKind::Sum, vec![
-        Variant { name: "some".to_string(), fields: vec![tvar("T")] },
-        Variant { name: "none".to_string(), fields: vec![] },
+        Variant { name: symbols::member_symbol("some"), fields: vec![tvar("T")] },
+        Variant { name: symbols::member_symbol("none"), fields: vec![] },
     ], BTreeMap::new())
 }
 
 /// `Result<T, E> = Ok(T) | Err(E)`.
 fn result_def() -> AdtDef {
     builtin_adt(Path::builtin(typelisp_mem::wk::RESULT), &["T", "E"], AdtKind::Sum, vec![
-        Variant { name: "ok".to_string(), fields: vec![tvar("T")] },
-        Variant { name: "err".to_string(), fields: vec![tvar("E")] },
+        Variant { name: symbols::member_symbol("ok"), fields: vec![tvar("T")] },
+        Variant { name: symbols::member_symbol("err"), fields: vec![tvar("E")] },
     ], BTreeMap::new())
 }
 
@@ -1923,7 +1947,7 @@ fn builtin_error_defs() -> Vec<AdtDef> {
         .iter()
         .map(|&ty| {
             let path = Path::builtin(ty);
-            let variant = Variant { name: path.last_segment().to_string(), fields: vec![Type::Str] };
+            let variant = Variant { name: symbols::member_symbol(path.last_segment()), fields: vec![Type::Str] };
             builtin_adt(path, &[], AdtKind::Sum, vec![variant], BTreeMap::new())
         })
         .collect()
@@ -1954,7 +1978,7 @@ fn builtin_error_defs() -> Vec<AdtDef> {
 fn sexpr_def() -> AdtDef {
     use crate::sexpr_variant as sv;
     let variants = (0..sv::COUNT)
-        .map(|v| Variant { name: sv::NAMES[v].to_string(), fields: sexpr_variant_fields(v) })
+        .map(|v| Variant { name: symbols::member_symbol(sv::NAMES[v]), fields: sexpr_variant_fields(v) })
         .collect();
     builtin_adt(Path::builtin(typelisp_mem::wk::SEXPR), &[], AdtKind::Sum, variants, sexpr_assoc())
 }
@@ -3446,10 +3470,10 @@ fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
     let members = def
         .variants
         .iter()
-        .map(|v| v.name.as_str())
-        .chain(def.field_names.iter().map(String::as_str))
-        .chain(def.assoc.keys().map(String::as_str))
-        .chain(def.insts.values().flat_map(|i| i.assoc.keys().map(String::as_str)));
+        .map(|v| v.name.name())
+        .chain(def.field_names.iter().map(|f| f.name()))
+        .chain(def.assoc.keys().map(|m| m.name()))
+        .chain(def.insts.values().flat_map(|i| i.assoc.keys().map(|m| m.name())));
     for name in members {
         names.declare_member(ty, typelisp_mem::symbols::intern_in(home, name));
     }
@@ -3461,6 +3485,6 @@ fn publish_trait(def: &TraitDef, names: &mut typelisp_mem::symbols::SessionNames
     let home = def.name.ns();
     names.declare_type(home, tr);
     for name in def.methods.keys() {
-        names.declare_member(tr, typelisp_mem::symbols::intern_in(home, name));
+        names.declare_member(tr, typelisp_mem::symbols::intern_in(home, name.name()));
     }
 }

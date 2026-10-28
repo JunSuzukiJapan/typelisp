@@ -769,13 +769,3 @@ pub(super) fn member_form(heap: &mut Heap, type_path: &Path, member: &str) -> Re
     items.push(Value::Symbol(typelisp_mem::symbols::intern_in(type_path.ns(), member)));
     items.finish_list()
 }
-
-/// `(a b c)` — a list of symbols, one per name.
-pub(super) fn sym_list(heap: &mut Heap, names: &[String]) -> Result<Value, Error> {
-    let mut f = Items::new(heap);
-    for n in names {
-        let sym = f.heap().intern_symbol(n);
-        f.push(sym);
-    }
-    f.finish_list()
-}
