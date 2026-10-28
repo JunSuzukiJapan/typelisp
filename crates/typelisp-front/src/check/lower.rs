@@ -97,7 +97,7 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
             s.push_root(form);
             core::tagged(s, wk::TYPE_VALUE, &[form])
         }
-        Node::Local { name } => forms::var_form(s, name),
+        Node::Local { name } => forms::var_form(s, *name),
         Node::Global { path, ty } => info.global_form(s, path, ty),
         Node::FnRef { path, params } => info.fnref_form(s, path, params),
         Node::MethodRef { owner, method, params, ret } => info.methodref_form(s, owner, *method, params, ret),
@@ -144,7 +144,7 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
         }
         Node::Set { name, value } => {
             let value = sub(s, info, value)?;
-            forms::set_form(s, name, value)
+            forms::set_form(s, *name, value)
         }
         Node::SetGlobal { path, ty, value } => {
             let value = sub(s, info, value)?;
@@ -249,7 +249,7 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
                     SelectArm::Recv { var, bound, chan, body } => {
                         let chan = sub(s, info, chan)?;
                         let body = sub(s, info, body)?;
-                        forms::select_recv_arm(s, var, bound, chan, body)?
+                        forms::select_recv_arm(s, *var, bound, chan, body)?
                     }
                     SelectArm::Send { kind, chan, value, body } => {
                         let chan = sub(s, info, chan)?;
@@ -387,13 +387,12 @@ impl Info {
     /// Also the only sequencing node: `progn` is `(let () ...)`, a `let` with
     /// no bindings, so there is one shape for "run these in order" rather than
     /// two.
-    pub(super) fn let_form(&self, heap: &mut Heap, binds: &[(String, Type, Value)], body: &[Value]) -> Result<Value, Error> {
+    pub(super) fn let_form(&self, heap: &mut Heap, binds: &[(SymRef, Type, Value)], body: &[Value]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let mut bs = Items::new(f.heap());
         for (name, ty, val) in binds {
-            let sym = bs.heap().intern_symbol(name);
             let repr = self.repr_form(bs.heap(), ty)?;
-            let one = core::list(bs.heap(), &[sym, repr, *val])?;
+            let one = core::list(bs.heap(), &[Value::Symbol(*name), repr, *val])?;
             bs.push(one);
         }
         let binds = bs.finish_list()?;
@@ -701,8 +700,7 @@ impl Info {
         let form = match pat {
             Pattern::Wildcard => core::tagged(heap, wk::PAT_WILD, &[])?,
             Pattern::Bind(name) => {
-                let sym = heap.intern_symbol(name);
-                core::tagged(heap, wk::PAT_BIND, &[sym])?
+                core::tagged(heap, wk::PAT_BIND, &[Value::Symbol(*name)])?
             }
             Pattern::Int(n) => {
                 let lit = core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(*n)])?;
@@ -725,8 +723,7 @@ impl Info {
             Pattern::Guard { name, form } => {
                 let mut s = RootScope::new(heap);
                 let test = sub(&mut s, self, form)?;
-                let sym = s.intern_symbol(name);
-                core::tagged(&mut s, wk::PAT_GUARD, &[sym, test])?
+                core::tagged(&mut s, wk::PAT_GUARD, &[Value::Symbol(*name), test])?
             }
             Pattern::When { pat, test } => {
                 let mut s = RootScope::new(heap);
@@ -813,7 +810,7 @@ impl Info {
     pub(super) fn lambda_form(
         &self,
         heap: &mut Heap,
-        params: &[(String, Type)],
+        params: &[(SymRef, Type)],
         ret: &Type,
         body: &[Value],
     ) -> Result<Value, Error> {
@@ -828,12 +825,11 @@ impl Info {
 
     /// `((SYM REPR)...)` — a parameter list, shared by `lambda`/`labels` and
     /// the top-level definition forms.
-    pub(super) fn param_list_form(&self, heap: &mut Heap, params: &[(String, Type)]) -> Result<Value, Error> {
+    pub(super) fn param_list_form(&self, heap: &mut Heap, params: &[(SymRef, Type)]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         for (name, ty) in params {
-            let sym = f.heap().intern_symbol(name);
             let repr = self.repr_form(f.heap(), ty)?;
-            let one = core::list(f.heap(), &[sym, repr])?;
+            let one = core::list(f.heap(), &[Value::Symbol(*name), repr])?;
             f.push(one);
         }
         f.finish_list()
@@ -847,8 +843,7 @@ impl Info {
         let mut ds = Items::new(f.heap());
         for (name, params, ret, def_body) in defs {
             let mut d = Items::new(ds.heap());
-            let sym = d.heap().intern_symbol(name);
-            d.push(sym);
+            d.push(Value::Symbol(*name));
             let ps = self.param_list_form(d.heap(), params)?;
             d.push(ps);
             let r = self.repr_form(d.heap(), ret)?;
@@ -948,7 +943,7 @@ impl Info {
         &self,
         heap: &mut Heap,
         name: &Path,
-        params: &[(String, Type)],
+        params: &[(SymRef, Type)],
         ret: &Type,
         body: &[Value],
     ) -> Result<Value, Error> {
@@ -1004,10 +999,10 @@ impl Info {
         f.push(lib);
         // A callback parameter crosses as the entry's address — a raw word —
         // whatever function type it was declared with.
-        let named: Vec<(String, Type)> = params
+        let named: Vec<(SymRef, Type)> = params
             .iter()
             .enumerate()
-            .map(|(i, t)| (format!("a{}", i), if matches!(t, Type::Fn(..)) { Type::Ptr } else { t.clone() }))
+            .map(|(i, t)| (typelisp_mem::symbols::intern(&format!("a{}", i)), if matches!(t, Type::Fn(..)) { Type::Ptr } else { t.clone() }))
             .collect();
         let ps = self.param_list_form(f.heap(), &named)?;
         f.push(ps);
@@ -1043,7 +1038,7 @@ impl Info {
         heap: &mut Heap,
         name: &Path,
         type_params: &[String],
-        params: &[(String, Type)],
+        params: &[(SymRef, Type)],
         ret: &Type,
         body: &[Value],
     ) -> Result<Value, Error> {
@@ -1063,7 +1058,7 @@ impl Info {
         method: SymRef,
         instance: bool,
         type_params: &[String],
-        params: &[(String, Type)],
+        params: &[(SymRef, Type)],
         ret: &Type,
         body: &[Value],
     ) -> Result<Value, Error> {
@@ -1085,7 +1080,7 @@ impl Info {
         type_name: &Path,
         method: SymRef,
         instance: bool,
-        params: &[(String, Type)],
+        params: &[(SymRef, Type)],
         ret: &Type,
         body: &[Value],
     ) -> Result<Value, Error> {

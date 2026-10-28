@@ -759,5 +759,13 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      標準ライブラリの公開範囲と `pub use`、例のコードに `use`）。表が `prelude_offers` と合っていることは
      `root_names_documented_test` が確かめる。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。
+   - 7a. 局所の束縛。途中。チェッカーのスコープ（`Env`）のキー、`Node::Local`/`Set`/`Let`/`Lambda`、
+     `labels` の定義、パターンの束縛、`select` の受信の変数、マクロの引数、`symbol-macrolet` の表、
+     `loop` の DSL の変数と集め先、インタプリタの関数表（`FnDef::params`）とコンパイラへ渡す引数
+     （`FnBody`）を、利用者が書いたシンボルにした。IR の `var`/`set`/`let`/`lambda` は、文字列から
+     作り直さずにそのシンボルを運ぶ。チェッカーが自分で作る一時変数（`$match-scrut` など、ソースから
+     書けない綴り）は `info::internal_local` でルートのシンボルにする。このため、別のモジュールの
+     マクロが束縛した名前は、呼び出し側の同じ綴りの名前を捕まえない（`local_symbol_test`）。
+     残り: `block` の名前、`macrolet` の表、定義を指す IR、メソッド名の文字列比較。
 8. ダンプ・fasl を 3.6 の形に。
 9. 利用者向け文書（日本語の原本、翻訳）。

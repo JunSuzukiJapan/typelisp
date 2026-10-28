@@ -26,9 +26,16 @@ pub(super) fn symbol_macro_mark() -> Type {
     Type::Named(Path::root(" symbol-macro"), Vec::new())
 }
 
+/// The symbol of a local the checker makes for itself (`$match-scrut`,
+/// `" c-value"`, a gensym'd place): spelled so that no source can write it,
+/// and made at the root like the core IR's own names.
+pub(super) fn internal_local(name: &str) -> SymRef {
+    typelisp_mem::symbols::intern(name)
+}
+
 /// One binding of a local: its name, type, and — where known — the source
 /// position of the name in its binding form (see [`Env::get_loc`]).
-pub(super) type LocalBinding = (String, Type, Option<Loc>);
+pub(super) type LocalBinding = (SymRef, Type, Option<Loc>);
 
 /// The bindings one [`Env::extended_with_locs`] added, on top of the scope it
 /// extended. A chain rather than one flat list copied at every level: a body
@@ -42,7 +49,8 @@ pub(super) struct Scope {
     start: usize,
 }
 
-/// A lexical environment mapping variable names to their types.
+/// A lexical environment mapping local variables — by the symbol the binding
+/// form wrote, the one a reference to it reads as — to their types.
 #[derive(Clone)]
 pub(super) struct Env {
     /// Each binding's name, type, and — where known — the source position of
@@ -77,10 +85,10 @@ impl Env {
 
     /// The nearest binding of `name`, with where it sits counted from the
     /// outermost binding.
-    pub(super) fn lookup(&self, name: &str) -> Option<(usize, &LocalBinding)> {
+    pub(super) fn lookup(&self, name: SymRef) -> Option<(usize, &LocalBinding)> {
         let mut scope = self.vars.as_deref();
         while let Some(s) = scope {
-            if let Some(i) = s.binds.iter().rposition(|(n, _, _)| n == name) {
+            if let Some(i) = s.binds.iter().rposition(|(n, _, _)| *n == name) {
                 return Some((s.start + i, &s.binds[i]));
             }
             scope = s.parent.as_deref();
@@ -88,14 +96,14 @@ impl Env {
         None
     }
 
-    pub(super) fn get(&self, name: &str) -> Option<&Type> {
+    pub(super) fn get(&self, name: SymRef) -> Option<&Type> {
         self.lookup(name).map(|(_, (_, t, _))| t)
     }
 
     /// Where the nearest binding of `name` sits, counted from the outermost
     /// binding — stable down a chain of `extended` environments, which only
     /// ever add.
-    pub(super) fn position(&self, name: &str) -> Option<usize> {
+    pub(super) fn position(&self, name: SymRef) -> Option<usize> {
         self.lookup(name).map(|(i, _)| i)
     }
 
@@ -107,7 +115,7 @@ impl Env {
     /// The nearest binding of `name`'s own recorded source position, if any —
     /// see [`Self::vars`]'s doc comment. Consulted by `Checker::check_at`
     /// alongside [`Self::get`] when a `Var` reference resolves to a local.
-    pub(super) fn get_loc(&self, name: &str) -> Option<Loc> {
+    pub(super) fn get_loc(&self, name: SymRef) -> Option<Loc> {
         self.lookup(name).and_then(|(_, (_, _, l))| l.clone())
     }
 
@@ -116,7 +124,7 @@ impl Env {
     /// track individual binding positions (monomorphization's synthesized
     /// re-checks). See [`Self::extended_with_locs`] for the counterpart that
     /// does.
-    pub(super) fn extended(&self, binds: Vec<(String, Type)>) -> Result<Env, Error> {
+    pub(super) fn extended(&self, binds: Vec<(SymRef, Type)>) -> Result<Env, Error> {
         self.extended_with_locs(binds.into_iter().map(|(n, t)| (n, t, None)).collect())
     }
 
@@ -129,10 +137,10 @@ impl Env {
     /// binding, a `lambda`/`labels`/`defun`/`defmethod` parameter or receiver,
     /// a `labels` function name, a `match`-pattern binding — which is what
     /// makes this the one place a reserved name can be refused.
-    pub(super) fn extended_with_locs(&self, binds: Vec<(String, Type, Option<Loc>)>) -> Result<Env, Error> {
+    pub(super) fn extended_with_locs(&self, binds: Vec<(SymRef, Type, Option<Loc>)>) -> Result<Env, Error> {
         for (name, _, _) in &binds {
-            if is_reserved_name(name) {
-                return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name)));
+            if is_reserved_name(name.name()) {
+                return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
             }
         }
         let start = self.len();
@@ -221,7 +229,7 @@ pub(super) struct Info {
     /// symbol macro hides an outer variable (it rebinds the name to the
     /// mark) — which is exactly CL's rule, arrived at by the environment
     /// doing what it already does.
-    local_symbol_macros: RefCell<Vec<HashMap<String, Value>>>,
+    local_symbol_macros: RefCell<Vec<HashMap<SymRef, Value>>>,
 }
 
 impl Info {
@@ -399,7 +407,7 @@ impl Info {
     /// Runs `body` with `scope`'s `symbol-macrolet` bindings in view,
     /// innermost. The forms are heap values this table holds where the
     /// collector cannot see them, so the caller roots them for as long.
-    pub(super) fn with_symbol_macros<R>(&self, scope: HashMap<String, Value>, body: impl FnOnce() -> R) -> R {
+    pub(super) fn with_symbol_macros<R>(&self, scope: HashMap<SymRef, Value>, body: impl FnOnce() -> R) -> R {
         self.local_symbol_macros.borrow_mut().push(scope);
         let result = body();
         self.local_symbol_macros.borrow_mut().pop();
@@ -408,9 +416,9 @@ impl Info {
 
     /// The form `name` stands for, if a `symbol-macrolet` scope in view binds
     /// it. Innermost scope first, the way `Env` itself resolves.
-    pub(super) fn symbol_macro_form(&self, name: &str) -> Option<Value> {
+    pub(super) fn symbol_macro_form(&self, name: SymRef) -> Option<Value> {
         for scope in self.local_symbol_macros.borrow().iter().rev() {
-            if let Some(form) = scope.get(name) {
+            if let Some(form) = scope.get(&name) {
                 return Some(*form);
             }
         }

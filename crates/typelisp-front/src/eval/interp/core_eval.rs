@@ -1034,7 +1034,7 @@ impl Interp {
 
         let mut ps = core::Items::new(&mut s);
         for (i, name) in f.params.iter().enumerate() {
-            let sym = ps.heap().intern_symbol(name);
+            let sym = Value::Symbol(*name);
             let repr = match reprs.get(i) {
                 Some(r) => r.write(ps.heap()).map_err(heap_err)?,
                 None => Value::Empty,
@@ -1937,7 +1937,7 @@ impl Interp {
                 let mut variants = Vec::with_capacity(names.len());
                 let mut templates = Vec::with_capacity(names.len());
                 for ((n, fields), ts) in names.into_iter().zip(lists).zip(template_lists) {
-                    variants.push((n, repr_list(heap, fields, "defenum")?));
+                    variants.push((n.name().to_string(), repr_list(heap, fields, "defenum")?));
                     templates.push(type_list(heap, ts, "defenum")?);
                 }
                 self.root.borrow_mut().register_enum(&name, EnumDef { variants, templates });
@@ -2075,11 +2075,7 @@ impl Interp {
             .iter()
             .zip(args)
             .map(|(name, v)| {
-                let sym = match s.intern_symbol(name) {
-                    Value::Symbol(id) => id,
-                    _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-                };
-                (sym, v)
+                (*name, v)
             })
             .collect();
         let env = extend_env(&mut s, &binds, Value::Empty)?;
@@ -2101,7 +2097,7 @@ impl Interp {
         heap: &mut Heap,
         tl: Value,
         name: crate::Path,
-        params: Vec<String>,
+        params: Vec<SymRef>,
         param_reprs: Vec<Repr>,
         ret: Repr,
         body: Vec<Value>,
@@ -2180,7 +2176,7 @@ fn str_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<String>, EvalErr
 
 /// A field holding a parameter list `((SYM REPR)...)`, split into the names it
 /// binds and their representations.
-fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<String>, Vec<Repr>), EvalError> {
+fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<SymRef>, Vec<Repr>), EvalError> {
     let list = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) has no parameter list", what)))?;
     let ps = heap
@@ -2194,7 +2190,7 @@ fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<Str
             .map_err(|e| EvalError::Internal(format!("exec: ({} ..) parameter: {}", what, e)))?;
         match parts.as_slice() {
             [Value::Symbol(sym), r] => {
-                names.push(heap.symbol_spelling(*sym).to_string());
+                names.push(*sym);
                 reprs.push(Repr::read(heap, *r).ok_or_else(|| {
                     EvalError::Internal(format!("exec: ({} ..) parameter representation: {}", what, core::print(heap, *r)))
                 })?);
@@ -2248,7 +2244,7 @@ pub fn read_ffi_decl(heap: &Heap, tl: Value) -> Result<crate::eval::interp::FfiD
 
 /// A field holding a bare symbol list `(SYM...)` — a `defmacro`'s parameters
 /// (all `Sexpr`, so no representations) or a `defenum`'s variant names.
-fn sym_list_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<String>, EvalError> {
+fn sym_list_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<SymRef>, EvalError> {
     let list = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) has no field {}", what, i)))?;
     let vs = heap
@@ -2256,7 +2252,7 @@ fn sym_list_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<
         .map_err(|e| EvalError::Internal(format!("exec: ({} ..) symbol list: {}", what, e)))?;
     vs.into_iter()
         .map(|v| match v {
-            Value::Symbol(id) => Ok(heap.symbol_spelling(id).to_string()),
+            Value::Symbol(id) => Ok(id),
             other => Err(EvalError::Internal(format!("exec: ({} ..) not a symbol: {:?}", what, other))),
         })
         .collect()

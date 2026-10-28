@@ -21,7 +21,7 @@
 //! the rooting discipline comes from [`crate::check::core`] (see its module doc
 //! comment for why a raw `cons` is not enough).
 
-use typelisp_mem::{wk, Error, Heap, Loc, NsId, RootScope, Value};
+use typelisp_mem::{wk, Error, Heap, Loc, NsId, RootScope, SymRef, Value};
 
 use crate::check::analyze::MacroLambda;
 use crate::check::core::{self, path_form, Items};
@@ -45,17 +45,15 @@ use crate::types::{Path, Type};
 /// impossible to forget at the next one; the extra root-stack entry on the
 /// ordinary path costs nothing, since `check_form_at`'s `truncate_roots`
 /// releases them all at once regardless of how many there were.
-pub(super) fn var_form(heap: &mut Heap, name: &str) -> Result<Value, Error> {
-    let sym = heap.intern_symbol(name);
-    let form = core::tagged(heap, wk::VAR, &[sym])?;
+pub(super) fn var_form(heap: &mut Heap, name: SymRef) -> Result<Value, Error> {
+    let form = core::tagged(heap, wk::VAR, &[Value::Symbol(name)])?;
     Ok(rooted(heap, form))
 }
 
 /// `(set SYM FORM)` — assignment to a local binding.
-pub(super) fn set_form(heap: &mut Heap, name: &str, value: Value) -> Result<Value, Error> {
+pub(super) fn set_form(heap: &mut Heap, name: SymRef, value: Value) -> Result<Value, Error> {
     let mut f = Items::new(heap);
-    let sym = f.heap().intern_symbol(name);
-    f.push(sym);
+    f.push(Value::Symbol(name));
     f.push(value);
     f.finish(wk::SET)
 }
@@ -267,7 +265,7 @@ pub(super) fn select_form(heap: &mut Heap, arms: &[Value]) -> Result<Value, Erro
 /// mutable one.
 pub(super) fn select_recv_arm(
     heap: &mut Heap,
-    var: &str,
+    var: SymRef,
     bound: &Type,
     chan: Value,
     body: Value,
@@ -281,8 +279,7 @@ pub(super) fn select_recv_arm(
     let mut f = Items::new(arm_heap);
     let tag = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::RECV));
     f.push(tag);
-    let v = f.heap().intern_symbol(var);
-    f.push(v);
+    f.push(Value::Symbol(var));
     let k = core::type_form(f.heap(), bound, &[])?;
     f.push(k);
     f.push(chan);
@@ -434,7 +431,7 @@ pub(super) fn dyn_value_form(heap: &mut Heap, value: Value) -> Result<Value, Err
 pub(super) fn defmacro_form(
     heap: &mut Heap,
     name: &Path,
-    params: &[String],
+    params: &[SymRef],
     rest: bool,
     lambda: &MacroLambda,
     body: &[Value],
@@ -442,7 +439,11 @@ pub(super) fn defmacro_form(
     let mut f = Items::new(heap);
     let path = path_form(f.heap(), name);
     f.push(path);
-    let ps = sym_list(f.heap(), params)?;
+    let ps = {
+        let mut ps = Items::new(f.heap());
+        ps.extend(params.iter().map(|p| Value::Symbol(*p)));
+        ps.finish_list()?
+    };
     f.push(ps);
     f.push(Value::Bool(rest));
     let lam = {

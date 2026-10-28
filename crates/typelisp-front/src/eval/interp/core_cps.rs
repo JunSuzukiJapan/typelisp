@@ -2094,7 +2094,7 @@ impl Interp {
         let path = match known {
             Some(path) => path,
             None => {
-                let names = param_names(heap, params)?.into_iter().map(|s| heap.symbol_spelling(s).to_string()).collect();
+                let names = param_names(heap, params)?;
                 let reprs = param_reprs(heap, params)?;
                 let ret = Repr::read(heap, heap.closure_ret(id))
                     .ok_or_else(|| EvalError::Internal("thread: the closure has no declared return representation".to_string()))?;
@@ -2245,10 +2245,7 @@ impl Interp {
             .params
             .iter()
             .zip(argv)
-            .map(|(name, v)| match heap.intern_symbol(name) {
-                Value::Symbol(id) => (id, v),
-                _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-            })
+            .map(|(name, v)| (*name, v))
             .collect();
         // A top-level function closes over nothing, so its frame extends the
         // empty environment rather than the caller's — that is what makes the

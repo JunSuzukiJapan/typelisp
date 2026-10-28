@@ -71,7 +71,7 @@ pub struct FnDef {
     /// to look up in its table, and a name to print.
     pub target: crate::CompileTarget,
     /// Parameter names, including the receiver name first for instance methods.
-    pub params: Vec<String>,
+    pub params: Vec<SymRef>,
     /// The body's core forms, in order.
     ///
     /// These are heap cells, which the old `Vec<Typed>` was not — so the
@@ -1823,11 +1823,7 @@ impl Interp {
             ($v:expr) => {{
                 let v = $v;
                 heap.push_root(v);
-                let sym = match heap.intern_symbol(&f.params[pi]) {
-                    Value::Symbol(id) => id,
-                    other => unreachable!("intern_symbol returned {:?}", other),
-                };
-                env = self::core_eval::extend_env(heap, &[(sym, v)], env)?;
+                env = self::core_eval::extend_env(heap, &[(f.params[pi], v)], env)?;
                 heap.push_root(env);
                 argv.push(v);
                 pi += 1;
@@ -2713,31 +2709,6 @@ impl Interp {
         };
         Ok(result_ok(heap, &EVAL_RESULT_TYPE, result))
     }
-}
-
-/// Intern a name set into the `SymRef`s the core bridge compares by.
-pub fn intern_names(heap: &mut Heap, names: &HashSet<String>) -> HashSet<SymRef> {
-    names
-        .iter()
-        .map(|n| match heap.intern_symbol(n) {
-            Value::Symbol(id) => id,
-            _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-        })
-        .collect()
-}
-
-/// The same for a parameter list, keeping each name's representation.
-pub fn intern_params(heap: &mut Heap, params: &[(String, Repr)]) -> Vec<(SymRef, Repr)> {
-    params
-        .iter()
-        .map(|(n, r)| {
-            let id = match heap.intern_symbol(n) {
-                Value::Symbol(id) => id,
-                _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-            };
-            (id, r.clone())
-        })
-        .collect()
 }
 
 /// A compiled call handed back a word that does not decode to the shape its
@@ -4137,7 +4108,7 @@ pub struct FfiDecl {
 /// ABI to pin down and `Result`/`String` cross directly.
 /// What a function hands the compiler: its parameters, each with the
 /// representation its declared type lowers to, and its body forms.
-pub type FnBody = (Vec<(String, Repr)>, Vec<Value>);
+pub type FnBody = (Vec<(SymRef, Repr)>, Vec<Value>);
 
 /// One `llvm-*`/native-scope builtin, as the island calls it.
 pub type LlvmBuiltinFn = fn(&mut Heap, &Path, &str, &[Value]) -> Option<Result<Value, EvalError>>;

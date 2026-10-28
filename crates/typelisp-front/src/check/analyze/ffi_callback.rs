@@ -34,14 +34,14 @@ pub(super) struct LabelsScope {
     /// reference resolves to this block's function exactly when its nearest
     /// binding sits in `start..start + names.len()`.
     start: usize,
-    names: Vec<String>,
+    names: Vec<SymRef>,
     /// References to one of these functions as a C callback, resolved once
     /// every body in the block has been checked.
     pending: Vec<PendingLabelsCallback>,
 }
 
 struct PendingLabelsCallback {
-    name: String,
+    name: SymRef,
     lifted: Path,
     loc: Option<Loc>,
 }
@@ -87,8 +87,8 @@ impl Checker {
             // calls it.
             Node::FnRef { path, .. } if typelisp_mem::specialization::specialized(path.name_symbol()).is_some() => {
                 let Type::Fn(params, _, ret) = fn_ty else { unreachable!("a callback's type is a function type") };
-                let params: Vec<(String, Type)> = params.iter().enumerate().map(|(i, t)| (format!("a{}", i), t.clone())).collect();
-                let args = params.iter().map(|(n, t)| Checked::of(Node::Local { name: n.as_str().into() }, t.clone())).collect();
+                let params: Vec<(SymRef, Type)> = params.iter().enumerate().map(|(i, t)| (internal_local(&format!("a{}", i)), t.clone())).collect();
+                let args = params.iter().map(|(n, t)| Checked::of(Node::Local { name: *n }, t.clone())).collect();
                 let call = Checked::of(Node::Call { path: *path, args }, (**ret).clone());
                 let lambda = Checked::of(Node::Lambda { params, ret: (**ret).clone(), body: vec![call] }, fn_ty.clone());
                 let lambda = self.lowered(heap, &lambda)?;
@@ -104,7 +104,7 @@ impl Checker {
                 }
                 path.clone()
             }
-            Node::Local { name } => self.pend_labels_callback(env, name, loc.as_ref(), callee)?,
+            Node::Local { name } => self.pend_labels_callback(env, *name, loc.as_ref(), callee)?,
             _ => {
                 return Err(Error::TypeError(format!(
                     "{}: a C callback must be written where it is passed — the name of a function, \
@@ -189,7 +189,7 @@ impl Checker {
     /// A reference to a local function, noted for [`Self::resolve_labels_callbacks`]
     /// — its body, and its siblings', are not all checked yet — and the path
     /// its lifted copy will have. Any other local is a variable, refused.
-    fn pend_labels_callback(&self, env: &Env, name: &str, loc: Option<&Loc>, callee: &Path) -> Result<Path, Error> {
+    fn pend_labels_callback(&self, env: &Env, name: SymRef, loc: Option<&Loc>, callee: &Path) -> Result<Path, Error> {
         let at = env.position(name);
         let mut scopes = self.labels_scopes.borrow_mut();
         let scope = scopes
@@ -201,17 +201,17 @@ impl Checker {
                 "{}: `{}` is a variable, and which function a variable holds is not known until \
                  the program runs — so neither is whether it has local variables C could not \
                  give it. Pass the function's own name, or a `lambda`.",
-                callee, name
+                callee, name.name()
             )));
         };
         let lifted = self.fresh_callback_path();
-        scope.pending.push(PendingLabelsCallback { name: name.to_string(), lifted: lifted.clone(), loc: loc.cloned() });
+        scope.pending.push(PendingLabelsCallback { name, lifted: lifted.clone(), loc: loc.cloned() });
         Ok(lifted)
     }
 
     /// Opens a `labels` block's scope: its `names` were just bound into an
     /// `Env` that held `start` bindings before them.
-    pub(super) fn open_labels_scope(&self, start: usize, names: Vec<String>) {
+    pub(super) fn open_labels_scope(&self, start: usize, names: Vec<SymRef>) {
         self.labels_scopes.borrow_mut().push(LabelsScope { start, names, pending: Vec::new() });
     }
 
@@ -235,61 +235,56 @@ impl Checker {
     /// where `DEF...` are `g` and every sibling it reaches, or an error naming
     /// what they capture.
     fn lift_labels_callback(&self, heap: &mut Heap, defs: &[LabelsDef], p: &PendingLabelsCallback) -> Result<(), Error> {
-        let names: HashSet<&str> = defs.iter().map(|(n, _, _, _)| n.as_str()).collect();
+        let names: HashSet<SymRef> = defs.iter().map(|(n, _, _, _)| *n).collect();
         // Each definition's references out of its own parameters, split into
         // the siblings it reaches and the locals it captures.
-        let mut refs: HashMap<&str, (Vec<String>, Vec<String>)> = HashMap::new();
+        let mut refs: HashMap<SymRef, (Vec<SymRef>, Vec<SymRef>)> = HashMap::new();
         for (name, params, _, body) in defs {
-            let bound: HashSet<SymRef> = params.iter().map(|(n, _)| typelisp_mem::symbols::intern(n)).collect();
+            let bound: HashSet<SymRef> = params.iter().map(|(n, _)| *n).collect();
             let lowered = self.lowered_all(heap, body)?;
             let free = crate::check::freevars::free_vars(heap, &lowered, &bound, &HashSet::new())?;
-            let (sibs, caps): (Vec<String>, Vec<String>) = free
-                .iter()
-                .map(|s| s.name().to_string())
-                .partition(|n| names.contains(n.as_str()));
-            refs.insert(name.as_str(), (sibs, caps));
+            let (sibs, caps): (Vec<SymRef>, Vec<SymRef>) = free.iter().copied().partition(|n| names.contains(n));
+            refs.insert(*name, (sibs, caps));
         }
-        let mut reached: Vec<&str> = vec![p.name.as_str()];
+        let mut reached: Vec<SymRef> = vec![p.name];
         let mut i = 0;
         while i < reached.len() {
-            let (sibs, _) = &refs[reached[i]];
+            let (sibs, _) = &refs[&reached[i]];
             for s in sibs {
-                if let Some(n) = names.get(s.as_str()) {
-                    if !reached.contains(n) {
-                        reached.push(n);
-                    }
+                if !reached.contains(s) {
+                    reached.push(*s);
                 }
             }
             i += 1;
         }
         let capturing: Vec<String> = reached
             .iter()
-            .filter(|n| !refs[**n].1.is_empty())
-            .map(|n| format!("`{}` refers to {}", n, refs[*n].1.iter().map(|c| format!("`{}`", c)).collect::<Vec<_>>().join(", ")))
+            .filter(|n| !refs[*n].1.is_empty())
+            .map(|n| format!("`{}` refers to {}", n.name(), refs[n].1.iter().map(|c| format!("`{}`", c.name())).collect::<Vec<_>>().join(", ")))
             .collect();
         if !capturing.is_empty() {
             return Err(Error::TypeError(format!(
                 "the local function `{}` cannot be passed to C as a callback: C calls it with \
                  nothing but its arguments, and it needs local variables of the code around it \
                  ({}{})",
-                p.name,
+                p.name.name(),
                 capturing.join("; "),
                 if reached.len() > 1 { " — the local functions it calls count too" } else { "" }
             )));
         }
-        let (_, g_params, g_ret, _) = defs.iter().find(|(n, _, _, _)| n == &p.name).expect("a pending name is the block's");
+        let (_, g_params, g_ret, _) = defs.iter().find(|(n, _, _, _)| *n == p.name).expect("a pending name is the block's");
         let fn_ty = Type::Fn(g_params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(g_ret.clone()));
         // Parameter names no source can write, so none of them shadows — or
         // is shadowed by — a local function of the copied block.
-        let params: Vec<(String, Type)> =
-            g_params.iter().enumerate().map(|(i, (_, t))| (format!(" a{}", i), t.clone())).collect();
+        let params: Vec<(SymRef, Type)> =
+            g_params.iter().enumerate().map(|(i, (_, t))| (internal_local(&format!(" a{}", i)), t.clone())).collect();
         let mut args = Vec::with_capacity(params.len());
         for (n, t) in &params {
-            args.push(Checked::of(Node::Local { name: n.as_str().into() }, t.clone()));
+            args.push(Checked::of(Node::Local { name: *n }, t.clone()));
         }
-        let callee = Checked::of(Node::Local { name: p.name.as_str().into() }, fn_ty.clone());
+        let callee = Checked::of(Node::Local { name: p.name }, fn_ty.clone());
         let call = Checked::of(Node::Apply { callee: Box::new(callee), ret: g_ret.clone(), args }, g_ret.clone());
-        let kept: Vec<LabelsDef> = defs.iter().filter(|(n, _, _, _)| reached.contains(&n.as_str())).cloned().collect();
+        let kept: Vec<LabelsDef> = defs.iter().filter(|(n, _, _, _)| reached.contains(n)).cloned().collect();
         let block = Checked::of(Node::Labels { defs: kept, body: vec![call] }, g_ret.clone());
         let block = self.lowered(heap, &block)?;
         let form = self.info.defun_form(heap, &p.lifted, &params, g_ret, &[block])?;

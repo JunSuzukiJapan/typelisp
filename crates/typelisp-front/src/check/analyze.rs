@@ -173,17 +173,17 @@ pub struct MacroLambda {
 
 /// A `&rest` parameter's `(name, elem-type, name's source position)`, as
 /// returned by [`Checker::parse_params_rest`] alongside the fixed params.
-type RestParam = (String, Type, Option<Loc>);
+type RestParam = (SymRef, Type, Option<Loc>);
 
 /// One raw `&optional`/`&key` item: `(name, declared type, name's source
 /// position, the default form as written)`. The default is *unparsed* here —
 /// see [`Checker::parse_opt_key_spec`].
-type OptKeySpec = (String, Type, Option<Loc>, Option<Value>);
+type OptKeySpec = (SymRef, Type, Option<Loc>, Option<Value>);
 
 /// A full lambda list's four regions, in CL's own order: the required
 /// `(name type)` params (with their names' source positions), `&optional`,
 /// `&rest`, `&key` — [`Checker::parse_params_full`]'s result.
-type ParamsFull = (Vec<(String, Type)>, Vec<Option<Loc>>, Vec<OptKeySpec>, Option<RestParam>, Vec<OptKeySpec>);
+type ParamsFull = (Vec<(SymRef, Type)>, Vec<Option<Loc>>, Vec<OptKeySpec>, Option<RestParam>, Vec<OptKeySpec>);
 
 /// The call-site arity shape of a macro, derived from its [`MacroDef`] by
 /// [`Info::resolve_macro`]/[`Info::macro_at`]
@@ -209,7 +209,7 @@ impl MacroShape {
 /// as returned by [`Checker::check_pattern`]/[`Checker::check_ctor_pattern`].
 /// The `Loc` lets a later reference in a `match` arm body resolve
 /// goto-definition back to the binding site.
-type PatternBindings = Vec<(String, Type, Option<Loc>)>;
+type PatternBindings = Vec<(SymRef, Type, Option<Loc>)>;
 
 
 
@@ -452,7 +452,7 @@ struct MethodSig {
     /// the arguments the way a generic `defun`'s are.
     own_params: Vec<String>,
     instance: bool,
-    self_name: Option<String>,
+    self_name: Option<SymRef>,
     /// The receiver name's own source position (`(self Type)`'s `self`), for
     /// the checked body's `Env` binding — see `Checker::check_defmethod`'s
     /// use of `Env::extended_with_locs`.
@@ -471,7 +471,7 @@ struct MethodSig {
     /// ordinary fixed-arity one past this point; only the registered
     /// `FnSig` and the call site (`Checker::check_assoc_call`) know
     /// otherwise.
-    params: Vec<(String, Type)>,
+    params: Vec<(SymRef, Type)>,
     /// Each of `params`'s name's own source position, parallel to `params` —
     /// see `Checker::parse_param_pairs`.
     param_locs: Vec<Option<Loc>>,
@@ -757,13 +757,13 @@ const BLANKET_BOUND_DEPTH: usize = 16;
 /// One `labels` definition on its way into a node: its name, its parameters
 /// (name and declared type), its return type, and its already-checked body
 /// forms.
-pub(super) type LabelsDef = (String, Vec<(String, Type)>, Type, Vec<Checked>);
+pub(super) type LabelsDef = (SymRef, Vec<(SymRef, Type)>, Type, Vec<Checked>);
 
 /// What a `defmacro` lambda list parses into: the required parameter names,
 /// the `&optional` parameters (each with its default form, if it declared
 /// one), the `&rest` name, and the `&key` parameters in the same shape as the
 /// optionals.
-type MacroLambdaList = (Vec<String>, Vec<(String, Option<Value>)>, Option<String>, Vec<(String, Option<Value>)>);
+type MacroLambdaList = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
 
 /// Opaque saved namespace context — see [`Checker::suspend_ns_context`].
 pub struct NsContext {
@@ -2385,7 +2385,7 @@ impl Checker {
         match written {
             Written::Bare(sym) => {
                 let name = sym.name();
-                if env.get(name).is_some() {
+                if env.get(sym).is_some() {
                     return Some(Resolved::Local);
                 }
                 if let Some((path, shape)) = self.info.resolve_macro(sym) {
@@ -2850,14 +2850,13 @@ impl Checker {
         recv_sym: typelisp_mem::SymRef,
         method: &str,
     ) -> Option<Result<Checked, Error>> {
-        let recv_name = recv_sym.name();
         // The receiver is held across the whole of `check_assoc_call`, which
         // allocates plenty before `assoc_form` finally pushes it — so it has to
         // stay rooted. `var_form`/`global_form` root what they return for
         // exactly this reason; see `var_form`'s doc comment.
-        let recv = if let Some(t) = env.get(recv_name) {
+        let recv = if let Some(t) = env.get(recv_sym) {
             let ty = t.clone();
-            match Ok(Checked::of(Node::Local { name: recv_name.into() }, ty)) {
+            match Ok(Checked::of(Node::Local { name: recv_sym }, ty)) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(e)),
             }
@@ -3443,7 +3442,7 @@ impl Checker {
             params.push((rname.clone(), option_of_sexpr()));
             param_locs.push(rloc.clone());
         }
-        let binds: Vec<(String, Type, Option<Loc>)> = params
+        let binds: Vec<(SymRef, Type, Option<Loc>)> = params
             .iter()
             .cloned()
             .zip(param_locs)
@@ -3538,11 +3537,11 @@ impl Checker {
                 return Err(Error::TypeError(format!(
                     "defun {}: &optional parameter `{}` may not default when its type mentions the \
                      function's own type parameter — declare it with no default (`Option<{}>`) instead",
-                    name, pname, decl_ty
+                    name, pname.name(), decl_ty
                 )));
             }
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
-            optionals.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+            let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
+            optionals.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
         }
         let mut keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
@@ -3550,11 +3549,11 @@ impl Checker {
                 return Err(Error::TypeError(format!(
                     "defun {}: &key parameter `{}` may not default when its type mentions the \
                      function's own type parameter — declare it with no default (`Option<{}>`) instead",
-                    name, pname, decl_ty
+                    name, pname.name(), decl_ty
                 )));
             }
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
-            keys.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+            let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
+            keys.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
         }
 
         let sig = FnSig {
@@ -3584,22 +3583,22 @@ impl Checker {
         // `TopLevel::Defmacro::params`'s own region order. `&key`/`&optional`
         // never coexist (`Self::parse_defun_params_full` rejects that), so
         // exactly one of the two loops below ever runs.
-        let mut params: Vec<(String, Type)> = required.clone();
+        let mut params: Vec<(SymRef, Type)> = required.clone();
         let mut param_locs: Vec<Option<Loc>> = required_locs.clone();
-        for (o, (_, _, loc, _)) in optionals.iter().zip(optionals_raw.iter()) {
-            params.push((o.name.clone(), o.effective_ty()));
+        for (o, (sym, _, loc, _)) in optionals.iter().zip(optionals_raw.iter()) {
+            params.push((*sym, o.effective_ty()));
             param_locs.push(loc.clone());
         }
         if let Some((rname, _, rloc)) = &rest {
             params.push((rname.clone(), option_of_sexpr()));
             param_locs.push(rloc.clone());
         }
-        for (k, (_, _, loc, _)) in keys.iter().zip(keys_raw.iter()) {
-            params.push((k.name.clone(), k.effective_ty()));
+        for (k, (sym, _, loc, _)) in keys.iter().zip(keys_raw.iter()) {
+            params.push((*sym, k.effective_ty()));
             param_locs.push(loc.clone());
         }
 
-        let binds: Vec<(String, Type, Option<Loc>)> =
+        let binds: Vec<(SymRef, Type, Option<Loc>)> =
             params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
@@ -3654,7 +3653,7 @@ impl Checker {
         parts: &[Value],
         parts_locs: &[Option<Loc>],
     ) -> Result<
-        (Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, BTreeMap<String, Vec<TraitBound>>, usize, Option<String>),
+        (Vec<(SymRef, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, BTreeMap<String, Vec<TraitBound>>, usize, Option<String>),
         Error,
     > {
         if parts.len() < 3 {
@@ -3971,9 +3970,9 @@ impl Checker {
         let type_fq = type_fq.expect("a receiver that is not abstract names a type");
         // The receiver is the first parameter, not a field beside them: the
         // core form binds what the body binds, in order.
-        let mut all: Vec<(String, Type)> = Vec::new();
-        if let Some(s) = &self_name {
-            all.push((s.clone(), recv_ty));
+        let mut all: Vec<(SymRef, Type)> = Vec::new();
+        if let Some(s) = self_name {
+            all.push((s, recv_ty));
         }
         all.extend(params);
         // Bounds are deliberately dropped here, mirroring
@@ -4006,7 +4005,7 @@ impl Checker {
             def.params.iter().cloned().zip(args.iter().cloned()).collect();
         let field_ty = subst_apply(&def.variants[0].fields[index], &subst);
         let recv_ty = Type::Named(type_fq.clone(), args.to_vec());
-        let self_param = ("self".to_string(), recv_ty);
+        let self_param = (internal_local("self"), recv_ty);
         if getter {
             // Rooted for the same reason the setter branch below roots: the body
             // form is built *before* `defmethod_form`, which then allocates its
@@ -4015,21 +4014,22 @@ impl Checker {
             // any of those allocations can collect an unrooted form. (This arm
             // did not root, and `gc_stress` caught it as `push_root given freed
             // cell` inside `Items::push`.)
-            let self_var = forms::var_form(heap, "self")?;
+            let self_var = forms::var_form(heap, self_param.0)?;
             let mut s = RootScope::new(heap);
             s.push_root(self_var);
             let get = self.info.field_get_form(&mut s, self_var, index, &field_ty)?;
             s.push_root(get);
             self.info.defmethod_form(&mut s, type_fq, mangled, true, &[self_param], &field_ty, &[get])
         } else {
-            let self_var = forms::var_form(heap, "self")?;
+            let self_var = forms::var_form(heap, self_param.0)?;
             let mut s = RootScope::new(heap);
             s.push_root(self_var);
-            let value_var = forms::var_form(&mut s, "value")?;
+            let value_name = internal_local("value");
+            let value_var = forms::var_form(&mut s, value_name)?;
             s.push_root(value_var);
             let set = self.info.field_set_form(&mut s, self_var, index, &field_ty, value_var)?;
             s.push_root(set);
-            let params = [self_param, ("value".to_string(), field_ty)];
+            let params = [self_param, (value_name, field_ty)];
             self.info.defmethod_form(&mut s, type_fq, mangled, true, &params, &Type::Unit, &[set])
         }
     }
@@ -4107,24 +4107,24 @@ impl Checker {
 
         let mut optionals = Vec::with_capacity(optionals_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &optionals_raw {
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
-            optionals.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+            let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
+            optionals.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
         }
         let mut keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
-            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, *default_raw)?;
-            keys.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+            let default = self.check_opt_key_default(heap, interp, pname.name(), decl_ty, *default_raw)?;
+            keys.push(OptKeyParam { name: pname.name().to_string(), decl_ty: decl_ty.clone(), default });
         }
 
-        let mut params: Vec<(String, Type)> = required.clone();
-        for o in &optionals {
-            params.push((o.name.clone(), o.effective_ty()));
+        let mut params: Vec<(SymRef, Type)> = required.clone();
+        for (o, (sym, _, _, _)) in optionals.iter().zip(optionals_raw.iter()) {
+            params.push((*sym, o.effective_ty()));
         }
         if let Some((rname, _, _)) = &rest {
-            params.push((rname.clone(), option_of_sexpr()));
+            params.push((*rname, option_of_sexpr()));
         }
-        for k in &keys {
-            params.push((k.name.clone(), k.effective_ty()));
+        for (k, (sym, _, _, _)) in keys.iter().zip(keys_raw.iter()) {
+            params.push((*sym, k.effective_ty()));
         }
 
         let env = Env::new().extended(params.clone())?;
@@ -4585,12 +4585,12 @@ impl Checker {
         // `params` lists every binding name in expansion order — required,
         // then optional, then `&rest`, then key — mirroring how
         // `Interp::bind_macro_args` fills them (see `TopLevel::Defmacro`).
-        let mut params: Vec<String> = required_names.clone();
-        params.extend(optionals.iter().map(|(n, _)| n.clone()));
-        if let Some(r) = &rest_name {
-            params.push(r.clone());
+        let mut params: Vec<SymRef> = required_names.clone();
+        params.extend(optionals.iter().map(|(n, _)| *n));
+        if let Some(r) = rest_name {
+            params.push(r);
         }
-        params.extend(key_specs.iter().map(|(n, _)| n.clone()));
+        params.extend(key_specs.iter().map(|(n, _)| *n));
 
         let fq_name = self.info.fq(&name);
         self.check_value_clash("macro", &name)?;
@@ -4601,7 +4601,7 @@ impl Checker {
                 required: required_names.len(),
                 optional: optionals.len(),
                 rest,
-                keys: key_specs.iter().map(|(n, _)| n.clone()).collect(),
+                keys: key_specs.iter().map(|(n, _)| n.name().to_string()).collect(),
                 public,
                 builtin: false,
             },
@@ -4637,11 +4637,11 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         fq_name: &Path,
         body_start: usize,
-        required_names: &[String],
-        optionals: &[(String, Option<Value>)],
-        rest_name: &Option<String>,
-        key_specs: &[(String, Option<Value>)],
-        params: &[String],
+        required_names: &[SymRef],
+        optionals: &[(SymRef, Option<Value>)],
+        rest_name: &Option<SymRef>,
+        key_specs: &[(SymRef, Option<Value>)],
+        params: &[SymRef],
     ) -> Result<TopLevelForm, Error> {
         let rest = rest_name.is_some();
 
@@ -4653,23 +4653,23 @@ impl Checker {
         // default may reference earlier params, never later ones), which is
         // also the order `bind_macro_args` evaluates them in.
         let sexpr_ty = option_of_sexpr();
-        let mut bindings: Vec<(String, Type)> =
-            required_names.iter().map(|n| (n.clone(), sexpr_ty.clone())).collect();
+        let mut bindings: Vec<(SymRef, Type)> =
+            required_names.iter().map(|n| (*n, sexpr_ty.clone())).collect();
 
         let mut opt_defaults: Vec<Vec<Value>> = Vec::with_capacity(optionals.len());
         for (n, default) in optionals {
             let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
             opt_defaults.push(checked);
-            bindings.push((n.clone(), sexpr_ty.clone()));
+            bindings.push((*n, sexpr_ty.clone()));
         }
         if let Some(r) = rest_name {
-            bindings.push((r.clone(), sexpr_ty.clone()));
+            bindings.push((*r, sexpr_ty.clone()));
         }
         let mut key_defaults: Vec<(String, Vec<Value>)> = Vec::with_capacity(key_specs.len());
         for (n, default) in key_specs {
             let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
-            key_defaults.push((n.clone(), checked));
-            bindings.push((n.clone(), sexpr_ty.clone()));
+            key_defaults.push((n.name().to_string(), checked));
+            bindings.push((*n, sexpr_ty.clone()));
         }
 
         let env = Env::new().extended(bindings)?;
@@ -4688,7 +4688,7 @@ impl Checker {
         &self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
-        bindings: &[(String, Type)],
+        bindings: &[(SymRef, Type)],
         default: Option<Value>,
         sexpr_ty: &Type,
     ) -> Result<Vec<Value>, Error> {
@@ -4703,18 +4703,18 @@ impl Checker {
     }
 
     /// A bare-symbol lambda-list parameter name (`required`/`&rest`).
-    fn macro_param_name(heap: &Heap, v: Value, section: &str) -> Result<String, Error> {
+    fn macro_param_name(v: Value, section: &str) -> Result<SymRef, Error> {
         match v {
-            Value::Symbol(id) => Ok(heap.symbol_spelling(id).to_string()),
+            Value::Symbol(id) => Ok(id),
             _ => Err(Error::TypeError(format!("defmacro: {} parameter must be a name", section))),
         }
     }
 
     /// An `&optional`/`&key` item: either a bare `name` (no default) or a
     /// `(name default-form)` pair. Returns `(name, Some(form)|None)`.
-    fn macro_opt_key_spec(heap: &Heap, v: Value, section: &str) -> Result<(String, Option<Value>), Error> {
+    fn macro_opt_key_spec(heap: &Heap, v: Value, section: &str) -> Result<(SymRef, Option<Value>), Error> {
         match v {
-            Value::Symbol(id) => Ok((heap.symbol_spelling(id).to_string(), None)),
+            Value::Symbol(id) => Ok((id, None)),
             Value::Cons(_) => {
                 let items = heap.list_to_vec(v)?;
                 if items.is_empty() || items.len() > 2 {
@@ -4723,7 +4723,7 @@ impl Checker {
                         section
                     )));
                 }
-                let name = Checker::macro_param_name(heap, items[0], section)?;
+                let name = Checker::macro_param_name(items[0], section)?;
                 Ok((name, items.get(1).copied()))
             }
             _ => Err(Error::TypeError(format!(
@@ -4741,7 +4741,7 @@ impl Checker {
     /// position (parallel to the returned params), for the checked body's
     /// `Env` binding (`Env::extended_with_locs`) — see `Self::parse_param_pairs`.
     #[allow(clippy::type_complexity)]
-    fn parse_params(&self, heap: &Heap, v: Value) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>), Error> {
+    fn parse_params(&self, heap: &Heap, v: Value) -> Result<(Vec<(SymRef, Type)>, Vec<Option<Loc>>), Error> {
         let elems = heap.list_to_vec(v)?;
         self.parse_param_pairs(heap, &elems)
     }
@@ -4763,7 +4763,7 @@ impl Checker {
         &self,
         heap: &Heap,
         v: Value,
-    ) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>), Error> {
+    ) -> Result<(Vec<(SymRef, Type)>, Vec<Option<Loc>>, Option<RestParam>), Error> {
         let elems = heap.list_to_vec(v)?;
         let rest_marker = elems
             .iter()
@@ -4799,7 +4799,7 @@ impl Checker {
     /// that binding — independent of where `pairs` itself came from, so this
     /// needs no location input from the caller).
     #[allow(clippy::type_complexity)]
-    fn parse_param_pairs(&self, heap: &Heap, pairs: &[Value]) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>), Error> {
+    fn parse_param_pairs(&self, heap: &Heap, pairs: &[Value]) -> Result<(Vec<(SymRef, Type)>, Vec<Option<Loc>>), Error> {
         let mut out = Vec::new();
         let mut locs = Vec::new();
         for binding in pairs {
@@ -4809,7 +4809,7 @@ impl Checker {
                 return Err(Error::TypeError("parameter must be (name type)".into()));
             }
             let name = match pair[0] {
-                Value::Symbol(id) => super::verify::bound_name(id, "a parameter")?,
+                Value::Symbol(id) => super::verify::bound_symbol(id, "a parameter")?,
                 _ => return Err(Error::TypeError("parameter name must be a symbol".into())),
             };
             out.push((name, self.parse_type_here_at(heap, pair[1], pair_locs.get(1).and_then(|(_, l)| l.as_ref()))?));
@@ -4826,7 +4826,7 @@ impl Checker {
     /// `Checker::check_defun_opt_key` / `Checker::check_defmethod_in` check
     /// it afterwards. `what` is the defining form's own keyword, so the
     /// error a user sees names the form they actually wrote.
-    fn parse_opt_key_spec(&self, heap: &Heap, v: Value, what: &str, section: &str) -> Result<(String, Type, Option<Loc>, Option<Value>), Error> {
+    fn parse_opt_key_spec(&self, heap: &Heap, v: Value, what: &str, section: &str) -> Result<OptKeySpec, Error> {
         let items_locs = heap.list_to_vec_locs(v)?;
         if items_locs.len() < 2 || items_locs.len() > 3 {
             return Err(Error::TypeError(format!(
@@ -4835,7 +4835,7 @@ impl Checker {
             )));
         }
         let name = match items_locs[0].0 {
-            Value::Symbol(id) => super::verify::bound_name(id, "a parameter")?,
+            Value::Symbol(id) => super::verify::bound_symbol(id, "a parameter")?,
             _ => return Err(Error::TypeError(format!("{}: {} parameter name must be a symbol", what, section))),
         };
         let name_loc = items_locs[0].1.clone();
@@ -6575,9 +6575,9 @@ impl Checker {
                 heap.push_permanent_root(e);
             }
             bounds.entry(target_var.to_string()).or_default().push(self_bound.clone());
-            let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
+            let mut binds: Vec<(SymRef, Type, Option<Loc>)> = Vec::new();
             if let Some(s) = &self_name {
-                binds.push((s.clone(), recv_ty.clone(), self_name_loc));
+                binds.push((*s, recv_ty.clone(), self_name_loc));
             }
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
@@ -6640,9 +6640,9 @@ impl Checker {
             } = sig;
             // Keyed by the type variable's name — what `is_self_tvar` matches.
             bounds.entry(SELF_TYPE_VAR.to_string()).or_default().push(self_bound.clone());
-            let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
+            let mut binds: Vec<(SymRef, Type, Option<Loc>)> = Vec::new();
             if let Some(s) = &self_name {
-                binds.push((s.clone(), recv_ty.clone(), self_name_loc));
+                binds.push((*s, recv_ty.clone(), self_name_loc));
             }
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
@@ -7763,11 +7763,11 @@ impl Checker {
                     "method {}::{}: &optional parameter `{}` may not default when its type \
                      mentions a type parameter (the owner's or the method's own) — declare it with \
                      no default instead",
-                    type_fq, method, pname
+                    type_fq, method, pname.name()
                 )));
             }
-            let default = self.check_opt_key_default(heap, interp, pname, &decl_ty, *default_raw)?;
-            sig_optionals.push(OptKeyParam { name: pname.clone(), decl_ty, default });
+            let default = self.check_opt_key_default(heap, interp, pname.name(), &decl_ty, *default_raw)?;
+            sig_optionals.push(OptKeyParam { name: pname.name().to_string(), decl_ty, default });
         }
         let mut sig_keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
@@ -7777,11 +7777,11 @@ impl Checker {
                     "method {}::{}: &key parameter `{}` may not default when its type \
                      mentions a type parameter (the owner's or the method's own) — declare it with \
                      no default instead",
-                    type_fq, method, pname
+                    type_fq, method, pname.name()
                 )));
             }
-            let default = self.check_opt_key_default(heap, interp, pname, &decl_ty, *default_raw)?;
-            sig_keys.push(OptKeyParam { name: pname.clone(), decl_ty, default });
+            let default = self.check_opt_key_default(heap, interp, pname.name(), &decl_ty, *default_raw)?;
+            sig_keys.push(OptKeyParam { name: pname.name().to_string(), decl_ty, default });
         }
         // The bounds are keyed by type-variable *name*, so they move too —
         // `validate_where_bounds` looks its keys up in the same `subst`
@@ -7844,9 +7844,9 @@ impl Checker {
             self.info.reg.docs.methods.insert((type_fq.clone(), def_name.clone()), doc);
         }
 
-        let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
+        let mut binds: Vec<(SymRef, Type, Option<Loc>)> = Vec::new();
         if let Some(s) = &self_name {
-            binds.push((s.clone(), recv_ty.clone(), self_name_loc));
+            binds.push((*s, recv_ty.clone(), self_name_loc));
         }
         binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
         // `with_bounds` mirrors `check_defun`'s body env: inside the body a
@@ -7876,9 +7876,9 @@ impl Checker {
         } else {
             Vec::new()
         };
-        let mut all: Vec<(String, Type)> = Vec::new();
-        if let Some(s) = &self_name {
-            all.push((s.clone(), recv_ty));
+        let mut all: Vec<(SymRef, Type)> = Vec::new();
+        if let Some(s) = self_name {
+            all.push((s, recv_ty));
         }
         all.extend(params);
         let lowered = self.lowered_all(heap, &body)?;
@@ -7936,7 +7936,7 @@ impl Checker {
                     return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method)));
                 }
                 let sname = match recv[0] {
-                    Value::Symbol(id) => super::verify::bound_name(id, "defmethod")?,
+                    Value::Symbol(id) => super::verify::bound_symbol(id, "defmethod")?,
                     _ => {
                         return Err(Error::TypeError(format!(
                             "impl: method `{}`: the receiver's name must be a symbol",
@@ -8167,7 +8167,7 @@ impl Checker {
                 // have to stay rooted until the method node holding them is
                 // finished; this scope releases them however it is left.
                 let mut s = RootScope::new(members.heap());
-                let self_var = forms::var_form(&mut s, "self")?;
+                let self_var = forms::var_form(&mut s, internal_local("self"))?;
                 s.push_root(self_var);
                 let get = self.info.field_get_form(&mut s, self_var, i, field_ty)?;
                 s.push_root(get);
@@ -8177,7 +8177,7 @@ impl Checker {
                     typelisp_mem::symbols::intern(field_name),
                     true,
                     &type_params,
-                    &[("self".to_string(), recv_ty.clone())],
+                    &[(internal_local("self"), recv_ty.clone())],
                     field_ty,
                     &[get],
                 )?
@@ -8202,9 +8202,9 @@ impl Checker {
             assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
             let setter = {
                 let mut s = RootScope::new(members.heap());
-                let self_var = forms::var_form(&mut s, "self")?;
+                let self_var = forms::var_form(&mut s, internal_local("self"))?;
                 s.push_root(self_var);
-                let value_var = forms::var_form(&mut s, "value")?;
+                let value_var = forms::var_form(&mut s, internal_local("value"))?;
                 s.push_root(value_var);
                 let set = self.info.field_set_form(&mut s, self_var, i, field_ty, value_var)?;
                 s.push_root(set);
@@ -8214,7 +8214,7 @@ impl Checker {
                     typelisp_mem::symbols::intern(&setter_name),
                     true,
                     &type_params,
-                    &[("self".to_string(), recv_ty.clone()), ("value".to_string(), field_ty.clone())],
+                    &[(internal_local("self"), recv_ty.clone()), (internal_local("value"), field_ty.clone())],
                     &Type::Unit,
                     &[set],
                 )?
@@ -9396,7 +9396,7 @@ impl Checker {
                         .or_insert_with(|| checked.ty.clone());
                 }
                 if let (Node::Local { name }, Some(ref_loc)) = (&checked.node, loc) {
-                    if let Some(bind_loc) = env.get_loc(name) {
+                    if let Some(bind_loc) = env.get_loc(*name) {
                         self.local_refs.borrow_mut().insert((ref_loc.line, ref_loc.col), bind_loc);
                     }
                 }
@@ -9582,13 +9582,13 @@ impl Checker {
                 // name a variable, global, function or method.
                 if id.is_keyword() {
                     self.literal(heap, wk::SYM, Some(Value::Symbol(id)), Type::Symbol)
-                } else if let Some(t) = env.get(name) {
+                } else if let Some(t) = env.get(id) {
                     // A `symbol-macrolet` binding: the name is not a variable
                     // at all, it stands for a form, which is checked here in
                     // the use site's own environment (CL's rule — the
                     // expansion is not closed over the binding site).
                     if *t == symbol_macro_mark() {
-                        let Some(form) = self.info.symbol_macro_form(name) else {
+                        let Some(form) = self.info.symbol_macro_form(id) else {
                             return Err(Error::TypeError(format!(
                                 "symbol macro `{}` has no expansion in scope",
                                 name
@@ -9597,7 +9597,7 @@ impl Checker {
                         return self.check(heap, interp, env, form, expected);
                     }
                     let t = t.clone();
-                    Checked::of(Node::Local { name: name.into() }, t)
+                    Checked::of(Node::Local { name: id }, t)
                 } else {
                     // The one resolution rule (`Self::resolve_name`). A value's
                     // receiver is the first parameter of the function it is
@@ -9877,7 +9877,7 @@ impl Checker {
             let (recv, member) = value_member_segments(heap, v)?;
             let typed = match self.try_field_access(heap, interp, env, recv, member.name()) {
                 Some(r) => r?,
-                None if env.get(recv.name()).is_none() && self.info.resolve_global(recv).is_none() => {
+                None if env.get(recv).is_none() && self.info.resolve_global(recv).is_none() => {
                     return Err(Error::TypeError(format!(
                         "unresolved path: {}::{} (`{}` is not a variable, and no module or type `{}` is visible here)",
                         recv.name(),
@@ -10000,7 +10000,7 @@ impl Checker {
         // a i j)`, two-argument `log`/`atan` and the like. Syntax rather than a
         // name to resolve, so it is tried before the resolution below; a local
         // binding of the same name still wins, as it does over every name.
-        if env.get(&head).is_none() {
+        if env.get(head_sym).is_none() {
             if let Some(result) = self.check_call_sugar(heap, interp, env, head_sym, args, arg_locs, expected) {
                 return result;
             }
@@ -10158,7 +10158,7 @@ impl Checker {
             params.push((rname, option_of_sexpr()));
             param_locs.push(rloc);
         }
-        let binds: Vec<(String, Type, Option<Loc>)> =
+        let binds: Vec<(SymRef, Type, Option<Loc>)> =
             params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
         let child = env.extended_with_locs(binds)?;
         // A lambda is a new function boundary: `break`/`return` cannot reach an
@@ -10173,7 +10173,7 @@ impl Checker {
         self.block_stack.replace(saved_blocks);
         self.loop_stack.replace(saved);
         let (body, _) = result?;
-        let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+        let bound: Vec<SymRef> = params.iter().map(|(n, _)| *n).collect();
         let lowered = self.lowered_all(heap, &body)?;
         self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, "a `lambda`")?;
         Ok(Checked::of(Node::Lambda { params, ret, body }, fn_ty))
@@ -10229,12 +10229,12 @@ impl Checker {
             let param_vals = heap.list_to_vec(parts[1])?;
             let (required_names, optionals, rest_name, key_specs) =
                 parse_macro_lambda_list(heap, &param_vals)?;
-            let mut params: Vec<String> = required_names.clone();
-            params.extend(optionals.iter().map(|(n, _)| n.clone()));
-            if let Some(r) = &rest_name {
-                params.push(r.clone());
+            let mut params: Vec<SymRef> = required_names.clone();
+            params.extend(optionals.iter().map(|(n, _)| *n));
+            if let Some(r) = rest_name {
+                params.push(r);
             }
-            params.extend(key_specs.iter().map(|(n, _)| n.clone()));
+            params.extend(key_specs.iter().map(|(n, _)| *n));
             let shape = MacroShape {
                 required: required_names.len(),
                 optional: optionals.len(),
@@ -10294,8 +10294,8 @@ impl Checker {
         let bindings = heap.list_to_vec(args[0]).map_err(|_| {
             Error::TypeError("symbol-macrolet: the binding list must be a proper list".into())
         })?;
-        let mut scope: HashMap<String, Value> = HashMap::new();
-        let mut binds: Vec<(String, Type)> = Vec::with_capacity(bindings.len());
+        let mut scope: HashMap<SymRef, Value> = HashMap::new();
+        let mut binds: Vec<(SymRef, Type)> = Vec::with_capacity(bindings.len());
         for b in bindings {
             let parts = heap.list_to_vec(b).map_err(|_| {
                 Error::TypeError("symbol-macrolet: each binding is (name form)".into())
@@ -10304,14 +10304,14 @@ impl Checker {
                 return Err(Error::TypeError("symbol-macrolet: each binding is (name form)".into()));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => super::verify::bound_name(id, "symbol-macrolet")?,
+                Value::Symbol(id) => super::verify::bound_symbol(id, "symbol-macrolet")?,
                 _ => {
                     return Err(Error::TypeError(
                         "symbol-macrolet: the binding name must be a symbol".into(),
                     ))
                 }
             };
-            scope.insert(name.clone(), parts[1]);
+            scope.insert(name, parts[1]);
             binds.push((name, symbol_macro_mark()));
         }
         // The expansion forms are ordinary heap values held in a Rust table
@@ -10360,8 +10360,8 @@ impl Checker {
         }
         let specs = heap.list_to_vec(args[0])?;
         struct Spec {
-            name: String,
-            params: Vec<(String, Type)>,
+            name: SymRef,
+            params: Vec<(SymRef, Type)>,
             param_locs: Vec<Option<Loc>>,
             ret: Type,
             raw_body: Vec<Value>,
@@ -10370,7 +10370,7 @@ impl Checker {
             body_locs: Vec<Option<Loc>>,
         }
         let mut parsed = Vec::new();
-        let mut sigs: Vec<(String, Type, Option<Loc>)> = Vec::new();
+        let mut sigs: Vec<(SymRef, Type, Option<Loc>)> = Vec::new();
         for spec in specs {
             // `list_to_vec_locs` so a bare-atom body form (e.g. a local
             // variable reference in the function's body) keeps its position,
@@ -10384,7 +10384,7 @@ impl Checker {
                 ));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => super::verify::bound_name(id, "labels")?,
+                Value::Symbol(id) => super::verify::bound_symbol(id, "labels")?,
                 _ => return Err(Error::TypeError("labels: name must be a symbol".into())),
             };
             let name_loc = parts_locs.first().and_then(|(_, l)| l.clone());
@@ -10394,14 +10394,14 @@ impl Checker {
             let (params, param_locs) = self.parse_params(heap, parts[1])?;
             let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|(_, l)| l.as_ref()))?;
             let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(ret.clone()));
-            sigs.push((name.clone(), fn_ty, name_loc));
+            sigs.push((name, fn_ty, name_loc));
             let body_locs = parts_locs[3..].iter().map(|(_, l)| l.clone()).collect();
             parsed.push(Spec { name, params, param_locs, ret, raw_body: parts[3..].to_vec(), body_locs });
         }
         // Every function's name is visible to every body (including its
         // own) and to the trailing `body` — registered up front, like
         // `check_defun`'s pre-body signature insert.
-        let names: Vec<String> = sigs.iter().map(|(n, _, _)| n.clone()).collect();
+        let names: Vec<SymRef> = sigs.iter().map(|(n, _, _)| *n).collect();
         let labels_env = env.extended_with_locs(sigs)?;
         // Open while every body and the trailing body are checked, so a C
         // callback naming one of these functions can be told apart from a
@@ -10410,7 +10410,7 @@ impl Checker {
         let checked = (|| -> Result<(Vec<LabelsDef>, Vec<Checked>, Type), Error> {
             let mut defs = Vec::new();
             for Spec { name, params, param_locs, ret, raw_body, body_locs } in parsed {
-                let binds: Vec<(String, Type, Option<Loc>)> =
+                let binds: Vec<(SymRef, Type, Option<Loc>)> =
                     params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
                 let fn_env = labels_env.extended_with_locs(binds)?;
                 // A new function boundary, same as `lambda`: `break`/`return`
@@ -10420,15 +10420,15 @@ impl Checker {
                 let saved = self.loop_stack.replace(Vec::new());
                 let saved_blocks = self.block_stack.replace(Vec::new());
                 let result = self.with_own_arena(|| {
-                    self.check_block_body(heap, interp, &fn_env, &raw_body, &body_locs, &name, ret.clone(), Some(&ret))
+                    self.check_block_body(heap, interp, &fn_env, &raw_body, &body_locs, name.name(), ret.clone(), Some(&ret))
                 });
                 self.block_stack.replace(saved_blocks);
                 self.loop_stack.replace(saved);
                 let (body, _, used) = result?;
-                let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).chain(names.iter().cloned()).collect();
+                let bound: Vec<SymRef> = params.iter().map(|(n, _)| *n).chain(names.iter().copied()).collect();
                 let lowered = self.lowered_all(heap, &body)?;
-                self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, &format!("the `labels` function `{}`", name))?;
-                let body = self.implicit_block(&name, &ret, body, used)?;
+                self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, &format!("the `labels` function `{}`", name.name()))?;
+                let body = self.implicit_block(name.name(), &ret, body, used)?;
                 defs.push((name, params, ret, body));
             }
             let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
@@ -11576,7 +11576,7 @@ impl Checker {
         // Operands, in the order written, for the `let` this becomes the body
         // of. The name is unwritable on purpose — a space is not an identifier
         // character — so it can never shadow or be shadowed.
-        let mut binds: Vec<(String, Type, Checked)> = Vec::new();
+        let mut binds: Vec<(SymRef, Type, Checked)> = Vec::new();
         let mut arms: Vec<SelectArm> = Vec::new();
         let mut ty: Option<Type> = None;
         let mut saw_else = false;
@@ -11622,10 +11622,10 @@ impl Checker {
                 let value = self.check_at(heap, interp, env, op[2], Some(&elem), loc.clone())?;
                 let kind = self.info.repr(&elem).field_kind();
                 let chan_ty = chan.ty.clone();
-                let chan_name = format!("select operand {}", binds.len());
-                binds.push((chan_name.clone(), chan.ty.clone(), chan));
-                let value_name = format!("select operand {}", binds.len());
-                binds.push((value_name.clone(), value.ty.clone(), value));
+                let chan_name = internal_local(&format!("select operand {}", binds.len()));
+                binds.push((chan_name, chan.ty.clone(), chan));
+                let value_name = internal_local(&format!("select operand {}", binds.len()));
+                binds.push((value_name, value.ty.clone(), value));
                 let (body, body_ty) = self.check_seq(heap, interp, env, rest, &vec![None; rest.len()], expected)?;
                 let (joined, split) = match &ty {
                     Some(t) => join_or_first(t, &body_ty),
@@ -11633,8 +11633,8 @@ impl Checker {
                 };
                 ty = Some(joined);
                 let body = disagreeing_if(Checked::of(Node::Let { binds: Vec::new(), body }, body_ty), split);
-                let chan = Checked::of(Node::Local { name: chan_name.into() }, chan_ty);
-                let value = Checked::of(Node::Local { name: value_name.into() }, elem);
+                let chan = Checked::of(Node::Local { name: chan_name }, chan_ty);
+                let value = Checked::of(Node::Local { name: value_name }, elem);
                 SelectArm::Send { kind, chan, value, body }
             } else {
                 // `((v (recv ch)) body...)`
@@ -11644,7 +11644,7 @@ impl Checker {
                         SHAPE
                     )));
                 };
-                let var = heap.symbol_spelling(vid).to_string();
+                let var = super::verify::bound_symbol(vid, "select")?;
                 if op.len() != 2 {
                     return Err(Error::TypeError(format!("`select`: a receive arm is (v (recv ch)). {}", SHAPE)));
                 }
@@ -11660,9 +11660,9 @@ impl Checker {
                 // written by testing the channel some other way.
                 let bound = super::registry::option_of(elem);
                 let chan_ty = chan.ty.clone();
-                let chan_name = format!("select operand {}", binds.len());
-                binds.push((chan_name.clone(), chan.ty.clone(), chan));
-                let child = env.extended_with_locs(vec![(var.clone(), bound.clone(), loc.clone())])?;
+                let chan_name = internal_local(&format!("select operand {}", binds.len()));
+                binds.push((chan_name, chan.ty.clone(), chan));
+                let child = env.extended_with_locs(vec![(var, bound.clone(), loc.clone())])?;
                 let (body, body_ty) = self.check_seq(heap, interp, &child, rest, &vec![None; rest.len()], expected)?;
                 let (joined, split) = match &ty {
                     Some(t) => join_or_first(t, &body_ty),
@@ -11670,8 +11670,8 @@ impl Checker {
                 };
                 ty = Some(joined);
                 let body = disagreeing_if(Checked::of(Node::Let { binds: Vec::new(), body }, body_ty), split);
-                let chan = Checked::of(Node::Local { name: chan_name.into() }, chan_ty);
-                SelectArm::Recv { var: var.into(), bound, chan, body }
+                let chan = Checked::of(Node::Local { name: chan_name }, chan_ty);
+                SelectArm::Recv { var, bound, chan, body }
             };
             arms.push(arm_form);
         }
@@ -12509,7 +12509,7 @@ impl Checker {
                 return Err(Error::TypeError("let: binding must be (name val)".into()));
             }
             let name = match pair[0] {
-                Value::Symbol(id) => super::verify::bound_name(id, "let")?,
+                Value::Symbol(id) => super::verify::bound_symbol(id, "let")?,
                 _ => return Err(Error::TypeError("let: binding name must be a symbol".into())),
             };
             name_locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
@@ -12523,10 +12523,10 @@ impl Checker {
             let val = self.recovered(checked, val_loc)?;
             binds.push((name, val));
         }
-        let env_binds: Vec<(String, Type, Option<Loc>)> = binds
+        let env_binds: Vec<(SymRef, Type, Option<Loc>)> = binds
             .iter()
             .zip(name_locs)
-            .map(|((n, t), l)| (n.clone(), t.ty.clone(), l))
+            .map(|((n, t), l)| (*n, t.ty.clone(), l))
             .collect();
         let child = env.extended_with_locs(env_binds)?;
         let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], &arg_locs[1..], expected)?;
@@ -12580,7 +12580,7 @@ impl Checker {
             return Err(Error::TypeError("let*: binding must be (name val)".into()));
         }
         let name = match pair[0] {
-            Value::Symbol(id) => super::verify::bound_name(id, "let*")?,
+            Value::Symbol(id) => super::verify::bound_symbol(id, "let*")?,
             _ => return Err(Error::TypeError("let*: binding name must be a symbol".into())),
         };
         let name_loc = pair_locs.first().and_then(|(_, l)| l.clone());
@@ -12588,7 +12588,7 @@ impl Checker {
         // Recovery boundary (B4): see `check_let`.
         let checked = self.check_at(heap, interp, env, pair[1], None, val_loc.clone());
         let val = self.recovered(checked, val_loc)?;
-        let child = env.extended_with_locs(vec![(name.clone(), val.ty.clone(), name_loc)])?;
+        let child = env.extended_with_locs(vec![(name, val.ty.clone(), name_loc)])?;
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
         Ok(Checked::of(Node::Let { binds: vec![(name, val.ty.clone(), val)], body: vec![inner] }, ty))
@@ -12634,12 +12634,12 @@ impl Checker {
                 "setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into(),
             )),
         };
-        if let Some(ty) = env.get(&name).cloned() {
+        if let Some(ty) = env.get(name_sym).cloned() {
             // `(setf x v)` where `x` is a `symbol-macrolet` name assigns to
             // the *form* it stands for — CL says so, and it is the reason the
             // form exists: an alias you can only read is a `let`.
             if ty == symbol_macro_mark() {
-                let Some(place) = self.info.symbol_macro_form(&name) else {
+                let Some(place) = self.info.symbol_macro_form(name_sym) else {
                     return Err(Error::TypeError(format!(
                         "symbol macro `{}` has no expansion in scope",
                         name
@@ -12648,7 +12648,7 @@ impl Checker {
                 return self.check_setf(heap, interp, env, &[place, args[1]], arg_locs);
             }
             let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
-            return Ok(Checked::of(Node::Set { name: name.into(), value: Box::new(value) }, ty));
+            return Ok(Checked::of(Node::Set { name: name_sym, value: Box::new(value) }, ty));
         }
         if let Some((path, vi)) = self.info.resolve_global(name_sym) {
             let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
@@ -12678,8 +12678,8 @@ impl Checker {
         value_loc: Option<Loc>,
     ) -> Result<Checked, Error> {
         let recv_name = recv_sym.name();
-        let recv = if let Some(ty) = env.get(recv_name).cloned() {
-            Checked::of(Node::Local { name: recv_name.into() }, ty)
+        let recv = if let Some(ty) = env.get(recv_sym).cloned() {
+            Checked::of(Node::Local { name: recv_sym }, ty)
         } else if let Some((path, vi)) = self.info.resolve_global(recv_sym) {
             Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty)
         } else {
@@ -13698,22 +13698,22 @@ impl Checker {
         // Pass 1a: the loop variables, each learned in the environment its
         // predecessors built (`:with j := (* i 2)` after `:for i …` is legal
         // in CL, and `let*` gives it the same meaning here).
-        let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
+        let mut binds: Vec<(SymRef, Type, Option<Loc>)> = Vec::new();
         for var in &plan.vars {
             let probe = loop_dsl::var_probe(heap, var)?;
             let probe = forms::rooted(heap, probe);
             let scoped = env.extended_with_locs(binds.clone())?;
             let ty = self.check_at(heap, interp, &scoped, probe, None, var.loc.clone())?.ty.clone();
-            binds.push((var.name.clone(), ty, var.loc.clone()));
+            binds.push((var.name, ty, var.loc.clone()));
         }
         let scoped = env.extended_with_locs(binds)?;
 
         // Pass 1b: each accumulator's own type, and the `Option` a
         // `:thereis` leaves behind when nothing matched.
-        let mut acc_inits: Vec<(String, Value)> = Vec::new();
+        let mut acc_inits: Vec<(SymRef, Value)> = Vec::new();
         for acc in &plan.accs {
             let init = self.loop_acc_init(heap, interp, &scoped, acc)?;
-            acc_inits.push((acc.name.clone(), init));
+            acc_inits.push((acc.name, init));
         }
         let thereis_none = match loop_dsl::thereis_expr(&plan) {
             Some(expr) => {
@@ -14431,7 +14431,7 @@ impl Checker {
         const ARG: &str = "format''arg";
         let shown = format!("~/{}/", site.name);
         let as_call = format!("({} arg colon at) with arg a `{}`", site.name, ty);
-        let env = env.extended(vec![(ARG.to_string(), ty.clone())])?;
+        let env = env.extended(vec![(internal_local(ARG), ty.clone())])?;
         let head = if site.name.contains("::") {
             // Read as the control string's module reads a path: segment by
             // segment (`SessionNames::read_path`).
@@ -14486,7 +14486,7 @@ impl Checker {
             }
             _ => return Err(not_a_definition()),
         };
-        let passed_as_is = first_arg.is_some_and(|a| matches!(&a.node, Node::Local { name } if &**name == ARG));
+        let passed_as_is = first_arg.is_some_and(|a| matches!(&a.node, Node::Local { name } if *name == internal_local(ARG)));
         if !passed_as_is {
             return Err(not_a_definition());
         }
@@ -16081,7 +16081,6 @@ impl Checker {
                     heap.pop_root();
                     return r;
                 }
-                let name = heap.symbol_spelling(id).to_string();
                 // A bare name that *is* a constructor of the scrutinee's own
                 // type is that constructor, not a new variable — `(match c
                 // (red 1) (blue 2))`. Without this the arm silently binds
@@ -16095,7 +16094,7 @@ impl Checker {
                 if let Some(pat) = self.check_bare_ctor_pattern(heap, interp, env, expected, v, loc.as_ref())? {
                     return Ok(pat);
                 }
-                Ok((Pattern::Bind(name.clone()), vec![(name, expected.clone(), loc)]))
+                Ok((Pattern::Bind(id), vec![(id, expected.clone(), loc)]))
             }
             Value::Int(n) => {
                 if expected.is_integer() {
@@ -16272,9 +16271,9 @@ impl Checker {
             core::list(&mut s, &[equals, scrut, expr])?
         };
         let guard_env =
-            env.extended_with_locs(vec![(MATCH_SCRUT.to_string(), expected.clone(), None)])?;
+            env.extended_with_locs(vec![(internal_local(MATCH_SCRUT), expected.clone(), None)])?;
         let checked = self.check_at(heap, interp, &guard_env, form, Some(&Type::Bool), loc)?;
-        Ok((Pattern::Guard { name: MATCH_SCRUT.to_string(), form: Box::new(checked) }, Vec::new()))
+        Ok((Pattern::Guard { name: internal_local(MATCH_SCRUT), form: Box::new(checked) }, Vec::new()))
     }
 
     /// Whether `ty` can be compared with `equals` — the same two lookups
@@ -16889,19 +16888,19 @@ fn expand_or_patterns(heap: &mut Heap, v: Value) -> Result<Vec<Value>, Error> {
 /// same types — what the shared arm body needs of them.
 fn same_or_bindings(first: &PatternBindings, other: &PatternBindings) -> Result<(), Error> {
     let key = |b: &PatternBindings| {
-        let mut v: Vec<(String, Type)> = b.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect();
-        v.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut v: Vec<(SymRef, Type)> = b.iter().map(|(n, t, _)| (*n, t.clone())).collect();
+        v.sort_by(|a, b| a.0.name().cmp(b.0.name()));
         v
     };
     let (a, b) = (key(first), key(other));
     if a == b {
         return Ok(());
     }
-    let show = |v: &[(String, Type)]| {
+    let show = |v: &[(SymRef, Type)]| {
         if v.is_empty() {
             "nothing".to_string()
         } else {
-            v.iter().map(|(n, t)| format!("`{}: {}`", n, t)).collect::<Vec<_>>().join(", ")
+            v.iter().map(|(n, t)| format!("`{}: {}`", n.name(), t)).collect::<Vec<_>>().join(", ")
         }
     };
     Err(Error::TypeError(format!(
@@ -17666,10 +17665,10 @@ fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLam
     // only advance the rank forward, so each appears at most once and in
     // order.
     let mut rank = 0u8;
-    let mut required_names: Vec<String> = Vec::new();
-    let mut optionals: Vec<(String, Option<Value>)> = Vec::new();
-    let mut rest_name: Option<String> = None;
-    let mut keys: Vec<(String, Option<Value>)> = Vec::new();
+    let mut required_names: Vec<SymRef> = Vec::new();
+    let mut optionals: Vec<(SymRef, Option<Value>)> = Vec::new();
+    let mut rest_name: Option<SymRef> = None;
+    let mut keys: Vec<(SymRef, Option<Value>)> = Vec::new();
 
     for p in param_vals {
         if let Value::Symbol(id) = p {
@@ -17699,13 +17698,13 @@ fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLam
             }
         }
         match rank {
-            0 => required_names.push(Checker::macro_param_name(heap, *p, "required")?),
+            0 => required_names.push(Checker::macro_param_name(*p, "required")?),
             1 => optionals.push(Checker::macro_opt_key_spec(heap, *p, "&optional")?),
             2 => {
                 if rest_name.is_some() {
                     return Err(Error::TypeError("defmacro: &rest takes exactly one parameter name".into()));
                 }
-                rest_name = Some(Checker::macro_param_name(heap, *p, "&rest")?);
+                rest_name = Some(Checker::macro_param_name(*p, "&rest")?);
             }
             _ => keys.push(Checker::macro_opt_key_spec(heap, *p, "&key")?),
         }

@@ -78,7 +78,7 @@ pub enum Pattern {
     Wildcard,
     /// A variable pattern — matches anything, binding it to the named
     /// variable.
-    Bind(String),
+    Bind(SymRef),
     Int(i64),
     Bool(bool),
     Char(char),
@@ -106,7 +106,7 @@ pub enum Pattern {
     /// stores into a fresh slot and rebinds the name before compiling that
     /// form), so two guards in one pattern never read each other's value.
     Guard {
-        name: String,
+        name: SymRef,
         form: Box<crate::check::core::Checked>,
     },
     /// A guarded arm, `(pat :when test body...)`: `pat` must match, and then

@@ -66,7 +66,7 @@ pub enum Node {
     /// `(quote datum)`, also a self-evaluating object of no reader syntax.
     Quote { datum: Value },
     /// A local binding.
-    Local { name: Box<str> },
+    Local { name: SymRef },
     /// A module's global variable, by its full path, read at its declared
     /// type `ty`.
     Global { path: crate::Path, ty: Type },
@@ -109,15 +109,15 @@ pub enum Node {
     DynCall { trait_path: crate::Path, method: Box<str>, slot: usize, targets: Vec<(crate::Path, SymRef)>, args: Vec<Checked> },
     /// `binds` in scope for `body`, which runs in order; each binding is its
     /// name, its type and its value. With no bindings this is `progn`.
-    Let { binds: Vec<(String, Type, Checked)>, body: Vec<Checked> },
+    Let { binds: Vec<(SymRef, Type, Checked)>, body: Vec<Checked> },
     /// An assignment to the local `name`.
-    Set { name: Box<str>, value: Box<Checked> },
+    Set { name: SymRef, value: Box<Checked> },
     /// An assignment to the global at `path`, declared `ty`.
     SetGlobal { path: crate::Path, ty: Type, value: Box<Checked> },
     /// Applying the function value `callee`, which returns `ret`.
     Apply { callee: Box<Checked>, ret: Type, args: Vec<Checked> },
     /// An anonymous function.
-    Lambda { params: Vec<(String, Type)>, ret: Type, body: Vec<Checked> },
+    Lambda { params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Checked> },
     /// Local functions in scope for each other and for `body`.
     Labels { defs: Vec<super::analyze::LabelsDef>, body: Vec<Checked> },
     /// `(loop body...)`, whose exits deliver a `ty`.
@@ -347,7 +347,7 @@ impl Node {
 pub enum SelectArm {
     /// `((var (recv chan)) body...)`; `bound` is the `Option` `var` is
     /// bound to.
-    Recv { var: Box<str>, bound: Type, chan: Checked, body: Checked },
+    Recv { var: SymRef, bound: Type, chan: Checked, body: Checked },
     /// `((send chan value) body...)`; `kind` is how the value is stored.
     Send { kind: i64, chan: Checked, value: Checked, body: Checked },
     /// `(:else body...)`.

@@ -87,7 +87,7 @@ pub(super) enum Step {
     Do(Vec<Value>),
     /// `:collect`/`:append`/`:sum`/`:count`/`:maximize`/`:minimize`, with the
     /// accumulator name `:into` gave it (or the anonymous one).
-    Accumulate { acc: Acc, expr: Value, into: String },
+    Accumulate { acc: Acc, expr: Value, into: SymRef },
     /// `:always` / `:never` — leave with `false` the moment the test fails.
     /// `never` is `always` over the negation, so only the polarity differs.
     Assert { expr: Value, want: bool },
@@ -105,7 +105,7 @@ pub(super) enum Step {
 /// One `:with` or `:for` variable, in written order.
 #[derive(Debug)]
 pub(super) struct Var {
-    pub name: String,
+    pub name: SymRef,
     pub loc: Option<Loc>,
     pub kind: VarKind,
 }
@@ -146,7 +146,7 @@ pub(super) struct Plan {
 
 #[derive(Debug)]
 pub(super) struct AccVar {
-    pub name: String,
+    pub name: SymRef,
     pub acc: Acc,
     /// The expression whose type decides the accumulator's — kept so
     /// `Checker::check_loop_dsl` can check it before `build` runs.
@@ -186,11 +186,9 @@ pub(super) fn is_dsl(args: &[Value]) -> bool {
 }
 
 /// The symbol name of `v`, for a clause position that must name a variable.
-fn var_name(heap: &Heap, v: Value) -> Option<String> {
+fn var_name(v: Value) -> Option<SymRef> {
     match v {
-        Value::Symbol(id) if !id.is_keyword() => {
-            Some(heap.symbol_spelling(id).to_string())
-        }
+        Value::Symbol(id) if !id.is_keyword() => Some(id),
         _ => None,
     }
 }
@@ -283,10 +281,10 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
         if word.is(wk::KW_NAMED) {
             c.i += 1;
             let (name_v, _) = c.next_value(":named")?;
-            let Some(name) = var_name(heap, name_v) else {
+            let Some(name) = var_name(name_v) else {
                 return Err(err(":named needs a block name".to_string()));
             };
-            plan.named = Some(name);
+            plan.named = Some(name.name().to_string());
         }
     }
 
@@ -298,7 +296,7 @@ pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
             wk::KW_WITH | wk::KW_FOR | wk::KW_AS => {
                 c.i += 1;
                 let (name_v, loc) = c.next_value(heap.symbol_spelling(word))?;
-                let Some(name) = var_name(heap, name_v) else {
+                let Some(name) = var_name(name_v) else {
                     return Err(err(format!("{} needs a variable name", heap.symbol_spelling(word))));
                 };
                 let kind = if word.is(wk::KW_WITH) {
@@ -480,19 +478,19 @@ fn accumulate(
     let expr = c.next_value(heap.symbol_spelling(word))?.0;
     let into = if c.eat(wk::KW_INTO) {
         let (v, _) = c.next_value(":into")?;
-        var_name(heap, v).ok_or_else(|| err(":into needs a variable name"))?
+        var_name(v).ok_or_else(|| err(":into needs a variable name"))?
     } else {
-        ANON_ACC.to_string()
+        heap.names().read(typelisp_mem::NsId::STD, ANON_ACC)
     };
     match plan.accs.iter().find(|a| a.name == into) {
         Some(prev) if prev.acc != acc => {
             return Err(err(format!(
                 "`{}` accumulates two different ways in one loop",
-                if into == ANON_ACC { "the loop's own result" } else { &into }
+                if into.name() == ANON_ACC { "the loop's own result" } else { into.name() }
             )))
         }
         Some(_) => {}
-        None => plan.accs.push(AccVar { name: into.clone(), acc, sample: expr }),
+        None => plan.accs.push(AccVar { name: into, acc, sample: expr }),
     }
     Ok(Step::Accumulate { acc, expr, into })
 }
@@ -514,7 +512,7 @@ fn state_name(prefix: &str, n: usize) -> String {
 /// `(the Option<T> (Option::none))` a `:thereis` leaves with when nothing
 /// matched.
 pub(super) struct Resolved {
-    pub acc_inits: Vec<(String, Value)>,
+    pub acc_inits: Vec<(SymRef, Value)>,
     pub thereis_none: Option<Value>,
 }
 
@@ -529,7 +527,13 @@ impl Build<'_, '_> {
     /// The standard library's symbol for `name`: what the expansion calls
     /// is the library's, whichever module the loop is written in.
     fn sym(&mut self, name: &str) -> Value {
-        Value::Symbol(self.s.names().read(typelisp_mem::NsId::STD, name))
+        Value::Symbol(self.temp(name))
+    }
+
+    /// The symbol a generated name reads as: the library's reading, which
+    /// the forms built here are checked in.
+    fn temp(&mut self, name: &str) -> SymRef {
+        self.s.names().read(typelisp_mem::NsId::STD, name)
     }
 
     /// A list, rooted before it is returned — every caller holds it across a
@@ -593,20 +597,18 @@ impl Build<'_, '_> {
         self.if_(test, then, Value::Empty)
     }
 
-    fn setf(&mut self, name: &str, value: Value) -> Result<Value, Error> {
-        let n = self.sym(name);
-        self.call("setf", &[n, value])
+    fn setf(&mut self, name: SymRef, value: Value) -> Result<Value, Error> {
+        self.call("setf", &[Value::Symbol(name), value])
     }
 
     /// `(let* ((n v)...) body)`, or `body` when there is nothing to bind.
-    fn let_star(&mut self, binds: &[(String, Value)], body: Value) -> Result<Value, Error> {
+    fn let_star(&mut self, binds: &[(SymRef, Value)], body: Value) -> Result<Value, Error> {
         if binds.is_empty() {
             return Ok(body);
         }
         let mut pairs = Vec::with_capacity(binds.len());
         for (name, val) in binds {
-            let n = self.sym(name);
-            let pair = self.list(&[n, *val])?;
+            let pair = self.list(&[Value::Symbol(*name), *val])?;
             pairs.push(pair);
         }
         let list = self.list(&pairs)?;
@@ -614,9 +616,9 @@ impl Build<'_, '_> {
         self.list(&[head, list, body])
     }
 
-    fn next_tmp(&mut self, prefix: &str) -> String {
+    fn next_tmp(&mut self, prefix: &str) -> SymRef {
         self.tmp += 1;
-        state_name(prefix, self.tmp)
+        self.temp(&state_name(prefix, self.tmp))
     }
 }
 
@@ -628,24 +630,24 @@ pub(super) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result
     // What each variable clause contributes: a binding that outlives the
     // loop, a binding refreshed every pass, a way for the loop to be over,
     // and a way to advance.
-    let mut outer: Vec<(String, Value)> = Vec::new();
-    let mut per_pass: Vec<(String, Value)> = Vec::new();
+    let mut outer: Vec<(SymRef, Value)> = Vec::new();
+    let mut per_pass: Vec<(SymRef, Value)> = Vec::new();
     let mut exhausted: Vec<Value> = Vec::new();
     let mut steppers: Vec<Value> = Vec::new();
 
     for (n, var) in plan.vars.iter().enumerate() {
         match &var.kind {
-            VarKind::With(init) => outer.push((var.name.clone(), *init)),
+            VarKind::With(init) => outer.push((var.name, *init)),
             VarKind::For(ForIter::Seq(seq)) | VarKind::For(ForIter::Suffixes(seq)) => {
                 let suffixes = matches!(var.kind, VarKind::For(ForIter::Suffixes(_)));
-                let buf = state_name("buf", n);
-                let idx = state_name("idx", n);
+                let buf = b.temp(&state_name("buf", n));
+                let idx = b.temp(&state_name("idx", n));
                 let materialized = b.call("copy-seq", &[*seq])?;
-                outer.push((buf.clone(), materialized));
-                outer.push((idx.clone(), Value::Int(0)));
+                outer.push((buf, materialized));
+                outer.push((idx, Value::Int(0)));
 
-                let buf_sym = b.sym(&buf);
-                let idx_sym = b.sym(&idx);
+                let buf_sym = Value::Symbol(buf);
+                let idx_sym = Value::Symbol(idx);
                 let len = b.call("len", &[buf_sym])?;
                 let test = b.call(">=", &[idx_sym, len])?;
                 exhausted.push(test);
@@ -659,15 +661,15 @@ pub(super) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result
                 } else {
                     b.call("get", &[buf_sym, idx_sym])?
                 };
-                per_pass.push((var.name.clone(), element));
+                per_pass.push((var.name, element));
 
                 let next = b.call("+", &[idx_sym, Value::Int(1)])?;
-                let step = b.setf(&idx, next)?;
+                let step = b.setf(idx, next)?;
                 steppers.push(step);
             }
             VarKind::For(ForIter::Range { from, end, by, down }) => {
-                outer.push((var.name.clone(), *from));
-                let v = b.sym(&var.name);
+                outer.push((var.name, *from));
+                let v = Value::Symbol(var.name);
                 match end {
                     RangeEnd::Inclusive(limit) => {
                         let op = if *down { "<" } else { ">" };
@@ -684,36 +686,37 @@ pub(super) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result
                 let stride = by.unwrap_or(Value::Int(1));
                 let op = if *down { "-" } else { "+" };
                 let next = b.call(op, &[v, stride])?;
-                let step = b.setf(&var.name, next)?;
+                let step = b.setf(var.name, next)?;
                 steppers.push(step);
             }
             VarKind::For(ForIter::Assign { init, next }) => {
-                outer.push((var.name.clone(), *init));
+                outer.push((var.name, *init));
                 // Without `:then`, CL re-evaluates the same form each pass.
-                let step = b.setf(&var.name, next.unwrap_or(*init))?;
+                let step = b.setf(var.name, next.unwrap_or(*init))?;
                 steppers.push(step);
             }
         }
     }
 
     if let Some(count) = &plan.repeat {
-        let n = state_name("rep", plan.vars.len());
-        let limit = state_name("rep-limit", plan.vars.len());
-        outer.push((limit.clone(), *count));
-        outer.push((n.clone(), Value::Int(0)));
-        let n_sym = b.sym(&n);
-        let limit_sym = b.sym(&limit);
+        let n = b.temp(&state_name("rep", plan.vars.len()));
+        let limit = b.temp(&state_name("rep-limit", plan.vars.len()));
+        outer.push((limit, *count));
+        outer.push((n, Value::Int(0)));
+        let n_sym = Value::Symbol(n);
+        let limit_sym = Value::Symbol(limit);
         let test = b.call(">=", &[n_sym, limit_sym])?;
         exhausted.push(test);
         let next = b.call("+", &[n_sym, Value::Int(1)])?;
-        let step = b.setf(&n, next)?;
+        let step = b.setf(n, next)?;
         steppers.push(step);
     }
 
     for (name, init) in &resolved.acc_inits {
-        outer.push((name.clone(), *init));
+        outer.push((*name, *init));
     }
-    outer.push((FIRST_FLAG.to_string(), Value::Bool(true)));
+    let first_flag = b.temp(FIRST_FLAG);
+    outer.push((first_flag, Value::Bool(true)));
 
     // The loop body, in CL's order: initialize (done by the `let*` above),
     // then test, then work, then step. Written here as step-then-test-then-
@@ -721,10 +724,10 @@ pub(super) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result
     // and puts the exit in one place.
     let mut body: Vec<Value> = Vec::new();
 
-    let cleared = b.setf(FIRST_FLAG, Value::Bool(false))?;
+    let cleared = b.setf(first_flag, Value::Bool(false))?;
     let cleared = b.statements(&[cleared])?;
     let stepped = b.statements(&steppers)?;
-    let flag = b.sym(FIRST_FLAG);
+    let flag = Value::Symbol(first_flag);
     let stepping = b.if_(flag, cleared, stepped)?;
     body.push(stepping);
 
@@ -805,7 +808,7 @@ fn leave_normally(b: &mut Build, plan: &Plan, resolved: &Resolved) -> Result<Val
         return b.statements(&plan.finally);
     }
     let value = match plan.accs.first() {
-        Some(first) => b.sym(&first.name),
+        Some(first) => Value::Symbol(first.name),
         None => match plan.verdict {
             Some(Verdict::Boolean) => Value::Bool(true),
             Some(Verdict::Optional) => resolved
@@ -850,14 +853,14 @@ fn build_step(b: &mut Build, step: &Step, plan: &Plan, resolved: &Resolved) -> R
         }
         Step::Thereis { expr } => {
             let tmp = b.next_tmp("thereis");
-            let tmp_sym = b.sym(&tmp);
+            let tmp_sym = Value::Symbol(tmp);
             let leave = b.call("return", &[tmp_sym])?;
             let leave = b.statements(&[leave])?;
             let is_some = b.call("is-some", &[tmp_sym])?;
             let branch = b.when(is_some, leave)?;
             b.let_star(&[(tmp, *expr)], branch)
         }
-        Step::Accumulate { acc, expr, into } => build_accumulate(b, *acc, *expr, into),
+        Step::Accumulate { acc, expr, into } => build_accumulate(b, *acc, *expr, *into),
         Step::Cond { test, want, then, els } => {
             let then_form = build_step(b, then, plan, resolved)?;
             let else_form = match els {
@@ -871,10 +874,10 @@ fn build_step(b: &mut Build, step: &Step, plan: &Plan, resolved: &Resolved) -> R
     }
 }
 
-fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: &str) -> Result<Value, Error> {
+fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: SymRef) -> Result<Value, Error> {
     match acc {
         Acc::Collect => {
-            let target = b.sym(into);
+            let target = Value::Symbol(into);
             let push = b.call("push", &[target, expr])?;
             b.statements(&[push])
         }
@@ -883,20 +886,20 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: &str) -> Result<
             // by element: `append` is the one operation that takes any `Iter`
             // on the right, and the loop DSL should not need a nested loop of
             // its own to say "and these too".
-            let target = b.sym(into);
+            let target = Value::Symbol(into);
             let it = b.call("iter", &[target])?;
             let joined = b.call("append", &[it, expr])?;
             let set = b.setf(into, joined)?;
             b.statements(&[set])
         }
         Acc::Sum => {
-            let target = b.sym(into);
+            let target = Value::Symbol(into);
             let sum = b.call("+", &[target, expr])?;
             let set = b.setf(into, sum)?;
             b.statements(&[set])
         }
         Acc::Count => {
-            let target = b.sym(into);
+            let target = Value::Symbol(into);
             let inc = b.call("+", &[target, Value::Int(1)])?;
             let set = b.setf(into, inc)?;
             let set = b.statements(&[set])?;
@@ -913,9 +916,9 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: &str) -> Result<
             // arbitrary `Ord` type to start from.
             let tmp = b.next_tmp("extremum");
             let best = b.next_tmp("best");
-            let tmp_sym = b.sym(&tmp);
-            let best_sym = b.sym(&best);
-            let target = b.sym(into);
+            let tmp_sym = Value::Symbol(tmp);
+            let best_sym = Value::Symbol(best);
+            let target = Value::Symbol(into);
             let op = if acc == Acc::Maximize { ">" } else { "<" };
 
             let cmp = b.call(op, &[tmp_sym, best_sym])?;

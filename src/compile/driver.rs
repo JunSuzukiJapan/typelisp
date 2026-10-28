@@ -30,7 +30,7 @@ use inkwell::AddressSpace;
 use typelisp_mem::{Heap, RootScope, SymRef, Value};
 
 use crate::check::repr::Repr;
-use crate::eval::interp::{intern_names, intern_params, str_rt, EvalError, Interp, Uncompilable};
+use crate::eval::interp::{str_rt, EvalError, Interp, Uncompilable};
 use crate::compile::externs::{
     is_native_lowered_primitive_method, is_rt_builtin, rt_extern_functions,
 };
@@ -331,10 +331,10 @@ pub fn translate_and_compile(
     interp: &Interp,
     heap: &mut Heap,
     module: Rc<RefCell<Module<'static>>>,
-    params: &[(String, Repr)],
+    params: &[(SymRef, Repr)],
     body: &[Value],
     internal_name: &str,
-    extra_exclude_from_cell_names: &HashSet<String>,
+    extra_exclude_from_cell_names: &HashSet<SymRef>,
 ) -> Result<(), EvalError> {
     prepare_targets(interp, heap, body)?;
     // `core_bridge` is deliberately `Registry`-free, so hand it the type
@@ -348,10 +348,8 @@ pub fn translate_and_compile(
     let trait_ids = interp.trait_ids.borrow();
     let dyn_tables = crate::compile::symbols::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
     let cx = crate::compile::core_bridge::Ctx::with_dyn_tables(&defs, &compiled_globals, dyn_tables);
-    let excluded = intern_names(heap, extra_exclude_from_cell_names);
-    let params = intern_params(heap, params);
     let (param_list, body_sexpr) =
-        match crate::compile::core_bridge::function_parts(heap, &params, body, cx, &excluded) {
+        match crate::compile::core_bridge::function_parts(heap, params, body, cx, extra_exclude_from_cell_names) {
             Ok(v) => v,
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };

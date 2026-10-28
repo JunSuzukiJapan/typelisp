@@ -237,6 +237,12 @@ pub(super) fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) ->
 /// itself, so it can be neither bound nor assigned, and no definition takes
 /// its name either.
 pub(super) fn bound_name(id: typelisp_mem::SymRef, who: &str) -> Result<String, Error> {
+    bound_symbol(id, who).map(|id| id.spelling().to_string())
+}
+
+/// [`bound_name`] for a local binding, which is the symbol itself: a
+/// reference to the local reads as the same symbol.
+pub(super) fn bound_symbol(id: typelisp_mem::SymRef, who: &str) -> Result<typelisp_mem::SymRef, Error> {
     if id.is_keyword() {
         return Err(Error::TypeError(format!(
             "{}: `{}` is a keyword — a constant that names itself — so it cannot be bound, assigned or defined",
@@ -244,7 +250,7 @@ pub(super) fn bound_name(id: typelisp_mem::SymRef, who: &str) -> Result<String, 
             id.spelling()
         )));
     }
-    Ok(id.spelling().to_string())
+    Ok(id)
 }
 
 /// Refuses `head` as the head of a form in expression position when it is

@@ -388,7 +388,7 @@ impl Checker {
         let close = self.c_call(b::ARENA_CLOSE, vec![arena_var], Type::Unit)?;
         let node = Node::UnwindProtect { protected: Box::new(body), cleanup: Box::new(close) };
         let protected = Checked::of(node, ty.clone());
-        let node = Node::Let { binds: vec![(b::ARENA_VAR.to_string(), Type::CULong, open)], body: vec![protected] };
+        let node = Node::Let { binds: vec![(internal_local(b::ARENA_VAR), Type::CULong, open)], body: vec![protected] };
         Ok(Checked::of(node, ty))
     }
 
@@ -409,13 +409,13 @@ impl Checker {
         heap: &Heap,
         env: &Env,
         body: &[Value],
-        bound: &[String],
+        bound: &[typelisp_mem::SymRef],
         what: &str,
     ) -> Result<(), Error> {
-        let bound: HashSet<typelisp_mem::SymRef> = bound.iter().map(|n| typelisp_mem::symbols::intern(n)).collect();
+        let bound: HashSet<typelisp_mem::SymRef> = bound.iter().copied().collect();
         for sym in crate::check::freevars::free_vars(heap, body, &bound, &HashSet::new())? {
             let name = sym.name();
-            if let Some(ty) = env.get(name) {
+            if let Some(ty) = env.get(sym) {
                 if type_mentions_typed_ptr(ty) {
                     return Err(Error::TypeError(format!(
                         "{} captures `{}`, a `{}`: the closure can run after the `unsafe` that \
@@ -456,7 +456,7 @@ impl Checker {
 
     /// The `unsafe`'s arena, a local of its own.
     fn c_arena_var(&self) -> Result<Checked, Error> {
-        Ok(Checked::of(Node::Local { name: b::ARENA_VAR.into() }, Type::CULong))
+        Ok(Checked::of(Node::Local { name: internal_local(b::ARENA_VAR) }, Type::CULong))
     }
 
     /// A raw-word constant argument.
@@ -587,13 +587,13 @@ impl Checker {
             let what = Disagreement::Unassignable(Unassignable::WholeCStruct { ty: ty.clone() });
             return Ok(disagreeing(value, what, ty.clone()));
         };
-        const TEMP: &str = " c-value";
-        let temp = Checked::of(Node::Local { name: TEMP.into() }, ty.clone());
+        let temp_name = internal_local(" c-value");
+        let temp = Checked::of(Node::Local { name: temp_name }, ty.clone());
         let off = self.c_word(heap, interp, offset)?;
         let kind_arg = self.c_word(heap, interp, kind as u64)?;
         let store = self.c_call(b::STORE, vec![addr, off, kind_arg, temp], Type::Unit)?;
-        let answer = Checked::of(Node::Local { name: TEMP.into() }, ty.clone());
-        let node = Node::Let { binds: vec![(TEMP.to_string(), ty.clone(), value)], body: vec![store, answer] };
+        let answer = Checked::of(Node::Local { name: temp_name }, ty.clone());
+        let node = Node::Let { binds: vec![(temp_name, ty.clone(), value)], body: vec![store, answer] };
         Ok(Checked::of(node, ty.clone()))
     }
 
