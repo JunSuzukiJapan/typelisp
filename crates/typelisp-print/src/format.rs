@@ -3046,10 +3046,8 @@ impl Renderer {
             Value::Boxed(id) if heap.is_builtin_fn(id) => {
                 let text = match heap.builtin_fn_recv(id) {
                     None => format!("#<builtin {}>", heap.builtin_fn_name(id)),
-                    Some(pid) => {
-                        let (ns, sym) = typelisp_mem::symbols::definition_of_path(&heap.path_segments(pid))
-                            .expect("a builtin's receiver is a path from the root");
-                        format!("#<builtin {}::{}>", crate::shared::name_view().definition(ns, sym), heap.builtin_fn_name(id))
+                    Some(recv) => {
+                        format!("#<builtin {}::{}>", crate::shared::name_view().definition(recv.home(), recv), heap.builtin_fn_name(id))
                     }
                 };
                 out.push_str(&text);

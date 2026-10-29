@@ -488,7 +488,7 @@ pub(crate) enum BoxedObj {
     /// checker at the reference site, since applying the value later is too
     /// late to ask. `None` for a free built-in, whose results build no such
     /// box.
-    Builtin { recv_type: Option<PathId>, name: SymRef, ret_type: Option<TypeId> },
+    Builtin { recv_type: Option<SymRef>, name: SymRef, ret_type: Option<TypeId> },
     /// A `random-state` (CL's `random-state`): the current seed of a mutable
     /// PRNG stream, advanced in place on every draw.
     ///

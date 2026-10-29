@@ -145,17 +145,17 @@ unsafe fn function<F: Copy>(code: &JitCode, name: &str) -> F {
 }
 
 /// Core IR written as text, read in the core IR's module so its tags are the
-/// IR's own symbols. A definition is named by its path from the root (`::f`,
-/// `::m::f`), as the checker writes it (`core::path_form`); the hand-written
-/// forms put theirs at the root or in a module `m`, which this session is
-/// told it has.
+/// IR's own symbols. A definition is written as its path from the root
+/// (`::f`, `::m::f`) and read as its symbol (`core::name_written_definitions`),
+/// as the checker writes it; the hand-written forms put theirs at the root or
+/// in a module `m`, which this session is told it has.
 fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
     h.names().declare_module(typelisp::mem::symbols::ns_of(&["m".to_string()]));
     h.names().declare_module(typelisp::mem::StdModule::PRIMITIVE.ns());
     Ok(Reader::new()
         .read_all_in_spanned_within(h, "<core>", src, typelisp::NsId::CORE)?
         .into_iter()
-        .map(|(v, _)| v)
+        .map(|(v, _)| typelisp::check::core::name_written_definitions(h, v))
         .collect())
 }
 

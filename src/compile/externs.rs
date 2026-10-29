@@ -1114,7 +1114,7 @@ mod scc_tests {
         // restriction never comes into play. Each body is a single
         // `(call NAME ())`: no arguments, hence no argument reprs.
         for (name, callee) in [("a", "b"), ("b", "a")] {
-            let path = crate::check::core::path_form(&mut heap, &Path::root(callee));
+            let path = crate::check::core::definition_form(&Path::root(callee));
             heap.push_root(path);
             let call = core::tagged(&mut heap, typelisp_mem::wk::CALL, &[path, Value::Empty])
                 .expect("building a 2-field node cannot exhaust a 1<<16 heap");

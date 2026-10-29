@@ -21,7 +21,7 @@
 //! type two ways.
 
 use crate::names::ConcreteNames;
-use crate::symbols::{child_ns_named, intern_in, wk, NsId, SymRef};
+use crate::symbols::{ns_names, wk, NsId, SymRef};
 use crate::{Heap, TypeId, TypeShape, Value};
 
 /// The interned identity of the type `form` writes, minting it if it has not
@@ -77,11 +77,11 @@ fn read_shape(heap: &Heap, form: Value, mint: bool) -> Option<Option<TypeShape>>
     let args = |forms: &[Value]| -> Option<Option<Vec<TypeId>>> { forms.iter().map(|f| arg(*f)).collect::<Option<Vec<_>>>().map(|v| v.into_iter().collect()) };
     let shape = match (tag.well_known(), fields.as_slice()) {
         (wk::TYPE_NAMED, [path, rest @ ..]) => {
-            let (ns, sym) = definition(heap, *path)?;
+            let (ns, sym) = definition(*path)?;
             args(rest)?.map(|a| TypeShape::Named(ns, sym, a))
         }
         (wk::TYPE_DYN, [path, pins @ ..]) => {
-            let (ns, sym) = definition(heap, *path)?;
+            let (ns, sym) = definition(*path)?;
             args(pins)?.map(|a| TypeShape::Dyn(ns, sym, a))
         }
         (wk::TYPE_FN, [params, rest, ret]) => {
@@ -98,7 +98,7 @@ fn read_shape(heap: &Heap, form: Value, mint: bool) -> Option<Option<TypeShape>>
         }
         (wk::TYPE_PTR, [pointee]) => arg(*pointee)?.map(TypeShape::Ptr),
         (wk::TYPE_CSTRUCT, [path]) => {
-            let (ns, sym) = definition(heap, *path)?;
+            let (ns, sym) = definition(*path)?;
             Some(TypeShape::CStruct(ns, sym))
         }
         (wk::TYPE_UNIT, []) => Some(TypeShape::Unit),
@@ -109,21 +109,11 @@ fn read_shape(heap: &Heap, form: Value, mint: bool) -> Option<Option<TypeShape>>
     Some(shape)
 }
 
-/// The definition a type form's path names: the module, walked down the
-/// tree from the root one segment at a time, and the name's symbol there.
-fn definition(heap: &Heap, path: Value) -> Option<(NsId, SymRef)> {
-    let Value::Path(id) = path else { return None };
-    let segments = heap.path_segments(id);
-    let (root, segs) = segments.split_first()?;
-    let (name, modules) = segs.split_last()?;
-    if *root != intern_in(NsId::ROOT, "") {
-        return None;
-    }
-    let mut ns = NsId::ROOT;
-    for m in modules {
-        ns = child_ns_named(ns, *m)?;
-    }
-    Some((ns, *name))
+/// The definition a type form names: the module its symbol is of, and the
+/// symbol.
+fn definition(name: Value) -> Option<(NsId, SymRef)> {
+    let Value::Symbol(sym) = name else { return None };
+    Some((sym.home(), sym))
 }
 
 /// The runtime-identity spelling of the type `form` writes — the key
@@ -135,8 +125,8 @@ pub fn type_key_of_form(heap: &Heap, form: Value) -> Option<String> {
     let fields = heap.list_to_vec(heap.cdr(form).ok()?).ok()?;
     let keys = |forms: &[Value]| forms.iter().map(|f| type_key_of_form(heap, *f)).collect::<Option<Vec<String>>>();
     match (tag.well_known(), fields.as_slice()) {
-        (wk::TYPE_NAMED, [path, args @ ..]) => Some(ConcreteNames::instantiated_type(&path_spelling(heap, *path)?, &keys(args)?)),
-        (wk::TYPE_DYN, [path, pins @ ..]) => Some(ConcreteNames::dyn_type(&path_spelling(heap, *path)?, &keys(pins)?)),
+        (wk::TYPE_NAMED, [path, args @ ..]) => Some(ConcreteNames::instantiated_type(&path_spelling(*path)?, &keys(args)?)),
+        (wk::TYPE_DYN, [path, pins @ ..]) => Some(ConcreteNames::dyn_type(&path_spelling(*path)?, &keys(pins)?)),
         (wk::TYPE_FN, [params, rest, ret]) => {
             let params = keys(&heap.list_to_vec(*params).ok()?)?;
             let rest = match rest {
@@ -146,7 +136,7 @@ pub fn type_key_of_form(heap: &Heap, form: Value) -> Option<String> {
             Some(ConcreteNames::fn_type(&params, rest.as_ref(), &type_key_of_form(heap, *ret)?))
         }
         (wk::TYPE_PTR, [pointee]) => Some(ConcreteNames::ptr_type(&type_key_of_form(heap, *pointee)?)),
-        (wk::TYPE_CSTRUCT, [path]) => path_spelling(heap, *path),
+        (wk::TYPE_CSTRUCT, [path]) => path_spelling(*path),
         (wk::TYPE_PARAM, [Value::Int(n)]) => Some(ConcreteNames::template_param(usize::try_from(*n).ok()?)),
         (wk::TYPE_VAR, [Value::Str(name)]) => Some(heap.string(*name).to_string()),
         (wk::TYPE_UNIT, []) => Some("()".to_string()),
@@ -155,14 +145,11 @@ pub fn type_key_of_form(heap: &Heap, form: Value) -> Option<String> {
     }
 }
 
-/// A definition's path from the root, spelled as a type key spells it: the
-/// segments after the root, joined by `::`.
-fn path_spelling(heap: &Heap, path: Value) -> Option<String> {
-    let Value::Path(id) = path else { return None };
-    let segments = heap.path_segments(id);
-    let (root, segs) = segments.split_first()?;
-    if *root != intern_in(NsId::ROOT, "") || segs.is_empty() {
-        return None;
-    }
-    Some(segs.iter().map(|s| s.name()).collect::<Vec<_>>().join("::"))
+/// A definition's path from the root, spelled as a type key spells it: its
+/// module's segments after the root and its name, joined by `::`.
+fn path_spelling(name: Value) -> Option<String> {
+    let (ns, sym) = definition(name)?;
+    let mut segs: Vec<&str> = ns_names(ns).into_iter().map(|s| s.name()).collect();
+    segs.push(sym.name());
+    Some(segs.join("::"))
 }

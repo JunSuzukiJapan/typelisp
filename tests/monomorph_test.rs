@@ -67,7 +67,7 @@ fn bundled_specs(h: &Heap, tl: TopLevelForm) -> Vec<TopLevelForm> {
     }
     // `(module PATH BODY...)` — the path decides whether this is *the* bundle.
     let fields = core::fields(h, tl).expect("a module's fields are a proper list");
-    let is_bundle = core::path_value(h, fields[0]) == Some(Path::root(MONO_BUNDLE_MODULE));
+    let is_bundle = core::root_path_value(h, fields[0]) == Some(Path::root(MONO_BUNDLE_MODULE));
     if !is_bundle {
         return Vec::new();
     }
@@ -78,7 +78,7 @@ fn bundled_specs(h: &Heap, tl: TopLevelForm) -> Vec<TopLevelForm> {
 /// A `(defun PATH ...)` form's name.
 fn defun_name(h: &Heap, tl: TopLevelForm) -> Path {
     assert_eq!(core::op_spelling(h, tl), Some("defun"), "expected a defun form");
-    core::path_field(h, tl, 0).expect("a defun names itself with a path or a symbol")
+    core::definition_field(h, tl, 0).expect("a defun names itself with its symbol")
 }
 
 /// A `(defmethod PATH SYM ...)` form's method name.

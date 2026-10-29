@@ -2184,7 +2184,7 @@ impl Heap {
     /// `name` is the builtin's own symbol, so the box holds only permanent
     /// references and allocating one never triggers a collection (like
     /// [`alloc_cell`](Self::alloc_cell)).
-    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: SymRef, ret_type: Option<TypeId>) -> Value {
+    pub fn alloc_builtin_fn(&mut self, recv_type: Option<SymRef>, name: SymRef, ret_type: Option<TypeId>) -> Value {
         self.alloc_boxed(BoxedObj::Builtin { recv_type, name, ret_type })
     }
 
@@ -2197,7 +2197,7 @@ impl Heap {
     /// built-in. Panics if `id` doesn't hold a `BoxedObj::Builtin`, the same
     /// internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).
-    pub fn builtin_fn_recv(&self, id: BoxId) -> Option<PathId> {
+    pub fn builtin_fn_recv(&self, id: BoxId) -> Option<SymRef> {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::Builtin { recv_type, .. }) => *recv_type,
             _ => panic!("BoxId does not hold a Builtin"),

@@ -97,9 +97,8 @@ pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: 
         fatal("rt_ffi_callback_address: expected 2 arguments");
     }
     let (ns, sym) = match decode(*args) {
-        Value::Path(id) => typelisp_mem::symbols::definition_of_path(&active_heap().path_segments(id))
-            .unwrap_or_else(|| fatal("rt_ffi_callback_address: the function's path does not start at the root")),
-        other => fatal(&format!("rt_ffi_callback_address: the function is not a path, got {:?}", other)),
+        Value::Symbol(sym) => (sym.home(), sym),
+        other => fatal(&format!("rt_ffi_callback_address: the function is not a symbol, got {:?}", other)),
     };
     let ty = TypeId::from_word(*args.add(1))
         .unwrap_or_else(|| fatal("rt_ffi_callback_address: the function type is not a type"));

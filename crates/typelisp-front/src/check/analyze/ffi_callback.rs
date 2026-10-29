@@ -120,7 +120,7 @@ impl Checker {
         }
         // `(call PATH (REPR REPR) (quote FUNCTION) (type-value TYPE))` to the
         // address builtin — the entry's address, as a raw word.
-        let function = core::path_form(heap, &target);
+        let function = core::definition_form(&target);
         let function = self.quoted(heap, function, sexpr_ty());
         let ty = Checked::type_value(fn_ty);
         Ok(Checked::of(Node::Call { path: Path::internal_builtin(ADDRESS_BUILTIN), args: vec![function, ty] }, Type::Ptr))
@@ -177,7 +177,7 @@ impl Checker {
         }
         let path = self.fresh_callback_path();
         let mut f = Items::new(heap);
-        let p = core::path_form(f.heap(), &path);
+        let p = core::definition_form(&path);
         f.push(p);
         f.extend(fields.iter().copied());
         let form = f.finish(wk::DEFUN)?;

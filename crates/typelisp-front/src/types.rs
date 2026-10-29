@@ -65,6 +65,11 @@ impl Path {
         Path { ns, name }
     }
 
+    /// The definition `name` names: the one in its home module.
+    pub fn named_by(name: SymRef) -> Path {
+        Path { ns: name.home(), name }
+    }
+
     /// The module `ns`, named as a definition of the module it is a child of.
     pub fn of_module(ns: NsId) -> Path {
         let parent = symbols::ns_parent(ns).expect("the root and the system module are not named");
@@ -98,8 +103,7 @@ impl Path {
     /// belongs to: `%core` for the LLVM handle types, which only the compiler
     /// island works with, and otherwise a module of the standard library.
     pub fn builtin(ty: u32) -> Path {
-        let name = symbols::well_known_symbol(ty);
-        Path { ns: name.home(), name }
+        Path::named_by(symbols::well_known_symbol(ty))
     }
 
     /// The primitive type `name` (`int`, `i32`, `string` ...), which

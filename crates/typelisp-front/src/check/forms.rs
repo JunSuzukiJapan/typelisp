@@ -24,7 +24,7 @@
 use typelisp_mem::{wk, Error, Heap, Loc, NsId, RootScope, SymRef, Value};
 
 use crate::check::analyze::MacroLambda;
-use crate::check::core::{self, path_form, Items};
+use crate::check::core::{self, definition_form, Items};
 use crate::check::repr::Repr;
 use crate::check::resolved::CompileTarget;
 use crate::types::{Path, Type};
@@ -386,7 +386,7 @@ pub(super) fn unwind_protect_form(
 /// `(dyn-upcast TRAIT FORM)`.
 pub(super) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) -> Result<Value, Error> {
     let mut f = Items::new(heap);
-    let tp = path_form(f.heap(), to_trait);
+    let tp = definition_form(to_trait);
     f.push(tp);
     f.push(value);
     f.finish(wk::DYN_UPCAST)
@@ -437,7 +437,7 @@ pub(super) fn defmacro_form(
     body: &[Value],
 ) -> Result<Value, Error> {
     let mut f = Items::new(heap);
-    let path = path_form(f.heap(), name);
+    let path = definition_form(name);
     f.push(path);
     let ps = {
         let mut ps = Items::new(f.heap());
@@ -482,7 +482,7 @@ pub(super) fn defmacro_form(
 /// absolute, so the wrapper only has to ensure the namespace exists.
 pub(super) fn module_form(heap: &mut Heap, path: &Path, body: &[Value]) -> Result<Value, Error> {
     let mut f = Items::new(heap);
-    let p = path_form(f.heap(), path);
+    let p = core::root_path_form(f.heap(), path);
     f.push(p);
     f.extend(body.iter().copied());
     f.finish(wk::MODULE)
@@ -491,9 +491,9 @@ pub(super) fn module_form(heap: &mut Heap, path: &Path, body: &[Value]) -> Resul
 /// `(use ALIAS TARGET)`.
 pub(super) fn use_form(heap: &mut Heap, alias: &Path, target: &Path) -> Result<Value, Error> {
     let mut f = Items::new(heap);
-    let a = path_form(f.heap(), alias);
+    let a = core::root_path_form(f.heap(), alias);
     f.push(a);
-    let t = path_form(f.heap(), target);
+    let t = core::root_path_form(f.heap(), target);
     f.push(t);
     f.finish(wk::USE)
 }
@@ -549,13 +549,13 @@ fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Val
     match target {
         CompileTarget::Fn(path) => {
             let mut f = Items::new(heap);
-            let path = path_form(f.heap(), path);
+            let path = definition_form(path);
             f.push(path);
             f.finish(wk::FN)
         }
         CompileTarget::Method(type_name, method) => {
             let mut f = Items::new(heap);
-            let tp = path_form(f.heap(), type_name);
+            let tp = definition_form(type_name);
             f.push(tp);
             f.push(Value::Symbol(*method));
             f.finish(wk::METHOD)
@@ -752,7 +752,7 @@ pub(super) fn name_form(heap: &mut Heap, p: &Path) -> Value {
     if p.ns() == NsId::ROOT || sym.home() == p.ns() {
         return Value::Symbol(sym);
     }
-    path_form(heap, p)
+    core::root_path_form(heap, p)
 }
 
 /// `(%type-member TYPE MEMBER)` — a member of the type `type_path` (a

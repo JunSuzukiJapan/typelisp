@@ -18,7 +18,7 @@ fn primary(h: &Heap, tl: TopLevelForm) -> TopLevelForm {
     }
     // `(module PATH BODY...)` — the path decides whether this is *the* bundle.
     let fields = core::fields(h, tl).expect("a module's fields are a proper list");
-    let is_bundle = core::path_value(h, fields[0]) == Some(Path::root(MONO_BUNDLE_MODULE));
+    let is_bundle = core::root_path_value(h, fields[0]) == Some(Path::root(MONO_BUNDLE_MODULE));
     if is_bundle {
         *fields.last().expect("a monomorph bundle always ends with its primary form")
     } else {

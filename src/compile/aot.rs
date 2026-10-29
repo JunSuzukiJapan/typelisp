@@ -113,7 +113,7 @@ fn collect_aot_item(
     }
     let defvar_meta = match tag {
         wk::DEFUN => {
-            let path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
+            let path = core::definition_field(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
             // A `defun main` other than the entry file's own is never called
             // — the entry point is always `entry_path` — so it is almost
             // certainly a mistake (entry code written inside a `module`, or a
@@ -132,7 +132,7 @@ fn collect_aot_item(
             None
         }
         wk::DEFMETHOD => {
-            let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
+            let type_path = core::definition_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => id,
                 _ => return Err("compile-file: defmethod without a name".to_string()),
@@ -143,7 +143,7 @@ fn collect_aot_item(
         // The whole form travels, not just the initializer: the global's
         // storage tagging is on the form (see `Interp::add_compiled_global_init`).
         wk::DEFVAR => {
-            let name = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defvar without a name".to_string())?;
+            let name = core::definition_field(heap, tl, 0).ok_or_else(|| "compile-file: defvar without a name".to_string())?;
             Some((name, tl))
         }
         // No codegen of their own. `exec` still runs: it records an enum's
@@ -227,7 +227,7 @@ fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     }
     // `(call PATH (R...) ARG...)`: the resolved path, and no arguments past
     // the representation list.
-    let is_main = core::path_field(heap, form, 0).is_some_and(|p| &p == entry_path);
+    let is_main = core::definition_field(heap, form, 0).is_some_and(|p| &p == entry_path);
     is_main && core::fields(heap, form).map(|f| f.len() == 2).unwrap_or(false)
 }
 

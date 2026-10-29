@@ -407,7 +407,7 @@ impl Interp {
     /// boxing here rather than a second copy of it.
     pub(super) fn dyn_new_with_value(&self, heap: &mut Heap, form: Value, v: Value) -> Result<Value, EvalError> {
         let concrete = type_field(heap, form, 0, "dyn-new")?;
-        let trait_path = path_field(heap, form, 1, "dyn-new")?;
+        let trait_path = definition_field(heap, form, 1, "dyn-new")?;
         let slots = method_list(heap, form, 2, "dyn-new")?;
         let supers = super_list(heap, form, 3)?;
 
@@ -463,7 +463,7 @@ impl Interp {
     /// [`Self::dyn_upcast_core`] from the point its operand has a value —
     /// split for the same reason [`Self::dyn_new_with_value`] is.
     pub(super) fn dyn_upcast_with_value(&self, heap: &mut Heap, form: Value, v: Value) -> Result<Value, EvalError> {
-        let to_trait = path_field(heap, form, 0, "dyn-upcast")?;
+        let to_trait = definition_field(heap, form, 0, "dyn-upcast")?;
 
         let id = match v {
             Value::Boxed(id) if heap.is_dyn(id) => id,
@@ -558,7 +558,7 @@ impl Interp {
     /// see a stale value a compiled write already updated, even though both
     /// sides name the same `defvar`.
     fn global_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
-        let path = path_field(heap, form, 0, "global")?;
+        let path = definition_field(heap, form, 0, "global")?;
         if let Some(&id) = self.compiled_globals.borrow().get(&path) {
             // `id` is *not* the permanent-root position — see
             // `typelisp_rt::global_new`'s doc comment (an `Option`/`Result`
@@ -583,7 +583,7 @@ impl Interp {
     /// `defun` has nothing to capture. A built-in becomes a `BoxedObj::Builtin`
     /// naming it, which `apply_core` dispatches by name.
     fn fnref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
-        let path = path_field(heap, form, 0, "fnref")?;
+        let path = definition_field(heap, form, 0, "fnref")?;
         let f = self.root.borrow().get_fn(&path);
         match f {
             Some(f) => self.reify(heap, &f),
@@ -599,17 +599,14 @@ impl Interp {
     /// `(methodref PATH SYM (PARAM-REPR...) RET-KEY)` — [`Self::fnref_core`]
     /// for a method.
     fn methodref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
-        let type_name = path_field(heap, form, 0, "methodref")?;
+        let type_name = definition_field(heap, form, 0, "methodref")?;
         let method = self.sym_field(heap, form, 1, "methodref")?;
         let f = self.root.borrow().get_method(&type_name, method);
         match f {
             Some(f) => self.reify(heap, &f),
             None => {
-                let Value::Path(recv) = crate::check::core::path_form(heap, &type_name) else {
-                    unreachable!("Heap::intern_path always returns Value::Path")
-                };
                 let ret = type_field(heap, form, 3, "methodref")?;
-                Ok(heap.alloc_builtin_fn(Some(recv), method, Some(ret)))
+                Ok(heap.alloc_builtin_fn(Some(type_name.name_symbol()), method, Some(ret)))
             }
         }
     }
@@ -633,9 +630,9 @@ impl Interp {
     /// payload shape is shared too.
     fn compile_target(&self, heap: &mut Heap, payload: Value, who: &str) -> Result<crate::CompileTarget, EvalError> {
         Ok(match core::op_sym(heap, payload).map(|s| s.well_known()) {
-            Some(wk::FN) => crate::CompileTarget::Fn(path_field(heap, payload, 0, who)?),
+            Some(wk::FN) => crate::CompileTarget::Fn(definition_field(heap, payload, 0, who)?),
             Some(wk::METHOD) => {
-                let type_name = path_field(heap, payload, 0, who)?;
+                let type_name = definition_field(heap, payload, 0, who)?;
                 let method = self.sym_field(heap, payload, 1, who)?;
                 crate::CompileTarget::Method(type_name, method)
             }
@@ -1210,7 +1207,7 @@ pub(super) fn match_core_pattern(
             match_core_pattern(it, heap, env, inner, v)
         }
         "pat-ctor" => {
-            let path = path_field(heap, pat, 0, "pat-ctor")?;
+            let path = definition_field(heap, pat, 0, "pat-ctor")?;
             // The instantiation this pattern accepts — see `Pattern::Ctor`'s
             // `targs`. The path above still says `sexpr`-or-not; this says
             // which `gen<_>`.
@@ -1229,7 +1226,7 @@ pub(super) fn match_core_pattern(
             match_ctor(it, heap, env, &path, ty, variant, &subs, v)
         }
         "pat-typetest" => {
-            let path = path_field(heap, pat, 0, "pat-typetest")?;
+            let path = definition_field(heap, pat, 0, "pat-typetest")?;
             let ty = tested_type_field(heap, pat, 1, "pat-typetest")?;
             let inner = core::field(heap, pat, 2)
                 .ok_or_else(|| EvalError::Internal("eval: (pat-typetest ..) has no sub-pattern".to_string()))?;
@@ -1557,7 +1554,7 @@ fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, SymRef), Eval
     let [ty, name] = parts[..] else {
         return Err(EvalError::Internal(format!("eval: vtable slot is not (PATH SYM): {}", core::print(heap, entry))));
     };
-    let ty = core::path_value(heap, ty)
+    let ty = core::definition_value(ty)
         .ok_or_else(|| EvalError::Internal(format!("eval: vtable slot type is {:?}", ty)))?;
     let Value::Symbol(name) = name else {
         return Err(EvalError::Internal(format!("eval: vtable slot method is {:?}", name)));
@@ -1588,7 +1585,7 @@ pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<Super
                     core::print(heap, *e)
                 )));
             };
-            let path = core::path_value(heap, path)
+            let path = core::definition_value(path)
                 .ok_or_else(|| EvalError::Internal(format!("eval: (dyn-new ..) supertrait path is {:?}", path)))?;
             let slots = heap
                 .list_to_vec(slots)
@@ -1631,10 +1628,10 @@ pub(super) fn param_reprs(heap: &Heap, params: Value) -> Result<Vec<Repr>, EvalE
         .collect()
 }
 
-/// A field naming a definition, as a [`crate::Path`] (`core::path_value`).
-pub(super) fn path_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
+/// A field naming a definition, as a [`crate::Path`] (`core::definition_value`).
+pub(super) fn definition_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
     let v = core::field(heap, form, i);
-    v.and_then(|v| core::path_value(heap, v))
+    v.and_then(|v| core::definition_value(v))
         .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) field {} is not a path: {:?}", what, i, v)))
 }
 
@@ -1755,7 +1752,7 @@ impl Interp {
         match tag.as_str() {
             // `(defun PATH ((SYM REPR)...) RET-REPR BODY...)`
             "defun" => {
-                let name = path_field(heap, tl, 0, "defun")?;
+                let name = definition_field(heap, tl, 0, "defun")?;
                 let (params, param_reprs) = param_list(heap, tl, 1, "defun")?;
                 let ret = repr_field(heap, tl, 2, "defun")?;
                 let body = body_forms(heap, tl, 3, "defun")?;
@@ -1768,7 +1765,7 @@ impl Interp {
             // `self_name` to splice in ahead of the rest the way the old node's
             // separate field needed.
             "defmethod" => {
-                let type_name = path_field(heap, tl, 0, "defmethod")?;
+                let type_name = definition_field(heap, tl, 0, "defmethod")?;
                 let method = self.sym_field(heap, tl, 1, "defmethod")?;
                 let _instance = bool_field(heap, tl, 2, "defmethod")?;
                 let (params, param_reprs) = param_list(heap, tl, 3, "defmethod")?;
@@ -1794,7 +1791,7 @@ impl Interp {
             // it is calling it — so it goes in the very same `fns` table; no
             // separate macro table exists.
             "defmacro" => {
-                let name = path_field(heap, tl, 0, "defmacro")?;
+                let name = definition_field(heap, tl, 0, "defmacro")?;
                 let params = sym_list_field(heap, tl, 1, "defmacro")?;
                 let rest = bool_field(heap, tl, 2, "defmacro")?;
                 let lambda = macro_lambda(heap, tl, 3)?;
@@ -1841,7 +1838,7 @@ impl Interp {
             // away what the session has since stored there. Absent reads as
             // `defvar` — see `Checker::defvar_form`.
             "defvar" => {
-                let name = path_field(heap, tl, 0, "defvar")?;
+                let name = definition_field(heap, tl, 0, "defvar")?;
                 let reassign = matches!(core::field(heap, tl, 4), Some(Value::Bool(true)));
                 if !reassign && self.global_is_bound(&name) {
                     return Ok(None);
@@ -1861,7 +1858,7 @@ impl Interp {
             // check time; recording the `TypeEntry` is all the interpreter
             // needs (see `scope::TypeEntry`'s doc comment).
             "defstruct" => {
-                let name = path_field(heap, tl, 0, "defstruct")?;
+                let name = definition_field(heap, tl, 0, "defstruct")?;
                 let fields = core::field(heap, tl, 1)
                     .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field list".to_string()))?;
                 let fields = repr_list(heap, fields, "defstruct")?;
@@ -1896,7 +1893,7 @@ impl Interp {
             // the names and the compiled-global boundary needs each field's
             // representation.
             "defenum" => {
-                let name = path_field(heap, tl, 0, "defenum")?;
+                let name = definition_field(heap, tl, 0, "defenum")?;
                 let names = sym_list_field(heap, tl, 1, "defenum")?;
                 let per_variant = core::field(heap, tl, 2)
                     .ok_or_else(|| EvalError::Internal("exec: (defenum ..) has no variant fields".to_string()))?;
@@ -2191,7 +2188,7 @@ fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<Sym
 /// cannot come to disagree about what the node says.
 pub fn read_ffi_decl(heap: &Heap, tl: Value) -> Result<crate::eval::interp::FfiDecl, EvalError> {
     Ok(crate::eval::interp::FfiDecl {
-        path: path_field(heap, tl, 0, "defffi")?,
+        path: definition_field(heap, tl, 0, "defffi")?,
         c_symbol: str_field(heap, tl, 1, "defffi")?,
         // `()` is "look in the running process", which is not a library name
         // — and must not read as one.
@@ -2326,7 +2323,7 @@ mod tests {
             .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
             .expect("read failed")
             .into_iter()
-            .map(|(v, _)| v)
+            .map(|(v, _)| crate::check::core::name_written_definitions(heap, v))
             .collect();
         assert_eq!(vs.len(), 1, "expected exactly one form in {:?}", src);
         vs.pop().unwrap()
@@ -3357,9 +3354,7 @@ mod tests {
         let mut h = stress_heap();
         let form = read1(&mut h, "(apply (var f) int-any-width (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))");
         h.push_root(form);
-        let Value::Path(recv) = crate::check::core::path_form(&mut h, &crate::Path::primitive("i32")) else {
-            unreachable!("Heap::intern_path always returns Value::Path")
-        };
+        let recv = crate::Path::primitive("i32").name_symbol();
         let i32 = crate::type_key::type_id(&crate::Type::I32);
         let plus = h.alloc_builtin_fn(Some(recv), typelisp_mem::symbols::well_known_symbol(typelisp_mem::wk::M_OP_ADD), Some(i32));
         h.push_root(plus);

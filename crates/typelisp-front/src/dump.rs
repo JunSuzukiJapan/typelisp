@@ -825,14 +825,14 @@ pub fn bind_globals(interp: &crate::Interp, globals: &[(String, usize)]) {
 /// reference, and both reads and writes consult `compiled_globals` before the
 /// module tree.
 ///
-/// Through `core::path_field`, not by matching `Value::Path`: a root-level name
+/// Through `core::definition_field`, not by matching `Value::Path`: a root-level name
 /// is stored as a bare `Value::Symbol`, so reading the field by hand silently
 /// misses every unqualified global — which is most of them.
 pub fn already_initialized_global(heap: &crate::Heap, interp: &crate::Interp, tl: crate::Value) -> bool {
     if !crate::check::core::op_is(heap, tl, wk::DEFVAR) {
         return false;
     }
-    match crate::check::core::path_field(heap, tl, 0) {
+    match crate::check::core::definition_field(heap, tl, 0) {
         Some(path) => interp.has_compiled_global(&path),
         None => false,
     }

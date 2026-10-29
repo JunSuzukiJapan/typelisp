@@ -769,7 +769,7 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `block` は書いたシンボルで照合し（暗黙の block は定義の名前のシンボル）、IR へは block ごとに一意で
      ソースから書けない名前（`done'12`）を渡す。島は block の名前を文字列で持つので、IR の形は変えない。
      `macrolet` の表もシンボルで引く。7a は済み。
-   - 7b. 定義を指す IR を定義のシンボルに、メソッド名を文字列で比べている残りの箇所をシンボルに。途中。
+   - 7b. 定義を指す IR を定義のシンボルに、メソッド名を文字列で比べている残りの箇所をシンボルに。
      組み込みの関数とメソッドの名前を語彙（`wk::F_*` と `wk::M_*`）に加え、`HOMED_VOCABULARY` で
      その関数を定義するモジュールに置いた。メソッドの名前は `%member` に置き、IR のメソッドのシンボルは
      すべて `member_symbol` で作る（vtable の枠の名前も）。置かれた語彙は置かれたモジュールのもので、
@@ -798,6 +798,16 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      足し、定義するモジュールで作る（`std` は今までどおり公開する）。組み込みの型のパス
      （`Path::builtin`）はシンボルの `home` から読み、型ごとの置き場所の表は消した。予約語は
      どのモジュールも同じシンボルを持つので、予約語の名前での定義はエラーにした
-     （2026-10-29 のユーザー決定。`Checker::refuse_unownable_name`）。ABI は 0.3.44。
+     （2026-10-29 のユーザー決定。`Checker::refuse_unownable_name`）。`ptr` も `c-long` と同じく
+     `std` の語彙にして `std::primitive` に置いた（組み込みの型の名前になるため）。
+     定義を指す IR（call、global、set-global、fnref、construct、assoc の受け手、パターンの構成子、
+     型のフォーム、各 `def*` の名前）は定義のシンボル 1 つを運ぶ。書く側は `core::definition_form`
+     （シンボルの `home` が定義のモジュールであることを assert する）、読む側は
+     `core::definition_value`（`home` からモジュールを読む）。モジュールの名前、`use` のフィールド、
+     チェッカーが書いてもう一度検査するフォームの名前は、ルートからのパスのまま
+     （`core::root_path_form`/`root_path_value`）。モジュールの名前は親のモジュールで読まれ、`std` が
+     公開するシンボルと重なりうるので、シンボルだけでは置き場所が決まらない。組み込み関数の値の
+     受け手の型と `rt_ffi_callback_address` の引数もシンボルにした。IR を手で書くテストは、読んだ後に
+     `core::name_written_definitions` でルートからのパスを定義のシンボルにする。ABI は 0.3.45。7b は済み。
 8. ダンプ・fasl を 3.6 の形に。
 9. 利用者向け文書（日本語の原本、翻訳）。

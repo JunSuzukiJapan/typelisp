@@ -1261,7 +1261,7 @@ pub const STD_VOCABULARY: &[u32] = &[
     wk::OPTION, wk::RESULT, wk::SEXPR, wk::VECTOR, wk::HASHTABLE, wk::SCOPE, wk::CHAN, wk::TASK_TYPE,
     wk::THREAD_TYPE, wk::ARRAY, wk::STRING, wk::SYMBOL, wk::PARSE_INT_ERROR, wk::PARSE_FLOAT_ERROR,
     wk::READ_ERROR, wk::EVAL_ERROR, wk::FILE_ERROR, wk::NET_ERROR, wk::LLVM_MODULE, wk::LLVM_FUNCTION,
-    wk::LLVM_BUILDER, wk::LLVM_BASIC_BLOCK, wk::LLVM_VALUE, wk::C_LONG, wk::C_ULONG,
+    wk::LLVM_BUILDER, wk::LLVM_BASIC_BLOCK, wk::LLVM_VALUE, wk::C_LONG, wk::C_ULONG, wk::PTR,
 ];
 
 /// The vocabulary members owned by [`NsId::CORE`]: core-IR tags with no
@@ -1522,7 +1522,7 @@ pub const MEMBER_VOCABULARY: &[u32] = &[
 /// is offered by `std::prelude`.
 pub const HOMED_VOCABULARY: &[(&[&str], &[u32])] = &[
     (&["std"], &[wk::F_COMPILE_FILE, wk::F_DUMP]),
-    (&["std", "primitive"], &[wk::INT, wk::BIGNUM, wk::RATIO, wk::CHAR, wk::BOOL, wk::STR, wk::SYM, wk::NIL, wk::PATH, wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32, wk::REPR_RATIONAL, wk::REPR_RANDOM_STATE, wk::REPR_VECTOR, wk::STRING, wk::SYMBOL, wk::C_LONG, wk::C_ULONG]),
+    (&["std", "primitive"], &[wk::INT, wk::BIGNUM, wk::RATIO, wk::CHAR, wk::BOOL, wk::STR, wk::SYM, wk::NIL, wk::PATH, wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32, wk::REPR_RATIONAL, wk::REPR_RANDOM_STATE, wk::REPR_VECTOR, wk::STRING, wk::SYMBOL, wk::C_LONG, wk::C_ULONG, wk::PTR]),
     (&["std", "option"], &[wk::OPTION, wk::REPR_NONE]),
     (&["std", "result"], &[wk::RESULT]),
     (&["std", "vec"], &[wk::VECTOR]),

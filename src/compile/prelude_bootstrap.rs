@@ -162,7 +162,7 @@ fn collect_defvars(heap: &Heap, tl: Value, out: &mut Vec<(Path, Value)>) -> Resu
             collect_defvars(heap, item, out)?;
         }
     } else if core::op_is(heap, tl, typelisp_mem::wk::DEFVAR) {
-        let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
+        let path = core::definition_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
         out.push((path, tl));
     }
     Ok(())
@@ -311,11 +311,11 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
             }
         }
         wk::DEFUN => {
-            let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defun without a name".to_string())?;
+            let path = core::definition_field(heap, tl, 0).ok_or_else(|| "prelude: defun without a name".to_string())?;
             plan.items.push(CompileTarget::Fn(path));
         }
         wk::DEFMETHOD => {
-            let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmethod without a type".to_string())?;
+            let type_path = core::definition_field(heap, tl, 0).ok_or_else(|| "prelude: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => id,
                 _ => return Err("prelude: defmethod without a name".to_string()),
@@ -324,7 +324,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         }
         // `defconstant` lowers to the same core form.
         wk::DEFVAR => {
-            let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
+            let path = core::definition_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
             plan.globals.push(path);
         }
         // A macro body is an ordinary `Sexpr -> Sexpr` function — expanding it
@@ -336,7 +336,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         // was already true and then some: expansion finishes at check time,
         // before any codegen runs).
         wk::DEFMACRO => {
-            let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmacro without a name".to_string())?;
+            let path = core::definition_field(heap, tl, 0).ok_or_else(|| "prelude: defmacro without a name".to_string())?;
             plan.items.push(CompileTarget::Fn(path));
         }
         // No codegen of their own. `exec` still registers what they define:

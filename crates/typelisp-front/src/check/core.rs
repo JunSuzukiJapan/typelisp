@@ -572,7 +572,7 @@ pub fn tagged_module(heap: &mut Heap, path: &crate::Path, body: &[Value]) -> Res
     for form in body {
         s.push_root(*form);
     }
-    let p = path_form(&mut s, path);
+    let p = root_path_form(&mut s, path);
     s.push_root(p);
     let mut items = vec![p];
     items.extend_from_slice(body);
@@ -593,18 +593,44 @@ pub fn field(heap: &Heap, form: Value, i: usize) -> Option<Value> {
     heap.car(cur).ok()
 }
 
-/// A path, as a core form field writes one: the path from the root, as the
-/// reader reads `::a::b::name` — the root's empty-named symbol, then each
-/// module's symbol in the tree, then the name's. [`path_value`] reads it back.
+/// A definition, as a core form field writes one: the symbol it is defined
+/// under. That symbol's home is the module that defines it (the checker
+/// refuses a name it cannot own), so the symbol alone names the definition,
+/// in a form read back in any module. [`definition_value`] reads it back.
 ///
-/// A definition at the root is `::name` too, not its bare symbol, so a form
-/// printed and read back in any module names the same definitions: a bare
-/// name is read as the reading module's own symbol.
-pub fn path_form(heap: &mut Heap, p: &crate::Path) -> Value {
+/// # Panics
+///
+/// When `p`'s symbol is not of `p`'s module: `p` does not name a definition.
+pub fn definition_form(p: &crate::Path) -> Value {
+    let sym = p.name_symbol();
+    assert!(
+        sym.home() == p.ns(),
+        "`{}` names no definition: its symbol is of `{}`",
+        p,
+        typelisp_mem::symbols::ns_path(sym.home()).join("::")
+    );
+    Value::Symbol(sym)
+}
+
+/// The path from the root to `p`, as the reader reads `::a::b::name` — the
+/// root's empty-named symbol, then each module's symbol in the tree, then the
+/// name's. The `module` and `use` forms name modules and `use` names this
+/// way: a module's name is read in its parent, where it may be a symbol made
+/// elsewhere (one `std` offers), so its symbol alone would not say where the
+/// module is. [`root_path_value`] reads it back.
+pub fn root_path_form(heap: &mut Heap, p: &crate::Path) -> Value {
     let mut segs = vec![typelisp_mem::symbols::intern_in(typelisp_mem::NsId::ROOT, "")];
     segs.extend(typelisp_mem::symbols::ns_names(p.ns()));
     segs.push(p.name_symbol());
     heap.intern_path(&segs)
+}
+
+/// The path [`root_path_form`] wrote. `None` when `v` is not a
+/// path from the root.
+pub fn root_path_value(heap: &Heap, v: Value) -> Option<crate::Path> {
+    let Value::Path(id) = v else { return None };
+    let (ns, name) = typelisp_mem::symbols::definition_of_path(&heap.path_segments(id))?;
+    Some(crate::Path::of_symbol(ns, name))
 }
 
 /// A type, as a core form field writes one: the form
@@ -618,7 +644,7 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
     let mut f = Items::new(heap);
     let tag = match ty {
         Type::Named(p, args) | Type::Dyn(p, args) => {
-            let v = path_form(f.heap(), p);
+            let v = definition_form(p);
             f.push(v);
             for a in args {
                 let v = type_form(f.heap(), a, params)?;
@@ -649,7 +675,7 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
             wk::TYPE_PTR
         }
         Type::CStruct(p) => {
-            let v = path_form(f.heap(), p);
+            let v = definition_form(p);
             f.push(v);
             wk::TYPE_CSTRUCT
         }
@@ -685,7 +711,7 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
         | Type::Char
         | Type::Str
         | Type::Symbol => {
-            let v = path_form(f.heap(), &crate::Path::primitive(ty.scalar_name().expect("a scalar has a name")));
+            let v = definition_form(&crate::Path::primitive(ty.scalar_name().expect("a scalar has a name")));
             f.push(v);
             wk::TYPE_NAMED
         }
@@ -693,19 +719,58 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
     f.finish(tag)
 }
 
-/// A node's `i`th field read as a [`crate::Path`] ([`path_value`]). Shared by
-/// everything that walks *checked* top-level forms looking for what they
-/// define (`compile::aot`, `compile::prelude_bootstrap`).
-pub fn path_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
-    path_value(heap, field(heap, form, i)?)
+/// Core IR written as text, with each definition named as the checker
+/// writes it ([`definition_form`]): text names a symbol of another module
+/// only by its path from the root (`::f`, `::m::f`), so every such path in
+/// `form` is replaced, in place, by the definition's symbol. The paths the
+/// checker writes as paths ([`root_path_form`]: a `module`'s name, a `use`'s
+/// fields) and quoted data are left as written, and so is a path that does
+/// not start at the root. For IR that is written by hand rather than
+/// lowered — the tests of the readers of core IR. Allocates nothing.
+pub fn name_written_definitions(heap: &mut Heap, form: Value) -> Value {
+    match form {
+        Value::Path(_) => match root_path_value(heap, form) {
+            Some(p) => definition_form(&p),
+            None => form,
+        },
+        Value::Cons(_) => {
+            let (mut cell, skip) = match op_wk(heap, form) {
+                Some(wk::QUOTE | wk::USE) => return form,
+                Some(wk::MODULE) => (heap.cdr(form).expect("a cons has a cdr"), 1),
+                _ => (form, 0),
+            };
+            for _ in 0..skip {
+                if let Value::Cons(_) = cell {
+                    cell = heap.cdr(cell).expect("a cons has a cdr");
+                }
+            }
+            while let Value::Cons(_) = cell {
+                let car = heap.car(cell).expect("a cons has a car");
+                let named = name_written_definitions(heap, car);
+                if named != car {
+                    heap.set_car(cell, named).expect("a cons has a car");
+                }
+                cell = heap.cdr(cell).expect("a cons has a cdr");
+            }
+            form
+        }
+        other => other,
+    }
 }
 
-/// The definition a core form names with `v`, as [`path_form`] writes one.
-/// `None` when `v` is not a path from the root.
-pub fn path_value(heap: &Heap, v: Value) -> Option<crate::Path> {
-    let Value::Path(id) = v else { return None };
-    let (ns, name) = typelisp_mem::symbols::definition_of_path(&heap.path_segments(id))?;
-    Some(crate::Path::of_symbol(ns, name))
+/// A node's `i`th field read as the definition it names
+/// ([`definition_value`]). Shared by everything that walks *checked*
+/// top-level forms looking for what they define (`compile::aot`,
+/// `compile::prelude_bootstrap`).
+pub fn definition_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
+    definition_value(field(heap, form, i)?)
+}
+
+/// The definition a core form names with `v`, as [`definition_form`] writes
+/// one. `None` when `v` is not a symbol.
+pub fn definition_value(v: Value) -> Option<crate::Path> {
+    let Value::Symbol(sym) = v else { return None };
+    Some(crate::Path::named_by(sym))
 }
 
 /// A node's `i`th field read as a symbol's name, or `None` if it is not a

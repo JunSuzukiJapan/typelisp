@@ -40,7 +40,7 @@ use crate::eval::value::EvalError;
 
 use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, param_names,
-    path_field, param_reprs, repr_list, sym_field, type_field, tail_after, tail_after_value, Op,
+    definition_field, param_reprs, repr_list, sym_field, type_field, tail_after, tail_after_value, Op,
 };
 use super::task_body::{TyplBody, TyplCx};
 use super::{FnDef, Interp};
@@ -1985,7 +1985,7 @@ impl Interp {
         };
         let (entry, params, args) = match kind {
             ArgsKind::Call => {
-                let path = path_field(heap, form, 0, "call")?;
+                let path = definition_field(heap, form, 0, "call")?;
                 let Some(f) = self.root.borrow().get_fn(&path) else {
                     return Err(not_compilable(format!("`{}`", path), "is a built-in with no body to compile".to_string()));
                 };
@@ -1995,7 +1995,7 @@ impl Interp {
                 (sched::Entry::Body(body), params, argv)
             }
             ArgsKind::Assoc => {
-                let type_name = path_field(heap, form, 0, "assoc")?;
+                let type_name = definition_field(heap, form, 0, "assoc")?;
                 let method = self.sym_field(heap, form, 1, "assoc")?;
                 let name = typelisp_mem::ConcreteNames::method_link(&type_name, method.name());
                 let Some(f) = self.root.borrow().get_method(&type_name, method) else {
@@ -2291,7 +2291,7 @@ impl Interp {
     }
 
     fn finish_call(&self, heap: &mut Heap, form: Value, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
-        let path = path_field(heap, form, 0, "call")?;
+        let path = definition_field(heap, form, 0, "call")?;
 
         // `(yield)` gives up the rest of this turn — not a builtin, for the
         // same reason `wait` is not: a builtin answers with a value, and this
@@ -2320,7 +2320,7 @@ impl Interp {
         // argument (`analyze::ffi_callback`). The answer is a raw word, which
         // is how the interpreter carries a `ptr`.
         if path.std_builtin().is_some_and(|s| s.is(wk::F_FFI_CALLBACK_ADDRESS)) {
-            let function = argv.first().and_then(|v| core::path_value(heap, *v));
+            let function = argv.first().and_then(|v| core::definition_value(*v));
             let ty = match argv.get(1) {
                 Some(Value::Int(n)) => u32::try_from(*n).ok().and_then(typelisp_mem::TypeId::from_index),
                 _ => None,
@@ -2432,9 +2432,8 @@ impl Interp {
                         Some(r) => r?,
                         None => return Err(EvalError::NoSuchFunction(name.name().to_string())),
                     },
-                    Some(pid) => {
-                        let type_name = crate::check::core::path_value(heap, Value::Path(pid))
-                            .expect("a builtin's receiver is written by `core::path_form`");
+                    Some(recv) => {
+                        let type_name = crate::Path::named_by(recv);
                         let ret_type = heap
                             .builtin_fn_ret_type(id)
                             .expect("a builtin method's value carries its result type");
@@ -2477,7 +2476,7 @@ impl Interp {
         form: Value,
         argv: Vec<Value>,
     ) -> Result<(State, Option<Frame>), EvalError> {
-        let path = path_field(heap, form, 0, "construct")?;
+        let path = definition_field(heap, form, 0, "construct")?;
         // The value's runtime identity, spelled by the checker where the
         // instantiation was known: `gen<i32>` and `gen<string>` share `path`
         // and differ here.
@@ -2503,7 +2502,7 @@ impl Interp {
         form: Value,
         argv: Vec<Value>,
     ) -> Result<(State, Option<Frame>), EvalError> {
-        let type_name = path_field(heap, form, 0, "assoc")?;
+        let type_name = definition_field(heap, form, 0, "assoc")?;
         let method = self.sym_field(heap, form, 1, "assoc")?;
         // The result's runtime identity, for the built-in methods that build a
         // box: `Vector::new` has no field to read an instantiation off.
@@ -2601,7 +2600,7 @@ impl Interp {
         form: Value,
         mut argv: Vec<Value>,
     ) -> Result<(State, Option<Frame>), EvalError> {
-        let trait_path = path_field(heap, form, 0, "dyn-call")?;
+        let trait_path = definition_field(heap, form, 0, "dyn-call")?;
         let method = sym_field(heap, form, 1, "dyn-call")?;
         let slot = int_field(heap, form, 2, "dyn-call")? as usize;
 
@@ -2891,7 +2890,7 @@ impl Interp {
             // written through that same storage — otherwise an interpreted
             // read could see a stale value a compiled write already updated.
             Frame::SetGlobal { form } => {
-                let path = path_field(heap, form, 0, "set-global")?;
+                let path = definition_field(heap, form, 0, "set-global")?;
                 if let Some(&id) = self.compiled_globals.borrow().get(&path) {
                     let perm_idx = typelisp_rt::global_perm_idx(id).ok_or_else(|| {
                         EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id))
@@ -3093,7 +3092,7 @@ mod tests {
             .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
             .expect("read failed")
             .into_iter()
-            .map(|(v, _)| v)
+            .map(|(v, _)| crate::check::core::name_written_definitions(heap, v))
             .collect();
         assert_eq!(vs.len(), 1, "expected exactly one form in {:?}", src);
         vs.pop().unwrap()

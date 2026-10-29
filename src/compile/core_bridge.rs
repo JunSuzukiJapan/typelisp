@@ -120,13 +120,13 @@ impl Definitions {
             wk::DEFSTRUCT => {
                 let parts = core::fields(heap, form)?;
                 let [path, ..] = parts[..] else { return Err(malformed(heap, form)) };
-                let path = core::path_value(heap, path).ok_or_else(|| malformed(heap, form))?;
+                let path = core::definition_value(path).ok_or_else(|| malformed(heap, form))?;
                 self.structs.insert(path);
             }
             wk::DEFENUM => {
                 let parts = core::fields(heap, form)?;
                 let [path, _variants, _fields] = parts[..] else { return Err(malformed(heap, form)) };
-                let path = core::path_value(heap, path).ok_or_else(|| malformed(heap, form))?;
+                let path = core::definition_value(path).ok_or_else(|| malformed(heap, form))?;
                 self.enums.insert(path);
             }
             // A module's children are top-level forms too, and a type defined
@@ -1108,7 +1108,7 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     if parts.len() < 2 {
         return Err(malformed(heap, form));
     }
-    let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let path = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, parts[1])?;
     let args = parts[2..].to_vec();
 
@@ -1218,7 +1218,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     if parts.len() < 6 {
         return Err(malformed(heap, form));
     }
-    let type_name = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let type_name = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field_sym(heap, form, 1)?;
     let Value::Bool(instance) = parts[2] else { return Err(malformed(heap, form)) };
     let ret = Repr::read(heap, parts[3]).ok_or_else(|| malformed(heap, form))?;
@@ -1451,7 +1451,7 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// struct field read already does, and writing one needs the same tagging.
 fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| core::path_value(heap, v))
+        .and_then(|v| core::definition_value(v))
         .ok_or_else(|| malformed(heap, form))?;
     let repr = core::field(heap, form, 1)
         .and_then(|v| Repr::read(heap, v))
@@ -1569,19 +1569,19 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // same path — the bridge turns a `fnref` into a forwarding call, so
         // its target needs the same treatment.
         wk::CALL | wk::FNREF => {
-            if let Some(p) = core::path_field(heap, form, 0) {
+            if let Some(p) = core::definition_field(heap, form, 0) {
                 push_unique(&mut t.calls, p);
             }
         }
         // `(assoc PATH SYM ...)` / `(methodref PATH SYM ...)`.
         wk::ASSOC | wk::METHODREF => {
-            if let (Some(p), Some(Value::Symbol(m))) = (core::path_field(heap, form, 0), core::field(heap, form, 1)) {
+            if let (Some(p), Some(Value::Symbol(m))) = (core::definition_field(heap, form, 0), core::field(heap, form, 1)) {
                 push_unique(&mut t.methods, (p, m));
             }
         }
         // `(global PATH REPR)` and `set-global`'s same leading path.
         wk::GLOBAL | wk::SET_GLOBAL => {
-            if let Some(p) = core::path_field(heap, form, 0) {
+            if let Some(p) = core::definition_field(heap, form, 0) {
                 push_unique(&mut t.globals, p);
             }
         }
@@ -1590,7 +1590,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // every target it could reach is right here in the slot list.
         wk::DYN_NEW => {
             let Some(concrete) = core::field(heap, form, 0).and_then(|k| typelisp_mem::type_of_form(heap, k)) else { return Ok(()) };
-            let Some(trait_path) = core::path_field(heap, form, 1) else { return Ok(()) };
+            let Some(trait_path) = core::definition_field(heap, form, 1) else { return Ok(()) };
             let slots = vtable_at(heap, form, 2)?;
             let supers = supers_at(heap, form, 3)?;
             for key in &slots {
@@ -1604,7 +1604,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // *boxing* site already registered. Only the target trait's id has to
         // be interned before translation.
         wk::DYN_UPCAST => {
-            if let Some(p) = core::path_field(heap, form, 0) {
+            if let Some(p) = core::definition_field(heap, form, 0) {
                 push_unique(&mut t.dyn_upcasts, p);
             }
         }
@@ -1612,7 +1612,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // static target, but every implementation it could dispatch to must
         // exist natively before this body can run natively.
         wk::DYN_CALL => {
-            if let Some(p) = core::path_field(heap, form, 0) {
+            if let Some(p) = core::definition_field(heap, form, 0) {
                 push_unique(&mut t.dyn_traits, p);
             }
             for key in vtable_at(heap, form, 3)? {
@@ -1653,7 +1653,7 @@ fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, SymRef)>, Error> {
     for entry in heap.list_to_vec(list)? {
         let parts = heap.list_to_vec(entry)?;
         if let [ty, m] = parts.as_slice() {
-            let Some(path) = core::path_value(heap, *ty) else { continue };
+            let Some(path) = core::definition_value(*ty) else { continue };
             if let Value::Symbol(id) = m {
                 out.push((path, *id));
             }
@@ -1670,7 +1670,7 @@ fn supers_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, Vec<(Path,
     for entry in heap.list_to_vec(list)? {
         let parts = heap.list_to_vec(entry)?;
         if let [ty, slots] = parts.as_slice() {
-            let Some(path) = core::path_value(heap, *ty) else { continue };
+            let Some(path) = core::definition_value(*ty) else { continue };
             // The already-destructured element, not `core::field(entry, 1)` —
             // see [`vtable_of`].
             out.push((path, vtable_of(heap, *slots)?));
@@ -1690,7 +1690,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
             if parts.len() < 3 {
                 return Err(malformed(heap, form));
             }
-            let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+            let path = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, form))?;
             (callee_symbol_name(&path), params_of(heap, parts[1])?, parts[3..].to_vec())
         }
         // `(defmethod PATH SYM INSTANCE ((SYM R)...) RET-R E...)`
@@ -1698,7 +1698,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
             if parts.len() < 5 {
                 return Err(malformed(heap, form));
             }
-            let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+            let path = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, form))?;
             let method = symbol_field(heap, form, 1)?;
             (ConcreteNames::method_symbol(&path, &method), params_of(heap, parts[3])?, parts[5..].to_vec())
         }
@@ -2050,7 +2050,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
         return Err(malformed(heap, form));
     }
     let concrete = typelisp_mem::type_of_form(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
-    let trait_path = core::path_value(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
+    let trait_path = core::definition_value(parts[1]).ok_or_else(|| malformed(heap, form))?;
     let repr = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
     let id = *cx.dyn_tables.vtables.get(&(concrete, trait_path.clone())).ok_or_else(|| {
         Error::TypeError(format!(
@@ -2073,7 +2073,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
 /// through the mapping the boxing site registered.
 fn translate_dyn_upcast(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let to_trait = core::field(heap, form, 0)
-        .and_then(|v| core::path_value(heap, v))
+        .and_then(|v| core::definition_value(v))
         .ok_or_else(|| malformed(heap, form))?;
     let value = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let id = *cx.dyn_tables.trait_ids.get(&to_trait).ok_or_else(|| {
@@ -2432,7 +2432,7 @@ fn translate_immediate_lambda_call(
 /// parameter is simply the last one.
 fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| core::path_value(heap, v))
+        .and_then(|v| core::definition_value(v))
         .ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?)?;
     let target = callee_symbol_name(&path);
@@ -2463,7 +2463,7 @@ fn builtin_receiver(type_name: &Path) -> Value {
 /// same convention an ordinary method call uses.
 fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| core::path_value(heap, v))
+        .and_then(|v| core::definition_value(v))
         .ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field(heap, form, 1)?;
     let reprs = repr_list(heap, core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?)?;
@@ -2562,7 +2562,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     if parts.len() < 5 {
         return Err(malformed(heap, form));
     }
-    let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let path = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, form))?;
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, form)) };
     let Value::Bool(mutable) = parts[3] else { return Err(malformed(heap, form)) };
     let field_reprs = repr_list(heap, parts[4])?;
@@ -2811,7 +2811,7 @@ fn pattern_bindings(
         // representation follows from what that type is — the same three-way
         // classification `translate_ctor_pattern` makes for its own kind.
         wk::PAT_TYPETEST => {
-            let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
+            let path = core::definition_value(core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
             let sub = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
             let repr = if path_is_builtin(&path, typelisp_mem::wk::SEXPR) {
@@ -2959,7 +2959,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             // binds at *that* type's representation rather than the enclosing
             // value's — the three-way classification `pattern_bindings` makes
             // for this node, made once more here.
-            let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
+            let path = core::definition_value(core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
             let inner_repr = if path_is_builtin(&path, typelisp_mem::wk::SEXPR) {
                 Repr::Sexpr
@@ -2986,7 +2986,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     if parts.len() < 5 {
         return Err(malformed(heap, pat));
     }
-    let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
+    let path = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, pat))?;
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, pat)) };
     let Value::Bool(downcast) = parts[3] else { return Err(malformed(heap, pat)) };
     let field_reprs = repr_list(heap, parts[4])?;
@@ -3235,8 +3235,9 @@ mod tests {
     use super::*;
 
     /// Core IR written as text, read in the core IR's module so its tags are
-    /// the IR's own symbols. A definition is named by its path from the root
-    /// (`::f`, `::m::f`), as the checker writes it (`core::path_form`); the
+    /// the IR's own symbols. A definition is written as its path from the
+    /// root (`::f`, `::m::f`) and read as its symbol
+    /// (`core::name_written_definitions`), as the checker writes it; the
     /// hand-written forms put theirs at the root or in a module `m`, which
     /// this session is told it has.
     fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
@@ -3249,7 +3250,7 @@ mod tests {
         Ok(crate::Reader::new()
             .read_all_in_spanned_within(h, "<core>", src, typelisp_mem::NsId::CORE)?
             .into_iter()
-            .map(|(v, _)| v)
+            .map(|(v, _)| core::name_written_definitions(h, v))
             .collect())
     }
     use std::collections::HashMap;
@@ -3309,8 +3310,15 @@ mod tests {
     /// Translate `src` with `defs` (each a `defstruct`/`defenum` core form)
     /// recorded first.
     fn bridged_with(defs: &[&str], src: &str) -> String {
+        bridged_in(|_| {}, defs, src)
+    }
+
+    /// [`bridged_with`], once `names` has told the session what it reads
+    /// differently (a `shadow`).
+    fn bridged_in(names: impl FnOnce(&mut Heap), defs: &[&str], src: &str) -> String {
         let mut h = Heap::with_capacity(1 << 16);
         h.set_gc_stress(true);
+        names(&mut h);
         let definitions = record_all(&mut h, defs);
         let globals = globals();
         let mut vs = read_core(&mut h, src).expect("read failed");
@@ -3484,11 +3492,19 @@ mod tests {
             bridged("(assoc ::m::point area true int-any-width (struct) (type-named ::std::primitive::i32) (var p))"),
             r#"(assoc () "area" true "tl_m::point''area" (2 var "p" false))"#
         );
-        // Only the standard library's type is named for the island: a root
-        // type that shadows a built-in's name is not taken for it.
+        // Only the standard library's type is named for the island: a type
+        // that shadows a built-in's name is not taken for it.
+        let shadowing = || typelisp_mem::symbols::ns_of(&["shadowing".to_string()]);
         assert_eq!(
-            bridged("(assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var a) (var b))"),
-            r#"(assoc () "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#
+            bridged_in(
+                |h| {
+                    h.names().declare_module(shadowing());
+                    h.names().shadow(shadowing(), "i32").expect("`i32` is not a reserved word");
+                },
+                &[],
+                "(assoc ::shadowing::i32 + true int-any-width (int-any-width int-any-width) (type-named ::shadowing::i32) (var a) (var b))"
+            ),
+            r#"(assoc () "+" true "tl_shadowing::i32''+" (0 var "a" false) (0 var "b" false))"#
         );
     }
 

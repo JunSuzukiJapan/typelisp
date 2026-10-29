@@ -17081,7 +17081,7 @@ fn method_specialization(type_fq: &Path, method: SymRef, args: &[Type]) -> SymRe
 pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for (ty, method) in slots {
-        let tp = core::path_form(f.heap(), ty);
+        let tp = core::definition_form(ty);
         let one = core::list(f.heap(), &[tp, Value::Symbol(*method)])?;
         f.push(one);
     }

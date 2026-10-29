@@ -799,7 +799,7 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
         // `lambda`, or comes from the prelude. See `docs/ja/reference/syntax.md` §11.
         Some(wk::EXPR) => core::field(heap, tl, 0).map(|e| is_readtable_registration(heap, e)).unwrap_or(false),
         Some(wk::MODULE) => {
-            let bundle = core::path_field(heap, tl, 0) == Some(Path::root(MONO_BUNDLE_MODULE));
+            let bundle = core::field(heap, tl, 0).and_then(|v| core::root_path_value(heap, v)) == Some(Path::root(MONO_BUNDLE_MODULE));
             bundle
                 && core::fields(heap, tl)
                     .map(|fs| fs.iter().skip(1).any(|f| needs_immediate_exec(heap, *f)))
@@ -818,7 +818,7 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
 /// have to be evaluated to be found, which is the thing being decided.
 fn is_readtable_registration(heap: &Heap, form: Value) -> bool {
     core::op_sym(heap, form).map(|s| s.well_known()) == Some(wk::CALL)
-        && core::path_field(heap, form, 0).is_some_and(|p| {
+        && core::definition_field(heap, form, 0).is_some_and(|p| {
             p.std_builtin().is_some_and(|s| s.is(wk::F_SET_MACRO_CHARACTER) || s.is(wk::F_SET_DISPATCH_MACRO_CHARACTER))
         })
 }

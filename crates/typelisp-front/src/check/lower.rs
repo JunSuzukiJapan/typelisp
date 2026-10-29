@@ -363,7 +363,7 @@ impl Info {
     /// see there.
     pub(super) fn global_form(&self, heap: &mut Heap, r: &Path, ty: &Type) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), r);
+        let path = core::definition_form(r);
         f.push(path);
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
@@ -374,7 +374,7 @@ impl Info {
     /// `(set-global PATH REPR FORM)` — see [`Self::global_form`] for `PATH`.
     pub(super) fn set_global_form(&self, heap: &mut Heap, r: &Path, ty: &Type, value: Value) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), r);
+        let path = core::definition_form(r);
         f.push(path);
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
@@ -417,7 +417,7 @@ impl Info {
             .filter(|sig| sig.builtin && !sig.ffi && !int_boundary_native_fn(r.name_symbol()))
             .map(|sig| (sig.params.clone(), sig.ret.clone()));
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), r);
+        let path = core::definition_form(r);
         f.push(path);
         // An untagged argument is a raw word from here on, and its
         // representation has to say so: a rooted slot holding a raw word
@@ -456,7 +456,7 @@ impl Info {
         args: &[Arg],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let ty_path = core::path_form(f.heap(), type_name);
+        let ty_path = core::definition_form(type_name);
         f.push(ty_path);
         f.push(Value::Symbol(method));
         f.push(Value::Bool(instance));
@@ -509,7 +509,7 @@ impl Info {
     /// it needs no flag of its own.
     pub(super) fn fnref_form(&self, heap: &mut Heap, r: &Path, params: &[Type]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), r);
+        let path = core::definition_form(r);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
@@ -533,7 +533,7 @@ impl Info {
         ret: &Type,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let ty_path = core::path_form(f.heap(), type_name);
+        let ty_path = core::definition_form(type_name);
         f.push(ty_path);
         f.push(Value::Symbol(method));
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
@@ -608,7 +608,7 @@ impl Info {
         args: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), type_name);
+        let path = core::definition_form(type_name);
         f.push(path);
         // The value's runtime identity, spelled here because here is the only
         // place the instantiation is known — the same reason `field_tys` is
@@ -762,7 +762,7 @@ impl Info {
             }
             Pattern::Ctor { type_name, targs, variant, args, field_types, downcast } => {
                 let mut f = Items::new(heap);
-                let tp = core::path_form(f.heap(), type_name);
+                let tp = core::definition_form(type_name);
                 f.push(tp);
                 // The instantiation this pattern accepts, spelled the way the
                 // constructing site spells it (`Checker::construct_form`). For
@@ -789,7 +789,7 @@ impl Info {
                 let path = nominal_path(ty)
                     .ok_or_else(|| Error::TypeError(format!("(the `{}` pattern): not a named type", ty)))?;
                 let mut f = Items::new(heap);
-                let tp = core::path_form(f.heap(), &path);
+                let tp = core::definition_form(&path);
                 f.push(tp);
                 // The full instantiation, not just the ADT path. The comment
                 // here used to say a heap box's type name never encodes type
@@ -880,13 +880,13 @@ impl Info {
         let mut f = Items::new(heap);
         let key = core::type_form(f.heap(), value_ty, &[])?;
         f.push(key);
-        let tp = core::path_form(f.heap(), trait_path);
+        let tp = core::definition_form(trait_path);
         f.push(tp);
         let slot_list = vtable_form(f.heap(), slots)?;
         f.push(slot_list);
         let mut sup = Items::new(f.heap());
         for (trait_path, slots) in supers {
-            let tp = core::path_form(sup.heap(), trait_path);
+            let tp = core::definition_form(trait_path);
             let mut one = Items::new(sup.heap());
             one.push(tp);
             let sl = vtable_form(one.heap(), slots)?;
@@ -919,7 +919,7 @@ impl Info {
         args: &[Arg],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let tp = core::path_form(f.heap(), trait_path);
+        let tp = core::definition_form(trait_path);
         f.push(tp);
         f.push(Value::Symbol(method));
         f.push(Value::Int(slot as i64));
@@ -947,7 +947,7 @@ impl Info {
         body: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), name);
+        let path = core::definition_form(name);
         f.push(path);
         let ps = self.param_list_form(f.heap(), params)?;
         f.push(ps);
@@ -985,7 +985,7 @@ impl Info {
         ret: &Type,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), name);
+        let path = core::definition_form(name);
         f.push(path);
         let sym = f.heap().alloc_string(c_symbol.to_string());
         f.push(sym);
@@ -1084,7 +1084,7 @@ impl Info {
         body: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), type_name);
+        let path = core::definition_form(type_name);
         f.push(path);
         f.push(Value::Symbol(method));
         f.push(Value::Bool(instance));
@@ -1119,7 +1119,7 @@ impl Info {
         reassign: bool,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), name);
+        let path = core::definition_form(name);
         f.push(path);
         let r = self.repr_form(f.heap(), ty)?;
         f.push(r);
@@ -1147,7 +1147,7 @@ impl Info {
         names: &[String],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), name);
+        let path = core::definition_form(name);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), fields.to_vec())?;
         f.push(reprs);
@@ -1163,7 +1163,7 @@ impl Info {
     /// variant's field key templates (see [`Self::defstruct_form`]).
     pub(super) fn defenum_form(&self, heap: &mut Heap, name: &Path, params: &[String], variants: &[Variant]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let path = core::path_form(f.heap(), name);
+        let path = core::definition_form(name);
         f.push(path);
         let mut names = Items::new(f.heap());
         names.extend(variants.iter().map(|v| Value::Symbol(v.name)));

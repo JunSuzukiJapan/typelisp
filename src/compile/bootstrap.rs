@@ -409,12 +409,12 @@ fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompileTarget>) ->
             }
         }
         wk::DEFUN => {
-            let path = core::path_field(heap, tl, 0)
+            let path = core::definition_field(heap, tl, 0)
                 .ok_or_else(|| "island: defun without a name".to_string())?;
             out.push(CompileTarget::Fn(path));
         }
         wk::DEFMETHOD => {
-            let type_path = core::path_field(heap, tl, 0)
+            let type_path = core::definition_field(heap, tl, 0)
                 .ok_or_else(|| "island: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => id,
