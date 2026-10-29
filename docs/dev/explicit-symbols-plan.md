@@ -431,7 +431,7 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
    - 4b. `shadow` と、公開されている名前を `shadow` なしで定義したときのエラー。`(shadow NAME...)` は
      リーダーが処理し、その名前をそのモジュールのシンボルにする（`SessionNames::shadow`、予約語は不可）。
      定義形（`defun`・`defvar`・`defmacro`・`defstruct` など）の入口で、名前のシンボルが公開されたもの
-     なら `std` の外ではエラー（`Checker::refuse_offered_name`）。局所の束縛は対象外。済み（`5ce33e1`）。
+     なら `std` の外ではエラー（`Checker::refuse_unownable_name`）。局所の束縛は対象外。済み（`5ce33e1`）。
    - 4c. 解析が素の名前をシンボルで引く。今のモジュールの表、取り込み、公開の表の順。公開の表は
      公開したシンボルからその名前の定義（`std` のものとルートのもの）を引く。祖先をたどる解決と
      `std` の段を消す。パスは読んだシンボルで引く。3 つに分ける。
@@ -751,7 +751,7 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      モジュールの `ctors` に置き、`std::prelude` がどのモジュールにも公開する。このため `none`
      （`REPR_NONE`）を `std` の語彙へ移した。`Option<Sexpr>` に対する `(some x)` は型を取り出す
      パターンの候補にしない（`resolve_sexpr_downcast_ctor`）。
-     `std::prelude` の名前を定義するときの `shadow` の要求は、4b の `Checker::refuse_offered_name` が
+     `std::prelude` の名前を定義するときの `shadow` の要求は、4b の `Checker::refuse_unownable_name` が
      公開の表（`SessionNames::offers`）で決めるので、公開を狭めたことがそのまま効く。公開しない
      ライブラリの名前（`parse-int` `trim` など）は `shadow` なしで定義でき、公開する構成子（`some` など）は
      `shadow` が要る（`shadow_test`）。6e は済み。
@@ -791,5 +791,13 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      特殊化の重複除去のキーもシンボルにした。ダンプにはメンバーを `OwnedSym` で書く。
      島へ渡す IR のメソッド名は綴りのままにしている。島は typelisp で書かれたコンパイラで、
      受け取ったメソッド名を `case` で振り分けている（約 50 箇所）。
+     定義を指す IR を定義のシンボル 1 つにする前提として、定義の名前のシンボルの `home` を定義の
+     モジュールにそろえた（`definition_home_test` が全部の定義の表で確かめる）。組み込みの型、
+     `Sexpr` の構成子、`while` などのマクロ、`cons` `assoc` `intern`、`%core` の `llvm-*` の型は、
+     `std` に作られた語彙のシンボルで子モジュールに定義されていた。`HOMED_VOCABULARY` に置き場所を
+     足し、定義するモジュールで作る（`std` は今までどおり公開する）。組み込みの型のパス
+     （`Path::builtin`）はシンボルの `home` から読み、型ごとの置き場所の表は消した。予約語は
+     どのモジュールも同じシンボルを持つので、予約語の名前での定義はエラーにした
+     （2026-10-29 のユーザー決定。`Checker::refuse_unownable_name`）。ABI は 0.3.44。
 8. ダンプ・fasl を 3.6 の形に。
 9. 利用者向け文書（日本語の原本、翻訳）。

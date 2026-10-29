@@ -1149,7 +1149,8 @@ impl SymRef {
     /// module's, like any symbol made there, even when the module is `std`
     /// (`dump`).
     pub fn is_shared_vocabulary(&self) -> bool {
-        self.well_known() != NOT_WELL_KNOWN && self.well_known() < FIRST_HOMED
+        let k = self.well_known();
+        k != NOT_WELL_KNOWN && !HOMED.get().expect("a symbol exists only once the table is built")[k as usize]
     }
 
     /// Whether this is the vocabulary member `konst` names.
@@ -1240,53 +1241,12 @@ impl StdModule {
     pub fn ns(self) -> NsId {
         self.0.iter().fold(NsId::STD, |ns, segment| child_ns(ns, segment))
     }
-
-    /// The module that defines the built-in type named by the vocabulary
-    /// symbol `ty` (`wk::OPTION` ...). Panics for a symbol that names no
-    /// built-in type.
-    pub fn of_builtin_type(ty: u32) -> StdModule {
-        match ty {
-            wk::OPTION => StdModule::OPTION,
-            wk::RESULT => StdModule::RESULT,
-            wk::VECTOR => StdModule::VEC,
-            wk::SEXPR => StdModule::SEXPR,
-            wk::HASHTABLE | wk::SCOPE => StdModule::COLLECTIONS,
-            wk::ARRAY => StdModule::ARRAY,
-            wk::TASK_TYPE | wk::THREAD_TYPE => StdModule::THREAD,
-            wk::CHAN => StdModule::SYNC,
-            wk::READ_ERROR => StdModule::READER,
-            wk::EVAL_ERROR => StdModule::EVAL,
-            wk::PARSE_INT_ERROR | wk::PARSE_FLOAT_ERROR => StdModule::NUM,
-            wk::FILE_ERROR => StdModule::FS,
-            wk::NET_ERROR => StdModule::NET,
-            wk::I8
-            | wk::I16
-            | wk::I32
-            | wk::U8
-            | wk::U16
-            | wk::U32
-            | wk::F32
-            | wk::F64
-            | wk::INT
-            | wk::RATIO
-            | wk::REPR_RATIONAL
-            | wk::REPR_RANDOM_STATE
-            | wk::BOOL
-            | wk::CHAR
-            | wk::NEVER
-            | wk::PTR
-            | wk::C_LONG
-            | wk::C_ULONG
-            | wk::STRING
-            | wk::SYMBOL => StdModule::PRIMITIVE,
-            _ => panic!("`{}` names no built-in type", well_known_symbol(ty).name()),
-        }
-    }
 }
 
-/// The vocabulary members owned by [`NsId::STD`] rather than the system
+/// The vocabulary members of the standard library rather than the system
 /// module: names the standard library defines, which a module may define for
-/// itself only after declaring so (`shadow`). Exported by `std`.
+/// itself only after declaring so (`shadow`). Exported by `std`, and owned by
+/// it unless [`HOMED_VOCABULARY`] places them in the module defining them.
 ///
 /// The second group are IR tags spelled as a name the standard library
 /// offers — a type, a function — so the IR's tag and the name the island
@@ -1330,8 +1290,11 @@ pub const CORE_VOCABULARY: &[u32] = &[
 /// so its name is read in no module a program is written in.
 pub const MEMBER_MODULE: &str = "%member";
 
-/// The first member of the vocabulary that [`HOMED_VOCABULARY`] places:
-/// every member from here on is made in its module.
+/// The first member of the vocabulary appended for [`HOMED_VOCABULARY`]:
+/// every member from here on is made in its module. An older member a group
+/// lists is a reserved word, a keyword or a core-IR name the group takes by
+/// pointer, unless it is one of the standard library's ([`STD_VOCABULARY`]),
+/// which is made in its module too.
 const FIRST_HOMED: u32 = wk::M_OP_MUL;
 
 /// The names of the built-in methods, owned by [`MEMBER_MODULE`].
@@ -1549,26 +1512,42 @@ pub const MEMBER_VOCABULARY: &[u32] = &[
 /// The vocabulary members owned by a module the table makes along with them,
 /// by the module's path from the root: each built-in free function's name in
 /// the module that defines it, and the built-in methods' names in
-/// [`MEMBER_MODULE`]. A member is made in the first module that lists it —
+/// [`MEMBER_MODULE`], and the built-in types, their constructors and the
+/// library's macros and functions named in [`STD_VOCABULARY`] in the module
+/// that defines each (which `std` still exports when that module is in it,
+/// so every module reads them as before; `%core`'s are reached by a `use`). A member is made in the first module that lists it —
 /// a function's ahead of the members', since a name is looked for in the
 /// module it was made in — and taken by pointer into any later one, as is a
 /// member an older group already owns. None of these is exported: a name the standard library offers
 /// is offered by `std::prelude`.
 pub const HOMED_VOCABULARY: &[(&[&str], &[u32])] = &[
     (&["std"], &[wk::F_COMPILE_FILE, wk::F_DUMP]),
+    (&["std", "primitive"], &[wk::INT, wk::BIGNUM, wk::RATIO, wk::CHAR, wk::BOOL, wk::STR, wk::SYM, wk::NIL, wk::PATH, wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32, wk::REPR_RATIONAL, wk::REPR_RANDOM_STATE, wk::REPR_VECTOR, wk::STRING, wk::SYMBOL, wk::C_LONG, wk::C_ULONG]),
+    (&["std", "option"], &[wk::OPTION, wk::REPR_NONE]),
+    (&["std", "result"], &[wk::RESULT]),
+    (&["std", "vec"], &[wk::VECTOR]),
+    (&["std", "collections"], &[wk::HASHTABLE, wk::SCOPE]),
+    (&["std", "array"], &[wk::ARRAY]),
+    (&["std", "control"], &[wk::WHILE, wk::UNTIL, wk::DOLIST, wk::DOTIMES, wk::DO]),
+    (&["std", "iter"], &[wk::DOITER]),
+    (&["std", "seq"], &[wk::ASSOC]),
+    (&["std", "sync"], &[wk::CHAN]),
+    (&["std", "fs"], &[wk::FILE_ERROR]),
+    (&["std", "net"], &[wk::NET_ERROR]),
+    (&[CORE_MODULE], &[wk::LLVM_MODULE, wk::LLVM_FUNCTION, wk::LLVM_BUILDER, wk::LLVM_BASIC_BLOCK, wk::LLVM_VALUE]),
     (&["std", "%internal"], &[wk::F_DRIBBLE_START, wk::F_DRIBBLE_STOP, wk::F_ED_OPEN, wk::F_FILE_CREATE_DIRECTORIES, wk::F_FILE_DELETE, wk::F_FILE_DIRECTORY_P, wk::F_FILE_EXISTS_P, wk::F_FILE_LIST_DIRECTORY, wk::F_FILE_MODIFIED_DATE, wk::F_FILE_OWNER_NAME, wk::F_FILE_RENAME, wk::F_FILE_TRUENAME, wk::F_MAKE_RANDOM_STATE_FRESH, wk::F_NET_ACCEPT, wk::F_NET_BUFFERED_P, wk::F_NET_CONNECT_BEGIN, wk::F_NET_CONNECT_FINISH, wk::F_NET_FILL, wk::F_NET_FLUSH, wk::F_NET_LISTEN, wk::F_NET_LOCAL_ADDRESS, wk::F_NET_PEER_ADDRESS, wk::F_NET_PEER_SUBJECT, wk::F_NET_POP_BYTE, wk::F_NET_POP_CHAR, wk::F_NET_PUSH_BYTE, wk::F_NET_PUSH_STRING, wk::F_NET_RESOLVE_BEGIN, wk::F_NET_RESOLVE_FINISH, wk::F_NET_SERVER_NAME, wk::F_NET_SET_KEEPALIVE, wk::F_NET_SET_KEEPALIVE_PERIOD, wk::F_NET_SET_NODELAY, wk::F_NET_SHUTDOWN_WRITE, wk::F_NET_SOCKET_ERROR, wk::F_NET_TLS_ADD_CERTIFICATE, wk::F_NET_TLS_HANDSHAKE, wk::F_NET_TLS_LISTEN, wk::F_NET_TLS_START, wk::F_NET_UDP_BIND, wk::F_NET_UDP_LAST_SENDER, wk::F_NET_UDP_RECV, wk::F_NET_UDP_SEND_TO, wk::F_NET_UNIX_CONNECT, wk::F_NET_UNIX_LISTEN, wk::F_NET_WAIT, wk::F_NET_WAIT_FOR, wk::F_RANDOM_STATE_COPY, wk::F_RANDOM_STATE_NEXT, wk::F_READ_DATUM_AT, wk::F_STREAM_AT_LINE_START, wk::F_STREAM_CLOSE, wk::F_STREAM_DESCRIBE, wk::F_STREAM_FINISH_OUTPUT, wk::F_STREAM_INPUT_P, wk::F_STREAM_LISTEN, wk::F_STREAM_OPEN_FILE, wk::F_STREAM_OPEN_P, wk::F_STREAM_OUTPUT_P, wk::F_STREAM_POSITION, wk::F_STREAM_READ_BYTE, wk::F_STREAM_READ_CHAR, wk::F_STREAM_STDERR, wk::F_STREAM_STDIN, wk::F_STREAM_STDOUT, wk::F_STREAM_STRING_INPUT, wk::F_STREAM_STRING_OUTPUT, wk::F_STREAM_TAKE_OUTPUT_STRING, wk::F_STREAM_UNREAD_CHAR, wk::F_STREAM_WRITE_BYTE, wk::F_STREAM_WRITE_STRING, wk::F_FORMAT_RT, wk::F_PRINT_RT, wk::F_PRINTLN_RT, wk::F_PPRINT_RT, wk::F_PPRINT_BLOCK_START_RT, wk::F_PPRINT_BLOCK_END_RT, wk::F_C_ARENA_OPEN, wk::F_C_ARENA_CLOSE, wk::F_C_ALLOC, wk::F_C_PTR_CHECK, wk::F_C_INDEX, wk::F_C_OFFSET, wk::F_C_LOAD, wk::F_C_STORE, wk::F_FFI_CALLBACK_ADDRESS]),
     (&["std", "cmp"], &[wk::M_EQUAL, wk::M_EQUALP]),
     (&["std", "env"], &[wk::F_COMMAND_LINE_ARGS, wk::F_GETENV, wk::F_HOME_DIRECTORY, wk::F_LISP_IMPLEMENTATION_VERSION, wk::F_MACHINE_INSTANCE, wk::F_MACHINE_TYPE, wk::F_MACHINE_VERSION, wk::F_SOFTWARE_TYPE, wk::F_SOFTWARE_VERSION]),
-    (&["std", "eval"], &[wk::F_EVAL, wk::F_MACROEXPAND, wk::F_MACROEXPAND_1]),
+    (&["std", "eval"], &[wk::EVAL_ERROR, wk::F_EVAL, wk::F_MACROEXPAND, wk::F_MACROEXPAND_1]),
     (&["std", "fmt"], &[wk::F_PPRINT_INDENT, wk::F_PPRINT_LIST_EXHAUSTED, wk::F_PPRINT_NEWLINE, wk::F_PPRINT_POP, wk::F_PPRINT_TAB]),
-    (&["std", "num"], &[wk::F_PARSE_FLOAT]),
+    (&["std", "num"], &[wk::PARSE_INT_ERROR, wk::PARSE_FLOAT_ERROR, wk::F_PARSE_FLOAT]),
     (&["std", "process"], &[wk::F_EXIT]),
     (&["std", "random"], &[wk::F_SEED_RANDOM_STATE]),
-    (&["std", "reader"], &[wk::F_GET_DISPATCH_MACRO_CHARACTER, wk::F_GET_MACRO_CHARACTER, wk::F_READ, wk::F_SET_DISPATCH_MACRO_CHARACTER, wk::F_SET_MACRO_CHARACTER]),
+    (&["std", "reader"], &[wk::READ_ERROR, wk::F_GET_DISPATCH_MACRO_CHARACTER, wk::F_GET_MACRO_CHARACTER, wk::F_READ, wk::F_SET_DISPATCH_MACRO_CHARACTER, wk::F_SET_MACRO_CHARACTER]),
     (&["std", "repl"], &[wk::F_HEAP_INFO]),
-    (&["std", "sexpr"], &[wk::F_SEXPR_ATOM, wk::F_SEXPR_BOOL, wk::F_SEXPR_CAR, wk::F_SEXPR_CDR, wk::F_SEXPR_CHAR, wk::F_SEXPR_CONS, wk::F_SEXPR_CONSP, wk::F_SEXPR_F32, wk::F_SEXPR_F64, wk::F_SEXPR_I16, wk::F_SEXPR_I32, wk::F_SEXPR_I8, wk::F_SEXPR_INT, wk::F_SEXPR_NULL, wk::F_SEXPR_STR, wk::F_SEXPR_SYM_NAME, wk::F_SEXPR_SYMP, wk::F_SEXPR_U16, wk::F_SEXPR_U32, wk::F_SEXPR_U8]),
+    (&["std", "sexpr"], &[wk::SEXPR, wk::CONS, wk::F_SEXPR_ATOM, wk::F_SEXPR_BOOL, wk::F_SEXPR_CAR, wk::F_SEXPR_CDR, wk::F_SEXPR_CHAR, wk::F_SEXPR_CONS, wk::F_SEXPR_CONSP, wk::F_SEXPR_F32, wk::F_SEXPR_F64, wk::F_SEXPR_I16, wk::F_SEXPR_I32, wk::F_SEXPR_I8, wk::F_SEXPR_INT, wk::F_SEXPR_NULL, wk::F_SEXPR_STR, wk::F_SEXPR_SYM_NAME, wk::F_SEXPR_SYMP, wk::F_SEXPR_U16, wk::F_SEXPR_U32, wk::F_SEXPR_U8]),
     (&["std", "symbol"], &[wk::INTERN, wk::F_KEYWORDP, wk::F_SYMBOL_TO_STRING]),
-    (&["std", "thread"], &[wk::F_SLEEP, wk::F_YIELD]),
+    (&["std", "thread"], &[wk::TASK_TYPE, wk::THREAD_TYPE, wk::F_SLEEP, wk::F_YIELD]),
     (&["std", "time"], &[wk::F_GET_INTERNAL_REAL_TIME, wk::F_GET_INTERNAL_RUN_TIME, wk::F_GET_UNIVERSAL_TIME, wk::F_TIMEZONE_DAYLIGHT_P, wk::F_TIMEZONE_OFFSET_SECONDS]),
     (&[MEMBER_MODULE], MEMBER_VOCABULARY),
 ];
@@ -1643,14 +1622,20 @@ impl SymTable {
         // The system module owns the reserved words. A keyword belongs to the
         // keyword module under its name without the colon, a standard
         // library name to `std` (which exports it), an IR name to `%core`.
-        // A member of [`HOMED_VOCABULARY`] appended since is made below, in
-        // its module, once the modules can be named.
+        // A member of [`HOMED_VOCABULARY`] is made below, in its module, once
+        // the modules can be named.
+        let mut homed = vec![false; BUILTIN_SYMBOLS.len()];
+        for (_, members) in HOMED_VOCABULARY {
+            for &i in *members {
+                homed[i as usize] = i >= FIRST_HOMED || STD_VOCABULARY.contains(&i);
+            }
+        }
         let mut vocabulary: Vec<Option<SymRef>> = BUILTIN_SYMBOLS
             .iter()
             .enumerate()
             .map(|(i, name)| {
                 let i = i as u32;
-                if i >= FIRST_HOMED {
+                if homed[i as usize] {
                     None
                 } else if let Some(kw) = name.strip_prefix(':') {
                     Some(t.create(NsId::KEYWORD, kw, i))
@@ -1685,7 +1670,13 @@ impl SymTable {
                     Some(sym) => {
                         t.nodes[ns.0 as usize].syms.insert(name.into(), sym);
                     }
-                    None => vocabulary[i as usize] = Some(t.create(ns, name, i)),
+                    None => {
+                        let sym = t.create(ns, name, i);
+                        if path.first() == Some(&STD_MODULE) && STD_VOCABULARY.contains(&i) {
+                            t.std_exports.insert(name.into(), sym);
+                        }
+                        vocabulary[i as usize] = Some(sym);
+                    }
                 }
             }
         }
@@ -1697,6 +1688,7 @@ impl SymTable {
         WELL_KNOWN
             .set(vocabulary.into_boxed_slice())
             .unwrap_or_else(|_| unreachable!("the table is built exactly once"));
+        HOMED.set(homed.into_boxed_slice()).unwrap_or_else(|_| unreachable!("the table is built exactly once"));
         t
     }
 
@@ -1848,6 +1840,11 @@ static SYMBOLS: OnceLock<Mutex<SymTable>> = OnceLock::new();
 /// [`well_known_symbol`]. Written once, while the table is being built, and
 /// read without the lock afterwards.
 static WELL_KNOWN: OnceLock<Box<[SymRef]>> = OnceLock::new();
+
+/// Whether [`HOMED_VOCABULARY`] places each member of the vocabulary, in
+/// [`BUILTIN_SYMBOLS`] order, for [`SymRef::is_shared_vocabulary`]. Written
+/// with [`WELL_KNOWN`].
+static HOMED: OnceLock<Box<[bool]>> = OnceLock::new();
 
 fn table() -> MutexGuard<'static, SymTable> {
     SYMBOLS

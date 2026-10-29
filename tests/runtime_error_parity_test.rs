@@ -338,22 +338,22 @@ fn a_compiled_cleanup_runs_when_a_zero_divisor_unwinds_through_it() {
 /// Nested compiled cleanups all run on the way out of an out-of-bounds vector
 /// index, innermost first.
 ///
-/// `trace` records the order as decimal digits (inner appends `1`, outer `2`),
+/// `order` records the order as decimal digits (inner appends `1`, outer `2`),
 /// so `12` means both ran and in that order.
 #[test]
 fn compiled_cleanups_run_in_order_when_a_bad_index_unwinds_through_them() {
     let mut s = Session::new();
     s.ok(r#"
-        (defvar (trace int) 0)
+        (defvar (order int) 0)
         (defun make-v () Vector<int> (Vector::new))
         (defun f ((i int)) int
           (unwind-protect
-            (unwind-protect (get (make-v) i) (setf trace (+ (* trace 10) 1)))
-            (setf trace (+ (* trace 10) 2))))
+            (unwind-protect (get (make-v) i) (setf order (+ (* order 10) 1)))
+            (setf order (+ (* order 10) 2))))
         (compile f)
         "#);
     assert_eq!(s.panics("(f 0)"), "Vector: index 0 out of bounds");
-    assert_eq!(s.ok("trace"), Value::Int(12), "the cleanups did not both run, innermost first");
+    assert_eq!(s.ok("order"), Value::Int(12), "the cleanups did not both run, innermost first");
 }
 
 /// A `catch` does not claim a runtime failure — it claims throws carrying its

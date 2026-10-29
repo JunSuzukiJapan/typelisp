@@ -33,7 +33,7 @@
             (setf count (+ count 1))))))
     count))
 
-(defun step ((b board)) board
+(defun next-board ((b board)) board
   (let ((next (make-board (w b) (h b))))
     (dotimes (y (h b))
       (dotimes (x (w b))
@@ -58,5 +58,5 @@
   (set-cell b 2 2 true)
   (print-board b)
   (dotimes (i 4)
-    (setf b (step b))
+    (setf b (next-board b))
     (print-board b)))

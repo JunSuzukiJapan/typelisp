@@ -199,12 +199,12 @@ fn a_cleanup_runs_while_a_panic_passes_through() {
 fn nested_cleanups_all_run() {
     assert_eq!(
         int(r#"
-        (defvar (trace int) 0)
+        (defvar (order int) 0)
         (let ((v (catch 'done
                    (unwind-protect
-                     (unwind-protect (throw 'done 0) (setf trace (+ (* trace 10) 1)))
-                     (setf trace (+ (* trace 10) 2))))))
-          (+ v trace))
+                     (unwind-protect (throw 'done 0) (setf order (+ (* order 10) 1)))
+                     (setf order (+ (* order 10) 2))))))
+          (+ v order))
         "#),
         12
     );

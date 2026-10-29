@@ -94,13 +94,12 @@ impl Path {
     }
 
     /// The built-in type whose name is the vocabulary symbol `ty`
-    /// (`wk::OPTION` ...), in the module that defines it: `%core` for the
-    /// LLVM handle types, which only the compiler island works with, and
-    /// otherwise the module of the standard library
-    /// `StdModule::of_builtin_type` answers.
+    /// (`wk::OPTION` ...), in the module that defines it, which the symbol
+    /// belongs to: `%core` for the LLVM handle types, which only the compiler
+    /// island works with, and otherwise a module of the standard library.
     pub fn builtin(ty: u32) -> Path {
-        let ns = if LLVM_HANDLE_TYPES.contains(&ty) { NsId::CORE } else { typelisp_mem::StdModule::of_builtin_type(ty).ns() };
-        Path { ns, name: symbols::well_known_symbol(ty) }
+        let name = symbols::well_known_symbol(ty);
+        Path { ns: name.home(), name }
     }
 
     /// The primitive type `name` (`int`, `i32`, `string` ...), which

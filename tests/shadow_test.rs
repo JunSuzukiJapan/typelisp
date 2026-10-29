@@ -21,6 +21,20 @@ fn defining_an_offered_name_without_shadow_is_an_error() {
     assert!(msg.contains("defmacro: `when`"), "{}", msg);
 }
 
+/// A reserved word is the one symbol every module shares, so no module can
+/// define anything under it, in a module of its own or at the top level.
+#[test]
+fn defining_a_reserved_word_is_an_error() {
+    let msg = check_err("(module m (defun step ((x int)) int x))");
+    assert!(msg.contains("defun: `step` is a reserved word, which no module can define"), "{}", msg);
+    let msg = check_err("(defstruct if (x int))");
+    assert!(msg.contains("defstruct: `if` is a reserved word"), "{}", msg);
+    let msg = check_err("(defvar (let int) 3)");
+    assert!(msg.contains("defvar: `let` is a reserved word"), "{}", msg);
+    let msg = check_err("(defmacro progn (x) x)");
+    assert!(msg.contains("defmacro: `progn` is a reserved word"), "{}", msg);
+}
+
 /// A definition of the standard library that `std::prelude` does not offer
 /// (it is brought in by `use`) leaves its name free: no `shadow` is needed.
 #[test]

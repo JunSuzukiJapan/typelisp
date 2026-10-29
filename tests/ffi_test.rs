@@ -327,7 +327,7 @@ fn a_pointer_cannot_be_a_global() {
     let e = err(
         r#"
         (defffi (c-malloc "malloc") (c-ulong) ptr)
-        (defvar (block ptr) (unsafe (c-malloc 8)))
+        (defvar (buf ptr) (unsafe (c-malloc 8)))
         "#,
     );
     assert!(e.contains("tags what it holds"), "unexpected error: {}", e);

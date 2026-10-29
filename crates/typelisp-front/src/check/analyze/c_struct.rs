@@ -140,7 +140,7 @@ impl Checker {
         def_loc: Option<Loc>,
     ) -> Result<Path, Error> {
         let usage = "def-c-struct: (def-c-struct name (field type)...)";
-        self.refuse_offered_name(heap, parts.first(), "def-c-struct")?;
+        self.refuse_unownable_name(heap, parts.first(), "def-c-struct")?;
         let name = match parts.first() {
             Some(Value::Symbol(id)) => heap.symbol_spelling(*id).to_string(),
             _ => return Err(Error::TypeError(usage.into())),

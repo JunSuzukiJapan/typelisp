@@ -281,11 +281,11 @@ fn setf_finds_a_setter_of_one_instantiation() {
     );
 }
 
-/// A macro cannot take over a special form's name — at top level, where the
-/// loader expands macro calls first, the same as inside a function.
+/// A macro cannot take over a special form's name: defining one under it is
+/// an error, so the loader, which expands macro calls at top level first,
+/// never meets such a macro.
 #[test]
-fn a_macro_does_not_take_over_a_special_form_at_top_level() {
-    let src = r#"(defmacro block (name &rest body) "taken over")
-(block outer "the special form")"#;
-    assert_eq!(eval_string(src), "the special form");
+fn a_macro_cannot_take_over_a_special_form_at_top_level() {
+    let e = check_err(r#"(defmacro block (name &rest body) "taken over")"#);
+    assert!(e.contains("reserved word"), "unexpected error: {}", e);
 }
