@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -161,6 +161,8 @@ I källkod skrivs typer som vanliga symboler eller listor.
   (`defstruct`/`defenum`) och ett trait (`deftrait`) inte ha samma namn.
 
 ## 3. Definitioner på toppnivå
+
+Namnen på specialformer (reserverade ord som `if`, `let` och `step`, som betyder samma sak i varje modul) kan inte vara namnet på en funktion, ett makro, en global variabel, en typ eller ett trait. Att definiera ett sådant är ett fel.
 
 ### 3.1 defun — funktionsdefinitioner
 

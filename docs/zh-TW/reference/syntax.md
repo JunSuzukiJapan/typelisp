@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -91,6 +91,8 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **型別與 trait 位於同一命名空間**（與 Rust 相同）：在同一模組中，型別（`defstruct`/`defenum`）與 trait（`deftrait`）不能同名。
 
 ## 3. 頂層定義
+
+特殊形式的名稱（`if`、`let`、`step` 等在任何模組中都指同一事物的保留字）不能用作函式、巨集、全域變數、型別或 trait 的名稱。定義它們會報錯。
 
 ### 3.1 defun — 函式定義
 

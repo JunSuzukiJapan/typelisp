@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -91,6 +91,8 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **类型与 trait 位于同一命名空间**（与 Rust 相同）：在同一模块中，类型（`defstruct`/`defenum`）与 trait（`deftrait`）不能同名。
 
 ## 3. 顶层定义
+
+特殊形式的名字（`if`、`let`、`step` 等在任何模块中都指同一事物的保留字）不能用作函数、宏、全局变量、类型或 trait 的名字。定义它们会报错。
 
 ### 3.1 defun — 函数定义
 

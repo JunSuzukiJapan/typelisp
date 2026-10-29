@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -167,6 +167,8 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
   (`defstruct`/`defenum`) dan sebuah trait (`deftrait`) tidak dapat bernama sama.
 
 ## 3. Definisi tingkat atas
+
+Nama bentuk khusus (kata cadangan seperti `if`, `let`, dan `step`, yang berarti hal yang sama di setiap modul) tidak dapat dipakai sebagai nama fungsi, makro, variabel global, tipe, atau trait. Mendefinisikannya adalah galat.
 
 ### 3.1 defun — definisi fungsi
 

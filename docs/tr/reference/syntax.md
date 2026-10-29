@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -165,6 +165,8 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
   (`defstruct`/`defenum`) ile bir trait (`deftrait`) aynı ada sahip olamaz.
 
 ## 3. Üst düzey tanımlar
+
+Özel formların adları (her modülde aynı şeyi ifade eden `if`, `let` ve `step` gibi ayrılmış sözcükler) bir fonksiyonun, makronun, global değişkenin, türün veya trait'in adı olamaz. Bunlardan birini tanımlamak hatadır.
 
 ### 3.1 defun — fonksiyon tanımları
 

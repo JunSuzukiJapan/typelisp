@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -170,6 +170,8 @@ In de broncode worden types als gewone symbolen of lijsten geschreven.
   (`defstruct`/`defenum`) en een trait (`deftrait`) niet dezelfde naam hebben.
 
 ## 3. Definities op het hoogste niveau
+
+De namen van speciale vormen (gereserveerde woorden zoals `if`, `let` en `step`, die in elke module hetzelfde betekenen) kunnen niet de naam zijn van een functie, macro, globale variabele, type of trait. Er een definiëren is een fout.
 
 ### 3.1 defun — functiedefinities
 

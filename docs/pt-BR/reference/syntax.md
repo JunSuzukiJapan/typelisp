@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -162,6 +162,8 @@ No código-fonte, os tipos são escritos como símbolos ou listas comuns.
   (`defstruct`/`defenum`) e um trait (`deftrait`) não podem ter o mesmo nome.
 
 ## 3. Definições de nível superior
+
+Os nomes das formas especiais (palavras reservadas como `if`, `let` e `step`, que significam a mesma coisa em todo módulo) não podem ser o nome de uma função, macro, variável global, tipo ou trait. Definir um deles é um erro.
 
 ### 3.1 defun — definição de funções
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -155,6 +155,8 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
   (`defstruct`/`defenum`) và một trait (`deftrait`) không thể trùng tên.
 
 ## 3. Các định nghĩa cấp cao nhất
+
+Tên của các dạng đặc biệt (từ dành riêng như `if`, `let` và `step`, mang cùng một nghĩa trong mọi mô-đun) không thể dùng làm tên của hàm, macro, biến toàn cục, kiểu hay trait. Định nghĩa một tên như vậy là lỗi.
 
 ### 3.1 defun — định nghĩa hàm
 

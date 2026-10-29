@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -162,6 +162,8 @@ W kodzie źródłowym typy zapisuje się jako zwykłe symbole lub listy.
   (`defstruct`/`defenum`) i trait (`deftrait`) nie mogą mieć tej samej nazwy.
 
 ## 3. Definicje najwyższego poziomu
+
+Nazwy form specjalnych (słowa zastrzeżone, takie jak `if`, `let` i `step`, które w każdym module znaczą to samo) nie mogą być nazwą funkcji, makra, zmiennej globalnej, typu ani cechy. Zdefiniowanie takiej nazwy jest błędem.
 
 ### 3.1 defun — definicje funkcji
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5537c080626842f5f1c72cd9b75004d54a6e5433 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -119,6 +119,8 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   트레이트(`deftrait`)는 같은 이름을 가질 수 없다.
 
 ## 3. 최상위 정의
+
+특수 형식의 이름(`if` `let` `step` 등, 어느 모듈에서나 같은 것을 가리키는 예약어)은 함수, 매크로, 전역 변수, 타입, 트레이트의 이름으로 쓸 수 없다. 정의하면 오류가 된다.
 
 ### 3.1 defun — 함수 정의
 
