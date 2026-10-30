@@ -113,6 +113,31 @@ typl main.typl        # => 25
 - ディレクトリの中のモジュールは `(use geo::shapes)` と書き、取り込んだ後は最後の部分
   （`shapes::...`）で参照します。
 
+### 標準ライブラリと同じ名前を付ける
+
+`length` や `first` のように標準ライブラリが公開している名前で関数などを定義すると、
+エラーになります。
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+そのモジュールで自分の定義を使うと決めたときは、定義より前に `shadow` を書きます。
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; このモジュールの first => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 標準ライブラリの first => (some 1)
+```
+
+`shadow` の後は、そのモジュールの中で `first` と書けば自分の定義を指します。標準ライブラリの
+`first` を使うときは `std::seq::first` とパスで書きます。`shadow` が効くのは書いたモジュールの
+中だけで、ほかのモジュールの `first` は標準ライブラリのままです。`if` や `let` のような特殊形の
+名前は `shadow` できず、定義にも使えません。
+
 ### トレイトのメソッドの呼び方
 
 `impl` で実装したメソッドは、モジュールの関数ではなく**型に属する**ので、モジュール名を付けずに
