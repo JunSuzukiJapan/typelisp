@@ -439,3 +439,27 @@ fn a_literal_takes_the_element_type_of_the_sequence() {
     let e = check(&format!("{} (find 300 (iter (the Vector<u8> (Vector::new))))", src)).map(|_| ()).unwrap_err();
     assert!(e.to_string().contains("out of range for u8"), "{}", e);
 }
+
+#[test]
+fn a_vector_handed_to_an_iter_function_says_it_is_not_iter() {
+    // `Vector<T>` is not `Iter` itself; `first`'s `A` is pinned only through
+    // `(Iter I (Item A))`, so the missing impl is what the call reports, not
+    // the `A` it left undecided — with `iter`, the method that yields one.
+    let err = check("(std::seq::first (the Vector<int> #(1 2 3)))").expect_err("must fail to check");
+    let msg = format!("{:?}", err);
+    assert!(
+        msg.contains("type `Vector<int>` does not implement trait `std::iter::Iter`")
+            && msg.contains("its method `iter` returns a value that does"),
+        "unexpected message: {}",
+        msg
+    );
+    assert!(!msg.contains("cannot infer"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn a_type_without_an_iter_method_gets_no_suggestion() {
+    let err = check("(defstruct point (x int)) (std::seq::first (make-instance 'point :x 1))").expect_err("must fail to check");
+    let msg = format!("{:?}", err);
+    assert!(msg.contains("type `point` does not implement trait `std::iter::Iter`"), "unexpected message: {}", msg);
+    assert!(!msg.contains("its method"), "unexpected message: {}", msg);
+}

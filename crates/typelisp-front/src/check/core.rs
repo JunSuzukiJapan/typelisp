@@ -267,8 +267,9 @@ pub enum Unmet {
     /// It is the enclosing function's own type parameter `var`, which its
     /// `where` clause does not bound by `trait_path`.
     Undeclared { var: String, trait_path: crate::Path },
-    /// `ty` does not implement `trait_path`.
-    Unimplemented { ty: Type, trait_path: crate::Path },
+    /// `ty` does not implement `trait_path`. `via` is a method of `ty`
+    /// taking only the receiver whose result does, when it has one.
+    Unimplemented { ty: Type, trait_path: crate::Path, via: Option<SymRef> },
     /// `ty` names no type, so it has no impls.
     NoImpls { ty: Type },
     /// `ty`'s associated type `assoc` is `actual` (`None`: it has none), not

@@ -84,30 +84,7 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                     ty
                 ),
                 Disagreement::NotDyn { ty, trait_path, pins, why } => not_dyn(ty, trait_path, pins, why),
-                Disagreement::Bound { of, param, unmet } => match unmet {
-                    Unmet::Undeclared { var, trait_path } => format!(
-                        "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
-                         which has no `where` bound declaring it implements `{}` — the enclosing function's \
-                         signature needs a matching `:where` clause on `{}`",
-                        of, param, var, trait_path, var
-                    ),
-                    Unmet::Unimplemented { ty, trait_path } => format!(
-                        "{}: type `{}` does not implement trait `{}` required by `:where` clause on type parameter `{}`",
-                        of, ty, trait_path, param
-                    ),
-                    Unmet::NoImpls { ty } => format!(
-                        "{}: type `{}` does not implement a trait required by `:where` clause on type parameter `{}`",
-                        of, ty, param
-                    ),
-                    Unmet::Assoc { ty, assoc, actual, required } => format!(
-                        "{}: type `{}`'s associated type `{}` is `{}`, but `:where` clause requires `{}`",
-                        of,
-                        ty,
-                        assoc,
-                        actual.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "undefined".to_string()),
-                        required
-                    ),
-                },
+                Disagreement::Bound { of, param, unmet } => bound_message(of, param, unmet),
             });
             // What disagrees is the value, so its own position, when it was
             // written somewhere, is the innermost one for it.
@@ -117,6 +94,44 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
             });
         }
     })
+}
+
+/// What a call says when the type it decided for `of`'s type parameter
+/// `param` falls short of `param`'s bound as `unmet` says.
+pub(super) fn bound_message(of: &str, param: &str, unmet: &Unmet) -> String {
+    match unmet {
+        Unmet::Undeclared { var, trait_path } => format!(
+            "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
+             which has no `where` bound declaring it implements `{}` — the enclosing function's \
+             signature needs a matching `:where` clause on `{}`",
+            of, param, var, trait_path, var
+        ),
+        Unmet::Unimplemented { ty, trait_path, via } => {
+            let mut m = format!(
+                "{}: type `{}` does not implement trait `{}` required by `:where` clause on type parameter `{}`",
+                of, ty, trait_path, param
+            );
+            if let Some(method) = via {
+                m.push_str(&format!(
+                    "; its method `{}` returns a value that does — pass `({} x)` instead of `x`",
+                    method, method
+                ));
+            }
+            m
+        }
+        Unmet::NoImpls { ty } => format!(
+            "{}: type `{}` does not implement a trait required by `:where` clause on type parameter `{}`",
+            of, ty, param
+        ),
+        Unmet::Assoc { ty, assoc, actual, required } => format!(
+            "{}: type `{}`'s associated type `{}` is `{}`, but `:where` clause requires `{}`",
+            of,
+            ty,
+            assoc,
+            actual.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "undefined".to_string()),
+            required
+        ),
+    }
 }
 
 fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &NotDyn) -> String {

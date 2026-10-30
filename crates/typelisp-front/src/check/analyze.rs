@@ -935,8 +935,9 @@ pub(super) enum Resolved {
 enum CallTarget {
     /// The function to call.
     Resolved(Path),
-    /// A type parameter none of them decided.
-    Open(String),
+    /// A type parameter none of them decided, and a `where` bound the types
+    /// they did decide do not meet — the reason, when there is one.
+    Open(String, Option<Disagreement>),
     /// A `where` bound the types they decided do not meet.
     Unmet(Disagreement),
 }
@@ -11248,7 +11249,7 @@ impl Checker {
                 heap, interp, env, &who, &af.sig, offset, &tparams, &mut subst, args, arg_locs, &mut typed,
             )?;
         }
-        let uninferred_assoc = |noun, p: &str, typed: Vec<Checked>| uninferred(&typed, noun, p, format!("{}::{}", type_fq, method));
+        let uninferred_assoc = |noun, p: &str, typed: Vec<Checked>| uninferred(&typed, None, noun, p, format!("{}::{}", type_fq, method));
         if let Some(p) = af.sig.type_params.iter().find(|p| !subst.contains_key(*p)) {
             return Err(uninferred_assoc("type parameter", p, typed));
         }
@@ -14938,10 +14939,11 @@ impl Checker {
         subst: &mut BTreeMap<String, Type>,
     ) -> Result<CallTarget, Error> {
         self.infer_pinned_assoc_types(env, sig, params, subst);
+        let unmet = self.validate_where_bounds(&name.to_string(), &sig.bounds, subst, &env.bounds);
         if let Some(p) = sig.type_params.iter().find(|p| !subst.contains_key(*p)) {
-            return Ok(CallTarget::Open(p.clone()));
+            return Ok(CallTarget::Open(p.clone(), unmet));
         }
-        if let Some(what) = self.validate_where_bounds(&name.to_string(), &sig.bounds, subst, &env.bounds) {
+        if let Some(what) = unmet {
             return Ok(CallTarget::Unmet(what));
         }
 
@@ -15093,8 +15095,8 @@ impl Checker {
         }
         let r = match self.resolve_call_target(env, name, &sig, &params, &mut subst)? {
             CallTarget::Resolved(r) => r,
-            CallTarget::Open(p) => {
-                return Err(uninferred(&typed, "type parameter", &p, name.to_string()))
+            CallTarget::Open(p, unmet) => {
+                return Err(uninferred(&typed, unmet, "type parameter", &p, name.to_string()))
             }
             CallTarget::Unmet(what) => {
                 let ty = subst_apply(&sig.ret, &subst);
@@ -15328,11 +15330,11 @@ impl Checker {
 
         let r = match self.resolve_call_target(env, name, sig, &params, &mut subst)? {
             CallTarget::Resolved(r) => r,
-            CallTarget::Open(p) => {
+            CallTarget::Open(p, unmet) => {
                 typed.extend(sig.keys.iter().filter_map(|k| supplied_keys.remove(&k.name)));
                 typed.extend(opt_supplied);
                 typed.extend(rest_typed);
-                return Err(uninferred(&typed, "type parameter", &p, name.to_string()));
+                return Err(uninferred(&typed, unmet, "type parameter", &p, name.to_string()));
             }
             CallTarget::Unmet(what) => {
                 typed.extend(sig.keys.iter().filter_map(|k| supplied_keys.remove(&k.name)));
@@ -15502,7 +15504,7 @@ impl Checker {
                 if *concrete != Type::Never {
                     for tb in trait_bounds {
                         if !self.type_implements(concrete, tb, 0) {
-                            let unmet = Unmet::Unimplemented { ty: concrete.clone(), trait_path: tb.trait_path.clone() };
+                            let unmet = Unmet::Unimplemented { ty: concrete.clone(), trait_path: tb.trait_path.clone(), via: None };
                             return Some(bound_unmet(name, tparam, unmet));
                         }
                     }
@@ -15517,7 +15519,8 @@ impl Checker {
                 // blanket impl covering `concrete` counts (and gets queued for
                 // materialization).
                 if !self.type_implements(concrete, tb, 0) {
-                    let unmet = Unmet::Unimplemented { ty: concrete.clone(), trait_path: tb.trait_path.clone() };
+                    let via = self.method_yielding(&type_fq, def, concrete, tb);
+                    let unmet = Unmet::Unimplemented { ty: concrete.clone(), trait_path: tb.trait_path.clone(), via };
                     return Some(bound_unmet(name, tparam, unmet));
                 }
                 let concrete_args: &[Type] = match concrete {
@@ -15550,6 +15553,39 @@ impl Checker {
             }
         }
         None
+    }
+
+    /// A method of `ty` (named `type_fq`, defined by `def`) that takes only
+    /// the receiver and answers a value implementing `tb`'s trait — what a
+    /// caller handing `ty` where the trait is required most likely meant to
+    /// hand (`Vector<T>`'s `iter` for `Iter`).
+    fn method_yielding(&self, type_fq: &Path, def: &AdtDef, ty: &Type, tb: &TraitBound) -> Option<SymRef> {
+        let args = match ty {
+            Type::Named(_, args) => args.as_slice(),
+            _ => &[],
+        };
+        let inst = def.insts.get(&ConcreteNames::type_args(args));
+        let own = inst.into_iter().flat_map(|i| i.assoc.keys()).filter(|&n| !def.assoc.contains_key(n));
+        def.assoc.keys().chain(own).find(|&name| {
+            let Some(af) = def.method_at(name, args) else { return false };
+            let sig = &af.sig;
+            if !af.instance
+                || !self.info.assoc_visible(type_fq, af)
+                || sig.params.len() != 1
+                || sig.rest.is_some()
+                || !sig.optionals.is_empty()
+                || !sig.keys.is_empty()
+            {
+                return false;
+            }
+            let params: HashSet<String> = def.params.iter().chain(&sig.type_params).cloned().collect();
+            let mut subst = BTreeMap::new();
+            if unify(&params, &sig.params[0], ty, &mut subst).is_err() {
+                return false;
+            }
+            let bare = TraitBound { trait_path: tb.trait_path.clone(), assoc: BTreeMap::new() };
+            self.type_implements(&subst_apply(&sig.ret, &subst), &bare, 0)
+        })
     }
 
     /// `ctor` is `(type path, variant index)` — the same pair [`Info::resolve_ctor`]
@@ -15623,7 +15659,7 @@ impl Checker {
                     result_args.push(Type::Never);
                 }
                 None => {
-                    return Err(uninferred(&typed_args, "type argument", p, adt_name.to_string()));
+                    return Err(uninferred(&typed_args, None, "type argument", p, adt_name.to_string()));
                 }
             }
         }
@@ -17136,11 +17172,19 @@ fn bound_unmet(of: &str, param: &str, unmet: Unmet) -> Disagreement {
 /// parameter `param` of `of`: there is no type to take and go on with, and
 /// whatever came after would complain about the missing one instead. An
 /// argument that disagrees is why nothing was decided, so the first of those
-/// comes first.
-fn uninferred(args: &[Checked], noun: &str, param: &str, of: String) -> Error {
+/// comes first; then a `where` bound the decided types do not meet (`unmet`),
+/// since a bound that pins `param` through a trait the type lacks is why
+/// `param` stayed open.
+fn uninferred(args: &[Checked], unmet: Option<Disagreement>, noun: &str, param: &str, of: String) -> Error {
     match args.iter().flat_map(super::verify::disagreements).next() {
         Some(e) => e,
-        None => Error::TypeError(format!("cannot infer {} `{}` for `{}`", noun, param, of)),
+        None => match unmet {
+            Some(Disagreement::Bound { of, param, unmet }) => {
+                Error::TypeError(super::verify::bound_message(&of, &param, &unmet))
+            }
+            Some(what) => unreachable!("validate_where_bounds answers only bounds, not {:?}", what),
+            None => Error::TypeError(format!("cannot infer {} `{}` for `{}`", noun, param, of)),
+        },
     }
 }
 
