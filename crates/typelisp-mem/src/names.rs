@@ -122,16 +122,9 @@ impl ConcreteNames {
     /// then the method's name — `geo::point''area`, `box''twice <int>`. The
     /// whole path, never its last segment: two types in different modules
     /// may share both a local name and a method name. What a message names
-    /// a method by, the key a dump files it under, and its LLVM symbol past
-    /// the prefix.
+    /// a method by, and its LLVM symbol past the prefix. Never split again.
     pub fn method_link(type_path: impl Display, method: &str) -> String {
         format!("{}{}{}", type_path, METHOD_SEPARATOR, method)
-    }
-
-    /// The type path and method name of a [`Self::method_link`], or `None`
-    /// for a name with no separator — a function's.
-    pub fn split_method_link(name: &str) -> Option<(&str, &str)> {
-        name.split_once(METHOD_SEPARATOR)
     }
 
     /// The LLVM symbol a compiled definition is defined and called under:
@@ -167,8 +160,6 @@ mod tests {
     fn a_link_name_and_its_symbol() {
         let link = N::method_link("geo::point", "area");
         assert_eq!(link, "geo::point''area");
-        assert_eq!(N::split_method_link(&link), Some(("geo::point", "area")));
-        assert_eq!(N::split_method_link("geo::area"), None);
         assert_eq!(N::method_symbol("geo::point", "area"), N::symbol(&link));
         assert_eq!(N::symbol(&link), "tl_geo::point''area");
     }

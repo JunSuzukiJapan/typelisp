@@ -138,7 +138,7 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
     // are one slot off — compiled code reading somebody else's storage, with
     // no error anywhere.
     if globals.len() != global_inits.len()
-        || globals.iter().zip(&global_inits).any(|((name, _), (path, _))| name != &path.to_string())
+        || globals.iter().zip(&global_inits).any(|((name, _), (path, _))| name != path)
     {
         return Err(format!(
             "prelude: the dump records {} global(s) but its forms hold {} `defvar`(s), or they are \
@@ -374,12 +374,12 @@ pub fn promote_globals(
     heap: &mut Heap,
     interp: &Interp,
     plan: &PreludePlan,
-) -> Result<Vec<(String, usize)>, String> {
+) -> Result<Vec<(Path, usize)>, String> {
     let mut out = Vec::with_capacity(plan.globals.len());
     for path in &plan.globals {
         let id =
             interp.promote_global(heap, path).map_err(|e| format!("prelude: promoting `{}`: {}", path, e))?;
-        out.push((path.to_string(), id));
+        out.push((path.clone(), id));
     }
     Ok(out)
 }

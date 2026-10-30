@@ -809,5 +809,13 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      公開するシンボルと重なりうるので、シンボルだけでは置き場所が決まらない。組み込み関数の値の
      受け手の型と `rt_ffi_callback_address` の引数もシンボルにした。IR を手で書くテストは、読んだ後に
      `core::name_written_definitions` でルートからのパスを定義のシンボルにする。ABI は 0.3.45。7b は済み。
-8. ダンプ・fasl を 3.6 の形に。
+8. ダンプ・fasl を 3.6 の形に。済み。名前空間ごとの表は前から節の並びと名前で書いていた。
+   残っていた、つないだ文字列で書いて読むときに切り直す箇所をなくした。ドキュメントの表・構造体の
+   既定値・総称の雛形のキーは `Path`（メソッドは `Path` とメンバーの `OwnedSym`）としてペイロードに
+   書き、`dump::parse_path`・`parse_method_key`・`ConcreteNames::split_method_link` は消した。
+   エントリの名前の文字列は差分を取るときに比べるだけで、読み戻さない。大域変数の表
+   （`UnitState::globals`）は `Path` で持つ。チェッカーの `catch`/`throw` のタグの表はタグのシンボルで
+   引き（ダンプには `OwnedSym` で書く）、`defsignature` の宣言の表は `Path` で持つ。実行ファイルが
+   `eval` の環境を作り直すモジュールは `type_words::ns_words` の語の列で渡す（`rt_eval_state`）。
+   ダンプの形式は 30、ABI は 0.3.46。
 9. 利用者向け文書（日本語の原本、翻訳）。

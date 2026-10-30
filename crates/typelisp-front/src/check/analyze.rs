@@ -1033,10 +1033,9 @@ pub struct Checker {
     /// price of dynamic tags in a statically typed language — and what lets
     /// `(throw 'found 42)` be rejected where `found` carries strings.
     ///
-    /// Keyed by the symbol's printed name rather than its `SymRef`: the id is
-    /// interned per `Heap`, and the message for a mismatch has to name the
-    /// symbol anyway.
-    throw_tags: RefCell<std::collections::BTreeMap<String, Type>>,
+    /// Keyed by the tag's symbol; a dump writes it as the symbol written
+    /// down (`owned_form::OwnedSym`).
+    throw_tags: RefCell<crate::dump::ThrowTags>,
     /// What to do when a `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`
     /// reuses a non-builtin name — see [`RedefPolicy`]. Defaults to `Warn`;
     /// override with [`Self::set_redef_policy`] (e.g. from a CLI flag).
@@ -1136,7 +1135,7 @@ pub struct Checker {
     /// [`Self::claim_predeclared`]). A name still here when the unit is
     /// finished is a declaration nothing defined, which
     /// [`Self::finish_unit`] reports: a declaration promises a definition.
-    predeclared: HashSet<String>,
+    predeclared: std::collections::BTreeSet<Path>,
     /// Monotonic counter for the synthetic temporary names `Self::place_dedup`
     /// mints (e.g. `%place-tmp-3`) when desugaring `incf`/`decf`/`rotatef`/
     /// `shiftf` over a call-form place. Prefixed with a character the reader
@@ -1235,7 +1234,7 @@ impl Checker {
             loop_stack: RefCell::new(Vec::new()),
             block_stack: RefCell::new(Vec::new()),
             unsafe_depth: Cell::new(0),
-            throw_tags: RefCell::new(std::collections::BTreeMap::new()),
+            throw_tags: RefCell::new(crate::dump::ThrowTags::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
             recover: false,
@@ -1254,7 +1253,7 @@ impl Checker {
             type_var_bindings: BTreeMap::new(),
             type_uses: RefCell::new(Vec::new()),
             place_tmp_counter: Cell::new(0),
-            predeclared: HashSet::new(),
+            predeclared: std::collections::BTreeSet::new(),
             infer_probe: Cell::new(false),
             probe_holes: Cell::new(0),
             format_calls: RefCell::new(BTreeSet::new()),
@@ -1315,10 +1314,10 @@ impl Checker {
                 return Ok(());
             }
             if cat == crate::dump::cat::FN_TEMPLATE {
-                fn_templates.push((crate::dump::parse_path(&key), bincode_read(&bytes)?));
+                fn_templates.push(bincode_read(&bytes)?);
             } else {
-                let (owner, _) = crate::dump::parse_method_key(&key)?;
-                let (name, template): (crate::owned_form::OwnedSym, crate::dump::WireMethodTemplate) = bincode_read(&bytes)?;
+                let ((owner, name), template): ((Path, crate::owned_form::OwnedSym), crate::dump::WireMethodTemplate) =
+                    bincode_read(&bytes)?;
                 method_templates.push((owner, name, template));
             }
             Ok(())
@@ -1374,14 +1373,13 @@ impl Checker {
 
     /// The pre-declared names in a fixed order, so two runs of the same load
     /// produce the same bytes.
-    fn sorted_predeclared(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.predeclared.iter().cloned().collect();
-        v.sort();
-        v
+    fn sorted_predeclared(&self) -> Vec<Path> {
+        self.predeclared.iter().cloned().collect()
     }
 
-    /// Feeds every retained generic template to `visit` as `(category, key,
-    /// serialized wire form, hash)`.
+    /// Feeds every retained generic template to `visit` as `(category,
+    /// identity, serialized key and wire form, hash)`. The identity is only
+    /// compared between signatures; the key is read back from the payload.
     ///
     /// The templates live on the `Checker` rather than in the `Registry`, so
     /// `dump::walk` cannot see them; this is their half of the same walk, and
@@ -1407,7 +1405,7 @@ impl Checker {
                 ns: typelisp_mem::symbols::ns_path(t.ns),
                 type_params: t.type_params.clone(),
             };
-            let (bytes, hash) = crate::dump::wire(&w)?;
+            let (bytes, hash) = crate::dump::wire(&(path, w))?;
             visit(crate::dump::cat::FN_TEMPLATE, path.to_string(), bytes, hash)?;
         }
 
@@ -1425,8 +1423,8 @@ impl Checker {
                 MethodTemplate::Getter { index } => crate::dump::WireMethodTemplate::Getter { index: *index },
                 MethodTemplate::Setter { index } => crate::dump::WireMethodTemplate::Setter { index: *index },
             };
-            let (bytes, hash) = crate::dump::wire(&(crate::owned_form::OwnedSym::of(key.1), w))?;
-            visit(crate::dump::cat::METHOD_TEMPLATE, typelisp_mem::ConcreteNames::method_link(&key.0, key.1.name()), bytes, hash)?;
+            let (bytes, hash) = crate::dump::wire(&(crate::dump::method_key(key), w))?;
+            visit(crate::dump::cat::METHOD_TEMPLATE, crate::dump::method_identity(key), bytes, hash)?;
         }
         Ok(())
     }
@@ -1881,7 +1879,7 @@ impl Checker {
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
 
         let fq_name = self.info.fq(&name);
-        if self.predeclared.contains(&fq_name.to_string()) {
+        if self.predeclared.contains(&fq_name) {
             return Err(Error::TypeError(format!("defsignature: `{}` is already declared", name)));
         }
         // A declaration *after* the definition is not a redefinition to warn
@@ -1914,7 +1912,7 @@ impl Checker {
             keys: Vec::new(),
         };
         self.info.reg.module_mut(self.info.ns).fns.insert(name, sig);
-        self.predeclared.insert(fq_name.to_string());
+        self.predeclared.insert(fq_name.clone());
         forms::defsignature_form(heap)
     }
 
@@ -2185,7 +2183,7 @@ impl Checker {
         if self.predeclared.is_empty() {
             return Ok(());
         }
-        let mut names = self.sorted_predeclared();
+        let mut names: Vec<String> = self.sorted_predeclared().iter().map(Path::to_string).collect();
         self.predeclared.clear();
         let list = names.join("`, `");
         let (subject, verb) = if names.len() == 1 { ("declaration", "has") } else { ("declarations", "have") };
@@ -2201,7 +2199,7 @@ impl Checker {
     /// registry entry as the declaration it fulfils rather than a
     /// redefinition to report. Claiming removes the entry, so a genuine
     /// second definition of the same name still trips `check_redef`.
-    fn claim_predeclared(&mut self, fq: &str) -> bool {
+    fn claim_predeclared(&mut self, fq: &Path) -> bool {
         self.predeclared.remove(fq)
     }
 
@@ -3433,7 +3431,7 @@ impl Checker {
         // kept to compare against below: a declaration nobody checks is a
         // declaration nobody can trust.
         self.check_value_clash("function", &name)?;
-        let declared = if self.claim_predeclared(&fq_name.to_string()) {
+        let declared = if self.claim_predeclared(&fq_name) {
             self.info.cur_ns().fns.get(&name).cloned()
         } else {
             self.check_redef("function", &name, self.info.cur_ns().fns.get(&name))?;
@@ -13882,7 +13880,7 @@ impl Checker {
     /// place this departs from CL's `catch`/`throw`, and it costs little —
     /// computed tags are vanishingly rare, and every use of one would have
     /// been unstatable in a typed language anyway.
-    fn throw_tag(&self, heap: &Heap, form: Value, who: &str) -> Result<(String, Value), Error> {
+    fn throw_tag(&self, heap: &Heap, form: Value, who: &str) -> Result<(SymRef, Value), Error> {
         let quoted = heap
             .list_to_vec(form)
             .ok()
@@ -13890,25 +13888,16 @@ impl Checker {
             .filter(|elems| matches!(elems[0], Value::Symbol(id) if id.is(wk::QUOTE)))
             .map(|elems| elems[1]);
         match quoted {
-            // Keyed by the symbol's module as well as its spelling, so two
-            // modules' `'done` are two tags carrying two types, as they are
-            // two symbols at run time.
-            Some(sym @ Value::Symbol(id)) => {
-                let home = typelisp_mem::symbols::ns_path(id.home());
-                let key = if id.is_keyword() || home.is_empty() {
-                    id.spelling().to_string()
-                } else {
-                    format!("{}::{}", home.join("::"), id.spelling())
-                };
-                Ok((key, sym))
-            }
+            // Keyed by the symbol, so two modules' `'done` are two tags
+            // carrying two types, as they are two symbols at run time.
+            Some(sym @ Value::Symbol(id)) => Ok((id, sym)),
             _ => Err(Error::TypeError(format!("{}: the tag must be a literal symbol, as in ({} 'done ...)", who, who))),
         }
     }
 
     /// Records that `tag` carries `ty`, or checks it against what an earlier
     /// `catch`/`throw` on the same symbol already established.
-    fn unify_throw_tag(&self, tag: &str, ty: &Type, who: &str) -> Result<(), Error> {
+    fn unify_throw_tag(&self, tag: SymRef, ty: &Type, who: &str) -> Result<(), Error> {
         if type_mentions_typed_ptr(ty) {
             return Err(Error::TypeError(format!(
                 "{}: `{}` would carry `{}`, and a typed pointer cannot leave the `unsafe` that \
@@ -13917,7 +13906,7 @@ impl Checker {
             )));
         }
         let mut tags = self.throw_tags.borrow_mut();
-        match tags.get(tag) {
+        match tags.get(&tag) {
             // `Never` never pins a tag down: it is what a `body` consisting
             // only of a `throw` has, and adopting it would make the tag's type
             // depend on which use the checker happened to reach first.
@@ -13929,7 +13918,7 @@ impl Checker {
             ))),
             None => {
                 if !matches!(ty, Type::Never) {
-                    tags.insert(tag.to_string(), ty.clone());
+                    tags.insert(tag, ty.clone());
                 }
                 Ok(())
             }
@@ -13955,7 +13944,7 @@ impl Checker {
         }
         let (tag, sym) = self.throw_tag(heap, args[0], "catch")?;
         let body = self.check_at(heap, interp, env, args[1], expected, nth_loc(arg_locs, 1))?;
-        self.unify_throw_tag(&tag, &body.ty, "catch")?;
+        self.unify_throw_tag(tag, &body.ty, "catch")?;
         // Joined with the tag's own type, not simply `body`'s: a body that
         // only throws has type `Never`, yet the form still produces whatever
         // the throw delivered. `join_or_first` leaves the ordinary case alone,
@@ -13991,7 +13980,7 @@ impl Checker {
         // mismatch is reported at the value rather than after the fact.
         let expected = self.throw_tags.borrow().get(&tag).cloned();
         let value = self.check_at(heap, interp, env, args[1], expected.as_ref(), nth_loc(arg_locs, 1))?;
-        self.unify_throw_tag(&tag, &value.ty, "throw")?;
+        self.unify_throw_tag(tag, &value.ty, "throw")?;
         Ok(Checked::of(Node::Throw { tag: sym, value: Box::new(value) }, Type::Never))
     }
 

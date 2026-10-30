@@ -12,7 +12,7 @@ use typelisp_front::dump::{apply_types, UnitState};
 
 use crate::compile::symbols::target_symbol_name;
 use crate::CompileTarget;
-use crate::{Checker, Heap, Interp};
+use crate::{Checker, Heap, Interp, Path};
 
 /// Reads one unit's checked state, without applying it.
 ///
@@ -82,10 +82,9 @@ fn load_unit_with(
     // check is not paranoia — `Interp::promote_global` is also called *lazily*
     // by the compile driver the first time a body mentions a global, so a load
     // that did anything before this point could already have consumed an id.
-    for (name, id) in &globals {
-        let path = typelisp_front::dump::parse_path(name);
+    for (path, id) in &globals {
         let got = interp
-            .promote_global(heap, &path)
+            .promote_global(heap, path)
             .map_err(|e| format!("{}: creating storage for global `{}`: {}", label, path, e))?;
         if got != *id {
             return Err(format!(
@@ -139,7 +138,7 @@ pub fn capture_program_dump(
     source: &str,
     src_root: &std::path::Path,
     entry_segs: &[String],
-    globals: &[(String, usize)],
+    globals: &[(Path, usize)],
 ) -> Result<Vec<u8>, String> {
     let prelude = typelisp_front::dump::parse(typelisp_front::prelude::DUMP, "prelude")?;
     let prelude_unit = prelude.first().ok_or_else(|| "prelude: the committed dump holds no units".to_string())?;
@@ -297,12 +296,12 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
 
     // The globals this session promoted: ids are handed out sequentially, so
     // "past where the session started" is exactly its own.
-    let mut globals: Vec<(String, usize)> = interp
+    let mut globals: Vec<(Path, usize)> = interp
         .compiled_globals
         .borrow()
         .iter()
         .filter(|(_, id)| **id >= globals_before)
-        .map(|(p, id)| (p.to_string(), *id))
+        .map(|(p, id)| (p.clone(), *id))
         .collect();
     globals.sort_by_key(|(_, id)| *id);
 

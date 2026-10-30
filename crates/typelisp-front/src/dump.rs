@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 29;
+pub const FORMAT_VERSION: u32 = 30;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -95,8 +95,8 @@ pub struct Entry {
     /// tables (docs, throw tags) that are keyed absolutely rather than by
     /// namespace.
     ns: Vec<String>,
-    /// The entry's name within its table, or the whole key for an absolutely
-    /// keyed table.
+    /// The entry's name within its table. For an absolutely keyed table, the
+    /// identity the entry is compared under; its key is in the payload.
     name: String,
     payload: Vec<u8>,
 }
@@ -326,45 +326,49 @@ type Visit<'a> = dyn FnMut(u8, &[String], &str, Vec<u8>, u64) -> Result<(), Stri
 
 fn walk(
     reg: &Registry,
-    throw_tags: &BTreeMap<String, Type>,
-    predeclared: &[String],
+    throw_tags: &ThrowTags,
+    predeclared: &[Path],
     visit: &mut Visit<'_>,
 ) -> Result<(), String> {
     let (docs, struct_defaults) = (&reg.docs, &reg.struct_defaults);
     walk_ns(reg, reg.root(), &mut Vec::new(), visit)?;
 
     // Keyed absolutely, like the doc tables — this one hangs off the
-    // `Registry`, not off any namespace.
+    // `Registry`, not off any namespace. The key is written in the payload,
+    // as a `Path` is; the identity the walk hands `visit` is only compared.
     for (path, defaults) in struct_defaults {
-        let (bytes, hash) = wire(defaults)?;
+        let (bytes, hash) = wire(&(path, defaults))?;
         visit(cat::STRUCT_DEFAULT, &[], &path.to_string(), bytes, hash)?;
     }
 
+    // Each row is the identity, the key written as what it is, and the text.
     macro_rules! doc_table {
-        ($cat:expr, $map:expr, $key:expr) => {
-            let mut rows: Vec<(String, &String)> = $map.iter().map(|(k, v)| ($key(k), v)).collect();
+        ($cat:expr, $rows:expr) => {
+            let mut rows: Vec<_> = $rows.collect();
             rows.sort_by(|a, b| a.0.cmp(&b.0));
-            for (key, v) in rows {
-                let (bytes, hash) = wire(v)?;
-                visit($cat, &[], &key, bytes, hash)?;
+            for (identity, key, v) in rows {
+                let (bytes, hash) = wire(&(key, v))?;
+                visit($cat, &[], &identity, bytes, hash)?;
             }
         };
     }
-    doc_table!(cat::DOC_FN, docs.fns, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_TYPE, docs.types, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_VAR, docs.vars, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_TRAIT, docs.traits, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_MACRO, docs.macros, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_METHOD, docs.methods, |k: &(Path, SymRef)| typelisp_mem::ConcreteNames::method_link(&k.0, k.1.name()));
-    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods, |k: &(Path, SymRef)| typelisp_mem::ConcreteNames::method_link(&k.0, k.1.name()));
+    doc_table!(cat::DOC_FN, docs.fns.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
+    doc_table!(cat::DOC_TYPE, docs.types.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
+    doc_table!(cat::DOC_VAR, docs.vars.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
+    doc_table!(cat::DOC_TRAIT, docs.traits.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
+    doc_table!(cat::DOC_MACRO, docs.macros.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
+    doc_table!(cat::DOC_METHOD, docs.methods.iter().map(|(k, v)| (method_identity(k), method_key(k), v)));
+    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods.iter().map(|(k, v)| (method_identity(k), method_key(k), v)));
 
-    for (tag, ty) in throw_tags {
-        let (bytes, hash) = wire(ty)?;
-        visit(cat::THROW_TAG, &[], tag, bytes, hash)?;
+    let mut tags: Vec<_> = throw_tags.iter().map(|(tag, ty)| (symbol_identity(*tag), tag, ty)).collect();
+    tags.sort_by(|a, b| a.0.cmp(&b.0));
+    for (identity, tag, ty) in tags {
+        let (bytes, hash) = wire(&(crate::owned_form::OwnedSym::of(*tag), ty))?;
+        visit(cat::THROW_TAG, &[], &identity, bytes, hash)?;
     }
-    for name in predeclared {
-        let (bytes, hash) = wire(&())?;
-        visit(cat::PREDECLARED, &[], name, bytes, hash)?;
+    for path in predeclared {
+        let (bytes, hash) = wire(path)?;
+        visit(cat::PREDECLARED, &[], &path.to_string(), bytes, hash)?;
     }
     Ok(())
 }
@@ -437,8 +441,8 @@ fn walk_ns(
 /// Every entry's content hash, as of now.
 pub fn signature(
     reg: &Registry,
-    throw_tags: &BTreeMap<String, Type>,
-    predeclared: &[String],
+    throw_tags: &ThrowTags,
+    predeclared: &[Path],
 ) -> Result<RegistrySignature, String> {
     let mut sig = RegistrySignature::default();
     walk(reg, throw_tags, predeclared, &mut |cat, ns, name, _bytes, hash| {
@@ -451,8 +455,8 @@ pub fn signature(
 /// Every entry that is new or different since `before`.
 pub fn delta(
     reg: &Registry,
-    throw_tags: &BTreeMap<String, Type>,
-    predeclared: &[String],
+    throw_tags: &ThrowTags,
+    predeclared: &[Path],
     before: &RegistrySignature,
 ) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
@@ -475,8 +479,8 @@ pub fn delta(
 #[allow(clippy::too_many_arguments)]
 pub fn apply_entries(
     reg: &mut Registry,
-    throw_tags: &mut BTreeMap<String, Type>,
-    predeclared: &mut dyn FnMut(String),
+    throw_tags: &mut ThrowTags,
+    predeclared: &mut dyn FnMut(Path),
     entries: Vec<Entry>,
 ) -> Result<(), String> {
     for e in entries {
@@ -534,9 +538,9 @@ pub fn apply_entries(
                 reg.module_mut(module).c_structs.insert(e.name, v);
             }
             cat::STRUCT_DEFAULT => {
-                let v: Vec<Option<OwnedForm>> =
+                let (path, v): (Path, Vec<Option<OwnedForm>>) =
                     bincode::deserialize(&e.payload).map_err(|err| read_failed("struct slot defaults", err))?;
-                reg.struct_defaults.insert(parse_path(&e.name), v);
+                reg.struct_defaults.insert(path, v);
             }
             cat::BLANKET => {
                 let v: BlanketImpl = bincode::deserialize(&e.payload).map_err(|err| read_failed("blanket impl", err))?;
@@ -556,30 +560,41 @@ pub fn apply_entries(
                 }
             }
             cat::THROW_TAG => {
-                let v: Type = bincode::deserialize(&e.payload).map_err(|err| read_failed("throw tag", err))?;
-                throw_tags.insert(e.name, v);
+                let (tag, v): (crate::owned_form::OwnedSym, Type) =
+                    bincode::deserialize(&e.payload).map_err(|err| read_failed("throw tag", err))?;
+                throw_tags.insert(tag.symbol(), v);
             }
-            cat::PREDECLARED => predeclared(e.name),
+            cat::PREDECLARED => {
+                let path: Path = bincode::deserialize(&e.payload).map_err(|err| read_failed("declaration", err))?;
+                predeclared(path)
+            }
             cat::DOC_FN => {
-                reg.docs.fns.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                let (path, text) = doc_row(&e.payload)?;
+                reg.docs.fns.insert(path, text);
             }
             cat::DOC_TYPE => {
-                reg.docs.types.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                let (path, text) = doc_row(&e.payload)?;
+                reg.docs.types.insert(path, text);
             }
             cat::DOC_VAR => {
-                reg.docs.vars.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                let (path, text) = doc_row(&e.payload)?;
+                reg.docs.vars.insert(path, text);
             }
             cat::DOC_TRAIT => {
-                reg.docs.traits.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                let (path, text) = doc_row(&e.payload)?;
+                reg.docs.traits.insert(path, text);
             }
             cat::DOC_MACRO => {
-                reg.docs.macros.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                let (path, text) = doc_row(&e.payload)?;
+                reg.docs.macros.insert(path, text);
             }
             cat::DOC_METHOD => {
-                reg.docs.methods.insert(parse_method_key(&e.name)?, doc_text(&e.payload)?);
+                let ((owner, member), text): ((Path, crate::owned_form::OwnedSym), String) = doc_row(&e.payload)?;
+                reg.docs.methods.insert((owner, member.symbol()), text);
             }
             cat::DOC_TRAIT_METHOD => {
-                reg.docs.trait_methods.insert(parse_method_key(&e.name)?, doc_text(&e.payload)?);
+                let ((owner, member), text): ((Path, crate::owned_form::OwnedSym), String) = doc_row(&e.payload)?;
+                reg.docs.trait_methods.insert((owner, member.symbol()), text);
             }
             other => return Err(format!("dump: entry category {} is not one this build knows", other)),
         }
@@ -593,23 +608,31 @@ fn read_failed(what: &str, err: bincode::Error) -> String {
     format!("dump: reading a {}: {}", what, err)
 }
 
-fn doc_text(payload: &[u8]) -> Result<String, String> {
+fn doc_row<K: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<(K, String), String> {
     bincode::deserialize(payload).map_err(|e| format!("dump: reading a docstring: {}", e))
 }
 
-/// A method entry's name back into the registry's key — the inverse of the
-/// [`typelisp_mem::ConcreteNames::method_link`] the walk wrote it with.
-pub fn parse_method_key(key: &str) -> Result<(Path, SymRef), String> {
-    match typelisp_mem::ConcreteNames::split_method_link(key) {
-        Some((path, method)) => Ok((parse_path(path), typelisp_mem::symbols::member_symbol(method))),
-        None => Err(format!("dump: `{}` is not a method key", key)),
-    }
+/// The checker's throw tags: the type each `catch`/`throw` tag carries, by
+/// the tag's symbol.
+pub type ThrowTags = std::collections::HashMap<SymRef, Type>;
+
+/// A method table's key as written: the owner's path and the member symbol.
+pub(crate) fn method_key(k: &(Path, SymRef)) -> (Path, crate::owned_form::OwnedSym) {
+    (k.0.clone(), crate::owned_form::OwnedSym::of(k.1))
 }
 
-/// `m::x` back into the `Path` the registry keys its tables by — the inverse of
-/// the `Display` the walk wrote the key with.
-pub fn parse_path(name: &str) -> Path {
-    Path::from_segments(name.split("::").map(str::to_string).collect())
+/// The identity a method table's row is compared under between two
+/// signatures. Never read back: the key itself is in the payload.
+pub(crate) fn method_identity(k: &(Path, SymRef)) -> String {
+    typelisp_mem::ConcreteNames::method_link(&k.0, k.1.name())
+}
+
+/// The identity a symbol-keyed row is compared under: its module's segments
+/// and its spelling, so two modules' `'done` are two rows.
+fn symbol_identity(sym: SymRef) -> String {
+    let mut segments = typelisp_mem::symbols::ns_path(sym.home());
+    segments.push(sym.spelling().to_string());
+    segments.join("::")
 }
 
 /// One compilation's output: what it added to the checker, and what its
@@ -686,7 +709,7 @@ pub struct UnitState {
     /// is called both eagerly in declaration order *and* lazily by the compile
     /// driver when it first sees a reference, so the sequence is not something
     /// a second process can reproduce by walking the source.
-    pub globals: Vec<(String, usize)>,
+    pub globals: Vec<(Path, usize)>,
 }
 
 /// Writes down what a unit added, for a unit that **carries no bodies**.
@@ -713,7 +736,7 @@ pub fn capture_types(
     source_digest: Option<u64>,
     forms_digest: Option<u64>,
     forms: &[crate::Value],
-    globals: Vec<(String, usize)>,
+    globals: Vec<(Path, usize)>,
 ) -> Result<UnitState, String> {
     capture_types_with_abi(
         heap,
@@ -742,7 +765,7 @@ pub fn capture_types_with_abi(
     forms_digest: Option<u64>,
     forms: &[crate::Value],
     items: Vec<crate::CompileTarget>,
-    globals: Vec<(String, usize)>,
+    globals: Vec<(Path, usize)>,
     body_abi: u8,
     emits_abi: u8,
     body_layout: u8,
@@ -808,9 +831,9 @@ pub fn apply_types(
 /// Records that these globals already have storage, made by somebody else.
 ///
 /// The AOT half of the split described on [`apply_types`].
-pub fn bind_globals(interp: &crate::Interp, globals: &[(String, usize)]) {
-    for (name, id) in globals {
-        interp.bind_compiled_global(parse_path(name), *id);
+pub fn bind_globals(interp: &crate::Interp, globals: &[(Path, usize)]) {
+    for (path, id) in globals {
+        interp.bind_compiled_global(path.clone(), *id);
     }
 }
 
@@ -926,10 +949,10 @@ pub const PROGRAM_LABEL: &str = "<program>";
 /// Applies each unit in order. No bitcode is installed — a dump embedded in an
 /// executable carries none, and this crate has no installer anyway.
 ///
-/// `ns` (`::`-joined) is the namespace a later eval'd form is checked in: the
-/// entry file's module, where `typl file.typl` places one too, so a bare name
-/// in it resolves to the program's own definition.
-pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: &str) -> Result<crate::Interp, String> {
+/// `ns` is the namespace a later eval'd form is checked in: the entry file's
+/// module, where `typl file.typl` places one too, so a bare name in it
+/// resolves to the program's own definition.
+pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: typelisp_mem::NsId) -> Result<crate::Interp, String> {
     let mut chk = crate::Checker::new();
     // Before anything runs: `Interp::new` resets the runtime global table
     // (`typelisp_rt::reset_global_table`), which is why an AOT program's startup
@@ -951,7 +974,7 @@ pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: &str) -> Result<cr
     }
 
     chk.take_warnings();
-    chk.set_current_ns(typelisp_mem::symbols::ns_of(&ns.split("::").map(str::to_string).collect::<Vec<_>>()));
+    chk.set_current_ns(ns);
     interp.set_checker(std::rc::Rc::new(std::cell::RefCell::new(chk)));
     Ok(interp)
 }

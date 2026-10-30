@@ -42,7 +42,7 @@ thread_local! {
     /// The embedded environment dump and the namespace an eval'd form is
     /// checked in, from [`rt_eval_state`]. `'static` because both point into
     /// the executable's read-only data.
-    static EVAL_DUMP: Cell<Option<(&'static [u8], &'static str)>> = const { Cell::new(None) };
+    static EVAL_DUMP: Cell<Option<(&'static [u8], typelisp_mem::NsId)>> = const { Cell::new(None) };
 
     /// The environment [`rt_eval_init`] rebuilt, or null under JIT where the
     /// running `Interp` is used instead.
@@ -56,25 +56,23 @@ thread_local! {
 }
 
 /// Registers the embedded environment dump: `args` is `[ptr, len, ns_ptr,
-/// ns_len, release]`, the dump, the `::`-joined namespace an eval'd form is
-/// checked in (the entry file's module), and nonzero when the executable was
-/// built as a release build ([`crate::release`]) — so is the process, then.
+/// ns_len, release]`, the dump, the module an eval'd form is checked in (the
+/// entry file's module) as the words `typelisp_mem::type_words::ns_words`
+/// writes, and nonzero when the executable was built as a release build
+/// ([`crate::release`]) — so is the process, then.
 ///
 /// # Safety
 ///
-/// `args` must point to 5 valid `i64`s, the first two pairs naming immortal
-/// bytes, the second pair UTF-8.
+/// `args` must point to 5 valid `i64`s, the first pair naming immortal
+/// bytes, the second immortal words.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
     if argc < 5 {
         fatal("rt_eval_state: expected 5 arguments");
     }
     let bytes = std::slice::from_raw_parts(*args as usize as *const u8, *args.add(1) as usize);
-    let ns_bytes = std::slice::from_raw_parts(*args.add(2) as usize as *const u8, *args.add(3) as usize);
-    let ns = match std::str::from_utf8(ns_bytes) {
-        Ok(s) => s,
-        Err(e) => fatal(&format!("rt_eval_state: the namespace is not UTF-8: {}", e)),
-    };
+    let ns_words = std::slice::from_raw_parts(*args.add(2) as usize as *const i64, *args.add(3) as usize);
+    let ns = typelisp_mem::type_words::read_ns(ns_words);
     crate::release::set_release(*args.add(4) != 0);
     EVAL_DUMP.with(|c| c.set(Some((bytes, ns))));
     0

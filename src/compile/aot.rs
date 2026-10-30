@@ -565,13 +565,13 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // assumed to be the loop index: the ids are whatever
     // `typelisp_rt::global_new` handed out, and the executable reproducing
     // them is a property of the `$global_init$` call order, not of this list.
-    let eval_globals: Vec<(String, usize)> = all_inits
+    let eval_globals: Vec<(Path, usize)> = all_inits
         .iter()
         .map(|(path, _)| {
             let id = interp
                 .compiled_global_id(path)
                 .ok_or_else(|| format!("internal error: global `{}` was collected but never promoted", path))?;
-            Ok((path.to_string(), id))
+            Ok((path.clone(), id))
         })
         .collect::<Result<_, String>>()?;
 
@@ -626,7 +626,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // The namespace an eval'd form is checked in: the entry file's module, as
     // `typl file.typl` places it (`run_file`), so a bare name in it resolves
     // to the program's own definition.
-    let eval_ns = entry_segs.join("::");
+    let eval_ns = typelisp_front::mem::symbols::ns_of(&entry_segs);
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
@@ -653,7 +653,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &format_calls,
             &printer_globals,
             &callback_entries,
-            eval_env.as_deref().map(|bytes| (bytes, eval_ns.as_str(), crate::release::is_release())),
+            eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
             main_returns_int,
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
@@ -716,8 +716,8 @@ fn print_object_receiver(target: &CompileTarget) -> Option<typelisp_mem::TypeId>
 /// `eval_env` is `Some` only for a program that calls `eval`: the
 /// environment, already built and serialized (`typelisp_front::dump`), for
 /// the startup to read back into [`EVAL_HEAP_CAPACITY`] cells before `main`
-/// proper begins, the namespace (`p`, `::`-joined) an eval'd form is
-/// checked in, and whether this is a release build.
+/// proper begins, the module an eval'd form is checked in, and whether this
+/// is a release build.
 fn build_main_wrapper(
     ctx: &'static Context,
     module: &Module<'static>,
@@ -732,7 +732,7 @@ fn build_main_wrapper(
     format_calls: &[(String, String)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
-    eval_env: Option<(&[u8], &str, bool)>,
+    eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
     main_returns_int: bool,
 ) -> Result<(), String> {
     let tl_main = module
@@ -977,9 +977,8 @@ fn build_main_wrapper(
         let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_env");
         blob.set_initializer(&ctx.const_string(bytes, false));
         blob.set_constant(true);
-        let ns_str = builder
-            .build_global_string_ptr(ns, "typelisp_eval_ns")
-            .map_err(|e| format!("failed to build the eval namespace string: {}", e))?;
+        let (ns_words, ns_len) =
+            crate::compile::type_table::constant_words(module, "typelisp_eval_ns", &typelisp_mem::type_words::ns_words(ns));
         call_shim(
             ctx,
             module,
@@ -988,8 +987,8 @@ fn build_main_wrapper(
             &[
                 blob.as_pointer_value().const_to_int(i64_ty),
                 i64_ty.const_int(bytes.len() as u64, false),
-                ns_str.as_pointer_value().const_to_int(i64_ty),
-                i64_ty.const_int(ns.len() as u64, false),
+                ns_words.as_pointer_value().const_to_int(i64_ty),
+                i64_ty.const_int(ns_len as u64, false),
                 i64_ty.const_int(release as u64, false),
             ],
         )?;
