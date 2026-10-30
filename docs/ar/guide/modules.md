@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # الوحدات وتنظيم الملفات
 
 يشرح هذا الدليل كيفية تجميع برنامج مكوّن من عدة ملفات. القواعد التفصيلية موجودة في الأقسام من 3.10 إلى
@@ -110,6 +110,30 @@ typl main.typl        # => 25
   `(use geometry::point::new)` أو `(use geometry::point::*)`.
 - تُكتب الوحدة الموجودة داخل مجلد على الصورة `(use geo::shapes)`، وبعد ذلك يُشار إليها بجزئها الأخير
   (`shapes::...`).
+
+### استعمال اسم تقدّمه المكتبة القياسية
+
+تعريف دالة أو أي شيء آخر باسم تقدّمه المكتبة القياسية، مثل `length` أو `first`، خطأ.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+وإذا قرّرت أن تستعمل الوحدة تعريفك الخاص، فاكتب `shadow` قبل التعريف.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; first الخاصة بهذه الوحدة => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first المكتبة القياسية => (some 1)
+```
+
+بعد `shadow` تشير كتابة `first` في تلك الوحدة إلى تعريفك الخاص. ولاستعمال `first` المكتبة القياسية
+اكتب مسارها، `std::seq::first`. ولا يسري `shadow` إلا في الوحدة التي كُتب فيها؛ وفي الوحدات الأخرى
+تبقى `first` هي دالة المكتبة القياسية. ولا يمكن تطبيق `shadow` على أسماء الصيغ الخاصة مثل `if`
+و`let`، ولا استعمالها في التعريفات.
 
 ### استدعاء توابع السمات
 

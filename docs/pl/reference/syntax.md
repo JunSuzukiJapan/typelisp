@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1013,6 +1013,7 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
 (pub use path...)          ; udostępnia to, co wprowadzono, także przez ścieżkę tego modułu
 (import path...)           ; to samo co use (zapis zgodny z CL)
 (shadowing-import path...) ; use, które świadomie przejmuje nazwę już używaną
+(shadow name...)           ; czyni nazwę oferowaną przez bibliotekę standardową własną nazwą tego modułu
 ```
 
 - `module` tworzy przestrzeń nazw. **Typy nie są przestrzeniami nazw** (jak w Rust, typ ma tylko metody
@@ -1069,6 +1070,12 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
   `use` na początku pliku.
 - **`use` może przyjmować kilka ścieżek** (`(use a::f b::g)`). `import` to zapis zgodny z CL o tym samym
   zachowaniu.
+- **Aby zdefiniować nazwę oferowaną przez bibliotekę standardową, najpierw pisze się `(shadow
+  name...)`.** Bez tego definicja `(defun length ...)` jest błędem. Od miejsca, w którym przeczytano
+  `shadow`, w obrębie tego modułu (pliku lub ciała otaczającego `module`) `name` jest własną nazwą
+  modułu, a definicja biblioteki standardowej nie jest już widoczna pod gołą nazwą. Nadal można jej
+  używać, pisząc jej ścieżkę, np. `std::seq::length`. Inne moduły nie są tym objęte. Słów
+  zastrzeżonych (nazw form specjalnych) nie można objąć `shadow`. Działa to jak `shadow` w CL.
 - **`use`, którego goła nazwa jest już zajęta, jest zgłaszane.** Rozstrzyganie gołej nazwy patrzy na własne definicje
   modułu przed aliasami, więc `(use m::twice)` po `(defun twice ...)` **nic nie robi**. Jeśli
   to zamierzone, napisz `shadowing-import` (nadal nie może pokonać definicji, ponieważ nie ma sposobu na usunięcie
@@ -1098,6 +1105,8 @@ zagnieżdża się **wewnątrz** niego (`geo::point::bar`), więc wyprowadzona ś
   `circular module dependency: a -> b -> a`.
 - **Uruchamianie**: `typl <file.typl>` uruchamia plik (bez argumentów REPL). `use` w REPL rozstrzyga
   pliki według tych samych reguł.
+  Definicje napisane w REPL trafiają do modułu `user` (`(module m ...)` napisane w REPL to
+  `user::m`).
 - **Pojemność areny cons**: `typl --heap-cells N` ustawia **początkową pojemność** areny komórek cons
   (domyślnie 65536; forma `--heap-cells=N` też działa, zarówno przy uruchamianiu plików, jak i REPL). Arena
   **rośnie przez dodawanie kolejnych**, gdy brakuje miejsca. Granicą wzrostu jest 256-krotność początkowej pojemności,

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -955,6 +955,7 @@ dispatch ผ่าน vtable:
 (pub use path...)          ; ทำให้สิ่งที่นำเข้ามาเข้าถึงได้ผ่านพาธของโมดูลนี้ด้วย
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
+(shadow name...)           ; make a name the standard library offers this module's own
 ```
 
 - `module` สร้างเนมสเปซ **ชนิดไม่ใช่เนมสเปซ** (เหมือน Rust ชนิดมีเพียงเมทอดสถิตและเมทอด)
@@ -992,6 +993,12 @@ dispatch ผ่าน vtable:
   `use` ที่ต้นไฟล์
 - **`use` รับได้หลายพาธ** (`(use a::f b::g)`) `import` เป็นการสะกดที่เข้ากันได้กับ CL
   และมีพฤติกรรมเดียวกัน
+- **ถ้าจะนิยามชื่อที่ไลบรารีมาตรฐานเปิดให้ใช้ ต้องเขียน `(shadow name...)` ก่อน**
+  ถ้าไม่เขียนแล้วนิยาม `(defun length ...)` จะเป็นข้อผิดพลาด ตั้งแต่ตำแหน่งที่อ่าน `shadow`
+  ภายในโมดูลนั้น (ไฟล์ หรือเนื้อของ `module` ที่ล้อมอยู่) `name` จะเป็นชื่อของโมดูลนั้นเอง
+  และนิยามของไลบรารีมาตรฐานจะมองไม่เห็นด้วยชื่อเปล่าอีกต่อไป ยังใช้ได้โดยเขียนพาธ เช่น
+  `std::seq::length` โมดูลอื่นไม่ได้รับผลกระทบ คำสงวน (ชื่อของ special form) `shadow` ไม่ได้
+  ทำงานเหมือน `shadow` ของ CL
 - **`use` ที่ชื่อเปล่าถูกใช้ไปแล้วจะถูกรายงาน** การแก้ไขชื่อเปล่าดูการนิยามของโมดูลเอง
   ก่อน alias ดังนั้น `(use m::twice)` หลัง `(defun twice ...)` **ไม่ทำอะไร** หากตั้งใจ
   ให้เขียน `shadowing-import` (ก็ยังเอาชนะการนิยามไม่ได้ เพราะไม่มีวิธีลบ
@@ -1021,6 +1028,7 @@ dispatch ผ่าน vtable:
   `circular module dependency: a -> b -> a`
 - **การรัน**: `typl <file.typl>` รันไฟล์ (หากไม่มีอาร์กิวเมนต์ จะเป็น REPL) `use` ใน REPL แก้ไข
   ไฟล์ด้วยกฎเดียวกัน
+  นิยามที่เขียนใน REPL จะเข้าไปอยู่ในโมดูล `user` (`(module m ...)` ที่เขียนใน REPL คือ `user::m`)
 - **ความจุ cons arena**: `typl --heap-cells N` ตั้ง **ความจุเริ่มต้น** ของ arena ของ cons cell
   (ค่าเริ่มต้น 65536; รูปแบบ `--heap-cells=N` ก็ใช้ได้ทั้งสำหรับรันไฟล์และ REPL) arena
   **เติบโตโดยการเพิ่ม** เมื่อไม่พอ ขีดจำกัดของการเติบโตคือ 256 เท่าของความจุเริ่มต้น

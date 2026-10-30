@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -797,6 +797,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (pub use path...)          ; 让引入的定义也能通过经过本模块的路径找到
 (import path...)           ; 与 use 相同（CL 兼容的写法）
 (shadowing-import path...) ; 明知裸名已被占用仍要取用的 use
+(shadow name...)           ; 把标准库公开的名字变成本模块自己的名字
 ```
 
 - `module` 创建命名空间。**类型不是命名空间**（与 Rust 一样，类型只拥有静态方法和方法）。
@@ -828,6 +829,11 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 - **`use` 对其后的形式生效。** 文件逐个形式读取，依赖也在检查该形式之前解析，所以在 `(use m)` **上面**写 `m::f` 会得到
   `unresolved path`。请把 `use` 放在文件开头。
 - **`use` 可以接受多个路径**（`(use a::f b::g)`）。`import` 是行为相同的 CL 兼容写法。
+- **要定义与标准库公开的名字同名的东西，须先写 `(shadow name...)`。** 不写就定义
+  `(defun length ...)` 会出错。从读到 `shadow` 的地方起，在该模块（文件，或外层 `module` 的主体）中，
+  `name` 就是该模块自己的名字，标准库的定义不再能用裸名看到。标准库的定义仍可用路径写出来使用，如
+  `std::seq::length`。其他模块不受影响。保留字（特殊形式的名字）不能 `shadow`。作用与 CL 的 `shadow`
+  相同。
 - **裸名已被占用的 `use` 会被报告。** 裸名的解析先看该模块自身的定义，再看别名，所以 `(defun twice ...)` 之后的
   `(use m::twice)` **什么也不做**。明知如此仍要这样做时写 `shadowing-import`（但它胜不过定义——没有撤销定义的手段。它能胜过的
   只有先前的别名）。
@@ -848,6 +854,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
   需要 `pub`（[3.13 pub](#313-pub--公开)）。
 - **循环引用是错误**：以 `circular module dependency: a -> b -> a` 的形式报告链条。
 - **运行**：用 `typl <file.typl>` 运行文件（不带参数时为 REPL）。REPL 中的 `use` 也按同样的约定解析文件。
+  在 REPL 中写的定义进入模块 `user`（在 REPL 中写 `(module m ...)` 即为 `user::m`）。
 - **cons 区域容量**：用 `typl --heap-cells N` 指定 cons 单元区域的**初始容量**（默认 65536。也可以写 `--heap-cells=N`，文件运行
   和 REPL 都适用）。区域不足时会**追加增长**。增长的上限是初始容量的 256 倍，超出它的分配会成为 `heap exhausted`——也就是说，初始
   容量意味着"最初分配这么多"，上限意味着"超过这里就视为泄漏"。

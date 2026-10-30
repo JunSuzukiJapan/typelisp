@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1011,6 +1011,7 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
 (pub use path...)          ; make what is brought in reachable through this module's path too
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
+(shadow name...)           ; make a name the standard library offers this module's own
 ```
 
 - `module` creates a namespace. **Types are not namespaces** (as in Rust, a type only has static methods
@@ -1068,6 +1069,12 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
   `use` at the top of the file.
 - **`use` can take several paths** (`(use a::f b::g)`). `import` is a CL-compatible spelling with the
   same behavior.
+- **To define a name the standard library offers, write `(shadow name...)` first.** Defining `(defun
+  length ...)` without it is an error. From where `shadow` is read, within that module (the file, or
+  the body of the enclosing `module`), `name` is the module's own name, and the standard library's
+  definition is no longer visible by the bare name. It can still be used by writing its path, as in
+  `std::seq::length`. Other modules are not affected. Reserved words (the names of special forms)
+  cannot be `shadow`ed. It works like CL's `shadow`.
 - **A `use` whose bare name is already taken is reported.** Resolving a bare name looks at the module's
   own definitions before aliases, so `(use m::twice)` after `(defun twice ...)` **does nothing**. If you
   mean it, write `shadowing-import` (it still cannot beat a definition, since there is no way to remove
@@ -1097,6 +1104,8 @@ nests **inside** it (`geo::point::bar`), so the derived path and an explicit dec
   `circular module dependency: a -> b -> a`.
 - **Running**: `typl <file.typl>` runs a file (without arguments, the REPL). `use` in the REPL resolves
   files by the same rules.
+  Definitions written in the REPL go into the module `user` (`(module m ...)` written in the REPL is
+  `user::m`).
 - **Cons arena capacity**: `typl --heap-cells N` sets the **initial capacity** of the cons cell arena
   (default 65536; the form `--heap-cells=N` works too, for both running files and the REPL). The arena
   **grows by adding more** when it runs short. The limit of growth is 256 times the initial capacity,

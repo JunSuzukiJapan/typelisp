@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # โมดูลและการจัดวางไฟล์
 
 คู่มือนี้อธิบายวิธีประกอบโปรแกรมที่ประกอบด้วยหลายไฟล์ กฎโดยละเอียดอยู่ในหัวข้อ 3.10 ถึง 3.13 ของ
@@ -112,6 +112,31 @@ typl main.typl        # => 25
   `(use geometry::point::new)` หรือ `(use geometry::point::*)`
 - โมดูลที่อยู่ในไดเรกทอรีเขียนเป็น `(use geo::shapes)` และหลังจากนั้นอ้างถึงด้วยส่วนสุดท้ายของชื่อ
   (`shapes::...`)
+
+### การใช้ชื่อที่ไลบรารีมาตรฐานเปิดให้ใช้
+
+การนิยามฟังก์ชันหรือสิ่งอื่นด้วยชื่อที่ไลบรารีมาตรฐานเปิดให้ใช้ เช่น `length` หรือ `first`
+จะเป็นข้อผิดพลาด
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+เมื่อตัดสินใจให้โมดูลใช้นิยามของตัวเอง ให้เขียน `shadow` ไว้ก่อนนิยาม
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; first ของโมดูลนี้ => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first ของไลบรารีมาตรฐาน => (some 1)
+```
+
+หลัง `shadow` การเขียน `first` ในโมดูลนั้นจะหมายถึงนิยามของตัวเอง ถ้าจะใช้ `first` ของไลบรารีมาตรฐาน
+ให้เขียนพาธ `std::seq::first` `shadow` มีผลเฉพาะในโมดูลที่เขียนไว้ ในโมดูลอื่น `first`
+ยังคงเป็นของไลบรารีมาตรฐาน ชื่อของ special form เช่น `if` และ `let` `shadow` ไม่ได้
+และใช้เป็นชื่อนิยามไม่ได้ด้วย
 
 ### การเรียกเมทอดของ trait
 

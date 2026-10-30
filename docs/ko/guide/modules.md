@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # 모듈과 파일 구성
 
 이 가이드에서는 여러 파일로 된 프로그램을 구성하는 방법을 설명한다. 자세한 규칙은
@@ -105,6 +105,29 @@ typl main.typl        # => 25
 - `(use geometry::point)`로 들여오는 것은 타입 이름뿐이다. `point::new`를 `new`로 쓰고 싶으면
   `(use geometry::point::new)`나 `(use geometry::point::*)`를 쓴다.
 - 디렉터리 안의 모듈은 `(use geo::shapes)`라고 쓰고, 그 뒤로는 마지막 부분(`shapes::...`)으로 가리킨다.
+
+### 표준 라이브러리와 같은 이름을 붙이기
+
+`length`나 `first`처럼 표준 라이브러리가 공개하는 이름으로 함수 등을 정의하면 오류가 됩니다.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+그 모듈에서 자신의 정의를 쓰기로 했다면, 정의보다 앞에 `shadow`를 씁니다.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; 이 모듈의 first => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 표준 라이브러리의 first => (some 1)
+```
+
+`shadow` 뒤에는 그 모듈 안에서 `first`라고 쓰면 자신의 정의를 가리킵니다. 표준 라이브러리의 `first`를 쓸 때는 `std::seq::first`처럼 경로로
+씁니다. `shadow`는 쓴 모듈 안에서만 효력이 있고, 다른 모듈의 `first`는 표준 라이브러리 그대로입니다. `if`나 `let` 같은 특수 형식의 이름은
+`shadow`할 수 없고 정의에도 쓸 수 없습니다.
 
 ### 트레이트 메서드 호출하기
 

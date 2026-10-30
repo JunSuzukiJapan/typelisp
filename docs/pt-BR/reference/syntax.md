@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1003,6 +1003,7 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
 (pub use path...)          ; faz o que foi trazido ser alcançado também pelo caminho deste módulo
 (import path...)           ; o mesmo que use (uma escrita compatível com o CL)
 (shadowing-import path...) ; um use que toma de propósito um nome simples já em uso
+(shadow name...)           ; torna um nome oferecido pela biblioteca padrão um nome próprio deste módulo
 ```
 
 - `module` cria um namespace. **Tipos não são namespaces** (como no Rust, um tipo só tem métodos estáticos e
@@ -1060,6 +1061,12 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
   `unresolved path`. Ponha o `use` no início do arquivo.
 - **`use` pode receber vários caminhos** (`(use a::f b::g)`). `import` é uma escrita compatível com o CL com o
   mesmo comportamento.
+- **Para definir um nome oferecido pela biblioteca padrão, escreva antes `(shadow name...)`.** Sem
+  isso, definir `(defun length ...)` é um erro. A partir de onde `shadow` é lido, dentro desse
+  módulo (o arquivo, ou o corpo do `module` que o envolve), `name` é o nome próprio do módulo, e a
+  definição da biblioteca padrão deixa de ser visível pelo nome simples. Ela ainda pode ser usada
+  escrevendo o seu caminho, como `std::seq::length`. Os outros módulos não são afetados. Palavras
+  reservadas (os nomes das formas especiais) não podem ser `shadow`. Funciona como o `shadow` de CL.
 - **Um `use` cujo nome simples já está em uso é relatado.** Ao resolver um nome simples, olham-se as próprias
   definições do módulo antes dos apelidos, então `(use m::twice)` depois de `(defun twice ...)` **não faz nada**.
   Se é isso que você quer, escreva `shadowing-import` (mesmo assim ele não consegue vencer uma definição, já que
@@ -1090,6 +1097,8 @@ e uma declaração explícita nunca colidem.
   `circular module dependency: a -> b -> a`.
 - **Execução**: `typl <file.typl>` executa um arquivo (sem argumentos, o REPL). O `use` no REPL resolve os
   arquivos pelas mesmas regras.
+  As definições escritas no REPL vão para o módulo `user` (`(module m ...)` escrito no REPL é
+  `user::m`).
 - **Capacidade da arena de cons**: `typl --heap-cells N` define a **capacidade inicial** da arena de células cons
   (65536 por padrão; a forma `--heap-cells=N` também funciona, tanto para executar arquivos quanto no REPL). A
   arena **cresce acrescentando mais** quando fica curta. O limite de crescimento é 256 vezes a capacidade inicial,

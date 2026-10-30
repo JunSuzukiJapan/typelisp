@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Modules en bestandsindeling
 
 Deze handleiding legt uit hoe je een programma samenstelt dat uit meerdere bestanden bestaat. De
@@ -117,6 +117,33 @@ De lijst met definities die `pub` kunnen krijgen staat in
   schrijf je `(use geometry::point::new)` of `(use geometry::point::*)`.
 - Een module in een map schrijf je als `(use geo::shapes)`, en daarna verwijs je ernaar met het
   laatste deel (`shapes::...`).
+
+### Een naam van de standaardbibliotheek gebruiken
+
+Een functie of iets anders definiëren onder een naam die de standaardbibliotheek aanbiedt, zoals
+`length` of `first`, is een fout.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+Als je besluit dat de module je eigen definitie moet gebruiken, schrijf je `shadow` vóór de
+definitie.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; first van deze module => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first van de standaardbibliotheek => (some 1)
+```
+
+Na `shadow` verwijst `first` in die module naar je eigen definitie. Om de `first` van de
+standaardbibliotheek te gebruiken, schrijf je het pad, `std::seq::first`. `shadow` werkt alleen in
+de module waar het staat; in andere modules is `first` nog steeds die van de standaardbibliotheek.
+De namen van speciale vormen zoals `if` en `let` kunnen niet ge-`shadow`d worden en ook niet voor
+definities gebruikt worden.
 
 ### Trait-methoden aanroepen
 

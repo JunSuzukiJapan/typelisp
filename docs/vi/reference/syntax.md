@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -983,6 +983,7 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 (pub use path...)          ; cho phép truy cập cái được đưa vào cả qua đường dẫn của module này
 (import path...)           ; giống use (một cách viết tương thích CL)
 (shadowing-import path...) ; một use cố ý lấy một tên trần đã được dùng
+(shadow name...)           ; biến một tên mà thư viện chuẩn cung cấp thành tên riêng của module này
 ```
 
 - `module` tạo một không gian tên. **Kiểu không phải là không gian tên** (như trong Rust, một kiểu chỉ có
@@ -1038,6 +1039,12 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
   đầu tệp.
 - **`use` có thể nhận nhiều đường dẫn** (`(use a::f b::g)`). `import` là một cách viết tương thích CL với cùng
   hành vi.
+- **Để định nghĩa một tên mà thư viện chuẩn cung cấp, trước hết hãy viết `(shadow name...)`.** Nếu
+  không, định nghĩa `(defun length ...)` là lỗi. Kể từ chỗ `shadow` được đọc, trong module đó (tệp,
+  hoặc thân của `module` bao quanh) `name` là tên riêng của module, và định nghĩa của thư viện chuẩn
+  không còn thấy được qua tên trần. Vẫn có thể dùng nó bằng cách viết đường dẫn, như
+  `std::seq::length`. Các module khác không bị ảnh hưởng. Từ dành riêng (tên của các dạng đặc biệt)
+  không thể `shadow`. Nó hoạt động giống `shadow` của CL.
 - **Một `use` mà tên trần đã bị chiếm sẽ được báo.** Việc phân giải một tên trần nhìn vào các định nghĩa của
   chính module trước các bí danh, nên `(use m::twice)` sau `(defun twice ...)` **không làm gì cả**. Nếu bạn chủ
   ý, hãy viết `shadowing-import` (nó vẫn không thể thắng một định nghĩa, vì không có cách nào gỡ một định
@@ -1065,6 +1072,8 @@ không bao giờ va chạm.
 - **Tham chiếu vòng là lỗi**: chuỗi được báo dưới dạng `circular module dependency: a -> b -> a`.
 - **Chạy**: `typl <file.typl>` chạy một tệp (không có đối số, là REPL). `use` trong REPL phân giải tệp theo
   cùng quy tắc.
+  Các định nghĩa viết trong REPL đi vào module `user` (`(module m ...)` viết trong REPL là
+  `user::m`).
 - **Dung lượng arena cons**: `typl --heap-cells N` đặt **dung lượng ban đầu** của arena ô cons (mặc định 65536;
   dạng `--heap-cells=N` cũng dùng được, cho cả chạy tệp lẫn REPL). Arena **tăng trưởng bằng cách thêm** khi thiếu.
   Giới hạn tăng trưởng là 256 lần dung lượng ban đầu, và một lần cấp phát vượt quá nó cho `heap exhausted`: dung

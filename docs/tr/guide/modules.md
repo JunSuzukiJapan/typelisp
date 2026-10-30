@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Modüller ve Dosya Düzeni
 
 Bu kılavuz, birkaç dosyadan oluşan bir programın nasıl bir araya getirileceğini anlatır. Ayrıntılı
@@ -115,6 +115,31 @@ typl main.typl        # => 25
   `(use geometry::point::new)` ya da `(use geometry::point::*)` yazın.
 - Bir dizinin içindeki modül `(use geo::shapes)` diye yazılır ve bundan sonra son bölümüyle
   (`shapes::...`) anılır.
+
+### Standart kütüphanenin sunduğu bir adı kullanmak
+
+`length` ya da `first` gibi standart kütüphanenin sunduğu bir adla bir fonksiyon veya başka bir şey
+tanımlamak hatadır.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+Modülün kendi tanımınızı kullanmasına karar verdiğinizde, tanımdan önce `shadow` yazın.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; bu modülün first'ü => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; standart kütüphanenin first'ü => (some 1)
+```
+
+`shadow`'dan sonra o modülde `first` yazmak kendi tanımınızı gösterir. Standart kütüphanenin
+`first`'ünü kullanmak için yolunu yazın: `std::seq::first`. `shadow` yalnızca yazıldığı modülde
+etkilidir; diğer modüllerde `first` hâlâ standart kütüphaneninkidir. `if` ve `let` gibi özel
+formların adları `shadow` edilemez ve tanımlarda da kullanılamaz.
 
 ### Trait metotlarını çağırma
 

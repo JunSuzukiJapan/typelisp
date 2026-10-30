@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Modul dan Tata Letak Berkas
 
 Panduan ini menjelaskan cara menyusun program yang terdiri dari beberapa berkas. Aturan terperinci
@@ -116,6 +116,31 @@ Daftar definisi yang dapat diberi `pub` ada di
   `(use geometry::point::new)` atau `(use geometry::point::*)`.
 - Modul di dalam direktori ditulis `(use geo::shapes)`, dan setelah itu dirujuk dengan bagian
   terakhirnya (`shapes::...`).
+
+### Memakai nama yang ditawarkan pustaka standar
+
+Mendefinisikan fungsi atau hal lain dengan nama yang ditawarkan pustaka standar, seperti `length`
+atau `first`, adalah galat.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+Bila Anda memutuskan modul itu memakai definisi Anda sendiri, tulis `shadow` sebelum definisinya.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; first milik modul ini => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first milik pustaka standar => (some 1)
+```
+
+Setelah `shadow`, menulis `first` di modul itu merujuk ke definisi Anda sendiri. Untuk memakai
+`first` milik pustaka standar, tulis jalurnya, `std::seq::first`. `shadow` hanya berlaku di modul
+tempat ia ditulis; di modul lain `first` tetap milik pustaka standar. Nama bentuk khusus seperti
+`if` dan `let` tidak dapat di-`shadow` dan juga tidak dapat dipakai untuk definisi.
 
 ### Memanggil metode trait
 

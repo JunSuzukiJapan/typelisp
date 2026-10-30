@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # मॉड्यूल और फ़ाइल संरचना
 
 यह गाइड बताती है कि कई फ़ाइलों से बना प्रोग्राम कैसे जोड़ा जाता है। विस्तृत नियम [सिंटैक्स संदर्भ](../reference/syntax.md#310-module--use--नेमस्पेस) के खंड 3.10 से 3.13 में हैं।
@@ -103,6 +103,32 @@ typl main.typl        # => 25
 - `(use geometry::point)` केवल टाइप का नाम लाता है। `point::new` को `new` लिखना हो, तो
   `(use geometry::point::new)` या `(use geometry::point::*)` लिखें।
 - किसी डायरेक्टरी के भीतर के मॉड्यूल को `(use geo::shapes)` लिखा जाता है, और उसके बाद उसे उसके अंतिम भाग से संदर्भित किया जाता है (`shapes::...`)।
+
+### मानक लाइब्रेरी द्वारा दिया गया नाम इस्तेमाल करना
+
+`length` या `first` जैसे मानक लाइब्रेरी द्वारा दिए गए नाम से फ़ंक्शन या कुछ और परिभाषित करना त्रुटि
+है।
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+जब आप तय करें कि मॉड्यूल आपकी अपनी परिभाषा इस्तेमाल करे, तो परिभाषा से पहले `shadow` लिखें।
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; इस मॉड्यूल का first => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; मानक लाइब्रेरी का first => (some 1)
+```
+
+`shadow` के बाद उस मॉड्यूल में `first` लिखना आपकी अपनी परिभाषा को इंगित करता है। मानक लाइब्रेरी का
+`first` इस्तेमाल करने के लिए उसका पथ लिखें, `std::seq::first`। `shadow` केवल उसी मॉड्यूल में असर
+करता है जहाँ वह लिखा गया है; दूसरे मॉड्यूलों में `first` अब भी मानक लाइब्रेरी का ही है। `if` और
+`let` जैसे विशेष रूपों के नामों को `shadow` नहीं किया जा सकता, और उन्हें परिभाषाओं के लिए भी
+इस्तेमाल नहीं किया जा सकता।
 
 ### Trait मेथड कॉल करना
 

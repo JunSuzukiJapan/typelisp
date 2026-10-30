@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Модулі та розкладання по файлах
 
 Цей посібник пояснює, як скласти програму з кількох файлів. Докладні правила наведено в розділах 3.10–3.13
@@ -114,6 +114,32 @@ typl main.typl        # => 25
   `(use geometry::point::new)` або `(use geometry::point::*)`.
 - Модуль у каталозі записується як `(use geo::shapes)`, а далі до нього звертаються за останньою
   частиною (`shapes::...`).
+
+### Ім'я, яке пропонує стандартна бібліотека
+
+Означити функцію чи щось інше під ім'ям, яке пропонує стандартна бібліотека, наприклад `length` або
+`first`, — помилка.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+Якщо ви вирішили, що модуль має використовувати ваше власне означення, напишіть `shadow` перед
+означенням.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; first цього модуля => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first стандартної бібліотеки => (some 1)
+```
+
+Після `shadow` ім'я `first` у цьому модулі позначає ваше власне означення. Щоб скористатися `first`
+стандартної бібліотеки, запишіть його шлях, `std::seq::first`. `shadow` діє лише в модулі, де його
+написано; в інших модулях `first` лишається функцією стандартної бібліотеки. Імена спеціальних форм,
+як-от `if` і `let`, не можна затінити `shadow` і не можна використати для означень.
 
 ### Виклик методів трейтів
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1011,6 +1011,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 (pub use path...)          ; içeri alınanı bu modülün yoluyla da ulaşılır kılar
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
+(shadow name...)           ; make a name the standard library offers this module's own
 ```
 
 - `module` bir ad alanı oluşturur. **Türler ad alanı değildir** (Rust'taki gibi bir türün yalnızca statik
@@ -1064,6 +1065,12 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
   `unresolved path` verir. `use`'u dosyanın başına koyun.
 - **`use` birkaç yol alabilir** (`(use a::f b::g)`). `import`, aynı davranışa sahip CL uyumlu bir
   yazımdır.
+- **Standart kütüphanenin sunduğu bir adı tanımlamak için önce `(shadow name...)` yazılır.** Bu
+  olmadan `(defun length ...)` tanımı hatadır. `shadow` okunduğu yerden itibaren o modülün içinde
+  (dosya ya da çevreleyen `module` gövdesi) `name` modülün kendi adıdır ve standart kütüphanenin
+  tanımı çıplak adla artık görünmez. Yolu yazılarak, örneğin `std::seq::length`, hâlâ
+  kullanılabilir. Diğer modüller etkilenmez. Ayrılmış sözcükler (özel formların adları) `shadow`
+  edilemez. CL'deki `shadow` gibi çalışır.
 - **Çıplak adı zaten alınmış bir `use` bildirilir.** Bir çıplak adı çözümlemek, takma adlardan önce
   modülün kendi tanımlarına bakar; bu yüzden `(defun twice ...)`'dan sonraki `(use m::twice)` **hiçbir
   şey yapmaz**. Kastettiyseniz `shadowing-import` yazın (yine de bir tanımı yenemez, çünkü birini
@@ -1091,6 +1098,7 @@ bu yüzden türetilen yol ile açık bir bildirim asla çakışmaz.
 - **Döngüsel başvurular hatadır**: zincir `circular module dependency: a -> b -> a` biçiminde bildirilir.
 - **Çalıştırma**: `typl <file.typl>` bir dosyayı çalıştırır (bağımsız değişkensiz REPL). REPL'deki `use`
   dosyaları aynı kurallarla çözümler.
+  REPL'de yazılan tanımlar `user` modülüne girer (REPL'de yazılan `(module m ...)` `user::m` olur).
 - **Cons arena kapasitesi**: `typl --heap-cells N`, cons hücresi arenasının **başlangıç kapasitesini**
   ayarlar (varsayılan 65536; `--heap-cells=N` biçimi de hem dosya çalıştırma hem REPL için çalışır). Arena
   yetmediğinde **daha fazla ekleyerek büyür**. Büyümenin sınırı başlangıç kapasitesinin 256 katıdır ve onu

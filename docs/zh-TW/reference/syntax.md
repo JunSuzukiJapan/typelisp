@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -781,6 +781,7 @@ vtable 進行動態分派：
 (pub use path...)          ; 讓引入的定義也能透過經過本模組的路徑找到
 (import path...)           ; 與 use 相同（CL 相容的寫法）
 (shadowing-import path...) ; 明知裸名稱已被占用仍要取用的 use
+(shadow name...)           ; 把標準函式庫公開的名稱變成本模組自己的名稱
 ```
 
 - `module` 建立命名空間。**型別不是命名空間**（與 Rust 一樣，型別只擁有靜態方法與方法）。
@@ -812,6 +813,11 @@ vtable 進行動態分派：
 - **`use` 對其後的形式生效。** 檔案逐個形式讀取，相依關係也在檢查該形式之前解析，所以在 `(use m)` **上面**寫 `m::f` 會得到 `unresolved path`。
   請把 `use` 放在檔案開頭。
 - **`use` 可以接受多個路徑**（`(use a::f b::g)`）。`import` 是行為相同的 CL 相容寫法。
+- **要定義與標準函式庫公開的名稱同名的東西，須先寫 `(shadow name...)`。** 不寫就定義
+  `(defun length ...)` 會出錯。從讀到 `shadow` 的地方起，在該模組（檔案，或外層 `module` 的主體）中，
+  `name` 就是該模組自己的名稱，標準函式庫的定義不再能用裸名稱看到。標準函式庫的定義仍可用路徑寫出來
+  使用，如 `std::seq::length`。其他模組不受影響。保留字（特殊形式的名稱）不能 `shadow`。作用與 CL 的
+  `shadow` 相同。
 - **裸名稱已被占用的 `use` 會被回報。** 裸名稱的解析先看該模組本身的定義，再看別名，所以 `(defun twice ...)` 之後的 `(use m::twice)`
   **什麼也不做**。明知如此仍要這樣做時寫 `shadowing-import`（但它贏不了定義——沒有撤銷定義的手段。它能贏的只有先前的別名）。
 - **`in-module` 是 `(module path body...)` 的平鋪形式。** 寫 `(in-module geometry)`，從那裡到該單元（檔案，或外層 `module` 的本體）結尾都在
@@ -830,6 +836,7 @@ vtable 進行動態分派：
   （[3.13 pub](#313-pub--公開)）。
 - **循環參照是錯誤**：以 `circular module dependency: a -> b -> a` 的形式回報鏈結。
 - **執行**：以 `typl <file.typl>` 執行檔案（不帶引數時為 REPL）。REPL 中的 `use` 也依同樣的約定解析檔案。
+  在 REPL 中寫的定義進入模組 `user`（在 REPL 中寫 `(module m ...)` 即為 `user::m`）。
 - **cons 區域容量**：以 `typl --heap-cells N` 指定 cons 單元區域的**初始容量**（預設 65536。也可以寫 `--heap-cells=N`，執行檔案與 REPL 都適用）。
   區域不足時會**追加增長**。增長的上限是初始容量的 256 倍，超過它的配置會成為 `heap exhausted`——也就是說，初始容量的意思是「一開始先配置這麼多」，
   上限的意思是「超過這裡就視為洩漏」。

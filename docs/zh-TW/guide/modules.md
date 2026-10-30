@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # 模組與檔案結構
 
 本指南說明如何組織由多個檔案構成的程式。詳細的語法規則見[語法參考](../reference/syntax.md#310-module--use--命名空間)的 3.10 至 3.13 節。
@@ -102,6 +102,29 @@ typl main.typl        # => 25
 - 對已被占用的裸名稱再 `use` 同名的東西會產生警告。明知如此仍要引入時，使用 `shadowing-import`。如果是型別的建構函式或靜態方法，則不是警告而是錯誤。
 - `(use geometry::point)` 引入的只有型別的名稱。想把 `point::new` 寫成 `new` 時，寫 `(use geometry::point::new)` 或 `(use geometry::point::*)`。
 - 目錄中的模組寫成 `(use geo::shapes)`，引入後以最後一部分（`shapes::...`）參照。
+
+### 使用與標準函式庫相同的名稱
+
+用 `length`、`first` 這類標準函式庫公開的名稱定義函式等會出錯。
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+決定在該模組中使用自己的定義時，在定義之前寫 `shadow`。
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; 本模組的 first => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 標準函式庫的 first => (some 1)
+```
+
+`shadow` 之後，在該模組中寫 `first` 指的是自己的定義。要使用標準函式庫的 `first`，就用路徑寫成
+`std::seq::first`。`shadow` 只在寫它的模組中生效，其他模組中的 `first` 仍是標準函式庫的。`if`、`let`
+這類特殊形式的名稱不能 `shadow`，也不能用於定義。
 
 ### trait 方法的呼叫方式
 

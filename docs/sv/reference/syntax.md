@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1010,6 +1010,7 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 (pub use path...)          ; gör det som tas in nåbart även via den här modulens väg
 (import path...)           ; samma som use (en CL-kompatibel stavning)
 (shadowing-import path...) ; ett use som medvetet tar ett bart namn som redan används
+(shadow name...)           ; gör ett namn som standardbiblioteket erbjuder till modulens eget namn
 ```
 
 - `module` skapar en namnrymd. **Typer är inte namnrymder** (som i Rust har en typ bara statiska metoder och
@@ -1066,6 +1067,12 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
   filen.
 - **`use` kan ta flera sökvägar** (`(use a::f b::g)`). `import` är en CL-kompatibel stavning med samma
   beteende.
+- **För att definiera ett namn som standardbiblioteket erbjuder skriver man först `(shadow
+  name...)`.** Utan det är `(defun length ...)` ett fel. Från där `shadow` läses är `name` inom den
+  modulen (filen, eller kroppen av den omgivande `module`) modulens eget namn, och
+  standardbibliotekets definition syns inte längre under det bara namnet. Den kan fortfarande
+  användas genom att skriva dess sökväg, som `std::seq::length`. Andra moduler påverkas inte.
+  Reserverade ord (namnen på specialformer) kan inte `shadow`as. Det fungerar som CL:s `shadow`.
 - **Ett `use` vars bara namn redan är upptaget rapporteras.** Upplösning av ett bart namn tittar på modulens
   egna definitioner före alias, så `(use m::twice)` efter `(defun twice ...)` **gör ingenting**. Om du
   menar det, skriv `shadowing-import` (det kan fortfarande inte slå en definition, eftersom det inte finns
@@ -1095,6 +1102,8 @@ aldrig.
   `circular module dependency: a -> b -> a`.
 - **Körning**: `typl <file.typl>` kör en fil (utan argument, REPL). `use` i REPL löser upp filer enligt
   samma regler.
+  Definitioner som skrivs i REPL:en hamnar i modulen `user` (`(module m ...)` skrivet i REPL:en är
+  `user::m`).
 - **Kapacitet för cons-arenan**: `typl --heap-cells N` sätter **startkapaciteten** för cons-cellsarenan
   (standard 65536; formen `--heap-cells=N` fungerar också, både för att köra filer och för REPL). Arenan
   **växer genom att lägga till mer** när den tar slut. Tillväxtgränsen är 256 gånger startkapaciteten,

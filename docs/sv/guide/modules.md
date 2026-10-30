@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Moduler och filuppdelning
 
 Den här guiden förklarar hur man sätter ihop ett program som består av flera filer. De detaljerade
@@ -113,6 +113,31 @@ Listan över definitioner som kan ta `pub` finns i
   `(use geometry::point::new)` eller `(use geometry::point::*)`.
 - En modul i en katalog skrivs `(use geo::shapes)`, och därefter refereras den med sin sista del
   (`shapes::...`).
+
+### Använda ett namn som standardbiblioteket erbjuder
+
+Att definiera en funktion eller något annat under ett namn som standardbiblioteket erbjuder, som
+`length` eller `first`, är ett fel.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+När du bestämmer att modulen ska använda din egen definition skriver du `shadow` före definitionen.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; den här modulens first => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; standardbibliotekets first => (some 1)
+```
+
+Efter `shadow` syftar `first` i den modulen på din egen definition. För att använda
+standardbibliotekets `first` skriver du dess sökväg, `std::seq::first`. `shadow` verkar bara i
+modulen där det står; i andra moduler är `first` fortfarande standardbibliotekets. Namnen på
+specialformer som `if` och `let` kan inte `shadow`as och kan inte heller användas till definitioner.
 
 ### Anropa trait-metoder
 

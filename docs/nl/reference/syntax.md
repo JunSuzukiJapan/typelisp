@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1051,6 +1051,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
 (pub use path...)          ; maakt wat binnengehaald is ook bereikbaar via het pad van dit module
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
+(shadow name...)           ; make a name the standard library offers this module's own
 ```
 
 - `module` maakt een naamruimte. **Types zijn geen naamruimten** (zoals in Rust heeft een type alleen statische
@@ -1110,6 +1111,13 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   `unresolved path`. Zet `use` bovenaan het bestand.
 - **`use` kan meerdere paden nemen** (`(use a::f b::g)`). `import` is een met CL compatibele schrijfwijze
   met hetzelfde gedrag.
+- **Om een naam te definiëren die de standaardbibliotheek aanbiedt, schrijf je eerst `(shadow
+  name...)`.** Zonder dat is `(defun length ...)` een fout. Vanaf de plek waar `shadow` gelezen
+  wordt, is `name` binnen die module (het bestand, of de body van de omringende `module`) de eigen
+  naam van de module, en is de definitie van de standaardbibliotheek niet meer zichtbaar onder de
+  kale naam. Via haar pad, zoals `std::seq::length`, blijft ze bruikbaar. Andere modules worden niet
+  beïnvloed. Gereserveerde woorden (de namen van speciale vormen) kunnen niet ge-`shadow`d worden.
+  Het werkt zoals `shadow` in CL.
 - **Een `use` waarvan de kale naam al bezet is, wordt gemeld.** Het oplossen van een kale naam kijkt
   vóór aliassen naar de eigen definities van de module, dus `(use m::twice)` na `(defun twice ...)`
   **doet niets**. Bedoel je het toch, schrijf dan `shadowing-import` (het kan een definitie nog steeds niet
@@ -1142,6 +1150,8 @@ nooit.
   `circular module dependency: a -> b -> a`.
 - **Uitvoeren**: `typl <file.typl>` voert een bestand uit (zonder argumenten de REPL). `use` in de REPL
   lost bestanden met dezelfde regels op.
+  Definities die in de REPL geschreven worden, komen in de module `user` (`(module m ...)` in de
+  REPL is `user::m`).
 - **Capaciteit van de cons-arena**: `typl --heap-cells N` stelt de **begincapaciteit** van de arena met
   cons-cellen in (standaard 65536; de vorm `--heap-cells=N` werkt ook, zowel bij het uitvoeren van
   bestanden als in de REPL). De arena **groeit door er meer toe te voegen** wanneer ze te klein wordt. De

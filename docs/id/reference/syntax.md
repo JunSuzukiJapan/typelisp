@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ a30c13a124fe38347425e2ed1a7d4611ecdf4328 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1052,6 +1052,7 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 (pub use path...)          ; membuat yang dibawa masuk juga tercapai lewat path modul ini
 (import path...)           ; the same as use (a CL-compatible spelling)
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
+(shadow name...)           ; make a name the standard library offers this module's own
 ```
 
 - `module` membuat ruang nama. **Tipe bukan ruang nama** (seperti di Rust, tipe hanya memiliki metode statis
@@ -1106,6 +1107,13 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
   `(use m)` menghasilkan `unresolved path`. Taruh `use` di awal berkas.
 - **`use` dapat menerima beberapa path** (`(use a::f b::g)`). `import` adalah ejaan yang kompatibel
   dengan CL dengan perilaku yang sama.
+- **Untuk mendefinisikan nama yang ditawarkan pustaka standar, tulis `(shadow name...)` terlebih
+  dahulu.** Tanpa itu, mendefinisikan `(defun length ...)` adalah galat. Sejak tempat `shadow`
+  dibaca, di dalam modul itu (berkas, atau badan `module` yang melingkupinya) `name` adalah nama
+  milik modul itu sendiri, dan definisi pustaka standar tidak lagi terlihat lewat nama polos.
+  Definisi itu masih bisa dipakai dengan menuliskan jalurnya, seperti `std::seq::length`. Modul lain
+  tidak terpengaruh. Kata cadangan (nama bentuk khusus) tidak dapat di-`shadow`. Cara kerjanya sama
+  dengan `shadow` di CL.
 - **`use` yang nama polosnya sudah terpakai dilaporkan.** Menyelesaikan nama polos melihat definisi
   milik modul itu sendiri sebelum alias, sehingga `(use m::twice)` setelah `(defun twice ...)`
   **tidak melakukan apa-apa**. Jika Anda memang bermaksud, tulis `shadowing-import` (ia tetap tidak
@@ -1137,6 +1145,8 @@ path turunan dan deklarasi eksplisit tidak pernah bertabrakan.
   `circular module dependency: a -> b -> a`.
 - **Menjalankan**: `typl <file.typl>` menjalankan sebuah berkas (tanpa argumen, REPL). `use` di REPL
   menyelesaikan berkas dengan aturan yang sama.
+  Definisi yang ditulis di REPL masuk ke modul `user` (`(module m ...)` yang ditulis di REPL adalah
+  `user::m`).
 - **Kapasitas arena cons**: `typl --heap-cells N` menyetel **kapasitas awal** arena sel cons (bawaan
   65536; bentuk `--heap-cells=N` juga berfungsi, baik untuk menjalankan berkas maupun REPL). Arena
   **membesar dengan menambah** ketika kekurangan. Batas pertumbuhannya adalah 256 kali kapasitas awal,

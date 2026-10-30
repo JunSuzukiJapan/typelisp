@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
 # Module và cách bố trí tệp
 
 Tài liệu này giải thích cách ghép một chương trình gồm nhiều tệp. Các quy tắc chi tiết nằm ở các mục
@@ -112,6 +112,31 @@ Danh sách các định nghĩa có thể nhận `pub` nằm ở
   `(use geometry::point::new)` hoặc `(use geometry::point::*)`.
 - Module nằm trong một thư mục được viết là `(use geo::shapes)`, và sau đó được gọi bằng phần cuối
   của nó (`shapes::...`).
+
+### Dùng một tên mà thư viện chuẩn cung cấp
+
+Định nghĩa một hàm hay thứ khác bằng một tên mà thư viện chuẩn cung cấp, như `length` hay `first`,
+là lỗi.
+
+```
+type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
+```
+
+Khi bạn quyết định module sẽ dùng định nghĩa của riêng mình, hãy viết `shadow` trước định nghĩa.
+
+```lisp
+(shadow first)
+
+(defun first ((a int) (b int)) int a)
+
+(println "~a" (first 10 20))                                          ; first của module này => 10
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first của thư viện chuẩn => (some 1)
+```
+
+Sau `shadow`, viết `first` trong module đó sẽ chỉ định nghĩa của riêng bạn. Để dùng `first` của thư
+viện chuẩn, hãy viết đường dẫn của nó, `std::seq::first`. `shadow` chỉ có hiệu lực trong module nơi
+nó được viết; ở các module khác `first` vẫn là của thư viện chuẩn. Tên của các dạng đặc biệt như
+`if` và `let` không thể `shadow` và cũng không thể dùng cho định nghĩa.
 
 ### Gọi phương thức của trait
 
