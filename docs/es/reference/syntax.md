@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -54,9 +54,8 @@ incorporados, consulta [Funciones incorporadas](functions/README.md); para la li
 - **Palabras clave**: símbolos que empiezan por dos puntos, como `:name` (como en CL). Se escriban en el módulo
   que se escriban, son el único símbolo de ese nombre en el espacio de nombres de las palabras clave, `keyword`
   (el paquete `KEYWORD` de CL). Se evalúan a sí mismos: no buscan ningún enlace y su valor son ellos mismos, con
-  tipo estático `symbol`. Las palabras clave con el mismo nombre son siempre el mismo objeto (`(eq :foo :FOO)`
-  es verdadero; como los demás símbolos, pasan a minúsculas). Los dos puntos no forman parte del nombre:
-  `(symbol->string :foo)` es `"foo"`. `~s` imprime `:foo` y `~a` imprime `foo`. Una palabra clave es una
+  tipo estático `symbol`. Las palabras clave con el mismo nombre son siempre el mismo objeto (como los demás símbolos, distinguen mayúsculas y minúsculas, así que `(eq :foo :FOO)` es falso). Los dos puntos no forman parte del nombre:
+  `(std::symbol::symbol->string :foo)` es `"foo"`. `~s` imprime `:foo` y `~a` imprime `foo`. Una palabra clave es una
   constante cuyo valor es ella misma, así que no se puede ligar ni asignar como variable, ni ser el nombre de
   una definición (un error de tipos). Para crearla a partir de una cadena se escribe `(intern "foo" "keyword")`.
   Se comprueba con `keywordp` (si pertenece al espacio de nombres de las palabras clave). Unos dos puntos solos
@@ -1970,8 +1969,7 @@ Los `read` / `read-from-string` incorporados también consultan la readtable (co
 
 **Lo que no hay**: `*readtable*` y `copy-readtable`, ni `readtable-case`. Los dos primeros porque una readtable
 **no es un valor**: un valor tendría que ser "algo que se puede entregar a un lector", pero el lector que lee el
-código fuente está fuera del programa, sin ningún sitio al que entregársela. `readtable-case` porque el
-capítulo 1 decide que el lector de este lenguaje siempre pasa a minúsculas (el `:downcase` de CL).
+código fuente está fuera del programa, sin ningún sitio al que entregársela. `readtable-case` porque el capítulo 1 decide que el lector de este lenguaje lee los nombres tal como se escriben (el `:preserve` de CL).
 
 
 ## 12. Concurrencia (tareas)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Dành cho lập trình viên Common Lisp
 
 typelisp kế thừa cú pháp của Common Lisp (CL) và nhiều tên hàm của nó, nhưng là một ngôn ngữ có kiểu
@@ -221,12 +221,15 @@ Không có package. Không gian tên là module, và mỗi tệp tự nó là m�
 viết `module::name`, và đưa tên vào bằng `use` ([Module và cách bố trí tệp](modules.md)).
 
 Keyword `:foo` có tồn tại và, như trong CL, tự đánh giá thành chính chúng và thuộc không gian tên keyword
-`keyword`. `(symbol->string :foo)` trả về `"foo"`, còn `(intern "foo" "keyword")` trả về `:foo`. Đối số
+`keyword`. `(std::symbol::symbol->string :foo)` trả về `"foo"`, còn `(intern "foo" "keyword")` trả về `:foo`. Đối số
 thứ hai của `intern` là đường dẫn module thay cho tên package.
 
 ## 10. Khác biệt về cách đọc và cú pháp
 
-- Chữ hoa và chữ thường không được phân biệt (symbol trở thành chữ thường khi đọc). Điều này giống CL.
+- Chữ hoa và chữ thường được phân biệt. `foo` và `Foo` là hai symbol khác nhau, và được in ra đúng
+  như khi đọc. Reader của CL mặc định chuyển thành chữ hoa, còn typelisp đọc tên đúng như được viết,
+  giống CL với `readtable-case` là `:preserve`. Tên kiểu bắt đầu bằng chữ hoa (`Option`, `Vector`,
+  v.v.).
 - Không có `#'` (mục 3). Literal số phức `#c(...)` không thể đọc; hãy tạo số phức bằng
   `(complex 1.0 2.0)`.
 - Các mệnh đề của `loop` mở rộng được viết bằng keyword: `(loop :for i :from 1 :to 3 :collect i)`.

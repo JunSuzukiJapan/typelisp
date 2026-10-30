@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Voor Common Lisp-programmeurs
 
 typelisp erft de syntaxis van Common Lisp (CL) en veel van zijn functienamen, maar is een statisch
@@ -231,13 +231,15 @@ van `pkg:symbol` `module::name`, en haal namen binnen met `use`
 ([Modules en bestandsindeling](modules.md)).
 
 Keywords `:foo` bestaan; zoals in CL evalueren ze naar zichzelf en behoren ze tot de keyword-naamruimte
-`keyword`. `(symbol->string :foo)` geeft `"foo"` terug en `(intern "foo" "keyword")` geeft `:foo` terug.
+`keyword`. `(std::symbol::symbol->string :foo)` geeft `"foo"` terug en `(intern "foo" "keyword")` geeft `:foo` terug.
 Het tweede argument van `intern` is een modulepad in plaats van een packagenaam.
 
 ## 10. Verschillen in lezen en syntaxis
 
-- Hoofdletters en kleine letters worden niet onderscheiden (symbolen worden bij het lezen kleine
-  letters). Dit is hetzelfde als in CL.
+- Hoofdletters en kleine letters worden onderscheiden. `foo` en `Foo` zijn verschillende symbolen en
+  worden afgedrukt zoals ze gelezen zijn. De reader van CL zet standaard om naar hoofdletters, maar
+  typelisp leest namen zoals ze geschreven zijn, zoals CL met `readtable-case` op `:preserve`.
+  Typenamen beginnen met een hoofdletter (`Option`, `Vector` enzovoort).
 - Er is geen `#'` (paragraaf 3). Letterlijke complexe getallen `#c(...)` kunnen niet worden gelezen;
   maak complexe getallen met `(complex 1.0 2.0)`.
 - De clausules van de uitgebreide `loop` worden met keywords geschreven:

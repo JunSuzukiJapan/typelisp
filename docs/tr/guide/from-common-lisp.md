@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Common Lisp Programcıları İçin
 
 typelisp, Common Lisp'in (CL) sözdizimini ve fonksiyon adlarının çoğunu devralır, ancak statik tür
@@ -224,12 +224,15 @@ Paketler yoktur. Ad alanları modüllerdir ve bir dosya kendi başına bir modü
 `module::name` yazın ve adları `use` ile getirin ([Modüller ve Dosya Düzeni](modules.md)).
 
 `:foo` anahtar sözcükleri vardır ve CL'deki gibi kendi kendilerine değerlendirilir ve anahtar sözcük ad
-alanı `keyword`'e aittir. `(symbol->string :foo)`, `"foo"`; `(intern "foo" "keyword")` ise `:foo`
+alanı `keyword`'e aittir. `(std::symbol::symbol->string :foo)`, `"foo"`; `(intern "foo" "keyword")` ise `:foo`
 döndürür. `intern`'in ikinci argümanı, paket adı yerine bir modül yoludur.
 
 ## 10. Okuma ve sözdizimindeki farklar
 
-- Büyük ve küçük harf ayırt edilmez (semboller okunurken küçük harfe dönüşür). Bu, CL ile aynıdır.
+- Büyük ve küçük harf ayrılır. `foo` ile `Foo` farklı sembollerdir ve okundukları gibi
+  yazdırılırlar. CL'nin okuyucusu varsayılan olarak büyük harfe çevirir; typelisp ise adları
+  yazıldığı gibi okur, `readtable-case` değeri `:preserve` olan CL gibi. Tür adları büyük harfle
+  başlar (`Option`, `Vector` vb.).
 - `#'` yoktur (bölüm 3). `#c(...)` karmaşık sayı sabitleri okunamaz; karmaşık sayıları
   `(complex 1.0 2.0)` ile yapın.
 - Genişletilmiş `loop`'un yan tümceleri anahtar sözcüklerle yazılır:

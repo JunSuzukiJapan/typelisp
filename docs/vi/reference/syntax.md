@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -49,8 +49,7 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
 - **Keyword**: các symbol bắt đầu bằng dấu hai chấm, như `:name` (như trong CL). Dù được viết trong module nào,
   chúng là symbol duy nhất mang tên đó trong không gian tên keyword `keyword` (package `KEYWORD` của CL). Chúng
   tự đánh giá: chúng không tra ràng buộc nào và giá trị của chúng là chính chúng, với kiểu tĩnh `symbol`. Các
-  keyword cùng tên luôn là cùng một đối tượng (`(eq :foo :FOO)` là true; như các symbol khác chúng được chuyển
-  thành chữ thường). Dấu hai chấm không phải là một phần của tên: `(symbol->string :foo)` là `"foo"`. `~s` in ra
+  keyword cùng tên luôn là cùng một đối tượng (giống các symbol khác chúng phân biệt chữ hoa và chữ thường, nên `(eq :foo :FOO)` là false). Dấu hai chấm không phải là một phần của tên: `(std::symbol::symbol->string :foo)` là `"foo"`. `~s` in ra
   `:foo` và `~a` in ra `foo`. Keyword là một hằng có giá trị là chính nó, nên không thể ràng buộc hay gán như
   một biến, cũng không thể làm tên của một định nghĩa (lỗi kiểu). Để tạo một keyword từ chuỗi, viết
   `(intern "foo" "keyword")`. Kiểm tra bằng `keywordp` (có thuộc không gian tên keyword không). Một dấu `:` đơn
@@ -1884,8 +1883,7 @@ tại chỗ khi được truyền cho `set-dispatch-macro-character`: **không c
 
 **Những gì không có**: `*readtable*` và `copy-readtable`, và `readtable-case`. Hai cái đầu vì một readtable
 **không phải một giá trị**: một giá trị phải là "thứ có thể đưa cho một reader", nhưng reader đọc mã nguồn nằm
-ngoài chương trình, không có nơi nào để đưa. `readtable-case` vì chương 1 quyết định rằng reader của ngôn ngữ này
-luôn chuyển thành chữ thường (`:downcase` của CL).
+ngoài chương trình, không có nơi nào để đưa. `readtable-case` vì chương 1 quyết định rằng reader của ngôn ngữ này đọc tên đúng như được viết (`:preserve` của CL).
 
 
 ## 12. Lập trình đồng thời (task)

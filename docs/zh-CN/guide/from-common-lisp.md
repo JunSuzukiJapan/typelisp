@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # 写给 Common Lisp 用户
 
 typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名，但它是静态类型语言。因此，CL 的写法并不总能直接通过。
@@ -198,12 +198,14 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 （[模块与文件结构](modules.md)）。
 
 关键字 `:foo` 是存在的，与 CL 一样求值为自身，并属于关键字专用命名空间 `keyword`。
-`(symbol->string :foo)` 返回 `"foo"`，`(intern "foo" "keyword")` 返回 `:foo`。
+`(std::symbol::symbol->string :foo)` 返回 `"foo"`，`(intern "foo" "keyword")` 返回 `:foo`。
 `intern` 的第 2 个参数是模块路径，而不是包名。
 
 ## 10. 读取与语法的区别
 
-- 不区分大小写（符号在读取时变为小写）。与 CL 相同。
+- 区分大小写。`foo` 和 `Foo` 是不同的符号，按读取时的拼写打印。CL 的读取器默认转为大写，而 typelisp
+  与 `readtable-case` 为 `:preserve` 的 CL 一样按书写读取。类型名以大写字母开头（`Option`、`Vector`
+  等）。
 - 没有 `#'`（第 3 节）。不能读取复数字面量 `#c(...)`，复数用 `(complex 1.0 2.0)` 创建。
 - 扩展 `loop` 的子句用关键字书写：`(loop :for i :from 1 :to 3 :collect i)`。不以关键字开头的 `loop` 是简单的无限
   循环，用 `(break)` 或 `(return 值)` 退出。`return` 退出的是最内层的循环（退出函数用 `return-from`）。

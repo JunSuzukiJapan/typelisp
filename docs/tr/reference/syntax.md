@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -54,8 +54,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
 - **Anahtar sözcükler**: `:name` gibi iki nokta üst üsteyle başlayan semboller (CL'deki gibi). Hangi modülde
   yazılırsa yazılsın, anahtar sözcük ad alanı `keyword` (CL'nin `KEYWORD` paketi) içindeki o addaki tek
   semboldürler. Kendi kendilerini değerlendirirler: hiçbir bağlamaya bakmazlar ve değerleri kendileridir; statik
-  türleri `symbol`'dür. Aynı adlı anahtar sözcükler her zaman aynı nesnedir (`(eq :foo :FOO)` doğrudur; diğer
-  semboller gibi küçük harfe çevrilirler). İki nokta adın bir parçası değildir: `(symbol->string :foo)`,
+  türleri `symbol`'dür. Aynı adlı anahtar sözcükler her zaman aynı nesnedir (diğer semboller gibi büyük/küçük harf ayrımı yaparlar, bu yüzden `(eq :foo :FOO)` yanlıştır). İki nokta adın bir parçası değildir: `(std::symbol::symbol->string :foo)`,
   `"foo"`'dur. `~s` `:foo`, `~a` ise `foo` yazdırır. Anahtar sözcük, değeri kendisi olan bir sabittir; bu yüzden
   değişken olarak bağlanamaz, atanamaz ve bir tanımın adı olamaz (tür hatası). Bir string'den
   `(intern "foo" "keyword")` ile yapılır. `keywordp` ile sınayın (anahtar sözcük ad alanına ait olup olmadığı).
@@ -1937,8 +1936,7 @@ Yerleşik `read` / `read-from-string` de readtable'a danışır (CL'deki gibi).
 
 **Olmayanlar**: `*readtable*` ve `copy-readtable` ile `readtable-case`. İlk ikisi, bir readtable **bir değer
 olmadığı** için: bir değer "bir okuyucuya verilebilecek bir şey" olmak zorundadır, ancak kaynağı okuyan
-okuyucu programın dışındadır ve verilecek bir yeri yoktur. `readtable-case`, 1. bölümün bu dilin
-okuyucusunun her zaman küçük harfe çevirdiğine (CL'nin `:downcase`'i) karar vermesi nedeniyle.
+okuyucu programın dışındadır ve verilecek bir yeri yoktur. `readtable-case`, 1. bölüm bu dilin okuyucusunun adları yazıldığı gibi okuduğuna (CL'nin `:preserve`'ü) karar verdiği için.
 
 ## 12. Eşzamanlılık (task'ler)
 

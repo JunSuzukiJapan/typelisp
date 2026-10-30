@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -52,9 +52,8 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
 - **Słowa kluczowe**: symbole zaczynające się od dwukropka, takie jak `:name` (jak w CL). W jakimkolwiek module
   zostaną zapisane, są jedynym symbolem o tej nazwie w przestrzeni nazw słów kluczowych `keyword` (pakiet
   `KEYWORD` z CL). Obliczają się do samych siebie: nie wyszukują żadnego wiązania, a ich wartością są one same,
-  ze statycznym typem `symbol`. Słowa kluczowe o tej samej nazwie są zawsze tym samym obiektem (`(eq :foo :FOO)`
-  to prawda; jak inne symbole są zamieniane na małe litery). Dwukropek nie jest częścią nazwy:
-  `(symbol->string :foo)` to `"foo"`. `~s` drukuje `:foo`, a `~a` drukuje `foo`. Słowo kluczowe jest stałą,
+  ze statycznym typem `symbol`. Słowa kluczowe o tej samej nazwie są zawsze tym samym obiektem (jak inne symbole rozróżniają wielkość liter, więc `(eq :foo :FOO)` to fałsz). Dwukropek nie jest częścią nazwy:
+  `(std::symbol::symbol->string :foo)` to `"foo"`. `~s` drukuje `:foo`, a `~a` drukuje `foo`. Słowo kluczowe jest stałą,
   której wartością jest ono samo, więc nie można go związać ani przypisać jako zmiennej ani uczynić nazwą
   definicji (błąd typu). Z łańcucha znaków tworzy się je przez `(intern "foo" "keyword")`. Test za pomocą
   `keywordp` (czy należy do przestrzeni nazw słów kluczowych). Samotny `:` lub z dodatkowymi dwukropkami, jak
@@ -1939,8 +1938,7 @@ Wbudowane `read` / `read-from-string` także korzystają z readtable (jak w CL).
 
 **Czego nie ma**: `*readtable*` oraz `copy-readtable` i `readtable-case`. Dwa pierwsze, ponieważ readtable
 **nie jest wartością**: wartość musiałaby być „czymś, co można przekazać czytnikowi", ale
-czytnik czytający kod źródłowy jest poza programem i nie ma gdzie go przekazać. `readtable-case`, ponieważ
-rozdział 1 ustala, że czytnik tego języka zawsze zamienia na małe litery (`:downcase` z CL).
+czytnik czytający kod źródłowy jest poza programem i nie ma gdzie go przekazać. `readtable-case`, ponieważ rozdział 1 ustala, że czytnik tego języka czyta nazwy tak, jak je napisano (`:preserve` z CL).
 
 
 ## 12. Współbieżność (zadania)

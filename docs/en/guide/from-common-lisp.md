@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # For Common Lisp Programmers
 
 typelisp inherits Common Lisp's (CL's) syntax and many of its function names, but it is a
@@ -226,13 +226,15 @@ There are no packages. Namespaces are modules, and a file is a module by itself.
 ([Modules and File Layout](modules.md)).
 
 Keywords `:foo` exist and, as in CL, evaluate to themselves and belong to the keyword namespace `keyword`.
-`(symbol->string :foo)` returns `"foo"`, and `(intern "foo" "keyword")` returns `:foo`. The second
+`(std::symbol::symbol->string :foo)` returns `"foo"`, and `(intern "foo" "keyword")` returns `:foo`. The second
 argument of `intern` is a module path in place of a package name.
 
 ## 10. Differences in reading and syntax
 
-- Upper and lower case are not distinguished (symbols become lowercase when read). This is the same
-  as CL.
+- Upper and lower case are distinguished. `foo` and `Foo` are different symbols, and are printed as
+  they were read. CL's reader upcases by default, but typelisp reads names as written, like CL with
+  `readtable-case` set to `:preserve`. Type names begin with an uppercase letter (`Option`,
+  `Vector`, and so on).
 - There is no `#'` (section 3). Complex number literals `#c(...)` cannot be read; make complex
   numbers with `(complex 1.0 2.0)`.
 - The clauses of the extended `loop` are written with keywords: `(loop :for i :from 1 :to 3 :collect i)`.

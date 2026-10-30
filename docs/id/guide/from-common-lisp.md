@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Untuk Pemrogram Common Lisp
 
 typelisp mewarisi sintaks Common Lisp (CL) dan banyak nama fungsinya, tetapi ia adalah bahasa dengan
@@ -227,12 +227,15 @@ Tidak ada paket. Ruang nama adalah modul, dan sebuah berkas adalah modul tersend
 ([Modul dan Tata Letak Berkas](modules.md)).
 
 Keyword `:foo` ada dan, seperti di CL, dievaluasi menjadi dirinya sendiri dan termasuk namespace keyword
-`keyword`. `(symbol->string :foo)` mengembalikan `"foo"`, dan `(intern "foo" "keyword")` mengembalikan
+`keyword`. `(std::symbol::symbol->string :foo)` mengembalikan `"foo"`, dan `(intern "foo" "keyword")` mengembalikan
 `:foo`. Argumen kedua `intern` adalah path modul sebagai ganti nama paket.
 
 ## 10. Perbedaan dalam pembacaan dan sintaks
 
-- Huruf besar dan kecil tidak dibedakan (simbol menjadi huruf kecil saat dibaca). Ini sama dengan CL.
+- Huruf besar dan kecil dibedakan. `foo` dan `Foo` adalah simbol yang berbeda, dan dicetak
+  sebagaimana dibaca. Reader CL secara bawaan mengubah ke huruf besar, tetapi typelisp membaca nama
+  sebagaimana ditulis, seperti CL dengan `readtable-case` bernilai `:preserve`. Nama tipe diawali
+  huruf besar (`Option`, `Vector`, dan seterusnya).
 - Tidak ada `#'` (bagian 3). Literal bilangan kompleks `#c(...)` tidak dapat dibaca; buat bilangan
   kompleks dengan `(complex 1.0 2.0)`.
 - Klausa `loop` yang diperluas ditulis dengan keyword: `(loop :for i :from 1 :to 3 :collect i)`.

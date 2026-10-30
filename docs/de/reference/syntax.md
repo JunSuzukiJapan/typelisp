@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -54,9 +54,8 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
 - **Schlüsselwörter**: Symbole, die mit einem Doppelpunkt beginnen, wie `:name` (wie in CL). In welchem Modul
   sie auch geschrieben werden, sie sind das eine Symbol dieses Namens im Schlüsselwort-Namensraum `keyword` (CLs
   Paket `KEYWORD`). Sie werten zu sich selbst aus: Sie suchen keine Bindung, ihr Wert sind sie selbst, mit dem
-  statischen Typ `symbol`. Schlüsselwörter gleichen Namens sind immer dasselbe Objekt (`(eq :foo :FOO)` ist
-  wahr; wie andere Symbole werden sie kleingeschrieben). Der Doppelpunkt ist nicht Teil des Namens:
-  `(symbol->string :foo)` ist `"foo"`. `~s` druckt `:foo`, `~a` druckt `foo`. Ein Schlüsselwort ist eine
+  statischen Typ `symbol`. Schlüsselwörter gleichen Namens sind immer dasselbe Objekt (wie andere Symbole unterscheiden sie Groß- und Kleinschreibung, also ist `(eq :foo :FOO)` falsch). Der Doppelpunkt ist nicht Teil des Namens:
+  `(std::symbol::symbol->string :foo)` ist `"foo"`. `~s` druckt `:foo`, `~a` druckt `foo`. Ein Schlüsselwort ist eine
   Konstante, deren Wert es selbst ist; es kann daher weder als Variable gebunden oder zugewiesen werden noch der
   Name einer Definition sein (ein Typfehler). Aus einer Zeichenkette erzeugt man es mit
   `(intern "foo" "keyword")`. Geprüft wird mit `keywordp` (ob es zum Schlüsselwort-Namensraum gehört). Ein
@@ -1995,7 +1994,7 @@ Auch die eingebauten `read` / `read-from-string` ziehen die readtable zu Rate (w
 **Was es nicht gibt**: `*readtable*` und `copy-readtable` sowie `readtable-case`. Die ersten beiden, weil eine
 readtable **kein Wert** ist: Ein Wert müsste „etwas sein, das man einem Reader übergeben kann“, aber der Reader,
 der den Quelltext liest, liegt außerhalb des Programms, ohne einen Ort, an den man sie übergeben könnte.
-`readtable-case`, weil Kapitel 1 festlegt, dass der Reader dieser Sprache immer kleinschreibt (CLs `:downcase`).
+`readtable-case`, weil Kapitel 1 festlegt, dass der Reader dieser Sprache Namen so liest, wie sie geschrieben sind (CLs `:preserve`).
 
 
 ## 12. Nebenläufigkeit (Tasks)

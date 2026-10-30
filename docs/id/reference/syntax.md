@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -56,8 +56,7 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
 - **Keyword**: simbol yang diawali titik dua, seperti `:name` (seperti di CL). Di modul mana pun ditulis,
   keyword adalah satu-satunya simbol bernama itu di namespace keyword `keyword` (paket `KEYWORD` pada CL).
   Keyword mengevaluasi dirinya sendiri: tidak mencari pengikatan dan nilainya adalah dirinya sendiri, dengan
-  tipe statis `symbol`. Keyword bernama sama selalu objek yang sama (`(eq :foo :FOO)` benar; seperti simbol lain
-  ia menjadi huruf kecil). Titik dua bukan bagian dari nama: `(symbol->string :foo)` adalah `"foo"`. `~s`
+  tipe statis `symbol`. Keyword bernama sama selalu objek yang sama (seperti simbol lain ia membedakan huruf besar dan kecil, jadi `(eq :foo :FOO)` salah). Titik dua bukan bagian dari nama: `(std::symbol::symbol->string :foo)` adalah `"foo"`. `~s`
   mencetak `:foo` dan `~a` mencetak `foo`. Keyword adalah konstanta yang nilainya dirinya sendiri, sehingga
   tidak dapat diikat maupun diberi nilai sebagai variabel, dan tidak dapat menjadi nama definisi (kesalahan
   tipe). Untuk membuatnya dari string, tulis `(intern "foo" "keyword")`. Ujilah dengan `keywordp` (apakah
@@ -2012,8 +2011,7 @@ Pendaftaran sudah melakukan tugasnya, sehingga langkah terpisah tidak akan memil
 **Yang tidak ada**: `*readtable*` dan `copy-readtable`, serta `readtable-case`. Dua yang pertama
 karena readtable **bukan sebuah nilai**: nilai harus "sesuatu yang dapat diserahkan ke reader", tetapi
 reader yang membaca sumber berada di luar program, tanpa tempat untuk menyerahkannya.
-`readtable-case` karena bab 1 menetapkan bahwa reader bahasa ini selalu mengubah ke huruf kecil
-(`:downcase` pada CL).
+`readtable-case` karena bab 1 menetapkan bahwa reader bahasa ini membaca nama sebagaimana ditulis (`:preserve` pada CL).
 
 
 ## 12. Konkurensi (task)

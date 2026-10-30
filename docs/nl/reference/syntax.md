@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -54,9 +54,8 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
 - **Keywords**: symbolen die met een dubbele punt beginnen, zoals `:name` (zoals in CL). In welke module ze ook
   geschreven worden, ze zijn het ene symbool met die naam in de keyword-naamruimte `keyword` (het package
   `KEYWORD` van CL). Ze evalueren naar zichzelf: ze zoeken geen binding op en hun waarde is zijzelf, met
-  statisch type `symbol`. Keywords met dezelfde naam zijn altijd hetzelfde object (`(eq :foo :FOO)` is waar; net
-  als andere symbolen worden ze in kleine letters gezet). De dubbele punt maakt geen deel uit van de naam:
-  `(symbol->string :foo)` is `"foo"`. `~s` drukt `:foo` af en `~a` drukt `foo` af. Een keyword is een constante
+  statisch type `symbol`. Keywords met dezelfde naam zijn altijd hetzelfde object (net als andere symbolen onderscheiden ze hoofd- en kleine letters, dus `(eq :foo :FOO)` is onwaar). De dubbele punt maakt geen deel uit van de naam:
+  `(std::symbol::symbol->string :foo)` is `"foo"`. `~s` drukt `:foo` af en `~a` drukt `foo` af. Een keyword is een constante
   met zichzelf als waarde, dus het kan niet als variabele worden gebonden of toegewezen, en ook niet de naam van
   een definitie zijn (een typefout). Uit een string maak je er een met `(intern "foo" "keyword")`. Test met
   `keywordp` (of het tot de keyword-naamruimte behoort). Een losse `:` of een met extra dubbele punten zoals
@@ -2017,8 +2016,7 @@ De ingebouwde `read` / `read-from-string` raadplegen ook de readtable (zoals in 
 **Wat er niet is**: `*readtable*` en `copy-readtable`, en `readtable-case`. De eerste twee omdat een
 readtable **geen waarde is**: een waarde zou "iets dat aan een reader kan worden gegeven" moeten zijn, maar
 de reader die de broncode leest bevindt zich buiten het programma, zonder plek om hem aan te geven.
-`readtable-case` omdat hoofdstuk 1 bepaalt dat de reader van deze taal altijd naar kleine letters omzet
-(`:downcase` van CL).
+`readtable-case` omdat hoofdstuk 1 bepaalt dat de reader van deze taal namen leest zoals ze geschreven zijn (`:preserve` van CL).
 
 
 ## 12. Gelijktijdigheid (taken)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -52,8 +52,7 @@ mensagens de erro, [errors.md](errors.md).
 - **Palavras-chave**: símbolos que começam com dois-pontos, como `:name` (como no CL). Em qualquer módulo em que
   sejam escritas, são o único símbolo desse nome no espaço de nomes das palavras-chave, `keyword` (o pacote
   `KEYWORD` do CL). São autoavaliadas: não procuram vínculo nenhum e seu valor são elas mesmas, com tipo
-  estático `symbol`. Palavras-chave com o mesmo nome são sempre o mesmo objeto (`(eq :foo :FOO)` é verdadeiro;
-  como os outros símbolos, viram minúsculas). Os dois-pontos não fazem parte do nome: `(symbol->string :foo)` é
+  estático `symbol`. Palavras-chave com o mesmo nome são sempre o mesmo objeto (como os outros símbolos, distinguem maiúsculas e minúsculas, então `(eq :foo :FOO)` é falso). Os dois-pontos não fazem parte do nome: `(std::symbol::symbol->string :foo)` é
   `"foo"`. `~s` imprime `:foo` e `~a` imprime `foo`. Uma palavra-chave é uma constante cujo valor é ela mesma,
   então não pode ser vinculada nem atribuída como variável, nem ser o nome de uma definição (um erro de tipo).
   Para criá-la a partir de uma string, escreva `(intern "foo" "keyword")`. Teste com `keywordp` (se pertence ao
@@ -1927,8 +1926,7 @@ Os `read` / `read-from-string` embutidos também consultam a readtable (como no 
 
 **O que não existe**: `*readtable*` e `copy-readtable`, e `readtable-case`. Os dois primeiros porque uma readtable
 **não é um valor**: um valor teria de ser "algo que pode ser entregue a um leitor", mas o leitor que lê o
-código-fonte está fora do programa, sem lugar para onde entregá-la. `readtable-case` porque o capítulo 1 decide que
-o leitor desta linguagem sempre passa para minúsculas (o `:downcase` do CL).
+código-fonte está fora do programa, sem lugar para onde entregá-la. `readtable-case` porque o capítulo 1 decide que o leitor desta linguagem lê os nomes como foram escritos (o `:preserve` do CL).
 
 
 ## 12. Concorrência (tarefas)

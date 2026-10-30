@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -57,8 +57,7 @@ metodi predefiniti, si veda [Funzioni predefinite](functions/README.md); per l'e
 - **Parole chiave**: simboli che iniziano con i due punti, come `:name` (come in CL). In qualunque modulo siano
   scritte, sono l'unico simbolo di quel nome nello spazio dei nomi delle parole chiave, `keyword` (il package
   `KEYWORD` di CL). Valutano se stesse: non cercano alcun binding e il loro valore è se stesse, con tipo statico
-  `symbol`. Le parole chiave con lo stesso nome sono sempre lo stesso oggetto (`(eq :foo :FOO)` è vero; come gli
-  altri simboli vengono convertite in minuscolo). I due punti non fanno parte del nome: `(symbol->string :foo)`
+  `symbol`. Le parole chiave con lo stesso nome sono sempre lo stesso oggetto (come gli altri simboli distinguono maiuscole e minuscole, quindi `(eq :foo :FOO)` è falso). I due punti non fanno parte del nome: `(std::symbol::symbol->string :foo)`
   è `"foo"`. `~s` stampa `:foo` e `~a` stampa `foo`. Una parola chiave è una costante il cui valore è se stessa,
   quindi non può essere né legata né assegnata come variabile, né essere il nome di una definizione (un errore
   di tipo). Per crearne una da una stringa si scrive `(intern "foo" "keyword")`. Si verifica con `keywordp` (se
@@ -2016,8 +2015,7 @@ Anche i `read` / `read-from-string` predefiniti consultano la readtable (come in
 **Che cosa non c'è**: `*readtable*` e `copy-readtable`, e `readtable-case`. I primi due perché una
 readtable **non è un valore**: un valore dovrebbe essere "qualcosa che si può consegnare a un lettore",
 ma il lettore che legge il sorgente è fuori dal programma, senza un posto a cui consegnarlo.
-`readtable-case` perché il capitolo 1 stabilisce che il lettore di questo linguaggio converte sempre in
-minuscolo (il `:downcase` di CL).
+`readtable-case` perché il capitolo 1 stabilisce che il lettore di questo linguaggio legge i nomi così come sono scritti (il `:preserve` di CL).
 
 ## 12. Concorrenza (task)
 

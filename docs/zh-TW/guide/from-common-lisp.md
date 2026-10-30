@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # 給 Common Lisp 使用者
 
 typelisp 繼承了 Common Lisp（以下簡稱 CL）的語法與許多函式名稱，但它是靜態型別語言。因此 CL 的寫法不一定能直接通過。本指南整理了熟悉
@@ -194,12 +194,14 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
 沒有套件。命名空間是模組，檔案本身就是模組。以 `module::name` 取代 `pkg:symbol`，以 `use` 引入（[模組與檔案結構](modules.md)）。
 
 關鍵字 `:foo` 是存在的，與 CL 一樣求值為自身，並屬於關鍵字專用命名空間 `keyword`。
-`(symbol->string :foo)` 回傳 `"foo"`，`(intern "foo" "keyword")` 回傳 `:foo`。
+`(std::symbol::symbol->string :foo)` 回傳 `"foo"`，`(intern "foo" "keyword")` 回傳 `:foo`。
 `intern` 的第 2 個參數是模組路徑，而不是套件名稱。
 
 ## 10. 讀取與語法的差異
 
-- 不區分大小寫（符號在讀取時變成小寫）。與 CL 相同。
+- 區分大小寫。`foo` 和 `Foo` 是不同的符號，按讀取時的拼寫印出。CL 的讀取器預設轉為大寫，而 typelisp
+  與 `readtable-case` 為 `:preserve` 的 CL 一樣按書寫讀取。型別名稱以大寫字母開頭（`Option`、
+  `Vector` 等）。
 - 沒有 `#'`（第 3 節）。無法讀取複數字面值 `#c(...)`，複數以 `(complex 1.0 2.0)` 建立。
 - 擴充 `loop` 的子句以關鍵字書寫：`(loop :for i :from 1 :to 3 :collect i)`。不以關鍵字開頭的 `loop` 是簡單的無限迴圈，以 `(break)`
   或 `(return 值)` 離開。`return` 離開的是最內層的迴圈（離開函式用 `return-from`）。

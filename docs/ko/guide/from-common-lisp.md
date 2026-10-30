@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로
@@ -206,12 +206,13 @@ CL과 다른 점은 세 가지다. 요소의 타입이 모두 같아야 한다(`
 패키지는 없다. 이름공간은 모듈이며, 파일이 그 자체로 모듈이다. `pkg:symbol` 대신 `module::name`이라고 쓰고, `use`로
 이름을 들여온다([모듈과 파일 구성](modules.md)).
 
-키워드 `:foo`는 있으며, CL과 같이 자기 자신으로 평가되고 키워드용 이름공간 `keyword`에 속하는 심볼이다. `(symbol->string :foo)`는 `"foo"`를,
+키워드 `:foo`는 있으며, CL과 같이 자기 자신으로 평가되고 키워드용 이름공간 `keyword`에 속하는 심볼이다. `(std::symbol::symbol->string :foo)`는 `"foo"`를,
 `(intern "foo" "keyword")`는 `:foo`를 반환한다. `intern`의 두 번째 인수는 패키지 이름 대신 모듈 경로이다.
 
 ## 10. 읽기와 문법의 차이
 
-- 대문자와 소문자를 구별하지 않는다(심볼은 읽을 때 소문자가 된다). CL과 같다.
+- 대문자와 소문자를 구별한다. `foo`와 `Foo`는 다른 심볼이며, 읽은 철자 그대로 인쇄된다. CL의 리더는 기본적으로 대문자로 맞추지만, typelisp는
+  `readtable-case`가 `:preserve`인 CL처럼 쓴 그대로 읽는다. 타입 이름은 대문자로 시작한다(`Option`, `Vector` 등).
 - `#'`는 없다(3절). 복소수 리터럴 `#c(...)`는 읽을 수 없다. 복소수는 `(complex 1.0 2.0)`으로 만든다.
 - 확장 `loop`의 절은 키워드로 쓴다: `(loop :for i :from 1 :to 3 :collect i)`. 키워드로 시작하지 않는 `loop`는 단순한
   무한 루프이며 `(break)`나 `(return 값)`으로 빠져나간다. `return`은 가장 안쪽의 루프를 빠져나간다(함수를 빠져나가려면

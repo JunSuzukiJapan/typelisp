@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -36,8 +36,8 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **关键字**：像 `:name` 这样以冒号开头的符号（遵循 CL）。
   无论写在哪个模块里，都是关键字专用命名空间 `keyword`（CL 的 `KEYWORD` 包）中同名的唯一一个符号。
   它是自求值的——不查找绑定，值就是它自身，静态类型为 `symbol`。
-  同名的关键字总是同一个对象（`(eq :foo :FOO)` 为真。与其他符号一样会被转为小写）。
-  冒号不是名字的一部分，`(symbol->string :foo)` 是 `"foo"`。
+  同名的关键字总是同一个对象（与其他符号一样区分大小写，所以 `(eq :foo :FOO)` 为假）。
+  冒号不是名字的一部分，`(std::symbol::symbol->string :foo)` 是 `"foo"`。
   `~s` 打印为 `:foo`，`~a` 打印为 `foo`。
   关键字是以自身为值的常量，所以既不能作为变量绑定或赋值，也不能作为定义的名字（类型错误）。
   从字符串创建时写 `(intern "foo" "keyword")`。判断用 `keywordp`（是否属于关键字专用命名空间）。
@@ -1555,8 +1555,7 @@ typl --image session.typld             # REPL 也一样
 内置的 `read` / `read-from-string` 也会参照 readtable（与 CL 相同）。
 
 **没有的东西**：`*readtable*` 和 `copy-readtable`，以及 `readtable-case`。前两者是因为 readtable **不是值**——作为值它必须是"可以
-交给读取器的东西"，但读取源代码的读取器在程序之外，没有可交给的去处。`readtable-case` 是因为第 1 章规定了本语言的读取器总是转为小写
-（CL 的 `:downcase`）。
+交给读取器的东西"，但读取源代码的读取器在程序之外，没有可交给的去处。`readtable-case` 是因为第 1 章规定了本语言的读取器按书写的拼写读取（CL 的 `:preserve`）。
 
 
 ## 12. 并发（任务）

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Für Common-Lisp-Programmierer
 
 typelisp übernimmt die Syntax von Common Lisp (CL) und viele seiner Funktionsnamen, ist aber eine statisch
@@ -227,13 +227,16 @@ Es gibt keine Pakete. Namensräume sind Module, und eine Datei ist für sich ein
 schreibt man `module::name`, und Namen holt man mit `use` herein ([Module und Dateiaufteilung](modules.md)).
 
 Schlüsselwörter `:foo` gibt es; wie in CL werten sie zu sich selbst aus und gehören zum
-Schlüsselwort-Namensraum `keyword`. `(symbol->string :foo)` gibt `"foo"` zurück,
+Schlüsselwort-Namensraum `keyword`. `(std::symbol::symbol->string :foo)` gibt `"foo"` zurück,
 `(intern "foo" "keyword")` gibt `:foo` zurück. Das zweite Argument von `intern` ist ein Modulpfad statt
 eines Paketnamens.
 
 ## 10. Unterschiede beim Lesen und in der Syntax
 
-- Groß- und Kleinschreibung werden nicht unterschieden (Symbole werden beim Lesen kleingeschrieben). Wie in CL.
+- Groß- und Kleinschreibung werden unterschieden. `foo` und `Foo` sind verschiedene Symbole und
+  werden so gedruckt, wie sie gelesen wurden. Der Reader von CL schreibt standardmäßig groß;
+  typelisp liest Namen so, wie sie geschrieben sind, wie CL mit `readtable-case` auf `:preserve`.
+  Typnamen beginnen mit einem Großbuchstaben (`Option`, `Vector` usw.).
 - Es gibt kein `#'` (Abschnitt 3). Literale komplexer Zahlen `#c(...)` lassen sich nicht lesen; komplexe Zahlen
   erzeugt man mit `(complex 1.0 2.0)`.
 - Die Klauseln des erweiterten `loop` werden mit Schlüsselwörtern geschrieben:

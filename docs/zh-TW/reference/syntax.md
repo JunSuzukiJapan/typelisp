@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -36,8 +36,8 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **關鍵字**：像 `:name` 這樣以冒號開頭的符號（依 CL）。
   無論寫在哪個模組裡，都是關鍵字專用命名空間 `keyword`（CL 的 `KEYWORD` 套件）中同名的唯一一個符號。
   它是自我求值的——不查找繫結，值就是它本身，靜態型別為 `symbol`。
-  同名的關鍵字一律是同一個物件（`(eq :foo :FOO)` 為真。與其他符號一樣會被轉為小寫）。
-  冒號不是名稱的一部分，`(symbol->string :foo)` 是 `"foo"`。
+  同名的關鍵字一律是同一個物件（與其他符號一樣區分大小寫，所以 `(eq :foo :FOO)` 為假）。
+  冒號不是名稱的一部分，`(std::symbol::symbol->string :foo)` 是 `"foo"`。
   `~s` 印出 `:foo`，`~a` 印出 `foo`。
   關鍵字是以自身為值的常數，所以既不能作為變數繫結或賦值，也不能作為定義的名稱（型別錯誤）。
   從字串建立時寫 `(intern "foo" "keyword")`。以 `keywordp` 判斷（是否屬於關鍵字專用命名空間）。
@@ -1521,8 +1521,7 @@ typl --image session.typld             # REPL 也一樣
 內建的 `read` / `read-from-string` 也會參照 readtable（與 CL 相同）。
 
 **沒有的東西**：`*readtable*` 與 `copy-readtable`，以及 `readtable-case`。前兩者是因為 readtable **不是值**——作為值它必須是「可以交給讀取器的
-東西」，但讀取原始碼的讀取器在程式之外，沒有可以交給的去處。`readtable-case` 是因為第 1 章規定了這個語言的讀取器一律轉為小寫（CL 的
-`:downcase`）。
+東西」，但讀取原始碼的讀取器在程式之外，沒有可以交給的去處。`readtable-case` 是因為第 1 章規定了這個語言的讀取器按書寫的拼寫讀取（CL 的 `:preserve`）。
 
 
 ## 12. 並行（任務）

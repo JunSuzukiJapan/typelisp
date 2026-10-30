@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -52,8 +52,8 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
 - **Keywords**: symboler som börjar med ett kolon, som `:name` (som i CL). Vilken modul de än skrivs i är de den
   enda symbolen med det namnet i keyword-namnrymden `keyword` (CL:s paket `KEYWORD`). De utvärderas till sig
   själva: de slår inte upp någon bindning och deras värde är de själva, med statisk typ `symbol`. Keywords med
-  samma namn är alltid samma objekt (`(eq :foo :FOO)` är sant; liksom andra symboler görs de till gemener).
-  Kolonet är inte en del av namnet: `(symbol->string :foo)` är `"foo"`. `~s` skriver ut `:foo` och `~a` skriver
+  samma namn är alltid samma objekt (liksom andra symboler skiljer de på versaler och gemener, så `(eq :foo :FOO)` är falskt).
+  Kolonet är inte en del av namnet: `(std::symbol::symbol->string :foo)` är `"foo"`. `~s` skriver ut `:foo` och `~a` skriver
   ut `foo`. Ett keyword är en konstant vars värde är den själv, så det kan varken bindas eller tilldelas som
   variabel eller vara namnet på en definition (ett typfel). Från en sträng skapas det med
   `(intern "foo" "keyword")`. Testa med `keywordp` (om den hör till keyword-namnrymden). Ett ensamt `:` eller
@@ -1937,8 +1937,7 @@ De inbyggda `read` / `read-from-string` konsulterar också readtable (som i CL).
 
 **Vad som inte finns**: `*readtable*` och `copy-readtable`, samt `readtable-case`. De två första eftersom
 en readtable **inte är ett värde**: ett värde skulle behöva vara "något som kan lämnas till en läsare", men
-läsaren som läser källkoden ligger utanför programmet, utan någonstans att lämna den till. `readtable-case`
-eftersom kapitel 1 avgör att det här språkets läsare alltid gör om till gemener (CL:s `:downcase`).
+läsaren som läser källkoden ligger utanför programmet, utan någonstans att lämna den till. `readtable-case` eftersom kapitel 1 avgör att det här språkets läsare läser namn som de är skrivna (CL:s `:preserve`).
 
 
 ## 12. Samtidighet (tasks)

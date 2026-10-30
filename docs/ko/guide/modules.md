@@ -108,13 +108,13 @@ typl main.typl        # => 25
 
 ### 표준 라이브러리와 같은 이름을 붙이기
 
-`length`나 `first`처럼 표준 라이브러리가 공개하는 이름으로 함수 등을 정의하면 오류가 됩니다.
+`length`나 `first`처럼 표준 라이브러리가 공개하는 이름으로 함수 등을 정의하면 오류가 된다.
 
 ```
 type error: defun: `length` is a name the standard library offers every module; write `(shadow length)` before defining it here
 ```
 
-그 모듈에서 자신의 정의를 쓰기로 했다면, 정의보다 앞에 `shadow`를 씁니다.
+그 모듈에서 자신의 정의를 쓰기로 했다면, 정의보다 앞에 `shadow`를 쓴다.
 
 ```lisp
 (shadow first)
@@ -125,9 +125,9 @@ type error: defun: `length` is a name the standard library offers every module; 
 (println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 표준 라이브러리의 first => (some 1)
 ```
 
-`shadow` 뒤에는 그 모듈 안에서 `first`라고 쓰면 자신의 정의를 가리킵니다. 표준 라이브러리의 `first`를 쓸 때는 `std::seq::first`처럼 경로로
-씁니다. `shadow`는 쓴 모듈 안에서만 효력이 있고, 다른 모듈의 `first`는 표준 라이브러리 그대로입니다. `if`나 `let` 같은 특수 형식의 이름은
-`shadow`할 수 없고 정의에도 쓸 수 없습니다.
+`shadow` 뒤에는 그 모듈 안에서 `first`라고 쓰면 자신의 정의를 가리킨다. 표준 라이브러리의 `first`를 쓸 때는 `std::seq::first`처럼 경로로
+쓴다. `shadow`는 쓴 모듈 안에서만 효력이 있고, 다른 모듈의 `first`는 표준 라이브러리 그대로다. `if`나 `let` 같은 특수 형식의 이름은
+`shadow`할 수 없고 정의에도 쓸 수 없다.
 
 ### 트레이트 메서드 호출하기
 

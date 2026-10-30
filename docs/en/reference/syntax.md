@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -51,8 +51,7 @@ and for reading error messages, [errors.md](errors.md).
 - **Keywords**: symbols starting with a colon, such as `:name` (as in CL). Whichever module they are written in,
   they are the one symbol of that name in the keyword namespace `keyword` (CL's `KEYWORD` package). They are
   self-evaluating: they look up no binding and their value is themselves, with static type `symbol`. Keywords
-  with the same name are always the same object (`(eq :foo :FOO)` is true; like other symbols they are
-  lower-cased). The colon is not part of the name: `(symbol->string :foo)` is `"foo"`. `~s` prints `:foo` and
+  with the same name are always the same object (like other symbols they distinguish case, so `(eq :foo :FOO)` is false). The colon is not part of the name: `(std::symbol::symbol->string :foo)` is `"foo"`. `~s` prints `:foo` and
   `~a` prints `foo`. A keyword is a constant whose value is itself, so it can neither be bound nor assigned as a
   variable, nor be the name of a definition (a type error). To make one from a string, write
   `(intern "foo" "keyword")`. Test with `keywordp` (whether it belongs to the keyword namespace). A lone `:` or
@@ -1939,8 +1938,7 @@ The built-in `read` / `read-from-string` also consult the readtable (as in CL).
 
 **What is not there**: `*readtable*` and `copy-readtable`, and `readtable-case`. The first two because a
 readtable is **not a value**: a value would have to be "something that can be handed to a reader", but the
-reader that reads the source is outside the program, with nowhere to hand it to. `readtable-case` because
-chapter 1 decides that this language's reader always lower-cases (CL's `:downcase`).
+reader that reads the source is outside the program, with nowhere to hand it to. `readtable-case` because chapter 1 decides that this language's reader reads names as written (CL's `:preserve`).
 
 
 ## 12. Concurrency (tasks)

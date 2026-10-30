@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # För Common Lisp-programmerare
 
 typelisp ärver syntaxen och många av funktionsnamnen från Common Lisp (CL), men är ett statiskt typat
@@ -223,12 +223,15 @@ Det finns inga paket. Namnrymder är moduler, och en fil är en modul i sig. I s
 skriver man `module::name`, och hämtar in namn med `use` ([Moduler och filuppdelning](modules.md)).
 
 Keywords `:foo` finns och, liksom i CL, utvärderas de till sig själva och hör till keyword-namnrymden
-`keyword`. `(symbol->string :foo)` returnerar `"foo"` och `(intern "foo" "keyword")` returnerar `:foo`.
+`keyword`. `(std::symbol::symbol->string :foo)` returnerar `"foo"` och `(intern "foo" "keyword")` returnerar `:foo`.
 Det andra argumentet till `intern` är en modulsökväg i stället för ett paketnamn.
 
 ## 10. Skillnader i läsning och syntax
 
-- Stora och små bokstäver skiljs inte åt (symboler blir gemena vid läsning). Det är samma som i CL.
+- Versaler och gemener skiljs åt. `foo` och `Foo` är olika symboler och skrivs ut som de lästes.
+  CL:s läsare gör om till versaler som standard, men typelisp läser namn som de är skrivna, som CL
+  med `readtable-case` satt till `:preserve`. Typnamn börjar med versal (`Option`, `Vector` och så
+  vidare).
 - Det finns inget `#'` (avsnitt 3). Literaler för komplexa tal, `#c(...)`, kan inte läsas; gör komplexa
   tal med `(complex 1.0 2.0)`.
 - Satserna i den utökade `loop` skrivs med keywords: `(loop :for i :from 1 :to 3 :collect i)`. En

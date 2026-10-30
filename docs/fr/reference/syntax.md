@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -54,8 +54,8 @@ messages d'erreur, [errors.md](errors.md).
   module où ils sont écrits, ils sont l'unique symbole de ce nom dans l'espace de noms des mots-clés, `keyword`
   (le paquetage `KEYWORD` de CL). Ils s'évaluent en eux-mêmes : ils ne cherchent aucune liaison et leur valeur
   est eux-mêmes, de type statique `symbol`. Les mots-clés de même nom sont toujours le même objet
-  (`(eq :foo :FOO)` est vrai ; comme les autres symboles, ils passent en minuscules). Le deux-points ne fait pas
-  partie du nom : `(symbol->string :foo)` vaut `"foo"`. `~s` imprime `:foo` et `~a` imprime `foo`. Un mot-clé
+  (comme les autres symboles, ils distinguent majuscules et minuscules, donc `(eq :foo :FOO)` est faux). Le deux-points ne fait pas
+  partie du nom : `(std::symbol::symbol->string :foo)` vaut `"foo"`. `~s` imprime `:foo` et `~a` imprime `foo`. Un mot-clé
   est une constante dont la valeur est lui-même ; il ne peut donc être ni lié ni affecté comme variable, ni
   servir de nom à une définition (erreur de type). Pour en créer un à partir d'une chaîne, on écrit
   `(intern "foo" "keyword")`. On teste avec `keywordp` (s'il appartient à l'espace de noms des mots-clés). Un
@@ -1957,8 +1957,7 @@ Les `read` / `read-from-string` intégrés consultent aussi la readtable (comme 
 
 **Ce qui n'existe pas** : `*readtable*` et `copy-readtable`, ainsi que `readtable-case`. Les deux premiers parce
 qu'une readtable **n'est pas une valeur** : une valeur devrait être « quelque chose qu'on peut remettre à un lecteur »,
-mais le lecteur qui lit le source est en dehors du programme, sans endroit où la remettre. `readtable-case` parce que
-le chapitre 1 décide que le lecteur de ce langage met toujours en minuscules (le `:downcase` de CL).
+mais le lecteur qui lit le source est en dehors du programme, sans endroit où la remettre. `readtable-case` parce que le chapitre 1 décide que le lecteur de ce langage lit les noms tels qu'ils sont écrits (le `:preserve` de CL).
 
 
 ## 12. Concurrence (tâches)

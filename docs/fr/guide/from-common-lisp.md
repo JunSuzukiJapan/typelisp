@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Pour les programmeurs Common Lisp
 
 typelisp reprend la syntaxe de Common Lisp (CL) et beaucoup de ses noms de fonctions, mais c'est un langage à
@@ -226,12 +226,15 @@ de `pkg:symbol`, écrivez `module::name`, et importez les noms avec `use`
 ([Modules et découpage en fichiers](modules.md)).
 
 Les mots-clés `:foo` existent ; comme en CL, ils s'évaluent en eux-mêmes et appartiennent à l'espace de
-noms des mots-clés, `keyword`. `(symbol->string :foo)` renvoie `"foo"` et `(intern "foo" "keyword")`
+noms des mots-clés, `keyword`. `(std::symbol::symbol->string :foo)` renvoie `"foo"` et `(intern "foo" "keyword")`
 renvoie `:foo`. Le second argument d'`intern` est un chemin de module à la place d'un nom de paquetage.
 
 ## 10. Différences de lecture et de syntaxe
 
-- Majuscules et minuscules ne sont pas distinguées (les symboles passent en minuscules à la lecture). Comme en CL.
+- Les majuscules et les minuscules sont distinguées. `foo` et `Foo` sont des symboles différents,
+  imprimés tels qu'ils ont été lus. Le lecteur de CL met en majuscules par défaut, mais typelisp lit
+  les noms tels qu'ils sont écrits, comme CL avec `readtable-case` à `:preserve`. Les noms de type
+  commencent par une majuscule (`Option`, `Vector`, etc.).
 - Il n'y a pas de `#'` (section 3). Les littéraux de nombres complexes `#c(...)` ne peuvent pas être lus ; créez
   les nombres complexes avec `(complex 1.0 2.0)`.
 - Les clauses du `loop` étendu s'écrivent avec des mots-clés : `(loop :for i :from 1 :to 3 :collect i)`. Un `loop`

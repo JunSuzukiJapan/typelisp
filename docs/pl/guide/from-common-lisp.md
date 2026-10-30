@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
 # Dla programistów Common Lisp
 
 typelisp dziedziczy składnię Common Lisp (CL) i wiele jego nazw funkcji, ale jest językiem
@@ -224,13 +224,15 @@ Nie ma pakietów. Przestrzeniami nazw są moduły, a plik sam jest modułem. Zam
 ([Moduły i układ plików](modules.md)).
 
 Słowa kluczowe `:foo` istnieją i, jak w CL, obliczają się do samych siebie oraz należą do przestrzeni nazw
-słów kluczowych `keyword`. `(symbol->string :foo)` zwraca `"foo"`, a `(intern "foo" "keyword")` zwraca
+słów kluczowych `keyword`. `(std::symbol::symbol->string :foo)` zwraca `"foo"`, a `(intern "foo" "keyword")` zwraca
 `:foo`. Drugim argumentem `intern` jest ścieżka modułu zamiast nazwy pakietu.
 
 ## 10. Różnice w czytaniu i składni
 
-- Wielkie i małe litery nie są rozróżniane (symbole po wczytaniu stają się małymi literami). Jest to to samo,
-  co w CL.
+- Wielkość liter jest rozróżniana. `foo` i `Foo` to różne symbole i są drukowane tak, jak je
+  przeczytano. Czytnik CL domyślnie zamienia na wielkie litery, ale typelisp czyta nazwy tak, jak je
+  napisano, jak CL z `readtable-case` ustawionym na `:preserve`. Nazwy typów zaczynają się wielką
+  literą (`Option`, `Vector` itd.).
 - Nie ma `#'` (sekcja 3). Literałów liczb zespolonych `#c(...)` nie można wczytać; liczby zespolone
   tworzy się za pomocą `(complex 1.0 2.0)`.
 - Klauzule rozszerzonego `loop` zapisuje się za pomocą słów kluczowych: `(loop :for i :from 1 :to 3 :collect i)`.
