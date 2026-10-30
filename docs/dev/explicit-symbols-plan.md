@@ -818,4 +818,7 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
    引き（ダンプには `OwnedSym` で書く）、`defsignature` の宣言の表は `Path` で持つ。実行ファイルが
    `eval` の環境を作り直すモジュールは `type_words::ns_words` の語の列で渡す（`rt_eval_state`）。
    ダンプの形式は 30、ABI は 0.3.46。
-9. 利用者向け文書（日本語の原本、翻訳）。
+9. 利用者向け文書（日本語の原本、翻訳）。済み。`(shadow name...)`（構文リファレンス 3.10、モジュールの
+   ガイド）と、REPL の定義がモジュール `user` に入ること（3.11）を書いた。シンボルが大文字小文字を
+   区別することと食い違っていた記述（キーワードの `(eq :foo :FOO)`、`readtable-case` が無い理由、
+   CL からの移行ガイド）と、`use` の要る `symbol->string` を裸で書いた例を直した。20 言語の訳も合わせた。
