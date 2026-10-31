@@ -116,11 +116,12 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 詳細は [算術トレイト](functions/traits.md#3-算術トレイトadd--sub--mul--div--rem--bits--number)。
 
-### 6.3 反復
+### 6.3 反復と要素の追加
 
 | トレイト | 実装している型 |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` モジュールの型（`lazy::map-iter<I,A,U>` など） |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>`（要素の型が `Hash` を実装しているとき） |
 
 ### 6.4 ストリーム
 

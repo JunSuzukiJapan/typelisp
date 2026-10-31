@@ -1511,6 +1511,15 @@ pub const SOURCE_TEMPLATE: &str = r##"
   (:type Item)
   (next ((self Self)) Option<Item>)))
 
+;; `Push`: a collection one element at a time can be added to — the one name
+;; `(push c x)` for each library collection's own way of adding (`Vector`'s
+;; `push`, `Deque`'s `push-back`, `Array`'s `push-extend`, `HashSet`'s
+;; `insert`), so a generic function can fill any of them.
+(module iter
+(pub deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ())))
+
 ;; `vector-iter<T>` is `Vector<T>`'s own iterator: a shared reference to the
 ;; vector being walked (`vec`, sharing the same underlying box
 ;; — pushing to the original after creating an iterator is visible through
@@ -1530,7 +1539,9 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (Option::some v))
         (Option::none))))
 (impl Vector<T>
-  (pub iter (self) vector-iter<T> (make-instance 'vector-iter :vec self :pos 0))))
+  (pub iter (self) vector-iter<T> (make-instance 'vector-iter :vec self :pos 0)))
+;; The built-in `push` is the method.
+(impl Push Vector<T> (:type Item T)))
 
 ;; Generic collection combinators (redesign Phase 4). Each takes an
 ;; *iterator* — any type implementing the `Iter` trait — rather than one
@@ -4092,6 +4103,10 @@ user-visible capacity."
   (pub count (self) int (count self::table))
   (pub clear (self) () (clear self::table))
   (pub iter (self) vector-iter<T> (iter (keys self::table))))
+;; `insert`, without its answer of whether `x` was new.
+(impl Push HashSet<T> (:where (Hash T))
+  (:type Item T)
+  (push ((self Self) (x T)) () (insert self x) ()))
 (impl print-object HashSet<T> (:where (print-object T))
   (print-object ((self Self) (escape bool)) string
     (let ((out "#<hashset"))
@@ -4212,6 +4227,9 @@ user-visible capacity."
       (while (>= i 0) (push out (get self::before i)) (setf i (- i 1)))
       (doiter (x (iter self::after)) (push out x))
       (iter out))))
+(impl Push Deque<T>
+  (:type Item T)
+  (push ((self Self) (x T)) () (push-back self x)))
 (impl print-object Deque<T> (:where (print-object T))
   (print-object ((self Self) (escape bool)) string
     (let ((out "#<deque"))
@@ -6949,6 +6967,9 @@ user-visible capacity."
          (if (< n (len self::data)) (set self::data n x) (push self::data x))
          (set self::dims 0 (len self::data))
          (setf self::fill-pointer (Option::some (+ n 1))))))))
+(impl Push Array<T>
+  (:type Item T)
+  (push ((self Self) (x T)) () (push-extend self x)))
 
 ;; CL's `vector-pop`. `Option<T>` on an empty array rather than an error, the
 ;; same answer `Vector<T>`'s own `pop` gives.

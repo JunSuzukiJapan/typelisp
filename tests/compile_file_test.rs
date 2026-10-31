@@ -2215,3 +2215,31 @@ fn compile_file_from_a_running_program_leaves_it_working() {
     let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
     assert_eq!(status.code(), Some(7));
 }
+
+/// The `Push` trait in an executable: a generic function fills each library
+/// collection, and a `:dyn Push` reaches `Vector`'s built-in `push` through
+/// the method that calls it, as in `typl`.
+#[test]
+fn push_fills_each_collection_in_a_compiled_executable() {
+    let (code, out, err) = compile_and_capture_with(
+        "push_trait_aot",
+        r##"(use std::collections::Deque std::collections::HashSet)
+           (defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+             (doiter (x (iter xs)) (push c x)))
+           (defun main () int
+             (let ((v (the Vector<int> (Vector::new)))
+                   (d (the Deque<int> (Deque::new)))
+                   (s (the HashSet<int> (HashSet::new)))
+                   (a (the Array<int> (Array::new (the Vector<int> #(0)) 0 :fill-pointer 0)))
+                   (sinks (the Vector<:dyn Push<int>> (Vector::new)))
+                   (xs (the Vector<int> #(1 2 2 3))))
+               (push-all v xs) (push-all d xs) (push-all s xs) (push-all a xs)
+               (push sinks v) (push sinks d)
+               (doiter (k (iter sinks)) (push k 9))
+               (println "~a ~a ~a ~a" v d (count s) a)
+               0))"##,
+        &[],
+    );
+    assert_eq!(code, Some(0), "stderr was: {}", err);
+    assert_eq!(out.trim(), "#(1 2 2 3 9) #<deque 1 2 2 3 9> 3 #(1 2 2 3)");
+}

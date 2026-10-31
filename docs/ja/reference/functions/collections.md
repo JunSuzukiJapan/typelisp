@@ -69,7 +69,7 @@
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | 空のベクタを作る。型引数は期待型から決まるので、裸の `let` では `(the Vector<i32> (Vector::new))` と書く |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `x` を `n` 個 |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | 末尾に追加 |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | 末尾に追加（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i` 番目を読む。範囲外は panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic。`(setf (get v i) x)` とも書ける |
 | `len` | `(len v)` | `Vector<T>→int` | 要素数 |
@@ -151,6 +151,7 @@
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CL `array-row-major-index` |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL `adjust-array`。ランクは変えられない。範囲に残る要素は添字ごと保存、増えたセルは `init`。CL と違い配列を返さない（この言語の配列は全部 adjustable なので、返す第 2 の配列が無い） |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL `vector-push-extend`。fill pointer が無ければ panic |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` と同じ（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CL `vector-pop`。空なら `none` |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer（無ければ `none`）。`(setf a::fill-pointer …)` で書ける |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | row-major 順のイテレータ。fill pointer があればそこで止まる |
@@ -191,6 +192,7 @@
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 追加する。新しく入れば `true`、既にあれば `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` があるか |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 取り除く。あれば `true` |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | `insert` と同じだが、新しく入ったかは返さない（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
 | `count` | `(count s)` | `HashSet<T>→int` | 要素数 |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | 全削除 |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 要素のイテレータ。順序は決まっていない |
@@ -241,6 +243,7 @@
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | 空の列を作る |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 先頭／末尾に追加 |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` と同じ（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 先頭／末尾を取り除いて返す。空なら `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 先頭／末尾を見る（取り除かない） |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 先頭から数えて `i` 番目。範囲外は `none` |

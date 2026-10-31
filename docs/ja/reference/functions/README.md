@@ -68,7 +68,7 @@
 | [sequences.md](sequences.md) | ペア `cons-cell`、S 式データ `Sexpr`、シンボル、シーケンス関数、遅延イテレータ `lazy`、高階関数 |
 | [collections.md](collections.md) | 文字列、文字、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、エラー型と `Error` トレイト |
-| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算術トレイト |
+| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算術トレイト、`Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、印字の制御変数 |
 | [format.md](format.md) | 書式ディレクティブ |
 | [streams-files.md](streams-files.md) | ストリーム、ファイル操作、パス名、readtable |

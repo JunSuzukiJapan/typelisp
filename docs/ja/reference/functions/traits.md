@@ -1,6 +1,6 @@
 # 標準トレイト
 
-反復・比較・算術のトレイト。ほかの標準トレイトは、それぞれの章にある:
+反復・比較・算術・要素の追加のトレイト。ほかの標準トレイトは、それぞれの章にある:
 `Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`（[エラー型](option-result.md#3-エラー型と-error-トレイト)）、
 `print-object`（[印字](printing.md#5-print-object型ごとの印字表現)）、ストリームのトレイト群と
 `Pathish`（[ストリームとファイル](streams-files.md)）。どの型がどれを実装しているかは
@@ -102,3 +102,36 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 `Div` を含めない（継承リストでは関連型をすべて固定する必要がある）。割り算をするジェネリック関数は
 `(:where (Div T (Output R)))` で結果の型を受け取るか、`(:where (Div T (Output T)))` で `T` の中に
 閉じた割り算を要求する（この場合 `int` は渡せない）。
+
+## 4. `Push` トレイト（要素を足す）
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+要素を 1 つずつ足せるコレクション。ジェネリック関数は `(:where (Push C (Item T)))` で
+「`T` を足せる型」を要求し、どのコレクションにも同じ `(push c x)` で足せる。
+
+| 型 | `push` の意味 |
+|---|---|
+| `Vector<T>` | 末尾に足す |
+| `Deque<T>` | 末尾に足す（`push-back`） |
+| `Array<T>` | fill pointer の位置に足す（`push-extend`）。fill pointer が無ければ panic |
+| `HashSet<T>` | 集合に入れる（`insert`）。要素の型が `Hash` を実装しているときだけ `Push` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+自前の型に `Push` を実装すれば、同じジェネリック関数に渡せる。`:dyn Push<int>` のように
+トレイトオブジェクトにもできる。

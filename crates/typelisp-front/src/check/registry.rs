@@ -296,6 +296,12 @@ pub struct AdtDef {
     /// substitutes a *specific* instantiation's `params` (e.g.
     /// `vector-iter<i32>`) in before use.
     pub trait_assoc: BTreeMap<Path, BTreeMap<String, Type>>,
+    /// Per-implemented-trait bounds the `impl`'s own `(:where ...)` puts on
+    /// this type's `params` (`(impl Push HashSet<T> (:where (Hash T)) ...)`):
+    /// trait `Path` -> {parameter name -> bounds}. An instantiation
+    /// implements the trait only when its arguments meet them
+    /// (`Checker::type_implements`).
+    pub impl_bounds: BTreeMap<Path, BTreeMap<String, Vec<TraitBound>>>,
     /// What `impl`s written for one instantiation of a generic type
     /// (`(impl Box<int> ...)`, `(impl Show Box<int> ...)`) add to it, keyed
     /// by [`ConcreteNames::type_args`]. `assoc`, `impls` and `trait_assoc` above hold only
@@ -1501,6 +1507,7 @@ fn builtin_adt(
         field_names: Vec::new(),
         impls: Vec::new(),
         trait_assoc: BTreeMap::new(),
+        impl_bounds: BTreeMap::new(),
         insts: BTreeMap::new(),
     }
 }

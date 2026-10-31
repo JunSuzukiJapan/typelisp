@@ -2859,7 +2859,8 @@ impl Checker {
         }
         let targs: Vec<Type> = all.iter().map(|p| subst[p.as_str()].clone()).collect();
         if targs.iter().any(|t| self.type_is_open(t))
-            || !self.generic_method_templates.contains_key(&(type_fq.clone(), template))
+            || !(self.generic_method_templates.contains_key(&(type_fq.clone(), template))
+                || self.builtin_specializable(type_fq, template))
         {
             return Err(not_here());
         }
@@ -3817,6 +3818,20 @@ impl Checker {
         })
     }
 
+    /// Whether `method` of the generic type `type_fq` is a built-in instance
+    /// method, which has no body of its own to call through a function value
+    /// or a trait object's table: those reach it through a specialization
+    /// whose body is the call ([`Self::specialize_builtin_method`]). A direct
+    /// call is still the built-in.
+    fn builtin_specializable(&self, type_fq: &Path, method: SymRef) -> bool {
+        self.info.reg.type_def(type_fq).is_some_and(|def| {
+            !def.params.is_empty()
+                && def.assoc.get(method).is_some_and(|af| {
+                    af.builtin && af.instance && af.sig.type_params.is_empty() && af.sig.rest.is_none()
+                })
+        })
+    }
+
     fn request_method_specialization(&self, type_fq: &Path, template: SymRef, base: SymRef, args: Vec<Type>) -> SymRef {
         let mangled = method_specialization(type_fq, base, &args);
         let mut memo = self.spec_memo.borrow_mut();
@@ -3986,11 +4001,13 @@ impl Checker {
         let SpecRequest::Method { type_fq, template, args, mangled, .. } = req else {
             unreachable!("drain routes Method requests here")
         };
-        let tmpl = self
-            .generic_method_templates
-            .get(&(type_fq.clone(), template.clone()))
-            .expect("a method specialization is only ever requested for a retained template")
-            .clone();
+        let Some(tmpl) = self.generic_method_templates.get(&(type_fq.clone(), template.clone())).cloned() else {
+            assert!(
+                self.builtin_specializable(type_fq, *template),
+                "a method specialization is only ever requested for a retained template or a built-in"
+            );
+            return self.specialize_builtin_method(heap, type_fq, *template, args, *mangled);
+        };
         match tmpl {
             MethodTemplate::Form { parts, ns, written_vars, own_vars } => {
                 let owner_n = args.len() - own_vars.len();
@@ -4036,6 +4053,46 @@ impl Checker {
         let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], method_sym, &ret)?;
         let lowered = self.lowered_all(heap, &body)?;
         self.info.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, &lowered)
+    }
+
+    /// The built-in instance method `method` of the generic type `type_fq` at
+    /// the owner's concrete `args`, as a method whose body calls it with its
+    /// parameters ([`Self::builtin_specializable`]).
+    fn specialize_builtin_method(
+        &self,
+        heap: &mut Heap,
+        type_fq: &Path,
+        method: SymRef,
+        args: &[Type],
+        mangled: SymRef,
+    ) -> Result<TopLevelForm, Error> {
+        let def = self.info.reg.type_def(type_fq).expect("a built-in specialization implies the type exists");
+        let af = def.assoc.get(method).expect("a built-in specialization implies the method exists");
+        let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(args.iter().cloned()).collect();
+        let params: Vec<(SymRef, Type)> = af
+            .sig
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let name = if i == 0 { "self".to_string() } else { format!("arg{}", i) };
+                (internal_local(&name), subst_apply(t, &subst))
+            })
+            .collect();
+        let ret = subst_apply(&af.sig.ret, &subst);
+        let call_args = params.iter().map(|(n, t)| Checked::of(Node::Local { name: *n }, t.clone())).collect();
+        let call = Checked::of(
+            Node::Assoc { owner: type_fq.clone(), method, instance: true, ret: ret.clone(), args: call_args },
+            ret.clone(),
+        );
+        let lowered = self.lowered_all(heap, &[call])?;
+        // Rooted across `defmethod_form`'s own allocations, as
+        // `synthesize_accessor` roots its body.
+        let mut s = RootScope::new(heap);
+        for v in &lowered {
+            s.push_root(*v);
+        }
+        self.info.defmethod_form(&mut s, type_fq, mangled, true, &params, &ret, &lowered)
     }
 
     /// Builds a concrete accessor `TopLevel::Defmethod` for a generic
@@ -5738,6 +5795,25 @@ impl Checker {
         }
         self.check_impl_conformance(&trait_fq, &target_fq, &target_ty, &written, &assoc_concrete)?;
         self.check_supertrait_impls(&trait_fq, &target_fq, inst_args.as_deref(), &assoc_concrete)?;
+        // Keyed by the type's own parameter names: the target may spell its
+        // variables differently (`(impl Push HashSet<U> (:where (Hash U)))`).
+        let mut impl_bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
+        if let Some(w) = impl_where {
+            let written_args = match &target_ty {
+                Type::Named(_, args) => args.as_slice(),
+                _ => &[],
+            };
+            let params = &self.info.reg.type_def(&target_fq).expect("checked above").params;
+            for (var, bs) in self.parse_where_clause(heap, w)? {
+                let i = written_args.iter().position(|a| matches!(a, Type::Var(v) if *v == var)).ok_or_else(|| {
+                    Error::TypeError(format!(
+                        "impl {} {}: `:where` bounds `{}`, which is not one of `{}`'s type parameters",
+                        trait_fq, target_ty, var, target_ty
+                    ))
+                })?;
+                impl_bounds.insert(params[i].clone(), bs);
+            }
+        }
         if let Some(def) = self.info.reg.type_def_mut(&target_fq) {
             match &inst_args {
                 Some(args) => {
@@ -5750,6 +5826,7 @@ impl Checker {
                 }
                 None => {
                     def.impls.push(trait_fq.clone());
+                    def.impl_bounds.insert(trait_fq.clone(), impl_bounds);
                     def.trait_assoc.insert(trait_fq, assoc_concrete);
                 }
             }
@@ -6326,7 +6403,7 @@ impl Checker {
                 _ => &[],
             };
             if def.implements_at(&tb.trait_path, args) {
-                return true;
+                return self.impl_bounds_hold(def, &tb.trait_path, args, depth);
             }
         }
         let Some(blanket) = self.info.reg.blanket_impl(&tb.trait_path) else { return false };
@@ -6356,6 +6433,24 @@ impl Checker {
             }
         }
         true
+    }
+
+    /// Whether the type arguments `args` of `def` meet the bounds its `impl`
+    /// of `trait_path` puts on its parameters ([`AdtDef::impl_bounds`]). An
+    /// argument that is still open is some generic context's type variable,
+    /// whose own bounds are checked again once each specialization has it
+    /// concrete.
+    fn impl_bounds_hold(&self, def: &AdtDef, trait_path: &Path, args: &[Type], depth: usize) -> bool {
+        let Some(bounds) = def.impl_bounds.get(trait_path) else { return true };
+        bounds.iter().all(|(param, bs)| {
+            let i = def
+                .params
+                .iter()
+                .position(|p| p == param)
+                .expect("an `impl`'s `:where` bounds only the target type's own parameters");
+            let arg = &args[i];
+            self.type_is_open(arg) || bs.iter().all(|b| self.type_implements(arg, b, depth + 1))
+        })
     }
 
     /// Queue a blanket impl's materialization at one concrete type, deduped
@@ -7322,7 +7417,8 @@ impl Checker {
             // does for a static call.
             let mut name = m;
             if !def.params.is_empty()
-                && self.generic_method_templates.contains_key(&(type_fq.clone(), m))
+                && (self.generic_method_templates.contains_key(&(type_fq.clone(), m))
+                    || self.builtin_specializable(&type_fq, m))
             {
                 if targs.len() != def.params.len() || targs.iter().any(|t| self.type_is_open(t)) {
                     return Err(Error::TypeError(format!(
@@ -8153,6 +8249,7 @@ impl Checker {
             field_names: Vec::new(),
             impls: Vec::new(),
             trait_assoc: BTreeMap::new(),
+            impl_bounds: BTreeMap::new(),
             insts: BTreeMap::new(),
         });
 
@@ -8301,6 +8398,7 @@ impl Checker {
             field_names,
             impls: Vec::new(),
             trait_assoc: BTreeMap::new(),
+            impl_bounds: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
         self.info.reg.module_mut(self.info.ns).add_type(def);
@@ -8619,6 +8717,7 @@ impl Checker {
             field_names: Vec::new(),
             impls: Vec::new(),
             trait_assoc: BTreeMap::new(),
+            impl_bounds: BTreeMap::new(),
             insts: BTreeMap::new(),
         });
 
@@ -8672,6 +8771,7 @@ impl Checker {
             field_names: Vec::new(),
             impls: Vec::new(),
             trait_assoc: BTreeMap::new(),
+            impl_bounds: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
         self.info.reg.module_mut(self.info.ns).add_type(def);
