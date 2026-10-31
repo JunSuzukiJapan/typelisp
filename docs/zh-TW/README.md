@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
 # typelisp 文件（繁體中文）
 
 typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫根目錄的 [README.md](../../README.md)（英文）。
@@ -30,6 +30,32 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
 (main)
 ```
 
+### 泛型
+
+在型別或函式的名稱後面用角括號寫型別參數。trait 約束寫在 `:where` 子句中。詳見[型別基礎](tutorial/types.md)與[trait](tutorial/traits.md)。
+
+```lisp
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### 用 Option 和 Result 取代 nil
 
 沒有 `nil`。可能沒有值時回傳 `Option<T>`，可能失敗時回傳 `Result<T,E>`，再用 `match` 取出其中的內容。若把 `Option<string>` 當作 `string` 使用，或在 `match` 中漏寫 `none` 的情況，程式執行之前就會出現型別錯誤。詳見[型別基礎](tutorial/types.md)與[錯誤處理](tutorial/errors.md)。
@@ -56,6 +82,30 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
 (match (parse-port "99999")
   ((ok p) (println "port ~a" p))
   ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### 用 `->` 串接處理
+
+`->` 巨集把值依序作為下一個運算式的第一個參數傳入。`(-> x (f a) (g b))` 與 `(g (f x a) b)` 相同。回傳 `Option` 或 `Result` 的處理可以由上而下依序書寫。詳見[Option、Result 與錯誤型別](reference/functions/option-result.md)。
+
+```lisp
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
 ```
 
 ### 經過型別檢查的巨集

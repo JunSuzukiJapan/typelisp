@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
 # typelisp 문서 (한국어)
 
 typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최상위의 [README.md](../../README.md)(영어)를
@@ -31,6 +31,32 @@ typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최�
 (main)
 ```
 
+### 제네릭
+
+타입이나 함수의 이름 뒤에 꺾쇠괄호로 타입 매개변수를 쓴다. 트레이트 경계는 `:where` 절에 쓴다. 자세한 내용은 [타입의 기초](tutorial/types.md), [트레이트](tutorial/traits.md) 문서를 참조한다.
+
+```lisp
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### nil 대신 Option과 Result
 
 `nil`은 없다. 값이 없을 수 있으면 `Option<T>`를, 실패할 수 있으면 `Result<T,E>`를 반환하고, `match`로 내용을 꺼낸다. `Option<string>`을 `string`처럼 쓰거나 `match`에서 `none`인 경우를 빠뜨리면 실행하기 전에 타입 오류가 된다. 자세한 내용은 [타입의 기초](tutorial/types.md), [오류 처리](tutorial/errors.md) 문서를 참조한다.
@@ -57,6 +83,30 @@ typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최�
 (match (parse-port "99999")
   ((ok p) (println "port ~a" p))
   ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### `->`로 처리 잇기
+
+`->` 매크로는 값을 다음 식의 첫 번째 인수로 차례로 넘긴다. `(-> x (f a) (g b))`는 `(g (f x a) b)`와 같다. `Option`이나 `Result`를 반환하는 처리를 위에서 아래로 쓸 수 있다. 자세한 내용은 [Option, Result, 오류 타입](reference/functions/option-result.md) 문서를 참조한다.
+
+```lisp
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
 ```
 
 ### 타입 검사되는 매크로

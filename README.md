@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: README_JP.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -143,6 +143,33 @@ It looks like this:
 (main)
 ```
 
+### Generics
+
+Type parameters are written in angle brackets after the name of a type or function. Trait bounds
+go in a `:where` clause.
+
+```
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### Option and Result instead of nil
 
 There is no `nil`. A function that may have no value returns `Option<T>`, and one that may fail
@@ -174,6 +201,32 @@ returns `Result<T,E>`; `match` takes the contents out.
 
 Using an `Option<string>` as a `string`, or leaving out the `none` case in a `match`, is a type
 error before the program runs.
+
+### Chaining with `->`
+
+The `->` macro passes a value as the first argument of each following form in turn.
+`(-> x (f a) (g b))` is the same as `(g (f x a) b)`. Steps that return `Option` or `Result` can be
+written from top to bottom.
+
+```
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
+```
 
 ### Type-checked macros
 

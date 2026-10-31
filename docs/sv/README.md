@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
 # typelisp-dokumentation (Svenska)
 
 typelisp är ett statiskt typat Lisp. Installation och bygge beskrivs i [README.md](../../README.md)
@@ -32,6 +32,34 @@ Du startar tasks (lättviktstrådar) som skickar värden till varandra genom kan
 (main)
 ```
 
+### Generiska typer
+
+Typparametrar skrivs inom vinkelparenteser efter namnet på en typ eller funktion. Trait-gränser
+skrivs i en `:where`-klausul. Se [Grunderna i typer](tutorial/types.md) och [Traits](tutorial/traits.md)
+för detaljer.
+
+```lisp
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### Option och Result i stället för nil
 
 Det finns inget `nil`. En funktion som kanske saknar värde returnerar `Option<T>`, och en som kan
@@ -61,6 +89,33 @@ körs. Se [Grunderna i typer](tutorial/types.md) och [Felhantering](tutorial/err
 (match (parse-port "99999")
   ((ok p) (println "port ~a" p))
   ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### Kedja med `->`
+
+Makrot `->` skickar ett värde i tur och ordning som första argument till varje följande form.
+`(-> x (f a) (g b))` är detsamma som `(g (f x a) b)`. Steg som returnerar `Option` eller `Result`
+kan då skrivas uppifrån och ned. Se [Option, Result och feltyper](reference/functions/option-result.md)
+för detaljer.
+
+```lisp
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
 ```
 
 ### Typkontrollerade makron

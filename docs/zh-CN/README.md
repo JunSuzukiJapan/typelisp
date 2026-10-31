@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
 # typelisp 文档（简体中文）
 
 typelisp 是一种静态类型的 Lisp。安装和构建方法请参阅仓库根目录的 [README.md](../../README.md)（英文）。
@@ -30,6 +30,32 @@ typelisp 是一种静态类型的 Lisp。安装和构建方法请参阅仓库根
 (main)
 ```
 
+### 泛型
+
+在类型或函数的名字后面用尖括号写类型参数。trait 约束写在 `:where` 子句中。详见[类型基础](tutorial/types.md)和[trait](tutorial/traits.md)。
+
+```lisp
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### 用 Option 和 Result 代替 nil
 
 没有 `nil`。可能没有值时返回 `Option<T>`，可能失败时返回 `Result<T,E>`，再用 `match` 取出其中的内容。如果把 `Option<string>` 当作 `string` 使用，或者在 `match` 中漏写 `none` 的情况，程序运行之前就会出现类型错误。详见[类型基础](tutorial/types.md)和[错误处理](tutorial/errors.md)。
@@ -56,6 +82,30 @@ typelisp 是一种静态类型的 Lisp。安装和构建方法请参阅仓库根
 (match (parse-port "99999")
   ((ok p) (println "port ~a" p))
   ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### 用 `->` 串联处理
+
+`->` 宏把值依次作为下一个表达式的第一个参数传入。`(-> x (f a) (g b))` 与 `(g (f x a) b)` 相同。返回 `Option` 或 `Result` 的处理可以从上到下依次书写。详见[Option、Result 与错误类型](reference/functions/option-result.md)。
+
+```lisp
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
 ```
 
 ### 经过类型检查的宏

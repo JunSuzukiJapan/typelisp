@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
 # Documentação do typelisp (português do Brasil)
 
 typelisp é um Lisp com tipagem estática. Para instalá-lo e compilá-lo, consulte o
@@ -32,6 +32,34 @@ Inicie tarefas (threads leves) e passe valores entre elas por meio de canais. Co
 (main)
 ```
 
+### Genéricos
+
+Os parâmetros de tipo são escritos entre colchetes angulares depois do nome de um tipo ou de uma
+função. As restrições de trait ficam em uma cláusula `:where`. Consulte
+[Fundamentos de tipos](tutorial/types.md) e [Traits](tutorial/traits.md) para mais detalhes.
+
+```lisp
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### Option e Result em vez de nil
 
 Não existe `nil`. Uma função que pode não ter valor retorna `Option<T>`, e uma que pode falhar
@@ -62,6 +90,33 @@ mais detalhes.
 (match (parse-port "99999")
   ((ok p) (println "port ~a" p))
   ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### Encadeando com `->`
+
+A macro `->` passa um valor, em sequência, como primeiro argumento de cada forma seguinte.
+`(-> x (f a) (g b))` é o mesmo que `(g (f x a) b)`. Assim, etapas que retornam `Option` ou `Result`
+são escritas de cima para baixo. Consulte [Option, Result e tipos de erro](reference/functions/option-result.md)
+para mais detalhes.
+
+```lisp
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
 ```
 
 ### Macros com verificação de tipos

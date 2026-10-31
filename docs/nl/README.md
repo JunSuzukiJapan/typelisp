@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
 # typelisp-documentatie (Nederlands)
 
 typelisp is een statisch getypeerde Lisp. Voor het installeren en bouwen zie de
@@ -32,6 +32,34 @@ Je start taken (lichtgewicht threads) die via kanalen waarden aan elkaar doorgev
 (main)
 ```
 
+### Generics
+
+Typeparameters schrijf je tussen punthaken na de naam van een type of functie. Trait bounds komen
+in een `:where`-clausule. Zie [Basis van types](tutorial/types.md) en [Traits](tutorial/traits.md)
+voor details.
+
+```lisp
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### Option en Result in plaats van nil
 
 Er is geen `nil`. Een functie die mogelijk geen waarde heeft, geeft `Option<T>` terug, en een
@@ -62,6 +90,33 @@ typefout nog voordat het programma draait. Zie [Basis van types](tutorial/types.
 (match (parse-port "99999")
   ((ok p) (println "port ~a" p))
   ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### Ketenen met `->`
+
+De macro `->` geeft een waarde om de beurt door als eerste argument van elke volgende vorm.
+`(-> x (f a) (g b))` is hetzelfde als `(g (f x a) b)`. Stappen die een `Option` of `Result`
+teruggeven schrijf je zo van boven naar beneden. Zie
+[Option, Result en foutentypes](reference/functions/option-result.md) voor details.
+
+```lisp
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
 ```
 
 ### Macro's met typecontrole
