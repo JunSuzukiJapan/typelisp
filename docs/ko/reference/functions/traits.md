@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # 표준 트레이트
 
-반복, 비교, 산술을 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
+반복, 비교, 산술, 요소 추가를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
 `Error`([오류 타입](option-result.md#3-오류-타입과-error-트레이트)), `print-object`
 ([출력](printing.md#5-print-object타입별-출력-표현)), 스트림 트레이트와 `Pathish`([스트림과 파일](streams-files.md)).
 어느 타입이 어느 것을 구현하는지는 [타입 목록](../types.md)에 있다. 트레이트를 정의하는 방법은
@@ -99,3 +99,34 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 `Div`를 포함하지 않는다(상속 목록에서는 연관 타입을 모두 고정해야 한다). 나눗셈을 하는 제네릭 함수는
 `(:where (Div T (Output R)))`로 결과 타입을 받거나, `(:where (Div T (Output T)))`로 `T` 안에서 닫힌
 나눗셈을 요구한다(이 경우 `int`는 넘길 수 없다).
+
+## 4. `Push` 트레이트(요소 추가)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+요소를 하나씩 추가할 수 있는 컬렉션. 제네릭 함수는 `(:where (Push C (Item T)))`로 "`T`를 추가할 수 있는 타입"을 요구하고, 어느 컬렉션에든 같은 `(push c x)`로 추가한다.
+
+| 타입 | `push`의 의미 |
+|---|---|
+| `Vector<T>` | 끝에 추가한다 |
+| `Deque<T>` | 끝에 추가한다(`push-back`) |
+| `Array<T>` | 채움 포인터 위치에 추가한다(`push-extend`). 채움 포인터가 없으면 panic |
+| `HashSet<T>` | 집합에 넣는다(`insert`). 요소 타입이 `Hash`를 구현할 때만 `Push` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+직접 만든 타입에 `Push`를 구현하면 같은 제네릭 함수에 넘길 수 있다. `:dyn Push<int>`처럼 트레이트 객체로도 만들 수 있다.

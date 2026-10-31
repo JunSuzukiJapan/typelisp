@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # String'ler, Karakterler ve Koleksiyonlar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` ve `Deque<T>`.
@@ -72,7 +72,7 @@ Yazdırıldığında da `#(1 2 3)` olur.
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Boş bir vektör yapar. Tür bağımsız değişkeni beklenen türden gelir; bu yüzden çıplak bir `let` içinde `(the Vector<i32> (Vector::new))` yazın |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `x`'in `n` kopyası |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Sona ekler |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Sona ekler ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`'inci elemanı okur. Aralık dışında panic olur |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`'inci elemanı değiştirir. Aralık dışında panic olur. `(setf (get v i) x)` olarak da yazılabilir |
 | `len` | `(len v)` | `Vector<T>→int` | Eleman sayısı |
@@ -158,6 +158,7 @@ Başvurusu](../syntax.md#1-sözcüksel-öğeler)).
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CL'nin `array-row-major-index`'i |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL'nin `adjust-array`'i. Rank değişemez. Aralıkta kalan elemanlar indekslerinde korunur ve yeni hücreler `init` alır. CL'den farklı olarak diziyi döndürmez (bu dildeki her dizi ayarlanabilirdir; bu yüzden döndürülecek ikinci bir dizi yoktur) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL'nin `vector-push-extend`'i. Doldurma işaretçisi olmadan panic olur |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` ile aynı ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CL'nin `vector-pop`'u. Boşsa `none` |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Doldurma işaretçisi (yoksa `none`). `(setf a::fill-pointer …)` ile yazılabilir |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Satır öncelikli sırayla bir yineleyici. Varsa doldurma işaretçisinde durur |
@@ -198,6 +199,7 @@ kütüphane `defstruct`'ı. Öğe türü, bir `HashTable` anahtarı gibi `Hash`'
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`'i ekler. Yoksa `true`, zaten varsa `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`'in olup olmadığı |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`'i çıkarır. Varsa `true` |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | `insert` ile aynı, ama `x`'in yeni olup olmadığını söylemez ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
 | `count` | `(count s)` | `HashSet<T>→int` | Öğe sayısı |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Her şeyi siler |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Öğeler üzerinde bir yineleyici. Sıra belirsizdir |
@@ -249,6 +251,7 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Boş bir dizi oluşturur |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Başa / sona ekler |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` ile aynı ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeyi çıkarıp döndürür. Boşsa `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeye bakar (çıkarmadan) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Baştan `i`'nci öğe. Aralık dışındaysa `none` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Chaînes, caractères et collections
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` et `Deque<T>`.
@@ -74,7 +74,7 @@ Elle s'imprime aussi `#(1 2 3)`.
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Crée un vecteur vide. L'argument de type vient du type attendu ; dans un simple `let`, écrivez donc `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` copies de `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Ajoute à la fin |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Ajoute à la fin (une méthode du trait [`Push`](traits.md#4-le-trait-push-ajouter-des-éléments)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Lit l'élément `i`. Panic hors limites |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Modifie l'élément `i`. Panic hors limites. Peut aussi s'écrire `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Nombre d'éléments |
@@ -159,6 +159,7 @@ Une valeur s'écrit `#2A((1 2) (3 4))` ([référence de la syntaxe](../syntax.md
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | Le `array-row-major-index` de CL |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | Le `adjust-array` de CL. Le rang ne peut pas changer. Les éléments qui restent dans les limites gardent leurs indices, et les nouvelles cellules reçoivent `init`. Contrairement à CL, il ne renvoie pas le tableau (tout tableau de ce langage est ajustable ; il n'y a donc pas de second tableau à renvoyer) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | Le `vector-push-extend` de CL. Panic sans pointeur de remplissage |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | Identique à `push-extend` (une méthode du trait [`Push`](traits.md#4-le-trait-push-ajouter-des-éléments)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | Le `vector-pop` de CL. `none` si vide |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Le pointeur de remplissage (`none` s'il n'y en a pas). Peut s'écrire avec `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Un itérateur dans l'ordre ligne par ligne. S'arrête au pointeur de remplissage s'il y en a un |
@@ -201,6 +202,7 @@ comme une clé de `HashTable`.
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Ajoute `x`. `true` s'il n'y était pas, `false` s'il y était déjà |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Si `x` y est |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Retire `x`. `true` s'il y était |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | Identique à `insert`, mais n'indique pas si `x` était nouveau (une méthode du trait [`Push`](traits.md#4-le-trait-push-ajouter-des-éléments)) |
 | `count` | `(count s)` | `HashSet<T>→int` | Le nombre d'éléments |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Vide tout |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Un itérateur sur les éléments. L'ordre n'est pas défini |
@@ -252,6 +254,7 @@ Une séquence où l'on peut ajouter et retirer aux deux bouts (le `VecDeque` de 
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Crée une séquence vide |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Ajoute au début / à la fin |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Identique à `push-back` (une méthode du trait [`Push`](traits.md#4-le-trait-push-ajouter-des-éléments)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Retire l'élément du début / de la fin et le renvoie. `none` si vide |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Regarde l'élément du début / de la fin (sans le retirer) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Le `i`-ième depuis le début. `none` hors limites |

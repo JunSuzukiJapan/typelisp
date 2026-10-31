@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # السمات القياسية
 
-سمات التكرار والمقارنة والحساب. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
+سمات التكرار والمقارنة والحساب وإضافة العناصر. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
 ([HashTable](collections.md#4-hashtablekv)) و`Error`
 ([أنواع الأخطاء](option-result.md#3-أنواع-الأخطاء-والسمة-error)) و`print-object`
 ([الطباعة](printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع)) وسمات التدفقات و`Pathish`
@@ -104,3 +104,34 @@
 لآخر، لا يتضمن `Number` السمة `Div` (يجب أن تثبّت قائمة السمات الأعلى كل نوع مرتبط). الدالة العامة
 التي تقسم تستقبل نوع النتيجة بـ`(:where (Div T (Output R)))`، أو تطلب قسمة مغلقة في `T`
 بـ`(:where (Div T (Output T)))` (وحينها لا يمكن تمرير `int`).
+
+## 4. السمة `Push` (إضافة العناصر)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+مجموعة يمكن إضافة العناصر إليها واحدًا تلو الآخر. تطلب الدالة العامة «نوعًا يمكن إضافة `T` إليه» بـ `(:where (Push C (Item T)))`، وتضيف إلى أي مجموعة من هذا القبيل بالاستدعاء نفسه `(push c x)`.
+
+| النوع | ما يفعله `push` |
+|---|---|
+| `Vector<T>` | يضيف في النهاية |
+| `Deque<T>` | يضيف في النهاية (`push-back`) |
+| `Array<T>` | يضيف عند مؤشر الملء (`push-extend`). ويحدث `panic` بدون مؤشر ملء |
+| `HashSet<T>` | يضعه في المجموعة (`insert`). ولا يكون `Push` إلا حين يطبّق نوع العناصر `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+يمكن تمرير نوع خاص بك يطبّق `Push` إلى الدوال العامة نفسها. ويمكن أيضًا أن يكون كائن سمة، كما في `:dyn Push<int>`.

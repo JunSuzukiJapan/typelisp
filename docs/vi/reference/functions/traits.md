@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Các trait chuẩn
 
-Các trait cho việc lặp, so sánh và số học. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
+Các trait cho việc lặp, so sánh, số học và thêm phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Các kiểu lỗi](option-result.md#3-các-kiểu-lỗi-và-trait-error)), `print-object`
 ([In](printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu)), và các trait của stream cùng
@@ -110,3 +110,36 @@ trên mọi kiểu số nguyên và `int`.
 khác nhau giữa các kiểu, `Number` không chứa `Div` (danh sách supertrait phải cố định mọi kiểu liên
 kết). Hàm tổng quát có phép chia nhận kiểu kết quả bằng `(:where (Div T (Output R)))`, hoặc yêu cầu phép
 chia khép kín trong `T` bằng `(:where (Div T (Output T)))` (khi đó không truyền được `int`).
+
+## 4. Trait `Push` (thêm phần tử)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+Một tập hợp có thể thêm phần tử vào từng cái một. Hàm generic yêu cầu "một kiểu có thể thêm `T` vào"
+bằng `(:where (Push C (Item T)))` và thêm vào bất kỳ tập hợp nào như vậy bằng cùng một `(push c x)`.
+
+| Kiểu | `push` làm gì |
+|---|---|
+| `Vector<T>` | Thêm vào cuối |
+| `Deque<T>` | Thêm vào cuối (`push-back`) |
+| `Array<T>` | Thêm tại vị trí fill pointer (`push-extend`). Panic nếu không có fill pointer |
+| `HashSet<T>` | Đưa vào tập (`insert`). Chỉ là `Push` khi kiểu phần tử triển khai `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+Một kiểu tự định nghĩa có triển khai `Push` có thể được truyền cho cùng các hàm generic đó. Nó cũng
+có thể là một trait object, như `:dyn Push<int>`.

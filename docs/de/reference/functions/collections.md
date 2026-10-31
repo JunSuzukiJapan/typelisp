@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Zeichenketten, Zeichen und Sammlungen
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` und `Deque<T>`.
@@ -75,7 +75,7 @@ ebenfalls als `#(1 2 3)`.
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Erzeugt einen leeren Vektor. Das Typargument stammt aus dem erwarteten Typ, daher schreibt man in einem bloßen `let` `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` Kopien von `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Hängt ans Ende an |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Hängt ans Ende an (eine Methode des Traits [`Push`](traits.md#4-der-trait-push-elemente-hinzufügen)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Liest das Element `i`. Panic außerhalb des Bereichs |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Ändert das Element `i`. Panic außerhalb des Bereichs. Lässt sich auch als `(setf (get v i) x)` schreiben |
 | `len` | `(len v)` | `Vector<T>→int` | Anzahl der Elemente |
@@ -161,6 +161,7 @@ Ein Wert lässt sich als `#2A((1 2) (3 4))` schreiben
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CLs `array-row-major-index` |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CLs `adjust-array`. Der Rang kann sich nicht ändern. Elemente, die im Bereich bleiben, behalten ihre Indizes, neue Zellen bekommen `init`. Anders als CL gibt es das Array nicht zurück (jedes Array dieser Sprache ist anpassbar, daher gibt es kein zweites Array, das man zurückgeben könnte) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CLs `vector-push-extend`. Panic ohne Füllzeiger |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | Dasselbe wie `push-extend` (eine Methode des Traits [`Push`](traits.md#4-der-trait-push-elemente-hinzufügen)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CLs `vector-pop`. `none`, wenn leer |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Der Füllzeiger (`none`, wenn keiner da ist). Lässt sich mit `(setf a::fill-pointer …)` schreiben |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Ein Iterator in zeilenweiser Reihenfolge. Hält am Füllzeiger an, falls einer da ist |
@@ -203,6 +204,7 @@ implementieren, wie ein Schlüssel einer `HashTable`.
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Fügt `x` hinzu. `true`, wenn es neu war, `false`, wenn es schon da war |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Ob `x` enthalten ist |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Entfernt `x`. `true`, wenn es enthalten war |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | Dasselbe wie `insert`, sagt aber nicht, ob `x` neu war (eine Methode des Traits [`Push`](traits.md#4-der-trait-push-elemente-hinzufügen)) |
 | `count` | `(count s)` | `HashSet<T>→int` | Die Anzahl der Elemente |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Entfernt alles |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Ein Iterator über die Elemente. Die Reihenfolge ist nicht festgelegt |
@@ -254,6 +256,7 @@ Eine Folge, die man an beiden Enden befüllen und entnehmen kann (Rusts `VecDequ
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Erzeugt eine leere Folge |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Fügt vorne / hinten hinzu |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Dasselbe wie `push-back` (eine Methode des Traits [`Push`](traits.md#4-der-trait-push-elemente-hinzufügen)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Entnimmt das vordere / hintere Element und gibt es zurück. `none`, wenn leer |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Liest das vordere / hintere Element (ohne es zu entnehmen) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Das `i`-te von vorne. `none` außerhalb des Bereichs |

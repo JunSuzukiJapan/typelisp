@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Inbyggda funktioner
 
 Listan över inbyggda funktioner, metoder och standardbiblioteket. För syntax (specialformer och hur man
@@ -73,7 +73,7 @@ Tabellerna i varje kapitel har kolumnerna "namn, form, typ, beskrivning". Typkol
 | [sequences.md](sequences.md) | Paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktioner, lata iteratorer `lazy`, högre ordningens funktioner |
 | [collections.md](collections.md) | Strängar, tecken, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, feltyper och traitet `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetiska traits |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetiska traits, `Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`, den snygga skrivaren (pretty printer), `print-object`, kontrollvariabler för utskrift |
 | [format.md](format.md) | Formatdirektiv |
 | [streams-files.md](streams-files.md) | Strömmar, filoperationer, pathnames, readtable |

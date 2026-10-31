@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -122,11 +122,12 @@ bila tipe elemennya mengimplementasikan trait tersebut.
 
 Rinciannya ada di [Trait aritmetika](functions/traits.md#3-trait-aritmetika-add--sub--mul--div--rem--bits--number).
 
-### 6.3 Iterasi
+### 6.3 Iterasi dan penambahan elemen
 
 | Trait | Tipe yang mengimplementasikan |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` tipe-tipe modul `lazy` (`lazy::map-iter<I,A,U>` dan lain-lain) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (jika tipe elemennya mengimplementasikan `Hash`) |
 
 ### 6.4 Stream
 

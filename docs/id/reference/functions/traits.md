@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Trait Standar
 
-Trait untuk iterasi, perbandingan, dan aritmetika. Trait standar lainnya ada di bab masing-masing:
+Trait untuk iterasi, perbandingan, aritmetika, dan penambahan elemen. Trait standar lainnya ada di bab masing-masing:
 `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Tipe kesalahan](option-result.md#3-tipe-kesalahan-dan-trait-error)), `print-object`
 ([Pencetakan](printing.md#5-print-object-representasi-cetak-per-tipe)), serta trait stream dan
@@ -112,3 +112,37 @@ tipe itu sendiri. Karena `Output` berbeda antar tipe, `Number` tidak menyertakan
 harus menetapkan setiap tipe terkait). Fungsi generik yang membagi menerima tipe hasil dengan
 `(:where (Div T (Output R)))`, atau meminta pembagian yang tertutup dalam `T` dengan
 `(:where (Div T (Output T)))` (maka `int` tidak dapat diteruskan).
+
+## 4. Trait `Push` (menambahkan elemen)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+Koleksi yang dapat ditambahi elemen satu per satu. Fungsi generik meminta "tipe yang dapat ditambahi
+`T`" dengan `(:where (Push C (Item T)))`, lalu menambahkan ke koleksi mana pun dengan `(push c x)`
+yang sama.
+
+| Tipe | Yang dilakukan `push` |
+|---|---|
+| `Vector<T>` | Menambahkan di akhir |
+| `Deque<T>` | Menambahkan di akhir (`push-back`) |
+| `Array<T>` | Menambahkan di posisi fill pointer (`push-extend`). Panic tanpa fill pointer |
+| `HashSet<T>` | Memasukkannya ke himpunan (`insert`). Merupakan `Push` hanya jika tipe elemennya mengimplementasikan `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+Tipe buatan sendiri yang mengimplementasikan `Push` dapat diberikan ke fungsi generik yang sama.
+Tipe itu juga dapat menjadi objek trait, seperti pada `:dyn Push<int>`.

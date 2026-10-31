@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -123,11 +123,12 @@ zijn bruikbaar als de elementtypen die trait implementeren.
 
 Details staan in [Rekenkundige traits](functions/traits.md#3-rekenkundige-traits-add--sub--mul--div--rem--bits--number).
 
-### 6.3 Iteratie
+### 6.3 Iteratie en het toevoegen van elementen
 
 | Trait | Implementerende types |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` de typen van de module `lazy` (`lazy::map-iter<I,A,U>` enz.) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (als het elementtype `Hash` implementeert) |
 
 ### 6.4 Streams
 

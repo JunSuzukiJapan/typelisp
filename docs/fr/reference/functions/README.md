@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Fonctions intégrées
 
 La liste des fonctions intégrées, des méthodes et de la bibliothèque standard. Pour la syntaxe (formes spéciales et
@@ -73,7 +73,7 @@ Les tableaux de chaque chapitre ont les colonnes « nom, forme, type, descriptio
 | [sequences.md](sequences.md) | La paire `cons-cell`, les données S-expression `Sexpr`, les symboles, les fonctions de séquence, itérateurs paresseux `lazy`, les fonctions d'ordre supérieur |
 | [collections.md](collections.md) | Chaînes, caractères, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, les types d'erreur et le trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, les traits arithmétiques |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, les traits arithmétiques, `Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`, le pretty printer, `print-object`, les variables de contrôle de l'affichage |
 | [format.md](format.md) | Directives de format |
 | [streams-files.md](streams-files.md) | Flux, opérations sur les fichiers, noms de chemin, readtable |

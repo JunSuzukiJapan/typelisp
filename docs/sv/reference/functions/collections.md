@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Strängar, tecken och samlingar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` och `Deque<T>`.
@@ -74,7 +74,7 @@ vektor). Det skrivs också ut som `#(1 2 3)`.
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Skapar en tom vektor. Typargumentet kommer från den förväntade typen, så i ett bart `let` skriver man `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` kopior av `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Lägger till sist |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Lägger till sist (en metod i traiten [`Push`](traits.md#4-traiten-push-lägga-till-element)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Läser element `i`. Ger panic utanför intervallet |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Ändrar element `i`. Ger panic utanför intervallet. Kan också skrivas `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Antal element |
@@ -160,6 +160,7 @@ Ett värde kan skrivas `#2A((1 2) (3 4))` (se
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CL:s `array-row-major-index` |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL:s `adjust-array`. Rangen kan inte ändras. Element som stannar inom intervallet behålls på sina index, och nya celler får `init`. Till skillnad från CL returnerar den inte arrayen (varje array i det här språket är justerbar, så det finns ingen andra array att returnera) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL:s `vector-push-extend`. Ger panic utan fyllpekare |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | Samma som `push-extend` (en metod i traiten [`Push`](traits.md#4-traiten-push-lägga-till-element)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CL:s `vector-pop`. `none` om tom |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Fyllpekaren (`none` om det inte finns någon). Kan skrivas med `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | En iterator i radvis ordning (row-major). Stannar vid fyllpekaren om det finns en |
@@ -201,6 +202,7 @@ innehåll är en `HashTable<T,()>`. Elementtypen måste implementera `Hash`, lik
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Lägger till `x`. `true` om det inte fanns, `false` om det redan fanns |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Om `x` finns |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Tar bort `x`. `true` om det fanns |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | Samma som `insert`, men säger inte om `x` var nytt (en metod i traiten [`Push`](traits.md#4-traiten-push-lägga-till-element)) |
 | `count` | `(count s)` | `HashSet<T>→int` | Antalet element |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Tar bort allt |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | En iterator över elementen. Ordningen är inte bestämd |
@@ -252,6 +254,7 @@ En följd som man kan lägga till i och ta ut ur i båda ändar (Rusts `VecDeque
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Skapar en tom följd |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Lägger till först / sist |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Samma som `push-back` (en metod i traiten [`Push`](traits.md#4-traiten-push-lägga-till-element)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Tar ut det första / sista elementet och returnerar det. `none` om tom |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Tittar på det första / sista elementet (utan att ta ut det) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Det `i`:te från början. `none` utanför intervallet |

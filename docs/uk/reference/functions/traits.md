@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Стандартні трейти
 
-Трейти для ітерації, порівняння та арифметики. Інші стандартні трейти описано у власних розділах: `Hash`
+Трейти для ітерації, порівняння, арифметики та додавання елементів. Інші стандартні трейти описано у власних розділах: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Типи помилок](option-result.md#3-типи-помилок-і-трейт-error)), `print-object`
 ([Друк](printing.md#5-print-object-представлення-для-друку-для-кожного-типу)), а також трейти потоків і
@@ -112,3 +112,37 @@
 асоційований тип). Узагальнена функція, що ділить, приймає тип результату через
 `(:where (Div T (Output R)))` або вимагає ділення, замкненого в `T`, через `(:where (Div T (Output T)))`
 (тоді `int` передати не можна).
+
+## 4. Трейт `Push` (додавання елементів)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+Колекція, до якої можна додавати елементи по одному. Узагальнена функція вимагає «тип, до якого
+можна додати `T`», через `(:where (Push C (Item T)))` і додає до будь-якої такої колекції тим самим
+`(push c x)`.
+
+| Тип | Що робить `push` |
+|---|---|
+| `Vector<T>` | Додає в кінець |
+| `Deque<T>` | Додає в кінець (`push-back`) |
+| `Array<T>` | Додає за покажчиком заповнення (`push-extend`). Panic без покажчика заповнення |
+| `HashSet<T>` | Додає до множини (`insert`). Є `Push`, лише коли тип елементів реалізує `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+Власний тип, що реалізує `Push`, можна передавати тим самим узагальненим функціям. Він може бути й
+об'єктом трейту, як у `:dyn Push<int>`.

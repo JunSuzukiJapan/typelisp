@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Łańcuchy znaków, znaki i kolekcje
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` i `Deque<T>`.
@@ -73,7 +73,7 @@ elementu, a każde obliczenie tworzy nowy wektor). Jest też drukowana jako `#(1
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Tworzy pusty wektor. Argument typu pochodzi z oczekiwanego typu, więc w samym `let` napisz `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` kopii `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Dopisuje na końcu |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Dopisuje na końcu (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Odczytuje element `i`. Powoduje panic poza zakresem |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Zmienia element `i`. Powoduje panic poza zakresem. Można też napisać `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Liczba elementów |
@@ -159,6 +159,7 @@ składni](../syntax.md#1-elementy-leksykalne)).
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | `array-row-major-index` z CL |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` z CL. Rangi nie można zmienić. Elementy, które pozostają w zakresie, są zachowane pod swoimi indeksami, a nowe komórki dostają `init`. W przeciwieństwie do CL nie zwraca tablicy (każda tablica w tym języku jest dostosowywalna, więc nie ma drugiej tablicy do zwrócenia) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` z CL. Powoduje panic bez wskaźnika wypełnienia |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | To samo co `push-extend` (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` z CL. `none`, jeśli pusta |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Wskaźnik wypełnienia (`none`, jeśli go nie ma). Można go zapisać za pomocą `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Iterator w porządku wierszowym (row-major). Zatrzymuje się na wskaźniku wypełnienia, jeśli jest |
@@ -200,6 +201,7 @@ zawartością jest `HashTable<T,()>`. Typ elementu musi implementować `Hash`, t
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Dodaje `x`. `true`, jeśli go nie było, `false`, jeśli już był |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Czy `x` jest w zbiorze |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Usuwa `x`. `true`, jeśli był |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | To samo co `insert`, ale nie mówi, czy `x` był nowy (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
 | `count` | `(count s)` | `HashSet<T>→int` | Liczba elementów |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Usuwa wszystko |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Iterator po elementach. Kolejność nie jest określona |
@@ -251,6 +253,7 @@ Ciąg, do którego można dodawać i z którego można wyjmować z obu końców 
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Tworzy pusty ciąg |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Dodaje na początek / koniec |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | To samo co `push-back` (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Wyjmuje element z początku / końca i go zwraca. `none`, gdy pusty |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Podgląda element z początku / końca (bez wyjmowania) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-ty od początku. `none` poza zakresem |

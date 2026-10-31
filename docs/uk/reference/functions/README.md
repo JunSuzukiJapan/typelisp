@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Вбудовані функції
 
 Перелік вбудованих функцій, методів і стандартної бібліотеки. Про синтаксис (спеціальні форми та способи
@@ -71,7 +71,7 @@
 | [sequences.md](sequences.md) | Пара `cons-cell`, S-вирази `Sexpr`, символи, функції над послідовностями, ліниві ітератори `lazy`, функції вищого порядку |
 | [collections.md](collections.md) | Рядки, знаки, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, типи помилок і трейт `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, арифметичні трейти |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, арифметичні трейти, `Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, змінні керування друком |
 | [format.md](format.md) | Директиви формату |
 | [streams-files.md](streams-files.md) | Потоки, файлові операції, шляхи, readtable |

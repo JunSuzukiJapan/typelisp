@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # 字符串、字符与集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -70,7 +70,7 @@
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | 创建空向量。类型参数由期望类型决定，所以在裸 `let` 中写成 `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` 个 `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | 追加到末尾 |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | 追加到末尾（[`Push`](traits.md#4-push-trait添加元素) trait 的方法） |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | 读取第 `i` 个。越界时 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | 修改第 `i` 个。越界时 panic。也可以写成 `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | 元素个数 |
@@ -149,6 +149,7 @@
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CL 的 `array-row-major-index` |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL 的 `adjust-array`。不能改变秩。仍在范围内的元素按下标保留，新增的单元为 `init`。与 CL 不同，不返回数组（本语言的数组都是可调整的，没有要返回的第二个数组） |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL 的 `vector-push-extend`。没有填充指针时 panic |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | 与 `push-extend` 相同（[`Push`](traits.md#4-push-trait添加元素) trait 的方法） |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CL 的 `vector-pop`。为空时为 `none` |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 填充指针（没有时为 `none`）。可以用 `(setf a::fill-pointer …)` 写入 |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | 按行主序的迭代器。有填充指针时在那里停止 |
@@ -186,6 +187,7 @@
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 加入 `x`。新加入时为 `true`，已存在时为 `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | 是否含有 `x` |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 去掉 `x`。原本存在时为 `true` |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | 与 `insert` 相同，但不返回 `x` 是否为新加入的（[`Push`](traits.md#4-push-trait添加元素) trait 的方法） |
 | `count` | `(count s)` | `HashSet<T>→int` | 元素个数 |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | 全部删除 |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 元素的迭代器。顺序不确定 |
@@ -233,6 +235,7 @@
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | 创建空序列 |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 加到开头／末尾 |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | 与 `push-back` 相同（[`Push`](traits.md#4-push-trait添加元素) trait 的方法） |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 取出开头／末尾的元素并返回。为空时为 `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 查看开头／末尾的元素（不取出） |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 从开头数第 `i` 个。越界时为 `none` |

@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Standard Traits
 
-The traits for iteration, comparison and arithmetic. The other standard traits are in their own
+The traits for iteration, comparison, arithmetic and adding elements. The other standard traits are in their own
 chapters: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Error types](option-result.md#3-error-types-and-the-error-trait)), `print-object`
 ([Printing](printing.md#5-print-object-per-type-printed-representation)), and the stream traits and
@@ -112,3 +112,37 @@ itself. Because `Output` differs between the types, `Number` does not include `D
 must pin every associated type). A generic function that divides takes the result type with
 `(:where (Div T (Output R)))`, or asks for division closed in `T` with `(:where (Div T (Output T)))` (an
 `int` cannot be passed then).
+
+## 4. The `Push` trait (adding elements)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+A collection that elements can be added to one at a time. A generic function asks for "a type `T`
+can be added to" with `(:where (Push C (Item T)))`, and adds to any such collection with the same
+`(push c x)`.
+
+| Type | What `push` does |
+|---|---|
+| `Vector<T>` | Appends to the end |
+| `Deque<T>` | Appends to the end (`push-back`) |
+| `Array<T>` | Adds at the fill pointer (`push-extend`). Panics without a fill pointer |
+| `HashSet<T>` | Puts it in the set (`insert`). A `Push` only when the element type implements `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+A type of your own that implements `Push` can be passed to the same generic functions. It can also
+be a trait object, as in `:dyn Push<int>`.

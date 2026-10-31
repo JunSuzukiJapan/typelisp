@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Trait มาตรฐาน
 
-trait สำหรับการวนซ้ำ การเปรียบเทียบ และการคำนวณ trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
+trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มสมาชิก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
 `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([ชนิดข้อผิดพลาด](option-result.md#3-ชนิดข้อผิดพลาดและ-trait-error)), `print-object`
 ([การพิมพ์](printing.md#5-print-object-การแสดงผลของแต่ละชนิด)) และ trait ของสตรีมกับ
@@ -111,3 +111,34 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 ต่างกันตามชนิด `Number` จึงไม่รวม `Div` (รายการ supertrait ต้องตรึงชนิดที่เกี่ยวข้องทุกตัว)
 ฟังก์ชันเจเนอริกที่หารจะรับชนิดผลลัพธ์ด้วย `(:where (Div T (Output R)))` หรือขอการหารที่ปิดใน `T` ด้วย
 `(:where (Div T (Output T)))` (กรณีนี้ส่ง `int` ไม่ได้)
+
+## 4. trait `Push` (การเพิ่มสมาชิก)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+คอลเลกชันที่เพิ่มสมาชิกได้ทีละตัว ฟังก์ชัน generic ขอ "ชนิดที่เพิ่ม `T` ได้" ด้วย `(:where (Push C (Item T)))` แล้วเพิ่มลงในคอลเลกชันแบบนั้นใดก็ได้ด้วย `(push c x)` เดียวกัน
+
+| ชนิด | สิ่งที่ `push` ทำ |
+|---|---|
+| `Vector<T>` | เพิ่มต่อท้าย |
+| `Deque<T>` | เพิ่มต่อท้าย (`push-back`) |
+| `Array<T>` | เพิ่มที่ตำแหน่ง fill pointer (`push-extend`) panic หากไม่มี fill pointer |
+| `HashSet<T>` | ใส่ลงในเซต (`insert`) เป็น `Push` เฉพาะเมื่อชนิดของสมาชิก implement `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+ชนิดที่เขียนเองซึ่ง implement `Push` ส่งให้ฟังก์ชัน generic เดียวกันได้ และยังเป็น trait object ได้ด้วย เช่น `:dyn Push<int>`

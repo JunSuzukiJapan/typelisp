@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # String, Karakter, dan Koleksi
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, dan `Deque<T>`.
@@ -74,7 +74,7 @@ dicetak sebagai `#(1 2 3)`.
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Membuat vector kosong. Argumen tipe berasal dari tipe yang diharapkan, sehingga pada `let` polos tulis `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` salinan `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Menambahkan di akhir |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Menambahkan di akhir (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Membaca elemen `i`. Panic jika di luar rentang |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Mengubah elemen `i`. Panic jika di luar rentang. Dapat juga ditulis `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Jumlah elemen |
@@ -159,6 +159,7 @@ Nilainya dapat ditulis `#2A((1 2) (3 4))` ([Referensi Sintaks](../syntax.md#1-un
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | `array-row-major-index` pada CL |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` pada CL. Rank tidak dapat berubah. Elemen yang tetap dalam rentang dipertahankan pada indeksnya, dan sel baru mendapat `init`. Tidak seperti CL, ia tidak mengembalikan larik (setiap larik di bahasa ini dapat disesuaikan, sehingga tidak ada larik kedua untuk dikembalikan) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` pada CL. Panic tanpa fill pointer |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | Sama dengan `push-extend` (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` pada CL. `none` jika kosong |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Fill pointer (`none` jika tidak ada). Dapat ditulis dengan `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Iterator dalam urutan row-major. Berhenti pada fill pointer jika ada |
@@ -201,6 +202,7 @@ isinya `HashTable<T,()>`. Tipe elemen harus mengimplementasikan `Hash`, sama sep
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Menambahkan `x`. `true` bila belum ada, `false` bila sudah ada |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Apakah `x` ada |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Mengeluarkan `x`. `true` bila tadinya ada |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | Sama dengan `insert`, tetapi tidak memberi tahu apakah `x` baru (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
 | `count` | `(count s)` | `HashSet<T>→int` | Jumlah elemen |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Menghapus semuanya |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Iterator atas elemen. Urutannya tidak ditentukan |
@@ -253,6 +255,7 @@ Barisan yang bisa ditambah dan diambil dari kedua ujungnya (`VecDeque` milik Rus
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Membuat barisan kosong |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Menambah di depan / belakang |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Sama dengan `push-back` (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Mengambil elemen depan / belakang dan mengembalikannya. `none` bila kosong |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Melihat elemen depan / belakang (tanpa mengambilnya) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Elemen ke-`i` dari depan. `none` bila di luar jangkauan |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # 类型一览
 
 typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的写法见[语法参考第 2 章](syntax.md#2-类型的写法)，各类型的
@@ -114,11 +114,12 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 详情见[算术 trait](functions/traits.md#3-算术-traitadd--sub--mul--div--rem--bits--number)。
 
-### 6.3 迭代
+### 6.3 迭代与添加元素
 
 | trait | 实现的类型 |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` 模块的类型（`lazy::map-iter<I,A,U>` 等） |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>`（元素类型实现了 `Hash` 时） |
 
 ### 6.4 流
 

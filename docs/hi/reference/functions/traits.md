@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # स्टैंडर्ड trait
 
-इटरेशन, तुलना और अंकगणित के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
+इटरेशन, तुलना, अंकगणित और तत्व जोड़ने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
 
 ## 1. `Iter` trait और इटरेशन
 
@@ -82,3 +82,34 @@ trait मेथड का नाम `+` नहीं है क्योंक�
 चूँकि `Output` प्रकार के अनुसार अलग है, `Number` में `Div` शामिल नहीं है (supertrait सूची को हर संबद्ध
 प्रकार स्थिर करना होता है)। भाग करने वाला जेनेरिक फ़ंक्शन परिणाम का प्रकार `(:where (Div T (Output R)))` से
 लेता है, या `(:where (Div T (Output T)))` से `T` के भीतर बंद भाग माँगता है (तब `int` नहीं दिया जा सकता)।
+
+## 4. `Push` trait (तत्व जोड़ना)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+ऐसा संग्रह जिसमें तत्व एक-एक करके जोड़े जा सकते हैं। जेनेरिक फ़ंक्शन `(:where (Push C (Item T)))` से "ऐसा टाइप जिसमें `T` जोड़ा जा सके" माँगता है, और ऐसे किसी भी संग्रह में उसी `(push c x)` से जोड़ता है।
+
+| टाइप | `push` क्या करता है |
+|---|---|
+| `Vector<T>` | अंत में जोड़ता है |
+| `Deque<T>` | अंत में जोड़ता है (`push-back`) |
+| `Array<T>` | fill pointer की जगह पर जोड़ता है (`push-extend`)। fill pointer के बिना panic करता है |
+| `HashSet<T>` | सेट में डालता है (`insert`)। तभी `Push` है जब तत्व का टाइप `Hash` लागू करता हो |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+अपना टाइप जो `Push` लागू करता है, उन्हीं जेनेरिक फ़ंक्शनों को दिया जा सकता है। वह `:dyn Push<int>` की तरह trait object भी बन सकता है।

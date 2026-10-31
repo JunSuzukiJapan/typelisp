@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Standardtraits
 
-Traits för iteration, jämförelse och aritmetik. De andra standardtraits finns i sina egna kapitel: `Hash`
+Traits för iteration, jämförelse, aritmetik och att lägga till element. De andra standardtraits finns i sina egna kapitel: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Feltyper](option-result.md#3-feltyper-och-traitet-error)), `print-object`
 ([Utskrift](printing.md#5-print-object-utskriftsform-per-typ)), samt strömtraits och `Pathish`
@@ -111,3 +111,37 @@ Implementerat för: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` på alla numeriska ty
 varje associerad typ). En generisk funktion som dividerar tar emot resultattypen med
 `(:where (Div T (Output R)))`, eller kräver en division sluten i `T` med `(:where (Div T (Output T)))` (då
 kan en `int` inte skickas).
+
+## 4. Traiten `Push` (lägga till element)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+En samling som element kan läggas till i ett i taget. En generisk funktion begär ”en typ som `T` kan
+läggas till i” med `(:where (Push C (Item T)))` och lägger till i varje sådan samling med samma
+`(push c x)`.
+
+| Typ | Vad `push` gör |
+|---|---|
+| `Vector<T>` | Lägger till sist |
+| `Deque<T>` | Lägger till sist (`push-back`) |
+| `Array<T>` | Lägger till vid fyllpekaren (`push-extend`). Ger panic utan fyllpekare |
+| `HashSet<T>` | Lägger in det i mängden (`insert`). Är `Push` bara när elementtypen implementerar `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+En egen typ som implementerar `Push` kan skickas till samma generiska funktioner. Den kan också vara
+ett trait-objekt, som i `:dyn Push<int>`.

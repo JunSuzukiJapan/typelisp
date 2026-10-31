@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Strings, tekens en collecties
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` en `Deque<T>`.
@@ -74,7 +74,7 @@ eerste element, en elke evaluatie maakt een nieuwe vector). Ze wordt ook als `#(
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Maakt een lege vector. Het typeargument komt uit het verwachte type, dus schrijf in een kale `let` `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` kopieën van `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Voegt aan het einde toe |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Voegt aan het einde toe (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Leest element `i`. Geeft een panic buiten het bereik |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Wijzigt element `i`. Geeft een panic buiten het bereik. Kan ook als `(setf (get v i) x)` worden geschreven |
 | `len` | `(len v)` | `Vector<T>→int` | Aantal elementen |
@@ -160,6 +160,7 @@ Een waarde kan als `#2A((1 2) (3 4))` worden geschreven
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | `array-row-major-index` van CL |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` van CL. De rang kan niet veranderen. Elementen die binnen het bereik blijven behouden hun indexen, en nieuwe cellen krijgen `init`. Anders dan in CL geeft het de array niet terug (elke array in deze taal is aanpasbaar, dus er is geen tweede array om terug te geven) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` van CL. Geeft een panic zonder fill pointer |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | Hetzelfde als `push-extend` (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` van CL. `none` als leeg |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | De fill pointer (`none` als er geen is). Kan met `(setf a::fill-pointer …)` worden geschreven |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Een iterator in row-major-volgorde. Stopt bij de fill pointer als die er is |
@@ -202,6 +203,7 @@ implementeren, net als een sleutel van een `HashTable`.
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Voegt `x` toe. `true` als het er nog niet was, `false` als het er al was |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Of `x` erin zit |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Haalt `x` eruit. `true` als het erin zat |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | Hetzelfde als `insert`, maar zegt niet of `x` nieuw was (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
 | `count` | `(count s)` | `HashSet<T>→int` | Het aantal elementen |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Haalt alles weg |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Een iterator over de elementen. De volgorde ligt niet vast |
@@ -253,6 +255,7 @@ Een reeks waaraan je aan beide kanten kunt toevoegen en uithalen (Rusts `VecDequ
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Maakt een lege reeks |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Voegt vooraan / achteraan toe |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Hetzelfde als `push-back` (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Haalt het voorste / achterste element eruit en geeft het terug. `none` als leeg |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Bekijkt het voorste / achterste element (zonder het eruit te halen) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Het `i`-de vanaf voren. `none` buiten het bereik |

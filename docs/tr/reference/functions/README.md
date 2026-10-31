@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Yerleşik Fonksiyonlar
 
 Yerleşik fonksiyonların, metotların ve standart kütüphanenin listesi. Sözdizimi (özel formlar ve
@@ -72,7 +72,7 @@ Her bölümdeki tabloların "ad, biçim, tür, açıklama" sütunları vardır. 
 | [sequences.md](sequences.md) | `cons-cell` çifti, S-ifade verisi `Sexpr`, semboller, dizi fonksiyonları, tembel yineleyiciler `lazy`, yüksek dereceli fonksiyonlar |
 | [collections.md](collections.md) | String'ler, karakterler, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, hata türleri ve `Error` trait'i |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetik trait'ler |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetik trait'ler, `Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, yazıcı denetim değişkenleri |
 | [format.md](format.md) | Biçim yönergeleri |
 | [streams-files.md](streams-files.md) | Akışlar, dosya işlemleri, yol adları, readtable |

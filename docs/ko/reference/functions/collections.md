@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
@@ -71,7 +71,7 @@
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | 빈 벡터를 만든다. 타입 인수는 기대 타입에서 정해지므로 그냥 `let`에서는 `(the Vector<i32> (Vector::new))`라고 쓴다 |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `x`를 `n`개 |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | 끝에 추가한다 |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | 끝에 추가한다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`번째 요소를 읽는다. 범위를 벗어나면 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`번째 요소를 바꾼다. 범위를 벗어나면 panic. `(setf (get v i) x)`로도 쓸 수 있다 |
 | `len` | `(len v)` | `Vector<T>→int` | 요소 수 |
@@ -152,6 +152,7 @@
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CL의 `array-row-major-index` |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL의 `adjust-array`. 랭크는 바꿀 수 없다. 범위 안에 남는 요소는 같은 인덱스에 남고 새 칸은 `init`이 된다. CL과 달리 배열을 반환하지 않는다(이 언어의 배열은 모두 크기를 바꿀 수 있으므로 반환할 두 번째 배열이 없다) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL의 `vector-push-extend`. 채움 포인터가 없으면 panic |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend`와 같다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CL의 `vector-pop`. 비어 있으면 `none` |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 채움 포인터(없으면 `none`). `(setf a::fill-pointer …)`로 쓸 수 있다 |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | 행 우선 순서의 이터레이터. 채움 포인터가 있으면 거기서 멈춘다 |
@@ -191,6 +192,7 @@
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`를 추가한다. 새로 들어가면 `true`, 이미 있으면 `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`가 있는지 |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`를 뺀다. 있었으면 `true` |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | `insert`와 같지만, `x`가 새로 들어갔는지는 반환하지 않는다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
 | `count` | `(count s)` | `HashSet<T>→int` | 요소 수 |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | 모두 지운다 |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 요소의 이터레이터. 순서는 정해져 있지 않다 |
@@ -240,6 +242,7 @@
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | 빈 열을 만든다 |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 앞 / 뒤에 추가한다 |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back`과 같다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 꺼내 돌려준다. 비어 있으면 `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 본다(꺼내지 않는다) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 앞에서부터 `i`번째. 범위 밖이면 `none` |

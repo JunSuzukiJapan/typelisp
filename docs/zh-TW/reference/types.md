@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # 型別一覽
 
 typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的寫法見[語法參考第 2 章](syntax.md#2-型別的寫法)，各型別的函式與方法見
@@ -114,11 +114,12 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 詳情見[算術 trait](functions/traits.md#3-算術-traitadd--sub--mul--div--rem--bits--number)。
 
-### 6.3 迭代
+### 6.3 迭代與新增元素
 
 | trait | 實作的型別 |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` 模組的型別（`lazy::map-iter<I,A,U>` 等） |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>`（元素型別實作了 `Hash` 時） |
 
 ### 6.4 串流
 

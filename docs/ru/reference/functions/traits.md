@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Стандартные трейты
 
-Трейты итерации, сравнения и арифметики. Остальные стандартные трейты описаны в собственных главах: `Hash`
+Трейты итерации, сравнения, арифметики и добавления элементов. Остальные стандартные трейты описаны в собственных главах: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error` ([Типы ошибок](option-result.md#3-типы-ошибок-и-трейт-error)),
 `print-object` ([Печать](printing.md#5-print-object-печатное-представление-по-типу)), а также трейты потоков и
 `Pathish` ([Потоки и файлы](streams-files.md)). Какие типы что реализуют, указано в [Типах](../types.md). Как
@@ -105,3 +105,37 @@
 каждый ассоциированный тип). Обобщённая функция, которая делит, принимает тип результата через
 `(:where (Div T (Output R)))` или требует деления, замкнутого в `T`, через `(:where (Div T (Output T)))`
 (тогда `int` передать нельзя).
+
+## 4. Трейт `Push` (добавление элементов)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+Коллекция, в которую можно добавлять элементы по одному. Обобщённая функция требует «тип, в который
+можно добавить `T`», через `(:where (Push C (Item T)))` и добавляет в любую такую коллекцию одним и
+тем же `(push c x)`.
+
+| Тип | Что делает `push` |
+|---|---|
+| `Vector<T>` | Добавляет в конец |
+| `Deque<T>` | Добавляет в конец (`push-back`) |
+| `Array<T>` | Добавляет по указателю заполнения (`push-extend`). Без указателя заполнения — panic |
+| `HashSet<T>` | Помещает в множество (`insert`). Является `Push`, только когда тип элементов реализует `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+Собственный тип, реализующий `Push`, можно передавать тем же обобщённым функциям. Он может быть и
+объектом трейта, как в `:dyn Push<int>`.

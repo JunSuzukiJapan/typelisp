@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Strings, caracteres e coleções
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` e `Deque<T>`.
@@ -73,7 +73,7 @@ Ele também é impresso como `#(1 2 3)`.
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | Cria um vetor vazio. O argumento de tipo vem do tipo esperado, então em um `let` simples escreva `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` cópias de `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Acrescenta no final |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | Acrescenta no final (um método do trait [`Push`](traits.md#4-o-trait-push-adicionar-elementos)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Lê o elemento `i`. Panic fora do intervalo |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Muda o elemento `i`. Panic fora do intervalo. Também pode ser escrito `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Número de elementos |
@@ -159,6 +159,7 @@ sintaxe](../syntax.md#1-elementos-léxicos)).
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | O `array-row-major-index` do CL |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | O `adjust-array` do CL. O rank não pode mudar. Os elementos que continuam no intervalo mantêm seus índices, e as células novas recebem `init`. Ao contrário do CL, não devolve o array (todo array desta linguagem é ajustável, então não há um segundo array para devolver) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | O `vector-push-extend` do CL. Panic sem ponteiro de preenchimento |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | O mesmo que `push-extend` (um método do trait [`Push`](traits.md#4-o-trait-push-adicionar-elementos)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | O `vector-pop` do CL. `none` se vazio |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | O ponteiro de preenchimento (`none` se não houver). Pode ser escrito com `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Um iterador em ordem por linhas. Para no ponteiro de preenchimento se houver |
@@ -201,6 +202,7 @@ de `HashTable`.
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Adiciona `x`. `true` se ainda não estava, `false` se já estava |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Se `x` está presente |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Tira `x`. `true` se estava |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | O mesmo que `insert`, mas não diz se `x` era novo (um método do trait [`Push`](traits.md#4-o-trait-push-adicionar-elementos)) |
 | `count` | `(count s)` | `HashSet<T>→int` | O número de elementos |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | Apaga tudo |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Um iterador sobre os elementos. A ordem não é definida |
@@ -252,6 +254,7 @@ Uma sequência em que se pode pôr e tirar pelas duas pontas (o `VecDeque` do Ru
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | Cria uma sequência vazia |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Adiciona no início / no fim |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | O mesmo que `push-back` (um método do trait [`Push`](traits.md#4-o-trait-push-adicionar-elementos)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Tira o elemento do início / do fim e o devolve. `none` se vazia |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Olha o elemento do início / do fim (sem tirá-lo) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | O `i`-ésimo a partir do início. `none` fora do intervalo |

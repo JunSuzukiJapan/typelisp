@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Funkcje wbudowane
 
 Lista funkcji wbudowanych, metod i biblioteki standardowej. Składnię (formy specjalne i sposoby
@@ -73,7 +73,7 @@ zapisana jako `(typ-argumentu,...)→typ-zwracany`.
 | [sequences.md](sequences.md) | Para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach, leniwe iteratory `lazy`, funkcje wyższego rzędu |
 | [collections.md](collections.md) | Łańcuchy znaków, znaki, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, typy błędów i trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traity arytmetyczne |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traity arytmetyczne, `Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, zmienne sterujące drukarką |
 | [format.md](format.md) | Dyrektywy formatu |
 | [streams-files.md](streams-files.md) | Strumienie, operacje na plikach, nazwy ścieżek, readtable |

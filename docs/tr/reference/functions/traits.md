@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Standart Trait'ler
 
-Yineleme, karşılaştırma ve aritmetik için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
+Yineleme, karşılaştırma, aritmetik ve öğe ekleme için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
 `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Hata türleri](option-result.md#3-hata-türleri-ve-error-traiti)), `print-object`
 ([Yazdırma](printing.md#5-print-object-türe-göre-yazdırılan-gösterim)) ve akış trait'leri ile `Pathish`
@@ -112,3 +112,37 @@ kendisidir. `Output` tipten tipe değiştiği için `Number`, `Div`'i içermez (
 ilişkili tipi sabitlemelidir). Bölme yapan genel bir fonksiyon sonuç tipini
 `(:where (Div T (Output R)))` ile alır ya da `(:where (Div T (Output T)))` ile `T` içinde kapalı bir
 bölme ister (o zaman `int` geçirilemez).
+
+## 4. `Push` trait'i (öğe ekleme)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+Öğelerin teker teker eklenebildiği bir koleksiyon. Jenerik bir fonksiyon
+`(:where (Push C (Item T)))` ile "`T` eklenebilen bir tür" ister ve bu tür her koleksiyona aynı
+`(push c x)` ile ekler.
+
+| Tür | `push` ne yapar |
+|---|---|
+| `Vector<T>` | Sona ekler |
+| `Deque<T>` | Sona ekler (`push-back`) |
+| `Array<T>` | Doldurma işaretçisinin yerine ekler (`push-extend`). Doldurma işaretçisi olmadan panic olur |
+| `HashSet<T>` | Kümeye koyar (`insert`). Yalnızca öğe türü `Hash`'i uyguladığında `Push`'tur |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+`Push`'u uygulayan kendi türünüz aynı jenerik fonksiyonlara geçirilebilir. `:dyn Push<int>` gibi bir
+trait nesnesi de olabilir.

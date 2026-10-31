@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # 내장 함수
 
 내장 함수, 메서드, 표준 라이브러리의 목록. 문법(특수 형식과 정의 방법)은 [문법 레퍼런스](../syntax.md), 타입 목록은
@@ -69,7 +69,7 @@
 | [sequences.md](sequences.md) | 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, 시퀀스 함수, 지연 이터레이터 `lazy`, 고차 함수 |
 | [collections.md](collections.md) | 문자열, 문자, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, 오류 타입과 `Error` 트레이트 |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, 산술 트레이트 |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, 산술 트레이트, `Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`, 프리티 프린터, `print-object`, 프린터 제어 변수 |
 | [format.md](format.md) | 서식 지시자 |
 | [streams-files.md](streams-files.md) | 스트림, 파일 조작, 경로명, readtable |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -120,11 +120,12 @@ när elementtyperna implementerar den traiten.
 
 Detaljer finns i [Aritmetiska traits](functions/traits.md#3-aritmetiska-traits-add--sub--mul--div--rem--bits--number).
 
-### 6.3 Iteration
+### 6.3 Iteration och att lägga till element
 
 | Trait | Implementerande typer |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` typerna i modulen `lazy` (`lazy::map-iter<I,A,U>` m.fl.) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (när elementtypen implementerar `Hash`) |
 
 ### 6.4 Strömmar
 

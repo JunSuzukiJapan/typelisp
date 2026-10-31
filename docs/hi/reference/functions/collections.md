@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -72,7 +72,7 @@
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | खाली वेक्टर बनाता है। टाइप आर्ग्युमेंट अपेक्षित टाइप से आता है, इसलिए नंगे `let` में `(the Vector<i32> (Vector::new))` लिखें |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `x` की `n` प्रतियाँ |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | अंत में जोड़ता है |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | अंत में जोड़ता है ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | तत्व `i` पढ़ता है। सीमा से बाहर panic करता है |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | तत्व `i` बदलता है। सीमा से बाहर panic करता है। `(setf (get v i) x)` भी लिखा जा सकता है |
 | `len` | `(len v)` | `Vector<T>→int` | तत्वों की संख्या |
@@ -146,6 +146,7 @@
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CL का `array-row-major-index` |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL का `adjust-array`। रैंक नहीं बदल सकता। जो तत्व सीमा में रहते हैं वे अपने इंडेक्स पर रखे जाते हैं, और नए सेल `init` पाते हैं। CL के विपरीत, यह ऐरे को नहीं लौटाता (इस भाषा का हर ऐरे समायोज्य है, इसलिए लौटाने को दूसरा ऐरे नहीं है) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL का `vector-push-extend`। fill pointer के बिना panic करता है |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` जैसा ही ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CL का `vector-pop`। खाली हो तो `none` |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer (यदि नहीं है तो `none`)। `(setf a::fill-pointer …)` से लिखा जा सकता है |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | रो-मेजर क्रम में इटरेटर। यदि fill pointer है तो वहीं रुकता है |
@@ -179,6 +180,7 @@
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x` जोड़ता है। नया हो तो `true`, पहले से हो तो `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` मौजूद है या नहीं |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x` निकालता है। मौजूद था तो `true` |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | `insert` जैसा ही, पर यह नहीं बताता कि `x` नया था या नहीं ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
 | `count` | `(count s)` | `HashSet<T>→int` | तत्वों की संख्या |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | सब हटा देता है |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | तत्वों का इटरेटर। क्रम तय नहीं है |
@@ -226,6 +228,7 @@
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | खाली अनुक्रम बनाता है |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | आगे / पीछे जोड़ता है |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` जैसा ही ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व निकालकर लौटाता है। खाली हो तो `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व देखता है (निकाले बिना) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | आगे से `i`-वाँ। सीमा के बाहर `none` |

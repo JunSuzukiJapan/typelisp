@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # 標準 trait
 
-用於迭代、比較與算術的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`
+用於迭代、比較、算術與新增元素的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`
 （[錯誤型別](option-result.md#3-錯誤型別與-error-trait)）、`print-object`（[列印](printing.md#5-print-object依型別的列印表示)）、串流的
 trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別實作了哪些 trait 見[型別一覽](../types.md)。trait 的定義方式見
 [語法參考](../syntax.md#39-deftrait--impl--trait-機制)。
@@ -91,3 +91,34 @@ trait 端的方法名稱不是 `+`，是因為 `+` 是內建方法名稱，`impl
 `Output` 是 `rational`，其他數值型別則是自身。由於 `Output` 因型別而異，`Number` 不包含 `Div`（繼承
 列表必須固定所有關聯型別）。做除法的泛型函式用 `(:where (Div T (Output R)))` 接收結果型別，或者用
 `(:where (Div T (Output T)))` 要求在 `T` 內封閉的除法（此時不能傳 `int`）。
+
+## 4. `Push` trait（新增元素）
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+可以一個一個新增元素的集合。泛型函式用 `(:where (Push C (Item T)))` 要求「可以新增 `T` 的型別」，並對任何這樣的集合用同一個 `(push c x)` 新增。
+
+| 型別 | `push` 的意義 |
+|---|---|
+| `Vector<T>` | 追加到末尾 |
+| `Deque<T>` | 追加到末尾（`push-back`） |
+| `Array<T>` | 在填充指標的位置新增（`push-extend`）。沒有填充指標時 panic |
+| `HashSet<T>` | 放入集合（`insert`）。僅當元素型別實作了 `Hash` 時才是 `Push` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+為自己的型別實作 `Push`，就能傳給同樣的泛型函式。也可以像 `:dyn Push<int>` 那樣作為 trait 物件。

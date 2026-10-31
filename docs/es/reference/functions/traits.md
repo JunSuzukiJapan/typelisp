@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Traits estándar
 
-Los traits para la iteración, la comparación y la aritmética. Los demás traits estándar están en sus propios
+Los traits para la iteración, la comparación, la aritmética y la adición de elementos. Los demás traits estándar están en sus propios
 capítulos: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Tipos de error](option-result.md#3-tipos-de-error-y-el-trait-error)), `print-object`
 ([Impresión](printing.md#5-print-object-representación-impresa-por-tipo)), y los traits de streams y
@@ -112,3 +112,37 @@ propio tipo. Como `Output` difiere según el tipo, `Number` no incluye `Div` (un
 debe fijar cada tipo asociado). Una función genérica que divide recibe el tipo del resultado con
 `(:where (Div T (Output R)))`, o pide una división cerrada en `T` con `(:where (Div T (Output T)))`
 (entonces no se puede pasar un `int`).
+
+## 4. El trait `Push` (añadir elementos)
+
+```lisp
+(deftrait Push ()
+  (:type Item)
+  (push ((self Self) (x Item)) ()))
+```
+
+Una colección a la que se pueden añadir elementos de uno en uno. Una función genérica pide «un tipo
+al que se puede añadir `T`» con `(:where (Push C (Item T)))` y añade a cualquiera de esas
+colecciones con el mismo `(push c x)`.
+
+| Tipo | Qué hace `push` |
+|---|---|
+| `Vector<T>` | Añade al final |
+| `Deque<T>` | Añade al final (`push-back`) |
+| `Array<T>` | Añade en el puntero de relleno (`push-extend`). Panic sin puntero de relleno |
+| `HashSet<T>` | Lo mete en el conjunto (`insert`). Es `Push` solo cuando el tipo de los elementos implementa `Hash` |
+
+```lisp
+(use std::collections::Deque)
+(defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))
+  (doiter (x (iter xs)) (push c x)))
+
+(let ((v (the Vector<int> (Vector::new)))
+      (d (the Deque<int> (Deque::new))))
+  (push-all v (the Vector<int> #(1 2)))
+  (push-all d (the Vector<int> #(3 4)))
+  (println "~a ~a" v d))                                  ; #(1 2) #<deque 3 4>
+```
+
+Un tipo propio que implemente `Push` se puede pasar a las mismas funciones genéricas. También puede
+ser un objeto trait, como en `:dyn Push<int>`.

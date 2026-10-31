@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # Типи
 
 Типи, які є в typelisp, і стандартні трейти, що їх реалізує кожен тип. Як записувати типи, описано в
@@ -120,11 +120,12 @@
 
 Подробиці наведено в розділі [Арифметичні трейти](functions/traits.md#3-арифметичні-трейти-add--sub--mul--div--rem--bits--number).
 
-### 6.3 Ітерація
+### 6.3 Ітерація та додавання елементів
 
 | Трейт | Типи, що реалізують |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` типи модуля `lazy` (`lazy::map-iter<I,A,U>` тощо) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (коли тип елементів реалізує `Hash`) |
 
 ### 6.4 Потоки
 

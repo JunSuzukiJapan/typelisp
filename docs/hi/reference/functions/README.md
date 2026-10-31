@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # बिल्ट-इन फ़ंक्शन
 
 बिल्ट-इन फ़ंक्शन, मेथड और स्टैंडर्ड लाइब्रेरी की सूची। सिंटैक्स (विशेष फ़ॉर्म और चीज़ें कैसे परिभाषित करें) के लिए [सिंटैक्स संदर्भ](../syntax.md) देखें; टाइप की सूची के लिए [टाइप](../types.md) देखें।
@@ -69,7 +69,7 @@
 | [sequences.md](sequences.md) | जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, अनुक्रम फ़ंक्शन, आलसी इटरेटर `lazy`, उच्च-क्रम फ़ंक्शन |
 | [collections.md](collections.md) | स्ट्रिंग, कैरेक्टर, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, त्रुटि टाइप और `Error` trait |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, अंकगणितीय trait |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, अंकगणितीय trait, `Push` |
 | [printing.md](printing.md) | `print`/`println`/`format`, सुंदर प्रिंटर, `print-object`, प्रिंटर नियंत्रण वेरिएबल |
 | [format.md](format.md) | फ़ॉर्मैट निर्देश |
 | [streams-files.md](streams-files.md) | स्ट्रीम, फ़ाइल ऑपरेशन, पाथनेम, readtable |

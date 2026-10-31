@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
 # السلاسل النصية والمحارف والمجموعات
 
 `string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.
@@ -71,7 +71,7 @@
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | يصنع متجهًا فارغًا. ويأتي وسيط النوع من النوع المتوقع، لذا في `let` مجردة اكتب `(the Vector<i32> (Vector::new))` |
 | `filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `n` نسخة من `x` |
-| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | يضيف في النهاية |
+| `push` | `(push v x)` | `(Vector<T>,T)→Unit` | يضيف في النهاية (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | يقرأ العنصر `i`. ويحدث `panic` خارج النطاق |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | يغيّر العنصر `i`. ويحدث `panic` خارج النطاق. ويمكن كتابته أيضًا `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | عدد العناصر |
@@ -154,6 +154,7 @@
 | `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | `array-row-major-index` في CL |
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` في CL. لا يمكن أن تتغير الرتبة. وتبقى العناصر التي تظل داخل النطاق عند فهارسها، وتأخذ الخلايا الجديدة `init`. وبخلاف CL لا تعيد المصفوفة (فكل مصفوفة في هذه اللغة قابلة للتعديل، فلا توجد مصفوفة ثانية لإعادتها) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` في CL. ويحدث `panic` بدون مؤشر ملء |
+| `push` | `(push a x)` | `(Array<T>,T)→Unit` | مثل `push-extend` (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` في CL. `none` إذا كانت فارغة |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | مؤشر الملء (`none` إذا لم يوجد). ويمكن كتابته بـ `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | مكرِّر بترتيب الصفوف (row-major). ويتوقف عند مؤشر الملء إن وُجد |
@@ -194,6 +195,7 @@
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | تضيف `x`. `true` إن لم يكن موجودًا، و`false` إن كان موجودًا |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | هل `x` موجود |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | تُخرج `x`. `true` إن كان موجودًا |
+| `push` | `(push s x)` | `(HashSet<T>,T)→Unit` | مثل `insert`، لكنه لا يخبر هل كان `x` جديدًا (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
 | `count` | `(count s)` | `HashSet<T>→int` | عدد العناصر |
 | `clear` | `(clear s)` | `HashSet<T>→Unit` | تحذف كل شيء |
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | مكرِّر على العناصر. الترتيب غير محدد |
@@ -244,6 +246,7 @@
 |---|---|---|---|
 | `new` | `(Deque::new)` | `()→Deque<T>` | تنشئ تسلسلًا فارغًا |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | تضيف في المقدمة / المؤخرة |
+| `push` | `(push d x)` | `(Deque<T>,T)→Unit` | مثل `push-back` (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | تُخرج عنصر المقدمة / المؤخرة وتُرجعه. `none` إن كان فارغًا |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | تنظر إلى عنصر المقدمة / المؤخرة (دون إخراجه) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | العنصر رقم `i` من المقدمة. `none` خارج النطاق |
