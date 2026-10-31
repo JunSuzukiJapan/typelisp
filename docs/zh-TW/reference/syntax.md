@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -471,8 +471,8 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 （`impl Point { ... }`）。
 
 - 項目的形式是 `(名稱 (參數...) 回傳型別 本體...)`，與 trait 的 `impl`（3.9）的項目相同。
-- 第一個參數是 `self` 的項目是**實例方法**，以 `(name obj args...)` 的形式呼叫。`self` 不必寫型別
-  （`(self)` 與 `((self Self))` 相同，`Self` 是對象型別）。
+- 第一個參數是 `self` 的項目是**實例方法**，以 `(name obj args...)` 的形式呼叫。`self` 不寫型別
+  （其型別為對象型別 `Self`，不能寫成 `(self Type)`）。
 - 沒有 `self` 的項目是**靜態方法**，以 `(Type::name args...)` 的形式呼叫。建立值的靜態方法就是該型別
   的建構函式。名稱可以自由決定，建議用 `new`。
 - **公開以項目為單位**。只有寫成 `(pub name ...)` 的項目才能在定義該型別的模組之外使用。不加 `pub`
@@ -684,13 +684,13 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 繼承清單是必要的。沒有時為 ()
   (:type AssocName)                       ; 關聯型別（可以多個，可以省略）
-  (method-name ((self Self) params...) RetType)          ; 沒有本體＝必須實作
-  (method-name ((self Self) params...) RetType body...)) ; 有本體＝預設實作
+  (method-name (self params...) RetType)          ; 沒有本體＝必須實作
+  (method-name (self params...) RetType body...)) ; 有本體＝預設實作
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; 作用於整個 impl 的約束（可以省略）
   (:type AssocName ConcreteType)          ; 具體化關聯型別
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 透過 `impl`，每個方法都作為 `TargetType` 的方法登記，可以像固有 `impl`（3.5）的方法一樣呼叫。
@@ -704,7 +704,7 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 (deftrait Eq () ...)                       ; 沒有繼承
 (deftrait Ord (Eq) ...)                    ; Rust 的 trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 固定關聯型別
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 繼承有 3 個效果。(1) `impl Ord X` 要求**先**寫 `impl Eq X`（關於書寫順序的規則。是在 REPL 與逐一 `load` 中都能確定判斷的唯一形式，比 Rust
@@ -725,7 +725,7 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 沒有本體——全部使用預設實作
 ```
@@ -749,11 +749,11 @@ trait 的呼叫預設是**靜態的**（依接收者的靜態型別解析）。�
 vtable 進行動態分派：
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 一個呼叫處，每個實作各自的回答

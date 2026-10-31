@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # स्टैंडर्ड trait
 
 इटरेशन, तुलना, अंकगणित और तत्व जोड़ने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
@@ -8,7 +8,7 @@
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` क्रमशः `vector-iter<T>`/`hashtable-iter<K,V>`/`array-iter<T>` के ज़रिए `Iter` लागू करते हैं (इटरेटर `(iter collection)` से पाएँ)। `Chan<T>` स्वयं एक `Iter` है (`recv` `next` की भूमिका निभाता है; [चैनल](concurrency.md#2-chant--चैनल))। `Sexpr` सूचियाँ `Iter` लागू नहीं करतीं (उनके तत्वों के टाइप एकसमान नहीं हैं)। यदि आप अपने टाइप के लिए `Iter` लागू करते हैं, तो उस पर `doiter` से चला जा सकता है, और उसे [अनुक्रम फ़ंक्शन](sequences.md#4-iter-पर-अनुक्रम-फ़ंक्शन) को पास किया जा सकता है।
@@ -19,14 +19,14 @@
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; लागू करना ज़रूरी
-  (not-equals ((self Self) (other Self)) bool             ; डिफ़ॉल्ट इम्प्लीमेंटेशन
+  (equals (self (other Self)) bool)                ; लागू करना ज़रूरी
+  (not-equals (self (other Self)) bool             ; डिफ़ॉल्ट इम्प्लीमेंटेशन
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; Eq से विरासत लेता है
-  (less ((self Self) (other Self)) bool)                  ; लागू करना ज़रूरी
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; लागू करना ज़रूरी
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 `Eq` लागू करने के लिए आप केवल `equals` लिखते हैं, और `Ord` के लिए केवल `less`। डिफ़ॉल्ट इम्प्लीमेंटेशन बाकी भर देते हैं। `Ord`, `Eq` से विरासत लेता है, इसलिए `impl Ord X` से पहले `impl Eq X` चाहिए।
@@ -51,17 +51,17 @@
 जेनेरिक कोड के लिए "जोड़ा जा सकने वाला टाइप" माँगने की एक परत। **ठोस टाइप पर अंकगणित बिल्ट-इन ऑपरेटर का उपयोग करता है** ([संख्याएँ](numbers.md)) और इस परत से होकर नहीं जाता।
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; दूरी हमेशा int है (ash की तरह)
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; दूरी हमेशा int है (ash की तरह)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; कोई मेथड नहीं; पाँच का संयोजन
 ```
 
@@ -88,7 +88,7 @@ trait मेथड का नाम `+` नहीं है क्योंक�
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 ऐसा संग्रह जिसमें तत्व एक-एक करके जोड़े जा सकते हैं। जेनेरिक फ़ंक्शन `(:where (Push C (Item T)))` से "ऐसा टाइप जिसमें `T` जोड़ा जा सके" माँगता है, और ऐसे किसी भी संग्रह में उसी `(push c x)` से जोड़ता है।

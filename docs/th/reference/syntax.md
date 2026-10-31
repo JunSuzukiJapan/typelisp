@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -589,8 +589,8 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 (`impl Point { ... }`)
 
 - แต่ละรายการมีรูป `(ชื่อ (พารามิเตอร์...) ชนิดที่คืน ตัวเนื้อหา...)` เหมือนรายการใน `impl` ของ trait (3.9)
-- รายการที่พารามิเตอร์ตัวแรกเป็น `self` คือ **เมทอดของอินสแตนซ์** เรียกในรูป `(name obj args...)` ไม่ต้อง
-  เขียนชนิดให้ `self` (`(self)` เท่ากับ `((self Self))` และ `Self` คือชนิดเป้าหมาย)
+- รายการที่พารามิเตอร์ตัวแรกเป็น `self` คือ **เมทอดของอินสแตนซ์** เรียกในรูป `(name obj args...)` ไม่
+  เขียนชนิดให้ `self` (ชนิดของมันคือ `Self` ซึ่งเป็นชนิดเป้าหมาย และเขียนเป็น `(self Type)` ไม่ได้)
 - รายการที่ไม่มี `self` คือ **เมทอดสถิต** เรียกในรูป `(Type::name args...)` เมทอดสถิตที่สร้างค่าคือตัวสร้าง
   ของชนิดนั้น ตั้งชื่อได้อิสระ แนะนำ `new`
 - **การมองเห็นกำหนดทีละรายการ** เฉพาะรายการที่เขียน `(pub name ...)` เท่านั้นที่ใช้ได้นอกโมดูลที่นิยามชนิด
@@ -831,13 +831,13 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name ((self Self) params...) RetType)          ; no body = must be implemented
-  (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
+  (method-name (self params...) RetType)          ; no body = must be implemented
+  (method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 ผ่าน `impl` แต่ละเมทอดถูกลงทะเบียนเป็นเมทอดของ `TargetType` และเรียกได้เหมือนเมทอดของ inherent `impl`
@@ -852,7 +852,7 @@ type ทั้งหมดของมัน**
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 การสืบทอดมีสามผล (1) `impl Ord X` ต้องมี `impl Eq X` เขียน **ก่อน** (กฎเรื่อง
@@ -884,7 +884,7 @@ implement trait เดียวกันให้ทั้ง `Box<T>` และ
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -920,11 +920,11 @@ trait ที่ไลบรารีมาตรฐานจัดให้: **`
 dispatch ผ่าน vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation

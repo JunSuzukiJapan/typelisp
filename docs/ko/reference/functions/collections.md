@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
@@ -105,7 +105,7 @@
 
 ```lisp
 (deftrait Hash (Eq)
-  (sxhash ((self Self)) int))              ; fixnum에 들어가는 음이 아닌 값을 반환한다
+  (sxhash (self) int))              ; fixnum에 들어가는 음이 아닌 값을 반환한다
 ```
 
 구현되어 있는 타입: `int`와 고정 폭 정수 6가지, `bool`, `char`, `string`, `symbol`(부동소수점 수에는 없다). 직접 만든
@@ -116,10 +116,10 @@
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
-  (equals ((self Self) (other Self)) bool
+  (equals (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")

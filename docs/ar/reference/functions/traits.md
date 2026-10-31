@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # السمات القياسية
 
 سمات التكرار والمقارنة والحساب وإضافة العناصر. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
@@ -13,7 +13,7 @@
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 تنفّذ `Vector<T>`/`HashTable<K,V>`/`Array<T>` السمة `Iter` عبر `vector-iter<T>`/
@@ -29,14 +29,14 @@
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; يجب تنفيذه
-  (not-equals ((self Self) (other Self)) bool             ; تنفيذ افتراضي
+  (equals (self (other Self)) bool)                ; يجب تنفيذه
+  (not-equals (self (other Self)) bool             ; تنفيذ افتراضي
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; ترث من Eq
-  (less ((self Self) (other Self)) bool)                  ; يجب تنفيذه
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; يجب تنفيذه
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 لتنفيذ `Eq` تكتب `equals` فقط، ولتنفيذ `Ord` تكتب `less` فقط. وتملأ التنفيذات الافتراضية الباقي. وترث
@@ -69,17 +69,17 @@
 المعامِلات المضمنة** ([الأعداد](numbers.md)) ولا يمرّ بهذه الطبقة.
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; المسافة دائمًا int (كما في ash)
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; المسافة دائمًا int (كما في ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; بلا طرق؛ تركيب من خمس
 ```
 
@@ -110,7 +110,7 @@
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 مجموعة يمكن إضافة العناصر إليها واحدًا تلو الآخر. تطلب الدالة العامة «نوعًا يمكن إضافة `T` إليه» بـ `(:where (Push C (Item T)))`، وتضيف إلى أي مجموعة من هذا القبيل بالاستدعاء نفسه `(push c x)`.

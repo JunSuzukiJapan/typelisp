@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # การพิมพ์
 
 `print`/`println`/`format`, ตัวพิมพ์แบบหนึ่งอาร์กิวเมนต์, pretty printer, `print-object` และ
@@ -199,7 +199,7 @@ generic function `print-object` ของ CL (CLHS 22.1.4)
 
 ```lisp
 (deftrait print-object ()
-  (print-object ((self Self) (escape bool)) string))
+  (print-object (self (escape bool)) string))
 ```
 
 | อาร์กิวเมนต์ | ความหมาย |
@@ -213,7 +213,7 @@ generic function `print-object` ของ CL (CLHS 22.1.4)
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl print-object point
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 

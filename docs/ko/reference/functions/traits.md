@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 표준 트레이트
 
 반복, 비교, 산술, 요소 추가를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
@@ -12,7 +12,7 @@
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>`는 각각 `vector-iter<T>`/`hashtable-iter<K,V>`/`array-iter<T>`를 통해 `Iter`를
@@ -27,14 +27,14 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; 구현해야 한다
-  (not-equals ((self Self) (other Self)) bool             ; 기본 구현
+  (equals (self (other Self)) bool)                ; 구현해야 한다
+  (not-equals (self (other Self)) bool             ; 기본 구현
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; Eq를 상속한다
-  (less ((self Self) (other Self)) bool)                  ; 구현해야 한다
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; 구현해야 한다
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 `Eq`를 구현하려면 `equals`만, `Ord`는 `less`만 쓴다. 나머지는 기본 구현이 채운다. `Ord`는 `Eq`를 상속하므로
@@ -66,17 +66,17 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 거치지 않는다.
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; 거리는 항상 int(ash와 같다)
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; 거리는 항상 int(ash와 같다)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 메서드 없음·5개의 합성
 ```
 
@@ -105,7 +105,7 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 요소를 하나씩 추가할 수 있는 컬렉션. 제네릭 함수는 `(:where (Push C (Item T)))`로 "`T`를 추가할 수 있는 타입"을 요구하고, 어느 컬렉션에든 같은 `(push c x)`로 추가한다.

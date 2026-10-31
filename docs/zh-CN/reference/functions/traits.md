@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 标准 trait
 
 用于迭代、比较、算术和添加元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
@@ -11,7 +11,7 @@
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` 分别通过 `vector-iter<T>`/`hashtable-iter<K,V>`/`array-iter<T>` 实现
@@ -26,14 +26,14 @@
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; 必须实现
-  (not-equals ((self Self) (other Self)) bool             ; 默认实现
+  (equals (self (other Self)) bool)                ; 必须实现
+  (not-equals (self (other Self)) bool             ; 默认实现
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; 继承 Eq
-  (less ((self Self) (other Self)) bool)                  ; 必须实现
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; 必须实现
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 实现 `Eq` 只需写 `equals`，实现 `Ord` 只需写 `less`。其余由默认实现补全。`Ord` 继承 `Eq`，所以 `impl Ord X` 之前
@@ -63,17 +63,17 @@
 供泛型代码要求"可以相加的类型"的一层。**具体类型的运算使用内置运算符**（[数值](numbers.md)），不经过这一层。
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; 距离总是 int（与 ash 相同）
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; 距离总是 int（与 ash 相同）
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 没有方法，五个的组合
 ```
 
@@ -101,7 +101,7 @@ trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` �
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 可以一个一个添加元素的集合。泛型函数用 `(:where (Push C (Item T)))` 要求“可以添加 `T` 的类型”，并对任何这样的集合用同一个 `(push c x)` 添加。

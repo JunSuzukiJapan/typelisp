@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -661,8 +661,8 @@ Rust (`impl Point { ... }`).
 - Un elemento ha la forma `(nome (parametri...) TipoDiRitorno corpo...)`, la stessa di un elemento
   dell'`impl` di un trait (3.9).
 - Un elemento il cui primo parametro è `self` è un **metodo di istanza**, chiamato come
-  `(name obj args...)`. `self` non ha bisogno del tipo (`(self)` equivale a `((self Self))`, e `Self` è il
-  tipo di destinazione).
+  `(name obj args...)`. `self` si scrive senza tipo (il suo tipo è `Self`,
+  il tipo di destinazione; `(self Type)` non è accettato).
 - Un elemento senza `self` è un **metodo statico**, chiamato come `(Type::name args...)`. Un metodo
   statico che crea un valore è il costruttore di quel tipo. Il nome è libero; si consiglia `new`.
 - **La visibilità è per elemento.** Solo gli elementi scritti `(pub name ...)` si possono usare fuori dal
@@ -921,13 +921,13 @@ un tipo, non un tipo**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name ((self Self) params...) RetType)          ; no body = must be implemented
-  (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
+  (method-name (self params...) RetType)          ; no body = must be implemented
+  (method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 Tramite `impl`, ogni metodo viene registrato come metodo di `TargetType` e si chiama come un metodo di un
@@ -943,7 +943,7 @@ suoi tipi associati fissati**.
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 L'ereditarietà ha tre effetti. (1) `impl Ord X` richiede che `impl Eq X` sia scritto **per primo** (una
@@ -976,7 +976,7 @@ per ogni tipo che soddisfa i vincoli.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -1014,11 +1014,11 @@ ricevitore). Per trattare valori il cui tipo concreto è deciso a runtime, il ti
 `:dyn Trait` (capitolo 2) dà il dispatch dinamico attraverso una vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation

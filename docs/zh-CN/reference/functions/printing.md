@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见
@@ -173,7 +173,7 @@ CLHS 22.1.3 的打印函数。不做格式展开，直接打印一个值。流�
 
 ```lisp
 (deftrait print-object ()
-  (print-object ((self Self) (escape bool)) string))
+  (print-object (self (escape bool)) string))
 ```
 
 | 参数 | 含义 |
@@ -186,7 +186,7 @@ CLHS 22.1.3 的打印函数。不做格式展开，直接打印一个值。流�
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl print-object point
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 

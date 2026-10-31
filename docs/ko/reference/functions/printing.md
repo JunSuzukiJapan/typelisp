@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 출력
 
 `print`/`println`/`format`, 인수 하나의 출력 함수, 프리티 프린터, `print-object`, 출력을 제어하는 변수. 서식 지시자 목록은
@@ -180,7 +180,7 @@ CL에서 `pprint-exit-if-list-exhausted`는 `pprint-logical-block`에서의 비�
 
 ```lisp
 (deftrait print-object ()
-  (print-object ((self Self) (escape bool)) string))
+  (print-object (self (escape bool)) string))
 ```
 
 | 인수 | 의미 |
@@ -193,7 +193,7 @@ CL에서 `pprint-exit-if-list-exhausted`는 `pprint-logical-block`에서의 비�
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl print-object point
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 

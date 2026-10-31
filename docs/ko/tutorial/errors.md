@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 오류 처리
 
 typelisp의 오류 처리는 실패를 두 종류로 나눈다.
@@ -69,11 +69,11 @@ Rust의 `?` 같은 줄임 표기는 없다. `Result`를 반환하는 함수를 �
   (invalid string int))     ; 값이 잘못되었다
 
 (impl Error config-error
-  (message ((self Self)) string
+  (message (self) string
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (source ((self Self)) Option<:dyn Error> (Option::none)))
+  (source (self) Option<:dyn Error> (Option::none)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)

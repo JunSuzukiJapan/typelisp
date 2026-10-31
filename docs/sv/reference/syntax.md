@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -635,7 +635,7 @@ inneboende impl (`impl Point { ... }`).
 - En post har formen `(namn (parametrar...) Returtyp kropp...)`, samma som en post i ett traits `impl`
   (3.9).
 - En post vars första parameter är `self` är en **instansmetod**, som anropas som `(name obj args...)`.
-  `self` behöver ingen typ (`(self)` är samma sak som `((self Self))`, och `Self` är måltypen).
+  `self` skrivs utan typ (typen är `Self`, måltypen; `(self Type)` accepteras inte).
 - En post utan `self` är en **statisk metod**, som anropas som `(Type::name args...)`. En statisk metod
   som skapar ett värde är typens konstruktor. Namnet är fritt; `new` rekommenderas.
 - **Synligheten gäller per post.** Endast poster som skrivs `(pub name ...)` kan användas utanför den modul
@@ -884,13 +884,13 @@ typ, inte en typ**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; listan över supertraits är obligatorisk; () om inga
   (:type AssocName)                       ; associerade typer (hur många som helst, valfritt)
-  (method-name ((self Self) params...) RetType)          ; ingen kropp = måste implementeras
-  (method-name ((self Self) params...) RetType body...)) ; med kropp = standardimplementation
+  (method-name (self params...) RetType)          ; ingen kropp = måste implementeras
+  (method-name (self params...) RetType body...)) ; med kropp = standardimplementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; gränser som gäller hela impl (valfritt)
   (:type AssocName ConcreteType)          ; gör en associerad typ konkret
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 Genom `impl` registreras varje metod som en metod hos `TargetType` och anropas som en metod i en inneboende
@@ -906,7 +906,7 @@ associerade typer fastlagda**.
 (deftrait Eq () ...)                       ; inga supertraits
 (deftrait Ord (Eq) ...)                    ; Rusts trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; fastlägga en associerad typ
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 Arv har tre effekter. (1) `impl Ord X` kräver att `impl Eq X` skrivs **först** (en regel om
@@ -939,7 +939,7 @@ implementerar traitet på en gång för varje typ som uppfyller gränserna.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; ingen kropp alls; allt är standardimplementationen
 ```
@@ -976,11 +976,11 @@ vars konkreta typ avgörs vid körning ger trait-objekttypen `:dyn Trait` (kapit
 genom en vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; ett anropsställe, ett svar per implementation

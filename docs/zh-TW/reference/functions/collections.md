@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 字串、字元與集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -103,7 +103,7 @@
 
 ```lisp
 (deftrait Hash (Eq)
-  (sxhash ((self Self)) int))              ; 回傳非負且放得進 fixnum 的值
+  (sxhash (self) int))              ; 回傳非負且放得進 fixnum 的值
 ```
 
 已實作：`int` 與 6 種固定寬度整數、`bool`、`char`、`string`、`symbol`（浮點數沒有）。在自己的型別中，把結果與 `*sxhash-mask*`（2^30-1）做
@@ -113,10 +113,10 @@
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
-  (equals ((self Self) (other Self)) bool
+  (equals (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")

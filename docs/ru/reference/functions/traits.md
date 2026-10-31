@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Стандартные трейты
 
 Трейты итерации, сравнения, арифметики и добавления элементов. Остальные стандартные трейты описаны в собственных главах: `Hash`
@@ -12,7 +12,7 @@
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` реализуют `Iter` соответственно через `vector-iter<T>`/
@@ -28,14 +28,14 @@
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; нужно реализовать
-  (not-equals ((self Self) (other Self)) bool             ; реализация по умолчанию
+  (equals (self (other Self)) bool)                ; нужно реализовать
+  (not-equals (self (other Self)) bool             ; реализация по умолчанию
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; наследуется от Eq
-  (less ((self Self) (other Self)) bool)                  ; нужно реализовать
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; нужно реализовать
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 Для реализации `Eq` пишут только `equals`, а для `Ord` — только `less`. Остальное дополняют реализации по умолчанию.
@@ -69,17 +69,17 @@
 типами использует встроенные операторы** ([Числа](numbers.md)) и через этот слой не проходит.
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; расстояние всегда int (как у ash)
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; расстояние всегда int (как у ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; методов нет; сочетание пяти
 ```
 
@@ -111,7 +111,7 @@
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 Коллекция, в которую можно добавлять элементы по одному. Обобщённая функция требует «тип, в который

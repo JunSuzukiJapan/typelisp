@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Trait
 
 Trait एक वादा है कि "यह टाइप ये ऑपरेशन सपोर्ट करता है"। Trait कई टाइप को एक ही नाम के ऑपरेशन साझा करने देते हैं, ताकि उन्हें इस्तेमाल करने वाले फ़ंक्शन को हर टाइप के लिए अलग-अलग न लिखना पड़े। वे लगभग ठीक Rust के trait की तरह काम करते हैं। यह अध्याय मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -9,8 +9,8 @@ Trait एक वादा है कि "यह टाइप ये ऑपरे
 
 ```lisp
 (deftrait Shape ()
-  (area ((self Self)) int)
-  (name ((self Self)) string))
+  (area (self) int)
+  (name (self) string))
 ```
 
 - trait के नाम के बाद का `()` उन trait की सूची है जिनसे यह विरासत लेता है (खंड 4)। कोई न हो तो उसे खाली छोड़ें।
@@ -23,12 +23,12 @@ Trait एक वादा है कि "यह टाइप ये ऑपरे
 (defstruct rect (w int) (h int))
 
 (impl Shape circle
-  (area ((self Self)) int (* 3 self::r self::r))
-  (name ((self Self)) string "circle"))
+  (area (self) int (* 3 self::r self::r))
+  (name (self) string "circle"))
 
 (impl Shape rect
-  (area ((self Self)) int (* self::w self::h))
-  (name ((self Self)) string "rect"))
+  (area (self) int (* self::w self::h))
+  (name (self) string "rect"))
 ```
 
 लागू किए गए मेथड सामान्य फ़ंक्शन की तरह ही कॉल होते हैं।
@@ -70,16 +70,16 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (deftrait Describe ()
-  (label ((self Self)) string)
-  (describe ((self Self)) string
+  (label (self) string)
+  (describe (self) string
     (format false "<~a>" (label self))))
 
 (impl Describe circle
-  (label ((self Self)) string "a circle"))            ; describe डिफ़ॉल्ट वाला है
+  (label (self) string "a circle"))            ; describe डिफ़ॉल्ट वाला है
 
 (impl Describe rect
-  (label ((self Self)) string "a rect")
-  (describe ((self Self)) string "[rect]"))           ; यहाँ लिखे गए को प्राथमिकता मिलती है
+  (label (self) string "a rect")
+  (describe (self) string "[rect]"))           ; यहाँ लिखे गए को प्राथमिकता मिलती है
 
 (describe (make-instance 'circle :r 1))     ; => "<a circle>"
 (describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
@@ -103,10 +103,10 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (defstruct money (yen int))
 
 (impl Eq money
-  (equals ((self Self) (other Self)) bool (= self::yen other::yen)))
+  (equals (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (less ((self Self) (other Self)) bool (< self::yen other::yen)))
+  (less (self (other Self)) bool (< self::yen other::yen)))
 
 (greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (Ord का डिफ़ॉल्ट इम्प्लीमेंटेशन)
 ```
@@ -115,7 +115,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (impl print-object money
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "~a yen" self::yen)))
 
 (println "~a" (make-instance 'money :yen 500))              ; 500 yen

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -662,7 +662,7 @@ dengan impl inheren di Rust (`impl Point { ... }`).
 - Sebuah item berbentuk `(nama (parameter...) TipeKembali badan...)`, sama dengan item di `impl` sebuah
   trait (3.9).
 - Item yang parameter pertamanya `self` adalah **metode instans**, dipanggil sebagai `(name obj args...)`.
-  `self` tidak perlu tipe (`(self)` sama dengan `((self Self))`, dan `Self` adalah tipe sasaran).
+  `self` ditulis tanpa tipe (tipenya `Self`, yaitu tipe sasaran; `(self Type)` tidak diterima).
 - Item tanpa `self` adalah **metode statis**, dipanggil sebagai `(Type::name args...)`. Metode statis yang
   membuat nilai adalah konstruktor tipe itu. Namanya bebas; disarankan `new`.
 - **Visibilitas diatur per item.** Hanya item yang ditulis `(pub name ...)` yang dapat dipakai di luar
@@ -921,13 +921,13 @@ untuk tipe, bukan sebuah tipe**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name ((self Self) params...) RetType)          ; no body = must be implemented
-  (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
+  (method-name (self params...) RetType)          ; no body = must be implemented
+  (method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 Melalui `impl`, setiap metode didaftarkan sebagai metode `TargetType` dan dipanggil seperti metode `impl`
@@ -943,7 +943,7 @@ terkaitnya ditetapkan**.
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 Pewarisan memiliki tiga efek. (1) `impl Ord X` mensyaratkan `impl Eq X` ditulis **lebih dulu**
@@ -977,7 +977,7 @@ sekaligus untuk setiap tipe yang memenuhi batas.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -1016,11 +1016,11 @@ Untuk menangani nilai yang tipe konkretnya ditentukan saat dijalankan, tipe obje
 (bab 2) memberikan dispatch dinamis melalui vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation

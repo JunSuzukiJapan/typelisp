@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -589,8 +589,8 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 (`impl Point { ... }`).
 
 - صورة العنصر `(الاسم (المعاملات...) نوع_الإرجاع الجسم...)`، وهي صورة عنصر `impl` السمة نفسها (3.9).
-- العنصر الذي معامله الأول `self` هو **تابع نسخة**، ويُستدعى على الصورة `(name obj args...)`. ولا يحتاج
-  `self` إلى نوع (`(self)` هو `((self Self))` نفسه، و`Self` هو النوع الهدف).
+- العنصر الذي معامله الأول `self` هو **تابع نسخة**، ويُستدعى على الصورة `(name obj args...)`. ولا يُكتب
+  لـ `self` نوع (نوعه `Self`، أي النوع الهدف؛ ولا تُقبل الصيغة `(self Type)`).
 - العنصر الذي ليس فيه `self` هو **تابع ساكن**، ويُستدعى على الصورة `(Type::name args...)`. والتابع الساكن
   الذي يصنع قيمة هو مُنشئ ذلك النوع. الاسم حر، ويُنصح بـ `new`.
 - **الإتاحة لكل عنصر على حدة.** لا يُستعمل خارج الوحدة التي تعرّف النوع إلا العناصر المكتوبة
@@ -826,13 +826,13 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; قائمة السمات الأعلى مطلوبة؛ و() إذا لم توجد
   (:type AssocName)                       ; أنواع مرتبطة (أي عدد، اختيارية)
-  (method-name ((self Self) params...) RetType)          ; بلا جسم = يجب تنفيذه
-  (method-name ((self Self) params...) RetType body...)) ; مع جسم = تنفيذ افتراضي
+  (method-name (self params...) RetType)          ; بلا جسم = يجب تنفيذه
+  (method-name (self params...) RetType body...)) ; مع جسم = تنفيذ افتراضي
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; قيود تنطبق على impl كلها (اختياري)
   (:type AssocName ConcreteType)          ; يجعل نوعًا مرتبطًا ملموسًا
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 بواسطة `impl` يُسجَّل كل تابع تابعًا لـ `TargetType`، ويُستدعى كما يُستدعى تابع `impl` ذاتي (3.5). وتوابع
@@ -846,7 +846,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 (deftrait Eq () ...)                       ; بلا سمات أعلى
 (deftrait Ord (Eq) ...)                    ; مثل trait Ord: Eq في Rust
 (deftrait CharSource ((Iter (Item char)))  ; تثبيت نوع مرتبط
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 للوراثة ثلاثة آثار. (1) يتطلب `impl Ord X` أن يُكتب `impl Eq X` **أولًا** (قاعدة عن ترتيب الكتابة: الصيغة
@@ -873,7 +873,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; بلا أي جسم؛ كل شيء افتراضي
 ```
@@ -905,11 +905,11 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 وقت التشغيل يعطي نوع كائن السمة `:dyn Trait` (الفصل 2) إرسالًا ديناميكيًا عبر vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; موضع استدعاء واحد، وجواب لكل تنفيذ

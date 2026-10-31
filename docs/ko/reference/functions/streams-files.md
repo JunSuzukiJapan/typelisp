@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # 스트림과 파일
 
 스트림의 트레이트와 메서드, 구체 스트림 타입, 파일 조작, 경로명. 네트워크 소켓도 스트림이며 [네트워크](network.md)에서
@@ -160,11 +160,11 @@ CL은 `(open name :element-type '(unsigned-byte 8))`처럼 **호출**에서 요�
 ```lisp
 (defstruct counter (n i32))
 (impl Stream counter
-  (open-stream-p ((self Self)) bool true)
-  (close ((self Self)) () ()))
+  (open-stream-p (self) bool true)
+  (close (self) () ()))
 (impl OutputStream counter
   (:type Item char)
-  (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
+  (write-item (self (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 남은 메서드는 모두 기본 구현
 
 (write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri, fresh-line이 모두 동작한다

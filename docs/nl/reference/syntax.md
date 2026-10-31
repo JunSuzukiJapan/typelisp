@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -666,8 +666,8 @@ de inherente impl van Rust (`impl Point { ... }`).
 - Een item heeft de vorm `(naam (parameters...) Teruggeeftype romp...)`, dezelfde als een item van de
   `impl` van een trait (3.9).
 - Een item waarvan de eerste parameter `self` is, is een **instantiemethode**, aangeroepen als
-  `(name obj args...)`. `self` heeft geen type nodig (`(self)` is hetzelfde als `((self Self))`, en `Self`
-  is het doeltype).
+  `(name obj args...)`. `self` wordt zonder type geschreven (het type is
+  `Self`, het doeltype; `(self Type)` wordt niet geaccepteerd).
 - Een item zonder `self` is een **statische methode**, aangeroepen als `(Type::name args...)`. Een
   statische methode die een waarde maakt, is de constructor van dat type. De naam is vrij; `new` wordt
   aanbevolen.
@@ -923,13 +923,13 @@ een type, geen type**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name ((self Self) params...) RetType)          ; no body = must be implemented
-  (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
+  (method-name (self params...) RetType)          ; no body = must be implemented
+  (method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 Via `impl` wordt elke methode geregistreerd als methode van `TargetType` en aangeroepen zoals een methode
@@ -945,7 +945,7 @@ types vastgelegd**.
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 Overerving heeft drie effecten. (1) `impl Ord X` vereist dat `impl Eq X` **eerst** wordt geschreven (een
@@ -979,7 +979,7 @@ type dat aan de bounds voldoet.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -1016,11 +1016,11 @@ te behandelen waarvan het concrete type tijdens runtime wordt bepaald, geeft het
 `:dyn Trait` (hoofdstuk 2) dynamische dispatch via een vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation

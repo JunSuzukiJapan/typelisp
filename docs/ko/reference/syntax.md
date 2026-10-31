@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -532,7 +532,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 - 항목의 형태는 `(이름 (인수...) 반환 타입 본체...)`이며, 트레이트의 `impl`(3.9)의 항목과 같다.
 - 첫 번째 인수가 `self`인 항목은 **인스턴스 메서드**이며 `(name obj args...)` 형태로 호출한다.
-  `self`에는 타입을 쓰지 않아도 된다(`(self)`는 `((self Self))`와 같고, `Self`는 대상 타입이다).
+  `self`에는 타입을 쓰지 않는다(타입은 대상 타입 `Self`이며, `(self Type)`으로는 쓸 수 없다).
 - `self`가 없는 항목은 **정적 메서드**이며 `(Type::name args...)` 형태로 호출한다. 값을 만드는 정적
   메서드가 그 타입의 생성자가 된다. 이름은 자유이며 `new`를 권한다.
 - **공개는 항목마다** 정한다. `(pub name ...)`로 쓴 항목만 타입을 정의한 모듈 밖에서 쓸 수 있다.
@@ -764,13 +764,13 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 상위 트레이트 목록은 필수. 없으면 ()
   (:type AssocName)                       ; 연관 타입(여러 개 가능, 생략 가능)
-  (method-name ((self Self) params...) RetType)          ; 본체 없음 = 구현 필수
-  (method-name ((self Self) params...) RetType body...)) ; 본체 있음 = 기본 구현
+  (method-name (self params...) RetType)          ; 본체 없음 = 구현 필수
+  (method-name (self params...) RetType body...)) ; 본체 있음 = 기본 구현
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; impl 전체에 걸리는 경계(생략 가능)
   (:type AssocName ConcreteType)          ; 연관 타입을 구체화한다
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 `impl`을 거쳐 각 메서드는 `TargetType`의 메서드로 등록되며, 고유 `impl`(3.5)의 메서드와 같은 방식으로
@@ -785,7 +785,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (deftrait Eq () ...)                       ; 상속 없음
 (deftrait Ord (Eq) ...)                    ; Rust의 trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 연관 타입을 고정한다
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 상속에는 세 가지 효과가 있다. (1) `impl Ord X`는 `impl Eq X`가 **먼저** 쓰여 있기를 요구한다(쓰는 순서에 관한 규칙. REPL과
@@ -811,7 +811,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 본체 없음. 모두 기본 구현
 ```
@@ -840,11 +840,11 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 트레이트 객체 타입 `:dyn Trait`(2장)을 쓰면 vtable을 거친 동적 디스패치가 된다.
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 호출 지점 하나에 구현마다의 답

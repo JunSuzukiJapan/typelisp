@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # प्रिंटिंग
 
 `print`/`println`/`format`, एक-आर्ग्युमेंट प्रिंटर, सुंदर प्रिंटर, `print-object`, और प्रिंटिंग को नियंत्रित करने वाले वेरिएबल। फ़ॉर्मैट निर्देशों की सूची [format.md](format.md) में है। स्ट्रीम से पढ़ना और लिखना [स्ट्रीम और फ़ाइलें](streams-files.md) में है।
@@ -150,7 +150,7 @@ CL में, `pprint-exit-if-list-exhausted` `pprint-logical-block` से न�
 
 ```lisp
 (deftrait print-object ()
-  (print-object ((self Self) (escape bool)) string))
+  (print-object (self (escape bool)) string))
 ```
 
 | आर्ग्युमेंट | अर्थ |
@@ -163,7 +163,7 @@ CL में, `pprint-exit-if-list-exhausted` `pprint-logical-block` से न�
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl print-object point
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 

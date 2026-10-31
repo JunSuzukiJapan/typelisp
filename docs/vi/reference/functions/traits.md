@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Các trait chuẩn
 
 Các trait cho việc lặp, so sánh, số học và thêm phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
@@ -14,7 +14,7 @@ Các trait cho việc lặp, so sánh, số học và thêm phần tử. Các tr
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` triển khai `Iter` lần lượt qua `vector-iter<T>`/
@@ -32,14 +32,14 @@ các ràng buộc `:where` của hàm generic để yêu cầu các kiểu phầ
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; phải được triển khai
-  (not-equals ((self Self) (other Self)) bool             ; triển khai mặc định
+  (equals (self (other Self)) bool)                ; phải được triển khai
+  (not-equals (self (other Self)) bool             ; triển khai mặc định
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; kế thừa từ Eq
-  (less ((self Self) (other Self)) bool)                  ; phải được triển khai
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; phải được triển khai
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 Để triển khai `Eq` bạn chỉ viết `equals`, và với `Ord` chỉ viết `less`. Các triển khai mặc định điền phần
@@ -74,17 +74,17 @@ Một tầng để mã generic yêu cầu "một kiểu có thể cộng đượ
 tử dựng sẵn** ([Số](numbers.md)) và không đi qua tầng này.
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; khoảng dịch luôn là int (như với ash)
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; khoảng dịch luôn là int (như với ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; không có phương thức; tổ hợp của năm trait
 ```
 
@@ -116,7 +116,7 @@ chia khép kín trong `T` bằng `(:where (Div T (Output T)))` (khi đó không 
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 Một tập hợp có thể thêm phần tử vào từng cái một. Hàm generic yêu cầu "một kiểu có thể thêm `T` vào"

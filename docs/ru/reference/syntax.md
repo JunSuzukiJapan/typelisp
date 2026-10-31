@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Справочник по синтаксису typelisp
 
 typelisp — это Лисп со статической типизацией, записываемый S-выражениями. Список встроенных функций и методов — во
@@ -616,8 +616,8 @@ impl в Rust (`impl Point { ... }`).
 
 - Элемент имеет вид `(имя (параметры...) ТипВозврата тело...)`, как и элемент `impl` трейта (3.9).
 - Элемент, первый параметр которого `self`, — **метод экземпляра**; он вызывается как
-  `(name obj args...)`. Для `self` тип писать не нужно (`(self)` — то же, что `((self Self))`, а `Self` —
-  целевой тип).
+  `(name obj args...)`. Для `self` тип не пишется (его тип — `Self`,
+  целевой тип; запись `(self Type)` не принимается).
 - Элемент без `self` — **статический метод**; он вызывается как `(Type::name args...)`. Статический метод,
   создающий значение, и есть конструктор этого типа. Имя выбирается свободно; рекомендуется `new`.
 - **Видимость задаётся для каждого элемента.** Вне модуля, где определён тип, можно использовать только
@@ -864,13 +864,13 @@ impl в Rust (`impl Point { ... }`).
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; список супертрейтов обязателен; () если их нет
   (:type AssocName)                       ; ассоциированные типы (любое число, необязательно)
-  (method-name ((self Self) params...) RetType)          ; без тела = нужно реализовать
-  (method-name ((self Self) params...) RetType body...)) ; с телом = реализация по умолчанию
+  (method-name (self params...) RetType)          ; без тела = нужно реализовать
+  (method-name (self params...) RetType body...)) ; с телом = реализация по умолчанию
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; ограничения для всего impl (необязательно)
   (:type AssocName ConcreteType)          ; делает ассоциированный тип конкретным
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 Через `impl` каждый метод регистрируется как метод `TargetType` и вызывается так же, как метод собственного
@@ -886,7 +886,7 @@ impl в Rust (`impl Point { ... }`).
 (deftrait Eq () ...)                       ; без супертрейтов
 (deftrait Ord (Eq) ...)                    ; trait Ord: Eq из Rust
 (deftrait CharSource ((Iter (Item char)))  ; фиксация ассоциированного типа
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 У наследования три следствия. (1) `impl Ord X` требует, чтобы `impl Eq X` был написан **раньше** (правило о порядке
@@ -917,7 +917,7 @@ impl в Rust (`impl Point { ... }`).
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; вообще без тела; всё — по умолчанию
 ```
@@ -951,11 +951,11 @@ impl в Rust (`impl Point { ... }`).
 динамическую диспетчеризацию через vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; одно место вызова, по ответу на реализацию

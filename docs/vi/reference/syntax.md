@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -612,7 +612,8 @@ cố hữu của Rust (`impl Point { ... }`).
 
 - Một mục có dạng `(tên (tham số...) KiểuTrảVề thân...)`, giống một mục trong `impl` của trait (3.9).
 - Mục có tham số đầu là `self` là **phương thức thể hiện**, được gọi dưới dạng `(name obj args...)`.
-  `self` không cần kiểu (`(self)` giống `((self Self))`, và `Self` là kiểu đích).
+  `self` được viết không kèm kiểu (kiểu của nó là `Self`, tức kiểu đích; không chấp nhận
+  `(self Type)`).
 - Mục không có `self` là **phương thức tĩnh**, được gọi dưới dạng `(Type::name args...)`. Phương thức
   tĩnh tạo ra một giá trị chính là hàm dựng của kiểu đó. Tên tùy bạn; nên dùng `new`.
 - **Tính công khai đặt theo từng mục.** Chỉ những mục viết `(pub name ...)` mới dùng được bên ngoài module
@@ -861,13 +862,13 @@ kiểu, không phải một kiểu**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; danh sách supertrait là bắt buộc; () nếu không có
   (:type AssocName)                       ; các kiểu liên kết (số lượng bất kỳ, tùy chọn)
-  (method-name ((self Self) params...) RetType)          ; không có thân = phải được triển khai
-  (method-name ((self Self) params...) RetType body...)) ; có thân = triển khai mặc định
+  (method-name (self params...) RetType)          ; không có thân = phải được triển khai
+  (method-name (self params...) RetType body...)) ; có thân = triển khai mặc định
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; các ràng buộc áp dụng cho cả impl (tùy chọn)
   (:type AssocName ConcreteType)          ; làm cho một kiểu liên kết trở nên cụ thể
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 Thông qua `impl`, mỗi phương thức được đăng ký như một phương thức của `TargetType` và được gọi như phương
@@ -882,7 +883,7 @@ hoặc, nếu trait đó có kiểu liên kết, là `(Trait (Assoc Type))` vớ
 (deftrait Eq () ...)                       ; không có supertrait
 (deftrait Ord (Eq) ...)                    ; trait Ord: Eq của Rust
 (deftrait CharSource ((Iter (Item char)))  ; cố định một kiểu liên kết
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 Kế thừa có ba tác dụng. (1) `impl Ord X` yêu cầu `impl Eq X` phải được viết **trước** (một quy tắc về thứ tự
@@ -913,7 +914,7 @@ các ràng buộc.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; hoàn toàn không có thân; mọi thứ là mặc định
 ```
@@ -948,11 +949,11 @@ kiểu cụ thể được quyết định lúc chạy, kiểu trait object `:dy
 vtable:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; một vị trí gọi, một đáp án cho mỗi triển khai

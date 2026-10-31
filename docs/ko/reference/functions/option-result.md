@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Option, Result, 오류 타입
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -104,8 +104,8 @@ Rust의 `std::error::Error`를 따라 **`Error`는 타입이 아니라 트레이
 (use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
-  (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (Option::none)))
+  (message (self) string (append "io failed: " self::path))
+  (source (self) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; 구체 타입을 그대로 E에 넣는다
   (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # typelisp सिंटैक्स संदर्भ
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है, जो S-एक्सप्रेशन में लिखा जाता है। बिल्ट-इन फ़ंक्शन और मेथड की सूची के लिए [बिल्ट-इन फ़ंक्शन](functions/README.md) देखें; टाइप की सूची के लिए [types.md](types.md); और त्रुटि संदेश पढ़ने के लिए [errors.md](errors.md)।
@@ -427,8 +427,8 @@ C जैसे ही लेआउट वाला struct घोषित कर
 
 - आइटम का रूप `(नाम (पैरामीटर...) रिटर्न-टाइप बॉडी...)` है, trait के `impl` (3.9) के आइटम जैसा ही।
 - जिस आइटम का पहला पैरामीटर `self` है वह **इंस्टेंस मेथड** है, जिसे `(name obj args...)` के रूप में
-  कॉल किया जाता है। `self` को टाइप की ज़रूरत नहीं (`(self)` वही है जो `((self Self))`, और `Self`
-  लक्ष्य टाइप है)।
+  कॉल किया जाता है। `self` बिना टाइप के लिखा जाता है (उसका टाइप
+  `Self`, यानी लक्ष्य टाइप है; `(self Type)` स्वीकार नहीं है)।
 - जिस आइटम में `self` नहीं वह **स्टैटिक मेथड** है, जिसे `(Type::name args...)` के रूप में कॉल किया
   जाता है। मान बनाने वाला स्टैटिक मेथड उस टाइप का कंस्ट्रक्टर है। नाम आपकी मर्ज़ी है; `new` की
   सिफ़ारिश है।
@@ -646,13 +646,13 @@ CL का `deftype`, जिसे स्टैटिक टाइप वाल�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; supertrait सूची आवश्यक है; कोई न हो तो ()
   (:type AssocName)                       ; असोसिएटेड टाइप (कितने भी, वैकल्पिक)
-  (method-name ((self Self) params...) RetType)          ; बॉडी नहीं = लागू करना ज़रूरी
-  (method-name ((self Self) params...) RetType body...)) ; बॉडी के साथ = डिफ़ॉल्ट इम्प्लीमेंटेशन
+  (method-name (self params...) RetType)          ; बॉडी नहीं = लागू करना ज़रूरी
+  (method-name (self params...) RetType body...)) ; बॉडी के साथ = डिफ़ॉल्ट इम्प्लीमेंटेशन
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; पूरे impl पर लागू होने वाले बाउंड (वैकल्पिक)
   (:type AssocName ConcreteType)          ; असोसिएटेड टाइप को ठोस बनाता है
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 `impl` के ज़रिए, हर मेथड `TargetType` के मेथड के रूप में पंजीकृत होता है और inherent `impl` (3.5) के
@@ -666,7 +666,7 @@ trait को जेनेरिक फ़ंक्शन के `:where` क्�
 (deftrait Eq () ...)                       ; कोई supertrait नहीं
 (deftrait Ord (Eq) ...)                    ; Rust का trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; असोसिएटेड टाइप तय करना
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 विरासत के तीन प्रभाव हैं। (1) `impl Ord X` के लिए ज़रूरी है कि `impl Eq X` **पहले** लिखा गया हो (लिखने के क्रम का नियम: REPL में और चरण-दर-चरण `load` के साथ नियतात्मक रूप से तय किया जा सकने वाला एकमात्र रूप, और Rust से अधिक सख्त)। (2) केवल `(:where (Ord T))` से आप `Eq` के मेथड भी कॉल कर सकते हैं। (3) `Eq` के मेथड `:dyn Ord` के ज़रिए कॉल किए जा सकते हैं, और `:dyn Ord` का मान जस का तस वहाँ पास किया जा सकता है जहाँ `:dyn Eq` चाहिए (अपकास्टिंग)। सबट्रेट का अपने पैरेंट के समान नाम वाला मेथड दोबारा घोषित करना, और दो पैरेंट से समान नाम के मेथड विरासत में लेना, दोनों त्रुटियाँ हैं (vtable में हर नाम के लिए एक स्लॉट होता है)। हीरा विरासत एक स्लॉट में मिल जाती है।
@@ -684,7 +684,7 @@ trait को जेनेरिक फ़ंक्शन के `:where` क्�
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; कोई बॉडी बिलकुल नहीं; सब कुछ डिफ़ॉल्ट है
 ```
@@ -698,11 +698,11 @@ trait को जेनेरिक फ़ंक्शन के `:where` क्�
 Trait कॉल डिफ़ॉल्ट रूप से **स्टैटिक** होते हैं (रिसीवर के स्टैटिक टाइप से हल)। जिन मानों का ठोस टाइप रन टाइम पर तय होता है उन्हें संभालने के लिए, trait ऑब्जेक्ट टाइप `:dyn Trait` (अध्याय 2) vtable के ज़रिए डायनामिक डिस्पैच देता है:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; एक कॉल साइट, हर इम्प्लीमेंटेशन के लिए एक उत्तर

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -639,7 +639,7 @@ değiştirilemez (`setf` bir hatadır).
 - Bir öğenin biçimi `(ad (parametreler...) DönüşTürü gövde...)` olup bir trait'in `impl`'indeki (3.9)
   öğeyle aynıdır.
 - İlk parametresi `self` olan öğe bir **örnek metodudur** ve `(name obj args...)` biçiminde çağrılır.
-  `self` için tür yazmak gerekmez (`(self)`, `((self Self))` ile aynıdır ve `Self` hedef türdür).
+  `self` türsüz yazılır (türü hedef tür olan `Self`'tir; `(self Type)` kabul edilmez).
 - `self` içermeyen öğe bir **statik metottur** ve `(Type::name args...)` biçiminde çağrılır. Değer üreten
   statik metot o türün yapıcısıdır. Ad serbesttir; `new` önerilir.
 - **Görünürlük öğe başınadır.** Türü tanımlayan modülün dışında yalnızca `(pub name ...)` diye yazılan
@@ -886,13 +886,13 @@ değil**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name ((self Self) params...) RetType)          ; no body = must be implemented
-  (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
+  (method-name (self params...) RetType)          ; no body = must be implemented
+  (method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 `impl` aracılığıyla her metot `TargetType`'ın bir metodu olarak kaydedilir ve içsel bir `impl`'in (3.5)
@@ -908,7 +908,7 @@ trait adıdır ya da o trait'in ilişkili türleri varsa, **tüm ilişkili türl
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 Mirasın üç etkisi vardır. (1) `impl Ord X`, `impl Eq X`'in **önce** yazılmasını gerektirir (yazma sırasıyla
@@ -940,7 +940,7 @@ bir anda gerçekleştirir.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -976,11 +976,11 @@ Trait çağrıları varsayılan olarak **statiktir** (alıcının statik türüy
 vtable üzerinden dinamik dağıtım verir:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation

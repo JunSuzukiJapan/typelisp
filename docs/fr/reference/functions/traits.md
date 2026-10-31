@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Traits standard
 
 Les traits d'itération, de comparaison, d'arithmétique et d'ajout d'éléments. Les autres traits standard se trouvent dans leurs propres
@@ -14,7 +14,7 @@ chapitres : `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` implémentent `Iter` respectivement via `vector-iter<T>`/
@@ -31,14 +31,14 @@ des fonctions génériques pour exiger que les types d'éléments soient compara
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; doit être implémentée
-  (not-equals ((self Self) (other Self)) bool             ; implémentation par défaut
+  (equals (self (other Self)) bool)                ; doit être implémentée
+  (not-equals (self (other Self)) bool             ; implémentation par défaut
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; hérite de Eq
-  (less ((self Self) (other Self)) bool)                  ; doit être implémentée
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; doit être implémentée
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 Pour implémenter `Eq`, on écrit seulement `equals`, et pour `Ord` seulement `less`. Les implémentations par défaut
@@ -73,17 +73,17 @@ Une couche permettant au code générique d'exiger « un type qu'on peut additio
 concrets utilise les opérateurs intégrés** ([Nombres](numbers.md)) et ne passe pas par cette couche.
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; la distance est toujours int (comme pour ash)
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; la distance est toujours int (comme pour ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; aucune méthode ; une combinaison de cinq
 ```
 
@@ -116,7 +116,7 @@ résultat avec `(:where (Div T (Output R)))`, ou exige une division fermée dans
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 Une collection à laquelle on peut ajouter des éléments un par un. Une fonction générique demande «

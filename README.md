@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
+<!-- translated-from: README_JP.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -94,21 +94,21 @@ It looks like this:
 
 ```
 (deftrait Animal ()
-  (name ((self Self)) string)
-  (sound ((self Self)) string)
-  (speak ((self Self)) string
+  (name (self) string)
+  (sound (self) string)
+  (speak (self) string
     (format false "~a says ~a" (name self) (sound self))))
 
 (defstruct Dog (nick string))
 (defstruct Cat (nick string))
 
 (impl Animal Dog
-  (name ((self Self)) string self::nick)
-  (sound ((self Self)) string "Woof"))
+  (name (self) string self::nick)
+  (sound (self) string "Woof"))
 
 (impl Animal Cat
-  (name ((self Self)) string self::nick)
-  (sound ((self Self)) string "Meow"))
+  (name (self) string self::nick)
+  (sound (self) string "Meow"))
 
 (defun main () ()
   (let ((animals (the Vector<:dyn Animal> (Vector::new))))

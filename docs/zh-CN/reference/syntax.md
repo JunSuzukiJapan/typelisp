@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -479,8 +479,8 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 （`impl Point { ... }`）。
 
 - 项目的形式是 `(名字 (参数...) 返回类型 本体...)`，与 trait 的 `impl`（3.9）的项目相同。
-- 第一个参数是 `self` 的项目是**实例方法**，以 `(name obj args...)` 的形式调用。`self` 不必写类型
-  （`(self)` 与 `((self Self))` 相同，`Self` 是目标类型）。
+- 第一个参数是 `self` 的项目是**实例方法**，以 `(name obj args...)` 的形式调用。`self` 不写类型
+  （其类型为目标类型 `Self`，不能写成 `(self Type)`）。
 - 没有 `self` 的项目是**静态方法**，以 `(Type::name args...)` 的形式调用。创建值的静态方法就是该类型
   的构造函数。名字可以自由决定，推荐用 `new`。
 - **公开以项目为单位**。只有写成 `(pub name ...)` 的项目才能在定义该类型的模块之外使用。不加 `pub`
@@ -696,13 +696,13 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 继承列表是必需的。没有时为 ()
   (:type AssocName)                       ; 关联类型（可以多个，可以省略）
-  (method-name ((self Self) params...) RetType)          ; 没有函数体＝必须实现
-  (method-name ((self Self) params...) RetType body...)) ; 有函数体＝默认实现
+  (method-name (self params...) RetType)          ; 没有函数体＝必须实现
+  (method-name (self params...) RetType body...)) ; 有函数体＝默认实现
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; 作用于整个 impl 的约束（可以省略）
   (:type AssocName ConcreteType)          ; 具体化关联类型
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 通过 `impl`，每个方法都作为 `TargetType` 的方法注册，可以像固有 `impl`（3.5）的方法一样调用。
@@ -716,7 +716,7 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 (deftrait Eq () ...)                       ; 没有继承
 (deftrait Ord (Eq) ...)                    ; Rust 的 trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 固定关联类型
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 继承有 3 个效果。(1) `impl Ord X` 要求**先**写 `impl Eq X`（关于书写顺序的规则。是在 REPL 和逐个 `load` 中都能确定地判断的唯一
@@ -739,7 +739,7 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 没有函数体——全部使用默认实现
 ```
@@ -765,11 +765,11 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 （第 2 章），就会经由 vtable 进行动态分派：
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 一个调用处，每个实现各自的回答

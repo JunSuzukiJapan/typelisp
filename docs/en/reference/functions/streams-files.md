@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Streams and Files
 
 Stream traits and methods, concrete stream types, file operations and pathnames. Network sockets are
@@ -170,11 +170,11 @@ composite streams.
 ```lisp
 (defstruct counter (n i32))
 (impl Stream counter
-  (open-stream-p ((self Self)) bool true)
-  (close ((self Self)) () ()))
+  (open-stream-p (self) bool true)
+  (close (self) () ()))
 (impl OutputStream counter
   (:type Item char)
-  (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
+  (write-item (self (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
 (write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri and fresh-line all work

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Option, Result y tipos de error
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -113,8 +113,8 @@ Si implementas `Error` para tu propio tipo de error, se puede manejar **igual** 
 (use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
-  (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (Option::none)))
+  (message (self) string (append "io failed: " self::path))
+  (source (self) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; el tipo concreto va tal cual en E
   (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))

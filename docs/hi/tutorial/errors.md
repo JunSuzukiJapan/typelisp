@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # त्रुटि प्रबंधन
 
 typelisp में त्रुटि प्रबंधन विफलताओं को दो प्रकारों में बाँटता है।
@@ -64,11 +64,11 @@ Rust के `?` जैसा कोई शॉर्टहैंड नहीं 
   (invalid string int))     ; कोई मान गलत है
 
 (impl Error config-error
-  (message ((self Self)) string
+  (message (self) string
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (source ((self Self)) Option<:dyn Error> (Option::none)))
+  (source (self) Option<:dyn Error> (Option::none)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)

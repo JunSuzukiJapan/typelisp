@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Traits estándar
 
 Los traits para la iteración, la comparación, la aritmética y la adición de elementos. Los demás traits estándar están en sus propios
@@ -14,7 +14,7 @@ capítulos: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` implementan `Iter` mediante `vector-iter<T>`/
@@ -32,14 +32,14 @@ Corresponden a `PartialEq`/`PartialOrd` de Rust (con los nombres `Eq`/`Ord`). Se
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; hay que implementarlo
-  (not-equals ((self Self) (other Self)) bool             ; implementación por defecto
+  (equals (self (other Self)) bool)                ; hay que implementarlo
+  (not-equals (self (other Self)) bool             ; implementación por defecto
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; hereda de Eq
-  (less ((self Self) (other Self)) bool)                  ; hay que implementarlo
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; hay que implementarlo
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 Para implementar `Eq` solo se escribe `equals`, y para `Ord` solo `less`. Las implementaciones por defecto
@@ -75,17 +75,17 @@ Una capa para que el código genérico exija "un tipo que se pueda sumar". **La 
 concretos usa los operadores incorporados** ([Números](numbers.md)) y no pasa por esta capa.
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; la distancia es siempre int (como en ash)
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; la distancia es siempre int (como en ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; sin métodos; una combinación de cinco
 ```
 
@@ -118,7 +118,7 @@ debe fijar cada tipo asociado). Una función genérica que divide recibe el tipo
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 Una colección a la que se pueden añadir elementos de uno en uno. Una función genérica pide «un tipo

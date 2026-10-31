@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Trait
 
 Trait là một lời hứa rằng "kiểu này hỗ trợ những thao tác này". Trait cho phép nhiều kiểu chia sẻ các
@@ -11,8 +11,8 @@ Hãy định nghĩa các thao tác trả về diện tích và tên của một 
 
 ```lisp
 (deftrait Shape ()
-  (area ((self Self)) int)
-  (name ((self Self)) string))
+  (area (self) int)
+  (name (self) string))
 ```
 
 - `()` sau tên trait là danh sách các trait mà nó kế thừa (mục 4). Để trống khi không có.
@@ -25,12 +25,12 @@ Hãy định nghĩa các thao tác trả về diện tích và tên của một 
 (defstruct rect (w int) (h int))
 
 (impl Shape circle
-  (area ((self Self)) int (* 3 self::r self::r))
-  (name ((self Self)) string "circle"))
+  (area (self) int (* 3 self::r self::r))
+  (name (self) string "circle"))
 
 (impl Shape rect
-  (area ((self Self)) int (* self::w self::h))
-  (name ((self Self)) string "rect"))
+  (area (self) int (* self::w self::h))
+  (name (self) string "rect"))
 ```
 
 Các phương thức đã triển khai được gọi giống hệt hàm thông thường.
@@ -75,16 +75,16 @@ Nếu một phương thức của trait có thân, thân đó được dùng khi
 
 ```lisp
 (deftrait Describe ()
-  (label ((self Self)) string)
-  (describe ((self Self)) string
+  (label (self) string)
+  (describe (self) string
     (format false "<~a>" (label self))))
 
 (impl Describe circle
-  (label ((self Self)) string "a circle"))            ; describe là bản mặc định
+  (label (self) string "a circle"))            ; describe là bản mặc định
 
 (impl Describe rect
-  (label ((self Self)) string "a rect")
-  (describe ((self Self)) string "[rect]"))           ; bản viết ở đây được ưu tiên
+  (label (self) string "a rect")
+  (describe (self) string "[rect]"))           ; bản viết ở đây được ưu tiên
 
 (describe (make-instance 'circle :r 1))     ; => "<a circle>"
 (describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
@@ -110,10 +110,10 @@ của `Eq` phải đứng trước.
 (defstruct money (yen int))
 
 (impl Eq money
-  (equals ((self Self) (other Self)) bool (= self::yen other::yen)))
+  (equals (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (less ((self Self) (other Self)) bool (< self::yen other::yen)))
+  (less (self (other Self)) bool (< self::yen other::yen)))
 
 (greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (triển khai mặc định trong Ord)
 ```
@@ -123,7 +123,7 @@ cần một dạng có thể đọc ngược lại, như với `~s`.
 
 ```lisp
 (impl print-object money
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "~a yen" self::yen)))
 
 (println "~a" (make-instance 'money :yen 500))              ; 500 yen

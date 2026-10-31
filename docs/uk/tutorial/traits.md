@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
 # Трейти
 
 Трейт — це обіцянка, що «цей тип підтримує ці операції». Трейти дозволяють кільком типам ділити операції
@@ -12,8 +12,8 @@
 
 ```lisp
 (deftrait Shape ()
-  (area ((self Self)) int)
-  (name ((self Self)) string))
+  (area (self) int)
+  (name (self) string))
 ```
 
 - `()` після назви трейта — це список трейтів, які він успадковує (розділ 4). Якщо їх немає, залиште
@@ -27,12 +27,12 @@
 (defstruct rect (w int) (h int))
 
 (impl Shape circle
-  (area ((self Self)) int (* 3 self::r self::r))
-  (name ((self Self)) string "circle"))
+  (area (self) int (* 3 self::r self::r))
+  (name (self) string "circle"))
 
 (impl Shape rect
-  (area ((self Self)) int (* self::w self::h))
-  (name ((self Self)) string "rect"))
+  (area (self) int (* self::w self::h))
+  (name (self) string "rect"))
 ```
 
 Реалізовані методи викликаються так само, як звичайні функції.
@@ -77,16 +77,16 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (deftrait Describe ()
-  (label ((self Self)) string)
-  (describe ((self Self)) string
+  (label (self) string)
+  (describe (self) string
     (format false "<~a>" (label self))))
 
 (impl Describe circle
-  (label ((self Self)) string "a circle"))            ; describe is the default one
+  (label (self) string "a circle"))            ; describe is the default one
 
 (impl Describe rect
-  (label ((self Self)) string "a rect")
-  (describe ((self Self)) string "[rect]"))           ; the one written here takes priority
+  (label (self) string "a rect")
+  (describe (self) string "[rect]"))           ; the one written here takes priority
 
 (describe (make-instance 'circle :r 1))     ; => "<a circle>"
 (describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
@@ -112,10 +112,10 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (defstruct money (yen int))
 
 (impl Eq money
-  (equals ((self Self) (other Self)) bool (= self::yen other::yen)))
+  (equals (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (less ((self Self) (other Self)) bool (< self::yen other::yen)))
+  (less (self (other Self)) bool (< self::yen other::yen)))
 
 (greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
 ```
@@ -125,7 +125,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (impl print-object money
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "~a yen" self::yen)))
 
 (println "~a" (make-instance 'money :yen 500))              ; 500 yen
