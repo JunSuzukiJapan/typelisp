@@ -20,16 +20,16 @@
 ;; 全メソッドが self レシーバを持ち Self をレシーバ以外に書いていないので、
 ;; このトレイトは :dyn 化できる(object safety)。
 (deftrait Shape ()
-  (label ((self Self)) string)
-  (paint ((self Self) (cv canvas)) ()))
+  (label (self) string)
+  (paint (self (cv canvas)) ()))
 
 (defstruct rect (x int) (y int) (w int) (h int))
 (defstruct circle (cx int) (cy int) (r int))
 (defstruct hline (x int) (y int) (len int))
 
 (impl Shape rect
-  (label ((self Self)) string "rect")
-  (paint ((self Self) (cv canvas)) ()
+  (label (self) string "rect")
+  (paint (self (cv canvas)) ()
     (dotimes (i self::w)
       (plot cv (+ self::x i) self::y #\-)
       (plot cv (+ self::x i) (+ self::y (- self::h 1)) #\-))
@@ -42,8 +42,8 @@
 ;; 文字セルは縦長なので、縦方向の距離を2倍に数えて丸く見せる。
 ;; r*r との差が r 以内のセルだけ打つ(＝輪郭だけ)。
 (impl Shape circle
-  (label ((self Self)) string "circle")
-  (paint ((self Self) (cv canvas)) ()
+  (label (self) string "circle")
+  (paint (self (cv canvas)) ()
     (dotimes (dy (+ (* 2 self::r) 1))
       (dotimes (dx (+ (* 4 self::r) 1))
         (let ((ox (- dx (* 2 self::r)))
@@ -52,8 +52,8 @@
             (plot cv (+ self::cx ox) (+ self::cy oy) #\*)))))))
 
 (impl Shape hline
-  (label ((self Self)) string "hline")
-  (paint ((self Self) (cv canvas)) ()
+  (label (self) string "hline")
+  (paint (self (cv canvas)) ()
     (dotimes (i self::len)
       (plot cv (+ self::x i) self::y #\=))))
 
@@ -102,7 +102,7 @@
 ;; ——Error トレイトのデフォルト実装が none を返す。
 (defstruct bad-command (detail string))
 (impl Error bad-command
-  (message ((self Self)) string (append "bad command: " self::detail)))
+  (message (self) string (append "bad command: " self::detail)))
 
 ;; An argument that should be an integer could not be read. It wraps the built-in
 ;; ParseIntError as its cause, so following source reaches the lower-level message
@@ -111,8 +111,8 @@
 ;; source をたどると下位のメッセージまで届く(Rust の Error::source と同じ)。
 (defstruct bad-number (word string) (cause ParseIntError))
 (impl Error bad-number
-  (message ((self Self)) string (append "not a number: " self::word))
-  (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
+  (message (self) string (append "not a number: " self::word))
+  (source (self) Option<:dyn Error> (Option::some self::cause)))
 
 ;; Strings have no split, so we cut on whitespace by hand.
 ;; 文字列に split は無いので空白区切りは自前で刻む。

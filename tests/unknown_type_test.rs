@@ -74,13 +74,13 @@ fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
 
 #[test]
 fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
-    let defs = "(defstruct box<T> (v T)) (deftrait Show () (show ((self Self)) string))";
-    assert_unknown(&format!("{defs} (impl Show box<T> (show ((self Self)) string (let ((y (the U 1))) \"b\")))"), "U");
-    assert_unknown(&format!("{defs} (impl<T> Show Vector<T> (show ((self Self)) string (let ((y (the U 1))) \"v\")))"), "U");
+    let defs = "(defstruct box<T> (v T)) (deftrait Show () (show (self) string))";
+    assert_unknown(&format!("{defs} (impl Show box<T> (show (self) string (let ((y (the U 1))) \"b\")))"), "U");
+    assert_unknown(&format!("{defs} (impl<T> Show Vector<T> (show (self) string (let ((y (the U 1))) \"v\")))"), "U");
     let src = format!(
         "{defs}
-         (impl Show box<T> (show ((self Self)) string (let ((x (the T self::v))) \"b\")))
-         (deftrait Clamp (Ord) (clamp ((self Self) (lo Self) (hi Self)) Self
+         (impl Show box<T> (show (self) string (let ((x (the T self::v))) \"b\")))
+         (deftrait Clamp (Ord) (clamp (self (lo Self) (hi Self)) Self
            (if (less self lo) lo (if (less hi self) hi self))))
          (impl<T> Clamp T (:where (Ord T)))
          (+ (length (show (make-instance 'box :v 1))) (clamp 5 1 3))"
@@ -90,7 +90,7 @@ fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
 
 #[test]
 fn a_trait_s_type_variables_are_self_and_its_associated_types() {
-    assert_unknown("(deftrait Shape () (:type Unit2) (area ((self Self)) Unit2) (bad ((self Self)) Oops))", "Oops");
+    assert_unknown("(deftrait Shape () (:type Unit2) (area (self) Unit2) (bad (self) Oops))", "Oops");
 }
 
 #[test]

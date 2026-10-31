@@ -203,8 +203,8 @@ fn generic_key_uninferrable_type_param_is_a_type_error() {
 #[test]
 fn generic_optional_where_bound_is_validated() {
     let prog = "
-        (deftrait eq2 () (same ((self Self) (other Self)) bool))
-        (impl eq2 int (same ((self Self) (other Self)) bool (= self other)))
+        (deftrait eq2 () (same (self (other Self)) bool))
+        (impl eq2 int (same (self (other Self)) bool (= self other)))
         (defstruct no-eq (n int))
         (defun check-eq<T> ((a T) (b T) &optional (verbose bool false)) bool (:where (eq2 T)) (same a b))
     ";
@@ -446,10 +446,10 @@ fn a_trait_impl_method_may_not_declare_lambda_list_sections() {
     // site fills its arguments from the trait's declaration, a concrete one
     // from the impl's, and the two have to be the same call.
     let src = "
-        (deftrait greet () (hello ((self Self)) int))
+        (deftrait greet () (hello (self) int))
         (defstruct thing (n int))
         (impl greet thing
-          (hello ((self Self) &key (extra int 0)) int (+ self::n extra)))
+          (hello (self &key (extra int 0)) int (+ self::n extra)))
     ";
     let msg = check_err(src);
     assert!(msg.contains("arity is fixed by its vtable slot"), "unexpected message: {}", msg);
@@ -461,7 +461,7 @@ fn an_inherent_method_with_sections_cannot_be_adopted_as_a_trait_method() {
     // outside the `impl` block, so `subst_method_item` never sees it and the
     // conformance check is what refuses it.
     let src = "
-        (deftrait greet () (hello ((self Self)) int))
+        (deftrait greet () (hello (self) int))
         (defstruct thing (n int))
         (impl thing
   (hello (self &key (extra int 0)) int (+ self::n extra)))

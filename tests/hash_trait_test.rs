@@ -71,9 +71,9 @@ fn a_chars_hash_is_its_code_point() {
 fn a_user_type_can_implement_hash() {
     let src = "(use std::hash::*sxhash-mask*) 
         (defstruct point (x int) (y int))
-        (impl Eq point (equals ((self Self) (other Self)) bool
+        (impl Eq point (equals (self (other Self)) bool
           (and (= self::x other::x) (= self::y other::y))))
-        (impl Hash point (sxhash ((self Self)) int
+        (impl Hash point (sxhash (self) int
           (logand (+ (* (as int self::x) 31) (as int self::y)) *sxhash-mask*)))
         (sxhash (make-instance 'point :x 1 :y 2))
     ";
@@ -177,10 +177,10 @@ fn size_reports_the_occupancy() {
 const POINT: &str = r#"(use std::hash::*sxhash-mask*) 
     (defstruct point (x int) (y int))
     (impl Eq point
-      (equals ((self Self) (other Self)) bool
+      (equals (self (other Self)) bool
         (if (= self::x other::x) (= self::y other::y) false)))
     (impl Hash point
-      (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+      (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 "#;
 
 #[test]
@@ -238,9 +238,9 @@ fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
 fn colliding_keys_stay_separate_entries() {
     let src = r#"
         (defstruct k (n int))
-        (impl Eq k (equals ((self Self) (other Self)) bool (= self::n other::n)))
+        (impl Eq k (equals (self (other Self)) bool (= self::n other::n)))
         ;; Every key hashes to 0.
-        (impl Hash k (sxhash ((self Self)) int 0))
+        (impl Hash k (sxhash (self) int 0))
         (defvar (h HashTable<k,int>) (HashTable::new))
         (progn
           (set h (make-instance 'k :n 1) 10)

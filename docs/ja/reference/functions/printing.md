@@ -192,7 +192,7 @@ CL 側の定型もつねに `loop` の中に書くので、書き味は変わら
 
 ```lisp
 (deftrait print-object ()
-  (print-object ((self Self) (escape bool)) string))
+  (print-object (self (escape bool)) string))
 ```
 
 | 引数 | 意味 |
@@ -206,7 +206,7 @@ CL 側の定型もつねに `loop` の中に書くので、書き味は変わら
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl print-object point
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 

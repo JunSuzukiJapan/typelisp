@@ -368,13 +368,13 @@ fn a_call_directive_works_through_a_stream_destination() {
 fn print_object_reaches_a_generic_type() {
     is_true(
         r#"(defstruct gen<T> (v T))
-           (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
+           (impl print-object gen<T> (print-object (self (escape bool)) string "GEN"))
            (equal (format false "~a" (make-instance 'gen :v 1)) "GEN")"#,
     );
     // Still reachable by name, as it always was.
     is_true(
         r#"(defstruct gen<T> (v T))
-           (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
+           (impl print-object gen<T> (print-object (self (escape bool)) string "GEN"))
            (equal (print-object (make-instance 'gen :v 1) true) "GEN")"#,
     );
 }
@@ -386,13 +386,13 @@ fn print_object_reaches_a_generic_type() {
 fn each_instantiation_reaches_its_own_print_object() {
     is_true(
         r#"(defstruct wi (n int))
-           (impl print-object wi (print-object ((self Self) (escape bool)) string "INT"))
+           (impl print-object wi (print-object (self (escape bool)) string "INT"))
            (defstruct ws (s string))
-           (impl print-object ws (print-object ((self Self) (escape bool)) string "STR"))
+           (impl print-object ws (print-object (self (escape bool)) string "STR"))
            (defstruct gen<T> (v T))
            (impl print-object gen<T>
              (:where (print-object T))
-             (print-object ((self Self) (escape bool)) string
+             (print-object (self (escape bool)) string
                (append "gen-of-" (print-object (v self) escape))))
            (and (equal (format false "~a" (make-instance 'gen :v (make-instance 'wi :n 1))) "gen-of-INT")
                 (equal (format false "~a" (make-instance 'gen :v (make-instance 'ws :s "x"))) "gen-of-STR"))"#,
@@ -407,9 +407,9 @@ fn each_instantiation_reaches_its_own_print_object() {
 fn print_object_reaches_a_builtin_generic_type() {
     is_true(
         r#"(defstruct point (x int) (y int))
-           (impl print-object point (print-object ((self Self) (escape bool)) string "P"))
+           (impl print-object point (print-object (self (escape bool)) string "P"))
            (impl print-object Vector<T> (:where (print-object T))
-             (print-object ((self Self) (escape bool)) string "V"))
+             (print-object (self (escape bool)) string "V"))
            (equal (format false "~a" (the Vector<point> (Vector::new))) "V")"#,
     );
 }

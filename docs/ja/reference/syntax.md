@@ -590,7 +590,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 
 - 項目の形は `(名前 (引数...) 戻り値の型 本体...)` で、トレイトの `impl`（3.9）の項目と同じ。
 - 引数の先頭が `self` の項目は**インスタンスメソッド**で、`(name obj args...)` の形で呼ぶ。
-  `self` には型を書かなくてよい（`(self)` は `((self Self))` と同じで、`Self` は対象の型）。
+  `self` には型を書かない（型は対象の型 `Self` になる。`(self Type)` とは書けない）。
 - `self` の無い項目は**静的メソッド**で、`(Type::name args...)` の形で呼ぶ。値を作る静的
   メソッドがその型のコンストラクタになる。名前は自由で、`new` を勧める。
 - **公開は項目ごと**。`(pub name ...)` と書いた項目だけが、型を定義したモジュールの外から使える。
@@ -832,13 +832,13 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 継承リストは必須。無ければ ()
   (:type AssocName)                       ; 関連型（複数可、省略可）
-  (method-name ((self Self) params...) RetType)          ; 本体なし＝実装必須
-  (method-name ((self Self) params...) RetType body...)) ; 本体あり＝デフォルト実装
+  (method-name (self params...) RetType)          ; 本体なし＝実装必須
+  (method-name (self params...) RetType body...)) ; 本体あり＝デフォルト実装
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; impl 全体に効く境界（省略可）
   (:type AssocName ConcreteType)          ; 関連型を具体化
-  (method-name (recv params...) RetType body...))
+  (method-name (self params...) RetType body...))
 ```
 
 `impl` によって各メソッドは `TargetType` のメソッドとして登録され、固有 `impl`（3.5）のメソッドと
@@ -853,7 +853,7 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 (deftrait Eq () ...)                       ; 継承なし
 (deftrait Ord (Eq) ...)                    ; Rust の trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 関連型のピン留め
-  (rewind ((self Self)) ()))
+  (rewind (self) ()))
 ```
 
 継承の効果は3つ。(1) `impl Ord X` は `impl Eq X` を**先に**書くことを要求する（記述順の規則。
@@ -881,7 +881,7 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp ((self Self) (lo Self) (hi Self)) Self
+  (clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 本体ゼロ — 全部デフォルト
 ```
@@ -912,11 +912,11 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 場合は trait オブジェクト型 `:dyn Trait`（2 章）を使うと vtable 経由の動的ディスパッチになる:
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
-(impl Drawable square (draw ((self Self)) string "square"))
+(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable square (draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 1つの呼び出し地点、実装ごとの答え

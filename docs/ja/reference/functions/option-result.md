@@ -108,8 +108,8 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 (use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
-  (message ((self Self)) string (append "io failed: " self::path))
-  (source ((self Self)) Option<:dyn Error> (Option::none)))
+  (message (self) string (append "io failed: " self::path))
+  (source (self) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; 具象型をそのまま E に載せる
   (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))

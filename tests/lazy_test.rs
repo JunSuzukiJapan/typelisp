@@ -114,7 +114,7 @@ fn an_impl_where_pin_types_the_source() {
 (defstruct every-other-iter<I,A> (src I))
 (impl Iter every-other-iter<I,A> (:where (Iter I (Item A)))
   (:type Item A)
-  (next ((self Self)) Option<A>
+  (next (self) Option<A>
     (next self::src)
     (next self::src)))
 (defun every-other<I,A> ((it I)) every-other-iter<I,A> (:where (Iter I (Item A))) (make-instance 'every-other-iter :src it))

@@ -334,8 +334,8 @@ fn a_traced_call_prints_a_niched_option_by_its_declared_type() {
 #[test]
 fn a_niched_option_cannot_be_boxed_as_a_trait_object() {
     let msg = check_err(
-        "(deftrait Speak () (say ((self Self)) string))\n\
-         (impl Speak Option<int> (say ((self Self)) string \"opt\"))\n\
+        "(deftrait Speak () (say (self) string))\n\
+         (impl Speak Option<int> (say (self) string \"opt\"))\n\
          (defun hear ((s :dyn Speak)) string (say s))\n\
          (hear (the Option<int> (Option::some 1)))",
     );

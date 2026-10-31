@@ -300,7 +300,7 @@ fn sort_is_stable_for_equal_keys() {
 fn member_works_over_a_user_type_with_an_eq_impl() {
     let src = "(defstruct point (x int) (y int))
                (impl Eq point
-                 (equals ((self Self) (other Self)) bool
+                 (equals (self (other Self)) bool
                    (if (= self::x other::x) (= self::y other::y) false)))
                (defun make-v () Vector<point> (Vector::new))
                (let ((v (make-v)))

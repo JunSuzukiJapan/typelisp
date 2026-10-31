@@ -257,7 +257,7 @@ fn waiting_on_a_socket_from_a_print_method_is_refused() {
         "(use std::net::socket-listener std::net::tcp-listen) {LISTEN}
 (defstruct peeker (l socket-listener))
 (impl print-object peeker
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (match (accept self::l)
       ((ok c) (progn (close c) \"accepted\"))
       ((err e) (panic (message e))))))

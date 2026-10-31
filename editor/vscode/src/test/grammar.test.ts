@@ -68,7 +68,7 @@ test("definition forms name a function, a type, or a variable", () => {
     "(defun factorial ((n i32)) int 1)",
     "(pub defun g ((x i32)) i32 x)",
     "(defstruct point<T> (x T))",
-    "(deftrait Shape (label ((self Self)) string))",
+    "(deftrait Shape (label (self) string))",
     "(pub defvar (*flag* bool) false)",
   ].join("\n");
   assert.equal(scopeOf(src, "defun"), "storage.type.function.typelisp");
@@ -86,7 +86,7 @@ test("definition forms name a function, a type, or a variable", () => {
 test("impl names both the trait and the type, even lowercase ones", () => {
   // `print-object` is a prelude trait whose name is not capitalized, so the
   // Capitalized-name rule cannot reach it.
-  const src = "(impl print-object point\n  (print-object ((self Self) (escape bool)) string \"p\"))";
+  const src = "(impl print-object point\n  (print-object (self (escape bool)) string \"p\"))";
   const tokens = tokenize(src);
   assert.equal(tokens[1][0], "impl");
   assert.equal(tokens[1][1], "keyword.control.impl.typelisp");

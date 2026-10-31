@@ -70,15 +70,15 @@ fn eval_string(src: &str) -> String {
 /// just `deftrait`+`impl`+ordinary (concrete-receiver) dispatch.
 const COUNTER_PRELUDE: &str = "
 (deftrait Counted ()
-  (count ((self Self)) int))
+  (count (self) int))
 (defstruct box (n int))
 (impl Counted box
-  (count ((self Self)) int self::n))
+  (count (self) int self::n))
 ";
 
 #[test]
 fn deftrait_registers_with_no_error() {
-    assert!(check("(deftrait Counted () (count ((self Self)) int))").is_ok());
+    assert!(check("(deftrait Counted () (count (self) int))").is_ok());
 }
 
 #[test]
@@ -96,16 +96,16 @@ fn impl_on_a_primitive_type_dispatches_as_an_ordinary_method() {
     // second `Self` parameter beyond the receiver.
     let src = "
 (deftrait Doubling ()
-  (add-twice ((self Self) (other Self)) Self))
+  (add-twice (self (other Self)) Self))
 (impl Doubling int
-  (add-twice ((self Self) (other Self)) Self (+ self (* other 2))))
+  (add-twice (self (other Self)) Self (+ self (* other 2))))
 (add-twice 40 1)";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
 fn impl_on_an_unknown_type_is_a_type_error() {
-    assert!(check("(deftrait Counted () (count ((self Self)) int)) (impl Counted nope (count ((self Self)) int 0))").is_err());
+    assert!(check("(deftrait Counted () (count (self) int)) (impl Counted nope (count (self) int 0))").is_err());
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn calling_an_unimplemented_trait_method_on_a_concrete_type_is_a_type_error() {
     // `box` never gets a `Counted` impl here, so `(count b)` must fail to
     // resolve (no free function, no instance method) rather than silently
     // doing something else.
-    let src = "(deftrait Counted () (count ((self Self)) int))
+    let src = "(deftrait Counted () (count (self) int))
                (defstruct box (n int))
                (let ((b (make-instance 'box :n 1))) (count b))";
     assert!(check(src).is_err());
@@ -147,11 +147,11 @@ fn where_bound_function_rejects_a_method_the_trait_does_not_declare() {
 #[test]
 fn two_types_implementing_the_same_trait_dispatch_independently() {
     let src = "
-        (deftrait Counted () (count ((self Self)) int))
+        (deftrait Counted () (count (self) int))
         (defstruct box-a (n int))
         (defstruct box-b (n int))
-        (impl Counted box-a (count ((self Self)) int self::n))
-        (impl Counted box-b (count ((self Self)) int (* 2 self::n)))
+        (impl Counted box-a (count (self) int self::n))
+        (impl Counted box-b (count (self) int (* 2 self::n)))
         (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
         (+ (describe (make-instance 'box-a :n 3)) (describe (make-instance 'box-b :n 3)))";
     assert_eq!(eval_ok(src), Value::Int(3 + 6));
@@ -181,11 +181,11 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
     // `same` requires `(Eq2 A) (Eq2 B)` and compares fields via the bounded
     // trait method — with a *nested* `pr` exercising impl-on-impl recursion.
     let src = "
-        (deftrait Eq2 () (same ((self Self) (other Self)) bool))
-        (impl Eq2 int (same ((self Self) (other Self)) bool (= self other)))
+        (deftrait Eq2 () (same (self (other Self)) bool))
+        (impl Eq2 int (same (self (other Self)) bool (= self other)))
         (defstruct pr<A,B> (a A) (b B))
         (impl Eq2 pr<A,B>
-          (same ((self Self) (other Self)) bool (:where (Eq2 A) (Eq2 B))
+          (same (self (other Self)) bool (:where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
         (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3))
             (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 9) :b 3)) 0 1)
@@ -200,12 +200,12 @@ fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
     // impl — the *call* must fail to check with a real trait error, not an
     // opaque `NoSuchFunction` from inside the specialization drain.
     let src = "
-        (deftrait Eq2 () (same ((self Self) (other Self)) bool))
-        (impl Eq2 int (same ((self Self) (other Self)) bool (= self other)))
+        (deftrait Eq2 () (same (self (other Self)) bool))
+        (impl Eq2 int (same (self (other Self)) bool (= self other)))
         (defstruct no-eq (n int))
         (defstruct pr<A,B> (a A) (b B))
         (impl Eq2 pr<A,B>
-          (same ((self Self) (other Self)) bool (:where (Eq2 A) (Eq2 B))
+          (same (self (other Self)) bool (:where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
         (same (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2) (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2))";
     let err = check(src).expect_err("must fail to check");
@@ -281,11 +281,11 @@ fn forwarding_a_bare_type_parameter_with_a_matching_where_bound_type_checks_and_
 const BOXED_PRELUDE: &str = "
 (deftrait Boxed ()
   (:type Item)
-  (unbox ((self Self)) Item))
+  (unbox (self) Item))
 (defstruct wrap<T> (v T))
 (impl Boxed wrap<T>
   (:type Item T)
-  (unbox ((self Self)) T self::v))
+  (unbox (self) T self::v))
 (defun get-int<T> ((b T)) int (:where (Boxed T (Item int))) (unbox b))
 ";
 
@@ -350,12 +350,12 @@ fn check_err(src: &str) -> String {
 /// implementing both — the arrangement every supertrait rule is stated over.
 const SUPER_PRELUDE: &str = "
 (deftrait Base ()
-  (base-tag ((self Self)) int))
+  (base-tag (self) int))
 (deftrait Derived (Base)
-  (derived-tag ((self Self)) int))
+  (derived-tag (self) int))
 (defstruct cell (n int))
-(impl Base cell (base-tag ((self Self)) int self::n))
-(impl Derived cell (derived-tag ((self Self)) int (* self::n 10)))
+(impl Base cell (base-tag (self) int self::n))
+(impl Derived cell (derived-tag (self) int (* self::n 10)))
 ";
 
 #[test]
@@ -387,10 +387,10 @@ fn a_supertrait_bound_discharges_a_callees_bound_on_the_base_trait() {
 #[test]
 fn implementing_a_trait_without_its_supertrait_is_rejected() {
     let m = check_err(
-        "(deftrait Base () (base-tag ((self Self)) int))
-         (deftrait Derived (Base) (derived-tag ((self Self)) int))
+        "(deftrait Base () (base-tag (self) int))
+         (deftrait Derived (Base) (derived-tag (self) int))
          (defstruct cell (n int))
-         (impl Derived cell (derived-tag ((self Self)) int 1))",
+         (impl Derived cell (derived-tag (self) int 1))",
     );
     assert!(m.contains("requires"), "{}", m);
     assert!(m.contains("write it before this one"), "{}", m);
@@ -401,18 +401,18 @@ fn a_supertrait_impl_written_after_the_subtrait_impl_is_rejected() {
     // Textual precedence: the obligation is discharged where `impl Derived`
     // is checked, so a later `impl Base` does not retroactively satisfy it.
     let m = check_err(
-        "(deftrait Base () (base-tag ((self Self)) int))
-         (deftrait Derived (Base) (derived-tag ((self Self)) int))
+        "(deftrait Base () (base-tag (self) int))
+         (deftrait Derived (Base) (derived-tag (self) int))
          (defstruct cell (n int))
-         (impl Derived cell (derived-tag ((self Self)) int 1))
-         (impl Base cell (base-tag ((self Self)) int 2))",
+         (impl Derived cell (derived-tag (self) int 1))
+         (impl Base cell (base-tag (self) int 2))",
     );
     assert!(m.contains("write it before this one"), "{}", m);
 }
 
 #[test]
 fn an_unknown_supertrait_names_the_mandatory_slot() {
-    let m = check_err("(deftrait Derived (Nope) (m ((self Self)) int))");
+    let m = check_err("(deftrait Derived (Nope) (m (self) int))");
     assert!(m.contains("unknown supertrait"), "{}", m);
     assert!(m.contains("write `()` for none"), "{}", m);
 }
@@ -422,15 +422,15 @@ fn omitting_the_supertrait_list_is_reported_against_that_slot() {
     // The pre-supertrait spelling: the first *method* lands in the
     // supertrait slot, so the diagnostic must point at the slot rule rather
     // than blaming the method name.
-    let m = check_err("(deftrait Counted (count ((self Self)) int))");
+    let m = check_err("(deftrait Counted (count (self) int))");
     assert!(m.contains("supertrait"), "{}", m);
 }
 
 #[test]
 fn a_trait_cannot_redeclare_an_inherited_method() {
     let m = check_err(
-        "(deftrait Base () (tag ((self Self)) int))
-         (deftrait Derived (Base) (tag ((self Self)) int))",
+        "(deftrait Base () (tag (self) int))
+         (deftrait Derived (Base) (tag (self) int))",
     );
     assert!(m.contains("already inherited"), "{}", m);
 }
@@ -438,9 +438,9 @@ fn a_trait_cannot_redeclare_an_inherited_method() {
 #[test]
 fn two_supertraits_declaring_the_same_method_are_rejected() {
     let m = check_err(
-        "(deftrait A () (tag ((self Self)) int))
-         (deftrait B () (tag ((self Self)) int))
-         (deftrait C (A B) (c-only ((self Self)) int))",
+        "(deftrait A () (tag (self) int))
+         (deftrait B () (tag (self) int))
+         (deftrait C (A B) (c-only (self) int))",
     );
     assert!(m.contains("inherited from both"), "{}", m);
 }
@@ -450,15 +450,15 @@ fn a_diamond_inherits_the_shared_method_once() {
     // D(B,C), B(A), C(A): `A::tag` reaches the linearizer twice, declared by
     // `A` both times, so it keeps exactly one slot and `D` stays usable.
     let src = "
-        (deftrait A () (tag ((self Self)) int))
-        (deftrait B (A) (b-tag ((self Self)) int))
-        (deftrait C (A) (c-tag ((self Self)) int))
-        (deftrait D (B C) (d-tag ((self Self)) int))
+        (deftrait A () (tag (self) int))
+        (deftrait B (A) (b-tag (self) int))
+        (deftrait C (A) (c-tag (self) int))
+        (deftrait D (B C) (d-tag (self) int))
         (defstruct cell (n int))
-        (impl A cell (tag ((self Self)) int self::n))
-        (impl B cell (b-tag ((self Self)) int 2))
-        (impl C cell (c-tag ((self Self)) int 3))
-        (impl D cell (d-tag ((self Self)) int 4))
+        (impl A cell (tag (self) int self::n))
+        (impl B cell (b-tag (self) int 2))
+        (impl C cell (c-tag (self) int 3))
+        (impl D cell (d-tag (self) int 4))
         (defun sum<T> ((x T)) int (:where (D T))
           (+ (tag x) (+ (b-tag x) (+ (c-tag x) (d-tag x)))))
         (sum (make-instance 'cell :n 1))";
@@ -468,8 +468,8 @@ fn a_diamond_inherits_the_shared_method_once() {
 #[test]
 fn a_supertrait_listed_twice_is_rejected() {
     let m = check_err(
-        "(deftrait A () (tag ((self Self)) int))
-         (deftrait B (A A) (b ((self Self)) int))",
+        "(deftrait A () (tag (self) int))
+         (deftrait B (A A) (b (self) int))",
     );
     assert!(m.contains("twice"), "{}", m);
 }
@@ -477,8 +477,8 @@ fn a_supertrait_listed_twice_is_rejected() {
 #[test]
 fn a_supertrait_with_an_associated_type_must_pin_it() {
     let m = check_err(
-        "(deftrait Src () (:type Item) (next ((self Self)) Item))
-         (deftrait CharSrc (Src) (rewind ((self Self)) ()))",
+        "(deftrait Src () (:type Item) (next (self) Item))
+         (deftrait CharSrc (Src) (rewind (self) ()))",
     );
     assert!(m.contains("must be pinned"), "{}", m);
 }
@@ -488,11 +488,11 @@ fn a_supertrait_associated_type_pin_resolves_an_inherited_method() {
     // `CharSrc` pins `Src`'s `Item` to `int`, so the inherited `next`
     // returns `int` — a `bool` context must be a type error.
     let src = "
-        (deftrait Src () (:type Item) (next ((self Self)) Item))
-        (deftrait CharSrc ((Src (Item int))) (rewind ((self Self)) ()))
+        (deftrait Src () (:type Item) (next (self) Item))
+        (deftrait CharSrc ((Src (Item int))) (rewind (self) ()))
         (defstruct counter (n int))
-        (impl Src counter (:type Item int) (next ((self Self)) int self::n))
-        (impl CharSrc counter (rewind ((self Self)) () ()))
+        (impl Src counter (:type Item int) (next (self) int self::n))
+        (impl CharSrc counter (rewind (self) () ()))
         (defun peek<T> ((x T)) int (:where (CharSrc T)) (next x))
         (peek (make-instance 'counter :n 5))";
     assert_eq!(eval_ok(src), Value::Int(5));
@@ -502,11 +502,11 @@ fn a_supertrait_associated_type_pin_resolves_an_inherited_method() {
 
 const DEFAULTED: &str = "
 (deftrait Eq2 ()
-  (same ((self Self) (other Self)) bool)
-  (differs ((self Self) (other Self)) bool
+  (same (self (other Self)) bool)
+  (differs (self (other Self)) bool
     (if (same self other) false true)))
 (defstruct point (x int))
-(impl Eq2 point (same ((self Self) (other Self)) bool (= self::x other::x)))
+(impl Eq2 point (same (self (other Self)) bool (= self::x other::x)))
 ";
 
 #[test]
@@ -525,13 +525,13 @@ fn a_default_body_calls_the_impls_own_core_method() {
 fn an_impl_can_override_a_default_body() {
     let src = "
         (deftrait Eq2 ()
-          (same ((self Self) (other Self)) bool)
-          (differs ((self Self) (other Self)) bool (if (same self other) false true)))
+          (same (self (other Self)) bool)
+          (differs (self (other Self)) bool (if (same self other) false true)))
         (defstruct point (x int))
         (impl Eq2 point
-          (same ((self Self) (other Self)) bool (= self::x other::x))
+          (same (self (other Self)) bool (= self::x other::x))
           ;; deliberately wrong, to prove the written body wins
-          (differs ((self Self) (other Self)) bool false))
+          (differs (self (other Self)) bool false))
         (differs (make-instance 'point :x 1) (make-instance 'point :x 2))";
     assert_eq!(eval_ok(src), Value::Bool(false));
 }
@@ -544,10 +544,10 @@ fn a_default_body_resolves_names_in_the_traits_module() {
         (module m
           (defun helper ((n int)) int (* n 2))
           (pub deftrait Doubler ()
-            (base ((self Self)) int)
-            (doubled ((self Self)) int (helper (base self)))))
+            (base (self) int)
+            (doubled (self) int (helper (base self)))))
         (defstruct box (n int))
-        (impl m::Doubler box (base ((self Self)) int self::n))
+        (impl m::Doubler box (base (self) int self::n))
         (doubled (make-instance 'box :n 21))";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -557,7 +557,7 @@ fn a_trailing_string_on_a_bodyless_signature_is_a_default_body_not_a_docstring()
     // CL's rule, unchanged: a lone trailing string is the return value. So
     // this declares a default body returning "doc" — which is exactly why a
     // bodyless signature can never be documented separately.
-    let src = "(deftrait T () (f ((self Self)) string \"doc\"))
+    let src = "(deftrait T () (f (self) string \"doc\"))
                (defstruct s (n int))
                (impl T s)
                (f (make-instance 's :n 1))";
@@ -575,11 +575,11 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
     // cannot even be written on one.
     let src = "
         (pub deftrait Eq3 ()
-          (same ((self Self) (other Self)) bool)
-          (differs ((self Self) (other Self)) bool (if (same self other) false true)))
+          (same (self (other Self)) bool)
+          (differs (self (other Self)) bool (if (same self other) false true)))
         (module m
           (pub defstruct point (pub x int))
-          (impl ::Eq3 point (same ((self Self) (other Self)) bool (= self::x other::x))))
+          (impl ::Eq3 point (same (self (other Self)) bool (= self::x other::x))))
         (differs (make-instance 'm::point :x 1) (make-instance 'm::point :x 2))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
@@ -588,10 +588,10 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
 fn a_trait_method_is_callable_from_outside_the_implementing_module() {
     let src = "
         (pub deftrait Named ()
-          (label ((self Self)) string))
+          (label (self) string))
         (module m
           (pub defstruct tag (pub n int))
-          (impl ::Named tag (label ((self Self)) string \"tag\")))
+          (impl ::Named tag (label (self) string \"tag\")))
         (label (make-instance 'm::tag :n 1))";
     assert_eq!(eval_string(src), "tag");
 }
@@ -609,8 +609,8 @@ fn an_unused_default_body_is_type_checked_at_the_deftrait() {
     // is still wrong, and Rust would say so at the `trait` too.
     let m = check_err(
         "(deftrait T ()
-           (n ((self Self)) int)
-           (twice ((self Self)) int \"two\"))",
+           (n (self) int)
+           (twice (self) int \"two\"))",
     );
     assert!(m.contains("expected `int`") || m.contains("expected `string`"), "{}", m);
 }
@@ -619,8 +619,8 @@ fn an_unused_default_body_is_type_checked_at_the_deftrait() {
 fn an_unused_default_body_may_not_call_an_unknown_function() {
     let m = check_err(
         "(deftrait T ()
-           (n ((self Self)) int)
-           (twice ((self Self)) int (triple self)))",
+           (n (self) int)
+           (twice (self) int (triple self)))",
     );
     assert!(m.contains("no such function"), "{}", m);
 }
@@ -631,8 +631,8 @@ fn a_default_body_may_call_a_sibling_method_on_self_at_the_declaration() {
     // type variable — the bound the precheck puts in scope.
     assert!(check(
         "(deftrait T ()
-           (n ((self Self)) int)
-           (twice ((self Self)) int (* 2 (n self))))"
+           (n (self) int)
+           (twice (self) int (* 2 (n self))))"
     )
     .is_ok());
 }
@@ -640,8 +640,8 @@ fn a_default_body_may_call_a_sibling_method_on_self_at_the_declaration() {
 #[test]
 fn a_default_body_may_call_an_inherited_method_on_self() {
     assert!(check(
-        "(deftrait Base () (n ((self Self)) int))
-         (deftrait Sub (Base) (twice ((self Self)) int (* 2 (n self))))"
+        "(deftrait Base () (n (self) int))
+         (deftrait Sub (Base) (twice (self) int (* 2 (n self))))"
     )
     .is_ok());
 }
@@ -653,15 +653,15 @@ fn a_default_body_is_checked_against_the_traits_associated_types() {
     assert!(check(
         "(deftrait Boxed ()
            (:type Item)
-           (unwrap ((self Self)) Item)
-           (unwrap-again ((self Self)) Item (unwrap self)))"
+           (unwrap (self) Item)
+           (unwrap-again (self) Item (unwrap self)))"
     )
     .is_ok());
     let m = check_err(
         "(deftrait Boxed ()
            (:type Item)
-           (unwrap ((self Self)) Item)
-           (unwrap-again ((self Self)) Item 1))",
+           (unwrap (self) Item)
+           (unwrap-again (self) Item 1))",
     );
     assert!(m.contains("Item"), "{}", m);
 }
@@ -673,10 +673,10 @@ fn a_default_body_rejected_at_the_declaration_leaves_no_half_trait_behind() {
     // driver that keeps going sees must still be a coherent trait.
     let m = check_err(
         "(deftrait T ()
-           (n ((self Self)) int)
-           (twice ((self Self)) int \"two\"))
+           (n (self) int)
+           (twice (self) int \"two\"))
          (defstruct s (n int))
-         (impl T s (n ((self Self)) int self::n))",
+         (impl T s (n (self) int self::n))",
     );
     assert!(m.contains("expected `int`") || m.contains("expected `string`"), "{}", m);
 }
@@ -686,9 +686,9 @@ fn a_default_body_rejected_at_the_declaration_leaves_no_half_trait_behind() {
 #[test]
 fn an_impl_missing_an_undefaulted_method_is_rejected() {
     let m = check_err(
-        "(deftrait T () (a ((self Self)) int) (b ((self Self)) int))
+        "(deftrait T () (a (self) int) (b (self) int))
          (defstruct s (n int))
-         (impl T s (a ((self Self)) int 1))",
+         (impl T s (a (self) int 1))",
     );
     assert!(m.contains("missing method `b`"), "{}", m);
 }
@@ -696,9 +696,9 @@ fn an_impl_missing_an_undefaulted_method_is_rejected() {
 #[test]
 fn an_impl_of_a_method_the_trait_does_not_declare_is_rejected() {
     let m = check_err(
-        "(deftrait T () (a ((self Self)) int))
+        "(deftrait T () (a (self) int))
          (defstruct s (n int))
-         (impl T s (a ((self Self)) int 1) (zz ((self Self)) int 2))",
+         (impl T s (a (self) int 1) (zz (self) int 2))",
     );
     assert!(m.contains("is not a method of"), "{}", m);
 }
@@ -706,11 +706,11 @@ fn an_impl_of_a_method_the_trait_does_not_declare_is_rejected() {
 #[test]
 fn implementing_an_inherited_method_in_the_subtraits_impl_is_rejected() {
     let m = check_err(
-        "(deftrait Base () (tag ((self Self)) int))
-         (deftrait Sub (Base) (extra ((self Self)) int))
+        "(deftrait Base () (tag (self) int))
+         (deftrait Sub (Base) (extra (self) int))
          (defstruct s (n int))
-         (impl Base s (tag ((self Self)) int 1))
-         (impl Sub s (extra ((self Self)) int 2) (tag ((self Self)) int 3))",
+         (impl Base s (tag (self) int 1))
+         (impl Sub s (extra (self) int 2) (tag (self) int 3))",
     );
     assert!(m.contains("supertrait's own `impl`"), "{}", m);
 }
@@ -718,9 +718,9 @@ fn implementing_an_inherited_method_in_the_subtraits_impl_is_rejected() {
 #[test]
 fn an_impl_giving_the_same_method_twice_is_rejected() {
     let m = check_err(
-        "(deftrait T () (a ((self Self)) int))
+        "(deftrait T () (a (self) int))
          (defstruct s (n int))
-         (impl T s (a ((self Self)) int 1) (a ((self Self)) int 2))",
+         (impl T s (a (self) int 1) (a (self) int 2))",
     );
     assert!(m.contains("given twice") || m.contains("already defined"), "{}", m);
 }
@@ -728,9 +728,9 @@ fn an_impl_giving_the_same_method_twice_is_rejected() {
 #[test]
 fn an_impl_with_the_wrong_return_type_is_rejected() {
     let m = check_err(
-        "(deftrait T () (a ((self Self)) int))
+        "(deftrait T () (a (self) int))
          (defstruct s (n int))
-         (impl T s (a ((self Self)) string \"x\"))",
+         (impl T s (a (self) string \"x\"))",
     );
     assert!(m.contains("declares"), "{}", m);
 }
@@ -738,9 +738,9 @@ fn an_impl_with_the_wrong_return_type_is_rejected() {
 #[test]
 fn an_impl_with_the_wrong_parameter_type_is_rejected() {
     let m = check_err(
-        "(deftrait T () (a ((self Self) (k int)) int))
+        "(deftrait T () (a (self (k int)) int))
          (defstruct s (n int))
-         (impl T s (a ((self Self) (k string)) int 1))",
+         (impl T s (a (self (k string)) int 1))",
     );
     assert!(m.contains("declares"), "{}", m);
 }
@@ -748,9 +748,9 @@ fn an_impl_with_the_wrong_parameter_type_is_rejected() {
 #[test]
 fn an_impl_omitting_an_associated_type_is_rejected() {
     let m = check_err(
-        "(deftrait Src () (:type Item) (next ((self Self)) Item))
+        "(deftrait Src () (:type Item) (next (self) Item))
          (defstruct s (n int))
-         (impl Src s (next ((self Self)) int self::n))",
+         (impl Src s (next (self) int self::n))",
     );
     assert!(m.contains("associated type"), "{}", m);
 }
@@ -771,8 +771,8 @@ fn an_impl_omitting_an_associated_type_is_rejected() {
 fn a_self_returning_trait_method_resolves_to_the_bounded_type_variable() {
     assert_eq!(
         eval_ok(
-            "(deftrait Add () (add ((self Self) (other Self)) Self))
-             (impl Add int (add ((self Self) (other Self)) Self (+ self other)))
+            "(deftrait Add () (add (self (other Self)) Self))
+             (impl Add int (add (self (other Self)) Self (+ self other)))
              (defun sum3<T> ((a T) (b T) (c T)) T (:where (Add T)) (add (add a b) c))
              (sum3 1 2 3)"
         ),
@@ -786,9 +786,9 @@ fn a_self_returning_trait_method_resolves_to_the_bounded_type_variable() {
 fn an_inherited_self_returning_trait_method_resolves_to_the_bounded_type_variable() {
     assert_eq!(
         eval_ok(
-            "(deftrait Add () (add ((self Self) (other Self)) Self))
-             (deftrait Double (Add) (twice ((self Self)) Self (add self self)))
-             (impl Add int (add ((self Self) (other Self)) Self (+ self other)))
+            "(deftrait Add () (add (self (other Self)) Self))
+             (deftrait Double (Add) (twice (self) Self (add self self)))
+             (impl Add int (add (self (other Self)) Self (+ self other)))
              (impl Double int)
              (defun quad<T> ((a T)) T (:where (Double T)) (twice (twice a)))
              (quad 3)"
@@ -814,8 +814,8 @@ const SINK: &str = "
 (defstruct holder (n int))
 (deftrait Sink ()
   (:type Item)
-  (size ((self Self)) int)
-  (put-all ((self Self) (vs Vector<Item>)) int (size self)))
+  (size (self) int)
+  (put-all (self (vs Vector<Item>)) int (size self)))
 ";
 
 #[test]
@@ -827,7 +827,7 @@ fn an_associated_type_inside_a_generic_is_substituted() {
             "{}
              (impl Sink holder
                (:type Item char)
-               (size ((self Self)) int self::n))
+               (size (self) int self::n))
              (defun empty-chars () Vector<char> (Vector::new))
              (defun two () Vector<char>
                (let ((v (empty-chars)))
@@ -849,12 +849,12 @@ fn substitution_reaches_a_nested_argument_and_self() {
         "(defstruct holder (n int))
          (deftrait Sink ()
            (:type Item)
-           (size ((self Self)) int)
-           (nested ((self Self) (vs Vector<Option<Item>>)) int (size self))
-           (selves ((self Self) (vs Vector<Self>)) int (size self)))
+           (size (self) int)
+           (nested (self (vs Vector<Option<Item>>)) int (size self))
+           (selves (self (vs Vector<Self>)) int (size self)))
          (impl Sink holder
            (:type Item char)
-           (size ((self Self)) int self::n))",
+           (size (self) int self::n))",
     )
     .expect("check failed");
 }
@@ -870,11 +870,11 @@ fn an_associated_type_may_be_bound_to_a_type_no_name_can_spell() {
         "(defstruct holder (n int))
          (deftrait Sink ()
            (:type Item)
-           (size ((self Self)) int)
-           (put-all ((self Self) (vs Vector<Item>)) int (size self)))
+           (size (self) int)
+           (put-all (self (vs Vector<Item>)) int (size self)))
          (impl Sink holder
            (:type Item (fn (int) int))
-           (size ((self Self)) int self::n))",
+           (size (self) int self::n))",
     )
     .expect("check failed");
 }
@@ -885,14 +885,14 @@ fn an_associated_type_may_be_bound_to_a_type_no_name_can_spell() {
 fn an_associated_type_may_be_bound_to_a_trait_object() {
     check(
         "(defstruct holder (n int))
-         (deftrait Drawable () (draw ((self Self)) ()))
+         (deftrait Drawable () (draw (self) ()))
          (deftrait Sink ()
            (:type Item)
-           (size ((self Self)) int)
-           (put-all ((self Self) (vs Vector<Item>)) int (size self)))
+           (size (self) int)
+           (put-all (self (vs Vector<Item>)) int (size self)))
          (impl Sink holder
            (:type Item :dyn Drawable)
-           (size ((self Self)) int self::n))",
+           (size (self) int self::n))",
     )
     .expect("check failed");
 }

@@ -11,7 +11,7 @@ const DEFS: &str = r##"
   (pub at ((x f64) (y f64)) Point (make-instance 'Point :x x :y y))
   (pub origin () Self (make-instance 'Point :x 0.0 :y 0.0))
   (pub area (self) f64 (* self::x self::y))
-  (pub scaled ((self Self) (k f64) &optional (dk f64 0.0)) Point
+  (pub scaled (self (k f64) &optional (dk f64 0.0)) Point
     (make-instance 'Point :x (* self::x (+ k dk)) :y (* self::y k))))
 (defstruct Box<T> (v T))
 (impl Box<T> (:where (print-object T))
@@ -38,7 +38,7 @@ fn static_and_instance_methods() {
     both(r##"(format false "~a ~a" (area (Point::origin)) (area (Point::at 2.0 3.0)))"##, "0.0 6.0");
 }
 
-/// A bare `self` is `(self Self)`; `Self` is the target type; an inherent
+/// A bare `self` is the receiver; `Self` is the target type; an inherent
 /// method's parameters may be optional, with a default.
 #[test]
 fn self_and_optional_parameters() {

@@ -173,7 +173,7 @@ fn deftrait_docstring_is_returned_by_documentation() {
     let src = r#"
         (deftrait describable ()
           "Types that can describe themselves."
-          (describe ((self Self)) string))
+          (describe (self) string))
         (unwrap-or (documentation describable) "none")
     "#;
     assert_eq!(eval_string(src), "Types that can describe themselves.");
@@ -184,9 +184,9 @@ fn defmethod_docstring_via_impl_is_returned_by_documentation() {
     let src = r#"
         (defstruct point (x int) (y int))
         (deftrait describable ()
-          (describe ((self Self)) string))
+          (describe (self) string))
         (impl describable point
-          (describe ((self point)) string
+          (describe (self) string
             "Describes this point as a string."
             "a point"))
         (unwrap-or (documentation point::describe) "none")

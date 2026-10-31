@@ -40,7 +40,7 @@ fn a_mismatch_in_a_generic_function_body_is_reported() {
 
 #[test]
 fn a_mismatch_in_a_trait_default_body_is_reported() {
-    let e = mismatch(r#"(deftrait greet () (hello ((self Self)) i32 "x"))"#);
+    let e = mismatch(r#"(deftrait greet () (hello (self) i32 "x"))"#);
     assert!(e.contains("type mismatch: expected `i32`, found `string`"), "{}", e);
 }
 
@@ -90,7 +90,7 @@ fn the_argument_that_decided_nothing_is_reported_before_its_use() {
 #[test]
 fn an_unmet_where_bound_is_reported() {
     let e = mismatch(
-        r#"(deftrait shout () (loud ((self Self)) i32))
+        r#"(deftrait shout () (loud (self) i32))
            (defun f<T> ((x T)) i32 (:where (shout T)) 1)
            (f 5)"#,
     );
@@ -140,7 +140,7 @@ fn an_empty_body_where_a_value_is_expected_is_reported() {
 #[test]
 fn a_value_not_admitted_as_a_trait_object_is_reported() {
     let e = mismatch(
-        r#"(deftrait speak () (say ((self Self)) string))
+        r#"(deftrait speak () (say (self) string))
            (defun hear ((s :dyn speak)) string (say s))
            (hear "x")"#,
     );
@@ -150,8 +150,8 @@ fn a_value_not_admitted_as_a_trait_object_is_reported() {
 #[test]
 fn a_trait_object_converted_to_a_trait_it_does_not_inherit_is_reported() {
     let e = mismatch(
-        r#"(deftrait speak () (say ((self Self)) string))
-           (deftrait walk () (pace ((self Self)) i32))
+        r#"(deftrait speak () (say (self) string))
+           (deftrait walk () (pace (self) i32))
            (defun go ((w :dyn walk)) i32 (pace w))
            (defun f ((s :dyn speak)) i32 (go s))"#,
     );

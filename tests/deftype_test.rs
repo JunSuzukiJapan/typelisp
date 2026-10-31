@@ -165,7 +165,7 @@ fn a_type_and_an_alias_may_not_share_a_name() {
 
 #[test]
 fn an_alias_and_a_trait_may_not_share_a_name() {
-    let msg = check_err("(deftrait shown () (show ((self Self)) string)) (deftype shown int)");
+    let msg = check_err("(deftrait shown () (show (self) string)) (deftype shown int)");
     assert!(msg.contains("share one name space"), "unexpected message: {}", msg);
 }
 

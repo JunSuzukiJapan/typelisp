@@ -18,7 +18,7 @@ fn every_definition_is_named_by_a_symbol_of_its_module() {
         "(module m
            (pub defstruct Point (x int))
            (pub defenum Shape (circle int) (square int))
-           (pub deftrait Area () (area ((self Self)) int))
+           (pub deftrait Area () (area (self) int))
            (pub defvar (tally int) 0)
            (pub defmacro twice (x) `(progn ,x ,x))
            (pub defun next-board ((b int)) int b))",

@@ -244,11 +244,11 @@ fn a_user_defined_type_can_be_a_stream() {
     let v = eval_string(
         r#"(defstruct counter (n int))
            (impl Stream counter
-             (open-stream-p ((self Self)) bool true)
-             (close ((self Self)) () ()))
+             (open-stream-p (self) bool true)
+             (close (self) () ()))
            (impl OutputStream counter
              (:type Item char)
-             (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
+             (write-item (self (c char)) () (setf self::n (+ self::n 1))))
            (impl CharOutput counter)
            (let ((c (make-instance 'counter :n 0)))
              (write-line c "four")
@@ -263,11 +263,11 @@ fn a_user_stream_can_go_into_a_broadcast_alongside_a_builtin_one() {
     let v = eval_string(
         r#"(defstruct counter (n int))
            (impl Stream counter
-             (open-stream-p ((self Self)) bool true)
-             (close ((self Self)) () ()))
+             (open-stream-p (self) bool true)
+             (close (self) () ()))
            (impl OutputStream counter
              (:type Item char)
-             (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
+             (write-item (self (c char)) () (setf self::n (+ self::n 1))))
            (impl CharOutput counter)
            (let ((c (make-instance 'counter :n 0))
                  (s (make-string-output-stream))
@@ -469,11 +469,11 @@ fn a_stream_that_cannot_tell_gets_its_newline() {
     let v = eval_string(
         r#"(defstruct sink (text string))
            (impl Stream sink
-             (open-stream-p ((self Self)) bool true)
-             (close ((self Self)) () ()))
+             (open-stream-p (self) bool true)
+             (close (self) () ()))
            (impl OutputStream sink
              (:type Item char)
-             (write-item ((self Self) (c char)) () (setf self::text (append self::text (char->string c)))))
+             (write-item (self (c char)) () (setf self::text (append self::text (char->string c)))))
            (impl CharOutput sink)
            (let ((k (make-instance 'sink :text "")))
              (fresh-line k)
@@ -745,11 +745,11 @@ fn a_user_defined_input_stream_can_be_read_from() {
     let v = eval_string(
         r#"(use std::io::make-peek-stream std::reader::read-sexpr) (defstruct fixed (text string) (at int))
            (impl Stream fixed
-             (open-stream-p ((self Self)) bool true)
-             (close ((self Self)) () ()))
+             (open-stream-p (self) bool true)
+             (close (self) () ()))
            (impl InputStream fixed
              (:type Item char)
-             (read-item ((self Self)) Option<char>
+             (read-item (self) Option<char>
                (if (>= self::at (length self::text))
                    (Option::none)
                    (let ((c (ref self::text self::at)))

@@ -57,7 +57,7 @@ fn a_generic_struct_echo_names_its_type_arguments() {
 #[test]
 fn the_echo_uses_a_print_object_method() {
     let defs = "(defstruct money (yen int))\n\
-                (impl print-object money (print-object ((self Self) (escape bool)) string (format false \"~a yen\" self::yen)))";
+                (impl print-object money (print-object (self (escape bool)) string (format false \"~a yen\" self::yen)))";
     assert_echo(defs, "(make-instance 'money :yen 5)", "5 yen");
     assert_echo(defs, "(list 1 (make-instance 'money :yen 7))", "(1 7 yen)");
 }

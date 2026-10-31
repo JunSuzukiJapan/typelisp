@@ -58,7 +58,7 @@ fn a_user_type_implements_push() {
             r##"(defstruct Counter (n int))
                 (impl Push Counter
                   (:type Item string)
-                  (push ((self Self) (x string)) () (setf self::n (+ self::n (length x)))))"##
+                  (push (self (x string)) () (setf self::n (+ self::n (length x)))))"##
         ),
         r##"(let ((c (make-instance 'Counter :n 0)))
               (push-all c (the Vector<string> #("ab" "cde")))

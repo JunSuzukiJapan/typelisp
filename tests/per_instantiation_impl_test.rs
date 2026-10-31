@@ -115,10 +115,10 @@ fn a_method_for_every_instantiation_and_for_one_is_refused() {
 // ---- trait impls ------------------------------------------------------------
 
 const SHOW: &str = r##"
-(deftrait Show () (show ((self Self)) string))
+(deftrait Show () (show (self) string))
 (defstruct Box<T> (v T))
-(impl Show Box<int> (show ((self Self)) string (format false "int ~a" self::v)))
-(impl Show Box<string> (show ((self Self)) string (format false "string ~a" self::v)))
+(impl Show Box<int> (show (self) string (format false "int ~a" self::v)))
+(impl Show Box<string> (show (self) string (format false "string ~a" self::v)))
 (defun via-dyn ((s :dyn Show)) string (show s))
 (defun via-bound<T> ((s T)) string (:where (Show T)) (show s))
 "##;
@@ -154,10 +154,10 @@ fn a_where_bound_holds_at_each_instantiation_with_an_impl() {
 #[test]
 fn each_instantiation_binds_its_own_associated_type() {
     let defs = r##"
-(deftrait Unwrap () (:type Item) (unwrap ((self Self)) Item))
+(deftrait Unwrap () (:type Item) (unwrap (self) Item))
 (defstruct Box<T> (v T))
-(impl Unwrap Box<int> (:type Item int) (unwrap ((self Self)) int (+ self::v 1)))
-(impl Unwrap Box<string> (:type Item string) (unwrap ((self Self)) string (format false "~a!" self::v)))
+(impl Unwrap Box<int> (:type Item int) (unwrap (self) int (+ self::v 1)))
+(impl Unwrap Box<string> (:type Item string) (unwrap (self) string (format false "~a!" self::v)))
 (defun get-int ((u :dyn Unwrap<int>)) int (unwrap u))
 "##;
     both(defs, r##"(format false "~a ~a ~a" (unwrap (make-instance 'Box :v 1)) (unwrap (make-instance 'Box :v "s")) (get-int (make-instance 'Box :v 5)))"##, "2 s! 6");
@@ -169,31 +169,31 @@ fn each_instantiation_binds_its_own_associated_type() {
 /// `impl`, or by one for every instantiation).
 #[test]
 fn a_supertrait_is_needed_at_the_instantiation() {
-    let base = "(deftrait A () (a ((self Self)) int))\n(deftrait B (A) (b ((self Self)) int))\n(defstruct Box<T> (v T))\n";
+    let base = "(deftrait A () (a (self) int))\n(deftrait B (A) (b (self) int))\n(defstruct Box<T> (v T))\n";
     both(
-        &format!("{}(impl A Box<int> (a ((self Self)) int 1))\n(impl B Box<int> (b ((self Self)) int 2))\n", base),
+        &format!("{}(impl A Box<int> (a (self) int 1))\n(impl B Box<int> (b (self) int 2))\n", base),
         r##"(format false "~a" (+ (a (make-instance 'Box :v 0)) (b (make-instance 'Box :v 0))))"##,
         "3",
     );
     both(
-        &format!("{}(impl A Box<T> (a ((self Self)) int 1))\n(impl B Box<int> (b ((self Self)) int 2))\n", base),
+        &format!("{}(impl A Box<T> (a (self) int 1))\n(impl B Box<int> (b (self) int 2))\n", base),
         r##"(format false "~a" (b (make-instance 'Box :v 0)))"##,
         "2",
     );
-    let msg = check_err(&format!("{}(impl A Box<string> (a ((self Self)) int 1))\n(impl B Box<int> (b ((self Self)) int 2))", base));
+    let msg = check_err(&format!("{}(impl A Box<string> (a (self) int 1))\n(impl B Box<int> (b (self) int 2))", base));
     assert!(msg.contains("requires `A`"), "{}", msg);
 }
 
 #[test]
 fn a_trait_for_every_instantiation_and_for_one_is_refused() {
-    let base = "(deftrait Show () (show ((self Self)) string))\n(defstruct Box<T> (v T))\n";
+    let base = "(deftrait Show () (show (self) string))\n(defstruct Box<T> (v T))\n";
     let msg = check_err(&format!(
-        "{}(impl Show Box<T> (show ((self Self)) string \"any\"))\n(impl Show Box<int> (show ((self Self)) string \"int\"))",
+        "{}(impl Show Box<T> (show (self) string \"any\"))\n(impl Show Box<int> (show (self) string \"int\"))",
         base
     ));
     assert!(msg.contains("implements `Show` for every instantiation already"), "{}", msg);
     let msg = check_err(&format!(
-        "{}(impl Show Box<int> (show ((self Self)) string \"int\"))\n(impl Show Box<T> (show ((self Self)) string \"any\"))",
+        "{}(impl Show Box<int> (show (self) string \"int\"))\n(impl Show Box<T> (show (self) string \"any\"))",
         base
     ));
     assert!(msg.contains("`Show` is implemented for `Box<int>` already"), "{}", msg);
@@ -204,11 +204,11 @@ fn a_trait_for_every_instantiation_and_for_one_is_refused() {
 #[test]
 fn a_blanket_impl_at_two_instantiations_keeps_both() {
     let defs = r##"
-(deftrait Ranked () (rank ((self Self)) int))
-(deftrait Twice (Ranked) (twice-rank ((self Self)) int (* 2 (rank self))))
+(deftrait Ranked () (rank (self) int))
+(deftrait Twice (Ranked) (twice-rank (self) int (* 2 (rank self))))
 (defstruct Box<T> (v T))
-(impl Ranked Box<int> (rank ((self Self)) int self::v))
-(impl Ranked Box<string> (rank ((self Self)) int 100))
+(impl Ranked Box<int> (rank (self) int self::v))
+(impl Ranked Box<string> (rank (self) int 100))
 (impl<T> Twice T (:where (Ranked T)))
 "##;
     both(defs, r##"(format false "~a ~a" (twice-rank (make-instance 'Box :v 4)) (twice-rank (make-instance 'Box :v "s")))"##, "8 200");
@@ -219,8 +219,8 @@ fn a_blanket_impl_at_two_instantiations_keeps_both() {
 fn print_object_for_each_instantiation() {
     let defs = r##"
 (defstruct Box<T> (v T))
-(impl print-object Box<int> (print-object ((self Self) (escape bool)) string (format false "#<int-box ~a>" self::v)))
-(impl print-object Box<string> (print-object ((self Self) (escape bool)) string (format false "#<str-box ~a>" self::v)))
+(impl print-object Box<int> (print-object (self (escape bool)) string (format false "#<int-box ~a>" self::v)))
+(impl print-object Box<string> (print-object (self (escape bool)) string (format false "#<str-box ~a>" self::v)))
 "##;
     both(defs, r##"(format false "~a ~a" (make-instance 'Box :v 1) (make-instance 'Box :v "s"))"##, "#<int-box 1> #<str-box s>");
 }

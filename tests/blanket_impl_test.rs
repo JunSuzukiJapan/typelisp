@@ -43,14 +43,14 @@ fn eval_err(src: &str) -> String {
 /// for every `Ranked` type — the canonical shape the feature exists for.
 const CLAMP: &str = "
 (deftrait Ranked ()
-  (rank ((self Self)) int))
+  (rank (self) int))
 (deftrait Clamp (Ranked)
-  (clamped ((self Self) (lo Self) (hi Self)) int
+  (clamped (self (lo Self) (hi Self)) int
     (if (< (rank self) (rank lo))
         (rank lo)
         (if (< (rank hi) (rank self)) (rank hi) (rank self)))))
 (defstruct cell (n int))
-(impl Ranked cell (rank ((self Self)) int self::n))
+(impl Ranked cell (rank (self) int self::n))
 (impl<T> Clamp T (:where (Ranked T)))
 ";
 
@@ -65,7 +65,7 @@ fn one_blanket_impl_covers_two_concrete_types() {
     let src = format!(
         "{CLAMP}
          (defstruct tick (t int))
-         (impl Ranked tick (rank ((self Self)) int (* self::t 2)))
+         (impl Ranked tick (rank (self) int (* self::t 2)))
          (+ (clamped (make-instance 'cell :n 9) (make-instance 'cell :n 1) (make-instance 'cell :n 5))
             (clamped (make-instance 'tick :t 9) (make-instance 'tick :t 1) (make-instance 'tick :t 5)))"
     );
@@ -99,8 +99,8 @@ fn an_explicit_impl_wins_over_the_blanket() {
     let src = format!(
         "{CLAMP}
          (defstruct tick (t int))
-         (impl Ranked tick (rank ((self Self)) int self::t))
-         (impl Clamp tick (clamped ((self Self) (lo Self) (hi Self)) int 999))
+         (impl Ranked tick (rank (self) int self::t))
+         (impl Clamp tick (clamped (self (lo Self) (hi Self)) int 999))
          (clamped (make-instance 'tick :t 9) (make-instance 'tick :t 1) (make-instance 'tick :t 5))"
     );
     assert_eq!(eval_ok(&src), Value::Int(999));
@@ -119,8 +119,8 @@ fn a_second_blanket_impl_for_the_same_trait_is_rejected() {
 #[test]
 fn a_blanket_impl_whose_where_names_a_foreign_variable_is_rejected() {
     let src = "
-        (deftrait Ranked () (rank ((self Self)) int))
-        (deftrait Clamp (Ranked) (clamped ((self Self)) int (rank self)))
+        (deftrait Ranked () (rank (self) int))
+        (deftrait Clamp (Ranked) (clamped (self) int (rank self)))
         (impl<T> Clamp T (:where (Ranked Q)))";
     let m = eval_err(src);
     assert!(m.contains("not one of the impl's type parameters"), "{}", m);
@@ -131,8 +131,8 @@ fn mutually_recursive_blanket_bounds_do_not_hang() {
     // `A` requires `B` requires `A` — the coverage search must terminate and
     // simply not cover anything, rather than recurring forever.
     let src = "
-        (deftrait A () (a ((self Self)) int 1))
-        (deftrait B () (b ((self Self)) int 2))
+        (deftrait A () (a (self) int 1))
+        (deftrait B () (b (self) int 2))
         (defstruct s (n int))
         (impl<T> A T (:where (B T)))
         (impl<T> B T (:where (A T)))
@@ -147,10 +147,10 @@ fn a_blanket_provided_method_is_reachable_through_a_trait_object() {
     // so this uses a one-argument sibling — the point is that the vtable is
     // laid out over a materialized blanket impl, not a written one.
     let src = "
-        (deftrait Ranked () (rank ((self Self)) int))
-        (deftrait Doubled (Ranked) (doubled ((self Self)) int (* 2 (rank self))))
+        (deftrait Ranked () (rank (self) int))
+        (deftrait Doubled (Ranked) (doubled (self) int (* 2 (rank self))))
         (defstruct cell (n int))
-        (impl Ranked cell (rank ((self Self)) int self::n))
+        (impl Ranked cell (rank (self) int self::n))
         (impl<T> Doubled T (:where (Ranked T)))
         (defun peek ((d :dyn Doubled)) int (doubled d))
         (peek (make-instance 'cell :n 7))";
@@ -167,10 +167,10 @@ fn a_self_taking_method_still_makes_a_trait_not_object_safe() {
 /// A trait whose blanket impl writes its method out, rather than inheriting a
 /// default body — the shape whose body the declaration-time pass checks.
 const DOUBLE: &str = "
-(deftrait Ranked () (rank ((self Self)) int))
-(deftrait Doubled (Ranked) (doubled ((self Self)) int))
+(deftrait Ranked () (rank (self) int))
+(deftrait Doubled (Ranked) (doubled (self) int))
 (defstruct cell (n int))
-(impl Ranked cell (rank ((self Self)) int self::n))
+(impl Ranked cell (rank (self) int self::n))
 ";
 
 #[test]
@@ -180,7 +180,7 @@ fn an_unused_blanket_impls_body_is_type_checked() {
     let src = format!(
         "{DOUBLE}
          (impl<T> Doubled T (:where (Ranked T))
-           (doubled ((self Self)) int \"two\"))"
+           (doubled (self) int \"two\"))"
     );
     let m = eval_err(&src);
     assert!(m.contains("TypeError"), "{}", m);
@@ -191,7 +191,7 @@ fn an_unused_blanket_impls_body_may_call_an_unknown_function() {
     let src = format!(
         "{DOUBLE}
          (impl<T> Doubled T (:where (Ranked T))
-           (doubled ((self Self)) int (triple self)))"
+           (doubled (self) int (triple self)))"
     );
     let m = eval_err(&src);
     assert!(m.contains("NoSuchFunction") || m.contains("no such function"), "{}", m);
@@ -204,7 +204,7 @@ fn a_blanket_impls_body_may_use_its_declared_bounds() {
     let src = format!(
         "{DOUBLE}
          (impl<T> Doubled T (:where (Ranked T))
-           (doubled ((self Self)) int (* 2 (rank self))))
+           (doubled (self) int (* 2 (rank self))))
          (doubled (make-instance 'cell :n 7))"
     );
     assert_eq!(eval_ok(&src), Value::Int(14));
@@ -217,11 +217,11 @@ fn a_blanket_impls_body_may_call_a_sibling_method_on_self() {
     let src = format!(
         "{DOUBLE}
          (deftrait Halved (Ranked)
-           (halved ((self Self)) int)
-           (twice-halved ((self Self)) int))
+           (halved (self) int)
+           (twice-halved (self) int))
          (impl<T> Halved T (:where (Ranked T))
-           (halved ((self Self)) int (truncate (rank self) 2))
-           (twice-halved ((self Self)) int (truncate (halved self) 2)))
+           (halved (self) int (truncate (rank self) 2))
+           (twice-halved (self) int (truncate (halved self) 2)))
          (twice-halved (make-instance 'cell :n 20))"
     );
     assert_eq!(eval_ok(&src), Value::Int(5));
@@ -234,20 +234,20 @@ fn a_blanket_impls_body_is_checked_against_its_associated_type_binding() {
     // abstract check exactly as they are for a materialization.
     let boxed = format!(
         "{DOUBLE}
-         (deftrait Boxed () (:type Item) (unwrap ((self Self)) Item))"
+         (deftrait Boxed () (:type Item) (unwrap (self) Item))"
     );
     let ok = format!(
         "{boxed}
          (impl<T> Boxed T (:where (Ranked T))
            (:type Item int)
-           (unwrap ((self Self)) Item (rank self)))"
+           (unwrap (self) Item (rank self)))"
     );
     assert_eq!(eval_ok(&ok), Value::Empty);
     let bad = format!(
         "{boxed}
          (impl<T> Boxed T (:where (Ranked T))
            (:type Item int)
-           (unwrap ((self Self)) Item \"nope\"))"
+           (unwrap (self) Item \"nope\"))"
     );
     let m = eval_err(&bad);
     assert!(m.contains("TypeError"), "{}", m);
@@ -261,9 +261,9 @@ fn a_method_call_the_bounds_do_not_justify_is_rejected() {
     // same body is fine: see the two tests above.)
     let src = format!(
         "{DOUBLE}
-         (deftrait Tagged () (tag ((self Self)) int))
+         (deftrait Tagged () (tag (self) int))
          (impl<T> Tagged T
-           (tag ((self Self)) int (rank self)))"
+           (tag (self) int (rank self)))"
     );
     let m = eval_err(&src);
     assert!(m.contains("no method `rank` for type variable `T`"), "{}", m);
@@ -274,8 +274,8 @@ fn an_impl_over_a_type_constructor_is_not_a_blanket_impl() {
     // `Vector<T>` has a single owning `AdtDef`, so `impl<T>` here takes the
     // ordinary generic-owner path; the head parameters are documentation.
     let src = "
-        (deftrait Sized2 () (size ((self Self)) int))
-        (impl<T> Sized2 Vector<T> (size ((self Self)) int 7))
+        (deftrait Sized2 () (size (self) int))
+        (impl<T> Sized2 Vector<T> (size (self) int 7))
         (defun build () Vector<int> (Vector::new))
         (let ((v (build))) (push v 1) (size v))";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -286,13 +286,13 @@ fn an_impl_over_a_type_constructor_is_not_a_blanket_impl() {
 #[test]
 fn a_blanket_impl_satisfies_a_supertrait() {
     let src = "
-(deftrait Named () (name ((self Self)) int))
-(deftrait Greet (Named) (greet ((self Self)) int))
-(deftrait Tag () (tag ((self Self)) int))
-(impl<T> Named T (:where (Tag T)) (name ((self Self)) int (tag self)))
+(deftrait Named () (name (self) int))
+(deftrait Greet (Named) (greet (self) int))
+(deftrait Tag () (tag (self) int))
+(impl<T> Named T (:where (Tag T)) (name (self) int (tag self)))
 (defstruct P (x int))
-(impl Tag P (tag ((self Self)) int self::x))
-(impl Greet P (greet ((self Self)) int (* 10 (name self))))
+(impl Tag P (tag (self) int self::x))
+(impl Greet P (greet (self) int (* 10 (name self))))
 (greet (make-instance 'P :x 4))";
     assert_eq!(eval_ok(src), Value::Int(40));
 }
@@ -302,10 +302,10 @@ fn a_blanket_impl_satisfies_a_supertrait() {
 #[test]
 fn a_value_pattern_uses_a_blanket_eq() {
     let src = "
-(deftrait Key () (key ((self Self)) int))
-(impl<T> Eq T (:where (Key T)) (equals ((self Self) (other Self)) bool (= (key self) (key other))))
+(deftrait Key () (key (self) int))
+(impl<T> Eq T (:where (Key T)) (equals (self (other Self)) bool (= (key self) (key other))))
 (defstruct P (x int))
-(impl Key P (key ((self Self)) int self::x))
+(impl Key P (key (self) int self::x))
 (let ((a (make-instance 'P :x 1)) (b (make-instance 'P :x 1)))
   (match a ((:= b) 1) (_ 0)))";
     assert_eq!(eval_ok(src), Value::Int(1));

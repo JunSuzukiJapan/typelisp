@@ -252,10 +252,10 @@ fn a_defenum_error_type_implements_the_error_trait() {
     let src = r#"
         (defenum ConfigErr (missing-key string) (bad-value string))
         (impl Error ConfigErr
-          (message ((self Self)) string
+          (message (self) string
             (match self ((missing-key k) (append "missing key: " k))
                         ((bad-value v) (append "bad value: " v))))
-          (source ((self Self)) Option<:dyn Error> (Option::none)))
+          (source (self) Option<:dyn Error> (Option::none)))
         (defun describe ((e :dyn Error)) string (message e))
         (describe (ConfigErr::missing-key "port"))
     "#;
@@ -269,12 +269,12 @@ fn source_returns_the_wrapped_error() {
     let src = r#"
         (defstruct LowErr (detail string))
         (impl Error LowErr
-          (message ((self Self)) string self::detail)
-          (source ((self Self)) Option<:dyn Error> (Option::none)))
+          (message (self) string self::detail)
+          (source (self) Option<:dyn Error> (Option::none)))
         (defstruct HighErr (cause LowErr))
         (impl Error HighErr
-          (message ((self Self)) string "high-level failure")
-          (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
+          (message (self) string "high-level failure")
+          (source (self) Option<:dyn Error> (Option::some self::cause)))
         (defun root-message ((e :dyn Error)) string
           (match (source e) ((some inner) (message inner)) ((none) (message e))))
         (root-message (make-instance 'HighErr :cause (make-instance 'LowErr :detail "disk offline")))
@@ -290,8 +290,8 @@ fn as_dyn_error_unifies_builtin_and_user_error_types() {
     let src = r#"(use std::error::as-dyn-error std::num::parse-int) 
         (defstruct AppErr (why string))
         (impl Error AppErr
-          (message ((self Self)) string self::why)
-          (source ((self Self)) Option<:dyn Error> (Option::none)))
+          (message (self) string self::why)
+          (source (self) Option<:dyn Error> (Option::none)))
         (defun fail-app () Result<int,AppErr> (Result::err (make-instance 'AppErr :why "app said no")))
         (defun describe ((r Result<int, :dyn Error>)) string
           (match r ((ok _) "?") ((err e) (message e))))
@@ -313,23 +313,23 @@ fn a_trait_written_in_type_position_is_rejected() {
 fn a_type_may_not_take_a_traits_name() {
     // Types and traits share one name space per module (Rust's rule), which
     // is why the built-in error types could not also be called `Error`.
-    assert_prelude_type_error("(module m (deftrait Fault () (m ((self Self)) int)) (defstruct Fault (msg string)))");
-    assert_prelude_type_error("(module m (deftrait Fault () (m ((self Self)) int)) (defenum Fault (boom string)))");
+    assert_prelude_type_error("(module m (deftrait Fault () (m (self) int)) (defstruct Fault (msg string)))");
+    assert_prelude_type_error("(module m (deftrait Fault () (m (self) int)) (defenum Fault (boom string)))");
 }
 
 #[test]
 fn a_trait_may_not_take_a_types_name() {
     // The other direction, on a bare checker so the names are free to start
     // with: whichever is defined second is the one rejected.
-    assert_type_error("(defstruct Thing (x int)) (deftrait Thing () (m ((self Self)) int))");
-    assert_type_error("(deftrait Gadget () (m ((self Self)) int)) (defstruct Gadget (x int))");
-    assert_type_error("(deftrait Widget () (m ((self Self)) int)) (defenum Widget (a))");
+    assert_type_error("(defstruct Thing (x int)) (deftrait Thing () (m (self) int))");
+    assert_type_error("(deftrait Gadget () (m (self) int)) (defstruct Gadget (x int))");
+    assert_type_error("(deftrait Widget () (m (self) int)) (defenum Widget (a))");
 }
 
 #[test]
 fn a_type_and_a_trait_of_the_same_name_may_live_in_different_modules() {
     // The rule is per-namespace, like every other name in this language.
-    let src = "(module a (deftrait Same () (m ((self Self)) int))) \
+    let src = "(module a (deftrait Same () (m (self) int))) \
                (module b (defstruct Same (x int)))";
     assert!(program(src).is_ok());
 }

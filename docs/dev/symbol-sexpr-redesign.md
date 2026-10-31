@@ -334,8 +334,8 @@ Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した�
 - **命名**: プレーン CL 名（`length`/`append`/`nth`/`elt`/`take`/`subseq`/`last`/`butlast`/`member`/
   `every`/`any`/`sort`/`assoc`）。Phase 5 で名前が空いていたため復活できた。既存 `vector-append`
   （Phase 3）は撤去し、generic 2-iterator 版 `append` に統合。
-- **等値/順序は新設トレイトで表現**: `deftrait Eq (equals ((self Self)(other Self)) bool)` /
-  `deftrait Ord (less ((self Self)(other Self)) bool)`。`member`/`sort`/`assoc` は
+- **等値/順序は新設トレイトで表現**: `deftrait Eq (equals (self (other Self)) bool)` /
+  `deftrait Ord (less (self (other Self)) bool)`。`member`/`sort`/`assoc` は
   `(where (Eq A))`/`(where (Ord A))` 境界で述語なしに書ける（既存 `find`/`position`/`count`/
   `remove-if` は述語版のまま存続＝両流儀併存）。
   - メソッド名は `equals`/`less`（`eq`/`eql`/`equal`/`equalp`/`lt` は全 scalar 型の builtin メソッドで

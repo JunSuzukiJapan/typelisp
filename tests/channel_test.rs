@@ -557,7 +557,7 @@ fn a_receive_that_needs_no_waiting_works_under_a_rust_caller() {
         text(
             r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
                (impl print-object probe
-                 (print-object ((self Self) (escape bool)) string
+                 (print-object (self (escape bool)) string
                    (format false "<~a>" (recv self::ch))))
                (defun main () string
                  (let ((ch (the Chan<int> (Chan::new 1))))
@@ -576,7 +576,7 @@ fn a_receive_that_would_wait_under_a_rust_caller_is_refused() {
     let e = err(
         r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
            (impl print-object probe
-             (print-object ((self Self) (escape bool)) string
+             (print-object (self (escape bool)) string
                (format false "<~a>" (recv self::ch))))
            (defun main () string
              (let ((ch (the Chan<int> (Chan::new 1))))
@@ -597,7 +597,7 @@ fn a_compiled_receive_that_needs_no_waiting_works_under_a_rust_caller() {
         text_compiled(
             r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
                (impl print-object probe
-                 (print-object ((self Self) (escape bool)) string
+                 (print-object (self (escape bool)) string
                    (format false "<~a>" (recv self::ch))))
                (defun main () string
                  (let ((ch (the Chan<int> (Chan::new 1))))
@@ -619,7 +619,7 @@ fn a_compiled_receive_that_would_wait_under_a_rust_caller_is_refused() {
     let e = err_compiled(
         r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
            (impl print-object probe
-             (print-object ((self Self) (escape bool)) string
+             (print-object (self (escape bool)) string
                (format false "<~a>" (recv self::ch))))
            (defun main () string
              (let ((ch (the Chan<int> (Chan::new 1))))
@@ -641,7 +641,7 @@ fn a_yield_under_a_rust_caller_is_a_no_op() {
         text(
             r#"(use std::thread::yield) (defstruct probe (tag int))
                (impl print-object probe
-                 (print-object ((self Self) (escape bool)) string
+                 (print-object (self (escape bool)) string
                    (progn (yield) "<ok>")))
                (defun main () string (format false "~a" (make-instance 'probe :tag 0)))
                (main)"#
@@ -657,7 +657,7 @@ fn a_compiled_yield_under_a_rust_caller_is_a_no_op() {
         text_compiled(
             r#"(use std::thread::yield) (defstruct probe (tag int))
                (impl print-object probe
-                 (print-object ((self Self) (escape bool)) string
+                 (print-object (self (escape bool)) string
                    (progn (yield) "<ok>")))
                (defun main () string (format false "~a" (make-instance 'probe :tag 0)))
                (compile probe::print-object)

@@ -152,7 +152,7 @@ fn an_undeclared_type_variable_is_still_unknown() {
 #[test]
 fn an_impl_method_cannot_add_type_parameters() {
     let msg = check_err(
-        "(deftrait Show () (show ((self Self)) string))\n(defstruct P (x int))\n(impl Show P (show<U> ((self P)) string \"p\"))",
+        "(deftrait Show () (show (self) string))\n(defstruct P (x int))\n(impl Show P (show<U> (self) string \"p\"))",
     );
     assert!(msg.contains("`show<U>` declares type parameters of its own"), "{}", msg);
 }

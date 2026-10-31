@@ -41,16 +41,16 @@ fn eval_err(src: &str) -> String {
 /// Two shapes implementing one trait — the setup every test below builds on.
 const SHAPES: &str = r#"
 (deftrait Drawable ()
-  (draw ((self Self)) string)
-  (sides ((self Self)) int))
+  (draw (self) string)
+  (sides (self) int))
 (defstruct circle (r int))
 (defstruct square (side int))
 (impl Drawable circle
-  (draw ((self Self)) string "circle")
-  (sides ((self Self)) int 0))
+  (draw (self) string "circle")
+  (sides (self) int 0))
 (impl Drawable square
-  (draw ((self Self)) string "square")
-  (sides ((self Self)) int 4))
+  (draw (self) string "square")
+  (sides (self) int 4))
 "#;
 
 // ---- dispatch -----------------------------------------------------------
@@ -91,9 +91,9 @@ fn a_second_slot_dispatches_independently_of_the_first() {
 #[test]
 fn a_method_argument_and_return_value_cross_the_vtable() {
     let src = r#"
-        (deftrait Scaler () (scale ((self Self) (k int)) int))
+        (deftrait Scaler () (scale (self (k int)) int))
         (defstruct fixed (n int))
-        (impl Scaler fixed (scale ((self Self) (k int)) int (* self::n k)))
+        (impl Scaler fixed (scale (self (k int)) int (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k int)) int (scale s k))
         (apply-scale (make-instance 'fixed :n 6) 7)"#;
     assert_eq!(eval_ok(src), Value::Int(42));
@@ -199,8 +199,8 @@ fn a_primitive_cannot_be_boxed_even_when_it_implements_the_trait() {
     // such a primitive: its word is a fixnum or a bignum box, a heap
     // representation already, so it boxes like `string` does.)
     let src = r#"
-        (deftrait Speak () (say ((self Self)) string))
-        (impl Speak i32 (say ((self Self)) string "i32"))
+        (deftrait Speak () (say (self) string))
+        (impl Speak i32 (say (self) string "i32"))
         (defun hear ((s :dyn Speak)) string (say s))
         (hear (the i32 1))"#;
     let m = eval_err(src);
@@ -231,9 +231,9 @@ fn a_trait_with_a_static_method_is_not_object_safe() {
 #[test]
 fn a_method_returning_self_makes_a_trait_not_object_safe() {
     let src = r#"
-        (deftrait Cloneable () (dup ((self Self)) Self))
+        (deftrait Cloneable () (dup (self) Self))
         (defstruct cell (n int))
-        (impl Cloneable cell (dup ((self Self)) Self (make-instance 'cell :n self::n)))
+        (impl Cloneable cell (dup (self) Self (make-instance 'cell :n self::n)))
         (defun f ((c :dyn Cloneable)) int 0)
         (f (make-instance 'cell :n 1))"#;
     let m = eval_err(src);
@@ -250,8 +250,8 @@ fn an_unknown_trait_name_is_reported_as_such() {
 fn upcasting_to_a_non_supertrait_is_rejected() {
     let src = format!(
         "{SHAPES}
-         (deftrait Named () (name ((self Self)) string))
-         (impl Named circle (name ((self Self)) string \"c\"))
+         (deftrait Named () (name (self) string))
+         (impl Named circle (name (self) string \"c\"))
          (defun render ((d :dyn Drawable)) string (draw d))
          (defun relabel ((n :dyn Named)) string (render n))
          (relabel (make-instance 'circle :r 1))"
@@ -274,15 +274,15 @@ fn dyn_in_a_value_position_is_a_type_error() {
 /// enough to show that an inherited slot dispatches per implementation.
 const CHAIN: &str = r#"
 (deftrait Named ()
-  (name ((self Self)) string))
+  (name (self) string))
 (deftrait Greeter (Named)
-  (greeting ((self Self)) string))
+  (greeting (self) string))
 (defstruct dog (n int))
 (defstruct cat (n int))
-(impl Named dog (name ((self Self)) string "dog"))
-(impl Greeter dog (greeting ((self Self)) string "woof"))
-(impl Named cat (name ((self Self)) string "cat"))
-(impl Greeter cat (greeting ((self Self)) string "meow"))
+(impl Named dog (name (self) string "dog"))
+(impl Greeter dog (greeting (self) string "woof"))
+(impl Named cat (name (self) string "cat"))
+(impl Greeter cat (greeting (self) string "meow"))
 "#;
 
 #[test]
@@ -397,17 +397,17 @@ fn downcasting_to_a_subtrait_is_rejected() {
 /// proves the swap happened: reusing `D`'s table would have called `b-tag`,
 /// which occupies slot 0 there.
 const DIAMOND: &str = r#"
-(deftrait B () (b-tag ((self Self)) int))
-(deftrait C () (c-tag ((self Self)) int))
-(deftrait D (B C) (d-tag ((self Self)) int))
+(deftrait B () (b-tag (self) int))
+(deftrait C () (c-tag (self) int))
+(deftrait D (B C) (d-tag (self) int))
 (defstruct cell (n int))
 (defstruct pair (n int))
-(impl B cell (b-tag ((self Self)) int 1))
-(impl C cell (c-tag ((self Self)) int 2))
-(impl D cell (d-tag ((self Self)) int 3))
-(impl B pair (b-tag ((self Self)) int 4))
-(impl C pair (c-tag ((self Self)) int 5))
-(impl D pair (d-tag ((self Self)) int 6))
+(impl B cell (b-tag (self) int 1))
+(impl C cell (c-tag (self) int 2))
+(impl D cell (d-tag (self) int 3))
+(impl B pair (b-tag (self) int 4))
+(impl C pair (c-tag (self) int 5))
+(impl D pair (d-tag (self) int 6))
 "#;
 
 #[test]
@@ -452,17 +452,17 @@ fn upcasting_twice_reaches_a_supertrait_of_the_supertrait() {
     // the second conversion has to find a table registered for a box the
     // *first* conversion produced.
     let src = r#"
-        (deftrait A () (a-tag ((self Self)) int))
-        (deftrait X () (x-tag ((self Self)) int))
-        (deftrait B () (b-tag ((self Self)) int))
-        (deftrait C (X A) (c-tag ((self Self)) int))
-        (deftrait D (B C) (d-tag ((self Self)) int))
+        (deftrait A () (a-tag (self) int))
+        (deftrait X () (x-tag (self) int))
+        (deftrait B () (b-tag (self) int))
+        (deftrait C (X A) (c-tag (self) int))
+        (deftrait D (B C) (d-tag (self) int))
         (defstruct cell (n int))
-        (impl A cell (a-tag ((self Self)) int 1))
-        (impl X cell (x-tag ((self Self)) int 2))
-        (impl B cell (b-tag ((self Self)) int 3))
-        (impl C cell (c-tag ((self Self)) int 4))
-        (impl D cell (d-tag ((self Self)) int 5))
+        (impl A cell (a-tag (self) int 1))
+        (impl X cell (x-tag (self) int 2))
+        (impl B cell (b-tag (self) int 3))
+        (impl C cell (c-tag (self) int 4))
+        (impl D cell (d-tag (self) int 5))
         (defun only-a ((a :dyn A)) int (a-tag a))
         (defun only-c ((c :dyn C)) int (only-a c))
         (defun via ((d :dyn D)) int (only-c d))
@@ -480,17 +480,17 @@ fn upcasting_reaches_a_trait_that_is_a_prefix_of_the_source_but_not_of_the_step(
     // conversion asking for a table `D`'s own prefix test would have
     // considered unnecessary.
     let src = r#"
-        (deftrait A () (a-tag ((self Self)) int))
-        (deftrait X () (x-tag ((self Self)) int))
-        (deftrait B (A) (b-tag ((self Self)) int))
-        (deftrait C (X A) (c-tag ((self Self)) int))
-        (deftrait D (B C) (d-tag ((self Self)) int))
+        (deftrait A () (a-tag (self) int))
+        (deftrait X () (x-tag (self) int))
+        (deftrait B (A) (b-tag (self) int))
+        (deftrait C (X A) (c-tag (self) int))
+        (deftrait D (B C) (d-tag (self) int))
         (defstruct cell (n int))
-        (impl A cell (a-tag ((self Self)) int 1))
-        (impl X cell (x-tag ((self Self)) int 2))
-        (impl B cell (b-tag ((self Self)) int 3))
-        (impl C cell (c-tag ((self Self)) int 4))
-        (impl D cell (d-tag ((self Self)) int 5))
+        (impl A cell (a-tag (self) int 1))
+        (impl X cell (x-tag (self) int 2))
+        (impl B cell (b-tag (self) int 3))
+        (impl C cell (c-tag (self) int 4))
+        (impl D cell (d-tag (self) int 5))
         (defun only-a ((a :dyn A)) int (a-tag a))
         (defun only-c ((c :dyn C)) int (only-a c))
         (defun via ((d :dyn D)) int (only-c d))
@@ -515,13 +515,13 @@ fn an_upcast_box_is_still_a_trait_object_for_match() {
 #[test]
 fn upcasting_to_the_first_supertrait_of_a_multi_supertrait_chain_works() {
     let src = r#"
-        (deftrait B () (b-tag ((self Self)) int))
-        (deftrait C () (c-tag ((self Self)) int))
-        (deftrait D (B C) (d-tag ((self Self)) int))
+        (deftrait B () (b-tag (self) int))
+        (deftrait C () (c-tag (self) int))
+        (deftrait D (B C) (d-tag (self) int))
         (defstruct cell (n int))
-        (impl B cell (b-tag ((self Self)) int 1))
-        (impl C cell (c-tag ((self Self)) int 2))
-        (impl D cell (d-tag ((self Self)) int 3))
+        (impl B cell (b-tag (self) int 1))
+        (impl C cell (c-tag (self) int 2))
+        (impl D cell (d-tag (self) int 3))
         (defun only-b ((b :dyn B)) int (b-tag b))
         (defun via ((d :dyn D)) int (only-b d))
         (via (make-instance 'cell :n 0))"#;
@@ -536,9 +536,9 @@ fn upcasting_to_the_first_supertrait_of_a_multi_supertrait_chain_works() {
 #[test]
 fn an_impl_for_one_instantiation_covers_only_that_instantiation() {
     let defs = r#"
-(deftrait Show () (show ((self Self)) string))
+(deftrait Show () (show (self) string))
 (defstruct Box<T> (v T))
-(impl Show Box<int> (show ((self Self)) string (format false "int box ~a" (+ self::v 1))))
+(impl Show Box<int> (show (self) string (format false "int box ~a" (+ self::v 1))))
 (defun f ((s :dyn Show)) string (show s))
 "#;
     assert_eq!(eval_ok(&format!("{}(equal (f (make-instance 'Box :v 1)) \"int box 2\")", defs)), Value::Bool(true));

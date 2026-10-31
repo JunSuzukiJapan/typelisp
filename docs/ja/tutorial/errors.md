@@ -70,11 +70,11 @@ Rust の `?` のような省略構文はありません。`Result` を返す関�
   (invalid string int))     ; 値がおかしい
 
 (impl Error config-error
-  (message ((self Self)) string
+  (message (self) string
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (source ((self Self)) Option<:dyn Error> (Option::none)))
+  (source (self) Option<:dyn Error> (Option::none)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)

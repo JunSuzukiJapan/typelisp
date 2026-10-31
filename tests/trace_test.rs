@@ -412,7 +412,7 @@ fn a_print_object_method_is_reported_when_the_printer_calls_it() {
     let out = traced(
         "(defstruct pt (n int))\n\
          (impl print-object pt\n\
-           (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
+           (print-object (self (escape bool)) string (format false \"<~d>\" self::n)))\n\
          (trace pt::print-object)\n\
          (format false \"~a\" (make-instance 'pt :n 7))",
     );
@@ -450,7 +450,7 @@ fn a_compiled_print_object_method_is_still_reported() {
     let out = traced(
         "(defstruct pt (n int))\n\
          (impl print-object pt\n\
-           (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
+           (print-object (self (escape bool)) string (format false \"<~d>\" self::n)))\n\
          (compile pt::print-object)\n\
          (trace pt::print-object)\n\
          (format false \"~a\" (make-instance 'pt :n 7))",

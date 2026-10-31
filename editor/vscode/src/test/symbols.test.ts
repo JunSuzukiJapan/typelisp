@@ -23,8 +23,8 @@ test("each definition form is found, with or without pub", () => {
     "(defmacro twice (e) `(progn ,e ,e))",
     "(defstruct point<T> (x T) (y T))",
     "(pub defenum color (red) (blue))",
-    "(deftrait Shape (label ((self Self)) string))",
-    "(impl Shape point (label ((self Self)) string \"p\"))",
+    "(deftrait Shape (label (self) string))",
+    "(impl Shape point (label (self) string \"p\"))",
     "(impl point (pub area (self) i32 1))",
     "(defvar (*flag* bool) false)",
     "(pub defconstant (limit i32) 10)",
@@ -46,7 +46,7 @@ test("each definition form is found, with or without pub", () => {
 });
 
 test("definitions are returned in source order", () => {
-  const src = "(defstruct a (x i32))\n(defun b () i32 1)\n(deftrait C (m ((self Self)) i32))";
+  const src = "(defstruct a (x i32))\n(defun b () i32 1)\n(deftrait C (m (self) i32))";
   const defs = findDefinitions(src);
   assert.deepEqual(defs.map((d) => d.name), ["a", "b", "C"]);
   for (let i = 1; i < defs.length; i++) {
@@ -165,7 +165,7 @@ test("a name that merely contains a type name is not a use", () => {
 
 test("traits and enums get their own kinds", () => {
   const src = [
-    "(deftrait shape (label ((self Self)) string))",
+    "(deftrait shape (label (self) string))",
     "(defenum color (red))",
     "(defstruct box (w i32))",
     "(defun f ((s :dyn shape) (c color) (b box)) () ())",

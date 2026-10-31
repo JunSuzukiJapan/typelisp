@@ -78,10 +78,10 @@ fn let_star_desugaring_survives_collection() {
 fn impl_self_substitution_survives_collection() {
     assert_stress_agrees(
         "(deftrait Counted ()
-           (count ((self Self)) int))
+           (count (self) int))
          (defstruct box (n int))
          (impl Counted box
-           (count ((self Self)) int self::n))",
+           (count (self) int self::n))",
     );
 }
 

@@ -214,7 +214,7 @@ fn bignum_and_ratio_literal_patterns_compare_by_value() {
 fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
     both(
         "(defstruct point (x int) (y int))\
-         \n(impl Eq point (equals ((self Self) (other Self)) bool\
+         \n(impl Eq point (equals (self (other Self)) bool\
          \n  (and (= self::x other::x) (= self::y other::y))))\
          \n(defvar (origin point) (make-instance 'point :x 0 :y 0))\
          \n(defun f ((p point)) int\

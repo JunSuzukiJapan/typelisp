@@ -44,12 +44,12 @@ x))
 === impl member body
 --- input
 (impl Shape rect
-(label ((self Self)) string
+(label (self) string
 (append "a"
 "b")))
 --- expected
 (impl Shape rect
-  (label ((self Self)) string
+  (label (self) string
     (append "a"
             "b")))
 

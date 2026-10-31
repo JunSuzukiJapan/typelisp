@@ -11,7 +11,7 @@
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>))
+  (next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` はそれぞれ `vector-iter<T>`/`hashtable-iter<K,V>`/
@@ -27,14 +27,14 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 
 ```lisp
 (deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)                ; 実装必須
-  (not-equals ((self Self) (other Self)) bool             ; デフォルト実装
+  (equals (self (other Self)) bool)                ; 実装必須
+  (not-equals (self (other Self)) bool             ; デフォルト実装
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; Eq を継承
-  (less ((self Self) (other Self)) bool)                  ; 実装必須
-  (less-equal ((self Self) (other Self)) bool (not (less other self)))
-  (greater ((self Self) (other Self)) bool (less other self))
-  (greater-equal ((self Self) (other Self)) bool (not (less self other))))
+  (less (self (other Self)) bool)                  ; 実装必須
+  (less-equal (self (other Self)) bool (not (less other self)))
+  (greater (self (other Self)) bool (less other self))
+  (greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 `Eq` を実装するには `equals` だけ、`Ord` を実装するには `less` だけ書けばよい。残りはデフォルト
@@ -68,17 +68,17 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 （[数値](numbers.md)）で、この層は通らない。
 
 ```lisp
-(deftrait Add () (add ((self Self) (other Self)) Self))
-(deftrait Sub () (sub ((self Self) (other Self)) Self))
-(deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
-(deftrait Rem () (remainder ((self Self) (other Self)) Self))
+(deftrait Add () (add (self (other Self)) Self))
+(deftrait Sub () (sub (self (other Self)) Self))
+(deftrait Mul () (mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (div (self (other Self)) Output))
+(deftrait Rem () (remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or  ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
-  (shift ((self Self) (count int)) Self))                 ; 距離は常に int（ash と同じ）
+  (bit-and (self (other Self)) Self)
+  (bit-or  (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
+  (shift (self (count int)) Self))                 ; 距離は常に int（ash と同じ）
 (deftrait Number (Add Sub Mul Rem Ord))                   ; メソッド無し・5つの合成
 ```
 
@@ -108,7 +108,7 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ()))
+  (push (self (x Item)) ()))
 ```
 
 要素を 1 つずつ足せるコレクション。ジェネリック関数は `(:where (Push C (Item T)))` で

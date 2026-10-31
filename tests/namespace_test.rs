@@ -397,12 +397,12 @@ fn a_type_the_library_does_not_offer_is_reached_only_through_a_use() {
 /// `:dyn`, a bound and an `impl` of the module that wrote the `use`.
 #[test]
 fn use_brings_in_a_trait() {
-    let src = "(module m (pub deftrait Area () (area ((self Self)) int)))
+    let src = "(module m (pub deftrait Area () (area (self) int)))
                (use m::Area)
                (defstruct sq (side int))
-               (impl Area sq (area ((self Self)) int (* self::side self::side)))
+               (impl Area sq (area (self) int (* self::side self::side)))
                (defun total ((s :dyn Area)) int (area s))
                (total (make-instance 'sq :side 3))";
     assert_eq!(ty_program(src), Type::Int);
-    assert!(program("(module m (pub deftrait Area () (area ((self Self)) int))) (defun f ((s :dyn Area)) int 1)").is_err());
+    assert!(program("(module m (pub deftrait Area () (area (self) int))) (defun f ((s :dyn Area)) int 1)").is_err());
 }

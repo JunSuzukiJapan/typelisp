@@ -22,8 +22,8 @@ fn a_method_of_an_impl_with_renamed_variables() {
         &format!(
             "{}\n{}",
             BOX,
-            r##"(deftrait Sh () (sh ((self Self)) string))
-                (impl Sh Box<U> (sh ((self Self)) string "box"))
+            r##"(deftrait Sh () (sh (self) string))
+                (impl Sh Box<U> (sh (self) string "box"))
                 (defun s<C> ((c C)) string (:where (Sh C)) (sh c))"##
         ),
         r##"(format false "~a ~a" (sh (make-instance 'Box<int> :v 3)) (s (make-instance 'Box<string> :v "a")))"##,
@@ -39,8 +39,8 @@ fn an_associated_type_bound_to_a_renamed_variable() {
         &format!(
             "{}\n{}",
             BOX,
-            r##"(deftrait Get () (:type Item) (get-it ((self Self)) Item))
-                (impl Get Box<U> (:type Item U) (get-it ((self Self)) U self::v))
+            r##"(deftrait Get () (:type Item) (get-it (self) Item))
+                (impl Get Box<U> (:type Item U) (get-it (self) U self::v))
                 (defun g<C,X> ((c C)) X (:where (Get C (Item X))) (get-it c))"##
         ),
         r##"(format false "~a ~a"
@@ -56,8 +56,8 @@ fn a_trait_object_of_an_impl_with_renamed_variables() {
         &format!(
             "{}\n{}",
             BOX,
-            r##"(deftrait Sh () (sh ((self Self)) string))
-                (impl Sh Box<U> (sh ((self Self)) string "box"))"##
+            r##"(deftrait Sh () (sh (self) string))
+                (impl Sh Box<U> (sh (self) string "box"))"##
         ),
         r##"(let ((d (the :dyn Sh (make-instance 'Box<int> :v 3)))) (sh d))"##,
         "box",
@@ -71,8 +71,8 @@ fn an_impl_bound_on_a_renamed_variable() {
     let defs = format!(
         "{}\n{}",
         BOX,
-        r##"(deftrait Sh () (sh ((self Self)) string))
-            (impl Sh Box<U> (:where (Hash U)) (sh ((self Self)) string "box"))
+        r##"(deftrait Sh () (sh (self) string))
+            (impl Sh Box<U> (:where (Hash U)) (sh (self) string "box"))
             (defun s<C> ((c C)) string (:where (Sh C)) (sh c))"##
     );
     both(&defs, r##"(s (make-instance 'Box<int> :v 3))"##, "box");

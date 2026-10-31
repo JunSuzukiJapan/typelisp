@@ -75,12 +75,12 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
 fn each_instantiations_impl_works_in_a_compiled_executable() {
     let (code, out, err) = compile_and_capture_with(
         "per_instantiation_aot",
-        r##"(deftrait Show () (show ((self Self)) string))
+        r##"(deftrait Show () (show (self) string))
            (defstruct Box<T> (v T))
-           (impl print-object Box<int> (print-object ((self Self) (escape bool)) string (format false "#<int-box ~a>" self::v)))
-           (impl print-object Box<string> (print-object ((self Self) (escape bool)) string (format false "#<str-box ~a>" self::v)))
-           (impl Show Box<int> (show ((self Self)) string "int"))
-           (impl Show Box<string> (show ((self Self)) string "string"))
+           (impl print-object Box<int> (print-object (self (escape bool)) string (format false "#<int-box ~a>" self::v)))
+           (impl print-object Box<string> (print-object (self (escape bool)) string (format false "#<str-box ~a>" self::v)))
+           (impl Show Box<int> (show (self) string "int"))
+           (impl Show Box<string> (show (self) string "string"))
            (defun via ((s :dyn Show)) string (show s))
            (defun main () int
              (progn (println "~a ~a ~a ~a" (make-instance 'Box :v 1) (make-instance 'Box :v "s")
@@ -910,9 +910,9 @@ fn compiles_an_impl_block() {
         compile_and_run(
             "impl_block",
             r#"
-            (deftrait Counted () (count ((self Self)) int))
+            (deftrait Counted () (count (self) int))
             (defstruct box-a (n int))
-            (impl Counted box-a (count ((self Self)) int self::n))
+            (impl Counted box-a (count (self) int self::n))
             (defun main () int (as int (count (make-instance 'box-a :n 9))))
             "#
         ),
@@ -932,11 +932,11 @@ fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
         compile_and_run(
             "dyn_dispatch",
             r#"
-            (deftrait Drawable () (draw ((self Self)) int))
+            (deftrait Drawable () (draw (self) int))
             (defstruct circle (r int))
             (defstruct square (side int))
-            (impl Drawable circle (draw ((self Self)) int 1))
-            (impl Drawable square (draw ((self Self)) int 2))
+            (impl Drawable circle (draw (self) int 1))
+            (impl Drawable square (draw (self) int 2))
             (defun render ((d :dyn Drawable)) int (draw d))
             (defun main () int
               (as int (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))))
@@ -956,17 +956,17 @@ fn compiles_and_runs_an_upcast_to_a_non_first_supertrait() {
         compile_and_run(
             "dyn_upcast",
             r#"
-            (deftrait B () (b-tag ((self Self)) int))
-            (deftrait C () (c-tag ((self Self)) int))
-            (deftrait D (B C) (d-tag ((self Self)) int))
+            (deftrait B () (b-tag (self) int))
+            (deftrait C () (c-tag (self) int))
+            (deftrait D (B C) (d-tag (self) int))
             (defstruct cell (n int))
             (defstruct pair (n int))
-            (impl B cell (b-tag ((self Self)) int 1))
-            (impl C cell (c-tag ((self Self)) int 2))
-            (impl D cell (d-tag ((self Self)) int 3))
-            (impl B pair (b-tag ((self Self)) int 4))
-            (impl C pair (c-tag ((self Self)) int 5))
-            (impl D pair (d-tag ((self Self)) int 6))
+            (impl B cell (b-tag (self) int 1))
+            (impl C cell (c-tag (self) int 2))
+            (impl D cell (d-tag (self) int 3))
+            (impl B pair (b-tag (self) int 4))
+            (impl C pair (c-tag (self) int 5))
+            (impl D pair (d-tag (self) int 6))
             (defun only-c ((c :dyn C)) int (c-tag c))
             (defun via ((d :dyn D)) int (only-c d))
             (defun main () int (as int (+ (* 10 (via (make-instance 'cell :n 0))) (via (make-instance 'pair :n 0)))))
@@ -984,12 +984,12 @@ fn compiles_and_runs_a_multi_slot_vtable() {
             "dyn_slots",
             r#"
             (deftrait Shape ()
-              (draw ((self Self)) int)
-              (sides ((self Self)) int))
+              (draw (self) int)
+              (sides (self) int))
             (defstruct tri (n int))
             (impl Shape tri
-              (draw ((self Self)) int 7)
-              (sides ((self Self)) int 3))
+              (draw (self) int 7)
+              (sides (self) int 3))
             (defun paint ((s :dyn Shape)) int (draw s))
             (defun outline ((s :dyn Shape)) int (sides s))
             (defun main () int (as int (+ (* 10 (paint (make-instance 'tri :n 1))) (outline (make-instance 'tri :n 1)))))

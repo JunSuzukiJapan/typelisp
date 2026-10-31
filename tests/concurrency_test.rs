@@ -982,10 +982,10 @@ fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
         text_compiled(
             r#"(use std::thread::yield) (defvar (trail string) "")
                (deftrait Ticker ()
-                 (tick ((self Self) (n int)) int))
+                 (tick (self (n int)) int))
                (defstruct marker (name string))
                (impl Ticker marker
-                 (tick ((self Self) (n int)) int
+                 (tick (self (n int)) int
                    (progn (dotimes (i n) (setf trail (append trail self::name)) (yield)) 0)))
                (defun drive-it ((t :dyn Ticker)) int (tick t 3))
                (compile drive-it)

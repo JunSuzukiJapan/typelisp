@@ -951,7 +951,7 @@ fn note_definition(heap: &Heap, ns: NsId, elems: &[Value]) {
 }
 
 /// The name a variant, a field or a trait method is written under: `red`,
-/// `(blue int)`, `(x int)`, `(pub x int)`, `(area ((self Self)) int)`. A
+/// `(blue int)`, `(x int)`, `(pub x int)`, `(area (self) int)`. A
 /// docstring or a keyword option is no member.
 fn member_name(heap: &Heap, v: Value) -> Option<SymRef> {
     let name = match v {

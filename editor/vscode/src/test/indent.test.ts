@@ -118,7 +118,7 @@ test("if lines up both branches, unlike Emacs Lisp's spec of 2", () => {
 test("impl members and labels local functions indent as definitions", () => {
   const impl = [
     "(impl Shape rect",
-    "  (label ((self Self)) string",
+    "  (label (self) string",
     '    (append "rect"',
     '            "!")))',
   ].join("\n");

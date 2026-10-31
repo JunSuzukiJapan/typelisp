@@ -138,9 +138,9 @@ fn a_compiled_task_that_needs_the_interpreter_moves_to_its_thread() {
 fn a_dyn_call_to_an_interpreted_method_moves_the_task_too() {
     same_on_one_and_four_threads(
         "typl_needs_main_dyn",
-        r#"(use std::thread::Task std::thread::Thread) (deftrait Answer () (answer ((self Self)) int))
+        r#"(use std::thread::Task std::thread::Thread) (deftrait Answer () (answer (self) int))
            (defstruct fixed (n int))
-           (impl Answer fixed (answer ((self Self)) int (+ self::n (Thread::current-id))))
+           (impl Answer fixed (answer (self) int (+ self::n (Thread::current-id))))
            (defun ask ((a :dyn Answer)) int (- (answer a) (Thread::current-id)))
            (defun start ((a :dyn Answer)) Task<int> (task (ask a)))
            (compile start)
@@ -186,7 +186,7 @@ fn a_worker_prints_what_the_interpreter_s_thread_prints() {
     let source = r#"(defenum shape (tri int int int) (dot))
                     (defstruct point (x int) (y int))
                     (impl print-object point
-                      (print-object ((self Self) (escape bool)) string (format false "<~a,~a>" self::x self::y)))
+                      (print-object (self (escape bool)) string (format false "<~a,~a>" self::x self::y)))
                     (defstruct holder (o Option<int>))
                     (defun show () string
                       (format false "~a ~a ~a ~a" (shape::tri 3 4 5) (make-instance 'point :x 1 :y 2) (make-instance 'holder :o (Option::some 7)) (shape::dot)))
@@ -213,7 +213,7 @@ fn a_worker_prints_what_the_interpreter_s_thread_prints() {
 fn an_interpreted_print_object_off_the_interpreter_s_thread_is_a_panic() {
     let source = r#"(defstruct blob (n int))
                     (impl print-object blob
-                      (print-object ((self Self) (escape bool)) string "blob!"))
+                      (print-object (self (escape bool)) string "blob!"))
                     (defun show () string (format false "~a" (make-instance 'blob :n 1)))
                     (defun elsewhere () string (join (thread (show))))
                     (compile elsewhere)

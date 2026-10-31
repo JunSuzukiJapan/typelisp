@@ -355,12 +355,12 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 `doiter`（§3末尾）が「Iterトレイトを実装した型すべてで使える」ことを要求したため2026-06-30に導入。
 `defmethod`の単一静的ディスパッチをそのまま再利用する設計（trait専用の新しいディスパッチ機構は作らない）。
 
-- **trait定義**: `(deftrait Name (Super...) (:type AssocName)... (method-name ((self Self) params...) Ret [body...])...)`。
+- **trait定義**: `(deftrait Name (Super...) (:type AssocName)... (method-name (self params...) Ret [body...])...)`。
   `Self`・宣言した関連型名はメソッドシグネチャの中で型変数として使える。
   ```lisp
   (deftrait Iter ()
     (:type Item)
-    (next ((self Self)) Option<Item>))
+    (next (self) Option<Item>))
   ```
 - **スーパトレイト**（2026-08-01追加）: 名前の直後の**必須**リスト。Rust の `trait Ord: Eq` は
   仕様上 `trait Ord where Self: Eq` の糖衣なので、内部表現は `where` 境界と同じ `TraitBound` を
@@ -382,7 +382,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   vtable・`Expr::DynCall`・AOT・島はどれも変更不要。本体はトレイトを書いたモジュールの
   名前空間で再チェックする（`check_defmethod_in`）——ヘッダは `impl` 側の名前空間で
   `Self` 置換済みなので、切り替えるのは本体だけ。
-- **trait実装**: `(impl TraitName TargetType (:type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`。
+- **trait実装**: `(impl TraitName TargetType (:type AssocName ConcreteType)... (method-name (self params...) Ret body...)...)`。
   `Self`/関連型名は`TargetType`/`(:type ...)`の具体型へ構文木レベルで置換されてから`defmethod`相当の
   処理に通る——実装後、各メソッドは`TargetType`の通常の`assoc`テーブルに**普通の`defmethod`として**
   挿入される（trait用の別テーブルは持たない）。`TargetType`の`AdtDef.impls`に`TraitName`が記録され、
@@ -390,7 +390,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   ```lisp
   (impl Iter vector-iter<T>
     (:type Item T)
-    (next ((self Self)) Option<T> ...))
+    (next (self) Option<T> ...))
   ```
   具体型に対する呼び出し（`(next concrete-vec-iter)`）は、register済みの`assoc`テーブルを引く
   既存の`Expr::Assoc`機構がそのまま動く——trait導入前と挙動・コードパスとも変わらない。
@@ -480,9 +480,9 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 閉じなければ完全に巻き戻すので既存の `(< a b)` 等は影響を受けない）。
 
 ```lisp
-(deftrait Drawable () (draw ((self Self)) string))
+(deftrait Drawable () (draw (self) string))
 (defstruct circle (r i32))
-(impl Drawable circle (draw ((self Self)) string "circle"))
+(impl Drawable circle (draw (self) string "circle"))
 
 (defun render ((d :dyn Drawable)) string (draw d))   ; 引数位置
 (render (circle::new 3))                              ; 暗黙に箱詰めされる

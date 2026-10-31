@@ -355,7 +355,7 @@ fn pprint_newline_rejects_an_unknown_keyword() {
 const POINT: &str = r##"
 (defstruct point (x int) (y int))
 (impl print-object point
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 (defvar (p point) (make-instance 'point :x 1 :y 2))
@@ -413,7 +413,7 @@ fn a_print_object_that_prints_itself_falls_back_instead_of_looping() {
         r#"
         (defstruct loopy (n int))
         (impl print-object loopy
-          (print-object ((self Self) (escape bool)) string (format false "<~a>" self)))
+          (print-object (self (escape bool)) string (format false "<~a>" self)))
         (print "~a" (make-instance 'loopy :n 1))
     "#,
     );
@@ -440,7 +440,7 @@ fn a_print_object_that_conses_heavily_survives_collections() {
         r#"
         (defstruct heavy (n int))
         (impl print-object heavy
-          (print-object ((self Self) (escape bool)) string
+          (print-object (self (escape bool)) string
             (let ((acc "x"))
               (dotimes (i 200)
                 (setf acc (format false "~a" (list 1 2 3 4 5 6 7 8 9 10))))

@@ -136,7 +136,7 @@ fn tuple_source() -> String {
         let eq_body = if n == 1 { eqs[0].clone() } else { format!("(and {})", eqs.join(" ")) };
         writeln!(
             out,
-            "(impl Eq {} (:where {}) (equals ((self Self) (other Self)) bool {}))",
+            "(impl Eq {} (:where {}) (equals (self (other Self)) bool {}))",
             generic,
             bound("Eq"),
             eq_body
@@ -147,7 +147,7 @@ fn tuple_source() -> String {
         for f in fields[..n - 1].iter().rev() {
             less = format!("(if (less self::{f} other::{f}) true (if (less other::{f} self::{f}) false {less}))");
         }
-        writeln!(out, "(impl Ord {} (:where {}) (less ((self Self) (other Self)) bool {}))", generic, bound("Ord"), less)
+        writeln!(out, "(impl Ord {} (:where {}) (less (self (other Self)) bool {}))", generic, bound("Ord"), less)
             .unwrap();
         // `sxhash`: the elements' hashes folded as `h * 31 + x`, kept in range
         // at every step.
@@ -155,13 +155,13 @@ fn tuple_source() -> String {
         for f in &fields[1..] {
             hash = format!("(logand (+ (* 31 {hash}) (sxhash self::{f})) *sxhash-mask*)");
         }
-        writeln!(out, "(impl Hash {} (:where {}) (sxhash ((self Self)) int {}))", generic, bound("Hash"), hash).unwrap();
+        writeln!(out, "(impl Hash {} (:where {}) (sxhash (self) int {}))", generic, bound("Hash"), hash).unwrap();
         // `#{a b}`, each element printed with the same `escape`.
         let directives = vec!["~a"; n].join(" ");
         let shown: Vec<String> = fields.iter().map(|f| format!("(print-object self::{f} escape)")).collect();
         writeln!(
             out,
-            "(impl print-object {} (:where {}) (print-object ((self Self) (escape bool)) string (format false \"#{{{}}}\" {})))",
+            "(impl print-object {} (:where {}) (print-object (self (escape bool)) string (format false \"#{{{}}}\" {})))",
             generic,
             bound("print-object"),
             directives,
@@ -1509,7 +1509,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module iter
 (pub deftrait Iter ()
   (:type Item)
-  (next ((self Self)) Option<Item>)))
+  (next (self) Option<Item>)))
 
 ;; `Push`: a collection one element at a time can be added to — the one name
 ;; `(push c x)` for each library collection's own way of adding (`Vector`'s
@@ -1518,7 +1518,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module iter
 (pub deftrait Push ()
   (:type Item)
-  (push ((self Self) (x Item)) ())))
+  (push (self (x Item)) ())))
 
 ;; `vector-iter<T>` is `Vector<T>`'s own iterator: a shared reference to the
 ;; vector being walked (`vec`, sharing the same underlying box
@@ -1532,7 +1532,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (pub defstruct vector-iter<T> (vec Vector<T>) (pos int))
 (impl Iter vector-iter<T>
   (:type Item T)
-  (next ((self Self)) Option<T>
+  (next (self) Option<T>
     (if (< self::pos (len self::vec))
         (let ((v (get self::vec self::pos)))
           (setf self::pos (+ self::pos 1))
@@ -1997,7 +1997,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (pub defstruct hashtable-iter<K,V> (snapshot Vector<cons-cell<K,V>>) (pos int))
 (impl Iter hashtable-iter<K,V>
   (:type Item cons-cell<K,V>)
-  (next ((self Self)) Option<cons-cell<K,V>>
+  (next (self) Option<cons-cell<K,V>>
     (if (< self::pos (len self::snapshot))
         (let ((e (get self::snapshot self::pos)))
           (setf self::pos (+ self::pos 1))
@@ -2046,19 +2046,19 @@ user-visible capacity."
 ;; suffixes are banned project-wide (so no `eq?`/`less?`).
 (module cmp
 (pub deftrait Eq ()
-  (equals ((self Self) (other Self)) bool)
-  (not-equals ((self Self) (other Self)) bool
+  (equals (self (other Self)) bool)
+  (not-equals (self (other Self)) bool
     "The negation of `equals` — Rust's `PartialEq::ne` default."
     (not (equals self other))))
 (pub deftrait Ord (Eq)
-  (less ((self Self) (other Self)) bool)
-  (less-equal ((self Self) (other Self)) bool
+  (less (self (other Self)) bool)
+  (less-equal (self (other Self)) bool
     "`a<=b` iff not `b<a`."
     (not (less other self)))
-  (greater ((self Self) (other Self)) bool
+  (greater (self (other Self)) bool
     "`a>b` iff `b<a`."
     (less other self))
-  (greater-equal ((self Self) (other Self)) bool
+  (greater-equal (self (other Self)) bool
     "`a>=b` iff not `a<b`."
     (not (less self other)))))
 
@@ -2070,15 +2070,15 @@ user-visible capacity."
 ;; core `equals`. The narrow integer widths and `f32` are further down, with
 ;; the arithmetic traits: they had no `=`/`<` to delegate to until Phase 1a
 ;; gave every width the same built-in catalog `i32` had.
-(impl Eq i32    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq f64    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq int (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq ratio  (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq rational (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq bool   (equals ((self Self) (other Self)) bool (equal self other)))
-(impl Eq char   (equals ((self Self) (other Self)) bool (equal self other)))
-(impl Eq string (equals ((self Self) (other Self)) bool (equal self other)))
-(impl Eq symbol (equals ((self Self) (other Self)) bool (eq self other)))
+(impl Eq i32    (equals (self (other Self)) bool (= self other)))
+(impl Eq f64    (equals (self (other Self)) bool (= self other)))
+(impl Eq int (equals (self (other Self)) bool (= self other)))
+(impl Eq ratio  (equals (self (other Self)) bool (= self other)))
+(impl Eq rational (equals (self (other Self)) bool (= self other)))
+(impl Eq bool   (equals (self (other Self)) bool (equal self other)))
+(impl Eq char   (equals (self (other Self)) bool (equal self other)))
+(impl Eq string (equals (self (other Self)) bool (equal self other)))
+(impl Eq symbol (equals (self (other Self)) bool (eq self other)))
 
 ;; `sexpr` is `eq`, deliberately — CL's identity, not `equal`'s recursive
 ;; descent. The type is a *union* of everything, so "compare two of these"
@@ -2100,7 +2100,7 @@ user-visible capacity."
 ;; `Self` here is `Sexpr` — the *non-empty* S-expression — while `eq` takes
 ;; `Option<Sexpr>`, the type an S-expression datum has. Wrapping is what
 ;; bridges the two, and it is free: under the niche `(Option::some x)` is `x`.
-(impl Eq Sexpr  (equals ((self Self) (other Self)) bool (eq (Option::some self) (Option::some other))))
+(impl Eq Sexpr  (equals (self (other Self)) bool (eq (Option::some self) (Option::some other))))
 
 ;; Scalar `Ord` impls — only the core `less`; the other three come from `Ord`'s
 ;; default bodies. Every scalar here has the overloaded `<` builtin (numbers
@@ -2108,31 +2108,31 @@ user-visible capacity."
 ;; code-point / lexicographic order). `bool`/`symbol` carry no meaningful
 ;; order, so no `Ord` for them. Each also needs its `Eq` impl above, since
 ;; `Ord` inherits `Eq`.
-(impl Ord i32    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord f64    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord int (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord ratio  (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord rational (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord char   (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord string (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord i32    (less (self (other Self)) bool (< self other)))
+(impl Ord f64    (less (self (other Self)) bool (< self other)))
+(impl Ord int (less (self (other Self)) bool (< self other)))
+(impl Ord ratio  (less (self (other Self)) bool (< self other)))
+(impl Ord rational (less (self (other Self)) bool (< self other)))
+(impl Ord char   (less (self (other Self)) bool (< self other)))
+(impl Ord string (less (self (other Self)) bool (< self other)))
 
 ;; The widths that had no methods at all until Phase 1a — every integer
 ;; other than `i32`, plus `f32` — joining `Eq`/`Ord`. The comment
 ;; above used to end "...so they stay outside `Eq`/`Ord` until they grow
 ;; real arithmetic": they have, so they do.
-(impl Eq i8    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq i16   (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq u8    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq u16   (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq u32   (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq f32   (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq i8    (equals (self (other Self)) bool (= self other)))
+(impl Eq i16   (equals (self (other Self)) bool (= self other)))
+(impl Eq u8    (equals (self (other Self)) bool (= self other)))
+(impl Eq u16   (equals (self (other Self)) bool (= self other)))
+(impl Eq u32   (equals (self (other Self)) bool (= self other)))
+(impl Eq f32   (equals (self (other Self)) bool (= self other)))
 
-(impl Ord i8    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord i16   (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord u8    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord u16   (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord u32   (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord f32   (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord i8    (less (self (other Self)) bool (< self other)))
+(impl Ord i16   (less (self (other Self)) bool (< self other)))
+(impl Ord u8    (less (self (other Self)) bool (< self other)))
+(impl Ord u16   (less (self (other Self)) bool (< self other)))
+(impl Ord u32   (less (self (other Self)) bool (< self other)))
+(impl Ord f32   (less (self (other Self)) bool (< self other)))
 
 ;; ---------------------------------------------------------------------
 ;; `Hash` — CL's `sxhash`, as a trait.
@@ -2153,7 +2153,7 @@ user-visible capacity."
 ;; default body. Its contract is the paragraph above.
 (module hash
 (pub deftrait Hash (Eq)
-  (sxhash ((self Self)) int))
+  (sxhash (self) int))
 
 ;; The mask that keeps a hash non-negative and fixnum-sized: 2^30-1.
 (pub defconstant (*sxhash-mask* int) 1073741823))
@@ -2184,20 +2184,20 @@ user-visible capacity."
           (setf i (+ i 1))))
       (logand (as int h) *sxhash-mask*))))
 
-(impl Hash int    (sxhash ((self Self)) int (logand self *sxhash-mask*)))
-(impl Hash i32    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
-(impl Hash i8     (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
-(impl Hash i16    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
-(impl Hash u8     (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
-(impl Hash u16    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
-(impl Hash u32    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))
-(impl Hash bool   (sxhash ((self Self)) int (if self 1231 1237)))
-(impl Hash char   (sxhash ((self Self)) int (char->int self)))
-(impl Hash string (sxhash ((self Self)) int (sxhash-string self)))
-(impl Hash symbol (sxhash ((self Self)) int (sxhash-string (symbol->string self))))
-(impl Hash ratio  (sxhash ((self Self)) int
+(impl Hash int    (sxhash (self) int (logand self *sxhash-mask*)))
+(impl Hash i32    (sxhash (self) int (logand (as int self) *sxhash-mask*)))
+(impl Hash i8     (sxhash (self) int (logand (as int self) *sxhash-mask*)))
+(impl Hash i16    (sxhash (self) int (logand (as int self) *sxhash-mask*)))
+(impl Hash u8     (sxhash (self) int (logand (as int self) *sxhash-mask*)))
+(impl Hash u16    (sxhash (self) int (logand (as int self) *sxhash-mask*)))
+(impl Hash u32    (sxhash (self) int (logand (as int self) *sxhash-mask*)))
+(impl Hash bool   (sxhash (self) int (if self 1231 1237)))
+(impl Hash char   (sxhash (self) int (char->int self)))
+(impl Hash string (sxhash (self) int (sxhash-string self)))
+(impl Hash symbol (sxhash (self) int (sxhash-string (symbol->string self))))
+(impl Hash ratio  (sxhash (self) int
   (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*)))
-(impl Hash rational (sxhash ((self Self)) int
+(impl Hash rational (sxhash (self) int
   (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*))))
 
 ;; ---------------------------------------------------------------------------
@@ -2274,38 +2274,38 @@ user-visible capacity."
 ;; `Sub` and nothing more.
 (module ops
 (pub deftrait Add ()
-  (add ((self Self) (other Self)) Self))
+  (add (self (other Self)) Self))
 (pub deftrait Sub ()
-  (sub ((self Self) (other Self)) Self))
+  (sub (self (other Self)) Self))
 (pub deftrait Mul ()
-  (mul ((self Self) (other Self)) Self))
+  (mul (self (other Self)) Self))
 ;; `Div` names its result type: CL's `/` on two integers is a `rational`, so
 ;; `int`'s `Output` is `rational` while every other number divides into
 ;; itself. The others name it `Self`'s own type.
 (pub deftrait Div ()
   (:type Output)
-  (div ((self Self) (other Self)) Output))
+  (div (self (other Self)) Output))
 ;; `remainder`, not `rem`: `rem` is already a method on every numeric type
 ;; (above), and a trait may not declare a name its implementors already
 ;; define. The impls delegate to it, and `(rem a b)` on a bounded type
 ;; variable resolves here through the same operator spelling as `+`, so
 ;; the short name is still what generic code writes.
 (pub deftrait Rem ()
-  (remainder ((self Self) (other Self)) Self))
+  (remainder (self (other Self)) Self))
 ;; The bitwise catalog, spelled apart from the `logand`/`logior`/`logxor`/
 ;; `lognot` builtins for the same reason `add` is spelled apart from `+`.
 (pub deftrait Bits ()
-  (bit-and ((self Self) (other Self)) Self)
-  (bit-or ((self Self) (other Self)) Self)
-  (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self)
+  (bit-and (self (other Self)) Self)
+  (bit-or (self (other Self)) Self)
+  (bit-xor (self (other Self)) Self)
+  (bit-not (self) Self)
   ;; `shift` is the only member whose second parameter is not `Self`: a
   ;; shift distance measures bits, so the receiver's width and signedness
   ;; have nothing to say about it (the same reasoning that made `ash`'s own
   ;; second parameter an `i32`). It could not have been written before that
   ;; change — an impl for `u8` would have had no way to say "shift right".
   ;; Positive is left, negative is right, exactly like `ash`.
-  (shift ((self Self) (count int)) Self))
+  (shift (self (count int)) Self))
 ;; What "a number" means as a bound: arithmetic and an ordering, with no
 ;; methods of its own — a name for the conjunction, so `(:where (Number T))`
 ;; says in one bound what five would. `Div` is not among them: its `Output`
@@ -2333,108 +2333,108 @@ user-visible capacity."
   (pub rem (self (b u32  )) u32   (- self (* b (/ self b)))))
 
 ;; The impls. Each is the built-in operator under the trait's name.
-(impl Add i32    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add i8     (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add i16    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add u8     (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add u16    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add u32    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add f64    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add f32    (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add int (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add ratio  (add ((self Self) (other Self)) Self (+ self other)))
-(impl Add rational (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add i32    (add (self (other Self)) Self (+ self other)))
+(impl Add i8     (add (self (other Self)) Self (+ self other)))
+(impl Add i16    (add (self (other Self)) Self (+ self other)))
+(impl Add u8     (add (self (other Self)) Self (+ self other)))
+(impl Add u16    (add (self (other Self)) Self (+ self other)))
+(impl Add u32    (add (self (other Self)) Self (+ self other)))
+(impl Add f64    (add (self (other Self)) Self (+ self other)))
+(impl Add f32    (add (self (other Self)) Self (+ self other)))
+(impl Add int (add (self (other Self)) Self (+ self other)))
+(impl Add ratio  (add (self (other Self)) Self (+ self other)))
+(impl Add rational (add (self (other Self)) Self (+ self other)))
 
-(impl Sub i32    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub i8     (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub i16    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub u8     (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub u16    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub u32    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub f64    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub f32    (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub int (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub ratio  (sub ((self Self) (other Self)) Self (- self other)))
-(impl Sub rational (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub i32    (sub (self (other Self)) Self (- self other)))
+(impl Sub i8     (sub (self (other Self)) Self (- self other)))
+(impl Sub i16    (sub (self (other Self)) Self (- self other)))
+(impl Sub u8     (sub (self (other Self)) Self (- self other)))
+(impl Sub u16    (sub (self (other Self)) Self (- self other)))
+(impl Sub u32    (sub (self (other Self)) Self (- self other)))
+(impl Sub f64    (sub (self (other Self)) Self (- self other)))
+(impl Sub f32    (sub (self (other Self)) Self (- self other)))
+(impl Sub int (sub (self (other Self)) Self (- self other)))
+(impl Sub ratio  (sub (self (other Self)) Self (- self other)))
+(impl Sub rational (sub (self (other Self)) Self (- self other)))
 
-(impl Mul i32    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul i8     (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul i16    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul u8     (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul u16    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul u32    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul f64    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul f32    (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul int (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul ratio  (mul ((self Self) (other Self)) Self (* self other)))
-(impl Mul rational (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul i32    (mul (self (other Self)) Self (* self other)))
+(impl Mul i8     (mul (self (other Self)) Self (* self other)))
+(impl Mul i16    (mul (self (other Self)) Self (* self other)))
+(impl Mul u8     (mul (self (other Self)) Self (* self other)))
+(impl Mul u16    (mul (self (other Self)) Self (* self other)))
+(impl Mul u32    (mul (self (other Self)) Self (* self other)))
+(impl Mul f64    (mul (self (other Self)) Self (* self other)))
+(impl Mul f32    (mul (self (other Self)) Self (* self other)))
+(impl Mul int (mul (self (other Self)) Self (* self other)))
+(impl Mul ratio  (mul (self (other Self)) Self (* self other)))
+(impl Mul rational (mul (self (other Self)) Self (* self other)))
 
-(impl Div i32    (:type Output i32) (div ((self Self) (other Self)) i32 (/ self other)))
-(impl Div i8     (:type Output i8) (div ((self Self) (other Self)) i8 (/ self other)))
-(impl Div i16    (:type Output i16) (div ((self Self) (other Self)) i16 (/ self other)))
-(impl Div u8     (:type Output u8) (div ((self Self) (other Self)) u8 (/ self other)))
-(impl Div u16    (:type Output u16) (div ((self Self) (other Self)) u16 (/ self other)))
-(impl Div u32    (:type Output u32) (div ((self Self) (other Self)) u32 (/ self other)))
-(impl Div f64    (:type Output f64) (div ((self Self) (other Self)) f64 (/ self other)))
-(impl Div f32    (:type Output f32) (div ((self Self) (other Self)) f32 (/ self other)))
-(impl Div int    (:type Output rational) (div ((self Self) (other Self)) rational (/ self other)))
-(impl Div ratio  (:type Output ratio) (div ((self Self) (other Self)) ratio (/ self other)))
-(impl Div rational (:type Output rational) (div ((self Self) (other Self)) rational (/ self other)))
+(impl Div i32    (:type Output i32) (div (self (other Self)) i32 (/ self other)))
+(impl Div i8     (:type Output i8) (div (self (other Self)) i8 (/ self other)))
+(impl Div i16    (:type Output i16) (div (self (other Self)) i16 (/ self other)))
+(impl Div u8     (:type Output u8) (div (self (other Self)) u8 (/ self other)))
+(impl Div u16    (:type Output u16) (div (self (other Self)) u16 (/ self other)))
+(impl Div u32    (:type Output u32) (div (self (other Self)) u32 (/ self other)))
+(impl Div f64    (:type Output f64) (div (self (other Self)) f64 (/ self other)))
+(impl Div f32    (:type Output f32) (div (self (other Self)) f32 (/ self other)))
+(impl Div int    (:type Output rational) (div (self (other Self)) rational (/ self other)))
+(impl Div ratio  (:type Output ratio) (div (self (other Self)) ratio (/ self other)))
+(impl Div rational (:type Output rational) (div (self (other Self)) rational (/ self other)))
 
-(impl Rem i32    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem i8     (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem i16    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem u8     (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem u16    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem u32    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem f64    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem f32    (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem int (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem ratio  (remainder ((self Self) (other Self)) Self (rem self other)))
-(impl Rem rational (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem i32    (remainder (self (other Self)) Self (rem self other)))
+(impl Rem i8     (remainder (self (other Self)) Self (rem self other)))
+(impl Rem i16    (remainder (self (other Self)) Self (rem self other)))
+(impl Rem u8     (remainder (self (other Self)) Self (rem self other)))
+(impl Rem u16    (remainder (self (other Self)) Self (rem self other)))
+(impl Rem u32    (remainder (self (other Self)) Self (rem self other)))
+(impl Rem f64    (remainder (self (other Self)) Self (rem self other)))
+(impl Rem f32    (remainder (self (other Self)) Self (rem self other)))
+(impl Rem int (remainder (self (other Self)) Self (rem self other)))
+(impl Rem ratio  (remainder (self (other Self)) Self (rem self other)))
+(impl Rem rational (remainder (self (other Self)) Self (rem self other)))
 
 (impl Bits i32
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count int)) Self (ash self count)))
+  (bit-and (self (other Self)) Self (logand self other))
+  (bit-or (self (other Self)) Self (logior self other))
+  (bit-xor (self (other Self)) Self (logxor self other))
+  (bit-not (self) Self (lognot self))
+  (shift (self (count int)) Self (ash self count)))
 (impl Bits i8
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count int)) Self (ash self count)))
+  (bit-and (self (other Self)) Self (logand self other))
+  (bit-or (self (other Self)) Self (logior self other))
+  (bit-xor (self (other Self)) Self (logxor self other))
+  (bit-not (self) Self (lognot self))
+  (shift (self (count int)) Self (ash self count)))
 (impl Bits i16
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count int)) Self (ash self count)))
+  (bit-and (self (other Self)) Self (logand self other))
+  (bit-or (self (other Self)) Self (logior self other))
+  (bit-xor (self (other Self)) Self (logxor self other))
+  (bit-not (self) Self (lognot self))
+  (shift (self (count int)) Self (ash self count)))
 (impl Bits u8
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count int)) Self (ash self count)))
+  (bit-and (self (other Self)) Self (logand self other))
+  (bit-or (self (other Self)) Self (logior self other))
+  (bit-xor (self (other Self)) Self (logxor self other))
+  (bit-not (self) Self (lognot self))
+  (shift (self (count int)) Self (ash self count)))
 (impl Bits u16
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count int)) Self (ash self count)))
+  (bit-and (self (other Self)) Self (logand self other))
+  (bit-or (self (other Self)) Self (logior self other))
+  (bit-xor (self (other Self)) Self (logxor self other))
+  (bit-not (self) Self (lognot self))
+  (shift (self (count int)) Self (ash self count)))
 (impl Bits u32
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count int)) Self (ash self count)))
+  (bit-and (self (other Self)) Self (logand self other))
+  (bit-or (self (other Self)) Self (logior self other))
+  (bit-xor (self (other Self)) Self (logxor self other))
+  (bit-not (self) Self (lognot self))
+  (shift (self (count int)) Self (ash self count)))
 (impl Bits int
-  (bit-and ((self Self) (other Self)) Self (logand self other))
-  (bit-or ((self Self) (other Self)) Self (logior self other))
-  (bit-xor ((self Self) (other Self)) Self (logxor self other))
-  (bit-not ((self Self)) Self (lognot self))
-  (shift ((self Self) (count int)) Self (ash self count)))
+  (bit-and (self (other Self)) Self (logand self other))
+  (bit-or (self (other Self)) Self (logior self other))
+  (bit-xor (self (other Self)) Self (logxor self other))
+  (bit-not (self) Self (lognot self))
+  (shift (self (count int)) Self (ash self count)))
 
 ;; `Number` has no methods, so its impls are the bare conjunction: this
 ;; type has all five.
@@ -2577,7 +2577,7 @@ user-visible capacity."
 ;; parameters (`A`/`B`, exactly as written on the `defstruct`) — a method's
 ;; signature can only be generic through them.
 (impl Eq cons-cell<A,B> (:where (Eq A) (Eq B))
-  (equals ((self Self) (other Self)) bool
+  (equals (self (other Self)) bool
     (if (equals self::car other::car)
         (equals self::cdr other::cdr)
         false)))
@@ -2592,7 +2592,7 @@ user-visible capacity."
 ;; `(Eq A)` in the bound list.
 ;; `less-equal`/`greater`/`greater-equal` come from `Ord`'s default bodies.
 (impl Ord cons-cell<A,B> (:where (Ord A) (Ord B))
-  (less ((self Self) (other Self)) bool
+  (less (self (other Self)) bool
     (if (less self::car other::car)
         true
         (if (less other::car self::car)
@@ -2616,8 +2616,8 @@ user-visible capacity."
 ;; before parsing its own method signatures.
 (module error
 (pub deftrait Error ()
-  (message ((self Self)) string)
-  (source ((self Self)) Option<:dyn Error>
+  (message (self) string)
+  (source (self) Option<:dyn Error>
     "The error this one wraps, if any. Defaults to `none` — most error types
      are leaves, so only a wrapping type needs to override this."
     (Option::none)))
@@ -2628,13 +2628,13 @@ user-visible capacity."
 ;; always the root cause. Nothing here is privileged: these read exactly like
 ;; the impl a user writes for their own error type.
 (impl Error ParseIntError
-  (message ((self Self)) string (match self ((ParseIntError m) m))))
+  (message (self) string (match self ((ParseIntError m) m))))
 (impl Error ParseFloatError
-  (message ((self Self)) string (match self ((ParseFloatError m) m))))
+  (message (self) string (match self ((ParseFloatError m) m))))
 (impl Error ReadError
-  (message ((self Self)) string (match self ((ReadError m) m))))
+  (message (self) string (match self ((ReadError m) m))))
 (impl Error EvalError
-  (message ((self Self)) string (match self ((EvalError m) m))))
+  (message (self) string (match self ((EvalError m) m))))
 
 ;; Widen a `Result`'s concrete error type to `:dyn Error`, so results from
 ;; different fallible operations can flow into one `Result<T, :dyn Error>` —
@@ -3892,7 +3892,7 @@ user-visible capacity."
 ;; never asks. What the impls buy is the bound.
 (module fmt
 (pub deftrait print-object ()
-  (print-object ((self Self) (escape bool)) string)))
+  (print-object (self (escape bool)) string)))
 
 ;; The scalar impls. Each renders its receiver the way the printer would
 ;; anyway, `escape` picking `~s` over `~a` -- so `(print-object x escape)` in
@@ -3905,21 +3905,21 @@ user-visible capacity."
 ;; That is the same trade Rust makes with `Display`, and the alternative --
 ;; a blanket impl -- cannot be written: its body would need to render a `T`
 ;; it knows nothing about, which is the problem the bound exists to solve.
-(impl print-object i8      (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object i16     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object i32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object u8      (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object u16     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object u32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object f32     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object f64     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object int  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object ratio   (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object rational (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object bool    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object char    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object string  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
-(impl print-object symbol  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object i8      (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object i16     (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object i32     (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object u8      (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object u16     (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object u32     (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object f32     (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object f64     (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object int  (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object ratio   (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object rational (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object bool    (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object char    (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object string  (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object symbol  (print-object (self (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 
 ;; How an error prints, the way SBCL prints a condition: `~a` is its report
 ;; (the message, as CLHS 9.1.3 has a condition print when `*print-escape*`
@@ -3928,13 +3928,13 @@ user-visible capacity."
   (if escape (format false "#<~a ~s>" name (message e)) (message e))))
 
 (impl print-object ParseIntError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "parseinterror")))
+  (print-object (self (escape bool)) string (%internal::error-print-object self escape "parseinterror")))
 (impl print-object ParseFloatError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "parsefloaterror")))
+  (print-object (self (escape bool)) string (%internal::error-print-object self escape "parsefloaterror")))
 (impl print-object ReadError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "readerror")))
+  (print-object (self (escape bool)) string (%internal::error-print-object self escape "readerror")))
 (impl print-object EvalError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "evalerror")))
+  (print-object (self (escape bool)) string (%internal::error-print-object self escape "evalerror")))
 
 ;; The tuple types and the `tuple` macro, generated by `tuple_source`.
 #%tuples
@@ -3957,7 +3957,7 @@ user-visible capacity."
   (pub defstruct map-iter<I,A,U> (src I) (f (fn (A) U)))
   (impl Iter map-iter<I,A,U> (:where (Iter I (Item A)))
     (:type Item U)
-    (next ((self Self)) Option<U>
+    (next (self) Option<U>
       (match (next self::src)
         ((some x) (let ((f self::f)) (Option::some (f x))))
         ((none) (Option::none)))))
@@ -3967,7 +3967,7 @@ user-visible capacity."
   (pub defstruct filter-iter<I,A> (src I) (pred (fn (A) bool)))
   (impl Iter filter-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
-    (next ((self Self)) Option<A>
+    (next (self) Option<A>
       (let ((p self::pred) (found (the Option<A> (Option::none))))
         (while-let ((some x) (next self::src))
           (when (p x)
@@ -3980,7 +3980,7 @@ user-visible capacity."
   (pub defstruct take-iter<I,A> (src I) (n int))
   (impl Iter take-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
-    (next ((self Self)) Option<A>
+    (next (self) Option<A>
       (if (> self::n 0)
           (progn (setf self::n (- self::n 1)) (next self::src))
           (Option::none))))
@@ -3990,7 +3990,7 @@ user-visible capacity."
   (pub defstruct take-while-iter<I,A> (src I) (pred (fn (A) bool)) (done bool))
   (impl Iter take-while-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
-    (next ((self Self)) Option<A>
+    (next (self) Option<A>
       (if self::done
           (Option::none)
           (match (next self::src)
@@ -4003,7 +4003,7 @@ user-visible capacity."
   (pub defstruct skip-iter<I,A> (src I) (n int))
   (impl Iter skip-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
-    (next ((self Self)) Option<A>
+    (next (self) Option<A>
       (while (> self::n 0)
         (setf self::n (- self::n 1))
         (next self::src))
@@ -4014,7 +4014,7 @@ user-visible capacity."
   (pub defstruct enumerate-iter<I,A> (src I) (i int))
   (impl Iter enumerate-iter<I,A> (:where (Iter I (Item A)))
     (:type Item #{int A})
-    (next ((self Self)) Option<#{int A}>
+    (next (self) Option<#{int A}>
       (match (next self::src)
         ((some x) (let ((i self::i)) (setf self::i (+ i 1)) (Option::some (tuple i x))))
         ((none) (Option::none)))))
@@ -4024,7 +4024,7 @@ user-visible capacity."
   (pub defstruct zip-iter<I,J,A,B> (left I) (right J))
   (impl Iter zip-iter<I,J,A,B> (:where (Iter I (Item A)) (Iter J (Item B)))
     (:type Item #{A B})
-    (next ((self Self)) Option<#{A B}>
+    (next (self) Option<#{A B}>
       (match (next self::left)
         ((some x) (match (next self::right)
                     ((some y) (Option::some (tuple x y)))
@@ -4036,7 +4036,7 @@ user-visible capacity."
   (pub defstruct chain-iter<I,J,A> (left I) (right J) (left-done bool))
   (impl Iter chain-iter<I,J,A> (:where (Iter I (Item A)) (Iter J (Item A)))
     (:type Item A)
-    (next ((self Self)) Option<A>
+    (next (self) Option<A>
       (if self::left-done
           (next self::right)
           (match (next self::left)
@@ -4048,7 +4048,7 @@ user-visible capacity."
   (pub defstruct flat-map-iter<I,A,J,B> (src I) (f (fn (A) J)) (cur Option<J>))
   (impl Iter flat-map-iter<I,A,J,B> (:where (Iter I (Item A)) (Iter J (Item B)))
     (:type Item B)
-    (next ((self Self)) Option<B>
+    (next (self) Option<B>
       (let ((out (the Option<B> (Option::none))))
         (loop
           (match self::cur
@@ -4068,7 +4068,7 @@ user-visible capacity."
   (pub defstruct iterate-iter<A> (cur A) (f (fn (A) A)) (started bool))
   (impl Iter iterate-iter<A>
     (:type Item A)
-    (next ((self Self)) Option<A>
+    (next (self) Option<A>
       (when self::started
         (let ((f self::f)) (setf self::cur (f self::cur))))
       (setf self::started true)
@@ -4079,7 +4079,7 @@ user-visible capacity."
   (pub defstruct repeat-iter<A> (elem A))
   (impl Iter repeat-iter<A>
     (:type Item A)
-    (next ((self Self)) Option<A> (Option::some self::elem)))
+    (next (self) Option<A> (Option::some self::elem)))
   (pub defun repeat<A> ((x A)) repeat-iter<A> (make-instance 'repeat-iter :elem x)))
 
 ;; ---------------------------------------------------------------------------
@@ -4106,9 +4106,9 @@ user-visible capacity."
 ;; `insert`, without its answer of whether `x` was new.
 (impl Push HashSet<T> (:where (Hash T))
   (:type Item T)
-  (push ((self Self) (x T)) () (insert self x) ()))
+  (push (self (x T)) () (insert self x) ()))
 (impl print-object HashSet<T> (:where (print-object T))
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (let ((out "#<hashset"))
       (doiter (x (iter self))
         (setf out (append (append out " ") (print-object x escape))))
@@ -4172,7 +4172,7 @@ user-visible capacity."
         (setf i (+ i 1)))
       (iter out))))
 (impl print-object SortedTable<K,V> (:where (print-object K) (print-object V))
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (let ((out "#<sortedtable"))
       (doiter (#{k v} (iter self))
         (setf out (append (append (append (append out " ") (print-object k escape)) " ") (print-object v escape))))
@@ -4229,9 +4229,9 @@ user-visible capacity."
       (iter out))))
 (impl Push Deque<T>
   (:type Item T)
-  (push ((self Self) (x T)) () (push-back self x)))
+  (push (self (x T)) () (push-back self x)))
 (impl print-object Deque<T> (:where (print-object T))
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (let ((out "#<deque"))
       (doiter (x (iter self))
         (setf out (append (append out " ") (print-object x escape))))
@@ -4402,10 +4402,10 @@ user-visible capacity."
 ;; `get-internal-real-time` return plain integers): seconds since 1900 for a
 ;; universal time, `internal-time-units-per-second` ticks for an internal one.
 (impl print-object universal-time
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "~d" (+ (* self::day 86400) self::second))))
 (impl print-object internal-time
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "~d" (+ (* self::second internal-time-units-per-second) self::microsecond))))
 
 (pub defun internal-time-seconds ((it internal-time)) f64
@@ -4526,7 +4526,7 @@ user-visible capacity."
   (pub = (self (other complex)) bool
     (if (= self::re other::re) (= self::im other::im) false))
   (pub /= (self (other complex)) bool (not (= self other))))
-(impl Eq complex (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq complex (equals (self (other Self)) bool (= self other)))
 ;; No `Ord`: the complex numbers are not ordered, and CL's `<` rejects them
 ;; for the same reason.
 
@@ -4557,7 +4557,7 @@ user-visible capacity."
 ;; reader half is not here (this language has no `#C` syntax), so `escape`
 ;; changes nothing.
 (impl print-object complex
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "#C(~a ~a)" self::re self::im))))
 
 (module path
@@ -4652,24 +4652,24 @@ user-visible capacity."
 (module path
 (pub deftrait Pathish ()
   "What can name a file: a `string` or a `pathname`."
-  (namestring ((self Self)) string)
-  (to-pathname ((self Self)) pathname))
+  (namestring (self) string)
+  (to-pathname (self) pathname))
 
 (impl Pathish string
   ;; A string is already its own namestring -- the whole reason file
   ;; operations take `Pathish` rather than `pathname` is that this case costs
   ;; nothing.
-  (namestring ((self Self)) string self)
-  (to-pathname ((self Self)) pathname (parse-namestring self)))
+  (namestring (self) string self)
+  (to-pathname (self) pathname (parse-namestring self)))
 
 (impl Pathish pathname
-  (namestring ((self Self)) string (append (std::%internal::pathname-directory-part self) (std::%internal::pathname-file-part self)))
-  (to-pathname ((self Self)) pathname self))
+  (namestring (self) string (append (std::%internal::pathname-directory-part self) (std::%internal::pathname-file-part self)))
+  (to-pathname (self) pathname self))
 
 ;; CL's `#P"..."` (CLHS 22.1.3.11) when it has to read back, the namestring
 ;; otherwise — SBCL's two answers.
 (impl print-object pathname
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if escape (format false "#P~s" (namestring self)) (namestring self))))
 
 (pub defun make-pathname (&key (directory Vector<string> (Vector::new))
@@ -4762,8 +4762,8 @@ user-visible capacity."
 (module io
 (pub deftrait Stream ()
   "What every stream can do, whatever it carries and whichever way it goes."
-  (open-stream-p ((self Self)) bool)
-  (close ((self Self)) ()))
+  (open-stream-p (self) bool)
+  (close (self) ()))
 
 ;; Direction. `Item` is left open so a byte stream can pin it to `i32` later
 ;; without a parallel trait hierarchy; the character layers below pin it.
@@ -4776,7 +4776,7 @@ user-visible capacity."
   ;; `string` where `Option<Item>` is declared -- which is exactly what this
   ;; docstring used to be, unnoticed until `deftrait` began checking its
   ;; default bodies at the declaration.
-  (read-item ((self Self)) Option<Item>)
+  (read-item (self) Option<Item>)
   ;; Whether the next `read-item` can answer without waiting.
   ;;
   ;; The default is `false`, and it is the same choice `at-line-start` makes
@@ -4787,12 +4787,12 @@ user-visible capacity."
   ;; name promises it will not do. Every built-in stream overrides this. A
   ;; user stream that can tell should too: with the default it never reports
   ;; anything ready, so `read-char-no-hang` on it always answers `none`.
-  (listen ((self Self)) bool false))
+  (listen (self) bool false))
 
 (pub deftrait OutputStream (Stream)
   "A stream that accepts items."
   (:type Item)
-  (write-item ((self Self) (x Item)) ()))
+  (write-item (self (x Item)) ()))
 
 ;; The character layers. Pinning `Item` to `char` in the supertrait list is
 ;; what lets these carry default bodies written in terms of characters --
@@ -4800,14 +4800,14 @@ user-visible capacity."
 ;; that already implements `InputStream` with `Item = char` costs one line.
 (pub deftrait CharInput ((InputStream (Item char)))
   "A character input stream. Every method has a default body."
-  (read-char ((self Self)) Option<char>
+  (read-char (self) Option<char>
     "The next character, or `none` at end of input."
     (read-item self))
-  (read-char-no-hang ((self Self)) Option<char>
+  (read-char-no-hang (self) Option<char>
     "The next character, but only if it is already there: `none` rather than
      a wait. Answers `none` for a stream whose `listen` is the default."
     (if (listen self) (read-char self) (Option::none)))
-  (read-sequence ((self Self) (into Vector<char>) (n int)) int
+  (read-sequence (self (into Vector<char>) (n int)) int
     "Read up to `n` characters, pushing each onto `into`; the count actually
      read, which is short of `n` only at end of input. CL's `read-sequence`
      fills an existing sequence between `:start` and `:end` and answers the
@@ -4821,7 +4821,7 @@ user-visible capacity."
               ((some c) (progn (push into c) (setf got (+ got 1)) ()))
               ((none) (progn (setf going false) ())))))
       got))
-  (read-line ((self Self)) Option<string>
+  (read-line (self) Option<string>
     "Up to (and consuming) the next newline. `none` only at end of input, so
      a final line with no newline is still returned."
     (match (read-item self)
@@ -4837,7 +4837,7 @@ user-visible capacity."
                    ((none) (progn (setf going false) ()))
                    ((some next) (progn (setf c next) ()))))))
          (Option::some out)))))
-  (read-all ((self Self)) string
+  (read-all (self) string
     "Everything left, as one string."
     (let ((out ""))
       (loop
@@ -4858,8 +4858,8 @@ user-visible capacity."
 (pub deftrait PeekInput (CharInput)
   "A character input stream that can put a character back. One is enough --
    that is all CL's `unread-char` promises."
-  (unread-char ((self Self) (c char)) ())
-  (peek-char ((self Self)) Option<char>
+  (unread-char (self (c char)) ())
+  (peek-char (self) Option<char>
     "The next character, without consuming it."
     (match (read-char self)
       ((none) (Option::none))
@@ -4867,35 +4867,35 @@ user-visible capacity."
 
 (pub deftrait CharOutput ((OutputStream (Item char)))
   "A character output stream. Every method has a default body."
-  (write-char ((self Self) (c char)) ()
+  (write-char (self (c char)) ()
     (write-item self c))
-  (write-string ((self Self) (s string)) ()
+  (write-string (self (s string)) ()
     "Write every character of `s`."
     (let ((i 0) (n (length s)))
       (while (< i n)
         (write-item self (ref s i))
         (setf i (+ i 1)))))
-  (terpri ((self Self)) ()
+  (terpri (self) ()
     "Write a newline. CL's name for it."
     (write-item self #\newline))
-  (write-sequence ((self Self) (from Vector<char>)) ()
+  (write-sequence (self (from Vector<char>)) ()
     "Every character of `from`, in order. CL's `write-sequence` takes
      `:start`/`:end`; slice the vector instead."
     (doiter (c (iter from)) (write-char self c)))
-  (write-line ((self Self) (s string)) ()
+  (write-line (self (s string)) ()
     "Write `s` followed by a newline."
     (progn (write-string self s) (write-item self #\newline)))
-  (at-line-start ((self Self)) bool
+  (at-line-start (self) bool
     "Whether the next character written would begin a line. Answering this
      needs a memory of what was written last, which only the stream itself
      has -- so the default is `false`, the answer that makes `fresh-line`
      write its newline. A stream that would rather not have that newline
      overrides this (every built-in one does)."
     false)
-  (fresh-line ((self Self)) ()
+  (fresh-line (self) ()
     "A newline, unless the stream is already at the start of a line."
     (if (at-line-start self) () (write-item self #\newline)))
-  (finish-output ((self Self)) ()
+  (finish-output (self) ()
     "Push buffered output to its destination. A no-op unless overridden."
     ()))
 
@@ -4909,10 +4909,10 @@ user-visible capacity."
 ;; value is always 0..255 -- `write-byte` refuses anything else, as CL's does.
 (pub deftrait ByteInput ((InputStream (Item int)))
   "A byte input stream. Every method has a default body."
-  (read-byte ((self Self)) Option<int>
+  (read-byte (self) Option<int>
     "The next byte, or `none` at end of input."
     (read-item self))
-  (read-sequence ((self Self) (into Vector<int>) (n int)) int
+  (read-sequence (self (into Vector<int>) (n int)) int
     "`CharInput`'s, over bytes."
     (let ((got 0) (going true))
       (while going
@@ -4925,13 +4925,13 @@ user-visible capacity."
 
 (pub deftrait ByteOutput ((OutputStream (Item int)))
   "A byte output stream. Every method has a default body."
-  (write-byte ((self Self) (b int)) ()
+  (write-byte (self (b int)) ()
     "Write one byte. `b` outside 0..255 is an error."
     (write-item self b))
-  (write-sequence ((self Self) (from Vector<int>)) ()
+  (write-sequence (self (from Vector<int>)) ()
     "Every byte of `from`, in order."
     (doiter (b (iter from)) (write-byte self b)))
-  (finish-output ((self Self)) ()
+  (finish-output (self) ()
     "Push buffered output to its destination. A no-op unless overridden."
     ()))
 
@@ -4964,21 +4964,21 @@ user-visible capacity."
         (format false "#<~a ~a {~d}>" type d h)))))
 (module io
 (impl print-object file-stream
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "file-stream" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "file-stream" self::h)))
 (impl print-object binary-file-stream
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "binary-file-stream" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "binary-file-stream" self::h)))
 (impl print-object string-input-stream
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "string-input-stream" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "string-input-stream" self::h)))
 (impl print-object string-output-stream
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "string-output-stream" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "string-output-stream" self::h)))
 (impl print-object standard-stream
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "standard-stream" self::h))))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "standard-stream" self::h))))
 
 (module fs
 (impl Error FileError
-  (message ((self Self)) string (match self ((FileError m) m))))
+  (message (self) string (match self ((FileError m) m))))
 (impl print-object FileError
-  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "fileerror"))))
+  (print-object (self (escape bool)) string (std::%internal::error-print-object self escape "fileerror"))))
 
 ;; `unwrap-io` turns the native layer's `Result` into a panic, for the
 ;; operations whose failure means the program is already broken (writing to a
@@ -4992,84 +4992,84 @@ user-visible capacity."
 
 (module io
 (impl Stream file-stream
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream file-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
-  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
+  (read-item (self) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
+  (listen (self) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl OutputStream file-stream
   (:type Item char)
-  (write-item ((self Self) (c char)) ()
+  (write-item (self (c char)) ()
     (std::%internal::unwrap-io (std::%internal::stream-write-string self::h (char->string c)))))
 (impl CharInput file-stream)
 (impl PeekInput file-stream
-  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
+  (unread-char (self (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 (impl CharOutput file-stream
   ;; Overridden: one native call per string beats one per character, and this
   ;; is the stream people write bulk output to.
-  (write-string ((self Self) (s string)) ()
+  (write-string (self (s string)) ()
     (std::%internal::unwrap-io (std::%internal::stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h))))
+  (at-line-start (self) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
+  (finish-output (self) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h))))
 
 (impl Stream binary-file-stream
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream binary-file-stream
   (:type Item int)
-  (read-item ((self Self)) Option<int> (std::%internal::unwrap-io (std::%internal::stream-read-byte self::h)))
-  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
+  (read-item (self) Option<int> (std::%internal::unwrap-io (std::%internal::stream-read-byte self::h)))
+  (listen (self) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl OutputStream binary-file-stream
   (:type Item int)
-  (write-item ((self Self) (b int)) () (std::%internal::unwrap-io (std::%internal::stream-write-byte self::h b))))
+  (write-item (self (b int)) () (std::%internal::unwrap-io (std::%internal::stream-write-byte self::h b))))
 (impl ByteInput binary-file-stream)
 (impl ByteOutput binary-file-stream
-  (finish-output ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h))))
+  (finish-output (self) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h))))
 
 (impl Stream string-input-stream
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream string-input-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
+  (read-item (self) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
   ;; The one kind that can honestly say `true`: the whole text is in memory.
-  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
+  (listen (self) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl CharInput string-input-stream)
 (impl PeekInput string-input-stream
-  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
+  (unread-char (self (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 
 (impl Stream string-output-stream
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl OutputStream string-output-stream
   (:type Item char)
-  (write-item ((self Self) (c char)) ()
+  (write-item (self (c char)) ()
     (std::%internal::unwrap-io (std::%internal::stream-write-string self::h (char->string c)))))
 (impl CharOutput string-output-stream
-  (write-string ((self Self) (s string)) ()
+  (write-string (self (s string)) ()
     (std::%internal::unwrap-io (std::%internal::stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h))))
+  (at-line-start (self) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h))))
 
 (impl Stream standard-stream
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream standard-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
-  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
+  (read-item (self) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
+  (listen (self) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl OutputStream standard-stream
   (:type Item char)
-  (write-item ((self Self) (c char)) ()
+  (write-item (self (c char)) ()
     (std::%internal::unwrap-io (std::%internal::stream-write-string self::h (char->string c)))))
 (impl CharInput standard-stream)
 (impl PeekInput standard-stream
-  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
+  (unread-char (self (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 (impl CharOutput standard-stream
-  (write-string ((self Self) (s string)) ()
+  (write-string (self (s string)) ()
     (std::%internal::unwrap-io (std::%internal::stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h)))))
+  (at-line-start (self) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
+  (finish-output (self) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Sockets. Three structs over one more kind of handle in the same native
@@ -5107,16 +5107,16 @@ user-visible capacity."
 (pub defstruct socket-byte-stream (h i32))
 (pub defstruct socket-listener (h i32))
 (impl print-object socket-stream
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "socket-stream" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "socket-stream" self::h)))
 (impl print-object socket-byte-stream
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "socket-byte-stream" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "socket-byte-stream" self::h)))
 (impl print-object socket-listener
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "socket-listener" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "socket-listener" self::h)))
 
 (impl Error NetError
-  (message ((self Self)) string (match self ((NetError m) m))))
+  (message (self) string (match self ((NetError m) m))))
 (impl print-object NetError
-  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "neterror"))))
+  (print-object (self (escape bool)) string (std::%internal::error-print-object self escape "neterror"))))
 
 ;; `unwrap-io`'s twin: the socket operations whose failure means the program
 ;; is already broken (a closed handle) panic; the ordinary failures -- a
@@ -5170,51 +5170,51 @@ user-visible capacity."
 
 (module net
 (impl Stream socket-stream
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::tcp-close self::h)))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::tcp-close self::h)))
 (impl InputStream socket-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (std::%internal::tcp-read-char self::h))
+  (read-item (self) Option<char> (std::%internal::tcp-read-char self::h))
   ;; True when something is already buffered: the one honest `true` a socket
   ;; can give, and what makes `read-char-no-hang` on it mean what it says.
-  (listen ((self Self)) bool (std::%internal::unwrap-net (std::%internal::net-buffered-p self::h))))
+  (listen (self) bool (std::%internal::unwrap-net (std::%internal::net-buffered-p self::h))))
 (impl OutputStream socket-stream
   (:type Item char)
-  (write-item ((self Self) (c char)) ()
+  (write-item (self (c char)) ()
     (std::%internal::unwrap-net (std::%internal::net-push-string self::h (char->string c)))
     (std::%internal::tcp-drain self::h)))
 (impl CharInput socket-stream)
 (impl PeekInput socket-stream
-  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
+  (unread-char (self (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 (impl CharOutput socket-stream
   ;; Write-through: each `write-string` reaches the peer before it returns,
   ;; as Go's `net.Conn.Write` does. A caller sending many small pieces can
   ;; batch them in a `string-output-stream` first.
-  (write-string ((self Self) (s string)) ()
+  (write-string (self (s string)) ()
     (std::%internal::unwrap-net (std::%internal::net-push-string self::h s))
     (std::%internal::tcp-drain self::h))
-  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (std::%internal::tcp-drain self::h)))
+  (at-line-start (self) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
+  (finish-output (self) () (std::%internal::tcp-drain self::h)))
 
 (impl Stream socket-byte-stream
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::tcp-close self::h)))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::tcp-close self::h)))
 (impl InputStream socket-byte-stream
   (:type Item int)
-  (read-item ((self Self)) Option<int> (std::%internal::tcp-read-byte self::h))
-  (listen ((self Self)) bool (std::%internal::unwrap-net (std::%internal::net-buffered-p self::h))))
+  (read-item (self) Option<int> (std::%internal::tcp-read-byte self::h))
+  (listen (self) bool (std::%internal::unwrap-net (std::%internal::net-buffered-p self::h))))
 (impl OutputStream socket-byte-stream
   (:type Item int)
-  (write-item ((self Self) (b int)) ()
+  (write-item (self (b int)) ()
     (std::%internal::unwrap-net (std::%internal::net-push-byte self::h b))
     (std::%internal::tcp-drain self::h)))
 (impl ByteInput socket-byte-stream)
 (impl ByteOutput socket-byte-stream
-  (finish-output ((self Self)) () (std::%internal::tcp-drain self::h)))
+  (finish-output (self) () (std::%internal::tcp-drain self::h)))
 
 (impl Stream socket-listener
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h)))))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::unwrap-io (std::%internal::stream-close self::h)))))
 
 ;; Waiting with a clock. `net-wait-for` answers `false` when `secs` ran out
 ;; first; the operations that take a timeout turn that into a `NetError`, so
@@ -5505,7 +5505,7 @@ user-visible capacity."
 
 (pub defstruct udp-socket (h i32))
 (impl print-object udp-socket
-  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "udp-socket" self::h)))
+  (print-object (self (escape bool)) string (std::%internal::stream-print-object "udp-socket" self::h)))
 (pub defstruct datagram (pub bytes Vector<int>) (pub from string))
 
 (pub defun udp-bind ((host string) (port int)) Result<udp-socket, NetError>
@@ -5516,8 +5516,8 @@ user-visible capacity."
     ((err e) (Result::err e))))
 
 (impl Stream udp-socket
-  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
-  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
+  (open-stream-p (self) bool (std::%internal::stream-open-p self::h))
+  (close (self) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 
 (impl udp-socket
   (pub local-address (self) string
@@ -5669,79 +5669,79 @@ user-visible capacity."
 ;; others with the streams they are made of, under SBCL's own labels. They
 ;; hold no handle, so there is no identity to show in braces.
 (impl print-object broadcast-stream
-  (print-object ((self Self) (escape bool)) string "#<broadcast-stream>"))
+  (print-object (self (escape bool)) string "#<broadcast-stream>"))
 (impl Stream broadcast-stream
-  (open-stream-p ((self Self)) bool true)
-  (close ((self Self)) () (doiter (p (iter self::parts)) (close p))))
+  (open-stream-p (self) bool true)
+  (close (self) () (doiter (p (iter self::parts)) (close p))))
 (impl OutputStream broadcast-stream
   (:type Item char)
-  (write-item ((self Self) (c char)) ()
+  (write-item (self (c char)) ()
     (doiter (p (iter self::parts)) (write-char p c))))
 (impl CharOutput broadcast-stream
-  (write-string ((self Self) (s string)) ()
+  (write-string (self (s string)) ()
     (doiter (p (iter self::parts)) (write-string p s)))
   ;; Asked of each component separately rather than derived from
   ;; `at-line-start`: the components need not agree, and one newline decided
   ;; for all of them would put a blank line into whichever were already at a
   ;; line start.
-  (fresh-line ((self Self)) ()
+  (fresh-line (self) ()
     (doiter (p (iter self::parts)) (fresh-line p)))
   ;; Only true when every component says so -- a broadcast stream is at the
   ;; start of a line when writing to it would begin a line everywhere.
-  (at-line-start ((self Self)) bool
+  (at-line-start (self) bool
     (let ((all true))
       (progn
         (doiter (p (iter self::parts)) (if (at-line-start p) () (progn (setf all false) ())))
         all)))
-  (finish-output ((self Self)) ()
+  (finish-output (self) ()
     (doiter (p (iter self::parts)) (finish-output p))))
 
 (pub defstruct two-way-stream (in :dyn CharInput) (out :dyn CharOutput))
 (impl print-object two-way-stream
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "#<two-way-stream :input-stream ~s :output-stream ~s>" self::in self::out)))
 (impl Stream two-way-stream
-  (open-stream-p ((self Self)) bool (open-stream-p self::in))
-  (close ((self Self)) () (progn (close self::in) (close self::out))))
+  (open-stream-p (self) bool (open-stream-p self::in))
+  (close (self) () (progn (close self::in) (close self::out))))
 (impl InputStream two-way-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (read-char self::in))
-  (listen ((self Self)) bool (listen self::in)))
+  (read-item (self) Option<char> (read-char self::in))
+  (listen (self) bool (listen self::in)))
 (impl OutputStream two-way-stream
   (:type Item char)
-  (write-item ((self Self) (c char)) () (write-char self::out c)))
+  (write-item (self (c char)) () (write-char self::out c)))
 (impl CharInput two-way-stream)
 (impl CharOutput two-way-stream
-  (write-string ((self Self) (s string)) () (write-string self::out s))
-  (at-line-start ((self Self)) bool (at-line-start self::out))
-  (finish-output ((self Self)) () (finish-output self::out)))
+  (write-string (self (s string)) () (write-string self::out s))
+  (at-line-start (self) bool (at-line-start self::out))
+  (finish-output (self) () (finish-output self::out)))
 
 ;; Reads from `in`, echoing every character actually read to `out`.
 (pub defstruct echo-stream (in :dyn CharInput) (out :dyn CharOutput))
 (impl print-object echo-stream
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "#<echo-stream :input-stream ~s :output-stream ~s>" self::in self::out)))
 (impl Stream echo-stream
-  (open-stream-p ((self Self)) bool (open-stream-p self::in))
-  (close ((self Self)) () (progn (close self::in) (close self::out))))
+  (open-stream-p (self) bool (open-stream-p self::in))
+  (close (self) () (progn (close self::in) (close self::out))))
 (impl InputStream echo-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char>
+  (read-item (self) Option<char>
     (match (read-char self::in)
       ((some c) (progn (write-char self::out c) (Option::some c)))
       ((none) (Option::none))))
-  (listen ((self Self)) bool (listen self::in)))
+  (listen (self) bool (listen self::in)))
 (impl CharInput echo-stream)
 
 ;; Reads through the components in order; each one's end of input advances to
 ;; the next rather than ending the stream.
 (pub defstruct concatenated-stream (parts Vector<:dyn CharInput>) (at int))
 (impl Stream concatenated-stream
-  (open-stream-p ((self Self)) bool true)
-  (close ((self Self)) () (doiter (p (iter self::parts)) (close p))))
+  (open-stream-p (self) bool true)
+  (close (self) () (doiter (p (iter self::parts)) (close p))))
 (impl InputStream concatenated-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char>
+  (read-item (self) Option<char>
     (let ((answer (the Option<char> (Option::none))) (going true))
       (while going
         (if (>= self::at (len self::parts))
@@ -5753,12 +5753,12 @@ user-visible capacity."
   ;; Only about the component being read now: whether a *later* one is ready
   ;; says nothing about the next character, and finding out would consume
   ;; this one's end of input.
-  (listen ((self Self)) bool
+  (listen (self) bool
     (if (>= self::at (len self::parts)) false (listen (get self::parts self::at)))))
 (impl CharInput concatenated-stream)
 ;; SBCL shows the streams still to be read, which is where `at` points.
 (impl print-object concatenated-stream
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (let ((out "") (i self::at))
       (while (< i (len self::parts))
         (setf out (if (equal out "")
@@ -5773,26 +5773,26 @@ user-visible capacity."
 ;; support.
 (pub defstruct peek-stream (inner :dyn CharInput) (pending Option<char>))
 (impl print-object peek-stream
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "#<peek-stream :stream ~s>" self::inner)))
 (impl Stream peek-stream
-  (open-stream-p ((self Self)) bool (open-stream-p self::inner))
-  (close ((self Self)) () (close self::inner)))
+  (open-stream-p (self) bool (open-stream-p self::inner))
+  (close (self) () (close self::inner)))
 (impl InputStream peek-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char>
+  (read-item (self) Option<char>
     (match self::pending
       ((some c) (progn (setf self::pending (Option::none)) (Option::some c)))
       ((none) (read-char self::inner))))
   ;; A pushed-back character is already in hand.
-  (listen ((self Self)) bool
+  (listen (self) bool
     (match self::pending ((some c) true) ((none) (listen self::inner)))))
 (impl CharInput peek-stream)
 (impl PeekInput peek-stream
   ;; A second `unread-char` without a read in between overwrites the first --
   ;; the one-character promise, and what a program that keeps to it never
   ;; notices.
-  (unread-char ((self Self) (c char)) () (progn (setf self::pending (Option::some c)) ())))
+  (unread-char (self (c char)) () (progn (setf self::pending (Option::some c)) ())))
 
 ;; ---------------------------------------------------------------------------
 ;; Constructors and the CL-shaped surface.
@@ -6533,7 +6533,7 @@ user-visible capacity."
 ;; Read at a glance, the way `room` reads: how full the arena is first, then
 ;; the other counts, each with its unit.
 (impl print-object heap-info
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (format false "#<heap-info ~d of ~d cells live (~d%), ~d free, ~d symbols, ~d strings, ~d boxes, ~d collections, ~a>"
             self::live self::capacity
             (if (= self::capacity 0) 0 (truncate (* self::live 100) self::capacity))
@@ -6611,7 +6611,7 @@ user-visible capacity."
 ;; out, so the offset shown is its negation plus the hour daylight saving
 ;; adds, and a `dst` marks when it does. Day 0 is Monday (CL's numbering).
 (impl print-object decoded-time
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (let* ((offset (+ (as int (* self::zone -60.0)) (if self::daylight-p 60 0)))
            (sign (if (< offset 0) "-" "+"))
            (mag (abs offset)))
@@ -6945,7 +6945,7 @@ user-visible capacity."
 (defstruct array-iter<T> (arr Array<T>) (pos int))
 (impl Iter array-iter<T>
   (:type Item T)
-  (next ((self Self)) Option<T>
+  (next (self) Option<T>
     (if (< self::pos (len self::arr))
         (let ((v (row-major-get self::arr self::pos)))
           (setf self::pos (+ self::pos 1))
@@ -6969,7 +6969,7 @@ user-visible capacity."
          (setf self::fill-pointer (Option::some (+ n 1))))))))
 (impl Push Array<T>
   (:type Item T)
-  (push ((self Self) (x T)) () (push-extend self x)))
+  (push (self (x T)) () (push-extend self x)))
 
 ;; CL's `vector-pop`. `Option<T>` on an empty array rather than an error, the
 ;; same answer `Vector<T>`'s own `pop` gives.
@@ -7112,7 +7112,7 @@ user-visible capacity."
 
 (module array
 (impl print-object Array<T> (:where (print-object T))
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if *print-array*
         (let ((r (len self::dims)))
           (if (= r 1)
@@ -7288,9 +7288,9 @@ user-visible capacity."
 (impl SimpleError
   (pub new ((text string)) SimpleError (make-instance 'SimpleError :text text)))
 (impl Error SimpleError
-  (message ((self Self)) string self::text))
+  (message (self) string self::text))
 (impl print-object SimpleError
-  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "simpleerror")))
+  (print-object (self (escape bool)) string (std::%internal::error-print-object self escape "simpleerror")))
 
 ;; CL's `simple-error` is what `(error "...")` signals; the same
 ;; convenience here is a constructor that formats, since a `Result` is
@@ -7305,10 +7305,10 @@ user-visible capacity."
   (text string)
   (cause :dyn Error))
 (impl Error WrappedError
-  (message ((self Self)) string self::text)
-  (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
+  (message (self) string self::text)
+  (source (self) Option<:dyn Error> (Option::some self::cause)))
 (impl print-object WrappedError
-  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "wrappederror")))
+  (print-object (self (escape bool)) string (std::%internal::error-print-object self escape "wrappederror")))
 
 ;; `(wrap-error "reading the config" e)` — the same widening `as-dyn-error`
 ;; does, with a sentence attached. Generic over the cause's concrete type for
@@ -7445,7 +7445,7 @@ user-visible capacity."
 (module sync
 (impl Iter Chan<T>
   (:type Item T)
-  (next ((self Self)) Option<T> (recv self))))
+  (next (self) Option<T> (recv self))))
 
 ;; The body of `after`, split out because `task` takes a call form.
 (module %internal (pub defun sleep-then-send ((sec f64) (ch Chan<()>)) ()
@@ -7674,7 +7674,7 @@ user-visible capacity."
       (task (std::%internal::cancel-after child sec))
       child)))
 (impl print-object Context
-  (print-object ((self Self) (escape bool)) string
+  (print-object (self (escape bool)) string
     (if (is-cancelled self) "#<context cancelled>" "#<context>"))))
 
 

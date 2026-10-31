@@ -5270,7 +5270,7 @@ impl Checker {
         self.with_type_names(vars, |c| c.check_deftrait_form(heap, interp, parts, parts_locs, public, def_loc))
     }
 
-    /// `(deftrait Name (Super...) (:type AssocName)... (method-name ((self Self) params...) Ret)...)`:
+    /// `(deftrait Name (Super...) (:type AssocName)... (method-name (self params...) Ret)...)`:
     /// declares a trait as a set of method signature *templates* (no
     /// bodies) — `Self` and any declared associated type name are usable as
     /// ordinary type variables in a signature, exactly like a generic
@@ -5327,7 +5327,7 @@ impl Checker {
         let supertraits = self.parse_supertrait_list(heap, &name, parts[1])?;
         // Pre-register a stub under `fq_name` *before* parsing the method
         // signatures, so a method that mentions a trait object of the very
-        // trait being defined (`(source ((self Self)) Option<:dyn Error>)` in
+        // trait being defined (`(source (self) Option<:dyn Error>)` in
         // the prelude's `Error`) resolves its own name through
         // `Self::canon`/`Info::trait_at`. Same device, same reason, as
         // `check_defstruct`'s self-referential-field stub; overwritten with
@@ -5357,7 +5357,8 @@ impl Checker {
         // registry keeps for `impl` to replay.
         let mut default_written: Vec<(Vec<Value>, Vec<Option<Loc>>)> = Vec::new();
         for item in &parts[item_start..] {
-            let elem_locs = heap.list_to_vec_locs(*item)?;
+            let (item, _) = self.expand_receiver(heap, *item)?;
+            let elem_locs = heap.list_to_vec_locs(item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
                 Some(Value::Symbol(id)) => *id,
@@ -5509,7 +5510,7 @@ impl Checker {
 
     /// `(impl Type (:where ...)? item...)`: Rust's inherent `impl`. Each item
     /// is `(pub? name<U...>? (params...) Ret (:where ...)? body...)`; one whose
-    /// first parameter is `self` (bare, or `(self Self)`) is an instance
+    /// first parameter is `self` is an instance
     /// method, any other a static method, called `(Type::name args...)`.
     /// `Self` in a parameter or return type is the target type.
     ///
@@ -5573,8 +5574,8 @@ impl Checker {
         forms::module_form(heap, &target_fq, &body)
     }
 
-    /// One inherent `impl` item, with `pub` taken off and a bare `self`
-    /// parameter written out as `(self Self)`: `(public, item, is_static)`.
+    /// One inherent `impl` item, with `pub` taken off and its receiver
+    /// written out by [`Self::expand_receiver`]: `(public, item, is_static)`.
     /// Values built here are rooted for the rest of the top-level form.
     fn normalize_inherent_item(&mut self, heap: &mut Heap, item: Value) -> Result<(bool, Value, bool), Error> {
         let shape = "impl: an item is (pub? name (params...) ReturnType body...)";
@@ -5586,31 +5587,52 @@ impl Checker {
         if elems.len() < 3 || generic_header(heap, elems[0].0).is_err() {
             return Err(Error::TypeError(shape.into()));
         }
-        let params = match elems[1].0 {
-            Value::Empty => Vec::new(),
-            v @ Value::Cons(_) => heap.list_to_vec_locs(v)?,
-            _ => return Err(Error::TypeError(shape.into())),
+        let rebuilt = forms::list_from_vec_locs(heap, &elems)?;
+        let rebuilt = forms::rooted(heap, rebuilt);
+        let (expanded, has_self) = self.expand_receiver(heap, rebuilt)?;
+        Ok((public, expanded, !has_self))
+    }
+
+    /// A method item `(name (params...) Ret ...)` as written in a `deftrait`
+    /// or an `impl`, with its receiver turned into the internal `(self Self)`
+    /// pair: the receiver is written `self` alone, as in Rust, and a
+    /// parameter named `self` with a type written next to it is refused.
+    /// Returns the rebuilt item (rooted for the rest of the top-level form)
+    /// and whether it has a receiver.
+    fn expand_receiver(&self, heap: &mut Heap, item: Value) -> Result<(Value, bool), Error> {
+        let Ok(elems) = heap.list_to_vec_locs(item) else { return Ok((item, false)) };
+        let Some((name, _)) = elems.first() else { return Ok((item, false)) };
+        let method = match generic_header(heap, *name) {
+            Ok((m, _)) => m,
+            Err(_) => return Ok((item, false)),
         };
-        let is_self = |_: &Heap, v: Value| is_symbol(v, wk::SELF);
-        let first_is_self = match params.first() {
-            Some((v @ Value::Symbol(_), _)) => is_self(heap, *v),
-            Some((v @ Value::Cons(_), _)) => heap.car(*v).map(|h| is_self(heap, h)).unwrap_or(false),
-            _ => false,
-        };
-        let mut params = params;
-        if let Some((v @ Value::Symbol(_), l)) = params.first().cloned() {
-            if is_self(heap, v) {
-                // `self` alone is the parameter `(self Self)`, `Self` being
-                // the target (the key of the substitution).
-                let self_ty = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::SELF_TYPE));
-                let pair = forms::list_from_vec_locs(heap, &[(v, l.clone()), (self_ty, l.clone())])?;
-                params[0] = (forms::rooted(heap, pair), l);
+        let Some(Value::Cons(_)) = elems.get(1).map(|(v, _)| *v) else { return Ok((item, false)) };
+        let mut params = heap.list_to_vec_locs(elems[1].0)?;
+        for (p, _) in &params {
+            if let Value::Cons(_) = p {
+                if heap.car(*p).is_ok_and(|h| is_symbol(h, wk::SELF)) {
+                    return Err(Error::TypeError(format!(
+                        "method `{}`: the receiver is written `self` alone, as the first parameter \
+                         — `(self Type)` is not accepted",
+                        method
+                    )));
+                }
             }
         }
+        let has_self = matches!(params.first(), Some((v, _)) if is_symbol(*v, wk::SELF));
+        if !has_self {
+            return Ok((item, false));
+        }
+        let (v, l) = params[0].clone();
+        let self_ty = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::SELF_TYPE));
+        let pair = forms::list_from_vec_locs(heap, &[(v, l.clone()), (self_ty, l.clone())])?;
+        params[0] = (forms::rooted(heap, pair), l);
         let param_list = forms::list_from_vec_locs(heap, &params)?;
-        elems[1].0 = forms::rooted(heap, param_list);
+        let param_list = forms::rooted(heap, param_list);
+        let mut elems = elems;
+        elems[1].0 = param_list;
         let rebuilt = forms::list_from_vec_locs(heap, &elems)?;
-        Ok((public, forms::rooted(heap, rebuilt), !first_is_self))
+        Ok((forms::rooted(heap, rebuilt), true))
     }
 
     fn check_impl_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
@@ -5731,7 +5753,10 @@ impl Checker {
                 subst.insert(aname, elems[2]);
                 continue;
             }
-            method_forms.push(*item);
+            // The trait's defaults appended below were expanded by their
+            // `deftrait` already; only the written items are.
+            let (item, _) = self.expand_receiver(heap, *item)?;
+            method_forms.push(item);
         }
 
         // Fill in every trait method this `impl` left out but the trait gave
@@ -6624,15 +6649,19 @@ impl Checker {
         // the registry keeps for later replay.
         let mut assoc_written: Vec<(String, Value)> = Vec::new();
         let mut method_forms: Vec<Value> = Vec::new();
-        for item in &parts[at..] {
-            let elems = heap.list_to_vec(*item)?;
-            if !matches!(elems.first(), Some(Value::Symbol(_))) {
-                return Err(Error::TypeError("impl: item must start with a symbol".into()));
-            }
-            let owned = elems
+        for written in &parts[at..] {
+            // Kept as written: `materialize_blanket_impl` replays it through
+            // `check_impl`, which expands the receiver itself.
+            let owned = heap
+                .list_to_vec(*written)?
                 .iter()
                 .map(|v| crate::owned_form::value_to_owned(heap, *v))
                 .collect::<Result<Vec<_>, Error>>()?;
+            let (item, _) = self.expand_receiver(heap, *written)?;
+            let elems = heap.list_to_vec(item)?;
+            if !matches!(elems.first(), Some(Value::Symbol(_))) {
+                return Err(Error::TypeError("impl: item must start with a symbol".into()));
+            }
             if is_symbol(elems[0], wk::KW_TYPE) {
                 if elems.len() != 3 {
                     return Err(Error::TypeError("impl: (:type AssocName Type)".into()));
@@ -6645,7 +6674,7 @@ impl Checker {
                 assoc.push((aname, owned[2].clone()));
                 continue;
             }
-            method_forms.push(*item);
+            method_forms.push(item);
             methods.push(owned);
         }
         // Registered *before* the bodies are checked, so a method that calls
@@ -8076,7 +8105,7 @@ impl Checker {
     ) -> Result<MethodSig, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
-                "impl: a method is (name ((self Self) params...) ReturnType body...)".into(),
+                "impl: a method is (name (self params...) ReturnType body...)".into(),
             ));
         }
         let (method, own_params) = generic_header(heap, parts[0])
@@ -8085,7 +8114,7 @@ impl Checker {
         let sig_list: Vec<Value> = sig_list_locs.iter().map(|(v, _)| *v).collect();
         if sig_list.is_empty() {
             return Err(Error::TypeError(format!(
-                "impl: method `{}` needs a receiver: (name ((self Self) params...) ReturnType body...)",
+                "impl: method `{}` needs a receiver: (name (self params...) ReturnType body...)",
                 method
             )));
         }
@@ -8098,7 +8127,7 @@ impl Checker {
                 let recv_locs = heap.list_to_vec_locs(sig_list[0])?;
                 let recv: Vec<Value> = recv_locs.iter().map(|(v, _)| *v).collect();
                 if recv.len() != 2 {
-                    return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method)));
+                    return Err(Error::TypeError(format!("impl: method `{}`: the receiver is written `self`", method)));
                 }
                 let sname = match recv[0] {
                     Value::Symbol(id) => super::verify::bound_symbol(id, "defmethod")?,
@@ -8116,7 +8145,7 @@ impl Checker {
             Value::Symbol(_) | Value::Path(_) => {
                 (false, None, None, sig_list[0], sig_list_locs.first().and_then(|(_, l)| l.clone()))
             }
-            _ => return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method))),
+            _ => return Err(Error::TypeError(format!("impl: method `{}`: the receiver is written `self`", method))),
         };
         let recv_ty = self.parse_type_here_at(heap, type_expr, type_expr_loc.as_ref())?;
         let type_fq = match nominal_path(&recv_ty) {
@@ -11073,7 +11102,7 @@ impl Checker {
                     )));
                 };
                 // `Self` in the template *is* this bounded type variable, so a
-                // trait method declared to return `Self` — `(add ((self Self)
+                // trait method declared to return `Self` — `(add (self
                 // (other Self)) Self)` — returns the receiver's type.
                 assoc.insert(SELF_TYPE_VAR.to_string(), recv.ty.clone());
                 let ret_ty = subst_apply(&sig.ret, &assoc);
