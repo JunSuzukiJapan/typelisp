@@ -5793,25 +5793,45 @@ impl Checker {
             // top-level form by `check_form_at`'s `truncate_roots`.
             body.push(forms::rooted(heap, tl));
         }
-        self.check_impl_conformance(&trait_fq, &target_fq, &target_ty, &written, &assoc_concrete)?;
+        // The target may spell the type's variables differently from its
+        // declaration (`(impl Push HashSet<U> ...)`), and the methods were
+        // registered in the declaration's names, so everything kept or
+        // compared below is renamed into those too.
+        let written_args = match &target_ty {
+            Type::Named(_, args) => args.clone(),
+            _ => Vec::new(),
+        };
+        let params = self.info.reg.type_def(&target_fq).expect("checked above").params.clone();
+        let rename: BTreeMap<String, Type> = written_args
+            .iter()
+            .zip(&params)
+            .filter_map(|(a, p)| match a {
+                Type::Var(v) => Some((v.clone(), Type::Var(p.clone()))),
+                _ => None,
+            })
+            .collect();
+        let declared_ty = subst_apply(&target_ty, &rename);
+        let assoc_concrete: BTreeMap<String, Type> =
+            assoc_concrete.iter().map(|(k, t)| (k.clone(), subst_apply(t, &rename))).collect();
+        self.check_impl_conformance(&trait_fq, &target_fq, &declared_ty, &written, &assoc_concrete)?;
         self.check_supertrait_impls(&trait_fq, &target_fq, inst_args.as_deref(), &assoc_concrete)?;
-        // Keyed by the type's own parameter names: the target may spell its
-        // variables differently (`(impl Push HashSet<U> (:where (Hash U)))`).
         let mut impl_bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
         if let Some(w) = impl_where {
-            let written_args = match &target_ty {
-                Type::Named(_, args) => args.as_slice(),
-                _ => &[],
-            };
-            let params = &self.info.reg.type_def(&target_fq).expect("checked above").params;
             for (var, bs) in self.parse_where_clause(heap, w)? {
-                let i = written_args.iter().position(|a| matches!(a, Type::Var(v) if *v == var)).ok_or_else(|| {
-                    Error::TypeError(format!(
+                let Some(Type::Var(p)) = rename.get(&var) else {
+                    return Err(Error::TypeError(format!(
                         "impl {} {}: `:where` bounds `{}`, which is not one of `{}`'s type parameters",
                         trait_fq, target_ty, var, target_ty
-                    ))
-                })?;
-                impl_bounds.insert(params[i].clone(), bs);
+                    )));
+                };
+                let bs = bs
+                    .into_iter()
+                    .map(|b| TraitBound {
+                        trait_path: b.trait_path,
+                        assoc: b.assoc.into_iter().map(|(k, t)| (k, subst_apply(&t, &rename))).collect(),
+                    })
+                    .collect();
+                impl_bounds.insert(p.clone(), bs);
             }
         }
         if let Some(def) = self.info.reg.type_def_mut(&target_fq) {
