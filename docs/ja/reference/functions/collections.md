@@ -73,7 +73,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i` 番目を読む。範囲外は panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic。`(setf (get v i) x)` とも書ける |
 | `len` | `(len v)` | `Vector<T>→int` | 要素数 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `none`（`get`/`set` と異なり panic しない） |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `none`（`get`/`set` と異なり panic しない）（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` を実装するイテレータを作る |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | `x` と等しい要素が無ければ末尾に追加（CL `pushnew`。場所を書き換える必要が無いのでマクロではなくメソッド） |
 
@@ -152,7 +152,7 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL `adjust-array`。ランクは変えられない。範囲に残る要素は添字ごと保存、増えたセルは `init`。CL と違い配列を返さない（この言語の配列は全部 adjustable なので、返す第 2 の配列が無い） |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL `vector-push-extend`。fill pointer が無ければ panic |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` と同じ（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL `vector-pop`。空なら `none` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL `vector-pop`。空なら `none`（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer（無ければ `none`）。`(setf a::fill-pointer …)` で書ける |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | row-major 順のイテレータ。fill pointer があればそこで止まる |
 
@@ -245,6 +245,7 @@
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 先頭／末尾に追加 |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` と同じ（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 先頭／末尾を取り除いて返す。空なら `none` |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back` と同じ（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 先頭／末尾を見る（取り除かない） |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 先頭から数えて `i` 番目。範囲外は `none` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic |

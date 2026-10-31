@@ -1,6 +1,7 @@
-//! The `Push` trait: one `(push c x)` for every library collection that adds
-//! one element at a time, so a generic function can fill any of them. Every
-//! case runs interpreted and compiled.
+//! The `Push` and `Pop` traits: one `(push c x)` for every library collection
+//! that adds one element at a time, and one `(pop c)` for each of those that
+//! has a last element to take back, so a generic function can fill or drain
+//! any of them. Every case runs interpreted and compiled.
 
 mod common;
 use common::{check_err, eval_string, eval_string_compiled};
@@ -112,4 +113,55 @@ fn a_hashset_of_an_unhashable_type_is_not_push() {
         PUSH_ALL
     ));
     assert!(msg.contains("`HashSet<f64>` does not implement trait `std::iter::Push`"), "{}", msg);
+}
+
+const POP_ALL: &str = r##"(use std::collections::Deque std::collections::HashSet)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))"##;
+
+/// Each takes back the element `push` added last: a `Deque` its back.
+#[test]
+fn a_generic_function_drains_each_library_collection() {
+    both(
+        POP_ALL,
+        r##"(let ((v (the Vector<int> #(1 2 3)))
+                  (d (the Deque<int> (Deque::new)))
+                  (a (the Array<int> (Array::new (the Vector<int> #(0)) 0 :fill-pointer 0))))
+              (push d 1) (push d 2) (push-front d 0)
+              (push a 5) (push a 6)
+              (format false "~a ~a ~a ~a" (pop-all v) (pop-all d) (pop-all a) (pop v)))"##,
+        "#(3 2 1) #(2 1 0) #(6 5) none",
+    );
+}
+
+#[test]
+fn a_trait_object_pops_from_a_vector_and_a_deque() {
+    both(
+        POP_ALL,
+        r##"(let ((sources (the Vector<:dyn Pop<int>> (Vector::new)))
+                  (v (the Vector<int> #(7)))
+                  (d (the Deque<int> (Deque::new)))
+                  (out (the Vector<Option<int>> (Vector::new))))
+              (push d 8)
+              (push sources v) (push sources d)
+              (doiter (s (iter sources)) (push out (pop s)))
+              (doiter (s (iter sources)) (push out (pop s)))
+              (format false "~a" out))"##,
+        "#((some 7) (some 8) none none)",
+    );
+}
+
+/// A `HashSet` has no last element, so it is a `Push` but not a `Pop`.
+#[test]
+fn a_hashset_is_not_pop() {
+    let msg = check_err(&format!(
+        "{}\n(defun f () () (pop-all (the HashSet<int> (HashSet::new))) ())",
+        POP_ALL
+    ));
+    assert!(msg.contains("`HashSet<int>` does not implement trait `std::iter::Pop`"), "{}", msg);
 }

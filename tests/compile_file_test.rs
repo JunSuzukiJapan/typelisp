@@ -2243,3 +2243,34 @@ fn push_fills_each_collection_in_a_compiled_executable() {
     assert_eq!(code, Some(0), "stderr was: {}", err);
     assert_eq!(out.trim(), "#(1 2 2 3 9) #<deque 1 2 2 3 9> 3 #(1 2 2 3)");
 }
+
+#[test]
+fn pop_drains_each_collection_in_a_compiled_executable() {
+    let (code, out, err) = compile_and_capture_with(
+        "pop_trait_aot",
+        r##"(use std::collections::Deque)
+           (defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+             (let ((out (the Vector<T> (Vector::new))) (more true))
+               (while more
+                 (match (pop c)
+                   ((some x) (push out x))
+                   ((none) (progn (setf more false) ()))))
+               out))
+           (defun main () int
+             (let ((v (the Vector<int> #(1 2 3)))
+                   (d (the Deque<int> (Deque::new)))
+                   (a (the Array<int> (Array::new (the Vector<int> #(0)) 0 :fill-pointer 0)))
+                   (sources (the Vector<:dyn Pop<int>> (Vector::new)))
+                   (got (the Vector<Option<int>> (Vector::new))))
+               (push d 1) (push d 2) (push-front d 0)
+               (push a 5) (push a 6)
+               (push sources a) (push sources d)
+               (doiter (k (iter sources)) (push got (pop k)))
+               (println "~a ~a" got (pop-all v))
+               (println "~a ~a" (pop-all d) (pop-all a))
+               0))"##,
+        &[],
+    );
+    assert_eq!(code, Some(0), "stderr was: {}", err);
+    assert_eq!(out.trim(), "#((some 6) (some 2)) #(3 2 1)\n#(1 0) #(5)");
+}

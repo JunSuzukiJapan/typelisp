@@ -1518,7 +1518,13 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module iter
 (pub deftrait Push ()
   (:type Item)
-  (push (self (x Item)) ())))
+  (push (self (x Item)) ()))
+;; `Pop`: a collection the last element `push` added can be taken back out
+;; of — `none` when it is empty. Apart from `Push` because a `HashSet` has no
+;; last element.
+(pub deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>)))
 
 ;; `vector-iter<T>` is `Vector<T>`'s own iterator: a shared reference to the
 ;; vector being walked (`vec`, sharing the same underlying box
@@ -1540,8 +1546,9 @@ pub const SOURCE_TEMPLATE: &str = r##"
         (Option::none))))
 (impl Vector<T>
   (pub iter (self) vector-iter<T> (make-instance 'vector-iter :vec self :pos 0)))
-;; The built-in `push` is the method.
-(impl Push Vector<T> (:type Item T)))
+;; The built-in `push` and `pop` are the methods.
+(impl Push Vector<T> (:type Item T))
+(impl Pop Vector<T> (:type Item T)))
 
 ;; Generic collection combinators (redesign Phase 4). Each takes an
 ;; *iterator* — any type implementing the `Iter` trait — rather than one
@@ -4230,6 +4237,10 @@ user-visible capacity."
 (impl Push Deque<T>
   (:type Item T)
   (push (self (x T)) () (push-back self x)))
+;; The back, where `push` adds.
+(impl Pop Deque<T>
+  (:type Item T)
+  (pop (self) Option<T> (pop-back self)))
 (impl print-object Deque<T> (:where (print-object T))
   (print-object (self (escape bool)) string
     (let ((out "#<deque"))
@@ -6983,6 +6994,7 @@ user-visible capacity."
            (let ((v (get self::data (- n 1))))
              (setf self::fill-pointer (Option::some (- n 1)))
              (Option::some v))))))))
+(impl Pop Array<T> (:type Item T))
 
 ;; Decode a row-major offset back into subscripts, into `out` (which must
 ;; already have one slot per dimension). The inverse of `row-major-index`'s

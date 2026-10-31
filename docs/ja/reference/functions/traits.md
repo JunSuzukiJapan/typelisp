@@ -1,6 +1,6 @@
 # 標準トレイト
 
-反復・比較・算術・要素の追加のトレイト。ほかの標準トレイトは、それぞれの章にある:
+反復・比較・算術・要素の出し入れのトレイト。ほかの標準トレイトは、それぞれの章にある:
 `Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`（[エラー型](option-result.md#3-エラー型と-error-トレイト)）、
 `print-object`（[印字](printing.md#5-print-object型ごとの印字表現)）、ストリームのトレイト群と
 `Pathish`（[ストリームとファイル](streams-files.md)）。どの型がどれを実装しているかは
@@ -135,3 +135,40 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 
 自前の型に `Push` を実装すれば、同じジェネリック関数に渡せる。`:dyn Push<int>` のように
 トレイトオブジェクトにもできる。
+
+## 5. `Pop` トレイト（要素を取り出す）
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+`push` で最後に足した要素を取り出せるコレクション。空なら `none`。ジェネリック関数は
+`(:where (Pop C (Item T)))` で要求する。
+
+| 型 | `pop` の意味 |
+|---|---|
+| `Vector<T>` | 末尾を取り出す |
+| `Deque<T>` | 末尾を取り出す（`pop-back`） |
+| `Array<T>` | fill pointer の手前を取り出す。fill pointer が無ければ panic |
+
+`HashSet<T>` には「最後の要素」が無いので、`Push` だが `Pop` ではない。
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+`Push` と同じく、自前の型に実装でき、`:dyn Pop<int>` にもできる。
