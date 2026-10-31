@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # 内置函数
 
 内置函数、方法和标准库的一览。语法（特殊形式、定义方法）见[语法参考](../syntax.md)，类型一览见[类型一览](../types.md)。
@@ -67,7 +67,7 @@
 | [sequences.md](sequences.md) | 序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、序列函数、惰性迭代器 `lazy`、高阶函数 |
 | [collections.md](collections.md) | 字符串、字符、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、错误类型与 `Error` trait |
-| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算术 trait、`Push` |
+| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算术 trait、`Push`、`Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、打印控制变量 |
 | [format.md](format.md) | 格式指令 |
 | [streams-files.md](streams-files.md) | 流、文件操作、路径名、readtable |

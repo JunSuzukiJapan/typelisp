@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Стандартні трейти
 
-Трейти для ітерації, порівняння, арифметики та додавання елементів. Інші стандартні трейти описано у власних розділах: `Hash`
+Трейти для ітерації, порівняння, арифметики, додавання та вилучення елементів. Інші стандартні трейти описано у власних розділах: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Типи помилок](option-result.md#3-типи-помилок-і-трейт-error)), `print-object`
 ([Друк](printing.md#5-print-object-представлення-для-друку-для-кожного-типу)), а також трейти потоків і
@@ -146,3 +146,41 @@
 
 Власний тип, що реалізує `Push`, можна передавати тим самим узагальненим функціям. Він може бути й
 об'єктом трейту, як у `:dyn Push<int>`.
+
+## 5. Трейт `Pop` (вилучення елементів)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+Колекція, з якої можна вилучити елемент, доданий `push` останнім. `none`, якщо вона порожня.
+Узагальнена функція вимагає її через `(:where (Pop C (Item T)))`.
+
+| Тип | Що робить `pop` |
+|---|---|
+| `Vector<T>` | Вилучає останній елемент |
+| `Deque<T>` | Вилучає останній елемент (`pop-back`) |
+| `Array<T>` | Вилучає елемент безпосередньо перед покажчиком заповнення. Без покажчика заповнення — panic |
+
+У `HashSet<T>` немає «останнього елемента», тож він `Push`, але не `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+Як і `Push`, його може реалізувати власний тип, і він може бути трейт-об'єктом, як у
+`:dyn Pop<int>`.

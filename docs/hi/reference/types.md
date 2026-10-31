@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -113,12 +113,13 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 विवरण [अंकगणितीय trait](functions/traits.md#3-अंकगणितीय-trait-add--sub--mul--div--rem--bits--number) में हैं।
 
-### 6.3 इटरेशन और तत्व जोड़ना
+### 6.3 इटरेशन और तत्व जोड़ना व निकालना
 
 | Trait | लागू करने वाले टाइप |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` मॉड्यूल के टाइप (`lazy::map-iter<I,A,U>` आदि) |
 | `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (जब तत्व का टाइप `Hash` लागू करता हो) |
+| `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 स्ट्रीम
 

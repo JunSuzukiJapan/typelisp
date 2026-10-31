@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Tipi
 
 I tipi che typelisp possiede e i trait standard che ciascun tipo implementa. Come si scrivono i tipi è
@@ -121,12 +121,13 @@ utilizzabili quando i tipi degli elementi implementano quel trait.
 
 I dettagli sono in [Trait aritmetici](functions/traits.md#3-trait-aritmetici-add--sub--mul--div--rem--bits--number).
 
-### 6.3 Iterazione e aggiunta di elementi
+### 6.3 Iterazione e aggiunta e rimozione di elementi
 
 | Trait | Tipi che lo implementano |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` i tipi del modulo `lazy` (`lazy::map-iter<I,A,U>` ecc.) |
 | `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (quando il tipo degli elementi implementa `Hash`) |
+| `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Stream
 

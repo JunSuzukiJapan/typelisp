@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # 표준 트레이트
 
-반복, 비교, 산술, 요소 추가를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
+반복, 비교, 산술, 요소의 추가와 꺼내기를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
 `Error`([오류 타입](option-result.md#3-오류-타입과-error-트레이트)), `print-object`
 ([출력](printing.md#5-print-object타입별-출력-표현)), 스트림 트레이트와 `Pathish`([스트림과 파일](streams-files.md)).
 어느 타입이 어느 것을 구현하는지는 [타입 목록](../types.md)에 있다. 트레이트를 정의하는 방법은
@@ -130,3 +130,39 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 ```
 
 직접 만든 타입에 `Push`를 구현하면 같은 제네릭 함수에 넘길 수 있다. `:dyn Push<int>`처럼 트레이트 객체로도 만들 수 있다.
+
+## 5. `Pop` 트레이트(요소 꺼내기)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+`push`로 마지막에 추가한 요소를 꺼낼 수 있는 컬렉션. 비어 있으면 `none`. 제네릭 함수는 `(:where (Pop C (Item T)))`로 요구한다.
+
+| 타입 | `pop`의 의미 |
+|---|---|
+| `Vector<T>` | 끝 요소를 꺼낸다 |
+| `Deque<T>` | 끝 요소를 꺼낸다(`pop-back`) |
+| `Array<T>` | fill pointer 바로 앞의 요소를 꺼낸다. fill pointer가 없으면 panic |
+
+`HashSet<T>`에는 "마지막 요소"가 없으므로 `Push`이지만 `Pop`은 아니다.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+`Push`와 마찬가지로 자신의 타입에 구현할 수 있고, `:dyn Pop<int>`처럼 트레이트 객체로도 만들 수 있다.

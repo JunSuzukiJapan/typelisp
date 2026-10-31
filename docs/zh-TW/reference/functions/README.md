@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # 內建函式
 
 內建函式、方法與標準函式庫的一覽。語法（特殊形式、定義方式）見[語法參考](../syntax.md)，型別一覽見[型別一覽](../types.md)。
@@ -67,7 +67,7 @@
 | [sequences.md](sequences.md) | 序對 `cons-cell`、S 運算式資料 `Sexpr`、符號、序列函式、惰性迭代器 `lazy`、高階函式 |
 | [collections.md](collections.md) | 字串、字元、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、錯誤型別與 `Error` trait |
-| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算術 trait、`Push` |
+| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算術 trait、`Push`、`Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、列印控制變數 |
 | [format.md](format.md) | 格式指令 |
 | [streams-files.md](streams-files.md) | 串流、檔案操作、路徑名稱、readtable |

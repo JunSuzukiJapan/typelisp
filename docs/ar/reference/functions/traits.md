@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # السمات القياسية
 
-سمات التكرار والمقارنة والحساب وإضافة العناصر. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
+سمات التكرار والمقارنة والحساب وإضافة العناصر وإخراجها. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
 ([HashTable](collections.md#4-hashtablekv)) و`Error`
 ([أنواع الأخطاء](option-result.md#3-أنواع-الأخطاء-والسمة-error)) و`print-object`
 ([الطباعة](printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع)) وسمات التدفقات و`Pathish`
@@ -135,3 +135,39 @@
 ```
 
 يمكن تمرير نوع خاص بك يطبّق `Push` إلى الدوال العامة نفسها. ويمكن أيضًا أن يكون كائن سمة، كما في `:dyn Push<int>`.
+
+## 5. السمة `Pop` (إخراج العناصر)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+مجموعة يمكن أن يُخرَج منها العنصر الذي أضافه `push` أخيرًا. تعطي `none` إذا كانت فارغة. تطلبها الدالة العامة بـ `(:where (Pop C (Item T)))`.
+
+| النوع | ما يفعله `pop` |
+|---|---|
+| `Vector<T>` | يُخرج العنصر الأخير |
+| `Deque<T>` | يُخرج العنصر الأخير (`pop-back`) |
+| `Array<T>` | يُخرج العنصر الذي يسبق مؤشر الملء مباشرة. يحدث panic إذا لم يكن هناك مؤشر ملء |
+
+ليس لـ `HashSet<T>` «عنصر أخير»، فهو `Push` وليس `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+كما في `Push`، يمكن لنوعك الخاص أن ينفّذها، ويمكن أن تكون كائن سمة، كما في `:dyn Pop<int>`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Eingebaute Funktionen
 
 Die Liste der eingebauten Funktionen, der Methoden und der Standardbibliothek. Zur Syntax (Spezialformen und
@@ -73,7 +73,7 @@ Die Tabellen in jedem Kapitel haben die Spalten „Name, Form, Typ, Beschreibung
 | [sequences.md](sequences.md) | Das Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, Sequenzfunktionen, lazy Iteratoren `lazy`, Funktionen höherer Ordnung |
 | [collections.md](collections.md) | Zeichenketten, Zeichen, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, Fehlertypen und der Trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetische Traits, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetische Traits, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, der Pretty Printer, `print-object`, Steuervariablen der Ausgabe |
 | [format.md](format.md) | Formatdirektiven |
 | [streams-files.md](streams-files.md) | Streams, Dateioperationen, Pfadnamen, readtable |

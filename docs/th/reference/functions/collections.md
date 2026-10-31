@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # สตริง อักขระ และคอลเลกชัน
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` และ `Deque<T>`
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | อ่านสมาชิกตัวที่ `i` panic เมื่อเกินช่วง |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | เปลี่ยนสมาชิกตัวที่ `i` panic เมื่อเกินช่วง เขียนเป็น `(setf (get v i) x)` ได้ด้วย |
 | `len` | `(len v)` | `Vector<T>→int` | จำนวนสมาชิก |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | ลบสมาชิกตัวสุดท้ายและคืนค่า `none` หากว่าง (ต่างจาก `get`/`set` ตรงที่ไม่ panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | ลบสมาชิกตัวสุดท้ายและคืนค่า `none` หากว่าง (ต่างจาก `get`/`set` ตรงที่ไม่ panic) (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | สร้างตัววนซ้ำที่ implement `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | ต่อท้าย `x` หากไม่มีสมาชิกที่เท่ากัน (`pushnew` ของ CL ไม่จำเป็นต้องเขียนทับ place จึงเป็นเมทอดแทนที่จะเป็นแมโคร) |
 
@@ -157,7 +157,7 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` ของ CL rank เปลี่ยนไม่ได้ สมาชิกที่ยังอยู่ในช่วงถูกเก็บไว้ที่ดัชนีเดิม และเซลล์ใหม่ได้ `init` ต่างจาก CL ตรงที่ไม่คืนอาร์เรย์ (ทุกอาร์เรย์ในภาษานี้ปรับได้ จึงไม่มีอาร์เรย์ตัวที่สองให้คืน) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` ของ CL panic หากไม่มี fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | เหมือน `push-extend` (เมธอดของ trait [`Push`](traits.md#4-trait-push-การเพิ่มสมาชิก)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` ของ CL `none` หากว่าง |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` ของ CL `none` หากว่าง (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer (`none` หากไม่มี) เขียนได้ด้วย `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | ตัววนซ้ำตามลำดับ row-major หยุดที่ fill pointer หากมี |
 
@@ -246,6 +246,7 @@
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | เพิ่มที่หัว / ท้าย |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | เหมือน `push-back` (เมธอดของ trait [`Push`](traits.md#4-trait-push-การเพิ่มสมาชิก)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | เอาสมาชิกที่หัว / ท้ายออกแล้วคืนให้ ถ้าว่างคืน `none` |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | เหมือน `pop-back` (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | ดูสมาชิกที่หัว / ท้าย (ไม่เอาออก) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | ตัวที่ `i` นับจากหัว ถ้าเกินช่วงคืน `none` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | เขียนทับตัวที่ `i` ถ้าเกินช่วงจะ panic |

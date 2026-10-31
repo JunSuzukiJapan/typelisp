@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Standardtraits
 
-Traits för iteration, jämförelse, aritmetik och att lägga till element. De andra standardtraits finns i sina egna kapitel: `Hash`
+Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut element. De andra standardtraits finns i sina egna kapitel: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Feltyper](option-result.md#3-feltyper-och-traitet-error)), `print-object`
 ([Utskrift](printing.md#5-print-object-utskriftsform-per-typ)), samt strömtraits och `Pathish`
@@ -145,3 +145,41 @@ läggas till i” med `(:where (Push C (Item T)))` och lägger till i varje såd
 
 En egen typ som implementerar `Push` kan skickas till samma generiska funktioner. Den kan också vara
 ett trait-objekt, som i `:dyn Push<int>`.
+
+## 5. Traiten `Pop` (ta ut element)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+En samling som elementet som `push` lade till sist kan tas ut ur igen. `none` när den är tom. En
+generisk funktion kräver den med `(:where (Pop C (Item T)))`.
+
+| Typ | Vad `pop` gör |
+|---|---|
+| `Vector<T>` | Tar ut det sista elementet |
+| `Deque<T>` | Tar ut det sista elementet (`pop-back`) |
+| `Array<T>` | Tar ut elementet närmast före fyllpekaren. Panik utan fyllpekare |
+
+En `HashSet<T>` har inget "sista element", så den är en `Push` men inte en `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+Precis som `Push` kan en egen typ implementera den, och den kan vara ett traitobjekt, som i
+`:dyn Pop<int>`.

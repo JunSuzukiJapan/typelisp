@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # String, Karakter, dan Koleksi
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, dan `Deque<T>`.
@@ -78,7 +78,7 @@ dicetak sebagai `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Membaca elemen `i`. Panic jika di luar rentang |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Mengubah elemen `i`. Panic jika di luar rentang. Dapat juga ditulis `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Jumlah elemen |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Menghapus elemen terakhir dan mengembalikannya. `none` jika kosong (tidak seperti `get`/`set`, ia tidak panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Menghapus elemen terakhir dan mengembalikannya. `none` jika kosong (tidak seperti `get`/`set`, ia tidak panic) (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Membuat iterator yang mengimplementasikan `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Menambahkan `x` jika tidak ada elemen yang sama (`pushnew` pada CL. Tidak perlu menulis ulang sebuah place, sehingga ia adalah metode dan bukan makro) |
 
@@ -160,7 +160,7 @@ Nilainya dapat ditulis `#2A((1 2) (3 4))` ([Referensi Sintaks](../syntax.md#1-un
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` pada CL. Rank tidak dapat berubah. Elemen yang tetap dalam rentang dipertahankan pada indeksnya, dan sel baru mendapat `init`. Tidak seperti CL, ia tidak mengembalikan larik (setiap larik di bahasa ini dapat disesuaikan, sehingga tidak ada larik kedua untuk dikembalikan) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` pada CL. Panic tanpa fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Sama dengan `push-extend` (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` pada CL. `none` jika kosong |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` pada CL. `none` jika kosong (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Fill pointer (`none` jika tidak ada). Dapat ditulis dengan `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Iterator dalam urutan row-major. Berhenti pada fill pointer jika ada |
 
@@ -257,6 +257,7 @@ Barisan yang bisa ditambah dan diambil dari kedua ujungnya (`VecDeque` milik Rus
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Menambah di depan / belakang |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Sama dengan `push-back` (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Mengambil elemen depan / belakang dan mengembalikannya. `none` bila kosong |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | Sama dengan `pop-back` (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Melihat elemen depan / belakang (tanpa mengambilnya) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Elemen ke-`i` dari depan. `none` bila di luar jangkauan |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Menimpa elemen ke-`i`. Panic bila di luar jangkauan |

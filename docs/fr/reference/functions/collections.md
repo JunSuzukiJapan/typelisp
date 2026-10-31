@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Chaînes, caractères et collections
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` et `Deque<T>`.
@@ -78,7 +78,7 @@ Elle s'imprime aussi `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Lit l'élément `i`. Panic hors limites |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Modifie l'élément `i`. Panic hors limites. Peut aussi s'écrire `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Nombre d'éléments |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Retire le dernier élément et le renvoie. `none` si vide (contrairement à `get`/`set`, pas de panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Retire le dernier élément et le renvoie. `none` si vide (contrairement à `get`/`set`, pas de panic) (une méthode du trait [`Pop`](traits.md#5-le-trait-pop-retirer-des-éléments)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Crée un itérateur qui implémente `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Ajoute `x` si aucun élément égal n'existe (le `pushnew` de CL. Il n'a pas besoin de réécrire un emplacement ; c'est donc une méthode plutôt qu'une macro) |
 
@@ -160,7 +160,7 @@ Une valeur s'écrit `#2A((1 2) (3 4))` ([référence de la syntaxe](../syntax.md
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | Le `adjust-array` de CL. Le rang ne peut pas changer. Les éléments qui restent dans les limites gardent leurs indices, et les nouvelles cellules reçoivent `init`. Contrairement à CL, il ne renvoie pas le tableau (tout tableau de ce langage est ajustable ; il n'y a donc pas de second tableau à renvoyer) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | Le `vector-push-extend` de CL. Panic sans pointeur de remplissage |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Identique à `push-extend` (une méthode du trait [`Push`](traits.md#4-le-trait-push-ajouter-des-éléments)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | Le `vector-pop` de CL. `none` si vide |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | Le `vector-pop` de CL. `none` si vide (une méthode du trait [`Pop`](traits.md#5-le-trait-pop-retirer-des-éléments)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Le pointeur de remplissage (`none` s'il n'y en a pas). Peut s'écrire avec `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Un itérateur dans l'ordre ligne par ligne. S'arrête au pointeur de remplissage s'il y en a un |
 
@@ -256,6 +256,7 @@ Une séquence où l'on peut ajouter et retirer aux deux bouts (le `VecDeque` de 
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Ajoute au début / à la fin |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Identique à `push-back` (une méthode du trait [`Push`](traits.md#4-le-trait-push-ajouter-des-éléments)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Retire l'élément du début / de la fin et le renvoie. `none` si vide |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | Identique à `pop-back` (une méthode du trait [`Pop`](traits.md#5-le-trait-pop-retirer-des-éléments)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Regarde l'élément du début / de la fin (sans le retirer) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Le `i`-ième depuis le début. `none` hors limites |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Écrase le `i`-ième. Panic hors limites |

@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Các trait chuẩn
 
-Các trait cho việc lặp, so sánh, số học và thêm phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
+Các trait cho việc lặp, so sánh, số học và thêm, lấy ra phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Các kiểu lỗi](option-result.md#3-các-kiểu-lỗi-và-trait-error)), `print-object`
 ([In](printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu)), và các trait của stream cùng
@@ -143,3 +143,40 @@ bằng `(:where (Push C (Item T)))` và thêm vào bất kỳ tập hợp nào n
 
 Một kiểu tự định nghĩa có triển khai `Push` có thể được truyền cho cùng các hàm generic đó. Nó cũng
 có thể là một trait object, như `:dyn Push<int>`.
+
+## 5. Trait `Pop` (lấy phần tử ra)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+Tập hợp có thể lấy lại phần tử mà `push` thêm vào sau cùng. Trả về `none` khi rỗng. Hàm generic yêu
+cầu nó bằng `(:where (Pop C (Item T)))`.
+
+| Kiểu | `pop` làm gì |
+|---|---|
+| `Vector<T>` | Lấy ra phần tử cuối |
+| `Deque<T>` | Lấy ra phần tử cuối (`pop-back`) |
+| `Array<T>` | Lấy ra phần tử ngay trước fill pointer. Panic nếu không có fill pointer |
+
+`HashSet<T>` không có "phần tử cuối", nên nó là `Push` nhưng không phải `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+Giống `Push`, kiểu của bạn có thể cài đặt nó, và nó có thể là trait object, như `:dyn Pop<int>`.

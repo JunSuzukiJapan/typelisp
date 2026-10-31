@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # 字符串、字符与集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -74,7 +74,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | 读取第 `i` 个。越界时 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | 修改第 `i` 个。越界时 panic。也可以写成 `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | 元素个数 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉末尾元素并返回。为空时为 `none`（与 `get`/`set` 不同，不会 panic） |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉末尾元素并返回。为空时为 `none`（与 `get`/`set` 不同，不会 panic）（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | 创建实现了 `Iter` 的迭代器 |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | 没有与 `x` 相等的元素时追加到末尾（CL 的 `pushnew`。不需要修改位置，所以是方法而不是宏） |
 
@@ -150,7 +150,7 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL 的 `adjust-array`。不能改变秩。仍在范围内的元素按下标保留，新增的单元为 `init`。与 CL 不同，不返回数组（本语言的数组都是可调整的，没有要返回的第二个数组） |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL 的 `vector-push-extend`。没有填充指针时 panic |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | 与 `push-extend` 相同（[`Push`](traits.md#4-push-trait添加元素) trait 的方法） |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL 的 `vector-pop`。为空时为 `none` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL 的 `vector-pop`。为空时为 `none`（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 填充指针（没有时为 `none`）。可以用 `(setf a::fill-pointer …)` 写入 |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | 按行主序的迭代器。有填充指针时在那里停止 |
 
@@ -237,6 +237,7 @@
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 加到开头／末尾 |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | 与 `push-back` 相同（[`Push`](traits.md#4-push-trait添加元素) trait 的方法） |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 取出开头／末尾的元素并返回。为空时为 `none` |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | 与 `pop-back` 相同（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 查看开头／末尾的元素（不取出） |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 从开头数第 `i` 个。越界时为 `none` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | 覆盖第 `i` 个。越界时 panic |

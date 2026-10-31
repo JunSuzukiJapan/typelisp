@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Standart Trait'ler
 
-Yineleme, karşılaştırma, aritmetik ve öğe ekleme için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
+Yineleme, karşılaştırma, aritmetik ve öğe ekleme ile çıkarma için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
 `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Hata türleri](option-result.md#3-hata-türleri-ve-error-traiti)), `print-object`
 ([Yazdırma](printing.md#5-print-object-türe-göre-yazdırılan-gösterim)) ve akış trait'leri ile `Pathish`
@@ -146,3 +146,40 @@ bölme ister (o zaman `int` geçirilemez).
 
 `Push`'u uygulayan kendi türünüz aynı jenerik fonksiyonlara geçirilebilir. `:dyn Push<int>` gibi bir
 trait nesnesi de olabilir.
+
+## 5. `Pop` trait'i (öğe çıkarma)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+`push` ile en son eklenen öğenin geri çıkarılabildiği koleksiyon. Boşsa `none`. Genel bir fonksiyon
+bunu `(:where (Pop C (Item T)))` ile ister.
+
+| Tür | `pop` ne yapar |
+|---|---|
+| `Vector<T>` | Son öğeyi çıkarır |
+| `Deque<T>` | Son öğeyi çıkarır (`pop-back`) |
+| `Array<T>` | Doldurma işaretçisinin hemen önündeki öğeyi çıkarır. Doldurma işaretçisi yoksa panic |
+
+`HashSet<T>`'nin "son öğesi" yoktur; bu yüzden `Push`'tur ama `Pop` değildir.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+`Push` gibi, kendi türünüz de bunu uygulayabilir ve `:dyn Pop<int>` gibi bir trait nesnesi olabilir.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # String'ler, Karakterler ve Koleksiyonlar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` ve `Deque<T>`.
@@ -76,7 +76,7 @@ Yazdırıldığında da `#(1 2 3)` olur.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`'inci elemanı okur. Aralık dışında panic olur |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`'inci elemanı değiştirir. Aralık dışında panic olur. `(setf (get v i) x)` olarak da yazılabilir |
 | `len` | `(len v)` | `Vector<T>→int` | Eleman sayısı |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Son elemanı kaldırır ve döndürür. Boşsa `none` (`get`/`set`'ten farklı olarak panic olmaz) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Son elemanı kaldırır ve döndürür. Boşsa `none` (`get`/`set`'ten farklı olarak panic olmaz) ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`'i gerçekleştiren bir yineleyici yapar |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Eşit bir eleman yoksa `x`'i ekler (CL'nin `pushnew`'i. Bir yeri yeniden yazmasına gerek olmadığından makro değil metottur) |
 
@@ -159,7 +159,7 @@ Başvurusu](../syntax.md#1-sözcüksel-öğeler)).
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL'nin `adjust-array`'i. Rank değişemez. Aralıkta kalan elemanlar indekslerinde korunur ve yeni hücreler `init` alır. CL'den farklı olarak diziyi döndürmez (bu dildeki her dizi ayarlanabilirdir; bu yüzden döndürülecek ikinci bir dizi yoktur) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL'nin `vector-push-extend`'i. Doldurma işaretçisi olmadan panic olur |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` ile aynı ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL'nin `vector-pop`'u. Boşsa `none` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL'nin `vector-pop`'u. Boşsa `none` ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Doldurma işaretçisi (yoksa `none`). `(setf a::fill-pointer …)` ile yazılabilir |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Satır öncelikli sırayla bir yineleyici. Varsa doldurma işaretçisinde durur |
 
@@ -253,6 +253,7 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Başa / sona ekler |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` ile aynı ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeyi çıkarıp döndürür. Boşsa `none` |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back` ile aynı ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeye bakar (çıkarmadan) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Baştan `i`'nci öğe. Aralık dışındaysa `none` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`'nci öğenin üzerine yazar. Aralık dışındaysa panic |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -76,7 +76,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | तत्व `i` पढ़ता है। सीमा से बाहर panic करता है |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | तत्व `i` बदलता है। सीमा से बाहर panic करता है। `(setf (get v i) x)` भी लिखा जा सकता है |
 | `len` | `(len v)` | `Vector<T>→int` | तत्वों की संख्या |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | अंतिम तत्व हटाकर लौटाता है। खाली हो तो `none` (`get`/`set` के विपरीत, यह panic नहीं करता) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | अंतिम तत्व हटाकर लौटाता है। खाली हो तो `none` (`get`/`set` के विपरीत, यह panic नहीं करता) ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` लागू करने वाला इटरेटर बनाता है |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | यदि कोई बराबर तत्व मौजूद न हो तो `x` जोड़ता है (CL का `pushnew`। इसे place को दोबारा लिखने की ज़रूरत नहीं, इसलिए यह macro की बजाय मेथड है) |
 
@@ -147,7 +147,7 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL का `adjust-array`। रैंक नहीं बदल सकता। जो तत्व सीमा में रहते हैं वे अपने इंडेक्स पर रखे जाते हैं, और नए सेल `init` पाते हैं। CL के विपरीत, यह ऐरे को नहीं लौटाता (इस भाषा का हर ऐरे समायोज्य है, इसलिए लौटाने को दूसरा ऐरे नहीं है) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL का `vector-push-extend`। fill pointer के बिना panic करता है |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` जैसा ही ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL का `vector-pop`। खाली हो तो `none` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL का `vector-pop`। खाली हो तो `none` ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer (यदि नहीं है तो `none`)। `(setf a::fill-pointer …)` से लिखा जा सकता है |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | रो-मेजर क्रम में इटरेटर। यदि fill pointer है तो वहीं रुकता है |
 
@@ -230,6 +230,7 @@
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | आगे / पीछे जोड़ता है |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` जैसा ही ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व निकालकर लौटाता है। खाली हो तो `none` |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back` जैसा ही ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व देखता है (निकाले बिना) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | आगे से `i`-वाँ। सीमा के बाहर `none` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`-वें पर ऊपर लिखता है। सीमा के बाहर panic |

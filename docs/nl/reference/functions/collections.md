@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Strings, tekens en collecties
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` en `Deque<T>`.
@@ -78,7 +78,7 @@ eerste element, en elke evaluatie maakt een nieuwe vector). Ze wordt ook als `#(
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Leest element `i`. Geeft een panic buiten het bereik |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Wijzigt element `i`. Geeft een panic buiten het bereik. Kan ook als `(setf (get v i) x)` worden geschreven |
 | `len` | `(len v)` | `Vector<T>→int` | Aantal elementen |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Verwijdert het laatste element en geeft het terug. `none` als leeg (anders dan `get`/`set` geeft het geen panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Verwijdert het laatste element en geeft het terug. `none` als leeg (anders dan `get`/`set` geeft het geen panic) (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Maakt een iterator die `Iter` implementeert |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Voegt `x` toe als er geen gelijk element bestaat (`pushnew` van CL. Het hoeft geen plaats te herschrijven, dus het is een methode en geen macro) |
 
@@ -161,7 +161,7 @@ Een waarde kan als `#2A((1 2) (3 4))` worden geschreven
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` van CL. De rang kan niet veranderen. Elementen die binnen het bereik blijven behouden hun indexen, en nieuwe cellen krijgen `init`. Anders dan in CL geeft het de array niet terug (elke array in deze taal is aanpasbaar, dus er is geen tweede array om terug te geven) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` van CL. Geeft een panic zonder fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Hetzelfde als `push-extend` (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` van CL. `none` als leeg |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` van CL. `none` als leeg (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | De fill pointer (`none` als er geen is). Kan met `(setf a::fill-pointer …)` worden geschreven |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Een iterator in row-major-volgorde. Stopt bij de fill pointer als die er is |
 
@@ -257,6 +257,7 @@ Een reeks waaraan je aan beide kanten kunt toevoegen en uithalen (Rusts `VecDequ
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Voegt vooraan / achteraan toe |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Hetzelfde als `push-back` (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Haalt het voorste / achterste element eruit en geeft het terug. `none` als leeg |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | Hetzelfde als `pop-back` (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Bekijkt het voorste / achterste element (zonder het eruit te halen) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Het `i`-de vanaf voren. `none` buiten het bereik |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Overschrijft het `i`-de. Panic buiten het bereik |

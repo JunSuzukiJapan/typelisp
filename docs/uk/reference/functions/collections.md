@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Рядки, знаки та колекції
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` і `Deque<T>`.
@@ -77,7 +77,7 @@ ASCII.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Читає елемент `i`. Panic поза межами |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Змінює елемент `i`. Panic поза межами. Можна також писати `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Кількість елементів |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Вилучає останній елемент і повертає його. `none`, якщо порожньо (на відміну від `get`/`set`, panic не виникає) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Вилучає останній елемент і повертає його. `none`, якщо порожньо (на відміну від `get`/`set`, panic не виникає) (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Створює ітератор, що реалізує `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Додає `x`, якщо рівного елемента немає (`pushnew` з CL. Йому не треба переписувати place, тож це метод, а не макрос) |
 
@@ -159,7 +159,7 @@ ASCII.
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` з CL. Ранг змінити не можна. Елементи, що лишаються в межах, зберігаються за своїми індексами, а нові комірки отримують `init`. На відміну від CL, масив не повертає (кожен масив у цій мові регульований, тож другого масиву для повернення немає) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` з CL. Panic без покажчика заповнення |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Те саме, що `push-extend` (метод трейту [`Push`](traits.md#4-трейт-push-додавання-елементів)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` з CL. `none`, якщо порожньо |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` з CL. `none`, якщо порожньо (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Покажчик заповнення (`none`, якщо його немає). Можна записувати через `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Ітератор у порядку рядків (row-major). Зупиняється на покажчику заповнення, якщо він є |
 
@@ -253,6 +253,7 @@ ASCII.
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Додає на початок / в кінець |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Те саме, що `push-back` (метод трейту [`Push`](traits.md#4-трейт-push-додавання-елементів)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Виймає елемент з початку / кінця і повертає його. `none`, якщо порожньо |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | Те саме, що `pop-back` (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Дивиться на елемент на початку / в кінці (не виймаючи) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-й від початку. `none` поза діапазоном |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Перезаписує `i`-й. Panic поза діапазоном |

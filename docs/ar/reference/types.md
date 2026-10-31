@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # الأنواع
 
 الأنواع الموجودة في typelisp، والسمات القياسية التي ينفّذها كل نوع. وطريقة كتابة الأنواع في
@@ -119,12 +119,13 @@
 
 التفاصيل في [سمات الحساب](functions/traits.md#3-سمات-الحساب-add--sub--mul--div--rem--bits--number).
 
-### 6.3 التكرار وإضافة العناصر
+### 6.3 التكرار وإضافة العناصر وإخراجها
 
 | السمة | الأنواع المنفِّذة |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` أنواع الوحدة `lazy` (`lazy::map-iter<I,A,U>` وغيرها) |
 | `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (حين يطبّق نوع العناصر `Hash`) |
+| `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 التدفقات
 

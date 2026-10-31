@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Trait มาตรฐาน
 
-trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มสมาชิก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
+trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มและนำสมาชิกออก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
 `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([ชนิดข้อผิดพลาด](option-result.md#3-ชนิดข้อผิดพลาดและ-trait-error)), `print-object`
 ([การพิมพ์](printing.md#5-print-object-การแสดงผลของแต่ละชนิด)) และ trait ของสตรีมกับ
@@ -142,3 +142,39 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 ```
 
 ชนิดที่เขียนเองซึ่ง implement `Push` ส่งให้ฟังก์ชัน generic เดียวกันได้ และยังเป็น trait object ได้ด้วย เช่น `:dyn Push<int>`
+
+## 5. trait `Pop` (นำสมาชิกออก)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+คอลเลกชันที่นำสมาชิกที่ `push` เพิ่มไว้ล่าสุดกลับออกมาได้ ได้ `none` เมื่อว่าง ฟังก์ชันเจเนอริกขอด้วย `(:where (Pop C (Item T)))`
+
+| ชนิด | สิ่งที่ `pop` ทำ |
+|---|---|
+| `Vector<T>` | นำสมาชิกตัวสุดท้ายออก |
+| `Deque<T>` | นำสมาชิกตัวสุดท้ายออก (`pop-back`) |
+| `Array<T>` | นำสมาชิกที่อยู่ก่อน fill pointer ออก ถ้าไม่มี fill pointer จะ panic |
+
+`HashSet<T>` ไม่มี "สมาชิกตัวสุดท้าย" จึงเป็น `Push` แต่ไม่เป็น `Pop`
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+เช่นเดียวกับ `Push` ชนิดของคุณเองก็ implement ได้ และเป็น trait object ได้ เช่น `:dyn Pop<int>`

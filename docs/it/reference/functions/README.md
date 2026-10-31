@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Funzioni predefinite
 
 L'elenco delle funzioni predefinite, dei metodi e della libreria standard. Per la sintassi (forme
@@ -73,7 +73,7 @@ scrive come `(tipo-dell-argomento,...)→tipo-di-ritorno`.
 | [sequences.md](sequences.md) | La coppia `cons-cell`, i dati S-expression `Sexpr`, i simboli, le funzioni sulle sequenze, iteratori pigri `lazy`, le funzioni di ordine superiore |
 | [collections.md](collections.md) | Stringhe, caratteri, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, i tipi di errore e il trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, i trait aritmetici, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, i trait aritmetici, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, il pretty printer, `print-object`, le variabili di controllo della stampa |
 | [format.md](format.md) | Direttive di formato |
 | [streams-files.md](streams-files.md) | Stream, operazioni sui file, pathname, readtable |

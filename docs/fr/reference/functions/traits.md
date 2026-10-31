@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Traits standard
 
-Les traits d'itération, de comparaison, d'arithmétique et d'ajout d'éléments. Les autres traits standard se trouvent dans leurs propres
+Les traits d'itération, de comparaison, d'arithmétique et d'ajout et de retrait d'éléments. Les autres traits standard se trouvent dans leurs propres
 chapitres : `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Types d'erreur](option-result.md#3-types-derreur-et-le-trait-error)), `print-object`
 ([Affichage](printing.md#5-print-object-représentation-imprimée-par-type)), ainsi que les traits de flux et
@@ -144,3 +144,41 @@ laquelle de ces collections avec le même `(push c x)`.
 
 Un type à vous qui implémente `Push` peut être passé aux mêmes fonctions génériques. Il peut aussi
 être un objet trait, comme dans `:dyn Push<int>`.
+
+## 5. Le trait `Pop` (retirer des éléments)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+Une collection dont on peut retirer l'élément ajouté en dernier par `push`. `none` quand elle est
+vide. Une fonction générique la demande avec `(:where (Pop C (Item T)))`.
+
+| Type | Ce que fait `pop` |
+|---|---|
+| `Vector<T>` | Retire le dernier élément |
+| `Deque<T>` | Retire le dernier élément (`pop-back`) |
+| `Array<T>` | Retire l'élément juste avant le pointeur de remplissage. Panic sans pointeur de remplissage |
+
+Un `HashSet<T>` n'a pas de « dernier élément » : c'est un `Push`, mais pas un `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+Comme pour `Push`, un type à vous peut l'implémenter, et il peut être un objet trait, comme dans
+`:dyn Pop<int>`.

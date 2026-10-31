@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -122,12 +122,13 @@ türleri o trait'i uyguladığında kullanılabilir.
 Ayrıntılar [Aritmetik trait'ler](functions/traits.md#3-aritmetik-traitler-add--sub--mul--div--rem--bits--number)
 bölümündedir.
 
-### 6.3 Yineleme ve öğe ekleme
+### 6.3 Yineleme ve öğe ekleme ile çıkarma
 
 | Trait | Gerçekleştiren türler |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` modülünün türleri (`lazy::map-iter<I,A,U>` vb.) |
 | `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (öğe türü `Hash`'i uyguladığında) |
+| `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Akışlar
 

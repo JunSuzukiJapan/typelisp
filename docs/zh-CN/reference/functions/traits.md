@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # 标准 trait
 
-用于迭代、比较、算术和添加元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
+用于迭代、比较、算术和存取元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
 `Error`（[错误类型](option-result.md#3-错误类型与-error-trait)）、`print-object`
 （[打印](printing.md#5-print-object按类型的打印表示)）、流的 trait 群与 `Pathish`（[流与文件](streams-files.md)）。
 哪些类型实现了哪些 trait 见[类型一览](../types.md)。trait 的定义方法见[语法参考](../syntax.md#39-deftrait--impl--trait-机制)。
@@ -126,3 +126,39 @@ trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` �
 ```
 
 为自己的类型实现 `Push`，就能传给同样的泛型函数。也可以像 `:dyn Push<int>` 那样作为 trait 对象。
+
+## 5. `Pop` trait（取出元素）
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+可以取回 `push` 最后添加的元素的集合。为空时返回 `none`。泛型函数用 `(:where (Pop C (Item T)))` 要求它。
+
+| 类型 | `pop` 的含义 |
+|---|---|
+| `Vector<T>` | 取出末尾元素 |
+| `Deque<T>` | 取出末尾元素（`pop-back`） |
+| `Array<T>` | 取出 fill pointer 前面的那个元素。没有 fill pointer 时 panic |
+
+`HashSet<T>` 没有“最后的元素”，所以它是 `Push` 但不是 `Pop`。
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+和 `Push` 一样，可以为自己的类型实现它，也可以像 `:dyn Pop<int>` 那样作为 trait 对象。

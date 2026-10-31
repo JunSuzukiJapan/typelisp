@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Strings, Characters and Collections
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` and `Deque<T>`.
@@ -77,7 +77,7 @@ prints as `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Reads element `i`. Panics out of range |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Changes element `i`. Panics out of range. Can also be written `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Number of elements |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Removes the last element and returns it. `none` if empty (unlike `get`/`set`, it does not panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Removes the last element and returns it. `none` if empty (unlike `get`/`set`, it does not panic) (a method of the [`Pop`](traits.md#5-the-pop-trait-taking-elements-out) trait) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Makes an iterator that implements `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Appends `x` if no equal element exists (CL's `pushnew`. It does not need to rewrite a place, so it is a method rather than a macro) |
 
@@ -159,7 +159,7 @@ A value can be written `#2A((1 2) (3 4))` ([Syntax Reference](../syntax.md#1-lex
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL's `adjust-array`. The rank cannot change. Elements that stay in range are kept at their indexes, and new cells get `init`. Unlike CL, it does not return the array (every array in this language is adjustable, so there is no second array to return) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL's `vector-push-extend`. Panics without a fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | The same as `push-extend` (a method of the [`Push`](traits.md#4-the-push-trait-adding-elements) trait) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL's `vector-pop`. `none` if empty |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL's `vector-pop`. `none` if empty (a method of the [`Pop`](traits.md#5-the-pop-trait-taking-elements-out) trait) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | The fill pointer (`none` if there is none). Can be written with `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | An iterator in row-major order. Stops at the fill pointer if there is one |
 
@@ -253,6 +253,7 @@ A sequence you can add to and take from at both ends (Rust's `VecDeque`).
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Adds at the front / back |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | The same as `push-back` (a method of the [`Push`](traits.md#4-the-push-trait-adding-elements) trait) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Takes the front / back element out and returns it. `none` if empty |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | The same as `pop-back` (a method of the [`Pop`](traits.md#5-the-pop-trait-taking-elements-out) trait) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Looks at the front / back element (without taking it out) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | The `i`th from the front. `none` if out of range |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Overwrites the `i`th. Panics if out of range |

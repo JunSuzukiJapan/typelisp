@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Funções embutidas
 
 A lista de funções embutidas, métodos e da biblioteca padrão. Para a sintaxe (formas especiais e como
@@ -73,7 +73,7 @@ As tabelas de cada capítulo têm as colunas "nome, forma, tipo, descrição". A
 | [sequences.md](sequences.md) | O par `cons-cell`, os dados de expressões S `Sexpr`, símbolos, funções de sequência, iteradores preguiçosos `lazy`, funções de ordem superior |
 | [collections.md](collections.md) | Strings, caracteres, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, tipos de erro e o trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traits aritméticos, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traits aritméticos, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, o pretty printer, `print-object`, variáveis de controle da impressora |
 | [format.md](format.md) | Diretivas de formato |
 | [streams-files.md](streams-files.md) | Streams, operações com arquivos, nomes de caminho, readtable |

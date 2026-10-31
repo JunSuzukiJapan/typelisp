@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -119,12 +119,13 @@ trait ของ `cons-cell<A,B>` และทูเพิล `#{..}` รวม�
 
 รายละเอียดอยู่ใน[trait การคำนวณ](functions/traits.md#3-trait-การคำนวณ-add--sub--mul--div--rem--bits--number)
 
-### 6.3 การวนซ้ำและการเพิ่มสมาชิก
+### 6.3 การวนซ้ำและการเพิ่มและนำสมาชิกออก
 
 | Trait | ชนิดที่ implement |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` ชนิดของมอดูล `lazy` (`lazy::map-iter<I,A,U>` เป็นต้น) |
 | `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (เมื่อชนิดของสมาชิก implement `Hash`) |
+| `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 สตรีม
 

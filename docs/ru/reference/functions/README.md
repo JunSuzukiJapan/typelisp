@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Встроенные функции
 
 Список встроенных функций, методов и стандартной библиотеки. О синтаксисе (специальных формах и способах
@@ -72,7 +72,7 @@
 | [sequences.md](sequences.md) | Пара `cons-cell`, данные S-выражений `Sexpr`, символы, функции последовательностей, ленивые итераторы `lazy`, функции высшего порядка |
 | [collections.md](collections.md) | Строки, символы, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, типы ошибок и трейт `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, арифметические трейты, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, арифметические трейты, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, красивая печать, `print-object`, управляющие переменные печати |
 | [format.md](format.md) | Директивы формата |
 | [streams-files.md](streams-files.md) | Потоки, операции с файлами, пути, readtable |

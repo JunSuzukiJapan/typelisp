@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Funciones incorporadas
 
 La lista de funciones incorporadas, métodos y la biblioteca estándar. Para la sintaxis (formas especiales y
@@ -74,7 +74,7 @@ escribe como `(tipo-de-argumento,...)→tipo-de-retorno`.
 | [sequences.md](sequences.md) | El par `cons-cell`, los datos de expresiones S `Sexpr`, símbolos, funciones de secuencia, iteradores perezosos `lazy`, funciones de orden superior |
 | [collections.md](collections.md) | Cadenas, caracteres, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, tipos de error y el trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traits aritméticos, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traits aritméticos, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, el pretty printer, `print-object`, variables de control de la impresora |
 | [format.md](format.md) | Directivas de formato |
 | [streams-files.md](streams-files.md) | Streams, operaciones con archivos, nombres de ruta, readtable |

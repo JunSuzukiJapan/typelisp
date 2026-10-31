@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -120,12 +120,13 @@ Các trait của `cons-cell<A,B>` và của tuple `#{..}`, cùng `print-object` 
 
 Chi tiết nằm ở [Các trait số học](functions/traits.md#3-các-trait-số-học-add--sub--mul--div--rem--bits--number).
 
-### 6.3 Lặp và thêm phần tử
+### 6.3 Lặp và thêm, lấy ra phần tử
 
 | Trait | Các kiểu triển khai |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` các kiểu của module `lazy` (`lazy::map-iter<I,A,U>`, v.v.) |
 | `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (khi kiểu phần tử triển khai `Hash`) |
+| `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Stream
 

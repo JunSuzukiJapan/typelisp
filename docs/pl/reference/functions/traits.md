@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Traity standardowe
 
-Traity do iteracji, porównywania, arytmetyki i dodawania elementów. Pozostałe traity standardowe znajdują się we własnych
+Traity do iteracji, porównywania, arytmetyki oraz dodawania i wyjmowania elementów. Pozostałe traity standardowe znajdują się we własnych
 rozdziałach: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Typy błędów](option-result.md#3-typy-błędów-i-trait-error)), `print-object`
 ([Wypisywanie](printing.md#5-print-object-reprezentacja-wypisywana-według-typu)) oraz traity strumieni i
@@ -146,3 +146,40 @@ można dodać `T`” za pomocą `(:where (Push C (Item T)))` i dodaje do każdej
 
 Własny typ, który implementuje `Push`, można przekazać do tych samych funkcji generycznych. Może też
 być obiektem traitu, jak w `:dyn Push<int>`.
+
+## 5. Trait `Pop` (wyjmowanie elementów)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+Kolekcja, z której można z powrotem wyjąć element dodany ostatnio przez `push`. `none`, gdy jest
+pusta. Funkcja generyczna wymaga jej przez `(:where (Pop C (Item T)))`.
+
+| Typ | Co robi `pop` |
+|---|---|
+| `Vector<T>` | Wyjmuje ostatni element |
+| `Deque<T>` | Wyjmuje ostatni element (`pop-back`) |
+| `Array<T>` | Wyjmuje element tuż przed wskaźnikiem wypełnienia. Panic bez wskaźnika wypełnienia |
+
+`HashSet<T>` nie ma „ostatniego elementu”, więc jest `Push`, ale nie `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+Tak jak `Push`, może go implementować własny typ i może być obiektem traitu, jak w `:dyn Pop<int>`.

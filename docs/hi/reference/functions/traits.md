@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # स्टैंडर्ड trait
 
-इटरेशन, तुलना, अंकगणित और तत्व जोड़ने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
+इटरेशन, तुलना, अंकगणित और तत्व जोड़ने व निकालने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
 
 ## 1. `Iter` trait और इटरेशन
 
@@ -113,3 +113,39 @@ trait मेथड का नाम `+` नहीं है क्योंक�
 ```
 
 अपना टाइप जो `Push` लागू करता है, उन्हीं जेनेरिक फ़ंक्शनों को दिया जा सकता है। वह `:dyn Push<int>` की तरह trait object भी बन सकता है।
+
+## 5. `Pop` trait (तत्व निकालना)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+ऐसा संग्रह जिससे `push` द्वारा सबसे बाद में जोड़ा गया तत्व वापस निकाला जा सके। खाली होने पर `none`। जेनेरिक फ़ंक्शन इसे `(:where (Pop C (Item T)))` से माँगता है।
+
+| टाइप | `pop` क्या करता है |
+|---|---|
+| `Vector<T>` | अंतिम तत्व निकालता है |
+| `Deque<T>` | अंतिम तत्व निकालता है (`pop-back`) |
+| `Array<T>` | fill pointer से ठीक पहले का तत्व निकालता है। fill pointer न हो तो panic |
+
+`HashSet<T>` में "अंतिम तत्व" नहीं होता, इसलिए वह `Push` है पर `Pop` नहीं।
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+`Push` की तरह, आपका अपना टाइप इसे implement कर सकता है, और यह `:dyn Pop<int>` जैसा trait object भी हो सकता है।

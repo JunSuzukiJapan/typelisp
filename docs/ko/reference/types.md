@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -117,12 +117,13 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 자세한 내용은 [산술 트레이트](functions/traits.md#3-산술-트레이트add--sub--mul--div--rem--bits--number)에 있다.
 
-### 6.3 반복과 요소 추가
+### 6.3 반복과 요소의 추가와 꺼내기
 
 | 트레이트 | 구현하는 타입 |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` 모듈의 타입(`lazy::map-iter<I,A,U>` 등) |
 | `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>`(요소 타입이 `Hash`를 구현할 때) |
+| `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 스트림
 

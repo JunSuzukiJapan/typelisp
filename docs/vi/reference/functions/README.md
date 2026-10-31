@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Hàm dựng sẵn
 
 Danh sách các hàm dựng sẵn, phương thức và thư viện chuẩn. Về cú pháp (các dạng đặc biệt và cách định
@@ -71,7 +71,7 @@ Các bảng trong mỗi chương có các cột "tên, dạng, kiểu, mô tả"
 | [sequences.md](sequences.md) | Cặp `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, hàm trên dãy, iterator lười `lazy`, hàm bậc cao |
 | [collections.md](collections.md) | Chuỗi, ký tự, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, các kiểu lỗi và trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, các trait số học, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, các trait số học, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, các biến điều khiển bộ in |
 | [format.md](format.md) | Các chỉ thị định dạng |
 | [streams-files.md](streams-files.md) | Stream, thao tác tệp, pathname, readtable |

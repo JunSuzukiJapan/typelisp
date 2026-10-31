@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # الدوال المضمنة
 
 قائمة الدوال المضمنة والتوابع (methods) والمكتبة القياسية. وللصياغة (الصيغ الخاصة وطريقة التعريف) انظر
@@ -71,7 +71,7 @@
 | [sequences.md](sequences.md) | الزوج `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات والمكرِّرات الكسولة `lazy` والدوال عالية الرتبة |
 | [collections.md](collections.md) | السلاسل النصية والمحارف و`Vector` و`HashTable` و`Array` و`BitVector` و`HashSet` و`SortedTable` و`Deque` |
 | [option-result.md](option-result.md) | `Option` و`Result` وأنواع الأخطاء والسمة `Error` |
-| [traits.md](traits.md) | `Iter` و`Eq`/`Ord` وسمات الحساب و`Push` |
+| [traits.md](traits.md) | `Iter` و`Eq`/`Ord` وسمات الحساب و`Push` و`Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format` والطابعة المنسَّقة (pretty printer) و`print-object` ومتغيرات التحكم بالطباعة |
 | [format.md](format.md) | موجِّهات التنسيق |
 | [streams-files.md](streams-files.md) | التدفقات وعمليات الملفات والمسارات وreadtable |

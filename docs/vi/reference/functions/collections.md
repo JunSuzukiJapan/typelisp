@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Chuỗi, ký tự và tập hợp
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` và `Deque<T>`.
@@ -77,7 +77,7 @@ in ra là `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Đọc phần tử `i`. Panic khi ngoài phạm vi |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Thay đổi phần tử `i`. Panic khi ngoài phạm vi. Cũng có thể viết `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Số phần tử |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Bỏ phần tử cuối và trả về nó. `none` nếu rỗng (không như `get`/`set`, nó không panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Bỏ phần tử cuối và trả về nó. `none` nếu rỗng (không như `get`/`set`, nó không panic) (một phương thức của trait [`Pop`](traits.md#5-trait-pop-lấy-phần-tử-ra)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Tạo một iterator triển khai `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` với `Eq T` | Nối `x` nếu chưa có phần tử bằng nó (`pushnew` của CL. Nó không cần ghi lại một place, nên là một phương thức chứ không phải macro) |
 
@@ -159,7 +159,7 @@ Giá trị có thể viết là `#2A((1 2) (3 4))` ([Tham chiếu cú pháp](../
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` của CL. Hạng không thể đổi. Các phần tử còn trong phạm vi được giữ ở chỉ số của chúng, và các ô mới nhận `init`. Không như CL, nó không trả về mảng (mọi mảng trong ngôn ngữ này đều điều chỉnh được, nên không có mảng thứ hai để trả về) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` của CL. Panic nếu không có fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Giống `push-extend` (một phương thức của trait [`Push`](traits.md#4-trait-push-thêm-phần-tử)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` của CL. `none` nếu rỗng |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` của CL. `none` nếu rỗng (một phương thức của trait [`Pop`](traits.md#5-trait-pop-lấy-phần-tử-ra)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Fill pointer (`none` nếu không có). Có thể ghi bằng `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Một iterator theo thứ tự row-major. Dừng ở fill pointer nếu có |
 
@@ -253,6 +253,7 @@ Dãy có thể thêm vào và lấy ra ở cả hai đầu (`VecDeque` của Rus
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Thêm vào đầu / cuối |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Giống `push-back` (một phương thức của trait [`Push`](traits.md#4-trait-push-thêm-phần-tử)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Lấy phần tử ở đầu / cuối ra và trả về. `none` nếu rỗng |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | Giống `pop-back` (một phương thức của trait [`Pop`](traits.md#5-trait-pop-lấy-phần-tử-ra)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Xem phần tử ở đầu / cuối (không lấy ra) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Phần tử thứ `i` tính từ đầu. `none` nếu ngoài phạm vi |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Ghi đè phần tử thứ `i`. Panic nếu ngoài phạm vi |

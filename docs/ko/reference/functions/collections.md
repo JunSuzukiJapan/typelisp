@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`번째 요소를 읽는다. 범위를 벗어나면 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`번째 요소를 바꾼다. 범위를 벗어나면 panic. `(setf (get v i) x)`로도 쓸 수 있다 |
 | `len` | `(len v)` | `Vector<T>→int` | 요소 수 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 마지막 요소를 없애고 반환한다. 비어 있으면 `none`(`get`/`set`과 달리 panic하지 않는다) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 마지막 요소를 없애고 반환한다. 비어 있으면 `none`(`get`/`set`과 달리 panic하지 않는다)([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`를 구현한 이터레이터를 만든다 |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | 같은 요소가 없으면 `x`를 추가한다(CL의 `pushnew`. 장소를 고쳐 쓸 필요가 없으므로 매크로가 아니라 메서드) |
 
@@ -153,7 +153,7 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL의 `adjust-array`. 랭크는 바꿀 수 없다. 범위 안에 남는 요소는 같은 인덱스에 남고 새 칸은 `init`이 된다. CL과 달리 배열을 반환하지 않는다(이 언어의 배열은 모두 크기를 바꿀 수 있으므로 반환할 두 번째 배열이 없다) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL의 `vector-push-extend`. 채움 포인터가 없으면 panic |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend`와 같다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL의 `vector-pop`. 비어 있으면 `none` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL의 `vector-pop`. 비어 있으면 `none`([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 채움 포인터(없으면 `none`). `(setf a::fill-pointer …)`로 쓸 수 있다 |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | 행 우선 순서의 이터레이터. 채움 포인터가 있으면 거기서 멈춘다 |
 
@@ -244,6 +244,7 @@
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 앞 / 뒤에 추가한다 |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back`과 같다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 꺼내 돌려준다. 비어 있으면 `none` |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back`과 같다([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 본다(꺼내지 않는다) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 앞에서부터 `i`번째. 범위 밖이면 `none` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`번째를 덮어쓴다. 범위 밖이면 panic |

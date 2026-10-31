@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Trait Standar
 
-Trait untuk iterasi, perbandingan, aritmetika, dan penambahan elemen. Trait standar lainnya ada di bab masing-masing:
+Trait untuk iterasi, perbandingan, aritmetika, serta penambahan dan pengambilan elemen. Trait standar lainnya ada di bab masing-masing:
 `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ([Tipe kesalahan](option-result.md#3-tipe-kesalahan-dan-trait-error)), `print-object`
 ([Pencetakan](printing.md#5-print-object-representasi-cetak-per-tipe)), serta trait stream dan
@@ -146,3 +146,41 @@ yang sama.
 
 Tipe buatan sendiri yang mengimplementasikan `Push` dapat diberikan ke fungsi generik yang sama.
 Tipe itu juga dapat menjadi objek trait, seperti pada `:dyn Push<int>`.
+
+## 5. Trait `Pop` (mengambil elemen)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+Koleksi yang elemen terakhir yang ditambahkan `push` dapat diambil kembali darinya. `none` jika
+kosong. Fungsi generik memintanya dengan `(:where (Pop C (Item T)))`.
+
+| Tipe | Yang dilakukan `pop` |
+|---|---|
+| `Vector<T>` | Mengambil elemen terakhir |
+| `Deque<T>` | Mengambil elemen terakhir (`pop-back`) |
+| `Array<T>` | Mengambil elemen tepat sebelum fill pointer. Panic jika tanpa fill pointer |
+
+`HashSet<T>` tidak punya "elemen terakhir", jadi ia `Push` tetapi bukan `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+Seperti `Push`, tipe Anda sendiri dapat mengimplementasikannya, dan ia dapat menjadi objek trait,
+seperti `:dyn Pop<int>`.

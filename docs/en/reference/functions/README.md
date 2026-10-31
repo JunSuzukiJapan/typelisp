@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Built-in Functions
 
 The list of built-in functions, methods and the standard library. For syntax (special forms and how
@@ -73,7 +73,7 @@ written as `(argument-type,...)→return-type`.
 | [sequences.md](sequences.md) | The pair `cons-cell`, S-expression data `Sexpr`, symbols, sequence functions, lazy iterators `lazy`, higher-order functions |
 | [collections.md](collections.md) | Strings, characters, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, error types and the `Error` trait |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetic traits, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetic traits, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, the pretty printer, `print-object`, printer control variables |
 | [format.md](format.md) | Format directives |
 | [streams-files.md](streams-files.md) | Streams, file operations, pathnames, readtable |

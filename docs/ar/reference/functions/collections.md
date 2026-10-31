@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # السلاسل النصية والمحارف والمجموعات
 
 `string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | يقرأ العنصر `i`. ويحدث `panic` خارج النطاق |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | يغيّر العنصر `i`. ويحدث `panic` خارج النطاق. ويمكن كتابته أيضًا `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | عدد العناصر |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | يزيل العنصر الأخير ويعيده. `none` إذا كان فارغًا (وبخلاف `get`/`set` لا يحدث `panic`) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | يزيل العنصر الأخير ويعيده. `none` إذا كان فارغًا (وبخلاف `get`/`set` لا يحدث `panic`) (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | يصنع مكرِّرًا ينفّذ `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` حيث `Eq T` | يضيف `x` إذا لم يوجد عنصر مساوٍ (`pushnew` في CL. ولا يحتاج إلى إعادة كتابة موضع (place)، فهو تابع لا ماكرو) |
 
@@ -155,7 +155,7 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` في CL. لا يمكن أن تتغير الرتبة. وتبقى العناصر التي تظل داخل النطاق عند فهارسها، وتأخذ الخلايا الجديدة `init`. وبخلاف CL لا تعيد المصفوفة (فكل مصفوفة في هذه اللغة قابلة للتعديل، فلا توجد مصفوفة ثانية لإعادتها) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` في CL. ويحدث `panic` بدون مؤشر ملء |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | مثل `push-extend` (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` في CL. `none` إذا كانت فارغة |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` في CL. `none` إذا كانت فارغة (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | مؤشر الملء (`none` إذا لم يوجد). ويمكن كتابته بـ `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | مكرِّر بترتيب الصفوف (row-major). ويتوقف عند مؤشر الملء إن وُجد |
 
@@ -248,6 +248,7 @@
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | تضيف في المقدمة / المؤخرة |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | مثل `push-back` (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | تُخرج عنصر المقدمة / المؤخرة وتُرجعه. `none` إن كان فارغًا |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | مثل `pop-back` (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | تنظر إلى عنصر المقدمة / المؤخرة (دون إخراجه) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | العنصر رقم `i` من المقدمة. `none` خارج النطاق |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | تكتب فوق العنصر رقم `i`. panic خارج النطاق |

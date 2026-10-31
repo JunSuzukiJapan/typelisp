@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # ฟังก์ชันที่มีให้ในตัว
 
 รายการฟังก์ชันที่มีให้ในตัว เมทอด และไลบรารีมาตรฐาน สำหรับไวยากรณ์ (ฟอร์มพิเศษและวิธีนิยามสิ่งต่าง ๆ)
@@ -72,7 +72,7 @@
 | [sequences.md](sequences.md) | คู่ `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับ อิเทอเรเตอร์แบบขี้เกียจ `lazy` ฟังก์ชันอันดับสูง |
 | [collections.md](collections.md) | สตริง อักขระ `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, ชนิดข้อผิดพลาด และ trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, trait การคำนวณ, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, trait การคำนวณ, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, ตัวแปรควบคุมการพิมพ์ |
 | [format.md](format.md) | คำสั่งรูปแบบ |
 | [streams-files.md](streams-files.md) | สตรีม การดำเนินการกับไฟล์ pathname readtable |

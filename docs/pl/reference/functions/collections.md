@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Łańcuchy znaków, znaki i kolekcje
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` i `Deque<T>`.
@@ -77,7 +77,7 @@ elementu, a każde obliczenie tworzy nowy wektor). Jest też drukowana jako `#(1
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Odczytuje element `i`. Powoduje panic poza zakresem |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Zmienia element `i`. Powoduje panic poza zakresem. Można też napisać `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Liczba elementów |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Usuwa ostatni element i go zwraca. `none`, jeśli pusty (w przeciwieństwie do `get`/`set` nie powoduje panic) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Usuwa ostatni element i go zwraca. `none`, jeśli pusty (w przeciwieństwie do `get`/`set` nie powoduje panic) (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Tworzy iterator implementujący `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Dopisuje `x`, jeśli nie istnieje równy element (`pushnew` z CL. Nie musi przepisywać miejsca, więc jest metodą, a nie makrem) |
 
@@ -160,7 +160,7 @@ składni](../syntax.md#1-elementy-leksykalne)).
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` z CL. Rangi nie można zmienić. Elementy, które pozostają w zakresie, są zachowane pod swoimi indeksami, a nowe komórki dostają `init`. W przeciwieństwie do CL nie zwraca tablicy (każda tablica w tym języku jest dostosowywalna, więc nie ma drugiej tablicy do zwrócenia) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` z CL. Powoduje panic bez wskaźnika wypełnienia |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | To samo co `push-extend` (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` z CL. `none`, jeśli pusta |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` z CL. `none`, jeśli pusta (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
 | `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Wskaźnik wypełnienia (`none`, jeśli go nie ma). Można go zapisać za pomocą `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Iterator w porządku wierszowym (row-major). Zatrzymuje się na wskaźniku wypełnienia, jeśli jest |
 
@@ -255,6 +255,7 @@ Ciąg, do którego można dodawać i z którego można wyjmować z obu końców 
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Dodaje na początek / koniec |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | To samo co `push-back` (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Wyjmuje element z początku / końca i go zwraca. `none`, gdy pusty |
+| `pop` | `(pop d)` | `Deque<T>→Option<T>` | To samo co `pop-back` (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Podgląda element z początku / końca (bez wyjmowania) |
 | `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-ty od początku. `none` poza zakresem |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Nadpisuje `i`-ty. Panic poza zakresem |

@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Стандартные трейты
 
-Трейты итерации, сравнения, арифметики и добавления элементов. Остальные стандартные трейты описаны в собственных главах: `Hash`
+Трейты итерации, сравнения, арифметики, добавления и извлечения элементов. Остальные стандартные трейты описаны в собственных главах: `Hash`
 ([HashTable](collections.md#4-hashtablekv)), `Error` ([Типы ошибок](option-result.md#3-типы-ошибок-и-трейт-error)),
 `print-object` ([Печать](printing.md#5-print-object-печатное-представление-по-типу)), а также трейты потоков и
 `Pathish` ([Потоки и файлы](streams-files.md)). Какие типы что реализуют, указано в [Типах](../types.md). Как
@@ -139,3 +139,41 @@
 
 Собственный тип, реализующий `Push`, можно передавать тем же обобщённым функциям. Он может быть и
 объектом трейта, как в `:dyn Push<int>`.
+
+## 5. Трейт `Pop` (извлечение элементов)
+
+```lisp
+(deftrait Pop ()
+  (:type Item)
+  (pop (self) Option<Item>))
+```
+
+Коллекция, из которой можно извлечь элемент, добавленный `push` последним. `none`, если она пуста.
+Обобщённая функция требует её через `(:where (Pop C (Item T)))`.
+
+| Тип | Что делает `pop` |
+|---|---|
+| `Vector<T>` | Извлекает последний элемент |
+| `Deque<T>` | Извлекает последний элемент (`pop-back`) |
+| `Array<T>` | Извлекает элемент прямо перед указателем заполнения. Без указателя заполнения — panic |
+
+У `HashSet<T>` нет «последнего элемента», поэтому он `Push`, но не `Pop`.
+
+```lisp
+(use std::collections::Deque)
+(defun pop-all<C,T> ((c C)) Vector<T> (:where (Pop C (Item T)))
+  (let ((out (the Vector<T> (Vector::new))) (more true))
+    (while more
+      (match (pop c)
+        ((some x) (push out x))
+        ((none) (progn (setf more false) ()))))
+    out))
+
+(let ((v (the Vector<int> #(1 2 3)))
+      (d (the Deque<int> (Deque::new))))
+  (push d 1) (push d 2)
+  (println "~a ~a" (pop-all v) (pop-all d)))              ; #(3 2 1) #(2 1)
+```
+
+Как и `Push`, его может реализовать собственный тип, и он может быть трейт-объектом, как в
+`:dyn Pop<int>`.

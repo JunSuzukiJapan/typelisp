@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 2d61c22ad717f8ad6dfd178f397927e87e1d8902 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
 # Ingebouwde functies
 
 De lijst met ingebouwde functies, methoden en de standaardbibliotheek. Voor syntaxis (speciale vormen
@@ -75,7 +75,7 @@ geschreven als `(argumenttype,...)→returntype`.
 | [sequences.md](sequences.md) | Het paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, sequentiefuncties, luie iterators `lazy`, functies van hogere orde |
 | [collections.md](collections.md) | Strings, tekens, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, foutentypes en de trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, rekenkundige traits, `Push` |
+| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, rekenkundige traits, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, de pretty printer, `print-object`, besturingsvariabelen van de printer |
 | [format.md](format.md) | Formatdirectieven |
 | [streams-files.md](streams-files.md) | Streams, bestandsbewerkingen, padnamen, readtable |
