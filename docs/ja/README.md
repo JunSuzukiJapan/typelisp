@@ -31,6 +31,33 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 (main)
 ```
 
+### ジェネリック
+
+型や関数の名前に山括弧で型パラメータを書きます。トレイト境界は `:where` 節に書きます。詳しくは
+[型の基本](tutorial/types.md) と [トレイト](tutorial/traits.md) を参照してください。
+
+```lisp
+(defstruct Pair<A,B> (first A) (second B))
+
+(impl Pair<A,B>
+  (swap (self) Pair<B,A>
+    (make-instance 'Pair :first self::second :second self::first)))
+
+(defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
+  (let ((best (the Option<T> (Option::none))))
+    (doiter (x (iter xs))
+      (setf best (Option::some (match best
+                                 ((some b) (if (> x b) x b))
+                                 ((none) x)))))
+    best))
+
+(let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
+  (println "~a ~a" p::first p::second))                       ; one 1
+
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+```
+
 ### nil の代わりに Option と Result
 
 `nil` はありません。値が無いかもしれないときは `Option<T>`、失敗するかもしれないときは
@@ -60,6 +87,32 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 (match (parse-port "99999")
   ((ok p) (println "port ~a" p))
   ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### `->` で処理をつなげる
+
+`->` マクロは、値を次の式の第 1 引数として順に渡します。`(-> x (f a) (g b))` は
+`(g (f x a) b)` と同じです。`Option` や `Result` を返す処理を、上から順に書けます。詳しくは
+[Option と Result、エラー型](reference/functions/option-result.md) を参照してください。
+
+```lisp
+(use std::num::parse-int)
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2))
+      (Option::some (truncate n 2))
+      (Option::none)))
+
+(println "~a"
+  (-> (Option::some 40)
+      (and-then half)                          ; (some 20)
+      (and-then half)                          ; (some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+      (unwrap-or 0)))                          ; 11
+
+(println "~a"
+  (-> (parse-int "abc")
+      (map (lambda ((n int)) int (* n 2)))
+      (unwrap-or -1)))                         ; -1
 ```
 
 ### 型検査されるマクロ
