@@ -1,34 +1,24 @@
-# 引き継ぎ（2026-10-30）
+# 引き継ぎ（2026-10-31）
 
-別のセッション（クラウドを含む）がこの作業を続けるための文書。作業の設計と段階は
-[explicit-symbols-plan.md](explicit-symbols-plan.md) にある。ここには、その計画のどこまで進んで
-いて、次に何をするかだけを書く。作業が進んだら、この文書も書き換える。
+別のセッション（クラウドを含む）がこの作業を続けるための文書。作業が進んだら、この文書も書き換える。
 
 ## 1. 今の位置
 
-- ブランチ: `claude/nice-feynman-dasp54`（`feature/keyword-markers` の続き）。main には入れていない。
-- 段階 4（名前の解決をポインタにする）と段階 5（型をフォームと `TypeId` で運ぶ）は済み。
-  各段階で変えたことは計画の 4d・5a〜5e の項にある。
-- 段階 6 は 6a（再公開 `(pub use PATH)`）、6b（ルートの組み込みを `std` へ）、6c（`std::prelude` が
-  `std` を全部再公開）、6d（`std` の子モジュールに分ける）、6d' （シンボルの大文字と小文字の区別）が
-  済み。6d で移したものの一覧は計画の 6d の項にある。`std` 直下に残したもの（`not` `unreachable` `todo`、
-  関数の組み合わせ、`compile-file` `dump`）は 5 節の表に置き場所が無いため。
-- 段階 7 は済み。7a で局所の束縛・block・macrolet をシンボルで引き、7b で組み込みの関数・メソッド・
-  実行時の定義の表をシンボルで引き、すべての定義の名前のシンボルの home を定義したモジュールにし
-  （番人は `tests/definition_home_test.rs`）、定義を指すコア IR を定義のシンボル 1 つにした
-  （`core::definition_form`/`definition_value`）。モジュールの名前と `use` はルートからのパスのまま
-  （`core::root_path_form`/`root_path_value`）。予約語の名前で定義するとエラーになる
-  （2026-10-29 のユーザーの決定）。
-- 段階 8（ダンプ・fasl を計画 3.6 の形に）と段階 9（利用者向け文書）は済み。ダンプの形式は 30。
-  計画の段階はすべて終わった。
-- ABI は 0.3.46。全体テストは最後のコミットで通っている。
-- 途中の作業は無い（作業ツリーはコミット済み）。
+- ブランチ: `main`。`feature/keyword-markers`（とその続きの `claude/nice-feynman-dasp54`）の内容は
+  2026-10-31 にすべて main へ入った。
+- 外のシンボルを明示する計画（[explicit-symbols-plan.md](explicit-symbols-plan.md)）は段階 1〜9 がすべて
+  済んだ。ダンプの形式は 30。
+- その後に入ったもの（経緯は [implementation-log.md](implementation-log.md) の該当の節）:
+  - メソッドの受け手を裸の `self` だけで書く（`(self Self)`/`(self 型)` は断る）。
+  - `Push`/`Pop` トレイト、組み込みメソッドの特殊化（`:dyn` と関数値）、impl の `(:where ...)` の
+    判定、impl の型変数の改名。
+- 全体テストは main の最後のコミットで通っている。途中の作業は無い。
 
-## 2. 次にすること（順に）
+## 2. 次にすること
 
-1. 計画の段階は残っていない。`feature/keyword-markers` を main に入れるかどうかはユーザーが決める。
+決まっている作業は無い。残っている作業は [TODO.md](TODO.md) に書く。
 
-## 3. 移すときの手順
+## 3. `std` へ移すときの手順
 
 1. registry の登録先の名前空間を変え、prelude のソース（`crates/typelisp-front/src/prelude.rs`）なら
    `(module NAME ...)` で包んで `pub` を付ける。新しい子モジュールは `registry::PRELUDE_MODULES` に足す。

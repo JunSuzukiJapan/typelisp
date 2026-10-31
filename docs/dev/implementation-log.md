@@ -12543,3 +12543,39 @@ prelude と島の機械語は、`Interp` のセッションごとに同じビッ
 2026-09-03 の `OnceLock`（`924066a`）は `editor_keyword_sync_test` の中で prelude を読む回数を
 1 回にしたもので、テストごとにセッションが JIT し直すのはそのまま残っていた。全テストの所要時間の合計は 7194 秒から
 3325 秒になった。
+
+## Push と Pop のトレイト（2026-10-31）
+
+`push` は `Vector` のメソッドでしかなく、ジェネリック関数がコレクションを選ばずに要素を足す
+手段が無かった。`std::iter` に 2 つのトレイトを置いた。
+
+- `Push`（`(push (self (x Item)) ())`）: `Vector`（組み込みの `push` そのもの）、`Deque`
+  （`push-back`）、`Array`（`push-extend`）、`HashSet`（`insert`、要素の型が `Hash` のときだけ）。
+- `Pop`（`(pop (self) Option<Item>)`）: `Vector`（組み込み）、`Deque`（`pop-back`。`push` と同じ
+  末尾から取り出し、どの型でも最後に足したものが先に出る）、`Array`（既存の `pop`）。`HashSet` には
+  最後の要素が無いので実装しない。`Push` とは別のトレイトにしたのはこのため。
+
+リストの `push`（CL の place への cons）、`Chan` の `send`、文字列出力ストリームは対象にしていない。
+引数の順番を CL に合わせるマクロ案は採らなかった（順番だけ合わせても CL の `push` にはならず、
+受け手が先の他の操作と揃わなくなる）。
+
+作る途中で出た穴を 3 つ塞いだ。
+
+- **組み込みメソッドを `:dyn` の表と関数値から呼べなかった。** 組み込みメソッドには `FnDef` が
+  無く、`Vector<:dyn Push<int>>` の表は「no such function」、AOT は「dyn dispatch target ... was
+  not compiled」で落ちた。`(apply-to push v)` のように関数値として渡すのも断られていた。
+  `builtin_specializable`/`specialize_builtin_method`（analyze.rs）が、型引数を埋めた
+  シグネチャで組み込みメソッドを呼ぶだけの本体（`Node::Assoc`）を特殊化として作る。直接の呼び出し
+  `(push v x)` は従来どおり組み込みのまま。
+- **impl の `(:where ...)` が型の判定に効いていなかった。** 境界は各メソッドの本体に混ぜられる
+  だけで、`type_implements` は `HashSet<f64>` も `Push` と答え、エラーは特殊化した関数本体の中に
+  出た。`AdtDef::impl_bounds`（トレイト → 型の仮引数 → 境界）に記録し、`impl_bounds_hold` が
+  インスタンス化の型引数で確かめる。エラーは呼び出した地点に出る。
+- **impl で型変数の名前を変えると断られた。** `(defstruct Box<T> ...)` に `(impl Sh Box<U> ...)` と
+  書くと「method `sh` is `(Box<T>) string`, but ... declares `(Box<U>) string`」になった。メソッドは
+  `defmethod` が宣言の名前に直して登録するのに、適合の確認は書かれた名前の対象型と比べ、関連型も
+  書かれた名前で記録していた。`check_impl_form` で対象型・関連型・`:where` の境界を宣言の名前に
+  直してから比べ、記録する。
+
+テストは `tests/push_trait_test.rs`（Push と Pop、インタプリタと compile の両方）、
+`tests/impl_renamed_type_vars_test.rs`、`compile_file_test` の AOT 2 本。
