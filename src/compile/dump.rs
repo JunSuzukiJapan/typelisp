@@ -356,8 +356,10 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompileTarget]) -> Re
     use std::rc::Rc;
 
     let ctx = crate::compile::llvm_context();
+    // One guard across the whole session build — see
+    // `bootstrap::build_island_bitcode`.
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let module = ctx.create_module("session");
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
@@ -383,16 +385,16 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompileTarget]) -> Re
         Rc::new(RefCell::new(module))
     };
 
-    // Without the lock held: `add_compiled_function` takes it per LLVM builtin
-    // call and `Mutex` is not reentrant — the same constraint every other
-    // compile loop in this crate documents.
+    // Each `add_compiled_function` call takes `COMPILE_LOCK` per LLVM builtin,
+    // nesting inside the whole-build guard above.
     for item in items {
         let node = item.link_name();
         crate::compile::driver::add_compiled_function(interp, heap, module.clone(), item, &target_symbol_name(item))
             .map_err(|e| format!("dump: re-compiling `{}` failed: {}", node, e))?;
     }
 
-    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    // Under the whole-build guard above (no second take here: rebinding
+    // `_guard` in this scope would drop the outer one first).
     let bitcode = {
         let m = module.borrow();
         m.verify()

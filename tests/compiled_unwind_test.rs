@@ -38,7 +38,7 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use inkwell::module::Linkage;
 use inkwell::values::ValueKind;
@@ -216,6 +216,10 @@ fn a_second_panic_still_unwinds() {
 /// Set by [`typelisp_test_cleanup_ran`], so a test can tell whether the
 /// landing pad actually executed rather than being merely emitted.
 static CLEANUP_RUNS: AtomicUsize = AtomicUsize::new(0);
+// The `a_protected_frame_*` tests assert exact deltas on `CLEANUP_RUNS`, so
+// they hold this for their whole body: libtest runs them in parallel, and
+// interleaved cleanups would land in each other's counts.
+static ONE_CLEANUP_COUNT_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 /// Stands in for an `unwind-protect`'s cleanup form: something observable
 /// that the landing pad calls while the panic is in flight.
@@ -321,6 +325,7 @@ fn call_protected(arg: i64) -> i64 {
 /// not run and the value comes back as usual.
 #[test]
 fn a_protected_frame_returns_normally_and_skips_its_cleanup() {
+    let _serial = ONE_CLEANUP_COUNT_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let before = CLEANUP_RUNS.load(Ordering::SeqCst);
     assert_eq!(call_protected(21), 42);
     assert_eq!(CLEANUP_RUNS.load(Ordering::SeqCst), before, "cleanup ran on the normal path");
@@ -335,6 +340,7 @@ fn a_protected_frame_returns_normally_and_skips_its_cleanup() {
 /// to release.
 #[test]
 fn a_protected_frame_runs_its_cleanup_while_a_panic_unwinds_through() {
+    let _serial = ONE_CLEANUP_COUNT_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let before = CLEANUP_RUNS.load(Ordering::SeqCst);
     let payload = without_panic_output(|| catch_unwind(AssertUnwindSafe(|| call_protected(0))))
         .expect_err("the panic did not propagate past the landing pad");
@@ -350,6 +356,7 @@ fn a_protected_frame_runs_its_cleanup_while_a_panic_unwinds_through() {
 /// `unwind-protect` over and over.
 #[test]
 fn a_protected_frame_is_reusable_after_an_unwind() {
+    let _serial = ONE_CLEANUP_COUNT_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let before = CLEANUP_RUNS.load(Ordering::SeqCst);
     for _ in 0..3 {
         let _ = without_panic_output(|| catch_unwind(AssertUnwindSafe(|| call_protected(0)))).expect_err("expected a panic");

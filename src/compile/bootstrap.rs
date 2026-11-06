@@ -158,31 +158,30 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;
     }
 
+    // One guard across the whole island build — declarations, every
+    // island-driven `llvm-*` builtin in the loop, verification and the
+    // bitcode write — so no other thread's IR building interleaves with this
+    // one on the shared Context. The inner takes nest (see `COMPILE_LOCK`).
+    //
     // The island announces its ring with `defsignature` and is written as ~60
     // mutually recursive top-level functions rather than one `labels` block,
     // so nothing can be compiled until everything is declared — see
     // `fresh_module_with_declarations`.
-    let module = crate::compile::driver::fresh_module_with_declarations("compiler_island", &items);
-    // `add_compiled_function` locks `COMPILE_LOCK` per LLVM builtin call
-    // (`eval_llvm_builtin_method`) and `Mutex` isn't reentrant, so it must
-    // run without the lock held — same constraint `aot::compile_file`
-    // documents at its own loop.
-    for item in &items {
-        let node_name = item.link_name();
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item))
-            .map_err(|e| format!("island compile of `{}` failed: {}", node_name, e))?;
-    }
-
     let bitcode = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let module = crate::compile::driver::fresh_module_with_declarations("compiler_island", &items);
+        for item in &items {
+            let node_name = item.link_name();
+            crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item))
+                .map_err(|e| format!("island compile of `{}` failed: {}", node_name, e))?;
+        }
         let bitcode = {
             let m = module.borrow();
             crate::compile::verify_module_naming_functions(&m, "island module")
                 .and_then(|()| crate::compile::type_table::write_bitcode(&m))
         };
-        // Destroyed with the guard still held: `module` was declared before it,
-        // so its own drop would run after the guard released, and `~Module`
-        // unregisters every value name from the shared LLVM Context (see
+        // Destroyed with the guard still held: `~Module` unregisters every
+        // value name from the shared LLVM Context (see
         // `compile::COMPILE_LOCK`).
         drop(module);
         bitcode?

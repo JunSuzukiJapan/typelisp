@@ -399,8 +399,14 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         .collect();
 
     let ctx = crate::compile::llvm_context();
+    // One guard across the whole build — module creation, every island-driven
+    // `llvm-*` builtin in the loops below, the `main` wrapper, verification
+    // and the object emission — so no other thread's IR building interleaves
+    // with this one on the shared Context. The inner takes nest (see
+    // `COMPILE_LOCK`); the non-LLVM work in between (the `eval` environment)
+    // runs under it too, which only costs other threads' wait.
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let module = ctx.create_module("compiled_file");
         // Forward-declares every `rt_*` shim (no body) so `compile-call`'s
         // `get-function` finds one the same way it finds any other
@@ -458,8 +464,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // this module and **aborts the process** when it finds nothing, so the
         // declaration has to be there first. Nothing exercised this until the
         // prelude arrived: a file that could not name a generic could not
-        // instantiate one either.
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        // instantiate one either. Under the whole-build guard above.
         let m = module.borrow();
         // A *Lisp* function's type, so it must follow this process's emit ABI
         // rather than the fixed `(ptr, i32)` the `rt_*` shims keep. A
@@ -483,12 +488,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 
     // One shared module, one `add_compiled_function` call per `defun` —
     // *not* per-function modules merged afterward, see this module's doc
-    // comment for why. `add_compiled_function` internally locks
-    // `COMPILE_LOCK` per LLVM builtin call (via `eval_llvm_builtin_method`),
-    // and `Mutex` isn't reentrant, so it must be called without the lock
-    // already held — unlike the rest of this function from here on, which
-    // touches the LLVM Context family of APIs directly with no calls back
-    // into `Interp`/the typelisp compiler body.
+    // comment for why. Each call takes `COMPILE_LOCK` per LLVM builtin (via
+    // `eval_llvm_builtin_method`), nesting inside the whole-build guard above.
     for item in &items {
         // Every user body's own LLVM symbol name is `ConcreteNames::symbol`'s
         // — `main` is no longer a special case: `build_main_wrapper` calls it
@@ -591,11 +592,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // Only when the program actually needs an interpreter ([`EVAL_SHIMS`]):
     // naming one of those shims is what makes the linker pull the checker and
     // the interpreter in, the same rule the printer's registration block
-    // follows. Asked under its own short lock so the environment below —
-    // which runs the checker and the interpreter, and touches no LLVM at all
-    // — is built without holding it.
+    // follows.
     let calls_eval = {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let m = module.borrow();
         module_calls_any(&m, &EVAL_SHIMS)
     };
@@ -628,7 +626,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // to the program's own definition.
     let eval_ns = typelisp_front::mem::symbols::ns_of(&entry_segs);
 
-    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    // Under the whole-build guard above (no second take here: rebinding
+    // `_guard` in this scope would drop the outer one first).
     let result = {
         let m = module.borrow();
         // One entry per C callback the program passes (`analyze::ffi_callback`),
@@ -659,11 +658,10 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
             .and_then(|()| write_executable(&m, output_path, &link_libraries, &items))
     };
-    // Destroyed here rather than left to fall out of scope: `module` was
-    // declared before the guard, so its own drop would run *after* the guard
-    // released, and `~Module` unregisters every value name from the shared
-    // LLVM Context (see `compile::COMPILE_LOCK`). Written as a `result`
-    // binding rather than `?`s so the failing paths take this route too.
+    // Destroyed here with the guard still held rather than left to fall out
+    // of scope: `~Module` unregisters every value name from the shared LLVM
+    // Context (see `compile::COMPILE_LOCK`). Written as a `result` binding
+    // rather than `?`s so the failing paths take this route too.
     drop(module);
     result
 }

@@ -468,50 +468,48 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
     reconcile_unsupported(&heap, &interp, &plan)?;
     let items = plan.compilable(&heap, &interp);
 
-    let module = crate::compile::driver::fresh_module_with_declarations("prelude_compiled", &items);
-
-    // `add_compiled_function` locks `COMPILE_LOCK` per LLVM builtin call (via
-    // `eval_llvm_builtin_method`) and `Mutex` isn't reentrant, so it must run
-    // without the lock held — the same constraint `aot::compile_file` and the
-    // island generator both document at their own loops.
-    for item in &items {
-        let node = item.link_name();
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item)).map_err(|e| {
-            format!(
-                "prelude: compiling `{}` failed: {} — the precheck said it was fine, so this is a \
-                 gap the call-graph walk cannot see rather than a missing lowering to record in \
-                 PRELUDE_COMPILE_UNSUPPORTED",
-                node, e
-            )
-        })?;
-    }
-
-    // Trait-object tables are the one thing a library artifact cannot carry as
-    // it stands: `dyn-new` bakes a vtable id and `dyn-upcast` a trait id, and
-    // both are assigned per boxing/upcast site during translation, so a
-    // reproducible numbering would need the same eager, ordered replay
-    // `promote_globals` does for globals — plus, for vtables, a way to publish
-    // the addresses (`compile::aot::build_main_wrapper` emits `rt_vtable_set`
-    // calls; a JIT-installed library has no startup sequence to put them in).
-    // No prelude body reaches either today: `as-dyn-error` is generic, and the
-    // stream combinators take already-boxed `:dyn` values rather than boxing
-    // any. A `dyn-call` bakes only a slot index, so dispatching on `:dyn` — the
-    // composed streams do — is fine.
-    //
-    // Checked rather than assumed, because the failure it guards is silent: a
-    // baked id that means something different at load time reads the wrong
-    // vtable and calls the wrong function.
-    if !interp.vtable_descriptors().is_empty() || !interp.upcast_descriptors().is_empty() {
-        return Err(
-            "prelude: a compiled body boxes or upcasts a trait object, whose vtable/trait ids are \
-             baked in per site — the artifact needs an ordered replay of those tables at load time \
-             before this can be shipped (see this function's comment)"
-                .to_string(),
-        );
-    }
-
+    // One guard across the whole prelude build — see
+    // `bootstrap::build_island_bitcode`.
     let bitcode = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let module = crate::compile::driver::fresh_module_with_declarations("prelude_compiled", &items);
+
+        for item in &items {
+            let node = item.link_name();
+            crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item)).map_err(|e| {
+                format!(
+                    "prelude: compiling `{}` failed: {} — the precheck said it was fine, so this is a \
+                     gap the call-graph walk cannot see rather than a missing lowering to record in \
+                     PRELUDE_COMPILE_UNSUPPORTED",
+                    node, e
+                )
+            })?;
+        }
+
+        // Trait-object tables are the one thing a library artifact cannot carry as
+        // it stands: `dyn-new` bakes a vtable id and `dyn-upcast` a trait id, and
+        // both are assigned per boxing/upcast site during translation, so a
+        // reproducible numbering would need the same eager, ordered replay
+        // `promote_globals` does for globals — plus, for vtables, a way to publish
+        // the addresses (`compile::aot::build_main_wrapper` emits `rt_vtable_set`
+        // calls; a JIT-installed library has no startup sequence to put them in).
+        // No prelude body reaches either today: `as-dyn-error` is generic, and the
+        // stream combinators take already-boxed `:dyn` values rather than boxing
+        // any. A `dyn-call` bakes only a slot index, so dispatching on `:dyn` — the
+        // composed streams do — is fine.
+        //
+        // Checked rather than assumed, because the failure it guards is silent: a
+        // baked id that means something different at load time reads the wrong
+        // vtable and calls the wrong function.
+        if !interp.vtable_descriptors().is_empty() || !interp.upcast_descriptors().is_empty() {
+            return Err(
+                "prelude: a compiled body boxes or upcasts a trait object, whose vtable/trait ids are \
+                 baked in per site — the artifact needs an ordered replay of those tables at load time \
+                 before this can be shipped (see this function's comment)"
+                    .to_string(),
+            );
+        }
+
         let bitcode = {
             let m = module.borrow();
             crate::compile::verify_module_naming_functions(&m, "prelude module")

@@ -30,7 +30,9 @@
 //!
 //! Every arm of [`eval_llvm_builtin_method`] holds [`crate::compile::COMPILE_LOCK`]
 //! for its duration — see that constant's doc comment for why concurrent
-//! access to the one process-wide LLVM `Context` must never happen.
+//! access to the one process-wide LLVM `Context` must never happen. A whole
+//! compile holds that same lock across the island, so these takes usually
+//! nest inside its guard rather than acquiring it themselves.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -58,7 +60,8 @@ use crate::types::Path;
 /// `AdtDef`s in `registry::llvm_module_def` etc. carry no `defmethod` body).
 /// Every arm holds [`crate::compile::COMPILE_LOCK`] for its duration — see
 /// that constant's doc comment for why concurrent access to the one
-/// process-wide LLVM `Context` must never happen.
+/// process-wide LLVM `Context` must never happen — nesting inside the
+/// whole-compile guard when the island runs under one.
 pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: SymRef, args: &[Value]) -> Option<Result<Value, EvalError>> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::LLVM_MODULE) {
@@ -2067,7 +2070,8 @@ pub(crate) enum NativeHandle {
 /// static's doc comment) — including at thread exit, which is where this
 /// `Drop` comes in. A thread normally exits outside the lock and takes it
 /// here; a process LLVM ends with `exit` from inside a compile runs this with
-/// the lock already held, and then the destructor is inside it as it is.
+/// the lock already held, and then the take nests instead of waiting for
+/// itself forever.
 ///
 /// The shares are not handed to `compile::retire_llvm` the way an engine is:
 /// these are `Rc`s, and every share of a given module lives on this thread
@@ -2079,8 +2083,7 @@ struct LlvmHandles(Vec<NativeHandle>);
 
 impl Drop for LlvmHandles {
     fn drop(&mut self) {
-        let lock = &crate::compile::COMPILE_LOCK;
-        let _guard = (!lock.held_here()).then(|| lock.lock().unwrap_or_else(|e| e.into_inner()));
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         self.0.clear();
     }
 }
@@ -2201,11 +2204,10 @@ pub(crate) fn llvm_handles_mark() -> usize {
 /// The handles come out of the registry first and are destroyed afterwards,
 /// under `COMPILE_LOCK`: a released `Builder`/`Module` share is often the last
 /// one, and its destructor touches the shared LLVM Context — see
-/// [`LlvmHandles`]. Taking the lock here is safe because the only caller
-/// (`Interp::run_compile_function`) runs outside it, as `add_compiled_function`
-/// requires; the registry's own `RefCell` borrow ends before the lock is taken,
-/// so a destructor that reached back into the registry could not deadlock on
-/// that either.
+/// [`LlvmHandles`]. The take nests inside the whole-compile guard the caller
+/// (`Interp::run_compile_function`) runs under; the registry's own `RefCell`
+/// borrow ends before the lock is taken, so a destructor that reached back
+/// into the registry could not deadlock on that either.
 pub(crate) fn llvm_handles_release(mark: usize) {
     let released: Vec<NativeHandle> = LLVM_HANDLES.with(|t| t.borrow_mut().0.split_off(mark));
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());

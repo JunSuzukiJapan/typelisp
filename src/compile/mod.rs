@@ -169,9 +169,11 @@ use inkwell::module::Module;
 
 /// Serializes every LLVM-Context-touching operation. LLVM's C API is not
 /// safe to call concurrently against one `Context` from multiple threads
-/// (its type-uniquing tables aren't synchronized), so this is held for the
-/// duration of any compile even though nothing here spawns compiler threads
-/// today — cheap insurance against a known class of non-deterministic crash.
+/// (its type-uniquing tables aren't synchronized), so a whole compile holds
+/// this from its first IR operation to its last — module creation, every
+/// island-driven `llvm-*` builtin, verification, and the JIT or object
+/// emission — rather than taking it per call and letting two threads'
+/// IR building interleave on the shared Context.
 ///
 /// **Destruction counts as a Context-touching operation**, and it is the one
 /// that used to escape: `~Module` walks its functions and unregisters every
@@ -184,13 +186,19 @@ use inkwell::module::Module;
 pub static COMPILE_LOCK: CompileLock = CompileLock(Mutex::new(()));
 
 /// The lock [`COMPILE_LOCK`] is: a `Mutex` that knows whether the calling
-/// thread is the one holding it.
+/// thread is the one holding it, and nests when it is.
 ///
-/// That is what a destructor run at process exit needs to ask. LLVM ends the
-/// process with `exit` from inside a compile on a fatal error (an object file
-/// it cannot finish writing, say), so the thread-local teardown that `exit`
-/// runs can find this thread still inside the lock; taking it again there
-/// would wait for itself forever instead of letting the process end.
+/// Nesting is what makes the whole-compile rule above statable: the island's
+/// `llvm-*` builtins take this lock per call, and a compile holding it across
+/// the island would deadlock on the first builtin if the second take waited.
+/// Instead the inner take is a no-op — the outer guard is what excludes other
+/// threads, and dropping the inner one changes nothing.
+///
+/// That nesting is also what a destructor run at process exit needs. LLVM ends
+/// the process with `exit` from inside a compile on a fatal error (an object
+/// file it cannot finish writing, say), so the thread-local teardown that
+/// `exit` runs can find this thread still inside the lock; taking it again
+/// there nests instead of waiting for itself forever.
 pub struct CompileLock(Mutex<()>);
 
 thread_local! {
@@ -198,18 +206,23 @@ thread_local! {
 }
 
 /// [`COMPILE_LOCK`] held by this thread, until dropped.
+///
+/// A nested take holds no `MutexGuard` of its own — there is nothing for it
+/// to release — so only an owning guard clears the thread-local flag.
 pub struct CompileGuard<'a> {
-    _guard: std::sync::MutexGuard<'a, ()>,
+    _guard: Option<std::sync::MutexGuard<'a, ()>>,
 }
 
 impl CompileLock {
-    /// Waits for the lock. Panics when this thread already holds it: the
-    /// lock is not reentrant, and the second take would never return.
+    /// Waits for the lock, unless this thread already holds it — then this
+    /// nests (see [`CompileLock`]) rather than waiting for itself.
     pub fn lock(&self) -> std::sync::LockResult<CompileGuard<'_>> {
-        assert!(!self.held_here(), "COMPILE_LOCK is already held by this thread");
+        if self.held_here() {
+            return Ok(CompileGuard { _guard: None });
+        }
         let wrap = |guard| {
             HOLDS_COMPILE_LOCK.with(|held| held.set(true));
-            CompileGuard { _guard: guard }
+            CompileGuard { _guard: Some(guard) }
         };
         match self.0.lock() {
             Ok(guard) => Ok(wrap(guard)),
@@ -225,7 +238,9 @@ impl CompileLock {
 
 impl Drop for CompileGuard<'_> {
     fn drop(&mut self) {
-        HOLDS_COMPILE_LOCK.with(|held| held.set(false));
+        if self._guard.is_some() {
+            HOLDS_COMPILE_LOCK.with(|held| held.set(false));
+        }
     }
 }
 
@@ -468,6 +483,32 @@ mod tests {
 
     use super::{llvm_context, CompiledFn, COMPILE_LOCK};
     use crate::compile::runtime::rt_ping;
+
+    /// `COMPILE_LOCK` nests on the holding thread and still excludes every
+    /// other: a whole compile holds it across the island's per-builtin takes,
+    /// so the inner take must return at once rather than wait for itself —
+    /// and dropping it must not release the outer one.
+    #[test]
+    fn compile_lock_nests_on_the_holding_thread_and_excludes_other_threads() {
+        let outer = COMPILE_LOCK.lock().unwrap();
+        assert!(COMPILE_LOCK.held_here());
+        // Nested: returns instead of deadlocking, and changes nothing.
+        let inner = COMPILE_LOCK.lock().unwrap();
+        drop(inner);
+        assert!(COMPILE_LOCK.held_here());
+        // Another thread still waits while the outer guard lives ...
+        let (tx, rx) = std::sync::mpsc::channel();
+        let peer = std::thread::spawn(move || {
+            let _peer = COMPILE_LOCK.lock().unwrap();
+            tx.send(()).unwrap();
+        });
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err());
+        // ... and proceeds once it is gone.
+        drop(outer);
+        rx.recv_timeout(std::time::Duration::from_secs(10)).expect("the peer never acquired the lock");
+        peer.join().unwrap();
+        assert!(!COMPILE_LOCK.held_here());
+    }
 
     /// Stage 0's JIT-side half of the proof that a `#[no_mangle]` Rust
     /// function from [`crate::compile::runtime`] is callable through the

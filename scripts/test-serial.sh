@@ -3,14 +3,15 @@
 #
 # `cargo test` launches the compiled test executables in parallel, and several
 # of them (compile_test, compile_file_test, ...) drive LLVM/JIT compilation
-# against the one process-wide `LLVMContext` (`src/compile/mod.rs`). Concurrent
-# LLVM use — whether across *processes* or across *threads within one test
-# binary* — can crash with SIGSEGV: `COMPILE_LOCK` guards each individual LLVM
-# builtin, but IR building and JIT execution still interleave on the shared
-# Context across threads, which LLVM does not support. It's rare and
-# load-dependent (a single binary passes on its own most of the time), but not
-# zero, so this script both serializes across binaries *and* forces
-# `--test-threads=1` within each for a reliable green signal.
+# against the one process-wide `LLVMContext` (`src/compile/mod.rs`). Separate
+# processes cannot collide on it — each has its own address space — so the
+# hazard this guards is *threads within one test binary*, where two tests'
+# IR building used to interleave on the shared `Context` (which LLVM does
+# not support) and crash with a rare, load-dependent SIGSEGV. `COMPILE_LOCK`
+# now serializes whole compiles instead of single builtins, which is designed
+# to make in-binary parallelism safe again; until the suite has proven that
+# in parallel, this script keeps both serializations — across binaries *and*
+# `--test-threads=1` within each — for a reliable green signal.
 #
 # Usage:
 #   scripts/test-serial.sh                # lib + every integration test
@@ -27,9 +28,10 @@
 # this, one runaway costs the whole run: on 2026-09-11 a malformed `loop` in a
 # hand-written core-IR test span for **nine hours** at 100% CPU on the *first*
 # target, and the run reported nothing at all — not even which file it was in.
-# `COMPILE_LOCK` is the other way to hang here: it is not reentrant, so taking
-# it where it is already held waits forever. A timed-out target is named in
-# `TIMEDOUT:` at the end and is a failure, not a skip.
+# A timed-out target is named in `TIMEDOUT:` at the end and is a failure,
+# not a skip. (`COMPILE_LOCK` used to be named here as the other way to hang:
+# it was not reentrant, so taking it where it was already held waited
+# forever. It nests now; a hang here is a runaway test, not the lock.)
 #
 # 3600s is about twice the slowest targets measured on the slowest machines the
 # suite runs on: compile_file_test, ~30 minutes in an x86_64 Linux VM (colima),

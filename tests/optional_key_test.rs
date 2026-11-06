@@ -18,9 +18,9 @@ use typelisp::{Checker, Error, Heap, Interp, Reader, Value};
 /// A `defun`d function under test, `(compile name)`d before the final call —
 /// same source, so `eval_ok`/`eval_ok_compiled` on identical inputs proves
 /// the interp and compile paths agree. No `COMPILE_LOCK` here: `Interp`
-/// already takes it internally for the `(compile ...)` form itself (see
-/// `eval::interp`'s own `COMPILE_LOCK` call sites) — locking it again around
-/// this whole call would self-deadlock on the same thread.
+/// already holds it across the whole `(compile ...)` form itself (see
+/// `eval::interp`'s own `COMPILE_LOCK` call sites) — an outer guard around
+/// this whole call would only serialize this test for no reason.
 fn eval_ok_compiled(def_and_calls: &str, compile_name: &str) -> Value {
     let src = def_and_calls.replacen("%COMPILE%", &format!("(compile {})", compile_name), 1);
     eval_ok(&src)

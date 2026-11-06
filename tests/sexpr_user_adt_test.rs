@@ -144,12 +144,11 @@ fn a_struct_instance_flows_through_a_compiled_function_still_shared() {
     // explicitly compiled (JIT) — `compile`'s own construct-sexpr lowering
     // handles the `int`-wrap `Expr::Construct` unchanged. No manual
     // `COMPILE_LOCK` guard here — `Interp::exec`'s own `(compile name)`
-    // handling already takes it internally (see `compile_test.rs`'s
-    // `run_with_compiler`/`compile_dispatches_a_defun_call_to_native_code`,
-    // which call it exactly this way); wrapping this whole call in an
-    // *outer* guard self-deadlocks the very first time `load_compiler`'s
-    // own `install_island_bitcode` tries to acquire the same non-reentrant
-    // `Mutex` from this same thread.
+    // handling already holds it across the whole compile (see
+    // `compile_test.rs`'s `run_with_compiler`/
+    // `compile_dispatches_a_defun_call_to_native_code`, which call it
+    // exactly this way), so an *outer* guard here would only serialize
+    // this test against every other compile for no reason.
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();

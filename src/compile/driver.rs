@@ -655,41 +655,44 @@ pub fn disassemble_function(
     let symbol = target_symbol_name(target);
     let edges = call_graph_edges(interp, heap, target)?;
 
-    let module = {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("disassemble")));
-        crate::compile::llvm_builtins::declare_external_compiled_function(&module, &symbol);
-        for edge in &edges {
-            let target_symbol = target_symbol_name(edge);
-            if target_symbol != symbol {
-                crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol);
-            }
+    // One guard across the whole disassembly — see `compile_scc`.
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("disassemble")));
+    crate::compile::llvm_builtins::declare_external_compiled_function(&module, &symbol);
+    for edge in &edges {
+        let target_symbol = target_symbol_name(edge);
+        if target_symbol != symbol {
+            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol);
         }
-        for (rt_name, _) in rt_extern_functions() {
-            crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
-        }
-        module
-    };
+    }
+    for (rt_name, _) in rt_extern_functions() {
+        crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
+    }
 
     add_compiled_function(interp, heap, module.clone(), target, &symbol)?;
 
-    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let verified = crate::compile::verify_module_naming_functions(&module.borrow(), "disassemble: module");
-    if llvm_ir {
+    // Bound rather than returned directly, so `module` is destroyed with the
+    // guard still held on every path: `~Module` unregisters every value name
+    // from the shared LLVM Context (see `compile::COMPILE_LOCK`).
+    let result = if llvm_ir {
         // Printed even when it does not verify. Asking for the IR is what you
         // do *because* something is wrong with it; refusing to show it then is
         // backwards. The complaint goes on the end so it is not lost.
         let text = module.borrow().print_to_string().to_string();
-        return Ok(match verified {
+        Ok(match verified {
             Ok(()) => text,
             Err(e) => format!("{}\n; {}", text, e),
-        });
-    }
-    verified.map_err(EvalError::Panic)?;
-    // Bound rather than returned directly: the `borrow()` temporary would
-    // otherwise outlive `module` in tail position.
-    let assembly = crate::compile::aot::assembly_of(&module.borrow());
-    assembly.map_err(EvalError::Panic)
+        })
+    } else {
+        verified.map_err(EvalError::Panic)?;
+        // Bound rather than returned directly: the `borrow()` temporary would
+        // otherwise outlive `module` in tail position.
+        let assembly = crate::compile::aot::assembly_of(&module.borrow());
+        assembly.map_err(EvalError::Panic)
+    };
+    drop(module);
+    result
 }
 
 /// Answers "would compiling `name` reach something with no compilable
@@ -955,23 +958,23 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[CompileTarget]) 
         }
     }
 
-    let module = {
-        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
-        for member in members.iter().chain(&targets) {
-            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol_name(member));
-        }
-        for (rt_name, _) in rt_extern_functions() {
-            crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
-        }
-        module
-    };
+    // One guard across the whole SCC — declarations, every island-driven
+    // `llvm-*` builtin below, verification and the JIT — so no other thread's
+    // IR building interleaves with this one on the shared Context. The inner
+    // takes nest (see `COMPILE_LOCK`).
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
+    for member in members.iter().chain(&targets) {
+        crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol_name(member));
+    }
+    for (rt_name, _) in rt_extern_functions() {
+        crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
+    }
 
     for member in members {
         add_compiled_function(interp, heap, module.clone(), member, &target_symbol_name(member))?;
     }
 
-    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let mut externals: Vec<(String, usize)> = targets
         .iter()
         .map(|t| {
