@@ -14,7 +14,8 @@
     判定、impl の型変数の改名。
 - 全体テストは main の最後のコミットで通っている。
 - 途中の作業: ブランチ `fix/reentrant-compile-lock`（2026-11-06）。`COMPILE_LOCK` の再入対応と
-  コンパイル全体の直列化。コンパイル系のスイートは並列実行で緑を確認済み。全体テストは未実行。
+  コンパイル全体の直列化。全体スイートを並列実行し、sandbox の OS 制限で赤の 4 件以外は緑を
+  確認済み（赤は sandbox 解除で緑）。シリアルの全体テストは未実行。
 
 ## 2. 次にすること
 
@@ -83,7 +84,8 @@
   `scripts/with-llvm-env.sh cargo check --workspace --all-targets --locked`）。
 - 全体テストは `scripts/with-llvm-env.sh scripts/test-serial.sh > <ログ> 2>&1`。通ったと言えるのは
   ログに `ALL TESTS PASSED (serial)` があるときだけ。始める前に `~/.typelisp/cache` を消す
-  （registry を変えると古い fasl のキャッシュが残る）。
+  （registry を変えると古い fasl のキャッシュが残る）。並列で流すときは
+  `scripts/test-parallel.sh`（同じ対象、結果は `target/test-parallel-logs/`）。
 - コミットや push の前の残りの確認（警告 0 の `cargo check`、生成物の再生成の判断、全体テストの
   判定、翻訳の直し方）は、スキル `.claude/skills/commit-check/SKILL.md` にまとめてある。
 
