@@ -13,6 +13,7 @@
 #   scripts/test-parallel.sh                # lib + every integration test
 #   scripts/test-parallel.sh compile_test ffi_test
 #   scripts/test-parallel.sh -j 4           # at most 4 binaries at once
+#   scripts/test-parallel.sh --shard 2/4    # the second quarter of them
 #   scripts/test-parallel.sh -- --test-threads=4
 #
 # `-j N` (`TEST_JOBS`, default 6) caps how many test binaries run at once.
@@ -20,6 +21,11 @@
 # `--test-threads`, passed after a `--` like in `test-serial.sh`. Flags
 # after `--` are forwarded to every `cargo test` invocation; they must not
 # contain spaces.
+#
+# A shard is every target whose position in the list (lib first, then
+# tests/*.rs in name order) is congruent to it modulo the count, so the shards
+# of one count cover the list exactly once between them — the same rule
+# `test-each.sh` uses. A shard cannot be combined with named targets.
 #
 # EACH TARGET GETS A TIMEOUT (`TEST_TIMEOUT`, default 3600s) and its own log
 # under `target/test-parallel-logs/<target>.log`. Stdout carries one
@@ -89,22 +95,34 @@ fi
 
 jobs="${TEST_JOBS:-6}"
 targets=()
+named=0
 passthrough=()
+shard_spec=""
 seen_dashes=0
+usage="usage: scripts/test-parallel.sh [-j N] [--shard <index>/<count>] [targets...] [-- cargo-test-flags...]"
 while [ $# -gt 0 ]; do
     if [ "$seen_dashes" -eq 1 ]; then
         passthrough+=("$1")
     elif [ "$1" = "--" ]; then
         seen_dashes=1
     elif [ "$1" = "-j" ] || [ "$1" = "--jobs" ]; then
-        [ $# -ge 2 ] || { echo "usage: scripts/test-parallel.sh [-j N] [targets...] [-- cargo-test-flags...]" >&2; exit 2; }
+        [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }
         jobs="$2"
         shift
+    elif [ "$1" = "--shard" ] || [[ "$1" == --shard=* ]]; then
+        if [ "$1" = "--shard" ]; then
+            [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }
+            shard_spec="$2"
+            shift
+        else
+            shard_spec="${1#--shard=}"
+        fi
     elif [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
         sed -n '2,/^set -uo pipefail$/p' "${BASH_SOURCE[0]}" | sed 's/^#//;s/^ //'
         exit 0
     else
         targets+=("$1")
+        named=1
     fi
     shift
 done
@@ -115,6 +133,30 @@ if [ "${#targets[@]}" -eq 0 ]; then
     for f in tests/*.rs; do
         targets+=("$(basename "$f" .rs)")
     done
+fi
+
+# A shard of the default set (never of named targets): `test-each.sh`'s own
+# rule, so the two scripts agree on what shard 2/4 is.
+if [ -n "$shard_spec" ]; then
+    if [ "$named" -eq 1 ]; then
+        echo "error: --shard cannot be combined with named targets" >&2
+        exit 2
+    fi
+    if ! [[ "$shard_spec" =~ ^([0-9]+)/([0-9]+)$ ]] || [ "${BASH_REMATCH[1]}" -lt 1 ] ||
+        [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+        echo "error: --shard takes <index>/<count> with 1 <= index <= count, got: $shard_spec" >&2
+        exit 2
+    fi
+    shard="${BASH_REMATCH[1]}"
+    count="${BASH_REMATCH[2]}"
+    all=("${targets[@]}")
+    targets=()
+    for i in "${!all[@]}"; do
+        if [ $((i % count + 1)) -eq "$shard" ]; then
+            targets+=("${all[$i]}")
+        fi
+    done
+    echo "shard $shard/$count: ${#targets[@]} of ${#all[@]} target(s)"
 fi
 
 # The AOT tests (`compile_file_test`) link `target/debug/libtypelisp_front.a`
@@ -145,6 +187,12 @@ echo "=== cargo build -p typelisp-front (staticlib for the AOT tests) ==="
 cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's staticlib"; exit 1; }
 
 mkdir -p "$logdir"
+# Fresh verdicts: without this, a target whose worker never ran would be
+# judged by the `.rc` file a previous run left behind.
+for t in "${targets[@]}"; do
+    if [ "$t" = "--lib" ]; then key="lib"; else key="$t"; fi
+    rm -f "$logdir/$key.rc"
+done
 # The passthrough flags, quoted once for the trip through xargs (which does
 # its own quote processing, the way a shell would). They must not contain
 # spaces — see the header comment.
@@ -187,4 +235,8 @@ if [ "${#timedout[@]}" -ne 0 ] || [ "${#missing[@]}" -ne 0 ] || [ "${#failed[@]}
     echo "(per-target logs under $logdir/)"
     exit 1
 fi
-echo "ALL TESTS PASSED (parallel, -j$jobs)"
+if [ -n "$shard_spec" ]; then
+    echo "ALL ${#targets[@]} TARGET(S) PASSED (parallel, -j$jobs, shard $shard_spec)"
+else
+    echo "ALL TESTS PASSED (parallel, -j$jobs)"
+fi

@@ -47,13 +47,13 @@ scripts/with-llvm-env.sh cargo check --workspace --all-targets --locked 2>&1 | g
 ## 3. 全体テスト
 
 ```sh
-scripts/with-llvm-env.sh scripts/test-serial.sh > <ログ> 2>&1
+scripts/with-llvm-env.sh scripts/test-parallel.sh > <ログ> 2>&1
 ```
 
-通ったと言えるのは、ログに `ALL TESTS PASSED (serial)` があるときだけ。
+通ったと言えるのは、ログに `ALL TESTS PASSED (parallel` があるときだけ。
+失敗の決定論的な再実行には `scripts/test-serial.sh`（同じ対象を 1 本ずつ）を使う。
 
-- LLVM を使うテストを別々のプロセスで同時に走らせると SIGSEGV する。個別のテストも 1 本ずつ
-  流す。SIGSEGV したテストは `test result` の行を出さないので、行が無いのも失敗として数える。
+- SIGSEGV したテストは `test result` の行を出さないので、行が無いのも失敗として数える。
 - AOT のテスト（実行ファイルを作るもの）は `cargo test` が作らない staticlib にリンクする。
   ソースを変えたら先に `scripts/with-llvm-env.sh cargo build -p typelisp-front`。
 - zsh は変数を単語に分けない。テスト名の絞り込みを変数で渡すと空振りするので、直接書く。

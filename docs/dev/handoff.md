@@ -13,9 +13,9 @@
   - `Push`/`Pop` トレイト、組み込みメソッドの特殊化（`:dyn` と関数値）、impl の `(:where ...)` の
     判定、impl の型変数の改名。
 - 全体テストは main の最後のコミットで通っている。
-- 途中の作業: ブランチ `fix/reentrant-compile-lock`（2026-11-06）。`COMPILE_LOCK` の再入対応と
-  コンパイル全体の直列化。全体スイートを並列実行し、sandbox の OS 制限で赤の 4 件以外は緑を
-  確認済み（赤は sandbox 解除で緑）。シリアルの全体テストは未実行。
+- 2026-11-06 の並列化作業は main に入った（`COMPILE_LOCK` の再入対応とコンパイル全体の
+  直列化、`scripts/test-parallel.sh` の新設、既定の全体テストの並列化）。シリアル全走は
+  sandbox の OS 制限で赤の 4 件以外は緑を確認済み（赤は制限解除で緑）。途中の作業は無い。
 
 ## 2. 次にすること
 
@@ -82,10 +82,10 @@
   `target/aot-test-tmp` の古いものを消して空ける。
 - cargo のコマンドは `scripts/with-llvm-env.sh` を通して打つ（例:
   `scripts/with-llvm-env.sh cargo check --workspace --all-targets --locked`）。
-- 全体テストは `scripts/with-llvm-env.sh scripts/test-serial.sh > <ログ> 2>&1`。通ったと言えるのは
-  ログに `ALL TESTS PASSED (serial)` があるときだけ。始める前に `~/.typelisp/cache` を消す
-  （registry を変えると古い fasl のキャッシュが残る）。並列で流すときは
-  `scripts/test-parallel.sh`（同じ対象、結果は `target/test-parallel-logs/`）。
+- 全体テストは `scripts/with-llvm-env.sh scripts/test-parallel.sh > <ログ> 2>&1`。通ったと
+  言えるのはログに `ALL TESTS PASSED (parallel` があるときだけ。始める前に
+  `~/.typelisp/cache` を消す（registry を変えると古い fasl のキャッシュが残る）。
+  失敗の決定論的な再実行には `scripts/test-serial.sh`（同じ対象を 1 本ずつ）を使う。
 - コミットや push の前の残りの確認（警告 0 の `cargo check`、生成物の再生成の判断、全体テストの
   判定、翻訳の直し方）は、スキル `.claude/skills/commit-check/SKILL.md` にまとめてある。
 
@@ -96,11 +96,10 @@
 - zsh は変数を単語に分けない。`for t in "a b"; do set -- $t` は効かず、テスト名の絞り込みが
   空振りする。引数は直接書く。
 - 別プロセス同士は LLVM の Context を共有しない（アドレス空間が別）ため衝突しない。
-  危険なのは 1 本のテスト実行ファイルの中のスレッド同士で、共有 Context 上の IR 構築が
-  混ざると SIGSEGV する。`COMPILE_LOCK` がコンパイル全体を直列化するようになったが、
-  全スイートの並列証明が済むまでは全体は `scripts/test-serial.sh` で流し、個別のテストも
-  1 本ずつ流す。SIGSEGV したテストは `test result` の行を出さないので、行が無いことも
-  失敗として数える。
+  危険だったのは 1 本のテスト実行ファイルの中のスレッド同士で、共有 Context 上の
+  IR 構築が混ざると SIGSEGV した。`COMPILE_LOCK` がコンパイル全体を直列化して解消し、
+  全体テストは並列が既定（`scripts/test-parallel.sh`）。SIGSEGV したテストは
+  `test result` の行を出さないので、行が無いことも失敗として数える。
 - lib のテストに出る PoisonError は、先に panic した別のテストの巻き添え。最初の panic を見る。
 - `src/compiler_island.typld` と `crates/typelisp-front/src/prelude.typld` は生成物。
   手で直さず、再生成のスクリプトで作る。`docs/dev/api_version/history/` の既存のファイルは消さず、

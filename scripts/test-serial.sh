@@ -8,10 +8,9 @@
 # hazard this guards is *threads within one test binary*, where two tests'
 # IR building used to interleave on the shared `Context` (which LLVM does
 # not support) and crash with a rare, load-dependent SIGSEGV. `COMPILE_LOCK`
-# now serializes whole compiles instead of single builtins, which is designed
-# to make in-binary parallelism safe again; until the suite has proven that
-# in parallel, this script keeps both serializations — across binaries *and*
-# `--test-threads=1` within each — for a reliable green signal.
+# now serializes whole compiles instead of single builtins, and the suite
+# runs in parallel by default (`scripts/test-parallel.sh`); this script
+# stays for when a failure needs a deterministic, unloaded re-run.
 #
 # Usage:
 #   scripts/test-serial.sh                # lib + every integration test

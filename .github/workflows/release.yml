@@ -7,9 +7,10 @@
 # built: the tests and the build, with nothing published — how this workflow
 # itself is tried out.
 #
-# The tests are split four ways per platform (scripts/test-each.sh --shard):
-# serially, as they have to run, the suite takes hours, and a job gets six.
-# Publishing to crates.io stays a manual step.
+# The tests are split four ways per platform (scripts/test-parallel.sh
+# --shard) and each shard runs its binaries concurrently; even so the suite
+# is slow, and a job gets six hours. Publishing to crates.io stays a manual
+# step.
 #
 # Once the release is published, the documentation site is rebuilt from the
 # tags (docs.yml), which adds this version's.
@@ -65,7 +66,7 @@ jobs:
         with:
           rust-version: ${{ env.RUST_VERSION }}
       - name: Test
-        run: scripts/test-each.sh --shard ${{ matrix.shard }}/4
+        run: scripts/test-parallel.sh --shard ${{ matrix.shard }}/4
 
   test-linux:
     name: Test Linux (${{ matrix.distro }}, ${{ matrix.shard }}/4)
@@ -105,7 +106,7 @@ jobs:
           rust-version: ${{ env.RUST_VERSION }}
           apt-suite: ${{ matrix.apt-suite }}
       - name: Test
-        run: scripts/test-each.sh --shard ${{ matrix.shard }}/4
+        run: scripts/test-parallel.sh --shard ${{ matrix.shard }}/4
 
   dist:
     name: Distribution (${{ matrix.arch }})

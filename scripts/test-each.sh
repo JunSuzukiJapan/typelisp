@@ -2,7 +2,8 @@
 # Runs the test targets one at a time through scripts/test-serial.sh, deleting
 # each target's test binary once it has run. For machines with less disk than
 # the whole suite needs: linked, the test binaries come to more than 15 GB,
-# and this keeps one of them at a time.
+# and this keeps one of them at a time. Otherwise prefer
+# scripts/test-parallel.sh, which is the default way to run the suite.
 #
 # Usage:
 #   scripts/test-each.sh                # lib + every integration test
