@@ -30,7 +30,7 @@ use crate::{Checker, Heap, Interp, Reader, Value};
 /// is already correctly handled by `eq` itself.
 ///
 /// The rest is a `Sexpr`-list library (roadmap step 7b — cl-equivalence
-/// catalog §2.2 e plus language-design.md §4.2's list section). Every
+/// catalog §2.2 e). Every
 /// function operates on plain `Sexpr` — no generics are needed here (unlike
 /// `HashTable<K,V>`) since a typelisp "list" already *is*
 /// `Sexpr`, a single concrete type — every Lisp's lists are built from cons
@@ -268,13 +268,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; expansion) — this is the first macro in the prelude whose expansion
 ;; mentions *itself* by name rather than a different macro, but the
 ;; mechanism is identical; termination follows from `cdr`/`null` shrinking
-;; `args` by one each step. `(quote true)`/`(quote false)` rather than bare
-;; `true`/`false`: a macro's `Sexpr`-typed result can only come from a
-;; quasiquote template or `(quote ..)` (both go through `value_to_quoted`)
-;; — `Checker::check`'s own literal arms (`Value::Bool` etc.) do *not*
-;; coerce to `Sexpr` the way bare `()` does (`Value::Empty`'s special-cased
-;; `none`/`nil` lookup), so a raw `false` returned directly from a macro
-;; body would fail to check against the macro body's `Sexpr`-expected type.
+;; `args` by one each step.
 ;; Macro bodies navigate their `Sexpr` argument (`args`) through the
 ;; `sexpr-*` layer (`sexpr-null`/`sexpr-car`/`sexpr-cdr`/`sexpr-cons`), not
 ;; the user-facing `car`/`cdr`/`cons` (Phase 4 repurposes those to a generic
@@ -395,10 +389,10 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `()` (after `body`, not instead of it) so its value is always `Unit`,
 ;; discarding whatever `body`'s own last form would otherwise evaluate to —
 ;; matching the old `check_when`'s explicit `body.push(unit_node())`. The
-;; *untaken* side is bare `()` too; both resolve to `Unit` (not `Sexpr::Nil`)
+;; *untaken* side is bare `()` too; both resolve to `Unit` (not the empty list)
 ;; via `Checker::check`'s `Value::Empty` special case, the same two-faced
 ;; `()` the rest of the language already relies on (see
-;; `docs/language-design.md`) — without the taken side's trailing `()`,
+;; `docs/dev/language-design.md` §0) — without the taken side's trailing `()`,
 ;; `if`'s `then`/`els` types would only agree by coincidence (e.g. `(when c
 ;; 5)` would try to unify `i32` against `els`'s `Unit` and fail to check).
 
@@ -3342,8 +3336,8 @@ user-visible capacity."
         (copy-seq (iter wv))))))
 
 ;; --- Phase 3d: the destructive operations ---
-;; language-design.md §0's (D4) said destructive operations would not be
-;; taken. cl-parity-plan.md revisits that: `Vector<T>` is a *reference* type
+;; The original design principle (D4) said destructive operations would not be
+;; taken. cl-parity-plan.md §0 revisits that: `Vector<T>` is a *reference* type
 ;; whose elements live on the heap, so `nreverse` and friends are ordinary
 ;; in-place mutation with no shared-structure hazard — the thing (D4) was
 ;; actually protecting against. The one CL operation that really does rewrite
@@ -3683,7 +3677,7 @@ user-visible capacity."
         r))))
 ;; `decode-float`: the significand scaled into `[1/2,1)` and the exponent that
 ;; puts it back, as a pair. CL returns three values (significand, exponent,
-;; sign); multiple values are not taken (language-design.md §0), so the sign
+;; sign); multiple values are not taken (cl-parity-plan.md §0), so the sign
 ;; is `float-sign` and this pair carries the other two. The significand is
 ;; unsigned, as CL specifies.
 (impl f64
@@ -7276,7 +7270,7 @@ user-visible capacity."
 ;; this language did not — cl-parity-plan.md Phase 7a.
 ;;
 ;; The condition *system* is not adopted (the plan's §0, and
-;; language-design.md §9: there is no way to catch a `panic` and continue).
+;; language-design.md §9). There is no way to catch a `panic` and continue.
 ;; What is here is the mapping of CL's condition *types* onto the `Error`
 ;; trait, plus the two holes that mapping left open:
 ;;
@@ -7386,7 +7380,7 @@ user-visible capacity."
 ;;
 ;; CL writes this as `let`, because a CL `let` on a special variable *is* a
 ;; dynamic binding. This language's `let` is always lexical and always will
-;; be (language-design.md), so `(let ((*print-base* 16)) ...)` would quietly
+;; be (language-design.md §3), so `(let ((*print-base* 16)) ...)` would quietly
 ;; bind a fresh local named `*print-base*` that nothing reads. The dynamic one
 ;; therefore needs a name of its own: `dlet`, after Emacs Lisp's macro of the
 ;; same name and the same job.

@@ -1074,7 +1074,7 @@ impl Registry {
         // and not to the checker.
         repl.fns.insert("heap-info".to_string(), FnSig::builtin(vec![], heap_info()));
         // `parse-float`: untrusted-text numeric parsing
-        // (`docs/language-design.md` §4.1's planned conversion catalog) —
+        // (`docs/dev/cl-equivalence-catalog.md` §2.1) —
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
@@ -3048,8 +3048,8 @@ fn char_assoc() -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
     }
-    // `char->int`: a `char`'s Unicode scalar value as `i32` (`docs/
-    // language-design.md` §4.1's planned conversion catalog) — the other
+    // `char->int`: a `char`'s Unicode scalar value as `i32` (`docs/dev/
+    // cl-equivalence-catalog.md` §2.1) — the other
     // half is `int_assoc`'s `int->char`.
     // `char->string`: the one-character string. CL reaches this through
     // `string`, which is a designator-taking function this language has no
@@ -3134,8 +3134,8 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
-    // `int->float`: widening numeric conversion (`docs/language-design.md`
-    // §4.1's planned conversion catalog) — registered for every integer
+    // `int->float`: widening numeric conversion (`docs/dev/
+    // cl-equivalence-catalog.md` §2.1) — registered for every integer
     // width, since each gets its own `int_assoc` call. This is also what
     // `equalp`'s `Sexpr` `Int`<->`Float` cross-type comparison
     // (`prelude.rs`) needed and previously lacked (see

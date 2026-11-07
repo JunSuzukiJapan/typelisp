@@ -1253,8 +1253,8 @@ pub(super) fn match_core_pattern(
 /// path (`gen<i32>`, not `gen`), which is what stops a `gen<string>` from
 /// reaching a `(the gen<i32> ...)` arm and having its field read as an `i32`. It is also why a genuine `Sexpr`
 /// datum must only reach the `Sexpr` arm when `PATH` really is `sexpr`: that
-/// arm indexes by *bare* variant number, where a struct's sole variant 0 would
-/// spuriously match `Sexpr::Nil`.
+/// arm indexes by *bare* variant number, where a struct's variant index would
+/// spuriously match the `Sexpr` variant with the same number.
 fn match_ctor(
     it: &Interp,
     heap: &mut Heap,

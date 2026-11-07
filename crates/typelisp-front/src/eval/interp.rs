@@ -1745,19 +1745,12 @@ impl Interp {
     }
 
 
-    /// Build the argument vector for a macro call: the first `fixed` raw
-    /// forms map 1:1 to parameters; if `f.rest`, every remaining raw
-    /// form is collected into a single heap-allocated `Sexpr` list (built
-    /// back-to-front, like `Self::alloc_quoted`'s `Cons` case) bound to the
-    /// last parameter. Each element is already rooted by the caller (it's in
-    /// `raw_args`, individually pushed in `Self::expand_macro`); only the
-    /// growing `list` accumulator needs protecting around each `cons` call.
     /// Bind a macro call's raw (unevaluated) argument forms to its parameters,
     /// producing one value per parameter in `f.params` order —
     /// required, then `&optional`, then `&rest`, then `&key` — ready for
     /// [`Self::enter`]. Omitted `&optional`/`&key` arguments evaluate their
     /// default-value body (in an environment holding the params already bound,
-    /// CL-style); an empty body binds `nil` (`Sexpr::Nil`).
+    /// CL-style); an empty body binds the empty list.
     ///
     /// GC safety: every value built here (a `&rest` list, an evaluated
     /// default) is stashed in a live heap cell as it is produced, and
@@ -1834,7 +1827,7 @@ impl Interp {
         for &a in &raw_args[..n_req] {
             bind!(a);
         }
-        // &optional — filled positionally, else its default (or nil)
+        // &optional — filled positionally, else its default (or the empty list)
         for (oi, default) in lambda.optionals.iter().enumerate() {
             let arg_idx = n_req + oi;
             let v = if arg_idx < pos_end {
@@ -1875,8 +1868,8 @@ impl Interp {
     }
 
     /// Evaluate an `&optional`/`&key` default-value body to the `Sexpr` value
-    /// bound when the argument is omitted — an empty body means `nil`
-    /// (`Sexpr::Nil`).
+    /// bound when the argument is omitted — an empty body means the empty
+    /// list (`Option<Sexpr>`'s `none`).
     ///
     /// `env` holds the parameters bound before this one, which a default may
     /// reference: `(defmacro dup (x &optional (y x)) ...)` copies `x` when `y`
@@ -1885,7 +1878,8 @@ impl Interp {
     /// checker accept a form the expander could not run (`macro `dup`: unbound
     /// variable: x`).
     fn eval_macro_default(&self, heap: &mut Heap, default: &[Value], env: Value) -> Result<Value, EvalError> {
-        // The empty body is "no default", which binds `nil` at expansion time.
+        // The empty body is "no default", which binds the empty list at
+        // expansion time.
         let mut result = Value::Empty;
         for form in default {
             result = self.eval_core(heap, *form, env)?;

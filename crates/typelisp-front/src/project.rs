@@ -1,6 +1,6 @@
 //! File-to-module mapping and on-demand module loading.
 //!
-//! The rule (see `docs/dev/language-design.md` §2.4): a source file's path
+//! The rule (see `docs/dev/language-design.md` §2.3): a source file's path
 //! relative to the project's source root *is* its module path — directories
 //! and the file's basename each become one `Path` segment, so
 //! `<root>/geo/point.typl` provides `geo::point`. A file's whole content is
@@ -15,15 +15,16 @@
 //! dependency, the same call `main.rs::parse_redef_policy` makes). With no
 //! manifest, the entry file's own directory is the root.
 //!
-//! Dependencies load on demand: before a file's forms are checked, its
-//! top-level `(use path)` forms (including ones nested in `(module ...)`) are
+//! Dependencies load on demand, one form at a time: each top-level form is
+//! read, its `(use path)` forms (including ones nested in `(module ...)`) are
 //! scanned, and each path that maps to an existing not-yet-loaded `.typl`
 //! file is loaded recursively — read, checked into the *same*
-//! `Checker`/`Registry`, and queued for execution. Scanning ahead of checking
-//! (rather than catching `Error::ModuleNotLoaded` mid-check and retrying the
-//! form) means no form is ever checked twice, so loading can't produce
-//! spurious redefinition warnings. The structured error still exists as the
-//! checker's signal for a `use` naming a path no file maps to.
+//! `Checker`/`Registry`, and queued for execution — before that form is
+//! checked. Scanning ahead of checking (rather than catching
+//! `Error::ModuleNotLoaded` mid-check and retrying the form) means no form is
+//! ever checked twice, so loading can't produce spurious redefinition
+//! warnings. The structured error still exists as the checker's signal for a
+//! `use` naming a path no file maps to.
 //!
 //! A `use` produced by *macro expansion* can't be seen by that pre-check scan
 //! (the macro it comes from is only registered by checking an earlier form of

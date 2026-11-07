@@ -7,8 +7,8 @@
 //! Sexpr = Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr, Sexpr)
 //! ```
 //!
-//! The empty list `()` is the `Sexpr::Nil` value, encoded at runtime by
-//! [`Value::Empty`] — a peer of [`Value::Cons`] in its own right, on the same
+//! The empty list `()` is `Option<Sexpr>`'s `none` (`Sexpr` itself has no
+//! empty variant), encoded at runtime by [`Value::Empty`] — a peer of [`Value::Cons`] in its own right, on the same
 //! footing as the other variants (not a wrapper around them). (`Empty` is the
 //! empty-list datum, **not** the removed language-level `nil`.)
 //!
@@ -568,7 +568,7 @@ pub(crate) enum StructPayload {
 /// A Lisp value — the runtime encoding of `Sexpr`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Value {
-    /// The empty list `()` — `Sexpr::Nil`.
+    /// The empty list `()` — `Option<Sexpr>`'s `none`.
     Empty,
     Int(i64),
     Char(char),

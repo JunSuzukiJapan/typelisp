@@ -1288,8 +1288,7 @@ mod native_method_list_tests {
             gaps.is_empty(),
             "these builtin methods are registered but have no compiled lowering, so a `defun` \
              calling one cannot be compiled: {:?}\n  Add each to `native_lowered_primitive_methods` \
-             *and* the island's matching `*-native-method?`, or — if it is unreachable as a method \
-             call the way `print` is — say so in `CHECKER_SPECIAL_FORMS`.",
+             *and* the island's matching `*-native-method?`.",
             gaps
         );
     }

@@ -36,11 +36,7 @@ pub const SOURCE: &str = r##"
 ;; and re-emits a (shorter) `(and ...)`/`(or ...)` call, which the checker
 ;; re-expands the same way (`Checker::check_list`'s macro arm recursively
 ;; re-`check`s its own expansion); termination follows from `cdr`/`null`
-;; shrinking `args` by one each step. `(quote true)`/`(quote false)` rather
-;; than bare `true`/`false`: a macro's `Sexpr`-typed result can only come from
-;; a quasiquote template or `(quote ..)` (both go through `value_to_quoted`) —
-;; `Checker::check`'s literal arms do *not* coerce to `Sexpr` the way bare `()`
-;; does, so a raw `false` returned from a macro body would fail to check.
+;; shrinking `args` by one each step.
 ;; Macro bodies navigate their `Sexpr` argument through the `sexpr-*` layer,
 ;; not the user-facing `car`/`cdr`/`cons`.
 (defmacro and (&rest args)
@@ -59,9 +55,9 @@ pub const SOURCE: &str = r##"
 ;; `when`/`unless`: `if` with one side missing. The taken side's trailing `()`
 ;; is not decoration — `if` is a fixed 3-element form here, so both sides must
 ;; agree in type, and the *untaken* side is bare `()`. Both resolve to `Unit`
-;; (not `Sexpr::Nil`) via `Checker::check`'s `Value::Empty` special case, the
+;; (not the empty list) via `Checker::check`'s `Value::Empty` special case, the
 ;; same two-faced `()` the rest of the language relies on (see
-;; `docs/language-design.md`). Without it, `(when c 5)` would try to unify
+;; `docs/dev/language-design.md` §0). Without it, `(when c 5)` would try to unify
 ;; `i32` against the else branch's `Unit` and fail to check.
 (defmacro when (test &rest body) `(if ,test (progn ,@body ()) ()))
 (defmacro unless (test &rest body) `(if ,test () (progn ,@body ())))
