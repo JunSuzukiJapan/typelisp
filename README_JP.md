@@ -307,7 +307,7 @@ Apple Silicon では macOS 26 以降、Intel では macOS 15 以降で動きま�
 （指定しなければ最新のリリース）。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_VERSION=0.3.1 sh
+curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_VERSION=0.3.2 sh
 ```
 
 アンインストールするときは、`typl` が書き出したライブラリを削除してから、インストール先を
