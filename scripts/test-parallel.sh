@@ -232,6 +232,15 @@ if [ "${#failed[@]}" -ne 0 ]; then
     echo "FAILED: ${failed[*]}"
 fi
 if [ "${#timedout[@]}" -ne 0 ] || [ "${#missing[@]}" -ne 0 ] || [ "${#failed[@]}" -ne 0 ]; then
+    # The logs stay on the machine that ran them, which on CI is gone once
+    # the job ends: print the end of each failing one, where libtest puts the
+    # failures and their panics.
+    for t in ${failed[@]+"${failed[@]}"} ${timedout[@]+"${timedout[@]}"}; do
+        if [ "$t" = "--lib" ]; then key="lib"; else key="$t"; fi
+        echo
+        echo "===== last 200 lines of $logdir/$key.log ====="
+        tail -n 200 "$logdir/$key.log"
+    done
     echo "(per-target logs under $logdir/)"
     exit 1
 fi

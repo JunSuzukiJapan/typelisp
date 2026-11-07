@@ -67,7 +67,8 @@ Context で通過）と typelisp 側の調査で、次のことが分かった�
   コードを `target/test-parallel-logs/<target>.rc` に書き、親はそれを集計
   する。`.rc` の無いターゲットは結果無しとして失敗に数える。
 - ターゲットごとに 3600 秒（`TEST_TIMEOUT`）のタイムアウトと個別ログが
-  付く。AOT テスト用の staticlib ビルドと `timeout` の名前解決は直列版と
+  付く。失敗とタイムアウトのターゲットは、最後にログの末尾 200 行を標準出力へ
+  出す（CI ではジョブが終わるとログのファイルが消えるため）。AOT テスト用の staticlib ビルドと `timeout` の名前解決は直列版と
   同じ。`bash` 3.2（macOS 付属）で動く書き方にしている。
 - `--shard` は `test-each.sh` と同じ分割規則で、リリースは 4 分割で流す
  （`release.yml`）。ディスクの小さい環境用の `test-each.sh` は残してある。

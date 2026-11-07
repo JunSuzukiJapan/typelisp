@@ -127,15 +127,16 @@ fn the_compiled_wait_loop_sees_the_same_answers() {
 #[test]
 fn a_task_waiting_on_accept_does_not_stop_the_others() {
     // While `main` sits in `accept` with nobody connecting, a sleeping task
-    // must keep waking. The counter it advances is the evidence; the
-    // connection that finally arrives is made by a third task after it.
+    // must keep waking. The connection that ends the wait is made only after
+    // the counter has reached 5, so the counter is the evidence; if `accept`
+    // stopped the other tasks, nobody would ever connect.
     let src = format!(
         "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defvar (ticks int) 0)
 (defun tick ((n int)) ()
   (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
 (defun connect-later ((port int)) ()
-  (sleep 0.05)
+  (while (< ticks 5) (sleep 0.005))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" port))))
     (close c)))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
@@ -378,15 +379,21 @@ fn a_compiled_timed_wait_answers_the_same() {
 
 #[test]
 fn a_timed_wait_does_not_stop_other_tasks() {
-    let src = r#"(use std::net::tcp-listen) 
+    // The task connects only after its 5 ticks, so the timed `accept` ends
+    // with a connection only if the task kept running while it waited.
+    let src = format!(
+        "(use std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defvar (ticks int) 0)
-(defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
-(let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
-  (task (tick 5))
-  (match (accept l :timeout 0.1)
-    ((ok c) (progn (close c) "accepted?!"))
-    ((err e) (format false "~a ~a" (message e) (>= ticks 5)))))"#;
-    assert_eq!(text(src), "accept: timed out true");
+(defun tick-then-connect ((port int)) ()
+  (dotimes (i 5) (sleep 0.005) (setf ticks (+ ticks 1)))
+  (close (unwrap (tcp-connect \"127.0.0.1\" port))))
+(let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
+  (task (tick-then-connect (port-of l)))
+  (match (accept l :timeout 30.0)
+    ((ok c) (progn (close c) (close l) (format false \"accepted ~a\" ticks)))
+    ((err e) (message e))))"
+    );
+    assert_eq!(text(&src), "accepted 5");
 }
 
 #[test]
