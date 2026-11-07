@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 串流與檔案
 
 串流的 trait 與方法、具體串流型別、檔案操作、路徑名稱。網路 socket 也是串流的一員，見[網路](network.md)。
@@ -153,11 +153,11 @@ CL 在**呼叫**中決定元素型別，如 `(open name :element-type '(unsigned
 ```lisp
 (defstruct counter (n i32))
 (impl Stream counter
-  (open-stream-p (self) bool true)
-  (close (self) () ()))
+  (defmethod open-stream-p (self) bool true)
+  (defmethod close (self) () ()))
 (impl OutputStream counter
   (:type Item char)
-  (write-item (self (c char)) () (setf self::n (+ self::n 1))))
+  (defmethod write-item (self (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 其餘方法全部使用預設實作
 
 (write-line (make-instance 'counter :n 0) "four")   ; write-line、terpri、fresh-line 都能運作

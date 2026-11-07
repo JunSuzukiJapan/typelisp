@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Option, Result и типы ошибок
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -110,8 +110,8 @@ Clojure). `(-> x (f a) (g b))` превращается в `(g (f x a) b)`. Им
 (use std::num::ParseIntError)
 (defstruct io-err (path string))
 (impl Error io-err
-  (message (self) string (append "io failed: " self::path))
-  (source (self) Option<:dyn Error> (Option::none)))
+  (defmethod message (self) string (append "io failed: " self::path))
+  (defmethod source (self) Option<:dyn Error> (Option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; конкретный тип идёт в E как есть
   (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))

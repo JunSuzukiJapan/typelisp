@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Felmeddelanden
 
 Vad de viktigaste felmeddelandena från `typl` betyder och hur man åtgärdar dem.
@@ -61,7 +61,8 @@ Fel som hittas före körning. Formen körs inte förrän de är åtgärdade.
 | `unbound variable: y` | Det finns ingen variabel med det namnet. Kontrollera stavningen och bindningens räckvidd (används den utanför sitt `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Två av en funktion, en global variabel och ett makro har fått samma namn i en modul. Byt namn på en av dem ([Syntaxreferens 3.10](syntax.md#310-module--use--namnrymder)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Inget `new` genereras för en struct. Skapa värdet med `make-instance`, eller skriv ett `new` i `impl` ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | Det finns inget `defmethod`. Metoder skrivs i typens `impl` ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | En post i en `impl` eller `deftrait` saknar `defmethod`. Skriv `(defmethod name (self) ...)`, inte `(name (self) ...)` ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | En `defmethod` utanför en `impl` fick `self`. Utanför en `impl` skrivs den första parametern med namn och typ: `((x Type) ...)` ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Det finns inget alternativ `:constructor`. Konstruktorn skrivs i `impl` som en statisk metod |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | En metod med ett visst namn har skrivits både i en `impl` vars typparametrar är variabler (`Box<T>`) och i en instansierings `impl` (`Box<int>`), i vilken ordning som helst. Behåll bara en av dem ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Samma trait har implementerats för både `Box<T>` och `Box<int>`. Behåll bara en av dem |

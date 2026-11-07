@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Standardtraits
 
 Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut element. De andra standardtraits finns i sina egna kapitel: `Hash`
@@ -14,7 +14,7 @@ Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut ele
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next (self) Option<Item>))
+  (defmethod next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` implementerar `Iter` genom `vector-iter<T>`/
@@ -32,14 +32,14 @@ Dessa motsvarar Rusts `PartialEq`/`PartialOrd` (här kallade `Eq`/`Ord`). De anv
 
 ```lisp
 (deftrait Eq ()
-  (equals (self (other Self)) bool)                ; måste implementeras
-  (not-equals (self (other Self)) bool             ; standardimplementation
+  (defmethod equals (self (other Self)) bool)                ; måste implementeras
+  (defmethod not-equals (self (other Self)) bool             ; standardimplementation
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; ärver från Eq
-  (less (self (other Self)) bool)                  ; måste implementeras
-  (less-equal (self (other Self)) bool (not (less other self)))
-  (greater (self (other Self)) bool (less other self))
-  (greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod less (self (other Self)) bool)                  ; måste implementeras
+  (defmethod less-equal (self (other Self)) bool (not (less other self)))
+  (defmethod greater (self (other Self)) bool (less other self))
+  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 För att implementera `Eq` skriver man bara `equals`, och för `Ord` bara `less`. Standardimplementationerna
@@ -74,17 +74,17 @@ Ett lager för generisk kod att kräva "en typ som kan adderas". **Aritmetik på
 inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 
 ```lisp
-(deftrait Add () (add (self (other Self)) Self))
-(deftrait Sub () (sub (self (other Self)) Self))
-(deftrait Mul () (mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (div (self (other Self)) Output))
-(deftrait Rem () (remainder (self (other Self)) Self))
+(deftrait Add () (defmethod add (self (other Self)) Self))
+(deftrait Sub () (defmethod sub (self (other Self)) Self))
+(deftrait Mul () (defmethod mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and (self (other Self)) Self)
-  (bit-or  (self (other Self)) Self)
-  (bit-xor (self (other Self)) Self)
-  (bit-not (self) Self)
-  (shift (self (count int)) Self))                 ; avståndet är alltid int (som med ash)
+  (defmethod bit-and (self (other Self)) Self)
+  (defmethod bit-or  (self (other Self)) Self)
+  (defmethod bit-xor (self (other Self)) Self)
+  (defmethod bit-not (self) Self)
+  (defmethod shift (self (count int)) Self))                 ; avståndet är alltid int (som med ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; inga metoder; en kombination av fem
 ```
 
@@ -117,7 +117,7 @@ kan en `int` inte skickas).
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push (self (x Item)) ()))
+  (defmethod push (self (x Item)) ()))
 ```
 
 En samling som element kan läggas till i ett i taget. En generisk funktion begär ”en typ som `T` kan
@@ -151,7 +151,7 @@ ett trait-objekt, som i `:dyn Push<int>`.
 ```lisp
 (deftrait Pop ()
   (:type Item)
-  (pop (self) Option<Item>))
+  (defmethod pop (self) Option<Item>))
 ```
 
 En samling som elementet som `push` lade till sist kan tas ut ur igen. `none` när den är tom. En

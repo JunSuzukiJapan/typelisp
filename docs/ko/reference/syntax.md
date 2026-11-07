@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -166,12 +166,12 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 정적 메서드
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 정적 메서드
     (point::origin :y 7)
     ```
 
@@ -519,23 +519,28 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; 정적 메서드: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; 인스턴스 메서드: (name obj args...)
-  (pub name ...))                                      ; 타입을 정의한 모듈 밖에도 공개한다
+  (defmethod name ((arg Type2) ...) RetType body...)            ; 정적 메서드: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; 인스턴스 메서드: (name obj args...)
+  (pub defmethod name ...))                                      ; 타입을 정의한 모듈 밖에도 공개한다
 
 ; 제네릭 타입
 (impl Type<T> (:where (Trait T)...) item...)
+
+; impl 밖: 첫 번째 인수의 타입의 메서드
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 `defstruct`(3.6)·`defenum`(3.7)으로 정의한 타입에 메서드를 준다. Rust의 고유 impl
 (`impl Point { ... }`)에 해당한다.
 
-- 항목의 형태는 `(이름 (인수...) 반환 타입 본체...)`이며, 트레이트의 `impl`(3.9)의 항목과 같다.
+- 항목의 형태는 `(defmethod 이름 (인수...) 반환 타입 본체...)`이며, 트레이트의 `impl`(3.9)의 항목과 같다.
+  `defmethod`를 붙이지 않은 `(이름 (인수...) ...)` 형태는 오류가 된다.
 - 첫 번째 인수가 `self`인 항목은 **인스턴스 메서드**이며 `(name obj args...)` 형태로 호출한다.
   `self`에는 타입을 쓰지 않는다(타입은 대상 타입 `Self`이며, `(self Type)`으로는 쓸 수 없다).
+  `self` 뒤의 인수에는 타입을 쓴다.
 - `self`가 없는 항목은 **정적 메서드**이며 `(Type::name args...)` 형태로 호출한다. 값을 만드는 정적
   메서드가 그 타입의 생성자가 된다. 이름은 자유이며 `new`를 권한다.
-- **공개는 항목마다** 정한다. `(pub name ...)`로 쓴 항목만 타입을 정의한 모듈 밖에서 쓸 수 있다.
+- **공개는 항목마다** 정한다. `(pub defmethod name ...)`로 쓴 항목만 타입을 정의한 모듈 밖에서 쓸 수 있다.
   붙이지 않으면 그 모듈 안에서만 쓸 수 있다.
 - 한 타입에 `impl`을 몇 개 써도 된다.
 - 호출하는 쪽은 `obj`의 정적 타입으로 메서드를 결정한다(단일·정적 디스패치). 메서드는 **첫 번째 인수의
@@ -543,8 +548,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 - **문서 문자열**은 `defun`과 같은 위치·같은 규칙으로 둘 수 있다(본체의 앞, 뒤에 본체 폼이 이어질 때만).
   `(documentation Type::name)`으로 꺼낸다. 트레이트의 `impl`의 메서드도 마찬가지다.
 - 쓸 수 있는 것은 자기 프로그램의 타입뿐이다. `Vector`·`Option`·`int` 같은 표준 라이브러리의 타입에는
-  쓸 수 없다(`... is a standard library type` 오류). 표준 타입에 연산을 더하고 싶으면 트레이트를
-  정의하고 그 타입에 `impl`한다.
+  쓸 수 없다(`... is a standard library type` 오류). 표준 타입에 메서드를 더하려면 아래의 `impl` 밖의 `defmethod`를 쓰거나, 트레이트를 정의하고 그 타입에 `impl`한다.
 - `(impl X ...)`에서 `X` 다음이 항목(리스트)이나 `:where`이거나 아무것도 없으면 이 고유 impl이고,
   이름이면 트레이트의 `impl`(`(impl Trait Type ...)`, 3.9)이다.
 
@@ -552,11 +556,11 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; 정적 메서드
@@ -570,7 +574,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -588,11 +592,11 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -607,6 +611,32 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
   순서와 관계없이 오류). 필드의 접근자도 변수로 쓴 쪽의 메서드에 해당한다.
 - `documentation`, `compile`, `trace` 등에서 이런 메서드를 지명할 때는 `Box<int>::twice`처럼 구체 타입을 쓴다.
   그 메서드를 가진 구체 타입이 하나뿐이면 `Box::twice`도 된다.
+
+#### impl 밖의 defmethod
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    int의 메서드
+(some-method 2.0 3.0)   ; => 6.0  f64의 메서드
+```
+
+`impl` 밖에 쓴 `defmethod`는 **첫 번째 인수의 타입의 메서드**가 된다. 메서드는 첫 번째 인수의 타입으로만 찾으므로, 같은 이름의 메서드를 첫 번째 인수의 타입마다 정의할 수 있다.
+
+- `impl` 안의 `defmethod`와 다른 점은 첫 번째 인수로 `self`를 받을 수 없다는 것뿐이다. 첫 번째 인수는 `(이름 타입)`으로 쓰고, 그 타입이 메서드의 주인이 된다. `self`를 쓰면 오류가 된다.
+- **어떤 타입에든 쓸 수 있다.** `int`·`Vector` 같은 표준 라이브러리의 타입이나 다른 모듈에서 정의한 타입에도 메서드를 더할 수 있다(고유 `impl`은 타입을 정의한 쪽만 쓸 수 있다).
+- 공개는 `impl` 안과 같이 `(pub defmethod ...)`이다. 붙이지 않으면 정의한 모듈 안에서만 쓸 수 있다.
+- 제네릭 타입의 수신자는 타입 매개변수를 변수 그대로 쓴다(`((v Vector<T>))`). 이 `T`는 수신자의 타입 매개변수이며, 메서드 자신의 타입 매개변수로 `<T>`를 겹쳐 선언할 수는 없다.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — 구조체(사용자 정의 타입)
 
@@ -764,19 +794,20 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 상위 트레이트 목록은 필수. 없으면 ()
   (:type AssocName)                       ; 연관 타입(여러 개 가능, 생략 가능)
-  (method-name (self params...) RetType)          ; 본체 없음 = 구현 필수
-  (method-name (self params...) RetType body...)) ; 본체 있음 = 기본 구현
+  (defmethod method-name (self params...) RetType)          ; 본체 없음 = 구현 필수
+  (defmethod method-name (self params...) RetType body...)) ; 본체 있음 = 기본 구현
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; impl 전체에 걸리는 경계(생략 가능)
   (:type AssocName ConcreteType)          ; 연관 타입을 구체화한다
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 `impl`을 거쳐 각 메서드는 `TargetType`의 메서드로 등록되며, 고유 `impl`(3.5)의 메서드와 같은 방식으로
 호출할 수 있다. 트레이트의 `impl`의 메서드는 `pub`을 쓰지 않아도 항상 공개된다. 트레이트는 제네릭
 함수의 `:where` 절에서 트레이트 경계로 참조한다([3.1 defun](#31-defun--함수-정의) 참고). 트레이트 이름에는 `m::Trait` 같은
 `::` 경로도 쓸 수 있다.
+`deftrait`의 메서드 선언도, 트레이트의 `impl`의 메서드도 고유 `impl`과 같이 `defmethod`로 쓴다(`defmethod`가 없는 `(method-name (self ...) ...)`는 오류).
 
 **상위 트레이트 목록(필수)**: 항상 트레이트 이름 바로 뒤에 쓴다. 요소는 맨 트레이트 이름, 또는 그 트레이트에 연관 타입이
 있으면 **모든 연관 타입을 고정한** `(Trait (Assoc Type))`이다.
@@ -785,7 +816,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (deftrait Eq () ...)                       ; 상속 없음
 (deftrait Ord (Eq) ...)                    ; Rust의 trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 연관 타입을 고정한다
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 상속에는 세 가지 효과가 있다. (1) `impl Ord X`는 `impl Eq X`가 **먼저** 쓰여 있기를 요구한다(쓰는 순서에 관한 규칙. REPL과
@@ -811,7 +842,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 본체 없음. 모두 기본 구현
 ```
@@ -840,11 +871,11 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 트레이트 객체 타입 `:dyn Trait`(2장)을 쓰면 vtable을 거친 동적 디스패치가 된다.
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 호출 지점 하나에 구현마다의 답
@@ -964,13 +995,14 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub`을 붙일 수 있는 것은 위의 11종류와 `use`뿐이다(`module`/`impl`에는 붙일 수 없다).
+`pub`을 붙일 수 있는 것은 위의 12종류와 `use`뿐이다(`module`/`impl`에는 붙일 수 없다).
 `(pub use path...)`는 가져온 정의를 **재공개**한다: 다른 모듈도 이 모듈을 거치는 경로(`m::name`)로
 찾을 수 있고 `(use m::name)`로 가져올 수 있다. 재공개할 수 있는 것은 정의뿐이며 모듈은 재공개할 수
 없다.
@@ -978,7 +1010,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 정의 형식을 괄호로 감싸는 `(pub (defun ...))` 형식이 아니라, `pub` 바로 뒤에 정의 키워드를 잇는다.
 하나의 `pub`이 공개할 수 있는 정의는 하나뿐이다(여러 정의를 한꺼번에 지정할 수 없다).
 
-고유 `impl`의 메서드는 항목마다 `(pub name ...)`로 쓴다(3.5). 구조체의 필드는 `(pub x i32)`로 쓴다(3.6).
+`impl`의 메서드는 항목마다 `(pub defmethod name ...)`로 쓴다(3.5). 구조체의 필드는 `(pub x i32)`로 쓴다(3.6).
 
 ### 3.14 defmacro — 매크로 정의
 

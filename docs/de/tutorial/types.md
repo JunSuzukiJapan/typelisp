@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Grundlagen der Typen
 
 typelisp ist eine statisch typisierte Sprache. Dieses Kapitel erklärt, was die Typprüfung leistet, welche
@@ -174,12 +174,12 @@ ein Typfehler.
 ```
 
 Um einer Struktur eigene Funktionen zu geben, verwende `impl`. Jeder Eintrag von `(impl Typname Eintrag...)`
-hat die Form `(name (argumente...) Rückgabetyp rumpf...)`, und ist sein erstes Argument `self`, wird er
+hat die Form `(defmethod name (argumente...) Rückgabetyp rumpf...)`, und ist sein erstes Argument `self`, wird er
 zu einer **Methode** dieses Typs. `self` wird ohne Typ geschrieben.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -190,9 +190,9 @@ Funktion, die den Wert erzeugt, unter dem Namen `new` bereit, kann man kurz `(po
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

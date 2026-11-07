@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Traits
 
 Ett trait är ett löfte om att "den här typen stöder dessa operationer". Med traits kan flera typer dela
@@ -12,8 +12,8 @@ Definiera de operationer som returnerar en figurs area och namn som traitet `Sha
 
 ```lisp
 (deftrait Shape ()
-  (area (self) int)
-  (name (self) string))
+  (defmethod area (self) int)
+  (defmethod name (self) string))
 ```
 
 - `()` efter traitets namn är listan över de traits det ärver från (avsnitt 4). Lämna den tom när det
@@ -27,12 +27,12 @@ För att implementera ett trait för en typ skriver man en `impl`.
 (defstruct rect (w int) (h int))
 
 (impl Shape circle
-  (area (self) int (* 3 self::r self::r))
-  (name (self) string "circle"))
+  (defmethod area (self) int (* 3 self::r self::r))
+  (defmethod name (self) string "circle"))
 
 (impl Shape rect
-  (area (self) int (* self::w self::h))
-  (name (self) string "rect"))
+  (defmethod area (self) int (* self::w self::h))
+  (defmethod name (self) string "rect"))
 ```
 
 De implementerade metoderna anropas precis som vanliga funktioner.
@@ -77,16 +77,16 @@ Om en trait-metod har en kropp används den kroppen när en `impl` utelämnar me
 
 ```lisp
 (deftrait Describe ()
-  (label (self) string)
-  (describe (self) string
+  (defmethod label (self) string)
+  (defmethod describe (self) string
     (format false "<~a>" (label self))))
 
 (impl Describe circle
-  (label (self) string "a circle"))            ; describe är standardvarianten
+  (defmethod label (self) string "a circle"))            ; describe är standardvarianten
 
 (impl Describe rect
-  (label (self) string "a rect")
-  (describe (self) string "[rect]"))           ; den som skrivs här har företräde
+  (defmethod label (self) string "a rect")
+  (defmethod describe (self) string "[rect]"))           ; den som skrivs här har företräde
 
 (describe (make-instance 'circle :r 1))     ; => "<a circle>"
 (describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
@@ -112,10 +112,10 @@ från `Eq` måste `impl` för `Eq` komma först.
 (defstruct money (yen int))
 
 (impl Eq money
-  (equals (self (other Self)) bool (= self::yen other::yen)))
+  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
 
 (greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (standardimplementationen i Ord)
 ```
@@ -125,7 +125,7 @@ form som kan läsas tillbaka efterfrågas, som med `~s`.
 
 ```lisp
 (impl print-object money
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
     (format false "~a yen" self::yen)))
 
 (println "~a" (make-instance 'money :yen 500))              ; 500 yen

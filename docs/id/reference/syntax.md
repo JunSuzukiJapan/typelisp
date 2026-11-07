@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -222,12 +222,12 @@ Nama bentuk khusus (kata cadangan seperti `if`, `let`, dan `step`, yang berarti 
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; metode statis
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; metode statis
     (point::origin :y 7)
     ```
 
@@ -648,24 +648,29 @@ tidak dapat (`setf` adalah kesalahan).
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; metode statis: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; metode instans: (name obj args...)
-  (pub name ...))                                      ; publik juga di luar modul tipe
+  (defmethod name ((arg Type2) ...) RetType body...)            ; metode statis: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; metode instans: (name obj args...)
+  (pub defmethod name ...))                                      ; publik juga di luar modul tipe
 
 ; tipe generik
 (impl Type<T> (:where (Trait T)...) item...)
+
+; di luar impl: metode milik tipe parameter pertama
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 Memberi metode pada tipe yang didefinisikan dengan `defstruct` (3.6) atau `defenum` (3.7). Ini setara
 dengan impl inheren di Rust (`impl Point { ... }`).
 
-- Sebuah item berbentuk `(nama (parameter...) TipeKembali badan...)`, sama dengan item di `impl` sebuah
+- Sebuah item berbentuk `(defmethod nama (parameter...) TipeKembali badan...)`, sama dengan item di `impl` sebuah
   trait (3.9).
+  Bentuk tanpa `defmethod`, `(nama (parameter...) ...)`, adalah galat.
 - Item yang parameter pertamanya `self` adalah **metode instans**, dipanggil sebagai `(name obj args...)`.
   `self` ditulis tanpa tipe (tipenya `Self`, yaitu tipe sasaran; `(self Type)` tidak diterima).
+  Parameter sesudah `self` ditulis dengan tipenya.
 - Item tanpa `self` adalah **metode statis**, dipanggil sebagai `(Type::name args...)`. Metode statis yang
   membuat nilai adalah konstruktor tipe itu. Namanya bebas; disarankan `new`.
-- **Visibilitas diatur per item.** Hanya item yang ditulis `(pub name ...)` yang dapat dipakai di luar
+- **Visibilitas diatur per item.** Hanya item yang ditulis `(pub defmethod name ...)` yang dapat dipakai di luar
   modul yang mendefinisikan tipe. Tanpa `pub`, item hanya dapat dipakai di dalam modul itu.
 - Sebuah tipe boleh memiliki berapa pun `impl`.
 - Pemanggil menentukan metode dari tipe statis `obj` (dispatch tunggal dan statis). Metode dicari **hanya
@@ -674,8 +679,7 @@ dengan impl inheren di Rust (`impl Point { ... }`).
   badan, hanya jika diikuti bentuk badan). Ambil dengan `(documentation Type::name)`. Hal yang sama berlaku
   untuk metode di `impl` sebuah trait.
 - Hanya tipe milik program sendiri yang dapat memilikinya. Tipe pustaka standar seperti `Vector`, `Option`
-  atau `int` tidak bisa (galatnya berbunyi `... is a standard library type`). Untuk menambah operasi pada
-  tipe standar, definisikan sebuah trait lalu tulis `impl`-nya untuk tipe itu.
+  atau `int` tidak bisa (galatnya berbunyi `... is a standard library type`). Untuk menambah metode pada tipe standar, gunakan `defmethod` di luar `impl` (di bawah), atau definisikan sebuah trait lalu tulis `impl`-nya untuk tipe itu.
 - Dalam `(impl X ...)`, jika yang mengikuti `X` adalah item (sebuah list), `:where`, atau tidak ada apa-apa,
   itulah impl inheren ini; jika berupa nama, itu adalah `impl` sebuah trait (`(impl Trait Type ...)`, 3.9).
 
@@ -683,11 +687,11 @@ dengan impl inheren di Rust (`impl Point { ... }`).
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; metode statis
@@ -702,7 +706,7 @@ argumen tiap pemanggilan.
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -722,11 +726,11 @@ metode bernama sama.
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -744,6 +748,32 @@ metode bernama sama.
 - Untuk menyebut metode seperti itu di `documentation`, `compile`, `trace`, dan sejenisnya, tulis
   instansiasinya: `Box<int>::twice`. Jika hanya satu instansiasi yang memiliki metode itu, `Box::twice` juga
   bisa.
+
+#### defmethod di luar impl
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    metode int
+(some-method 2.0 3.0)   ; => 6.0  metode f64
+```
+
+`defmethod` yang ditulis di luar `impl` menjadi **metode milik tipe parameter pertamanya**. Metode hanya dicari dari tipe argumen pertama, sehingga satu nama dapat memiliki metode untuk setiap tipe parameter pertama.
+
+- Bedanya dengan `defmethod` di dalam `impl` hanyalah parameter pertamanya tidak bisa `self`. Parameter pertama ditulis `(nama Tipe)`, dan tipe itulah pemilik metodenya. Menulis `self` adalah galat.
+- **Dapat ditulis untuk tipe apa pun.** Metode dapat ditambahkan pada tipe pustaka standar seperti `int` dan `Vector`, juga pada tipe yang didefinisikan di modul lain (`impl` inheren hanya dapat ditulis oleh pihak yang mendefinisikan tipenya).
+- Visibilitasnya `(pub defmethod ...)`, sama seperti di dalam `impl`. Tanpa itu, metode hanya dapat dipakai di dalam modul yang mendefinisikannya.
+- Penerima bertipe generik menulis parameter tipenya sebagai variabel (`((v Vector<T>))`). `T` ini adalah parameter tipe penerima; mendeklarasikan lagi `<T>` sebagai parameter tipe milik metode itu sendiri tidak diizinkan.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — struct (tipe buatan pengguna)
 
@@ -921,19 +951,20 @@ untuk tipe, bukan sebuah tipe**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name (self params...) RetType)          ; no body = must be implemented
-  (method-name (self params...) RetType body...)) ; with a body = default implementation
+  (defmethod method-name (self params...) RetType)          ; no body = must be implemented
+  (defmethod method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 Melalui `impl`, setiap metode didaftarkan sebagai metode `TargetType` dan dipanggil seperti metode `impl`
 inheren (3.5). Metode di `impl` sebuah trait selalu publik, tanpa `pub`. Trait dirujuk sebagai batas trait
 dalam klausa `:where` fungsi generik (lihat [3.1 defun](#31-defun--definisi-fungsi)). Nama trait juga dapat berupa jalur `::` seperti
 `m::Trait`.
+Deklarasi metode `deftrait` dan metode `impl` sebuah trait juga ditulis dengan `defmethod`, sama seperti `impl` inheren (`(method-name (self ...) ...)` tanpa `defmethod` adalah galat).
 
 **Daftar supertrait (wajib)**: selalu ditulis tepat setelah nama trait. Setiap elemen adalah nama
 trait polos, atau, jika trait itu memiliki tipe terkait, `(Trait (Assoc Type))` dengan **semua tipe
@@ -943,7 +974,7 @@ terkaitnya ditetapkan**.
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 Pewarisan memiliki tiga efek. (1) `impl Ord X` mensyaratkan `impl Eq X` ditulis **lebih dulu**
@@ -977,7 +1008,7 @@ sekaligus untuk setiap tipe yang memenuhi batas.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -1016,11 +1047,11 @@ Untuk menangani nilai yang tipe konkretnya ditentukan saat dijalankan, tipe obje
 (bab 2) memberikan dispatch dinamis melalui vtable:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation
@@ -1180,13 +1211,14 @@ path turunan dan deklarasi eksplisit tidak pernah bertabrakan.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` hanya dapat dipasang pada sebelas jenis di atas dan pada `use` (tidak pada `module`/`impl`).
+`pub` hanya dapat dipasang pada dua belas jenis di atas dan pada `use` (tidak pada `module`/`impl`).
 `(pub use path...)` **mengekspor ulang** apa yang dibawanya masuk: modul lain mencapainya lewat path
 yang melalui modul ini (`m::name`) dan membawanya masuk dengan `(use m::name)`. Hanya definisi yang
 dapat diekspor ulang; modul tidak.
@@ -1195,7 +1227,7 @@ dengan kata kunci definisi tepat setelah `pub`, bukan dalam bentuk `(pub (defun 
 definisi dengan tanda kurung. Satu `pub` membuat tepat satu definisi menjadi publik (beberapa definisi tidak
 dapat ditandai sekaligus).
 
-Metode `impl` inheren dijadikan publik per item, dengan menulis `(pub name ...)` (3.5). Field struct ditulis
+Metode `impl` dijadikan publik per item, dengan menulis `(pub defmethod name ...)` (3.5). Field struct ditulis
 `(pub x i32)` (3.6).
 
 ### 3.14 defmacro — definisi makro

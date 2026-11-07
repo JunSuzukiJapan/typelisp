@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # टाइप की बुनियादी बातें
 
 typelisp एक स्टैटिक रूप से टाइप की गई भाषा है। यह अध्याय समझाता है कि टाइप चेकर आपके लिए क्या करता है, वे टाइप जिनका आप सबसे अधिक उपयोग करेंगे
@@ -157,12 +157,12 @@ none
 ```
 
 स्ट्रक्ट को अपने फ़ंक्शन देने के लिए `impl` का उपयोग करें। `(impl टाइप-नाम आइटम...)` का हर आइटम
-`(नाम (आर्ग्युमेंट...) रिटर्न-टाइप बॉडी...)` के रूप का होता है, और यदि उसका पहला आर्ग्युमेंट `self` है तो
+`(defmethod नाम (आर्ग्युमेंट...) रिटर्न-टाइप बॉडी...)` के रूप का होता है, और यदि उसका पहला आर्ग्युमेंट `self` है तो
 वह उस टाइप का **मेथड** बन जाता है। `self` बिना टाइप के लिखा जाता है।
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -173,9 +173,9 @@ none
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Traity
 
 Trait to obietnica, że „ten typ obsługuje te operacje". Traity pozwalają kilku typom dzielić operacje o
@@ -12,8 +12,8 @@ Zdefiniuj operacje zwracające pole i nazwę figury jako trait `Shape`.
 
 ```lisp
 (deftrait Shape ()
-  (area (self) int)
-  (name (self) string))
+  (defmethod area (self) int)
+  (defmethod name (self) string))
 ```
 
 - `()` po nazwie traitu to lista traitów, które dziedziczy (sekcja 4). Zostaw ją pustą, gdy
@@ -27,12 +27,12 @@ Aby zaimplementować trait dla typu, napisz `impl`.
 (defstruct rect (w int) (h int))
 
 (impl Shape circle
-  (area (self) int (* 3 self::r self::r))
-  (name (self) string "circle"))
+  (defmethod area (self) int (* 3 self::r self::r))
+  (defmethod name (self) string "circle"))
 
 (impl Shape rect
-  (area (self) int (* self::w self::h))
-  (name (self) string "rect"))
+  (defmethod area (self) int (* self::w self::h))
+  (defmethod name (self) string "rect"))
 ```
 
 Zaimplementowane metody wywołuje się tak samo jak zwykłe funkcje.
@@ -77,16 +77,16 @@ Jeśli metoda traitu ma ciało, jest ono używane, gdy `impl` pomija tę metodę
 
 ```lisp
 (deftrait Describe ()
-  (label (self) string)
-  (describe (self) string
+  (defmethod label (self) string)
+  (defmethod describe (self) string
     (format false "<~a>" (label self))))
 
 (impl Describe circle
-  (label (self) string "a circle"))            ; describe to wersja domyślna
+  (defmethod label (self) string "a circle"))            ; describe to wersja domyślna
 
 (impl Describe rect
-  (label (self) string "a rect")
-  (describe (self) string "[rect]"))           ; wersja zapisana tutaj ma pierwszeństwo
+  (defmethod label (self) string "a rect")
+  (defmethod describe (self) string "[rect]"))           ; wersja zapisana tutaj ma pierwszeństwo
 
 (describe (make-instance 'circle :r 1))     ; => "<a circle>"
 (describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
@@ -112,10 +112,10 @@ z `Eq`, `impl` dla `Eq` musi być pierwszy.
 (defstruct money (yen int))
 
 (impl Eq money
-  (equals (self (other Self)) bool (= self::yen other::yen)))
+  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
 
 (greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (domyślna implementacja w Ord)
 ```
@@ -125,7 +125,7 @@ gdy żądana jest postać, którą można wczytać z powrotem, jak przy `~s`.
 
 ```lisp
 (impl print-object money
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
     (format false "~a yen" self::yen)))
 
 (println "~a" (make-instance 'money :yen 500))              ; 500 yen

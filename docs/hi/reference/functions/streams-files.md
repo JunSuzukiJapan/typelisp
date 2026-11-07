@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # स्ट्रीम और फ़ाइलें
 
 स्ट्रीम trait और मेथड, ठोस स्ट्रीम टाइप, फ़ाइल ऑपरेशन और पाथनेम। नेटवर्क सॉकेट भी स्ट्रीम हैं, और [नेटवर्किंग](network.md) में कवर हैं।
@@ -147,11 +147,11 @@ CL तत्व टाइप **कॉल में** तय करता है,
 ```lisp
 (defstruct counter (n i32))
 (impl Stream counter
-  (open-stream-p (self) bool true)
-  (close (self) () ()))
+  (defmethod open-stream-p (self) bool true)
+  (defmethod close (self) () ()))
 (impl OutputStream counter
   (:type Item char)
-  (write-item (self (c char)) () (setf self::n (+ self::n 1))))
+  (defmethod write-item (self (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; शेष हर मेथड डिफ़ॉल्ट है
 
 (write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri और fresh-line सब काम करते हैं

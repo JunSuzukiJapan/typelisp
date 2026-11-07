@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Довідник із синтаксису typelisp
 
 typelisp — це Лісп зі статичною типізацією, що записується S-виразами. Перелік вбудованих функцій і
@@ -215,12 +215,12 @@ typelisp — це Лісп зі статичною типізацією, що з
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; статичний метод
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; статичний метод
     (point::origin :y 7)
     ```
 
@@ -623,26 +623,31 @@ LP64). Поле, що вказує на саму структуру, напис�
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; статичний метод: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; метод екземпляра: (name obj args...)
-  (pub name ...))                                      ; публічний і поза модулем, де визначено тип
+  (defmethod name ((arg Type2) ...) RetType body...)            ; статичний метод: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; метод екземпляра: (name obj args...)
+  (pub defmethod name ...))                                      ; публічний і поза модулем, де визначено тип
 
 ; узагальнений тип
 (impl Type<T> (:where (Trait T)...) item...)
+
+; поза impl: метод типу першого параметра
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 Дає методи типу, визначеному через `defstruct` (3.6) або `defenum` (3.7). Відповідає власному impl у
 Rust (`impl Point { ... }`).
 
-- Елемент має вигляд `(ім'я (параметри...) ТипПовернення тіло...)`, такий самий, як елемент `impl`
+- Елемент має вигляд `(defmethod ім'я (параметри...) ТипПовернення тіло...)`, такий самий, як елемент `impl`
   трейту (3.9).
+  Запис без `defmethod`, `(ім'я (параметри...) ...)`, — помилка.
 - Елемент, перший параметр якого `self`, — **метод екземпляра**; він викликається як
   `(name obj args...)`. Для `self` тип не пишеться (його тип — `Self`,
   цільовий тип; запис `(self Type)` не приймається).
+  Параметри після `self` пишуться з типом.
 - Елемент без `self` — **статичний метод**; він викликається як `(Type::name args...)`. Статичний метод,
   що створює значення, і є конструктором цього типу. Ім'я довільне; радимо `new`.
 - **Видимість задається для кожного елемента.** Поза модулем, де визначено тип, можна використовувати
-  лише елементи, записані як `(pub name ...)`. Без `pub` елемент доступний лише всередині цього модуля.
+  лише елементи, записані як `(pub defmethod name ...)`. Без `pub` елемент доступний лише всередині цього модуля.
 - Тип може мати скільки завгодно `impl`.
 - Сторона виклику визначає метод за статичним типом `obj` (одинарна статична диспетчеризація). Метод
   шукається **лише за типом першого аргументу** (3.10).
@@ -650,8 +655,7 @@ Rust (`impl Point { ... }`).
   початку тіла, лише якщо за ним ідуть форми тіла). Їх отримують через `(documentation Type::name)`. Те
   саме стосується методів `impl` трейту.
 - Такий `impl` можна писати лише для типів самої програми. Для типу стандартної бібліотеки, як-от `Vector`,
-  `Option` чи `int`, — не можна (помилка `... is a standard library type`). Щоб додати операцію до
-  стандартного типу, визначте трейт і напишіть його `impl` для цього типу.
+  `Option` чи `int`, — не можна (помилка `... is a standard library type`). Щоб додати метод до стандартного типу, використайте `defmethod` поза `impl` (нижче) або визначте трейт і напишіть його `impl` для цього типу.
 - Якщо в `(impl X ...)` за `X` іде елемент (список), `:where` або нічого, це власний impl; якщо ім'я — це
   `impl` трейту (`(impl Trait Type ...)`, 3.9).
 
@@ -659,11 +663,11 @@ Rust (`impl Point { ... }`).
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; статичний метод
@@ -677,7 +681,7 @@ Rust (`impl Point { ... }`).
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -695,11 +699,11 @@ Rust (`impl Point { ... }`).
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -714,6 +718,32 @@ Rust (`impl Point { ... }`).
   (`Box<int>`); у будь-якому порядку це помилка. Аксесор поля вважається методом `impl` зі змінними.
 - Щоб назвати такий метод у `documentation`, `compile`, `trace` тощо, пишіть конкретизацію:
   `Box<int>::twice`. Якщо метод є лише в однієї конкретизації, підійде й `Box::twice`.
+
+#### defmethod поза impl
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    метод int
+(some-method 2.0 3.0)   ; => 6.0  метод f64
+```
+
+`defmethod`, написаний поза `impl`, стає **методом типу свого першого параметра**. Методи шукаються лише за типом першого аргументу, тому одне ім'я може мати метод для кожного типу першого параметра.
+
+- Від `defmethod` усередині `impl` він відрізняється лише тим, що його першим параметром не може бути `self`. Перший параметр пишеться як `(ім'я Тип)`, і цей тип володіє методом. Запис `self` — помилка.
+- **Його можна написати для будь-якого типу.** Методи можна додавати до типів стандартної бібліотеки, як-от `int` і `Vector`, і до типів, визначених в інших модулях (власний `impl` може написати лише та сторона, що визначає тип).
+- Видимість задається `(pub defmethod ...)`, як усередині `impl`. Без `pub` метод доступний лише всередині модуля, який його визначає.
+- Отримувач узагальненого типу записує свої параметри типу як змінні (`((v Vector<T>))`). Цей `T` — параметр типу отримувача; оголошувати `<T>` ще раз як власний параметр типу методу не можна.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — структури (користувацькі типи)
 
@@ -882,19 +912,20 @@ Rust (`impl Point { ... }`).
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name (self params...) RetType)          ; no body = must be implemented
-  (method-name (self params...) RetType body...)) ; with a body = default implementation
+  (defmethod method-name (self params...) RetType)          ; no body = must be implemented
+  (defmethod method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 Через `impl` кожен метод реєструється як метод `TargetType` і викликається так само, як метод власного
 `impl` (3.5). Методи `impl` трейту завжди публічні, без `pub`. На трейти посилаються як на обмеження
 трейтів у реченнях `:where` узагальнених функцій (див. [3.1 defun](#31-defun--визначення-функцій)). Ім'я трейту може бути й шляхом `::`,
 наприклад `m::Trait`.
+Оголошення методів `deftrait` і методи `impl` трейту пишуться через `defmethod`, як і у власному `impl` (`(method-name (self ...) ...)` без `defmethod` — помилка).
 
 **Список супертрейтів (обов'язковий)**: завжди записується одразу після назви трейта. Кожен елемент — це
 гола назва трейта або, якщо цей трейт має асоційовані типи, `(Trait (Assoc Type))` з **усіма закріпленими
@@ -904,7 +935,7 @@ Rust (`impl Point { ... }`).
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 Успадкування має три наслідки. (1) `impl Ord X` вимагає, щоб `impl Eq X` було записано **першим** (правило
@@ -935,7 +966,7 @@ Rust (`impl Point { ... }`).
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -971,11 +1002,11 @@ Rust (`impl Point { ... }`).
 динамічну диспетчеризацію через vtable:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation
@@ -1133,20 +1164,21 @@ Rust (`impl Point { ... }`).
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` можна ставити лише на одинадцять видів вище та на `use` (не на `module`/`impl`).
+`pub` можна ставити лише на дванадцять видів вище та на `use` (не на `module`/`impl`).
 `(pub use path...)` **реекспортує** те, що вводить: інші модулі дістають це шляхом через цей модуль
 (`m::name`) і вводять через `(use m::name)`. Реекспортувати можна лише визначення, а не модуль.
 Його пишуть так, що
 ключове слово визначення йде одразу після `pub`, а не у формі `(pub (defun ...))`, що обгортає визначення
 в дужки. Один `pub` робить публічним рівно одне визначення (позначити кілька відразу не можна).
 
-Методи власного `impl` робляться публічними поелементно, як `(pub name ...)` (3.5). Поля структури
+Методи `impl` робляться публічними поелементно, як `(pub defmethod name ...)` (3.5). Поля структури
 пишуться як `(pub x i32)` (3.6).
 
 ### 3.14 defmacro — визначення макросів

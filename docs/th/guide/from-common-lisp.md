@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # สำหรับโปรแกรมเมอร์ Common Lisp
 
 typelisp สืบทอดไวยากรณ์และชื่อฟังก์ชันจำนวนมากของ Common Lisp (CL) แต่เป็นภาษาที่มี
@@ -187,15 +187,14 @@ typelisp ไม่แยกเนมสเปซของฟังก์ชั�
 ไม่มี `defclass`, `defgeneric` หรือ method combination
 
 - ชนิดข้อมูลนิยามด้วย `defstruct` (struct) และ `defenum` (sum type)
-- ไม่มี `defmethod` เมทอดรวมไว้ใน `impl` ของแต่ละชนิด (รูปเดียวกับ inherent impl ของ Rust) เป้าหมายถูกกำหนด
-  จาก **ชนิดสถิตของอาร์กิวเมนต์ตัวแรก** เท่านั้น ไม่มี multiple dispatch
+- มี `defmethod` แต่ไม่ใช่ generic function เมทอดเขียนด้วย `defmethod` รวมไว้ใน `impl` ของแต่ละชนิด (รูปเดียวกับ inherent impl ของ Rust) หรือเขียนนอก `impl` เป็น `(defmethod m ((x ชนิด) ...) ...)` เป้าหมายถูกกำหนดจาก **ชนิดสถิตของอาร์กิวเมนต์ตัวแรก** เท่านั้น ไม่มี multiple dispatch
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; เมทอดสถิต
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; เมทอด
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; เมทอดสถิต
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; เมทอด
 
   (norm2 (point::new 3 4))   ; => 25
   ```

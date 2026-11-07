@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # मॉड्यूल और फ़ाइल संरचना
 
 यह गाइड बताती है कि कई फ़ाइलों से बना प्रोग्राम कैसे जोड़ा जाता है। विस्तृत नियम [सिंटैक्स संदर्भ](../reference/syntax.md#310-module--use--नेमस्पेस) के खंड 3.10 से 3.13 में हैं।
@@ -50,9 +50,9 @@ src = "src"
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
 (impl point
-  (pub new ((x i32) (y i32) (tag string)) point
+  (pub defmethod new ((x i32) (y i32) (tag string)) point
     (make-instance 'point :x x :y y :tag tag))
-  (pub origin () point (point::new 0 0 "o")))
+  (pub defmethod origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:

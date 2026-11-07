@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # أساسيات الأنواع
 
 typelisp لغة ذات أنواع ساكنة. يشرح هذا الفصل ما يفعله فاحص الأنواع من أجلك، والأنواع التي ستستخدمها
@@ -170,12 +170,12 @@ none
 ```
 
 لإعطاء بنية دوالّ خاصة بها، استعمل `impl`. كل عنصر من `(impl اسم_النوع عنصر...)` على الصورة
-`(الاسم (الوسائط...) نوع_الإرجاع الجسم...)`، وإن كان وسيطه الأول `self` صار **تابعًا** لذلك النوع.
+`(defmethod الاسم (الوسائط...) نوع_الإرجاع الجسم...)`، وإن كان وسيطه الأول `self` صار **تابعًا** لذلك النوع.
 ويُكتب `self` من دون نوع.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -186,9 +186,9 @@ none
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

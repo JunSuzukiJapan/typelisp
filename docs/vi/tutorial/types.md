@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Kiến thức cơ bản về kiểu
 
 typelisp là một ngôn ngữ có kiểu tĩnh. Chương này giải thích bộ kiểm tra kiểu làm gì cho bạn, các kiểu
@@ -170,12 +170,12 @@ qua trong `make-instance` sẽ nhận giá trị mặc định. Bỏ qua một t
 ```
 
 Để cho struct các hàm riêng, dùng `impl`. Mỗi mục của `(impl TênKiểu mục...)` có dạng
-`(tên (đối-số...) KiểuTrảVề thân...)`, và nếu đối số đầu tiên là `self` thì nó thành một **phương thức** của
+`(defmethod tên (đối-số...) KiểuTrảVề thân...)`, và nếu đối số đầu tiên là `self` thì nó thành một **phương thức** của
 kiểu đó. `self` được viết không kèm kiểu.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -186,9 +186,9 @@ với tên `new`, người dùng có thể viết ngắn gọn `(point::new 3 4)
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

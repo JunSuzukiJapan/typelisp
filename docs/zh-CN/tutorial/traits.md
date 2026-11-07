@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # trait
 
 trait 是"这个类型支持这些操作"的约定。它让多个类型拥有同名的操作，从而使用这些操作的函数不必为每个类型分别编写。
@@ -10,8 +10,8 @@ trait 是"这个类型支持这些操作"的约定。它让多个类型拥有同
 
 ```lisp
 (deftrait Shape ()
-  (area (self) int)
-  (name (self) string))
+  (defmethod area (self) int)
+  (defmethod name (self) string))
 ```
 
 - `deftrait` 名字后面的 `()` 是所继承的 trait 列表（第 4 节）。没有时留空。
@@ -24,12 +24,12 @@ trait 是"这个类型支持这些操作"的约定。它让多个类型拥有同
 (defstruct rect (w int) (h int))
 
 (impl Shape circle
-  (area (self) int (* 3 self::r self::r))
-  (name (self) string "circle"))
+  (defmethod area (self) int (* 3 self::r self::r))
+  (defmethod name (self) string "circle"))
 
 (impl Shape rect
-  (area (self) int (* self::w self::h))
-  (name (self) string "rect"))
+  (defmethod area (self) int (* self::w self::h))
+  (defmethod name (self) string "rect"))
 ```
 
 实现的方法可以像普通函数一样调用。
@@ -71,16 +71,16 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (deftrait Describe ()
-  (label (self) string)
-  (describe (self) string
+  (defmethod label (self) string)
+  (defmethod describe (self) string
     (format false "<~a>" (label self))))
 
 (impl Describe circle
-  (label (self) string "a circle"))            ; describe 使用默认实现
+  (defmethod label (self) string "a circle"))            ; describe 使用默认实现
 
 (impl Describe rect
-  (label (self) string "a rect")
-  (describe (self) string "[rect]"))           ; 自己写的优先
+  (defmethod label (self) string "a rect")
+  (defmethod describe (self) string "[rect]"))           ; 自己写的优先
 
 (describe (make-instance 'circle :r 1))     ; => "<a circle>"
 (describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
@@ -104,10 +104,10 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (defstruct money (yen int))
 
 (impl Eq money
-  (equals (self (other Self)) bool (= self::yen other::yen)))
+  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
 
 (greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord 的默认实现）
 ```
@@ -116,7 +116,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (impl print-object money
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
     (format false "~a yen" self::yen)))
 
 (println "~a" (make-instance 'money :yen 500))              ; 500 yen

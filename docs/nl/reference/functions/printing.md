@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Afdrukken
 
 `print`/`println`/`format`, de printers met één argument, de pretty printer, `print-object` en de
@@ -204,7 +204,7 @@ generieke functie `print-object` van CL (CLHS 22.1.4).
 
 ```lisp
 (deftrait print-object ()
-  (print-object (self (escape bool)) string))
+  (defmethod print-object (self (escape bool)) string))
 ```
 
 | Argument | Betekenis |
@@ -218,7 +218,7 @@ ingebouwde weergave afgedrukt (van de vorm `#<point x: 1 y: 2>`).
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl print-object point
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 錯誤處理
 
 typelisp 的錯誤處理把失敗分成兩類來考慮。
@@ -66,11 +66,11 @@ typelisp 的錯誤處理把失敗分成兩類來考慮。
   (invalid string int))     ; 值不正確
 
 (impl Error config-error
-  (message (self) string
+  (defmethod message (self) string
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::none)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)

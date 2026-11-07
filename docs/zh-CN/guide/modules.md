@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 模块与文件结构
 
 本指南说明如何组织由多个文件构成的程序。详细的语法规则见[语法参考](../reference/syntax.md#310-module--use--命名空间)
@@ -52,9 +52,9 @@ src = "src"
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
 (impl point
-  (pub new ((x i32) (y i32) (tag string)) point
+  (pub defmethod new ((x i32) (y i32) (tag string)) point
     (make-instance 'point :x x :y y :tag tag))
-  (pub origin () point (point::new 0 0 "o")))
+  (pub defmethod origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`：

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Untuk Pemrogram Common Lisp
 
 typelisp mewarisi sintaks Common Lisp (CL) dan banyak nama fungsinya, tetapi ia adalah bahasa dengan
@@ -195,15 +195,14 @@ dievaluasi (`'done`), dan nilai yang dilempar dengan satu tag memiliki satu tipe
 Tidak ada `defclass`, `defgeneric`, atau kombinasi metode.
 
 - Tipe data didefinisikan dengan `defstruct` (struct) dan `defenum` (sum type).
-- Tidak ada `defmethod`. Metode dikumpulkan per tipe di dalam `impl` (bentuk yang sama dengan impl inheren
-  Rust). Sasaran ditentukan hanya oleh **tipe statis argumen pertama**; tidak ada dispatch berganda.
+- `defmethod` ada, tetapi bukan fungsi generik. Metode dikumpulkan per tipe di dalam `impl` dan ditulis dengan `defmethod` (bentuk yang sama dengan impl inheren Rust), atau ditulis di luar `impl` sebagai `(defmethod m ((x Tipe) ...) ...)`. Sasaran ditentukan hanya oleh **tipe statis argumen pertama**; tidak ada dispatch berganda.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; metode statis
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; metode
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; metode statis
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; metode
 
   (norm2 (point::new 3 4))   ; => 25
   ```

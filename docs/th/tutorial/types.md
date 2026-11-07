@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # พื้นฐานของชนิด
 
 typelisp เป็นภาษาที่มีระบบชนิดแบบสถิต บทนี้อธิบายสิ่งที่ตัวตรวจสอบชนิดทำให้คุณ
@@ -168,12 +168,12 @@ Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช
 ```
 
 หากต้องการให้ struct มีฟังก์ชันของตัวเอง ให้ใช้ `impl` แต่ละรายการของ `(impl ชื่อชนิด รายการ...)` มีรูป
-`(ชื่อ (อาร์กิวเมนต์...) ชนิดที่คืน ตัวเนื้อหา...)` และถ้าอาร์กิวเมนต์ตัวแรกเป็น `self` จะกลายเป็น **เมทอด**
+`(defmethod ชื่อ (อาร์กิวเมนต์...) ชนิดที่คืน ตัวเนื้อหา...)` และถ้าอาร์กิวเมนต์ตัวแรกเป็น `self` จะกลายเป็น **เมทอด**
 ของชนิดนั้น `self` เขียนโดยไม่ต้องมีชนิด
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -184,9 +184,9 @@ Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

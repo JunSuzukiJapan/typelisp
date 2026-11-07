@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Common Lisp Programcıları İçin
 
 typelisp, Common Lisp'in (CL) sözdizimini ve fonksiyon adlarının çoğunu devralır, ancak statik tür
@@ -193,15 +193,14 @@ sembolle (`'done`) sınırlıdır ve bir etiketle fırlatılan değerlerin tek b
 `defclass`, `defgeneric` ya da metot kombinasyonu yoktur.
 
 - Veri türleri `defstruct` (struct'lar) ve `defenum` (toplam türler) ile tanımlanır.
-- `defmethod` yoktur. Metotlar her tür için bir `impl` içinde toplanır (Rust'ın içsel impl'iyle aynı biçim).
-  Hedef yalnızca **ilk argümanın statik türüne** göre belirlenir; çoklu gönderim yoktur.
+- `defmethod` vardır ama genel (generic) bir fonksiyon değildir. Metotlar ya her tür için bir `impl` içinde toplanıp `defmethod` ile yazılır (Rust'ın içsel impl'iyle aynı biçim) ya da `impl` dışında `(defmethod m ((x Tür) ...) ...)` biçiminde yazılır. Hedef yalnızca **ilk argümanın statik türüne** göre belirlenir; çoklu gönderim yoktur.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statik metot
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; metot
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statik metot
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; metot
 
   (norm2 (point::new 3 4))   ; => 25
   ```

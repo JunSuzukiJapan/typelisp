@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Voor Common Lisp-programmeurs
 
 typelisp erft de syntaxis van Common Lisp (CL) en veel van zijn functienamen, maar is een statisch
@@ -197,16 +197,14 @@ type.
 Er is geen `defclass`, `defgeneric` of methodecombinatie.
 
 - Gegevenstypes worden gedefinieerd met `defstruct` (structs) en `defenum` (somtypes).
-- `defmethod` bestaat niet. Methoden worden per type in een `impl` verzameld (dezelfde vorm als de inherente
-  impl van Rust). Het doel wordt alleen bepaald door **het statische type van het eerste argument**; er is
-  geen meervoudige dispatch.
+- `defmethod` bestaat, maar is geen generieke functie. Methoden worden ofwel per type in een `impl` verzameld en met `defmethod` geschreven (dezelfde vorm als de inherente impl van Rust), ofwel buiten een `impl` geschreven als `(defmethod m ((x Type) ...) ...)`. Het doel wordt alleen bepaald door **het statische type van het eerste argument**; er is geen meervoudige dispatch.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statische methode
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; methode
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statische methode
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; methode
 
   (norm2 (point::new 3 4))   ; => 25
   ```

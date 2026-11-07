@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -207,12 +207,12 @@ Tên của các dạng đặc biệt (từ dành riêng như `if`, `let` và `st
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; phương thức tĩnh
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; phương thức tĩnh
     (point::origin :y 7)
     ```
 
@@ -599,24 +599,29 @@ Chú thích kiểu là bắt buộc (nó không được suy ra từ biểu th�
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; phương thức tĩnh: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; phương thức thể hiện: (name obj args...)
-  (pub name ...))                                      ; công khai cả bên ngoài module của kiểu
+  (defmethod name ((arg Type2) ...) RetType body...)            ; phương thức tĩnh: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; phương thức thể hiện: (name obj args...)
+  (pub defmethod name ...))                                      ; công khai cả bên ngoài module của kiểu
 
 ; một kiểu generic
 (impl Type<T> (:where (Trait T)...) item...)
+
+; bên ngoài impl: phương thức của kiểu của tham số đầu
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 Cho một kiểu định nghĩa bằng `defstruct` (3.6) hoặc `defenum` (3.7) các phương thức. Tương ứng với impl
 cố hữu của Rust (`impl Point { ... }`).
 
-- Một mục có dạng `(tên (tham số...) KiểuTrảVề thân...)`, giống một mục trong `impl` của trait (3.9).
+- Một mục có dạng `(defmethod tên (tham số...) KiểuTrảVề thân...)`, giống một mục trong `impl` của trait (3.9).
+  Dạng không có `defmethod`, `(tên (tham số...) ...)`, là lỗi.
 - Mục có tham số đầu là `self` là **phương thức thể hiện**, được gọi dưới dạng `(name obj args...)`.
   `self` được viết không kèm kiểu (kiểu của nó là `Self`, tức kiểu đích; không chấp nhận
   `(self Type)`).
+  Các tham số sau `self` được viết kèm kiểu.
 - Mục không có `self` là **phương thức tĩnh**, được gọi dưới dạng `(Type::name args...)`. Phương thức
   tĩnh tạo ra một giá trị chính là hàm dựng của kiểu đó. Tên tùy bạn; nên dùng `new`.
-- **Tính công khai đặt theo từng mục.** Chỉ những mục viết `(pub name ...)` mới dùng được bên ngoài module
+- **Tính công khai đặt theo từng mục.** Chỉ những mục viết `(pub defmethod name ...)` mới dùng được bên ngoài module
   định nghĩa kiểu. Không có `pub`, mục chỉ dùng được bên trong module đó.
 - Một kiểu có thể có bao nhiêu `impl` cũng được.
 - Bên gọi phân giải phương thức theo kiểu tĩnh của `obj` (phân phối đơn, tĩnh). Phương thức được tìm **chỉ
@@ -625,8 +630,7 @@ cố hữu của Rust (`impl Point { ... }`).
   dạng thân theo sau). Lấy ra bằng `(documentation Type::name)`. Điều tương tự áp dụng cho các phương thức
   trong `impl` của một trait.
 - Chỉ các kiểu của chính chương trình mới viết được. Không viết được cho kiểu của thư viện chuẩn như
-  `Vector`, `Option` hay `int` (lỗi báo `... is a standard library type`). Để thêm một thao tác cho kiểu
-  chuẩn, hãy định nghĩa một trait rồi viết `impl` của nó cho kiểu đó.
+  `Vector`, `Option` hay `int` (lỗi báo `... is a standard library type`). Để thêm phương thức cho kiểu chuẩn, hãy dùng `defmethod` bên ngoài `impl` (bên dưới), hoặc định nghĩa một trait rồi viết `impl` của nó cho kiểu đó.
 - Trong `(impl X ...)`, nếu theo sau `X` là một mục (một danh sách), một `:where` hoặc không có gì, đó là
   impl cố hữu này; nếu là một tên, đó là `impl` của một trait (`(impl Trait Type ...)`, 3.9).
 
@@ -634,11 +638,11 @@ cố hữu của Rust (`impl Point { ... }`).
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; phương thức tĩnh
@@ -653,7 +657,7 @@ ra từ đối số của mỗi lần gọi.
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -672,11 +676,11 @@ nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` c�
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -692,6 +696,32 @@ nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` c�
   `impl` dùng biến.
 - Để gọi tên một phương thức như vậy trong `documentation`, `compile`, `trace` và tương tự, hãy viết thể hiện:
   `Box<int>::twice`. Nếu chỉ một thể hiện có phương thức đó thì `Box::twice` cũng được.
+
+#### defmethod bên ngoài impl
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    phương thức của int
+(some-method 2.0 3.0)   ; => 6.0  phương thức của f64
+```
+
+`defmethod` viết bên ngoài `impl` trở thành **phương thức của kiểu của tham số đầu tiên**. Phương thức chỉ được tìm theo kiểu của đối số đầu tiên, nên một tên có thể có phương thức cho từng kiểu của tham số đầu.
+
+- Nó chỉ khác `defmethod` bên trong `impl` ở chỗ tham số đầu không thể là `self`. Tham số đầu được viết `(tên Kiểu)`, và kiểu đó là chủ của phương thức. Viết `self` là lỗi.
+- **Có thể viết cho bất kỳ kiểu nào.** Có thể thêm phương thức cho các kiểu của thư viện chuẩn như `int` và `Vector`, và cho các kiểu định nghĩa trong module khác (`impl` cố hữu chỉ bên định nghĩa kiểu mới viết được).
+- Tính công khai là `(pub defmethod ...)`, giống bên trong `impl`. Không có nó, phương thức chỉ dùng được bên trong module định nghĩa nó.
+- Bên nhận có kiểu generic viết tham số kiểu dưới dạng biến (`((v Vector<T>))`). `T` này là tham số kiểu của bên nhận; không được khai báo lại `<T>` làm tham số kiểu riêng của phương thức.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — struct (kiểu do người dùng định nghĩa)
 
@@ -862,19 +892,20 @@ kiểu, không phải một kiểu**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; danh sách supertrait là bắt buộc; () nếu không có
   (:type AssocName)                       ; các kiểu liên kết (số lượng bất kỳ, tùy chọn)
-  (method-name (self params...) RetType)          ; không có thân = phải được triển khai
-  (method-name (self params...) RetType body...)) ; có thân = triển khai mặc định
+  (defmethod method-name (self params...) RetType)          ; không có thân = phải được triển khai
+  (defmethod method-name (self params...) RetType body...)) ; có thân = triển khai mặc định
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; các ràng buộc áp dụng cho cả impl (tùy chọn)
   (:type AssocName ConcreteType)          ; làm cho một kiểu liên kết trở nên cụ thể
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 Thông qua `impl`, mỗi phương thức được đăng ký như một phương thức của `TargetType` và được gọi như phương
 thức của một `impl` cố hữu (3.5). Các phương thức trong `impl` của một trait luôn công khai, không cần
 `pub`. Trait được tham chiếu như ràng buộc trait trong mệnh đề `:where` của hàm generic (xem [3.1 defun](#31-defun--định-nghĩa-hàm)). Tên
 trait cũng có thể là một đường dẫn `::` như `m::Trait`.
+Khai báo phương thức của `deftrait` và phương thức trong `impl` của trait cũng được viết bằng `defmethod`, giống như `impl` cố hữu (`(method-name (self ...) ...)` không có `defmethod` là lỗi).
 
 **Danh sách supertrait (bắt buộc)**: luôn được viết ngay sau tên trait. Mỗi phần tử là một tên trait trần,
 hoặc, nếu trait đó có kiểu liên kết, là `(Trait (Assoc Type))` với **mọi kiểu liên kết của nó được cố định**.
@@ -883,7 +914,7 @@ hoặc, nếu trait đó có kiểu liên kết, là `(Trait (Assoc Type))` vớ
 (deftrait Eq () ...)                       ; không có supertrait
 (deftrait Ord (Eq) ...)                    ; trait Ord: Eq của Rust
 (deftrait CharSource ((Iter (Item char)))  ; cố định một kiểu liên kết
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 Kế thừa có ba tác dụng. (1) `impl Ord X` yêu cầu `impl Eq X` phải được viết **trước** (một quy tắc về thứ tự
@@ -914,7 +945,7 @@ các ràng buộc.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; hoàn toàn không có thân; mọi thứ là mặc định
 ```
@@ -949,11 +980,11 @@ kiểu cụ thể được quyết định lúc chạy, kiểu trait object `:dy
 vtable:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; một vị trí gọi, một đáp án cho mỗi triển khai
@@ -1105,13 +1136,14 @@ không bao giờ va chạm.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` chỉ đặt được cho mười một loại ở trên và cho `use` (không cho `module`/`impl`).
+`pub` chỉ đặt được cho mười hai loại ở trên và cho `use` (không cho `module`/`impl`).
 `(pub use path...)` **tái xuất** những gì nó đưa vào: module khác truy cập được qua đường dẫn đi qua
 module này (`m::name`) và đưa vào bằng `(use m::name)`. Chỉ tái xuất được định nghĩa, không tái xuất
 được module.
@@ -1119,7 +1151,7 @@ Nó được viết với từ
 khóa định nghĩa ngay sau `pub`, không phải dạng `(pub (defun ...))` bọc định nghĩa trong ngoặc. Một `pub`
 công khai đúng một định nghĩa (không thể đánh dấu nhiều định nghĩa cùng lúc).
 
-Các phương thức của một `impl` cố hữu được công khai theo từng mục, bằng cách viết `(pub name ...)` (3.5).
+Các phương thức của một `impl` được công khai theo từng mục, bằng cách viết `(pub defmethod name ...)` (3.5).
 Các trường của struct được viết `(pub x i32)` (3.6).
 
 ### 3.14 defmacro — định nghĩa macro

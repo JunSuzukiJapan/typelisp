@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 型別基礎
 
 typelisp 是靜態型別語言。本章說明型別檢查能為你做什麼、常用的型別（`Option`、`Result`、結構、列舉）以及泛型。閱讀本章前請先讀
@@ -157,12 +157,12 @@ none
 (make-instance 'counter :name "hits")   ; count 為 0
 ```
 
-要讓結構擁有函式，使用 `impl`。`(impl 型別名稱 項目...)` 的每個項目是 `(名稱 (引數...) 回傳型別 本體...)`
+要讓結構擁有函式，使用 `impl`。`(impl 型別名稱 項目...)` 的每個項目是 `(defmethod 名稱 (引數...) 回傳型別 本體...)`
 的形式，第一個引數是 `self` 時，就成為該型別的**方法**。`self` 不寫型別。
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -173,9 +173,9 @@ none
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

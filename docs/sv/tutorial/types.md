@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Grunderna i typer
 
 typelisp är ett statiskt typat språk. Det här kapitlet förklarar vad typkontrollen gör åt dig, de typer
@@ -171,12 +171,12 @@ Ytterligare ett uttryck i ett fälts deklaration blir fältets **standardvärde*
 ```
 
 För att ge en struct egna funktioner använder du `impl`. Varje post i `(impl Typnamn post...)` har formen
-`(namn (argument...) Returtyp kropp...)`, och om det första argumentet är `self` blir den en **metod** hos
+`(defmethod namn (argument...) Returtyp kropp...)`, och om det första argumentet är `self` blir den en **metod** hos
 den typen. `self` skrivs utan typ.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -187,9 +187,9 @@ värdet under namnet `new` kan användarna kort skriva `(point::new 3 4)`.
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

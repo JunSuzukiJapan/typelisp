@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -216,12 +216,12 @@ Nazwy form specjalnych (słowa zastrzeżone, takie jak `if`, `let` i `step`, kt�
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; metoda statyczna
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; metoda statyczna
     (point::origin :y 7)
     ```
 
@@ -621,26 +621,31 @@ Adnotacja typu jest wymagana (nie jest wnioskowana z inicjalizatora). `defvar` m
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; metoda statyczna: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; metoda instancji: (name obj args...)
-  (pub name ...))                                      ; publiczna także poza modułem typu
+  (defmethod name ((arg Type2) ...) RetType body...)            ; metoda statyczna: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; metoda instancji: (name obj args...)
+  (pub defmethod name ...))                                      ; publiczna także poza modułem typu
 
 ; typ generyczny
 (impl Type<T> (:where (Trait T)...) item...)
+
+; poza impl: metoda typu pierwszego parametru
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 Daje metody typowi zdefiniowanemu przez `defstruct` (3.6) lub `defenum` (3.7). Odpowiada
 impl własnemu typu (inherent impl) w Rust (`impl Point { ... }`).
 
-- Element ma postać `(nazwa (parametry...) TypZwracany ciało...)`, taką samą jak element `impl` traitu
+- Element ma postać `(defmethod nazwa (parametry...) TypZwracany ciało...)`, taką samą jak element `impl` traitu
   (3.9).
+  Postać bez `defmethod`, `(nazwa (parametry...) ...)`, jest błędem.
 - Element, którego pierwszym parametrem jest `self`, to **metoda instancji**, wywoływana jako
   `(name obj args...)`. `self` zapisuje się bez typu (jego typem jest
   `Self`, typ docelowy; `(self Type)` nie jest akceptowane).
+  Parametry po `self` zapisuje się z typem.
 - Element bez `self` to **metoda statyczna**, wywoływana jako `(Type::name args...)`. Metoda statyczna,
   która tworzy wartość, jest konstruktorem tego typu. Nazwa jest dowolna; zalecana jest `new`.
 - **Widoczność ustala się dla każdego elementu.** Poza modułem, który definiuje typ, można używać tylko
-  elementów zapisanych jako `(pub name ...)`. Bez `pub` element jest dostępny tylko wewnątrz tego modułu.
+  elementów zapisanych jako `(pub defmethod name ...)`. Bez `pub` element jest dostępny tylko wewnątrz tego modułu.
 - Typ może mieć dowolnie wiele `impl`.
 - Wywołujący rozstrzyga metodę według statycznego typu `obj` (pojedyncza, statyczna dyspozycja). Metody
   szuka się **tylko według typu pierwszego argumentu** (3.10).
@@ -648,8 +653,7 @@ impl własnemu typu (inherent impl) w Rust (`impl Point { ... }`).
   ciała, tylko gdy dalej są formy ciała). Pobiera się je przez `(documentation Type::name)`. To samo
   dotyczy metod w `impl` traitu.
 - Można go pisać tylko dla własnych typów programu. Dla typu biblioteki standardowej, takiego jak `Vector`,
-  `Option` czy `int`, nie można (błąd mówi `... is a standard library type`). Aby dodać operację do typu
-  standardowego, zdefiniuj trait i napisz jego `impl` dla tego typu.
+  `Option` czy `int`, nie można (błąd mówi `... is a standard library type`). Aby dodać metodę do typu standardowego, użyj `defmethod` poza `impl` (poniżej) albo zdefiniuj trait i napisz jego `impl` dla tego typu.
 - Jeśli w `(impl X ...)` po `X` następuje element (lista), `:where` lub nic, jest to ten impl własny typu;
   jeśli nazwa, jest to `impl` traitu (`(impl Trait Type ...)`, 3.9).
 
@@ -657,11 +661,11 @@ impl własnemu typu (inherent impl) w Rust (`impl Point { ... }`).
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; metoda statyczna
@@ -676,7 +680,7 @@ każdego wywołania.
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -696,11 +700,11 @@ samej nazwie.
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -715,6 +719,32 @@ samej nazwie.
   (`Box<int>`); w dowolnej kolejności jest to błąd. Akcesor pola liczy się jako metoda `impl` ze zmiennymi.
 - Aby wskazać taką metodę w `documentation`, `compile`, `trace` i podobnych, napisz instancjację:
   `Box<int>::twice`. Jeśli metodę ma tylko jedna instancjacja, wystarczy też `Box::twice`.
+
+#### defmethod poza impl
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    metoda int
+(some-method 2.0 3.0)   ; => 6.0  metoda f64
+```
+
+`defmethod` zapisany poza `impl` staje się **metodą typu swojego pierwszego parametru**. Metod szuka się tylko po typie pierwszego argumentu, więc jedna nazwa może mieć metodę dla każdego typu pierwszego parametru.
+
+- Od `defmethod` wewnątrz `impl` różni się tylko tym, że jego pierwszym parametrem nie może być `self`. Pierwszy parametr zapisuje się jako `(nazwa Typ)`, a ten typ jest właścicielem metody. Zapisanie `self` jest błędem.
+- **Można go napisać dla dowolnego typu.** Metody można dodawać do typów biblioteki standardowej, takich jak `int` i `Vector`, oraz do typów zdefiniowanych w innych modułach (własny `impl` typu może napisać tylko strona, która definiuje typ).
+- Widoczność to `(pub defmethod ...)`, tak jak wewnątrz `impl`. Bez `pub` metoda jest dostępna tylko wewnątrz modułu, który ją definiuje.
+- Odbiorca typu generycznego zapisuje swoje parametry typu jako zmienne (`((v Vector<T>))`). To `T` jest parametrem typu odbiorcy; ponowne zadeklarowanie `<T>` jako własnego parametru typu metody jest niedozwolone.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — struktury (typy definiowane przez użytkownika)
 
@@ -887,19 +917,20 @@ typ**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; lista supertraitów jest wymagana; () jeśli brak
   (:type AssocName)                       ; typy powiązane (dowolna liczba, opcjonalne)
-  (method-name (self params...) RetType)          ; bez ciała = trzeba zaimplementować
-  (method-name (self params...) RetType body...)) ; z ciałem = implementacja domyślna
+  (defmethod method-name (self params...) RetType)          ; bez ciała = trzeba zaimplementować
+  (defmethod method-name (self params...) RetType body...)) ; z ciałem = implementacja domyślna
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; ograniczenia dotyczące całego impl (opcjonalne)
   (:type AssocName ConcreteType)          ; konkretyzuje typ powiązany
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 Przez `impl` każda metoda jest rejestrowana jako metoda `TargetType` i wywołuje się ją jak metodę
 własnego `impl` typu (3.5). Metody w `impl` traitu są zawsze publiczne, bez `pub`. Do traitów odwołuje się
 jako do ograniczeń traitów w klauzulach `:where` funkcji generycznych (zob. [3.1 defun](#31-defun--definicje-funkcji)). Nazwa traitu może
 być też ścieżką `::`, na przykład `m::Trait`.
+Deklaracje metod w `deftrait` i metody `impl` traitu zapisuje się przez `defmethod`, tak jak we własnym `impl` typu (`(method-name (self ...) ...)` bez `defmethod` jest błędem).
 
 **Lista supertraitów (wymagana)**: zawsze zapisywana zaraz po nazwie traitu. Każdy element to goła
 nazwa traitu lub, jeśli ten trait ma typy powiązane, `(Trait (Assoc Type))` ze **wszystkimi jego typami
@@ -909,7 +940,7 @@ powiązanymi ustalonymi**.
 (deftrait Eq () ...)                       ; bez supertraitów
 (deftrait Ord (Eq) ...)                    ; trait Ord: Eq z Rust
 (deftrait CharSource ((Iter (Item char)))  ; ustalenie typu powiązanego
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 Dziedziczenie ma trzy skutki. (1) `impl Ord X` wymaga, aby `impl Eq X` zostało zapisane **najpierw** (reguła
@@ -942,7 +973,7 @@ typu spełniającego ograniczenia.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; w ogóle bez ciała; wszystko jest domyślne
 ```
@@ -978,11 +1009,11 @@ konkretny typ jest ustalany w czasie działania, typ obiektu traitu `:dyn Trait`
 dyspozycję przez vtable:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; jedno miejsce wywołania, odpowiedź na implementację
@@ -1139,13 +1170,14 @@ zagnieżdża się **wewnątrz** niego (`geo::point::bar`), więc wyprowadzona ś
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` można postawić tylko przy jedenastu rodzajach powyżej i przy `use` (nie przy `module`/`impl`).
+`pub` można postawić tylko przy dwunastu rodzajach powyżej i przy `use` (nie przy `module`/`impl`).
 `(pub use path...)` **reeksportuje** to, co wprowadza: inne moduły sięgają do tego ścieżką przez ten
 moduł (`m::name`) i wprowadzają to przez `(use m::name)`. Reeksportować można tylko definicję, nie
 moduł.
@@ -1154,7 +1186,7 @@ Zapisuje się go tak, że słowo kluczowe definicji następuje tuż po `pub`, a 
 otaczającej definicję nawiasami. Jeden `pub` czyni publiczną dokładnie jedną definicję (nie można oznaczyć
 kilku naraz).
 
-Metody własnego `impl` typu czyni się publicznymi element po elemencie, pisząc `(pub name ...)` (3.5). Pola
+Metody `impl` czyni się publicznymi element po elemencie, pisząc `(pub defmethod name ...)` (3.5). Pola
 struktury zapisuje się `(pub x i32)` (3.6).
 
 ### 3.14 defmacro — definicje makr

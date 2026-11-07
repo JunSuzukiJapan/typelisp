@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -176,12 +176,12 @@ typelisp เป็น Lisp ที่มีระบบชนิดแบบส�
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; เมทอดสถิต
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; เมทอดสถิต
     (point::origin :y 7)
     ```
 
@@ -577,23 +577,28 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; เมทอดสถิต: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; เมทอดของอินสแตนซ์: (name obj args...)
-  (pub name ...))                                      ; เปิดเผยนอกโมดูลของชนิดด้วย
+  (defmethod name ((arg Type2) ...) RetType body...)            ; เมทอดสถิต: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; เมทอดของอินสแตนซ์: (name obj args...)
+  (pub defmethod name ...))                                      ; เปิดเผยนอกโมดูลของชนิดด้วย
 
 ; ชนิด generic
 (impl Type<T> (:where (Trait T)...) item...)
+
+; นอก impl: เมทอดของชนิดของพารามิเตอร์ตัวแรก
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 ให้เมทอดแก่ชนิดที่นิยามด้วย `defstruct` (3.6) หรือ `defenum` (3.7) ตรงกับ inherent impl ของ Rust
 (`impl Point { ... }`)
 
-- แต่ละรายการมีรูป `(ชื่อ (พารามิเตอร์...) ชนิดที่คืน ตัวเนื้อหา...)` เหมือนรายการใน `impl` ของ trait (3.9)
+- แต่ละรายการมีรูป `(defmethod ชื่อ (พารามิเตอร์...) ชนิดที่คืน ตัวเนื้อหา...)` เหมือนรายการใน `impl` ของ trait (3.9)
+  รูป `(ชื่อ (พารามิเตอร์...) ...)` ที่ไม่มี `defmethod` เป็นข้อผิดพลาด
 - รายการที่พารามิเตอร์ตัวแรกเป็น `self` คือ **เมทอดของอินสแตนซ์** เรียกในรูป `(name obj args...)` ไม่
   เขียนชนิดให้ `self` (ชนิดของมันคือ `Self` ซึ่งเป็นชนิดเป้าหมาย และเขียนเป็น `(self Type)` ไม่ได้)
+  พารามิเตอร์หลัง `self` ต้องเขียนชนิดด้วย
 - รายการที่ไม่มี `self` คือ **เมทอดสถิต** เรียกในรูป `(Type::name args...)` เมทอดสถิตที่สร้างค่าคือตัวสร้าง
   ของชนิดนั้น ตั้งชื่อได้อิสระ แนะนำ `new`
-- **การมองเห็นกำหนดทีละรายการ** เฉพาะรายการที่เขียน `(pub name ...)` เท่านั้นที่ใช้ได้นอกโมดูลที่นิยามชนิด
+- **การมองเห็นกำหนดทีละรายการ** เฉพาะรายการที่เขียน `(pub defmethod name ...)` เท่านั้นที่ใช้ได้นอกโมดูลที่นิยามชนิด
   ถ้าไม่มี `pub` จะใช้ได้เฉพาะภายในโมดูลนั้น
 - ชนิดหนึ่งมี `impl` กี่อันก็ได้
 - ผู้เรียกแก้ไขเมทอดจากชนิดสถิตของ `obj` (single, static dispatch) เมทอดถูกค้นหา **จากชนิดของ
@@ -601,8 +606,7 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 - **docstring** ใส่ได้ในตำแหน่งเดียวกันและตามกฎเดียวกับ `defun` (ที่ต้นตัวเนื้อหา เฉพาะเมื่อมีฟอร์มของ
   ตัวเนื้อหาตามมา) ดึงได้ด้วย `(documentation Type::name)` เช่นเดียวกันกับเมทอดใน `impl` ของ trait
 - เขียนได้เฉพาะชนิดของโปรแกรมเอง เขียนให้ชนิดของไลบรารีมาตรฐานอย่าง `Vector` `Option` หรือ `int` ไม่ได้
-  (ข้อผิดพลาดบอกว่า `... is a standard library type`) หากต้องการเพิ่มการดำเนินการให้ชนิดมาตรฐาน ให้นิยาม
-  trait แล้วเขียน `impl` ของมันสำหรับชนิดนั้น
+  (ข้อผิดพลาดบอกว่า `... is a standard library type`)หากต้องการเพิ่มเมทอดให้ชนิดมาตรฐาน ให้ใช้ `defmethod` นอก `impl` (ด้านล่าง) หรือนิยาม trait แล้วเขียน `impl` ของมันสำหรับชนิดนั้น
 - ใน `(impl X ...)` ถ้าสิ่งที่ตามหลัง `X` เป็นรายการ (ลิสต์) `:where` หรือไม่มีอะไรเลย นี่คือ inherent impl
   ถ้าเป็นชื่อ คือ `impl` ของ trait (`(impl Trait Type ...)`, 3.9)
 
@@ -610,11 +614,11 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; เมทอดสถิต
@@ -628,7 +632,7 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -646,11 +650,11 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -664,6 +668,32 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
   เขียนลำดับไหนก็เป็นข้อผิดพลาด accessor ของฟิลด์ก็นับเป็นเมทอดของฝั่ง `impl` ที่ใช้ตัวแปร
 - เมื่อระบุชื่อเมทอดเช่นนี้ใน `documentation`, `compile`, `trace` ฯลฯ ให้เขียนชนิดเฉพาะ: `Box<int>::twice`
   ถ้ามีชนิดเฉพาะเพียงชนิดเดียวที่มีเมทอดนั้น เขียน `Box::twice` ก็ได้
+
+#### defmethod นอก impl
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    เมทอดของ int
+(some-method 2.0 3.0)   ; => 6.0  เมทอดของ f64
+```
+
+`defmethod` ที่เขียนนอก `impl` จะเป็น **เมทอดของชนิดของพารามิเตอร์ตัวแรก** เนื่องจากเมทอดค้นหาจากชนิดของอาร์กิวเมนต์ตัวแรกเท่านั้น จึงนิยามเมทอดชื่อเดียวกันแยกตามชนิดของพารามิเตอร์ตัวแรกได้
+
+- ต่างจาก `defmethod` ใน `impl` เพียงอย่างเดียวคือพารามิเตอร์ตัวแรกเป็น `self` ไม่ได้ พารามิเตอร์ตัวแรกเขียนเป็น `(ชื่อ ชนิด)` และชนิดนั้นเป็นเจ้าของเมทอด ถ้าเขียน `self` จะเป็นข้อผิดพลาด
+- **เขียนให้ชนิดใดก็ได้** เพิ่มเมทอดให้ชนิดของไลบรารีมาตรฐานอย่าง `int` และ `Vector` หรือชนิดที่นิยามในโมดูลอื่นได้ (ส่วน inherent `impl` เขียนได้เฉพาะฝั่งที่นิยามชนิด)
+- การเปิดเผยใช้ `(pub defmethod ...)` เช่นเดียวกับใน `impl` ถ้าไม่มีจะใช้ได้เฉพาะภายในโมดูลที่นิยามเมทอดนั้น
+- ผู้รับที่เป็นชนิด generic เขียนพารามิเตอร์ชนิดเป็นตัวแปรตามเดิม (`((v Vector<T>))`) `T` นี้เป็นพารามิเตอร์ชนิดของผู้รับ และประกาศ `<T>` ซ้ำเป็นพารามิเตอร์ชนิดของเมทอดเองไม่ได้
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — struct (ชนิดที่ผู้ใช้นิยาม)
 
@@ -831,18 +861,19 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name (self params...) RetType)          ; no body = must be implemented
-  (method-name (self params...) RetType body...)) ; with a body = default implementation
+  (defmethod method-name (self params...) RetType)          ; no body = must be implemented
+  (defmethod method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 ผ่าน `impl` แต่ละเมทอดถูกลงทะเบียนเป็นเมทอดของ `TargetType` และเรียกได้เหมือนเมทอดของ inherent `impl`
 (3.5) เมทอดใน `impl` ของ trait เปิดเผยเสมอแม้ไม่มี `pub` อ้างถึง trait เป็นขอบเขต trait ในอนุประโยค
 `:where` ของฟังก์ชัน generic (ดู [3.1 defun](#31-defun--การนิยามฟังก์ชัน)) ชื่อ trait เป็นพาธ `::` เช่น `m::Trait` ก็ได้
+การประกาศเมทอดของ `deftrait` และเมทอดของ `impl` ของ trait ก็เขียนด้วย `defmethod` เช่นเดียวกับ inherent `impl` (`(method-name (self ...) ...)` ที่ไม่มี `defmethod` เป็นข้อผิดพลาด)
 
 **รายการ supertrait (จำเป็น)**: เขียนทันทีหลังชื่อ trait เสมอ แต่ละสมาชิกคือชื่อ
 trait เปล่า หรือ หาก trait นั้นมี associated type คือ `(Trait (Assoc Type))` โดย **กำหนด associated
@@ -852,7 +883,7 @@ type ทั้งหมดของมัน**
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 การสืบทอดมีสามผล (1) `impl Ord X` ต้องมี `impl Eq X` เขียน **ก่อน** (กฎเรื่อง
@@ -884,7 +915,7 @@ implement trait เดียวกันให้ทั้ง `Box<T>` และ
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -920,11 +951,11 @@ trait ที่ไลบรารีมาตรฐานจัดให้: **`
 dispatch ผ่าน vtable:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation
@@ -1061,20 +1092,21 @@ dispatch ผ่าน vtable:
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-ใส่ `pub` ได้เฉพาะสิบเอ็ดประเภทข้างต้นและ `use` (ใส่ให้ `module`/`impl` ไม่ได้)
+ใส่ `pub` ได้เฉพาะสิบสองประเภทข้างต้นและ `use` (ใส่ให้ `module`/`impl` ไม่ได้)
 `(pub use path...)` **ส่งออกซ้ำ** สิ่งที่นำเข้ามา: โมดูลอื่นเข้าถึงได้ผ่านพาธที่ผ่านโมดูลนี้ (`m::name`)
 และนำเข้าได้ด้วย `(use m::name)` ส่งออกซ้ำได้เฉพาะนิยาม ส่งออกซ้ำโมดูลไม่ได้
 เขียนโดยให้คีย์เวิร์ดของ
 การนิยามตามหลัง `pub` ทันที ไม่ใช่รูป `(pub (defun ...))` ที่ห่อการนิยามด้วยวงเล็บ `pub` หนึ่งตัวทำให้
 การนิยามเปิดเผยได้หนึ่งอันพอดี (ทำเครื่องหมายหลายอันพร้อมกันไม่ได้)
 
-เมทอดของ inherent `impl` เปิดเผยทีละรายการด้วยการเขียน `(pub name ...)` (3.5) ฟิลด์ของ struct เขียน
+เมทอดของ `impl` เปิดเผยทีละรายการด้วยการเขียน `(pub defmethod name ...)` (3.5) ฟิลด์ของ struct เขียน
 `(pub x i32)` (3.6)
 
 ### 3.14 defmacro — การนิยามแมโคร

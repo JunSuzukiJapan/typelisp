@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 給 Common Lisp 使用者
 
 typelisp 繼承了 Common Lisp（以下簡稱 CL）的語法與許多函式名稱，但它是靜態型別語言。因此 CL 的寫法不一定能直接通過。本指南整理了熟悉
@@ -166,15 +166,14 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
 沒有 `defclass`、`defgeneric` 與方法組合。
 
 - 資料型別以 `defstruct`（結構）與 `defenum`（和型別）定義。
-- 沒有 `defmethod`。方法依型別集中寫在 `impl` 中（與 Rust 的固有 impl 相同的形式）。呼叫對象只由**第一個引數的
-  靜態型別**決定，不進行多重分派。
+- 有 `defmethod`，但它不是泛型函式（generic function）。方法要麼依型別集中寫在 `impl` 中並用 `defmethod` 書寫（與 Rust 的固有 impl 相同的形式），要麼在 `impl` 之外寫成 `(defmethod m ((x 型別) ...) ...)`。呼叫對象只由**第一個引數的靜態型別**決定，不進行多重分派。
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 靜態方法
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; 方法
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 靜態方法
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; 方法
 
   (norm2 (point::new 3 4))   ; => 25
   ```

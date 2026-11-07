@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Podstawy typów
 
 typelisp jest językiem typowanym statycznie. Ten rozdział wyjaśnia, co dla ciebie robi sprawdzanie typów,
@@ -172,12 +172,12 @@ Jeszcze jedno wyrażenie w deklaracji pola staje się **wartością domyślną**
 ```
 
 Aby dać strukturze własne funkcje, użyj `impl`. Każdy element `(impl NazwaTypu element...)` ma postać
-`(nazwa (argumenty...) TypZwracany ciało...)`, a jeśli jego pierwszym argumentem jest `self`, staje się
+`(defmethod nazwa (argumenty...) TypZwracany ciało...)`, a jeśli jego pierwszym argumentem jest `self`, staje się
 **metodą** tego typu. `self` zapisuje się bez typu.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -188,9 +188,9 @@ funkcję tworzącą wartość pod nazwą `new`, użytkownicy mogą krótko pisa�
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

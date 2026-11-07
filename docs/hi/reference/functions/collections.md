@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -103,7 +103,7 @@
 
 ```lisp
 (deftrait Hash (Eq)
-  (sxhash (self) int))              ; fixnum में समाने वाला गैर-ऋणात्मक मान लौटाता है
+  (defmethod sxhash (self) int))              ; fixnum में समाने वाला गैर-ऋणात्मक मान लौटाता है
 ```
 
 इनके लिए लागू: `int` और छह निश्चित चौड़ाई वाले पूर्णांक, `bool`, `char`, `string` और `symbol` (फ़्लोटिंग-पॉइंट संख्याओं के लिए नहीं)। अपने टाइप के लिए, परिणाम को `*sxhash-mask*` (2^30-1) से `logand` करके गैर-ऋणात्मक रखें। स्ट्रिंग को हैश करने के लिए, आप `(sxhash-string s)` (32-बिट FNV-1a) कॉल कर सकते हैं, जिसे `string` का इम्प्लीमेंटेशन उपयोग करता है।
@@ -112,10 +112,10 @@
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
-  (equals (self (other Self)) bool
+  (defmethod equals (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")

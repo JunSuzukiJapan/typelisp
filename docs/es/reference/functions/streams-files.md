@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Streams y archivos
 
 Traits y métodos de stream, tipos de stream concretos, operaciones con archivos y nombres de ruta. Los
@@ -170,11 +170,11 @@ streams compuestos.
 ```lisp
 (defstruct counter (n i32))
 (impl Stream counter
-  (open-stream-p (self) bool true)
-  (close (self) () ()))
+  (defmethod open-stream-p (self) bool true)
+  (defmethod close (self) () ()))
 (impl OutputStream counter
   (:type Item char)
-  (write-item (self (c char)) () (setf self::n (+ self::n 1))))
+  (defmethod write-item (self (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; todos los métodos restantes son los por defecto
 
 (write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri y fresh-line funcionan todos

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Thông báo lỗi
 
 Ý nghĩa của các thông báo lỗi chính từ `typl` và cách sửa chúng.
@@ -61,7 +61,8 @@ Các sai sót được phát hiện trước khi chạy. Dạng đó không đư
 | `unbound variable: y` | Không có biến nào mang tên đó. Kiểm tra chính tả và phạm vi của ràng buộc (có dùng ngoài `let` của nó không?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Hai trong số hàm, biến toàn cục và macro được đặt cùng một tên trong một module. Đổi tên một trong số đó ([Tham chiếu cú pháp 3.10](syntax.md#310-module--use--không-gian-tên)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Không có `new` nào được sinh cho struct. Tạo giá trị bằng `make-instance`, hoặc viết một `new` trong `impl` ([Tham chiếu cú pháp 3.5](syntax.md#35-impl--phương-thức-của-một-kiểu)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | Không có `defmethod`. Phương thức được viết trong `impl` của kiểu ([Tham chiếu cú pháp 3.5](syntax.md#35-impl--phương-thức-của-một-kiểu)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | Mục của `impl` hoặc `deftrait` thiếu `defmethod`. Hãy viết `(defmethod name (self) ...)`, không phải `(name (self) ...)` ([Tham chiếu cú pháp 3.5](syntax.md#35-impl--phương-thức-của-một-kiểu)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | `defmethod` bên ngoài `impl` bị viết `self`. Bên ngoài `impl`, tham số đầu được viết kèm tên và kiểu: `((x Type) ...)` ([Tham chiếu cú pháp 3.5](syntax.md#35-impl--phương-thức-của-một-kiểu)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Không có tùy chọn `:constructor`. Hàm dựng được viết trong `impl` như một phương thức tĩnh |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Một phương thức cùng tên được viết cả trong `impl` có tham số kiểu là biến (`Box<T>`) lẫn trong `impl` của một thể hiện (`Box<int>`), theo thứ tự nào cũng vậy. Chỉ giữ lại một ([Tham chiếu cú pháp 3.5](syntax.md#35-impl--phương-thức-của-một-kiểu)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Cùng một trait được cài đặt cho cả `Box<T>` lẫn `Box<int>`. Chỉ giữ lại một |

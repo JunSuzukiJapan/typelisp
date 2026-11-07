@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -170,7 +170,7 @@ CLHS 22.1.3 的列印函式。不做格式展開，直接列印一個值。串�
 
 ```lisp
 (deftrait print-object ()
-  (print-object (self (escape bool)) string))
+  (defmethod print-object (self (escape bool)) string))
 ```
 
 | 引數 | 意義 |
@@ -183,7 +183,7 @@ CLHS 22.1.3 的列印函式。不做格式展開，直接列印一個值。串�
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl print-object point
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
 

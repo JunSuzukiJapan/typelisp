@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Komunikaty o błędach
 
 Co oznaczają główne komunikaty o błędach z `typl` i jak je naprawić.
@@ -61,7 +61,8 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | `unbound variable: y` | Nie ma zmiennej o tej nazwie. Sprawdź pisownię i zakres wiązania (czy jest użyta poza swoim `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | W jednym module dwóm spośród funkcji, zmiennej globalnej i makra nadano tę samą nazwę. Zmień nazwę jednego z nich (zob. [Referencja składni 3.10](syntax.md#310-module--use--przestrzenie-nazw)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Dla struktury nie jest generowane żadne `new`. Utwórz wartość przez `make-instance` albo napisz `new` w `impl` (zob. [Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | Nie ma `defmethod`. Metody pisze się w `impl` typu (zob. [Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | Elementowi `impl` lub `deftrait` brakuje `defmethod`. Pisz `(defmethod name (self) ...)`, nie `(name (self) ...)` ([Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | W `defmethod` poza `impl` zapisano `self`. Poza `impl` pierwszy parametr zapisuje się z nazwą i typem: `((x Type) ...)` ([Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Nie ma opcji `:constructor`. Konstruktor pisze się w `impl` jako metodę statyczną |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Metodę o jednej nazwie napisano zarówno w `impl`, którego parametry typu są zmiennymi (`Box<T>`), jak i w `impl` instancjacji (`Box<int>`), w dowolnej kolejności. Zostaw tylko jedną ([Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Tę samą cechę zaimplementowano dla `Box<T>` i dla `Box<int>`. Zostaw tylko jedną implementację |

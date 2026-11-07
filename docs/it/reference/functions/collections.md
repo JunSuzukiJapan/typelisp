@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Stringhe, caratteri e collezioni
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` e `Deque<T>`.
@@ -109,7 +109,7 @@ implementa è un **errore di tipo** (`f64` non ha `Hash` a causa di `NaN`).
 
 ```lisp
 (deftrait Hash (Eq)
-  (sxhash (self) int))              ; returns a non-negative value that fits in a fixnum
+  (defmethod sxhash (self) int))              ; returns a non-negative value that fits in a fixnum
 ```
 
 Implementato per: `int` e i sei interi a larghezza fissa, `bool`, `char`, `string` e `symbol` (non per i
@@ -121,10 +121,10 @@ a 32 bit), che usa l'implementazione per `string`.
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
-  (equals (self (other Self)) bool
+  (defmethod equals (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")

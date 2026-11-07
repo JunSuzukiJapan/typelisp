@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 格式指令
 
 寫在 `print`/`println`/`format` 的控制字串中的指令。幾乎涵蓋了 CL 的全部 `format` 指令。函式本身的說明見
@@ -80,7 +80,7 @@
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl point
-  (brief (self (colon bool) (at bool)) string
+  (defmethod brief (self (colon bool) (at bool)) string
     (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
 (defun yen ((n int) (colon bool) (at bool)) string
   (format false "~a yen" n))

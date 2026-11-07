@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 类型基础
 
 typelisp 是静态类型语言。本章介绍类型检查能为你做什么、常用的类型（`Option`、`Result`、结构体、枚举）以及
@@ -159,12 +159,12 @@ none
 (make-instance 'counter :name "hits")   ; count 为 0
 ```
 
-要让结构体拥有函数，使用 `impl`。`(impl 类型名 项目...)` 的每个项目是 `(名字 (参数...) 返回类型 本体...)`
+要让结构体拥有函数，使用 `impl`。`(impl 类型名 项目...)` 的每个项目是 `(defmethod 名字 (参数...) 返回类型 本体...)`
 的形式，第一个参数是 `self` 时，就成为该类型的**方法**。`self` 不写类型。
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -175,9 +175,9 @@ none
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

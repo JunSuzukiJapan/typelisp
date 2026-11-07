@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Dasar-dasar Tipe
 
 typelisp adalah bahasa dengan tipe statis. Bab ini menjelaskan apa yang dilakukan pemeriksa tipe
@@ -173,12 +173,12 @@ Satu ekspresi lagi pada deklarasi field menjadi **nilai bawaan** field itu. Fiel
 ```
 
 Untuk memberi struct fungsi miliknya sendiri, gunakan `impl`. Setiap item dari `(impl NamaTipe item...)`
-berbentuk `(nama (argumen...) TipeKembali badan...)`, dan jika argumen pertamanya `self`, item itu menjadi
+berbentuk `(defmethod nama (argumen...) TipeKembali badan...)`, dan jika argumen pertamanya `self`, item itu menjadi
 **metode** tipe tersebut. `self` ditulis tanpa tipe.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -189,9 +189,9 @@ fungsi pembuat nilai dengan nama `new`, pemakainya bisa menulis singkat `(point:
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

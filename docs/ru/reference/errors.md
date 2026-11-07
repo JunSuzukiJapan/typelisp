@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Сообщения об ошибках
 
 Что означают основные сообщения об ошибках `typl` и как их исправить.
@@ -61,7 +61,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `unbound variable: y` | Переменной с таким именем нет. Проверьте написание и область видимости привязки (не используется ли она вне своего `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | В одном модуле двум из функции, глобальной переменной и макроса дано одно имя. Переименуйте одно из них ([Справочник по синтаксису 3.10](syntax.md#310-module--use--пространства-имён)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Для структуры `new` не генерируется. Создайте значение через `make-instance` или напишите `new` в `impl` ([Справочник по синтаксису 3.5](syntax.md#35-impl--методы-типа)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` нет. Методы пишутся в `impl` типа ([Справочник по синтаксису 3.5](syntax.md#35-impl--методы-типа)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | В элементе `impl` или `deftrait` нет `defmethod`. Пишите `(defmethod name (self) ...)`, а не `(name (self) ...)` ([Справочник по синтаксису 3.5](syntax.md#35-impl--методы-типа)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | В `defmethod` вне `impl` написан `self`. Вне `impl` первый параметр пишется с именем и типом: `((x Type) ...)` ([Справочник по синтаксису 3.5](syntax.md#35-impl--методы-типа)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Опции `:constructor` нет. Конструктор пишется в `impl` как статический метод |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Метод с одним именем написан и в `impl`, где параметры типа — переменные (`Box<T>`), и в `impl` конкретизации (`Box<int>`), в любом порядке. Оставьте только один ([Справочник по синтаксису 3.5](syntax.md#35-impl--методы-типа)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Один и тот же трейт реализован и для `Box<T>`, и для `Box<int>`. Оставьте только одну реализацию |

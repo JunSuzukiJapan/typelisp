@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Trait มาตรฐาน
 
 trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มและนำสมาชิกออก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
@@ -14,7 +14,7 @@ trait สำหรับการวนซ้ำ การเปรียบเ�
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next (self) Option<Item>))
+  (defmethod next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` implement `Iter` ผ่าน `vector-iter<T>`/
@@ -32,14 +32,14 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 
 ```lisp
 (deftrait Eq ()
-  (equals (self (other Self)) bool)                ; must be implemented
-  (not-equals (self (other Self)) bool             ; default implementation
+  (defmethod equals (self (other Self)) bool)                ; must be implemented
+  (defmethod not-equals (self (other Self)) bool             ; default implementation
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; inherits from Eq
-  (less (self (other Self)) bool)                  ; must be implemented
-  (less-equal (self (other Self)) bool (not (less other self)))
-  (greater (self (other Self)) bool (less other self))
-  (greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod less (self (other Self)) bool)                  ; must be implemented
+  (defmethod less-equal (self (other Self)) bool (not (less other self)))
+  (defmethod greater (self (other Self)) bool (less other self))
+  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 หากต้อง implement `Eq` คุณเขียนเฉพาะ `equals` และสำหรับ `Ord` เฉพาะ `less` การ implement
@@ -75,17 +75,17 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 ตัวดำเนินการที่มีให้ในตัว** ([ตัวเลข](numbers.md)) และไม่ผ่านชั้นนี้
 
 ```lisp
-(deftrait Add () (add (self (other Self)) Self))
-(deftrait Sub () (sub (self (other Self)) Self))
-(deftrait Mul () (mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (div (self (other Self)) Output))
-(deftrait Rem () (remainder (self (other Self)) Self))
+(deftrait Add () (defmethod add (self (other Self)) Self))
+(deftrait Sub () (defmethod sub (self (other Self)) Self))
+(deftrait Mul () (defmethod mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and (self (other Self)) Self)
-  (bit-or  (self (other Self)) Self)
-  (bit-xor (self (other Self)) Self)
-  (bit-not (self) Self)
-  (shift (self (count int)) Self))                 ; the distance is always int (as with ash)
+  (defmethod bit-and (self (other Self)) Self)
+  (defmethod bit-or  (self (other Self)) Self)
+  (defmethod bit-xor (self (other Self)) Self)
+  (defmethod bit-not (self) Self)
+  (defmethod shift (self (count int)) Self))                 ; the distance is always int (as with ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; ไม่มีเมธอด เป็นการรวมห้าตัว
 ```
 
@@ -117,7 +117,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push (self (x Item)) ()))
+  (defmethod push (self (x Item)) ()))
 ```
 
 คอลเลกชันที่เพิ่มสมาชิกได้ทีละตัว ฟังก์ชัน generic ขอ "ชนิดที่เพิ่ม `T` ได้" ด้วย `(:where (Push C (Item T)))` แล้วเพิ่มลงในคอลเลกชันแบบนั้นใดก็ได้ด้วย `(push c x)` เดียวกัน
@@ -148,7 +148,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 ```lisp
 (deftrait Pop ()
   (:type Item)
-  (pop (self) Option<Item>))
+  (defmethod pop (self) Option<Item>))
 ```
 
 คอลเลกชันที่นำสมาชิกที่ `push` เพิ่มไว้ล่าสุดกลับออกมาได้ ได้ `none` เมื่อว่าง ฟังก์ชันเจเนอริกขอด้วย `(:where (Pop C (Item T)))`

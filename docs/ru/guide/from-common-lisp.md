@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Для программистов на Common Lisp
 
 typelisp наследует синтаксис Common Lisp (CL) и многие имена его функций, но это язык со статической типизацией.
@@ -189,15 +189,14 @@ typelisp не разделяет пространства имён функци�
 Нет `defclass`, `defgeneric` и комбинации методов.
 
 - Типы данных определяются через `defstruct` (структуры) и `defenum` (типы-суммы).
-- `defmethod` нет. Методы собираются по типам в `impl` (та же форма, что и собственный impl в Rust). Цель
-  определяется только **статическим типом первого аргумента**; множественной диспетчеризации нет.
+- `defmethod` есть, но это не обобщённая функция. Методы либо собираются по типам в `impl` и пишутся через `defmethod` (та же форма, что и собственный impl в Rust), либо пишутся вне `impl` как `(defmethod m ((x Тип) ...) ...)`. Цель определяется только **статическим типом первого аргумента**; множественной диспетчеризации нет.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; статический метод
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; метод
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; статический метод
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; метод
 
   (norm2 (point::new 3 4))   ; => 25
   ```

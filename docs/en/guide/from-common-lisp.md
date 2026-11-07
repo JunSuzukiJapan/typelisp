@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # For Common Lisp Programmers
 
 typelisp inherits Common Lisp's (CL's) syntax and many of its function names, but it is a
@@ -193,16 +193,14 @@ literal symbol (`'done`), and the values thrown with one tag have a single type.
 There is no `defclass`, `defgeneric` or method combination.
 
 - Data types are defined with `defstruct` (structs) and `defenum` (sum types).
-- There is no `defmethod`. Methods are gathered per type in an `impl` (the same shape as Rust's inherent
-  impl). The target is decided by **the static type of the first argument** only; there is no multiple
-  dispatch.
+- `defmethod` exists, but it is not a generic function. Methods are either gathered per type in an `impl` and written with `defmethod` (the same shape as Rust's inherent impl), or written outside an `impl` as `(defmethod m ((x Type) ...) ...)`. The target is decided by **the static type of the first argument** only; there is no multiple dispatch.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; static method
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; method
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; static method
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; method
 
   (norm2 (point::new 3 4))   ; => 25
   ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Основи типів
 
 typelisp — це мова зі статичною типізацією. Цей розділ пояснює, що для вас робить перевіряльник типів,
@@ -171,12 +171,12 @@ none
 ```
 
 Щоб дати структурі власні функції, використовуйте `impl`. Кожен елемент `(impl ІмʼяТипу елемент...)` має
-вигляд `(ім'я (аргументи...) ТипПовернення тіло...)`, і якщо його перший аргумент — `self`, він стає
+вигляд `(defmethod ім'я (аргументи...) ТипПовернення тіло...)`, і якщо його перший аргумент — `self`, він стає
 **методом** цього типу. `self` пишеться без типу.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -187,9 +187,9 @@ none
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 오류 메시지
 
 `typl`이 내는 주요 오류 메시지의 의미와 고치는 방법.
@@ -60,7 +60,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `unbound variable: y` | 그 이름의 변수가 없다. 철자와 바인딩의 범위(`let` 밖에서 쓰고 있지 않은지)를 확인한다 |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | 같은 모듈에서 함수·전역 변수·매크로 중 두 개에 같은 이름을 붙였다. 어느 한쪽의 이름을 바꾼다([문법 레퍼런스 3.10](syntax.md#310-module--use--이름공간)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | 구조체에 `new`는 자동으로 만들어지지 않는다. 값은 `make-instance`로 만들거나 `impl`에 `new`를 쓴다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod`는 없다. 메서드는 타입의 `impl`에 쓴다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | `impl`·`deftrait`의 항목에 `defmethod`가 없다. `(name (self) ...)`가 아니라 `(defmethod name (self) ...)`로 쓴다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | `impl` 밖의 `defmethod`에 `self`를 썼다. `impl` 밖에서는 첫 번째 인수를 `((x 타입) ...)`처럼 이름과 타입으로 쓴다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` 옵션은 없다. 생성자는 `impl`에 정적 메서드로 쓴다 |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | 같은 이름의 메서드를 타입 매개변수를 변수로 쓴 `impl`(`Box<T>`)과 구체 타입의 `impl`(`Box<int>`) 양쪽에 썼다(쓴 순서와 무관). 한쪽으로 모은다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | 같은 트레이트를 `Box<T>`와 `Box<int>` 양쪽에 `impl`했다. 한쪽으로 모은다 |

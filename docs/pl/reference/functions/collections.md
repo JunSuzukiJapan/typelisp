@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Łańcuchy znaków, znaki i kolekcje
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` i `Deque<T>`.
@@ -108,7 +108,7 @@ typu** (`f64` nie ma `Hash` z powodu `NaN`).
 
 ```lisp
 (deftrait Hash (Eq)
-  (sxhash (self) int))              ; zwraca nieujemną wartość mieszczącą się w fixnum
+  (defmethod sxhash (self) int))              ; zwraca nieujemną wartość mieszczącą się w fixnum
 ```
 
 Zaimplementowane dla: `int` i sześciu liczb całkowitych o stałej szerokości, `bool`, `char`, `string` i `symbol` (nie dla
@@ -120,10 +120,10 @@ używa implementacja dla `string`.
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
-  (equals (self (other Self)) bool
+  (defmethod equals (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")

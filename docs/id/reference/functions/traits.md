@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Trait Standar
 
 Trait untuk iterasi, perbandingan, aritmetika, serta penambahan dan pengambilan elemen. Trait standar lainnya ada di bab masing-masing:
@@ -14,7 +14,7 @@ di [Tipe](../types.md). Cara mendefinisikan trait ada di
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next (self) Option<Item>))
+  (defmethod next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` mengimplementasikan `Iter` melalui `vector-iter<T>`/
@@ -32,14 +32,14 @@ batas `:where` fungsi generik untuk mensyaratkan bahwa tipe elemen dapat dibandi
 
 ```lisp
 (deftrait Eq ()
-  (equals (self (other Self)) bool)                ; must be implemented
-  (not-equals (self (other Self)) bool             ; default implementation
+  (defmethod equals (self (other Self)) bool)                ; must be implemented
+  (defmethod not-equals (self (other Self)) bool             ; default implementation
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; inherits from Eq
-  (less (self (other Self)) bool)                  ; must be implemented
-  (less-equal (self (other Self)) bool (not (less other self)))
-  (greater (self (other Self)) bool (less other self))
-  (greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod less (self (other Self)) bool)                  ; must be implemented
+  (defmethod less-equal (self (other Self)) bool (not (less other self)))
+  (defmethod greater (self (other Self)) bool (less other self))
+  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 Untuk mengimplementasikan `Eq` Anda hanya menulis `equals`, dan untuk `Ord` hanya `less`. Implementasi
@@ -75,17 +75,17 @@ Lapisan agar kode generik dapat mensyaratkan "tipe yang dapat dijumlahkan". **Ar
 konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lapisan ini.
 
 ```lisp
-(deftrait Add () (add (self (other Self)) Self))
-(deftrait Sub () (sub (self (other Self)) Self))
-(deftrait Mul () (mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (div (self (other Self)) Output))
-(deftrait Rem () (remainder (self (other Self)) Self))
+(deftrait Add () (defmethod add (self (other Self)) Self))
+(deftrait Sub () (defmethod sub (self (other Self)) Self))
+(deftrait Mul () (defmethod mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and (self (other Self)) Self)
-  (bit-or  (self (other Self)) Self)
-  (bit-xor (self (other Self)) Self)
-  (bit-not (self) Self)
-  (shift (self (count int)) Self))                 ; the distance is always int (as with ash)
+  (defmethod bit-and (self (other Self)) Self)
+  (defmethod bit-or  (self (other Self)) Self)
+  (defmethod bit-xor (self (other Self)) Self)
+  (defmethod bit-not (self) Self)
+  (defmethod shift (self (count int)) Self))                 ; the distance is always int (as with ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; tanpa metode; gabungan lima
 ```
 
@@ -118,7 +118,7 @@ harus menetapkan setiap tipe terkait). Fungsi generik yang membagi menerima tipe
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push (self (x Item)) ()))
+  (defmethod push (self (x Item)) ()))
 ```
 
 Koleksi yang dapat ditambahi elemen satu per satu. Fungsi generik meminta "tipe yang dapat ditambahi
@@ -152,7 +152,7 @@ Tipe itu juga dapat menjadi objek trait, seperti pada `:dyn Push<int>`.
 ```lisp
 (deftrait Pop ()
   (:type Item)
-  (pop (self) Option<Item>))
+  (defmethod pop (self) Option<Item>))
 ```
 
 Koleksi yang elemen terakhir yang ditambahkan `push` dapat diambil kembali darinya. `none` jika

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -216,12 +216,12 @@ Namnen på specialformer (reserverade ord som `if`, `let` och `step`, som betyde
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; statisk metod
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; statisk metod
     (point::origin :y 7)
     ```
 
@@ -621,24 +621,29 @@ kan inte (`setf` är ett fel).
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; statisk metod: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; instansmetod: (name obj args...)
-  (pub name ...))                                      ; publik även utanför typens modul
+  (defmethod name ((arg Type2) ...) RetType body...)            ; statisk metod: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; instansmetod: (name obj args...)
+  (pub defmethod name ...))                                      ; publik även utanför typens modul
 
 ; en generisk typ
 (impl Type<T> (:where (Trait T)...) item...)
+
+; utanför en impl: en metod hos typen för den första parametern
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 Ger metoder till en typ som definierats med `defstruct` (3.6) eller `defenum` (3.7). Motsvarar Rusts
 inneboende impl (`impl Point { ... }`).
 
-- En post har formen `(namn (parametrar...) Returtyp kropp...)`, samma som en post i ett traits `impl`
+- En post har formen `(defmethod namn (parametrar...) Returtyp kropp...)`, samma som en post i ett traits `impl`
   (3.9).
+  Formen utan `defmethod`, `(namn (parametrar...) ...)`, är ett fel.
 - En post vars första parameter är `self` är en **instansmetod**, som anropas som `(name obj args...)`.
   `self` skrivs utan typ (typen är `Self`, måltypen; `(self Type)` accepteras inte).
+  Parametrarna efter `self` skrivs med typ.
 - En post utan `self` är en **statisk metod**, som anropas som `(Type::name args...)`. En statisk metod
   som skapar ett värde är typens konstruktor. Namnet är fritt; `new` rekommenderas.
-- **Synligheten gäller per post.** Endast poster som skrivs `(pub name ...)` kan användas utanför den modul
+- **Synligheten gäller per post.** Endast poster som skrivs `(pub defmethod name ...)` kan användas utanför den modul
   som definierar typen. Utan `pub` kan en post bara användas inom den modulen.
 - En typ kan ha hur många `impl` som helst.
 - Anroparen avgör metoden utifrån den statiska typen hos `obj` (enkel, statisk dispatch). En metod söks
@@ -647,8 +652,7 @@ inneboende impl (`impl Point { ... }`).
   kroppen, bara när kroppsformer följer). Hämta dem med `(documentation Type::name)`. Detsamma gäller
   metoderna i ett traits `impl`.
 - Bara programmets egna typer kan ha en. En typ från standardbiblioteket som `Vector`, `Option` eller
-  `int` kan inte det (felet säger `... is a standard library type`). För att lägga till en operation till
-  en standardtyp, definiera ett trait och skriv dess `impl` för den typen.
+  `int` kan inte det (felet säger `... is a standard library type`). För att lägga till en metod till en standardtyp, använd en `defmethod` utanför en `impl` (nedan), eller definiera ett trait och skriv dess `impl` för den typen.
 - Om det som följer `X` i `(impl X ...)` är en post (en lista), ett `:where` eller ingenting, är det den
   inneboende impl:en; är det ett namn, är det ett traits `impl` (`(impl Trait Type ...)`, 3.9).
 
@@ -656,11 +660,11 @@ inneboende impl (`impl Point { ... }`).
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; statisk metod
@@ -674,7 +678,7 @@ nedan) bestäms av mottagaren; metodens egna (`U`) härleds ur argumenten i varj
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -694,11 +698,11 @@ namn.
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -714,6 +718,32 @@ namn.
   en metod i `impl` med variabler.
 - För att nämna en sådan metod i `documentation`, `compile`, `trace` och liknande skriver du instansieringen:
   `Box<int>::twice`. Har bara en instansiering metoden går även `Box::twice`.
+
+#### defmethod utanför en impl
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    metod hos int
+(some-method 2.0 3.0)   ; => 6.0  metod hos f64
+```
+
+En `defmethod` som skrivs utanför en `impl` blir **en metod hos typen för dess första parameter**. Metoder slås bara upp via typen hos det första argumentet, så ett namn kan ha en metod för varje typ av första parameter.
+
+- Den skiljer sig från en `defmethod` inuti en `impl` bara genom att dess första parameter inte kan vara `self`. Den första parametern skrivs `(namn Typ)`, och den typen äger metoden. Att skriva `self` är ett fel.
+- **Den kan skrivas för vilken typ som helst.** Metoder kan läggas till typer från standardbiblioteket som `int` och `Vector`, och till typer som definieras i andra moduler (en inneboende `impl` kan bara skrivas av den sida som definierar typen).
+- Synligheten är `(pub defmethod ...)`, som inuti en `impl`. Utan `pub` kan metoden bara användas inom den modul som definierar den.
+- En mottagare av en generisk typ skriver sina typparametrar som variabler (`((v Vector<T>))`). Detta `T` är mottagarens typparameter; att deklarera `<T>` igen som metodens egen typparameter är inte tillåtet.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — structs (användardefinierade typer)
 
@@ -884,19 +914,20 @@ typ, inte en typ**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; listan över supertraits är obligatorisk; () om inga
   (:type AssocName)                       ; associerade typer (hur många som helst, valfritt)
-  (method-name (self params...) RetType)          ; ingen kropp = måste implementeras
-  (method-name (self params...) RetType body...)) ; med kropp = standardimplementation
+  (defmethod method-name (self params...) RetType)          ; ingen kropp = måste implementeras
+  (defmethod method-name (self params...) RetType body...)) ; med kropp = standardimplementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; gränser som gäller hela impl (valfritt)
   (:type AssocName ConcreteType)          ; gör en associerad typ konkret
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 Genom `impl` registreras varje metod som en metod hos `TargetType` och anropas som en metod i en inneboende
 `impl` (3.5). Metoderna i ett traits `impl` är alltid publika, utan `pub`. Traits refereras som
 traitgränser i `:where`-satserna hos generiska funktioner (se [3.1 defun](#31-defun--funktionsdefinitioner)). Ett traitnamn kan också vara en
 `::`-sökväg som `m::Trait`.
+Metoddeklarationerna i en `deftrait` och metoderna i ett traits `impl` skrivs med `defmethod`, precis som i en inneboende `impl` (`(method-name (self ...) ...)` utan `defmethod` är ett fel).
 
 **Listan över supertraits (obligatorisk)**: skrivs alltid direkt efter traitnamnet. Varje element är ett
 bart traitnamn, eller, om det traitet har associerade typer, `(Trait (Assoc Type))` med **alla dess
@@ -906,7 +937,7 @@ associerade typer fastlagda**.
 (deftrait Eq () ...)                       ; inga supertraits
 (deftrait Ord (Eq) ...)                    ; Rusts trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; fastlägga en associerad typ
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 Arv har tre effekter. (1) `impl Ord X` kräver att `impl Eq X` skrivs **först** (en regel om
@@ -939,7 +970,7 @@ implementerar traitet på en gång för varje typ som uppfyller gränserna.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; ingen kropp alls; allt är standardimplementationen
 ```
@@ -976,11 +1007,11 @@ vars konkreta typ avgörs vid körning ger trait-objekttypen `:dyn Trait` (kapit
 genom en vtable:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; ett anropsställe, ett svar per implementation
@@ -1137,13 +1168,14 @@ aldrig.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` kan bara sättas på de elva sorterna ovan och på `use` (inte på `module`/`impl`).
+`pub` kan bara sättas på de tolv sorterna ovan och på `use` (inte på `module`/`impl`).
 `(pub use path...)` **återexporterar** det som tas in: andra moduler når det genom en väg via den här
 modulen (`m::name`) och tar in det med `(use m::name)`. Bara en definition kan återexporteras, inte en
 modul.
@@ -1151,7 +1183,7 @@ Det skrivs med
 definitionens nyckelord direkt efter `pub`, inte i formen `(pub (defun ...))` som omsluter definitionen med
 parenteser. Ett `pub` gör exakt en definition publik (flera definitioner kan inte markeras på en gång).
 
-Metoderna i en inneboende `impl` görs publika post för post, som `(pub name ...)` (3.5). Structfält skrivs
+Metoderna i en `impl` görs publika post för post, som `(pub defmethod name ...)` (3.5). Structfält skrivs
 `(pub x i32)` (3.6).
 
 ### 3.14 defmacro — makrodefinitioner

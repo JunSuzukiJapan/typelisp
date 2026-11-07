@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
+<!-- translated-from: docs/ja/README.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # typelisp Documentation (English)
 
 typelisp is a statically typed Lisp. For installing and building it, see [README.md](../../README.md)
@@ -42,7 +42,7 @@ details.
 (defstruct Pair<A,B> (first A) (second B))
 
 (impl Pair<A,B>
-  (swap (self) Pair<B,A>
+  (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 
 (defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))

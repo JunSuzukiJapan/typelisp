@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Fondamenti dei tipi
 
 typelisp è un linguaggio a tipizzazione statica. Questo capitolo spiega che cosa fa il type checker per
@@ -173,12 +173,12 @@ predefinito è un errore di tipo.
 ```
 
 Per dare funzioni proprie a una struttura si usa `impl`. Ogni elemento di `(impl NomeTipo elemento...)` ha
-la forma `(nome (argomenti...) TipoDiRitorno corpo...)`, e se il primo argomento è `self` diventa un
+la forma `(defmethod nome (argomenti...) TipoDiRitorno corpo...)`, e se il primo argomento è `self` diventa un
 **metodo** di quel tipo. `self` si scrive senza tipo.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -189,9 +189,9 @@ funzione che crea il valore con il nome `new`, chi la usa può scrivere semplice
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

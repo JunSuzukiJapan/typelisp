@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 061ddc57df60521cbb5ed7ac683ff36fe9fb77be -->
+<!-- translated-from: README_JP.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -24,7 +24,7 @@ It looks like this:
 (defstruct Point (x i32) (y i32))
 
 (impl Point
-  (show (self) ()
+  (defmethod show (self) ()
     (println "Point: (x ~d y ~d)" self::x self::y)))
 
 (show (make-instance 'Point :x 1 :y 2))
@@ -94,21 +94,21 @@ It looks like this:
 
 ```
 (deftrait Animal ()
-  (name (self) string)
-  (sound (self) string)
-  (speak (self) string
+  (defmethod name (self) string)
+  (defmethod sound (self) string)
+  (defmethod speak (self) string
     (format false "~a says ~a" (name self) (sound self))))
 
 (defstruct Dog (nick string))
 (defstruct Cat (nick string))
 
 (impl Animal Dog
-  (name (self) string self::nick)
-  (sound (self) string "Woof"))
+  (defmethod name (self) string self::nick)
+  (defmethod sound (self) string "Woof"))
 
 (impl Animal Cat
-  (name (self) string self::nick)
-  (sound (self) string "Meow"))
+  (defmethod name (self) string self::nick)
+  (defmethod sound (self) string "Meow"))
 
 (defun main () ()
   (let ((animals (the Vector<:dyn Animal> (Vector::new))))
@@ -152,7 +152,7 @@ go in a `:where` clause.
 (defstruct Pair<A,B> (first A) (second B))
 
 (impl Pair<A,B>
-  (swap (self) Pair<B,A>
+  (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 
 (defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))

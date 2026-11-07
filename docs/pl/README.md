@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 25173243b2eff6e1cad20c77d2fc8be7e35e0124 -->
+<!-- translated-from: docs/ja/README.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Dokumentacja typelisp (Polski)
 
 typelisp to statycznie typowany Lisp. Instalacja i budowanie są opisane w pliku [README.md](../../README.md)
@@ -42,7 +42,7 @@ umieszcza się w klauzuli `:where`. Szczegóły w rozdziałach [Podstawy typów]
 (defstruct Pair<A,B> (first A) (second B))
 
 (impl Pair<A,B>
-  (swap (self) Pair<B,A>
+  (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 
 (defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))

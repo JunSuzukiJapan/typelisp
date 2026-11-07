@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Tür Temelleri
 
 typelisp statik tür denetimli bir dildir. Bu bölüm, tür denetleyicisinin sizin için ne yaptığını, en
@@ -172,12 +172,12 @@ atlanan alan varsayılan değerini alır. Varsayılan değeri olmayan bir alanı
 ```
 
 Bir yapıya kendi fonksiyonlarını vermek için `impl` kullanın. `(impl TürAdı öğe...)`'nin her öğesi
-`(ad (argümanlar...) DönüşTürü gövde...)` biçimindedir ve ilk argümanı `self` ise o türün bir **metodu** olur.
+`(defmethod ad (argümanlar...) DönüşTürü gövde...)` biçimindedir ve ilk argümanı `self` ise o türün bir **metodu** olur.
 `self` türsüz yazılır.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -188,9 +188,9 @@ fonksiyonu `new` adıyla hazırlarsanız, kullananlar kısaca `(point::new 3 4)`
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

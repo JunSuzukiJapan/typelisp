@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # رسائل الخطأ
 
 معنى أهم رسائل الخطأ الصادرة من `typl` وكيفية إصلاحها.
@@ -61,7 +61,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `unbound variable: y` | لا يوجد متغير بهذا الاسم. تحقق من الإملاء ومن نطاق الربط (هل يُستخدم خارج `let` الخاصة به؟) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | أُعطي اثنان من دالة ومتغير عام وماكرو الاسمَ نفسه في وحدة واحدة. غيّر اسم أحدهما ([مرجع الصياغة 3.10](syntax.md#310-module--use--مساحات-الأسماء)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | لا يُولَّد `new` للبنية. اصنع القيمة بـ `make-instance`، أو اكتب `new` في `impl` ([مرجع الصياغة 3.5](syntax.md#35-impl--توابع-النوع)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | لا يوجد `defmethod`. تُكتب التوابع في `impl` النوع ([مرجع الصياغة 3.5](syntax.md#35-impl--توابع-النوع)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | ينقص عنصرَ `impl` أو `deftrait` الكلمةُ `defmethod`. اكتب `(defmethod name (self) ...)` لا `(name (self) ...)` ([مرجع الصياغة 3.5](syntax.md#35-impl--توابع-النوع)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | كُتب `self` في `defmethod` خارج `impl`. خارج `impl` يُكتب المعامل الأول باسم ونوع: `((x Type) ...)` ([مرجع الصياغة 3.5](syntax.md#35-impl--توابع-النوع)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | لا يوجد خيار `:constructor`. يُكتب المُنشئ في `impl` تابعًا ساكنًا |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | كُتب تابع بالاسم نفسه في `impl` معاملات نوعه متغيرات (`Box<T>`) وفي `impl` تجسيد (`Box<int>`) معًا، أيًّا كان الترتيب. أبقِ واحدًا منهما فقط ([مرجع الصياغة 3.5](syntax.md#35-impl--توابع-النوع)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | نُفّذت السمة نفسها لـ`Box<T>` ولـ`Box<int>` معًا. أبقِ واحدًا منهما فقط |

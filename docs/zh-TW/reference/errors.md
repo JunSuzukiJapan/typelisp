@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 錯誤訊息
 
 `typl` 提供的主要錯誤訊息的意義與修正方式。
@@ -60,7 +60,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `unbound variable: y` | 沒有該名稱的變數。檢查拼寫以及繫結的範圍（是否在 `let` 外使用） |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | 在同一模組中為函式、全域變數、巨集中的兩個取了同一個名稱。改掉其中一個的名稱（[語法參考 3.10](syntax.md#310-module--use--命名空間)） |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | 結構不會自動產生 `new`。以 `make-instance` 建立值，或在 `impl` 中寫一個 `new`（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | 沒有 `defmethod`。方法寫在型別的 `impl` 中（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | `impl` 或 `deftrait` 的項目缺少 `defmethod`。不要寫 `(name (self) ...)`，而要寫 `(defmethod name (self) ...)`（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | 在 `impl` 之外的 `defmethod` 中寫了 `self`。在 `impl` 之外，第一個參數要像 `((x 型別) ...)` 這樣寫出名稱和型別（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
 | ``defstruct: (:constructor ...) is gone — ...`` | 沒有 `:constructor` 選項。建構函式在 `impl` 中寫成靜態方法 |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | 同名的方法同時寫在了把型別參數寫成變數的 `impl`（`Box<T>`）和具體型別的 `impl`（`Box<int>`）中（與先後順序無關）。只保留其中一個（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | 同一個 trait 同時為 `Box<T>` 和 `Box<int>` 寫了 `impl`。只保留其中一個 |

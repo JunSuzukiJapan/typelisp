@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # typelisp सिंटैक्स संदर्भ
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है, जो S-एक्सप्रेशन में लिखा जाता है। बिल्ट-इन फ़ंक्शन और मेथड की सूची के लिए [बिल्ट-इन फ़ंक्शन](functions/README.md) देखें; टाइप की सूची के लिए [types.md](types.md); और त्रुटि संदेश पढ़ने के लिए [errors.md](errors.md)।
@@ -123,12 +123,12 @@ typelisp एक स्टैटिक रूप से टाइप किया
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; स्टैटिक मेथड
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; स्टैटिक मेथड
     (point::origin :y 7)
     ```
 
@@ -414,25 +414,30 @@ C जैसे ही लेआउट वाला struct घोषित कर
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; स्टैटिक मेथड: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; इंस्टेंस मेथड: (name obj args...)
-  (pub name ...))                                      ; टाइप के मॉड्यूल के बाहर भी सार्वजनिक
+  (defmethod name ((arg Type2) ...) RetType body...)            ; स्टैटिक मेथड: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; इंस्टेंस मेथड: (name obj args...)
+  (pub defmethod name ...))                                      ; टाइप के मॉड्यूल के बाहर भी सार्वजनिक
 
 ; जेनेरिक टाइप
 (impl Type<T> (:where (Trait T)...) item...)
+
+; impl के बाहर: पहले पैरामीटर के टाइप का मेथड
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 `defstruct` (3.6) या `defenum` (3.7) से परिभाषित टाइप को मेथड देता है। यह Rust के inherent impl
 (`impl Point { ... }`) के समकक्ष है।
 
-- आइटम का रूप `(नाम (पैरामीटर...) रिटर्न-टाइप बॉडी...)` है, trait के `impl` (3.9) के आइटम जैसा ही।
+- आइटम का रूप `(defmethod नाम (पैरामीटर...) रिटर्न-टाइप बॉडी...)` है, trait के `impl` (3.9) के आइटम जैसा ही।
+  `defmethod` के बिना वाला रूप, `(नाम (पैरामीटर...) ...)`, त्रुटि है।
 - जिस आइटम का पहला पैरामीटर `self` है वह **इंस्टेंस मेथड** है, जिसे `(name obj args...)` के रूप में
   कॉल किया जाता है। `self` बिना टाइप के लिखा जाता है (उसका टाइप
   `Self`, यानी लक्ष्य टाइप है; `(self Type)` स्वीकार नहीं है)।
+  `self` के बाद के पैरामीटर टाइप के साथ लिखे जाते हैं।
 - जिस आइटम में `self` नहीं वह **स्टैटिक मेथड** है, जिसे `(Type::name args...)` के रूप में कॉल किया
   जाता है। मान बनाने वाला स्टैटिक मेथड उस टाइप का कंस्ट्रक्टर है। नाम आपकी मर्ज़ी है; `new` की
   सिफ़ारिश है।
-- **दृश्यता हर आइटम की अलग है।** केवल `(pub name ...)` लिखे आइटम ही उस मॉड्यूल के बाहर इस्तेमाल हो
+- **दृश्यता हर आइटम की अलग है।** केवल `(pub defmethod name ...)` लिखे आइटम ही उस मॉड्यूल के बाहर इस्तेमाल हो
   सकते हैं जो टाइप परिभाषित करता है। `pub` के बिना आइटम केवल उसी मॉड्यूल के भीतर इस्तेमाल हो सकता है।
 - एक टाइप के कितने भी `impl` हो सकते हैं।
 - कॉल करने वाला मेथड को `obj` के स्टैटिक टाइप से हल करता है (एकल, स्टैटिक डिस्पैच)। मेथड **केवल पहले
@@ -441,8 +446,7 @@ C जैसे ही लेआउट वाला struct घोषित कर
   तब जब बॉडी फ़ॉर्म आगे हों)। उसे `(documentation Type::name)` से प्राप्त करें। trait के `impl` के
   मेथड पर भी यही लागू होता है।
 - यह केवल प्रोग्राम के अपने टाइप के लिए लिखा जा सकता है। `Vector`, `Option` या `int` जैसे स्टैंडर्ड
-  लाइब्रेरी के टाइप के लिए नहीं (त्रुटि कहती है `... is a standard library type`)। किसी स्टैंडर्ड टाइप
-  में ऑपरेशन जोड़ने के लिए एक trait परिभाषित करें और उस टाइप के लिए उसका `impl` लिखें।
+  लाइब्रेरी के टाइप के लिए नहीं (त्रुटि कहती है `... is a standard library type`)। किसी स्टैंडर्ड टाइप में मेथड जोड़ने के लिए `impl` के बाहर `defmethod` (नीचे) का उपयोग करें, या एक trait परिभाषित करें और उस टाइप के लिए उसका `impl` लिखें।
 - `(impl X ...)` में, यदि `X` के बाद आइटम (सूची), `:where` या कुछ नहीं है, तो यह inherent impl है; यदि
   नाम है, तो यह trait का `impl` है (`(impl Trait Type ...)`, 3.9)।
 
@@ -450,11 +454,11 @@ C जैसे ही लेआउट वाला struct घोषित कर
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; स्टैटिक मेथड
@@ -469,7 +473,7 @@ C जैसे ही लेआउट वाला struct घोषित कर
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -488,11 +492,11 @@ C जैसे ही लेआउट वाला struct घोषित कर
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -507,6 +511,32 @@ C जैसे ही लेआउट वाला struct घोषित कर
   जा सकता; किसी भी क्रम में यह एरर है। फ़ील्ड का एक्सेसर भी वेरिएबल वाले `impl` का मेथड गिना जाता है।
 - ऐसे मेथड को `documentation`, `compile`, `trace` आदि में नाम से बताने के लिए विशिष्ट टाइप लिखें:
   `Box<int>::twice`। अगर वह मेथड केवल एक विशिष्ट टाइप में है, तो `Box::twice` भी चलेगा।
+
+#### impl के बाहर defmethod
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    int का मेथड
+(some-method 2.0 3.0)   ; => 6.0  f64 का मेथड
+```
+
+`impl` के बाहर लिखा गया `defmethod` **अपने पहले पैरामीटर के टाइप का मेथड** बन जाता है। मेथड केवल पहले आर्ग्युमेंट के टाइप से खोजे जाते हैं, इसलिए एक ही नाम का मेथड पहले पैरामीटर के हर टाइप के लिए परिभाषित किया जा सकता है।
+
+- `impl` के भीतर के `defmethod` से इसका अंतर केवल इतना है कि इसका पहला पैरामीटर `self` नहीं हो सकता। पहला पैरामीटर `(नाम टाइप)` के रूप में लिखा जाता है, और वही टाइप मेथड का स्वामी होता है। `self` लिखना त्रुटि है।
+- **इसे किसी भी टाइप के लिए लिखा जा सकता है।** `int` और `Vector` जैसे स्टैंडर्ड लाइब्रेरी के टाइप में और दूसरे मॉड्यूल में परिभाषित टाइप में भी मेथड जोड़े जा सकते हैं (inherent `impl` केवल वही पक्ष लिख सकता है जो टाइप परिभाषित करता है)।
+- दृश्यता `impl` के भीतर की तरह `(pub defmethod ...)` से तय होती है। इसके बिना मेथड केवल उसी मॉड्यूल के भीतर इस्तेमाल हो सकता है जिसमें वह परिभाषित है।
+- जेनेरिक टाइप का रिसीवर अपने टाइप पैरामीटर वेरिएबल के रूप में ही लिखता है (`((v Vector<T>))`)। यह `T` रिसीवर का टाइप पैरामीटर है; इसे मेथड के अपने टाइप पैरामीटर के रूप में `<T>` से दोबारा घोषित नहीं किया जा सकता।
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — struct (उपयोगकर्ता-परिभाषित टाइप)
 
@@ -646,19 +676,20 @@ CL का `deftype`, जिसे स्टैटिक टाइप वाल�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; supertrait सूची आवश्यक है; कोई न हो तो ()
   (:type AssocName)                       ; असोसिएटेड टाइप (कितने भी, वैकल्पिक)
-  (method-name (self params...) RetType)          ; बॉडी नहीं = लागू करना ज़रूरी
-  (method-name (self params...) RetType body...)) ; बॉडी के साथ = डिफ़ॉल्ट इम्प्लीमेंटेशन
+  (defmethod method-name (self params...) RetType)          ; बॉडी नहीं = लागू करना ज़रूरी
+  (defmethod method-name (self params...) RetType body...)) ; बॉडी के साथ = डिफ़ॉल्ट इम्प्लीमेंटेशन
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; पूरे impl पर लागू होने वाले बाउंड (वैकल्पिक)
   (:type AssocName ConcreteType)          ; असोसिएटेड टाइप को ठोस बनाता है
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 `impl` के ज़रिए, हर मेथड `TargetType` के मेथड के रूप में पंजीकृत होता है और inherent `impl` (3.5) के
 मेथड की तरह कॉल किया जाता है। trait के `impl` के मेथड `pub` के बिना भी हमेशा सार्वजनिक होते हैं।
 trait को जेनेरिक फ़ंक्शन के `:where` क्लॉज़ में trait बाउंड के रूप में संदर्भित किया जाता है ([3.1 defun](#31-defun--फ़ंक्शन-परिभाषाएँ)
 देखें)। trait का नाम `m::Trait` जैसा `::` पथ भी हो सकता है।
+`deftrait` की मेथड घोषणाएँ और trait के `impl` के मेथड भी inherent `impl` की तरह `defmethod` से लिखे जाते हैं (`defmethod` के बिना `(method-name (self ...) ...)` त्रुटि है)।
 
 **Supertrait सूची (आवश्यक)**: हमेशा trait के नाम के ठीक बाद लिखी जाती है। हर तत्व या तो नंगा trait नाम है, या, यदि उस trait के असोसिएटेड टाइप हैं, `(Trait (Assoc Type))` जिसमें उसके **सभी असोसिएटेड टाइप तय किए गए** हों।
 
@@ -666,7 +697,7 @@ trait को जेनेरिक फ़ंक्शन के `:where` क्�
 (deftrait Eq () ...)                       ; कोई supertrait नहीं
 (deftrait Ord (Eq) ...)                    ; Rust का trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; असोसिएटेड टाइप तय करना
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 विरासत के तीन प्रभाव हैं। (1) `impl Ord X` के लिए ज़रूरी है कि `impl Eq X` **पहले** लिखा गया हो (लिखने के क्रम का नियम: REPL में और चरण-दर-चरण `load` के साथ नियतात्मक रूप से तय किया जा सकने वाला एकमात्र रूप, और Rust से अधिक सख्त)। (2) केवल `(:where (Ord T))` से आप `Eq` के मेथड भी कॉल कर सकते हैं। (3) `Eq` के मेथड `:dyn Ord` के ज़रिए कॉल किए जा सकते हैं, और `:dyn Ord` का मान जस का तस वहाँ पास किया जा सकता है जहाँ `:dyn Eq` चाहिए (अपकास्टिंग)। सबट्रेट का अपने पैरेंट के समान नाम वाला मेथड दोबारा घोषित करना, और दो पैरेंट से समान नाम के मेथड विरासत में लेना, दोनों त्रुटियाँ हैं (vtable में हर नाम के लिए एक स्लॉट होता है)। हीरा विरासत एक स्लॉट में मिल जाती है।
@@ -684,7 +715,7 @@ trait को जेनेरिक फ़ंक्शन के `:where` क्�
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; कोई बॉडी बिलकुल नहीं; सब कुछ डिफ़ॉल्ट है
 ```
@@ -698,11 +729,11 @@ trait को जेनेरिक फ़ंक्शन के `:where` क्�
 Trait कॉल डिफ़ॉल्ट रूप से **स्टैटिक** होते हैं (रिसीवर के स्टैटिक टाइप से हल)। जिन मानों का ठोस टाइप रन टाइम पर तय होता है उन्हें संभालने के लिए, trait ऑब्जेक्ट टाइप `:dyn Trait` (अध्याय 2) vtable के ज़रिए डायनामिक डिस्पैच देता है:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; एक कॉल साइट, हर इम्प्लीमेंटेशन के लिए एक उत्तर
@@ -821,13 +852,14 @@ Trait कॉल डिफ़ॉल्ट रूप से **स्टैटि�
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` केवल ऊपर के ग्यारह प्रकारों और `use` पर लगाया जा सकता है (`module`/`impl` पर नहीं)।
+`pub` केवल ऊपर के बारह प्रकारों और `use` पर लगाया जा सकता है (`module`/`impl` पर नहीं)।
 `(pub use path...)` जो लाता है उसे **पुनः निर्यात** करता है: दूसरे मॉड्यूल उसे इस मॉड्यूल से होकर जाने
 वाले पथ (`m::name`) से पा सकते हैं और `(use m::name)` से ला सकते हैं। केवल परिभाषा का पुनः निर्यात हो
 सकता है, मॉड्यूल का नहीं।
@@ -835,7 +867,7 @@ Trait कॉल डिफ़ॉल्ट रूप से **स्टैटि�
 के ठीक बाद परिभाषा कीवर्ड रखकर लिखा जाता है, परिभाषा को कोष्ठकों में लपेटने वाले `(pub (defun ...))` रूप
 में नहीं। एक `pub` ठीक एक परिभाषा को सार्वजनिक बनाता है (कई परिभाषाएँ एक साथ चिह्नित नहीं की जा सकतीं)।
 
-inherent `impl` के मेथड आइटम-दर-आइटम `(pub name ...)` लिखकर सार्वजनिक किए जाते हैं (3.5)। स्ट्रक्ट के
+`impl` के मेथड आइटम-दर-आइटम `(pub defmethod name ...)` लिखकर सार्वजनिक किए जाते हैं (3.5)। स्ट्रक्ट के
 फ़ील्ड `(pub x i32)` लिखे जाते हैं (3.6)।
 
 ### 3.14 defmacro — macro परिभाषाएँ

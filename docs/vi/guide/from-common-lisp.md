@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Dành cho lập trình viên Common Lisp
 
 typelisp kế thừa cú pháp của Common Lisp (CL) và nhiều tên hàm của nó, nhưng là một ngôn ngữ có kiểu
@@ -190,15 +190,14 @@ literal không được đánh giá (`'done`), và các giá trị được ném
 Không có `defclass`, `defgeneric` hay kết hợp phương thức.
 
 - Các kiểu dữ liệu được định nghĩa bằng `defstruct` (struct) và `defenum` (sum type).
-- Không có `defmethod`. Phương thức được gom theo từng kiểu trong một `impl` (cùng dạng với impl cố hữu của
-  Rust). Đích gọi chỉ được quyết định bởi **kiểu tĩnh của đối số đầu tiên**; không có phân phối đa hình bội.
+- Có `defmethod`, nhưng nó không phải hàm generic. Phương thức hoặc được gom theo từng kiểu trong một `impl` và viết bằng `defmethod` (cùng dạng với impl cố hữu của Rust), hoặc viết bên ngoài `impl` dưới dạng `(defmethod m ((x Kiểu) ...) ...)`. Đích gọi chỉ được quyết định bởi **kiểu tĩnh của đối số đầu tiên**; không có phân phối đa hình bội.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; phương thức tĩnh
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; phương thức
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; phương thức tĩnh
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; phương thức
 
   (norm2 (point::new 3 4))   ; => 25
   ```

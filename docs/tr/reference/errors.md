@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Hata Mesajları
 
 `typl`'nin başlıca hata mesajlarının ne anlama geldiği ve nasıl düzeltileceği.
@@ -62,7 +62,8 @@ olduğu anlamına gelir.
 | `unbound variable: y` | Bu adda bir değişken yok. Yazımı ve bağlamanın kapsamını kontrol edin (`let`'inin dışında mı kullanılıyor?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Bir modülde fonksiyon, global değişken ve makrodan ikisine aynı ad verildi. Birinin adını değiştirin ([Sözdizimi Başvurusu 3.10](syntax.md#310-module--use--ad-alanları)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Bir yapı için `new` üretilmez. Değeri `make-instance` ile oluşturun ya da `impl`'e bir `new` yazın ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` yoktur. Metotlar türün `impl`'ine yazılır ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | Bir `impl` ya da `deftrait` öğesinde `defmethod` yok. `(name (self) ...)` değil, `(defmethod name (self) ...)` yazın ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | `impl` dışındaki bir `defmethod`'a `self` yazıldı. `impl` dışında ilk parametre ad ve türle yazılır: `((x Type) ...)` ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` seçeneği yoktur. Yapıcı `impl`'e statik metot olarak yazılır |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Aynı adlı bir metot hem tür parametreleri değişken olan bir `impl`'de (`Box<T>`) hem de bir örneklenmenin `impl`'inde (`Box<int>`) yazılmış, sıra fark etmez. Yalnızca birini bırakın ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Aynı trait hem `Box<T>` hem de `Box<int>` için uygulanmış. Yalnızca birini bırakın |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # لمبرمجي Common Lisp
 
 ترث typelisp صياغة Common Lisp (واختصارًا CL) وكثيرًا من أسماء دواله، لكنها لغة ذات أنواع ساكنة. ولهذا
@@ -186,15 +186,14 @@
 لا يوجد `defclass` ولا `defgeneric` ولا دمج للتوابع (method combination).
 
 - تُعرَّف أنواع البيانات بـ `defstruct` (البنى) و`defenum` (أنواع المجموع).
-- لا يوجد `defmethod`. تُجمع التوابع لكل نوع في `impl` (بصورة الـ impl الذاتي في Rust نفسها). ويتحدد الهدف
-  **بالنوع الساكن للوسيط الأول** وحده؛ ولا يوجد إرسال متعدد.
+- يوجد `defmethod`، لكنه ليس دالة عامة (generic function). تُجمع التوابع لكل نوع في `impl` وتُكتب بـ `defmethod` (بصورة الـ impl الذاتي في Rust نفسها)، أو تُكتب خارج `impl` على الصورة `(defmethod m ((x Type) ...) ...)`. ويتحدد الهدف **بالنوع الساكن للوسيط الأول** وحده؛ ولا يوجد إرسال متعدد.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; تابع ساكن
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; تابع
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; تابع ساكن
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; تابع
 
   (norm2 (point::new 3 4))   ; => 25
   ```

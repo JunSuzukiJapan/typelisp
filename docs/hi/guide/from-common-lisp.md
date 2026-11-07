@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Common Lisp प्रोग्रामरों के लिए
 
 typelisp, Common Lisp (CL) का सिंटैक्स और उसके कई फ़ंक्शन नाम विरासत में लेता है, लेकिन यह स्टैटिक रूप से टाइप की गई भाषा है। इसी कारण CL कोड हमेशा जस का तस काम नहीं करता। यह गाइड उन जगहों को इकट्ठा करती है जहाँ CL के आदी लोग अक्सर अटकते हैं, साथ में यह भी कि कोड को कैसे दोबारा लिखें।
@@ -157,15 +157,14 @@ CL से तीन अंतर हैं। सभी एलिमेंट �
 `defclass`, `defgeneric` या मेथड कॉम्बिनेशन नहीं हैं।
 
 - डेटा टाइप `defstruct` (struct) और `defenum` (sum टाइप) से परिभाषित होते हैं।
-- `defmethod` नहीं है। मेथड हर टाइप के लिए एक `impl` में इकट्ठे लिखे जाते हैं (Rust के inherent impl जैसा
-  ही रूप)। लक्ष्य केवल **पहले आर्ग्युमेंट के स्टैटिक टाइप** से तय होता है; मल्टीपल डिस्पैच नहीं है।
+- `defmethod` है, पर वह जेनेरिक फ़ंक्शन नहीं है। मेथड या तो हर टाइप के लिए एक `impl` में इकट्ठे `defmethod` से लिखे जाते हैं (Rust के inherent impl जैसा ही रूप), या `impl` के बाहर `(defmethod m ((x टाइप) ...) ...)` के रूप में लिखे जाते हैं। लक्ष्य केवल **पहले आर्ग्युमेंट के स्टैटिक टाइप** से तय होता है; मल्टीपल डिस्पैच नहीं है।
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; स्टैटिक मेथड
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; मेथड
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; स्टैटिक मेथड
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; मेथड
 
   (norm2 (point::new 3 4))   ; => 25
   ```

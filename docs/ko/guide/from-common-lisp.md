@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 57b3467ad96d7f85724772ba57ff775a80dc1dd7 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로
@@ -178,15 +178,14 @@ CL과 다른 점은 세 가지다. 요소의 타입이 모두 같아야 한다(`
 `defclass`, `defgeneric`, 메서드 결합은 없다.
 
 - 데이터 타입은 `defstruct`(구조체)와 `defenum`(합 타입)으로 정의한다.
-- `defmethod`는 없다. 메서드는 타입마다 `impl`에 모아 쓴다(Rust의 고유 impl과 같은 형태). 호출할 대상은
-  **첫 번째 인수의 정적 타입**만으로 정해지며, 다중 디스패치는 하지 않는다.
+- `defmethod`는 있지만 총칭 함수(generic function)가 아니다. 메서드는 타입마다 `impl`에 모아 `defmethod`로 쓰거나(Rust의 고유 impl과 같은 형태), `impl` 밖에서 `(defmethod m ((x 타입) ...) ...)`로 쓴다. 호출할 대상은 **첫 번째 인수의 정적 타입**만으로 정해지며, 다중 디스패치는 하지 않는다.
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 정적 메서드
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; 메서드
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 정적 메서드
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; 메서드
 
   (norm2 (point::new 3 4))   ; => 25
   ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 타입의 기초
 
 typelisp는 정적 타입 언어이다. 이 장에서는 타입 검사기가 해 주는 일, 자주 쓰는 타입(`Option`, `Result`, 구조체,
@@ -166,12 +166,12 @@ none
 ```
 
 구조체에 함수를 주려면 `impl`을 쓴다. `(impl 타입이름 항목...)`의 각 항목은
-`(이름 (인수...) 반환타입 본체...)` 형태이며, 첫 번째 인수가 `self`이면 그 타입의 **메서드**가 된다.
+`(defmethod 이름 (인수...) 반환타입 본체...)` 형태이며, 첫 번째 인수가 `self`이면 그 타입의 **메서드**가 된다.
 `self`에는 타입을 쓰지 않는다.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -182,9 +182,9 @@ none
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

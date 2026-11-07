@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # 流与文件
 
 流的 trait 与方法、具体流类型、文件操作、路径名。网络套接字也是流的一员，见[网络](network.md)。
@@ -156,11 +156,11 @@ trait 解析（第 9 章）。
 ```lisp
 (defstruct counter (n i32))
 (impl Stream counter
-  (open-stream-p (self) bool true)
-  (close (self) () ()))
+  (defmethod open-stream-p (self) bool true)
+  (defmethod close (self) () ()))
 (impl OutputStream counter
   (:type Item char)
-  (write-item (self (c char)) () (setf self::n (+ self::n 1))))
+  (defmethod write-item (self (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 其余方法全部使用默认实现
 
 (write-line (make-instance 'counter :n 0) "four")   ; write-line、terpri、fresh-line 都能工作

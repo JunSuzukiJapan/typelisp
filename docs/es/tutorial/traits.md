@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Traits
 
 Un trait es una promesa de que "este tipo admite estas operaciones". Los traits permiten que varios tipos
@@ -12,8 +12,8 @@ Definamos como el trait `Shape` las operaciones que devuelven el área y el nomb
 
 ```lisp
 (deftrait Shape ()
-  (area (self) int)
-  (name (self) string))
+  (defmethod area (self) int)
+  (defmethod name (self) string))
 ```
 
 - El `()` tras el nombre del trait es la lista de traits de los que hereda (sección 4). Se deja vacía si
@@ -27,12 +27,12 @@ Para implementar un trait para un tipo, escribe un `impl`.
 (defstruct rect (w int) (h int))
 
 (impl Shape circle
-  (area (self) int (* 3 self::r self::r))
-  (name (self) string "circle"))
+  (defmethod area (self) int (* 3 self::r self::r))
+  (defmethod name (self) string "circle"))
 
 (impl Shape rect
-  (area (self) int (* self::w self::h))
-  (name (self) string "rect"))
+  (defmethod area (self) int (* self::w self::h))
+  (defmethod name (self) string "rect"))
 ```
 
 Los métodos implementados se llaman igual que las funciones normales.
@@ -77,16 +77,16 @@ Si un método de un trait tiene cuerpo, ese cuerpo se usa cuando un `impl` omite
 
 ```lisp
 (deftrait Describe ()
-  (label (self) string)
-  (describe (self) string
+  (defmethod label (self) string)
+  (defmethod describe (self) string
     (format false "<~a>" (label self))))
 
 (impl Describe circle
-  (label (self) string "a circle"))            ; describe es la implementación por defecto
+  (defmethod label (self) string "a circle"))            ; describe es la implementación por defecto
 
 (impl Describe rect
-  (label (self) string "a rect")
-  (describe (self) string "[rect]"))           ; la que se escribe aquí tiene prioridad
+  (defmethod label (self) string "a rect")
+  (defmethod describe (self) string "[rect]"))           ; la que se escribe aquí tiene prioridad
 
 (describe (make-instance 'circle :r 1))     ; => "<a circle>"
 (describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
@@ -112,10 +112,10 @@ Implementemos `Eq` y `Ord` para un tipo que representa una cantidad de dinero. C
 (defstruct money (yen int))
 
 (impl Eq money
-  (equals (self (other Self)) bool (= self::yen other::yen)))
+  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
 
 (greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (la implementación por defecto de Ord)
 ```
@@ -125,7 +125,7 @@ se pide una forma que se pueda volver a leer, como con `~s`.
 
 ```lisp
 (impl print-object money
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
     (format false "~a yen" self::yen)))
 
 (println "~a" (make-instance 'money :yen 500))              ; 500 yen

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Error Messages
 
 What the main error messages from `typl` mean and how to fix them.
@@ -62,7 +62,8 @@ Mistakes found before running. The form is not run until they are fixed.
 | `unbound variable: y` | There is no variable of that name. Check the spelling and the scope of the binding (is it used outside its `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Two of a function, a global variable and a macro were given the same name in one module. Rename one of them ([Syntax Reference 3.10](syntax.md#310-module--use--namespaces)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | No `new` is generated for a struct. Make the value with `make-instance`, or write a `new` in `impl` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | There is no `defmethod`. Write methods in the type's `impl` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | An item of an `impl` or `deftrait` lacks `defmethod`. Write `(defmethod name (self) ...)`, not `(name (self) ...)` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | A `defmethod` outside an `impl` was given `self`. Outside an `impl`, write the first parameter with a name and a type: `((x Type) ...)` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | There is no `:constructor` option. Write the constructor in `impl` as a static method |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | A method of one name was written both in an `impl` whose type parameters are variables (`Box<T>`) and in an `impl` of an instantiation (`Box<int>`), in either order. Keep only one of them ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | The same trait was implemented for both `Box<T>` and `Box<int>`. Keep only one of them |

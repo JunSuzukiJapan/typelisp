@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Chuỗi, ký tự và tập hợp
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` và `Deque<T>`.
@@ -108,7 +108,7 @@ truyền vector qua `iter`, như `(map (iter v) f)`. Các thao tác phá hủy (
 
 ```lisp
 (deftrait Hash (Eq)
-  (sxhash (self) int))              ; trả về một giá trị không âm vừa với fixnum
+  (defmethod sxhash (self) int))              ; trả về một giá trị không âm vừa với fixnum
 ```
 
 Được triển khai cho: `int` và sáu số nguyên độ rộng cố định, `bool`, `char`, `string` và `symbol` (không
@@ -120,10 +120,10 @@ khai cho `string` dùng.
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
-  (equals (self (other Self)) bool
+  (defmethod equals (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")

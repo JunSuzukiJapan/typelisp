@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -135,12 +135,12 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 静态方法
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 静态方法
     (point::origin :y 7)
     ```
 
@@ -467,30 +467,35 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; 静态方法: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; 实例方法: (name obj args...)
-  (pub name ...))                                      ; 在定义类型的模块之外也公开
+  (defmethod name ((arg Type2) ...) RetType body...)            ; 静态方法: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; 实例方法: (name obj args...)
+  (pub defmethod name ...))                                      ; 在定义类型的模块之外也公开
 
 ; 泛型类型
 (impl Type<T> (:where (Trait T)...) item...)
+
+; impl 之外：第一个参数的类型的方法
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 给用 `defstruct`（3.6）、`defenum`（3.7）定义的类型添加方法。相当于 Rust 的固有 impl
 （`impl Point { ... }`）。
 
-- 项目的形式是 `(名字 (参数...) 返回类型 本体...)`，与 trait 的 `impl`（3.9）的项目相同。
+- 项目的形式是 `(defmethod 名字 (参数...) 返回类型 本体...)`，与 trait 的 `impl`（3.9）的项目相同。
+  不加 `defmethod` 的 `(名字 (参数...) ...)` 形式会报错。
 - 第一个参数是 `self` 的项目是**实例方法**，以 `(name obj args...)` 的形式调用。`self` 不写类型
   （其类型为目标类型 `Self`，不能写成 `(self Type)`）。
+  `self` 之后的参数要写类型。
 - 没有 `self` 的项目是**静态方法**，以 `(Type::name args...)` 的形式调用。创建值的静态方法就是该类型
   的构造函数。名字可以自由决定，推荐用 `new`。
-- **公开以项目为单位**。只有写成 `(pub name ...)` 的项目才能在定义该类型的模块之外使用。不加 `pub`
+- **公开以项目为单位**。只有写成 `(pub defmethod name ...)` 的项目才能在定义该类型的模块之外使用。不加 `pub`
   的项目只能在该模块内使用。
 - 一个类型可以写任意多个 `impl`。
 - 调用方根据 `obj` 的静态类型解析方法（单一、静态分派）。方法**只**根据**第一个参数的类型**查找（3.10）。
 - **docstring** 可以与 `defun` 放在相同位置、按相同规则书写（本体的开头，仅当后面还有本体形式时）。
   用 `(documentation Type::name)` 取出。trait 的 `impl` 的方法也一样。
 - 只能为自己程序中的类型书写。`Vector`、`Option`、`int` 这样的标准库类型不能写（会报
-  `... is a standard library type` 错误）。想给标准类型增加操作时，定义一个 trait，再对该类型写 `impl`。
+  `... is a standard library type` 错误）。想给标准类型增加方法时，使用下面 `impl` 之外的 `defmethod`，或者定义一个 trait，再对该类型写 `impl`。
 - 在 `(impl X ...)` 中，`X` 之后是项目（列表）、`:where` 或什么都没有时，就是这里的固有 impl；
   是名字时，就是 trait 的 `impl`（`(impl Trait Type ...)`，3.9）。
 
@@ -498,11 +503,11 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; 静态方法
@@ -516,7 +521,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -533,11 +538,11 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -551,6 +556,32 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   都是错误。字段的访问器也算作用变量写的那一方的方法。
 - 在 `documentation`、`compile`、`trace` 等处指名这样的方法时，写出具体类型：`Box<int>::twice`。只有一个
   具体类型拥有该方法时，也可以写 `Box::twice`。
+
+#### impl 之外的 defmethod
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    int 的方法
+(some-method 2.0 3.0)   ; => 6.0  f64 的方法
+```
+
+写在 `impl` 之外的 `defmethod` 会成为**第一个参数的类型的方法**。方法只按第一个参数的类型查找，因此可以为第一个参数的每种类型定义同名的方法。
+
+- 与 `impl` 中的 `defmethod` 的区别只有一点：第一个参数不能是 `self`。第一个参数写成 `(名字 类型)`，该类型就是方法的所有者。写 `self` 会报错。
+- **可以为任何类型书写。** 可以为 `int`、`Vector` 这样的标准库类型以及在其他模块中定义的类型增加方法（固有 `impl` 只有定义该类型的一方才能书写）。
+- 公开与 `impl` 中相同，写成 `(pub defmethod ...)`。不加时，只能在定义它的模块内使用。
+- 泛型类型的接收者把类型参数照原样写成变量（`((v Vector<T>))`）。这个 `T` 是接收者的类型参数，不能再用 `<T>` 把它重复声明为方法自己的类型参数。
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — 结构体（用户定义类型）
 
@@ -696,18 +727,19 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 继承列表是必需的。没有时为 ()
   (:type AssocName)                       ; 关联类型（可以多个，可以省略）
-  (method-name (self params...) RetType)          ; 没有函数体＝必须实现
-  (method-name (self params...) RetType body...)) ; 有函数体＝默认实现
+  (defmethod method-name (self params...) RetType)          ; 没有函数体＝必须实现
+  (defmethod method-name (self params...) RetType body...)) ; 有函数体＝默认实现
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; 作用于整个 impl 的约束（可以省略）
   (:type AssocName ConcreteType)          ; 具体化关联类型
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 通过 `impl`，每个方法都作为 `TargetType` 的方法注册，可以像固有 `impl`（3.5）的方法一样调用。
 trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛型函数的 `:where` 子句中作为 trait 约束引用
 （见 [3.1 defun](#31-defun--函数定义)）。trait 名也可以写 `m::Trait` 这样的 `::` 路径。
+`deftrait` 的方法声明和 trait 的 `impl` 的方法，也与固有 `impl` 一样用 `defmethod` 书写（没有 `defmethod` 的 `(method-name (self ...) ...)` 会报错）。
 
 **继承列表（必需）**：一定写在 trait 名之后。元素是裸 trait 名，或者在该 trait 有关联类型时，写成**固定了所有关联类型**的
 `(Trait (Assoc Type))`。
@@ -716,7 +748,7 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 (deftrait Eq () ...)                       ; 没有继承
 (deftrait Ord (Eq) ...)                    ; Rust 的 trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 固定关联类型
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 继承有 3 个效果。(1) `impl Ord X` 要求**先**写 `impl Eq X`（关于书写顺序的规则。是在 REPL 和逐个 `load` 中都能确定地判断的唯一
@@ -739,7 +771,7 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 没有函数体——全部使用默认实现
 ```
@@ -765,11 +797,11 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 （第 2 章），就会经由 vtable 进行动态分派：
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 一个调用处，每个实现各自的回答
@@ -881,20 +913,21 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` 只能用于上述 11 种以及 `use`（不能用于 `module`/`impl`）。
+`pub` 只能用于上述 12 种以及 `use`（不能用于 `module`/`impl`）。
 `(pub use path...)` 会**再导出**它引入的定义：其他模块也能通过经过本模块的路径（`m::name`）找到它，
 并用 `(use m::name)` 引入。只能再导出定义，不能再导出模块。
 不是用括号包住定义形式的
 `(pub (defun ...))` 形式，而是在 `pub` 之后紧接定义关键字。一个 `pub` 只能公开一个定义（不能一次
 指定多个定义）。
 
-固有 `impl` 的方法按项目写成 `(pub name ...)`（3.5）。结构体的字段写成 `(pub x i32)`（3.6）。
+`impl` 的方法按项目写成 `(pub defmethod name ...)`（3.5）。结构体的字段写成 `(pub x i32)`（3.6）。
 
 ### 3.14 defmacro — 宏定义
 

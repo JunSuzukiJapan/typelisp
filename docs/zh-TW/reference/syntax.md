@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -135,12 +135,12 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 靜態方法
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 靜態方法
     (point::origin :y 7)
     ```
 
@@ -459,30 +459,35 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; 靜態方法: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; 實例方法: (name obj args...)
-  (pub name ...))                                      ; 在定義型別的模組之外也公開
+  (defmethod name ((arg Type2) ...) RetType body...)            ; 靜態方法: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; 實例方法: (name obj args...)
+  (pub defmethod name ...))                                      ; 在定義型別的模組之外也公開
 
 ; 泛型型別
 (impl Type<T> (:where (Trait T)...) item...)
+
+; impl 之外：第一個參數的型別的方法
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 為以 `defstruct`（3.6）、`defenum`（3.7）定義的型別加上方法。相當於 Rust 的固有 impl
 （`impl Point { ... }`）。
 
-- 項目的形式是 `(名稱 (參數...) 回傳型別 本體...)`，與 trait 的 `impl`（3.9）的項目相同。
+- 項目的形式是 `(defmethod 名稱 (參數...) 回傳型別 本體...)`，與 trait 的 `impl`（3.9）的項目相同。
+  不加 `defmethod` 的 `(名稱 (參數...) ...)` 形式會出錯。
 - 第一個參數是 `self` 的項目是**實例方法**，以 `(name obj args...)` 的形式呼叫。`self` 不寫型別
   （其型別為對象型別 `Self`，不能寫成 `(self Type)`）。
+  `self` 之後的參數要寫型別。
 - 沒有 `self` 的項目是**靜態方法**，以 `(Type::name args...)` 的形式呼叫。建立值的靜態方法就是該型別
   的建構函式。名稱可以自由決定，建議用 `new`。
-- **公開以項目為單位**。只有寫成 `(pub name ...)` 的項目才能在定義該型別的模組之外使用。不加 `pub`
+- **公開以項目為單位**。只有寫成 `(pub defmethod name ...)` 的項目才能在定義該型別的模組之外使用。不加 `pub`
   的項目只能在該模組內使用。
 - 一個型別可以寫任意多個 `impl`。
 - 呼叫端依 `obj` 的靜態型別解析方法（單一、靜態分派）。方法**只**依**第一個引數的型別**尋找（3.10）。
 - **文件字串**可以與 `defun` 放在相同位置、依相同規則書寫（本體的開頭，僅當後面還有本體形式時）。
   以 `(documentation Type::name)` 取出。trait 的 `impl` 的方法也一樣。
 - 只能為自己程式中的型別書寫。`Vector`、`Option`、`int` 這類標準函式庫的型別不能寫（會出現
-  `... is a standard library type` 錯誤）。想為標準型別增加操作時，定義一個 trait，再對該型別寫 `impl`。
+  `... is a standard library type` 錯誤）。想為標準型別增加方法時，使用下面 `impl` 之外的 `defmethod`，或定義一個 trait，再對該型別寫 `impl`。
 - 在 `(impl X ...)` 中，`X` 之後是項目（串列）、`:where` 或什麼都沒有時，就是這裡的固有 impl；
   是名稱時，就是 trait 的 `impl`（`(impl Trait Type ...)`，3.9）。
 
@@ -490,11 +495,11 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; 靜態方法
@@ -508,7 +513,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -525,11 +530,11 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -543,6 +548,32 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   都是錯誤。欄位的存取器也算作以變數寫的那一方的方法。
 - 在 `documentation`、`compile`、`trace` 等處指名這樣的方法時，寫出具體型別：`Box<int>::twice`。只有一個
   具體型別擁有該方法時，也可以寫 `Box::twice`。
+
+#### impl 之外的 defmethod
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    int 的方法
+(some-method 2.0 3.0)   ; => 6.0  f64 的方法
+```
+
+寫在 `impl` 之外的 `defmethod` 會成為**第一個參數的型別的方法**。方法只依第一個參數的型別查找，因此可以為第一個參數的每種型別定義同名的方法。
+
+- 與 `impl` 中的 `defmethod` 的差別只有一點：第一個參數不能是 `self`。第一個參數寫成 `(名稱 型別)`，該型別就是方法的擁有者。寫 `self` 會出錯。
+- **可以為任何型別書寫。** 可以為 `int`、`Vector` 這類標準函式庫的型別以及在其他模組中定義的型別增加方法（固有 `impl` 只有定義該型別的一方才能書寫）。
+- 公開與 `impl` 中相同，寫成 `(pub defmethod ...)`。不加時，只能在定義它的模組內使用。
+- 泛型型別的接收者把型別參數照原樣寫成變數（`((v Vector<T>))`）。這個 `T` 是接收者的型別參數，不能再用 `<T>` 把它重複宣告為方法自己的型別參數。
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — 結構（使用者定義型別）
 
@@ -684,18 +715,19 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 繼承清單是必要的。沒有時為 ()
   (:type AssocName)                       ; 關聯型別（可以多個，可以省略）
-  (method-name (self params...) RetType)          ; 沒有本體＝必須實作
-  (method-name (self params...) RetType body...)) ; 有本體＝預設實作
+  (defmethod method-name (self params...) RetType)          ; 沒有本體＝必須實作
+  (defmethod method-name (self params...) RetType body...)) ; 有本體＝預設實作
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; 作用於整個 impl 的約束（可以省略）
   (:type AssocName ConcreteType)          ; 具體化關聯型別
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 透過 `impl`，每個方法都作為 `TargetType` 的方法登記，可以像固有 `impl`（3.5）的方法一樣呼叫。
 trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛型函式的 `:where` 子句中作為 trait 約束參照
 （見 [3.1 defun](#31-defun--函式定義)）。trait 名稱也可以寫 `m::Trait` 這樣的 `::` 路徑。
+`deftrait` 的方法宣告和 trait 的 `impl` 的方法，也與固有 `impl` 一樣用 `defmethod` 書寫（沒有 `defmethod` 的 `(method-name (self ...) ...)` 會出錯）。
 
 **繼承清單（必要）**：一定寫在 trait 名稱之後。元素是裸 trait 名稱，或者在該 trait 有關聯型別時，寫成**固定了所有關聯型別**的
 `(Trait (Assoc Type))`。
@@ -704,7 +736,7 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 (deftrait Eq () ...)                       ; 沒有繼承
 (deftrait Ord (Eq) ...)                    ; Rust 的 trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 固定關聯型別
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 繼承有 3 個效果。(1) `impl Ord X` 要求**先**寫 `impl Eq X`（關於書寫順序的規則。是在 REPL 與逐一 `load` 中都能確定判斷的唯一形式，比 Rust
@@ -725,7 +757,7 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 沒有本體——全部使用預設實作
 ```
@@ -749,11 +781,11 @@ trait 的呼叫預設是**靜態的**（依接收者的靜態型別解析）。�
 vtable 進行動態分派：
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 一個呼叫處，每個實作各自的回答
@@ -863,20 +895,21 @@ vtable 進行動態分派：
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` 只能用於上述 11 種以及 `use`（不能用於 `module`/`impl`）。
+`pub` 只能用於上述 12 種以及 `use`（不能用於 `module`/`impl`）。
 `(pub use path...)` 會**再匯出**它引入的定義：其他模組也能透過經過本模組的路徑（`m::name`）找到它，
 並用 `(use m::name)` 引入。只能再匯出定義，不能再匯出模組。
 不是以括號包住定義形式的
 `(pub (defun ...))` 形式，而是在 `pub` 之後緊接定義關鍵字。一個 `pub` 只能公開一個定義（不能一次
 指定多個定義）。
 
-固有 `impl` 的方法依項目寫成 `(pub name ...)`（3.5）。結構的欄位寫成 `(pub x i32)`（3.6）。
+`impl` 的方法依項目寫成 `(pub defmethod name ...)`（3.5）。結構的欄位寫成 `(pub x i32)`（3.6）。
 
 ### 3.14 defmacro — 巨集定義
 

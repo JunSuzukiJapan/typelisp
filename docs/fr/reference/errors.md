@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Messages d'erreur
 
 Ce que signifient les principaux messages d'erreur de `typl` et comment les corriger.
@@ -62,7 +62,8 @@ Les erreurs trouvées avant l'exécution. La forme n'est pas exécutée tant qu'
 | `unbound variable: y` | Il n'existe pas de variable de ce nom. Vérifiez l'orthographe et la portée de la liaison (est-elle utilisée hors de son `let` ?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Deux éléments parmi une fonction, une variable globale et une macro ont reçu le même nom dans un module. Renommez l'un d'eux ([Référence de la syntaxe 3.10](syntax.md#310-module--use--espaces-de-noms)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Aucun `new` n'est généré pour une structure. Créez la valeur avec `make-instance`, ou écrivez un `new` dans `impl` ([Référence de la syntaxe 3.5](syntax.md#35-impl--méthodes-dun-type)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` n'existe pas. Les méthodes s'écrivent dans l'`impl` du type ([Référence de la syntaxe 3.5](syntax.md#35-impl--méthodes-dun-type)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | Il manque `defmethod` à un élément d'un `impl` ou d'un `deftrait`. Écrivez `(defmethod name (self) ...)` et non `(name (self) ...)` ([Référence de la syntaxe 3.5](syntax.md#35-impl--méthodes-dun-type)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | Un `defmethod` hors d'un `impl` a reçu `self`. Hors d'un `impl`, le premier paramètre s'écrit avec un nom et un type : `((x Type) ...)` ([Référence de la syntaxe 3.5](syntax.md#35-impl--méthodes-dun-type)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | L'option `:constructor` n'existe pas. Le constructeur s'écrit dans `impl` comme méthode statique |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Une méthode d'un même nom a été écrite à la fois dans un `impl` dont les paramètres de type sont des variables (`Box<T>`) et dans l'`impl` d'une instanciation (`Box<int>`), dans un ordre ou dans l'autre. N'en garder qu'un ([Référence de la syntaxe 3.5](syntax.md#35-impl--méthodes-dun-type)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Le même trait a été implémenté pour `Box<T>` et pour `Box<int>`. N'en garder qu'un |

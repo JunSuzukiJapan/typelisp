@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Mensagens de erro
 
 O que significam as principais mensagens de erro do `typl` e como corrigi-las.
@@ -61,7 +61,8 @@ Erros encontrados antes da execução. A forma não é executada até que sejam 
 | `unbound variable: y` | Não há variável com esse nome. Confira a grafia e o escopo do vínculo (ela está sendo usada fora do seu `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Foi dado o mesmo nome a duas entre uma função, uma variável global e uma macro num mesmo módulo. Renomeie uma delas ([Referência de sintaxe 3.10](syntax.md#310-module--use--namespaces)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Nenhum `new` é gerado para uma estrutura. Crie o valor com `make-instance` ou escreva um `new` em `impl` ([Referência de sintaxe 3.5](syntax.md#35-impl--métodos-de-um-tipo)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | Não existe `defmethod`. Os métodos são escritos no `impl` do tipo ([Referência de sintaxe 3.5](syntax.md#35-impl--métodos-de-um-tipo)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | Falta `defmethod` num item de `impl` ou `deftrait`. Escreva `(defmethod name (self) ...)`, não `(name (self) ...)` ([Referência de sintaxe 3.5](syntax.md#35-impl--métodos-de-um-tipo)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | Foi escrito `self` num `defmethod` fora de um `impl`. Fora de um `impl`, o primeiro parâmetro é escrito com nome e tipo: `((x Type) ...)` ([Referência de sintaxe 3.5](syntax.md#35-impl--métodos-de-um-tipo)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Não existe a opção `:constructor`. O construtor é escrito em `impl` como método estático |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Um método de um mesmo nome foi escrito tanto num `impl` cujos parâmetros de tipo são variáveis (`Box<T>`) quanto no `impl` de uma instância (`Box<int>`), em qualquer ordem. Mantenha só um deles ([Referência de sintaxe 3.5](syntax.md#35-impl--métodos-de-um-tipo)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | O mesmo trait foi implementado para `Box<T>` e para `Box<int>`. Mantenha só um deles |

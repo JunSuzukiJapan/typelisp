@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Standard-Traits
 
 Die Traits für Iteration, Vergleich, Arithmetik und das Hinzufügen und Entnehmen von Elementen. Die anderen Standard-Traits stehen in ihren eigenen
@@ -14,7 +14,7 @@ Kapiteln: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next (self) Option<Item>))
+  (defmethod next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` implementieren `Iter` jeweils über `vector-iter<T>`/
@@ -32,14 +32,14 @@ generischer Funktionen verwendet, um zu verlangen, dass Elementtypen vergleichba
 
 ```lisp
 (deftrait Eq ()
-  (equals (self (other Self)) bool)                ; muss implementiert werden
-  (not-equals (self (other Self)) bool             ; Standardimplementierung
+  (defmethod equals (self (other Self)) bool)                ; muss implementiert werden
+  (defmethod not-equals (self (other Self)) bool             ; Standardimplementierung
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; erbt von Eq
-  (less (self (other Self)) bool)                  ; muss implementiert werden
-  (less-equal (self (other Self)) bool (not (less other self)))
-  (greater (self (other Self)) bool (less other self))
-  (greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod less (self (other Self)) bool)                  ; muss implementiert werden
+  (defmethod less-equal (self (other Self)) bool (not (less other self)))
+  (defmethod greater (self (other Self)) bool (less other self))
+  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 Um `Eq` zu implementieren, schreibt man nur `equals`, für `Ord` nur `less`. Die Standardimplementierungen
@@ -75,17 +75,17 @@ konkreten Typen verwendet die eingebauten Operatoren** ([Zahlen](numbers.md)) un
 Schicht.
 
 ```lisp
-(deftrait Add () (add (self (other Self)) Self))
-(deftrait Sub () (sub (self (other Self)) Self))
-(deftrait Mul () (mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (div (self (other Self)) Output))
-(deftrait Rem () (remainder (self (other Self)) Self))
+(deftrait Add () (defmethod add (self (other Self)) Self))
+(deftrait Sub () (defmethod sub (self (other Self)) Self))
+(deftrait Mul () (defmethod mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and (self (other Self)) Self)
-  (bit-or  (self (other Self)) Self)
-  (bit-xor (self (other Self)) Self)
-  (bit-not (self) Self)
-  (shift (self (count int)) Self))                 ; die Distanz ist immer int (wie bei ash)
+  (defmethod bit-and (self (other Self)) Self)
+  (defmethod bit-or  (self (other Self)) Self)
+  (defmethod bit-xor (self (other Self)) Self)
+  (defmethod bit-not (self) Self)
+  (defmethod shift (self (count int)) Self))                 ; die Distanz ist immer int (wie bei ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; keine Methoden; eine Kombination aus fünf
 ```
 
@@ -118,7 +118,7 @@ eine in `T` geschlossene Division (dann kann kein `int` übergeben werden).
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push (self (x Item)) ()))
+  (defmethod push (self (x Item)) ()))
 ```
 
 Eine Sammlung, der Elemente einzeln hinzugefügt werden können. Eine generische Funktion verlangt mit
@@ -152,7 +152,7 @@ Er kann auch ein Trait-Objekt sein, wie in `:dyn Push<int>`.
 ```lisp
 (deftrait Pop ()
   (:type Item)
-  (pop (self) Option<Item>))
+  (defmethod pop (self) Option<Item>))
 ```
 
 Eine Sammlung, aus der sich das zuletzt mit `push` hinzugefügte Element wieder entnehmen lässt.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Type Basics
 
 typelisp is a statically typed language. This chapter explains what the type checker does for
@@ -171,12 +171,12 @@ error.
 ```
 
 To give a struct functions of its own, use `impl`. Each item of `(impl TypeName item...)` has the
-form `(name (args...) ReturnType body...)`, and if its first argument is `self` it becomes a
+form `(defmethod name (args...) ReturnType body...)`, and if its first argument is `self` it becomes a
 **method** of that type. `self` is written without a type.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -187,9 +187,9 @@ that makes a value under the name `new`, users can write it briefly as `(point::
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

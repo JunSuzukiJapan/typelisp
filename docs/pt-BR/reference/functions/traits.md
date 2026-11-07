@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Traits padrão
 
 Os traits para iteração, comparação, aritmética e adição e remoção de elementos. Os outros traits padrão estão nos seus próprios capítulos:
@@ -13,7 +13,7 @@ definir traits está na [Referência de sintaxe](../syntax.md#39-deftrait--impl-
 ```lisp
 (deftrait Iter ()
   (:type Item)
-  (next (self) Option<Item>))
+  (defmethod next (self) Option<Item>))
 ```
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` implementam `Iter` por meio de `vector-iter<T>`/
@@ -30,14 +30,14 @@ funções genéricas para exigir que os tipos dos elementos possam ser comparado
 
 ```lisp
 (deftrait Eq ()
-  (equals (self (other Self)) bool)                ; precisa ser implementado
-  (not-equals (self (other Self)) bool             ; implementação padrão
+  (defmethod equals (self (other Self)) bool)                ; precisa ser implementado
+  (defmethod not-equals (self (other Self)) bool             ; implementação padrão
     (not (equals self other))))
 (deftrait Ord (Eq)                                        ; herda de Eq
-  (less (self (other Self)) bool)                  ; precisa ser implementado
-  (less-equal (self (other Self)) bool (not (less other self)))
-  (greater (self (other Self)) bool (less other self))
-  (greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod less (self (other Self)) bool)                  ; precisa ser implementado
+  (defmethod less-equal (self (other Self)) bool (not (less other self)))
+  (defmethod greater (self (other Self)) bool (less other self))
+  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
 Para implementar `Eq` você só escreve `equals`, e para `Ord` só `less`. As implementações padrão completam o
@@ -72,17 +72,17 @@ Uma camada para que o código genérico exija "um tipo que possa ser somado". **
 concretos usa os operadores embutidos** ([Números](numbers.md)) e não passa por esta camada.
 
 ```lisp
-(deftrait Add () (add (self (other Self)) Self))
-(deftrait Sub () (sub (self (other Self)) Self))
-(deftrait Mul () (mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (div (self (other Self)) Output))
-(deftrait Rem () (remainder (self (other Self)) Self))
+(deftrait Add () (defmethod add (self (other Self)) Self))
+(deftrait Sub () (defmethod sub (self (other Self)) Self))
+(deftrait Mul () (defmethod mul (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
-  (bit-and (self (other Self)) Self)
-  (bit-or  (self (other Self)) Self)
-  (bit-xor (self (other Self)) Self)
-  (bit-not (self) Self)
-  (shift (self (count int)) Self))                 ; a distância é sempre int (como em ash)
+  (defmethod bit-and (self (other Self)) Self)
+  (defmethod bit-or  (self (other Self)) Self)
+  (defmethod bit-xor (self (other Self)) Self)
+  (defmethod bit-not (self) Self)
+  (defmethod shift (self (count int)) Self))                 ; a distância é sempre int (como em ash)
 (deftrait Number (Add Sub Mul Rem Ord))                   ; sem métodos; uma combinação de cinco
 ```
 
@@ -114,7 +114,7 @@ resultado com `(:where (Div T (Output R)))`, ou exige uma divisão fechada em `T
 ```lisp
 (deftrait Push ()
   (:type Item)
-  (push (self (x Item)) ()))
+  (defmethod push (self (x Item)) ()))
 ```
 
 Uma coleção à qual se podem adicionar elementos um de cada vez. Uma função genérica pede “um tipo ao
@@ -148,7 +148,7 @@ objeto trait, como em `:dyn Push<int>`.
 ```lisp
 (deftrait Pop ()
   (:type Item)
-  (pop (self) Option<Item>))
+  (defmethod pop (self) Option<Item>))
 ```
 
 Uma coleção da qual se pode retirar o último elemento adicionado com `push`. `none` quando está

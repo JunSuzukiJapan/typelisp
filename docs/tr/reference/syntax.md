@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -219,12 +219,12 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; statik metot
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; statik metot
     (point::origin :y 7)
     ```
 
@@ -625,24 +625,29 @@ değiştirilemez (`setf` bir hatadır).
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; statik metot: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; örnek metodu: (name obj args...)
-  (pub name ...))                                      ; türün modülü dışında da açık
+  (defmethod name ((arg Type2) ...) RetType body...)            ; statik metot: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; örnek metodu: (name obj args...)
+  (pub defmethod name ...))                                      ; türün modülü dışında da açık
 
 ; genel bir tür
 (impl Type<T> (:where (Trait T)...) item...)
+
+; impl dışında: ilk parametrenin türünün metodu
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 `defstruct` (3.6) veya `defenum` (3.7) ile tanımlanan bir türe metot verir. Rust'ın içsel impl'ine
 (`impl Point { ... }`) karşılık gelir.
 
-- Bir öğenin biçimi `(ad (parametreler...) DönüşTürü gövde...)` olup bir trait'in `impl`'indeki (3.9)
+- Bir öğenin biçimi `(defmethod ad (parametreler...) DönüşTürü gövde...)` olup bir trait'in `impl`'indeki (3.9)
   öğeyle aynıdır.
+  `defmethod` olmadan yazılan `(ad (parametreler...) ...)` biçimi hatadır.
 - İlk parametresi `self` olan öğe bir **örnek metodudur** ve `(name obj args...)` biçiminde çağrılır.
   `self` türsüz yazılır (türü hedef tür olan `Self`'tir; `(self Type)` kabul edilmez).
+  `self`'ten sonraki parametreler türleriyle yazılır.
 - `self` içermeyen öğe bir **statik metottur** ve `(Type::name args...)` biçiminde çağrılır. Değer üreten
   statik metot o türün yapıcısıdır. Ad serbesttir; `new` önerilir.
-- **Görünürlük öğe başınadır.** Türü tanımlayan modülün dışında yalnızca `(pub name ...)` diye yazılan
+- **Görünürlük öğe başınadır.** Türü tanımlayan modülün dışında yalnızca `(pub defmethod name ...)` diye yazılan
   öğeler kullanılabilir. `pub` olmadan bir öğe yalnızca o modülün içinde kullanılabilir.
 - Bir türün istenen sayıda `impl`'i olabilir.
 - Çağıran taraf metodu `obj`'nin statik türünden çözer (tekli, statik gönderim). Bir metot **yalnızca ilk
@@ -651,8 +656,7 @@ değiştirilemez (`setf` bir hatadır).
   ardından gövde formları geliyorsa). `(documentation Type::name)` ile alınır. Bir trait'in `impl`'inin
   metotları için de aynısı geçerlidir.
 - Yalnızca programın kendi türleri için yazılabilir. `Vector`, `Option` veya `int` gibi standart
-  kütüphane türleri için yazılamaz (hata `... is a standard library type` der). Standart bir türe işlem
-  eklemek için bir trait tanımlayıp o tür için `impl`'ini yazın.
+  kütüphane türleri için yazılamaz (hata `... is a standard library type` der). Standart bir türe metot eklemek için `impl` dışında bir `defmethod` (aşağıda) kullanın ya da bir trait tanımlayıp o tür için `impl`'ini yazın.
 - `(impl X ...)` içinde `X`'ten sonra bir öğe (bir liste), bir `:where` ya da hiçbir şey geliyorsa bu
   içsel impl'dir; bir ad geliyorsa bir trait'in `impl`'idir (`(impl Trait Type ...)`, 3.9).
 
@@ -660,11 +664,11 @@ değiştirilemez (`setf` bir hatadır).
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; statik metot
@@ -679,7 +683,7 @@ parametreleri (aşağıdaki `T`) alıcı tarafından belirlenir; metodun kendi p
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -697,11 +701,11 @@ ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme içi
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -717,6 +721,32 @@ ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme içi
   metodu sayılır.
 - Böyle bir metodu `documentation`, `compile`, `trace` gibi yerlerde adlandırmak için örneklenmeyi yazın:
   `Box<int>::twice`. Metot yalnızca bir örneklenmede varsa `Box::twice` da olur.
+
+#### impl dışında defmethod
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    int'in metodu
+(some-method 2.0 3.0)   ; => 6.0  f64'ün metodu
+```
+
+`impl` dışında yazılan bir `defmethod`, **ilk parametresinin türünün metodu** olur. Metotlar yalnızca ilk argümanın türüne göre arandığından, aynı ad ilk parametrenin her türü için ayrı bir metoda sahip olabilir.
+
+- `impl` içindeki `defmethod`'dan tek farkı, ilk parametresinin `self` olamamasıdır. İlk parametre `(ad Tür)` diye yazılır ve metodun sahibi o türdür. `self` yazmak hatadır.
+- **Her tür için yazılabilir.** `int` ve `Vector` gibi standart kütüphane türlerine ve başka modüllerde tanımlanmış türlere metot eklenebilir (içsel `impl`'i yalnızca türü tanımlayan taraf yazabilir).
+- Görünürlük, `impl` içinde olduğu gibi `(pub defmethod ...)` ile belirlenir. O olmadan metot yalnızca onu tanımlayan modülün içinde kullanılabilir.
+- Genel (generic) bir türün alıcısı, tür parametrelerini değişken olarak yazar (`((v Vector<T>))`). Bu `T` alıcının tür parametresidir; `<T>`'yi metodun kendi tür parametresi olarak yeniden bildirmek yasaktır.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — struct'lar (kullanıcı tanımlı türler)
 
@@ -886,19 +916,20 @@ değil**.
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
   (:type AssocName)                       ; associated types (any number, optional)
-  (method-name (self params...) RetType)          ; no body = must be implemented
-  (method-name (self params...) RetType body...)) ; with a body = default implementation
+  (defmethod method-name (self params...) RetType)          ; no body = must be implemented
+  (defmethod method-name (self params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
   (:type AssocName ConcreteType)          ; makes an associated type concrete
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 `impl` aracılığıyla her metot `TargetType`'ın bir metodu olarak kaydedilir ve içsel bir `impl`'in (3.5)
 metodu gibi çağrılır. Bir trait'in `impl`'inin metotları `pub` olmadan da her zaman açıktır. Trait'lere
 genel fonksiyonların `:where` yan tümcelerinde trait sınırı olarak başvurulur (bkz. [3.1 defun](#31-defun--fonksiyon-tanımları)). Bir trait adı
 `m::Trait` gibi bir `::` yolu da olabilir.
+`deftrait`'in metot bildirimleri ve bir trait'in `impl`'indeki metotlar da içsel `impl`'de olduğu gibi `defmethod` ile yazılır (`defmethod` olmadan `(method-name (self ...) ...)` hatadır).
 
 **Üst trait listesi (zorunlu)**: her zaman trait adının hemen ardından yazılır. Her eleman çıplak bir
 trait adıdır ya da o trait'in ilişkili türleri varsa, **tüm ilişkili türleri sabitlenmiş** olarak
@@ -908,7 +939,7 @@ trait adıdır ya da o trait'in ilişkili türleri varsa, **tüm ilişkili türl
 (deftrait Eq () ...)                       ; no supertraits
 (deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 Mirasın üç etkisi vardır. (1) `impl Ord X`, `impl Eq X`'in **önce** yazılmasını gerektirir (yazma sırasıyla
@@ -940,7 +971,7 @@ bir anda gerçekleştirir.
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
@@ -976,11 +1007,11 @@ Trait çağrıları varsayılan olarak **statiktir** (alıcının statik türüy
 vtable üzerinden dinamik dağıtım verir:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; one call site, an answer per implementation
@@ -1131,13 +1162,14 @@ bu yüzden türetilen yol ile açık bir bildirim asla çakışmaz.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` yalnızca yukarıdaki on bir türe ve `use`'a konabilir (`module`/`impl`'e konamaz).
+`pub` yalnızca yukarıdaki on iki türe ve `use`'a konabilir (`module`/`impl`'e konamaz).
 `(pub use path...)` içeri aldığını **yeniden dışa aktarır**: başka modüller ona bu modülden geçen bir
 yolla (`m::name`) ulaşır ve onu `(use m::name)` ile içeri alır. Yalnızca bir tanım yeniden dışa
 aktarılabilir; bir modül aktarılamaz.
@@ -1145,7 +1177,7 @@ Tanım anahtar
 sözcüğü `pub`'ın hemen ardından gelecek şekilde yazılır; tanımı parantez içine alan `(pub (defun ...))`
 biçiminde değil. Bir `pub` tam olarak bir tanımı açık yapar (birden fazla tanım bir kerede işaretlenemez).
 
-İçsel bir `impl`'in metotları öğe öğe `(pub name ...)` yazılarak açık yapılır (3.5). Yapı alanları
+Bir `impl`'in metotları öğe öğe `(pub defmethod name ...)` yazılarak açık yapılır (3.5). Yapı alanları
 `(pub x i32)` diye yazılır (3.6).
 
 ### 3.14 defmacro — makro tanımları

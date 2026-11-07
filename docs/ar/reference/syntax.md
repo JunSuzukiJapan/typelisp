@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1ba918af8af98a319b34010b9dc04df8c4d321e0 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -200,12 +200,12 @@ typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات 
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; تابع ساكن
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; تابع ساكن
     (point::origin :y 7)
     ```
 
@@ -577,24 +577,29 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; تابع ساكن: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; تابع نسخة: (name obj args...)
-  (pub name ...))                                      ; عام أيضًا خارج وحدة النوع
+  (defmethod name ((arg Type2) ...) RetType body...)            ; تابع ساكن: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)       ; تابع نسخة: (name obj args...)
+  (pub defmethod name ...))                                      ; عام أيضًا خارج وحدة النوع
 
 ; نوع عام
 (impl Type<T> (:where (Trait T)...) item...)
+
+; خارج impl: تابع لنوع المعامل الأول
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 يعطي توابع لنوع عُرِّف بـ `defstruct` (3.6) أو `defenum` (3.7). ويقابل الـ impl الذاتي في Rust
 (`impl Point { ... }`).
 
-- صورة العنصر `(الاسم (المعاملات...) نوع_الإرجاع الجسم...)`، وهي صورة عنصر `impl` السمة نفسها (3.9).
+- صورة العنصر `(defmethod الاسم (المعاملات...) نوع_الإرجاع الجسم...)`، وهي صورة عنصر `impl` السمة نفسها (3.9).
+  والصورة التي ليس فيها `defmethod`، أي `(الاسم (المعاملات...) ...)`، خطأ.
 - العنصر الذي معامله الأول `self` هو **تابع نسخة**، ويُستدعى على الصورة `(name obj args...)`. ولا يُكتب
   لـ `self` نوع (نوعه `Self`، أي النوع الهدف؛ ولا تُقبل الصيغة `(self Type)`).
+  وتُكتب أنواع المعاملات التي بعد `self`.
 - العنصر الذي ليس فيه `self` هو **تابع ساكن**، ويُستدعى على الصورة `(Type::name args...)`. والتابع الساكن
   الذي يصنع قيمة هو مُنشئ ذلك النوع. الاسم حر، ويُنصح بـ `new`.
 - **الإتاحة لكل عنصر على حدة.** لا يُستعمل خارج الوحدة التي تعرّف النوع إلا العناصر المكتوبة
-  `(pub name ...)`. ومن دون `pub` لا يُستعمل العنصر إلا داخل تلك الوحدة.
+  `(pub defmethod name ...)`. ومن دون `pub` لا يُستعمل العنصر إلا داخل تلك الوحدة.
 - يمكن أن يكون للنوع أي عدد من `impl`.
 - يحلّ المستدعي التابع من النوع الساكن لـ `obj` (إرسال ساكن مفرد). ويُبحث عن التابع **بنوع الوسيط الأول
   وحده** (3.10).
@@ -602,8 +607,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
   عندما تتبعها صيغ جسم). وتُسترجَع بـ `(documentation Type::name)`. وينطبق الشيء نفسه على توابع `impl`
   السمة.
 - لا يُكتب إلا لأنواع البرنامج نفسه. ولا يُكتب لنوع من المكتبة القياسية مثل `Vector` أو `Option` أو `int`
-  (يقول الخطأ `... is a standard library type`). ولإضافة عملية إلى نوع قياسي، عرِّف سمة واكتب `impl` لها
-  لذلك النوع.
+  (يقول الخطأ `... is a standard library type`). ولإضافة تابع إلى نوع قياسي، استعمل `defmethod` خارج `impl` (أدناه)، أو عرِّف سمة واكتب `impl` لها لذلك النوع.
 - في `(impl X ...)`، إن كان ما يلي `X` عنصرًا (قائمة) أو `:where` أو لا شيء، فهذا هو الـ impl الذاتي؛ وإن
   كان اسمًا، فهو `impl` سمة (`(impl Trait Type ...)`، 3.9).
 
@@ -611,11 +615,11 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; تابع ساكن
@@ -629,7 +633,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -647,11 +651,11 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -665,6 +669,32 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
   كان الترتيب. ويُعدّ موصل الحقل تابعًا لـ`impl` ذي المتغيرات.
 - لتسمية مثل هذا التابع في `documentation` و`compile` و`trace` ونحوها، اكتب التجسيد: `Box<int>::twice`. وإذا لم
   يكن التابع إلا لتجسيد واحد، يصلح `Box::twice` أيضًا.
+
+#### defmethod خارج impl
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    تابع لـ int
+(some-method 2.0 3.0)   ; => 6.0  تابع لـ f64
+```
+
+يصير `defmethod` المكتوب خارج `impl` **تابعًا لنوع معامله الأول**. ولأن التوابع لا يُبحث عنها إلا من نوع الوسيط الأول، يمكن تعريف تابع بالاسم نفسه لكل نوع من أنواع المعامل الأول.
+
+- لا يختلف عن `defmethod` داخل `impl` إلا في أن معامله الأول لا يمكن أن يكون `self`. يُكتب المعامل الأول على الصورة `(الاسم النوع)`، وذلك النوع هو صاحب التابع. وكتابة `self` خطأ.
+- **يمكن كتابته لأي نوع.** يمكن إضافة توابع إلى أنواع المكتبة القياسية مثل `int` و`Vector`، وإلى أنواع معرَّفة في وحدات أخرى (أما `impl` الذاتي فلا يكتبه إلا الطرف الذي يعرّف النوع).
+- الإتاحة بـ `(pub defmethod ...)` كما داخل `impl`. ومن دونها لا يُستعمل التابع إلا داخل الوحدة التي تعرّفه.
+- المستقبِل من نوع عام تُكتب معاملات نوعه متغيراتٍ كما هي (`((v Vector<T>))`). و`T` هذا معامل نوع المستقبِل، ولا يجوز إعلان `<T>` مرة أخرى معامل نوعٍ خاصًا بالتابع.
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — البنى (أنواع يعرفها المستخدم)
 
@@ -826,18 +856,19 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; قائمة السمات الأعلى مطلوبة؛ و() إذا لم توجد
   (:type AssocName)                       ; أنواع مرتبطة (أي عدد، اختيارية)
-  (method-name (self params...) RetType)          ; بلا جسم = يجب تنفيذه
-  (method-name (self params...) RetType body...)) ; مع جسم = تنفيذ افتراضي
+  (defmethod method-name (self params...) RetType)          ; بلا جسم = يجب تنفيذه
+  (defmethod method-name (self params...) RetType body...)) ; مع جسم = تنفيذ افتراضي
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; قيود تنطبق على impl كلها (اختياري)
   (:type AssocName ConcreteType)          ; يجعل نوعًا مرتبطًا ملموسًا
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 بواسطة `impl` يُسجَّل كل تابع تابعًا لـ `TargetType`، ويُستدعى كما يُستدعى تابع `impl` ذاتي (3.5). وتوابع
 `impl` السمة عامة دائمًا، من دون `pub`. ويُشار إلى السمات قيودَ سمات في بنود `:where` للدوال العامة (انظر
 [3.1 defun](#31-defun--تعريف-الدوال)). ويمكن أن يكون اسم السمة مسار `::` أيضًا مثل `m::Trait`.
+وتُكتب تصريحات توابع `deftrait` وتوابع `impl` السمة بـ `defmethod` كما في `impl` الذاتي (والصورة `(method-name (self ...) ...)` من دون `defmethod` خطأ).
 
 **قائمة السمات الأعلى (مطلوبة)**: تُكتب دائمًا مباشرة بعد اسم السمة. وكل عنصر اسم سمة مجرد، أو، إذا كان
 لتلك السمة أنواع مرتبطة، `(Trait (Assoc Type))` مع **تثبيت كل أنواعها المرتبطة**.
@@ -846,7 +877,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 (deftrait Eq () ...)                       ; بلا سمات أعلى
 (deftrait Ord (Eq) ...)                    ; مثل trait Ord: Eq في Rust
 (deftrait CharSource ((Iter (Item char)))  ; تثبيت نوع مرتبط
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 للوراثة ثلاثة آثار. (1) يتطلب `impl Ord X` أن يُكتب `impl Eq X` **أولًا** (قاعدة عن ترتيب الكتابة: الصيغة
@@ -873,7 +904,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; بلا أي جسم؛ كل شيء افتراضي
 ```
@@ -905,11 +936,11 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 وقت التشغيل يعطي نوع كائن السمة `:dyn Trait` (الفصل 2) إرسالًا ديناميكيًا عبر vtable:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; موضع استدعاء واحد، وجواب لكل تنفيذ
@@ -1047,20 +1078,21 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-لا يوضع `pub` إلا على الأنواع الأحد عشر أعلاه وعلى `use` (لا على `module`/`impl`).
+لا يوضع `pub` إلا على الأنواع الاثني عشر أعلاه وعلى `use` (لا على `module`/`impl`).
 يُعيد `(pub use path...)` **تصدير** ما يُدخله: تصل إليه الوحدات الأخرى عبر مسار يمر بهذه الوحدة
 (`m::name`) وتُدخله بـ `(use m::name)`. لا يُعاد تصدير إلا التعريف، لا الوحدة.
 ويُكتب بوضع كلمة
 التعريف مباشرة بعد `pub`، لا بالصورة `(pub (defun ...))` التي تحيط التعريف بأقواس. و`pub` الواحد يجعل
 تعريفًا واحدًا بالضبط عامًّا (لا يمكن تعليم عدة تعريفات دفعة واحدة).
 
-توابع `impl` الذاتي تُجعل عامة عنصرًا عنصرًا، بكتابة `(pub name ...)` (3.5). وحقول البنية تُكتب
+توابع `impl` تُجعل عامة عنصرًا عنصرًا، بكتابة `(pub defmethod name ...)` (3.5). وحقول البنية تُكتب
 `(pub x i32)` (3.6).
 
 ### 3.14 defmacro — تعريف الماكرو

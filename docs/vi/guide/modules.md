@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ b4f23852eb3f4b11e3fd96c05da870bdd383e84f -->
+<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Module và cách bố trí tệp
 
 Tài liệu này giải thích cách ghép một chương trình gồm nhiều tệp. Các quy tắc chi tiết nằm ở các mục
@@ -54,9 +54,9 @@ nơi tìm thấy làm thư mục gốc mã nguồn. Nếu không tìm thấy, th
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
 (impl point
-  (pub new ((x i32) (y i32) (tag string)) point
+  (pub defmethod new ((x i32) (y i32) (tag string)) point
     (make-instance 'point :x x :y y :tag tag))
-  (pub origin () point (point::new 0 0 "o")))
+  (pub defmethod origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:

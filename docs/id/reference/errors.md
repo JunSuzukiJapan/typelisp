@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Pesan Kesalahan
 
 Arti pesan kesalahan utama dari `typl` dan cara memperbaikinya.
@@ -62,7 +62,8 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | `unbound variable: y` | Tidak ada variabel dengan nama itu. Periksa ejaan dan lingkup pengikatannya (apakah dipakai di luar `let`-nya?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Dua di antara fungsi, variabel global, dan makro diberi nama yang sama dalam satu modul. Ganti nama salah satunya ([Referensi Sintaks 3.10](syntax.md#310-module--use--ruang-nama)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Tidak ada `new` yang dihasilkan untuk struct. Buat nilainya dengan `make-instance`, atau tulis `new` di `impl` ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | Tidak ada `defmethod`. Metode ditulis di `impl` tipe ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | Item `impl` atau `deftrait` tidak memakai `defmethod`. Tulis `(defmethod name (self) ...)`, bukan `(name (self) ...)` ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | `self` ditulis pada `defmethod` di luar `impl`. Di luar `impl`, parameter pertama ditulis dengan nama dan tipe: `((x Type) ...)` ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Tidak ada opsi `:constructor`. Konstruktor ditulis di `impl` sebagai metode statis |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Metode bernama sama ditulis baik di `impl` yang parameter tipenya variabel (`Box<T>`) maupun di `impl` sebuah instansiasi (`Box<int>`), dalam urutan mana pun. Pertahankan salah satunya saja ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Trait yang sama diimplementasikan untuk `Box<T>` dan untuk `Box<int>`. Pertahankan salah satunya saja |

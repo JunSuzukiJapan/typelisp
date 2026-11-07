@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # ข้อความแสดงข้อผิดพลาด
 
 ความหมายของข้อความแสดงข้อผิดพลาดหลักจาก `typl` และวิธีแก้ไข
@@ -61,7 +61,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `unbound variable: y` | ไม่มีตัวแปรชื่อนั้น ตรวจสอบการสะกดและขอบเขตของการผูก (ใช้นอก `let` ของมันหรือไม่) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | ในโมดูลเดียว ตั้งชื่อเดียวกันให้สองสิ่งจากฟังก์ชัน ตัวแปรโกลบอล และแมโคร ให้เปลี่ยนชื่อหนึ่งในนั้น ([เอกสารอ้างอิงไวยากรณ์ 3.10](syntax.md#310-module--use--เนมสเปซ)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | ไม่มีการสร้าง `new` ให้ struct โดยอัตโนมัติ ให้สร้างค่าด้วย `make-instance` หรือเขียน `new` ใน `impl` ([เอกสารอ้างอิงไวยากรณ์ 3.5](syntax.md#35-impl--เมทอดของชนิด)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | ไม่มี `defmethod` เมทอดเขียนใน `impl` ของชนิด ([เอกสารอ้างอิงไวยากรณ์ 3.5](syntax.md#35-impl--เมทอดของชนิด)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | รายการของ `impl` หรือ `deftrait` ไม่มี `defmethod` ให้เขียน `(defmethod name (self) ...)` ไม่ใช่ `(name (self) ...)` ([เอกสารอ้างอิงไวยากรณ์ 3.5](syntax.md#35-impl--เมทอดของชนิด)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | เขียน `self` ใน `defmethod` นอก `impl` นอก `impl` ให้เขียนพารามิเตอร์ตัวแรกด้วยชื่อและชนิด: `((x Type) ...)` ([เอกสารอ้างอิงไวยากรณ์ 3.5](syntax.md#35-impl--เมทอดของชนิด)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | ไม่มีตัวเลือก `:constructor` ตัวสร้างเขียนใน `impl` เป็นเมทอดสถิต |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | เขียนเมทอดชื่อเดียวกันทั้งใน `impl` ที่เขียนพารามิเตอร์ชนิดเป็นตัวแปร (`Box<T>`) และใน `impl` ของชนิดเฉพาะ (`Box<int>`) (ไม่ขึ้นกับลำดับ) ให้เหลือเพียงฝั่งเดียว ([เอกสารอ้างอิงไวยากรณ์ 3.5](syntax.md#35-impl--เมทอดของชนิด)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | implement trait เดียวกันให้ทั้ง `Box<T>` และ `Box<int>` ให้เหลือเพียงฝั่งเดียว |

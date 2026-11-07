@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # त्रुटि संदेश
 
 `typl` के मुख्य त्रुटि संदेशों का अर्थ और उन्हें कैसे ठीक करें।
@@ -59,7 +59,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `unbound variable: y` | उस नाम का कोई वेरिएबल नहीं है। वर्तनी और बाइंडिंग का स्कोप जाँचें (क्या इसका उपयोग इसके `let` के बाहर हो रहा है?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | एक मॉड्यूल में फ़ंक्शन, ग्लोबल वेरिएबल और मैक्रो में से दो को एक ही नाम दिया गया। उनमें से एक का नाम बदलें ([सिंटैक्स संदर्भ 3.10](syntax.md#310-module--use--नेमस्पेस)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | स्ट्रक्ट के लिए कोई `new` उत्पन्न नहीं होता। मान `make-instance` से बनाएँ, या `impl` में एक `new` लिखें ([सिंटैक्स संदर्भ 3.5](syntax.md#35-impl--टाइप-के-मेथड)) |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` नहीं है। मेथड टाइप के `impl` में लिखे जाते हैं ([सिंटैक्स संदर्भ 3.5](syntax.md#35-impl--टाइप-के-मेथड)) |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | `impl` या `deftrait` के आइटम में `defmethod` नहीं है। `(name (self) ...)` नहीं, `(defmethod name (self) ...)` लिखें ([सिंटैक्स संदर्भ 3.5](syntax.md#35-impl--टाइप-के-मेथड)) |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | `impl` के बाहर के `defmethod` में `self` लिखा गया। `impl` के बाहर पहला पैरामीटर नाम और टाइप के साथ लिखें: `((x Type) ...)` ([सिंटैक्स संदर्भ 3.5](syntax.md#35-impl--टाइप-के-मेथड)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` विकल्प नहीं है। कंस्ट्रक्टर `impl` में स्टैटिक मेथड के रूप में लिखा जाता है |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | एक ही नाम का मेथड टाइप पैरामीटर को वेरिएबल लिखने वाले `impl` (`Box<T>`) और विशिष्ट टाइप के `impl` (`Box<int>`) दोनों में लिखा गया (क्रम कोई भी हो)। केवल एक रखें ([सिंटैक्स संदर्भ 3.5](syntax.md#35-impl--टाइप-के-मेथड)) |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | एक ही ट्रेट `Box<T>` और `Box<int>` दोनों के लिए `impl` किया गया। केवल एक रखें |

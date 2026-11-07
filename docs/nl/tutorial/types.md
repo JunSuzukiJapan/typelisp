@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
 # Basis van types
 
 typelisp is een statisch getypeerde taal. Dit hoofdstuk legt uit wat de typechecker voor je doet, de
@@ -173,12 +173,12 @@ een typefout.
 ```
 
 Om een struct eigen functies te geven, gebruik je `impl`. Elk item van `(impl Typenaam item...)` heeft de
-vorm `(naam (argumenten...) Teruggeeftype romp...)`, en als het eerste argument `self` is, wordt het een
+vorm `(defmethod naam (argumenten...) Teruggeeftype romp...)`, en als het eerste argument `self` is, wordt het een
 **methode** van dat type. `self` wordt zonder type geschreven.
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -189,9 +189,9 @@ waarde maakt de naam `new` geeft, kunnen gebruikers kort `(point::new 3 4)` schr
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
