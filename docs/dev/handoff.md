@@ -83,8 +83,7 @@
 - cargo のコマンドは `scripts/with-llvm-env.sh` を通して打つ（例:
   `scripts/with-llvm-env.sh cargo check --workspace --all-targets --locked`）。
 - 全体テストは `scripts/with-llvm-env.sh scripts/test-parallel.sh > <ログ> 2>&1`。通ったと
-  言えるのはログに `ALL TESTS PASSED (parallel` があるときだけ。始める前に
-  `~/.typelisp/cache` を消す（registry を変えると古い fasl のキャッシュが残る）。
+  言えるのはログに `ALL TESTS PASSED (parallel` があるときだけ。
   失敗の決定論的な再実行には `scripts/test-serial.sh`（同じ対象を 1 本ずつ）を使う。
 - コミットや push の前の残りの確認（警告 0 の `cargo check`、生成物の再生成の判断、全体テストの
   判定、翻訳の直し方）は、スキル `.claude/skills/commit-check/SKILL.md` にまとめてある。

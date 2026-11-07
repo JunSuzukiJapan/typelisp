@@ -22,7 +22,8 @@
 条件、引数、`let` の初期化式、`match` の scrutinee — はすべてそこを通っていた。
 
 その帰結が、`scripts/test-serial.sh` の `RUST_MIN_STACK=32MB` と、
-`src/bin/bootstrap_island.rs` が 64MB スタックのスレッドを明示的に立てていること。
+`src/bin/bootstrap_island.rs` が 64MB スタックのスレッドを明示的に立てていたこと
+（どちらも CPS 化の後に要らなくなり、外した）。
 
 得られるものは 3 つ:
 

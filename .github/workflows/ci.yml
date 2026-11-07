@@ -1,8 +1,8 @@
 # Every push and pull request: the workspace builds, nothing in it — tests
 # included — has a warning, and every translation is up to date with the
 # Japanese document it was made from. The test suite itself runs only for a
-# release (release.yml): it takes hours, serially (scripts/test-serial.sh says
-# why).
+# release (release.yml): it takes hours even with the binaries run in
+# parallel (scripts/test-parallel.sh).
 #
 # Tests are checked, not built: linked, the 130-odd test binaries come to more
 # than 15 GB, more than a hosted runner has free.

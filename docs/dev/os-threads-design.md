@@ -86,7 +86,7 @@ pub struct HeapShared {              // Send + Sync（unsafe impl、不変条件
   `chan_roots`（`sched.rs:792-825`）はスケジューラロック下で per-thread の `current` を
   一時切替するだけなので競合しない。
 - `Value`/`ConsRef` に `unsafe impl Send`（ヒープがプロセス共有になった、が根拠）。
-  `assert_send::<CompiledTask>()` をテストに昇格（`tests/sched_send_test.rs`）。
+  `assert_send::<CompiledTask>()` をテストに昇格（`crates/typelisp-rt/tests/sched_send_test.rs`）。
 - **`in_flight_throw`（`heap.rs:101`）はビューにもシェアにも置かない**——§5 でタスクへ移す。
 
 ## 4. stop-the-world GC

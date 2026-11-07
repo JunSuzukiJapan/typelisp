@@ -17,8 +17,9 @@
 #                                               in an uninterruptible wait)
 #     from target/debug/ ........... 0.03 s
 #
-# Every test binary in the suite is exec'd out of that directory, so the whole
-# of `scripts/test-serial.sh` pays it once per binary. `editor_keyword_sync_test`
+# Every test binary in the suite is exec'd out of that directory, so a whole
+# run of `scripts/test-parallel.sh` or `scripts/test-serial.sh` pays it once
+# per binary. `editor_keyword_sync_test`
 # looked like a 40-second test whose own six tests take 0.85 s.
 #
 # WHAT IT KEEPS: every `.o` younger than `--days` (2 by default), and every

@@ -1,6 +1,6 @@
 # typelisp 開発手順（ビルド・テスト）
 
-最終更新: 2026-09-04 / ブランチ: `main`
+最終更新: 2026-11-07 / ブランチ: `main`
 
 ビルドとテストの実行方法。2026-07-29 に [TODO.md](TODO.md) から分離した（TODO.md は残作業のみを
 記録するドキュメントで、残作業が無くなったため）。
@@ -8,11 +8,15 @@
 ## 開発コマンド
 
 ```sh
-cargo test                                   # 全体
+scripts/with-llvm-env.sh scripts/test-parallel.sh   # 全体（既定。テストバイナリを並列に流す）
+scripts/test-serial.sh <ターゲット>...               # 失敗の決定論的な再実行（1 本ずつ）
 cargo +nightly miri test --test mem_test     # GC/ポインタの UB・リーク検査（約 50 秒）
 cargo +nightly miri test --test read_test    # 約 4 分
 cargo run                                    # REPL（typl、prelude 読み込み済み）
 ```
+
+全体テストの合否はログの `ALL TESTS PASSED (parallel` の行で判定する。`-j N`・`--shard`・
+`.rc` ファイルによる判定など、並列実行の仕組みは [parallel-testing.md](parallel-testing.md) にある。
 
 ### Miri で回せるのは prelude を読まないテストだけ
 
@@ -58,8 +62,8 @@ macOS の dev プロファイルは `split-debuginfo = "unpacked"` が既定で�
 | `target/debug/deps/` から | 21〜40 秒（CPU は 0.03 秒。プロセスは `ps` で `UN` = 割り込み不能待ち） |
 | `target/debug/` から（同じファイルシステム、小さいディレクトリ） | 0.03 秒 |
 
-テストバイナリは全部このディレクトリから exec されるので、`scripts/test-serial.sh` は
-バイナリ 1 本ごとにこれを払う。`editor_keyword_sync_test` が「40 秒かかるテスト」に
+テストバイナリは全部このディレクトリから exec されるので、全体テストのスクリプト
+（`scripts/test-parallel.sh`・`scripts/test-serial.sh`）はバイナリ 1 本ごとにこれを払う。`editor_keyword_sync_test` が「40 秒かかるテスト」に
 見えていたのはこれで、6 つのテスト本体の合計は 0.85 秒だった。**`cargo test` が報告する
 `finished in ...` はテスト本体の時間だけなので、この差はテストの出力からは見えない。**
 

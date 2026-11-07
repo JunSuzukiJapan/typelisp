@@ -191,8 +191,8 @@ main.rs:452 の REPL は単発フォームなので対象外・現状維持を�
 3. **展開器を再帰で書いてはいけない**。展開器はインタプリタで動き、debug
    ビルドの `Interp::eval` フレームは太い。`compile-value` の 37 アームで
    1アーム1再帰にすると**スタック要求が 2MB → 8MB に4倍化**し、素の
-   `cargo test` が落ちた(`scripts/test-serial.sh` の `RUST_MIN_STACK=32MB`
-   では隠れてしまう)。`icond-build` を `loop`/`setf` の反復に書き換えて
+   `cargo test` が落ちた(当時の `scripts/test-serial.sh` の `RUST_MIN_STACK=32MB`
+   では隠れていた)。`icond-build` を `loop`/`setf` の反復に書き換えて
    基準線の 2MB に戻した。
 
 結果として Stage 2.0 の案 A(層の逆転)も案 B(prelude より下の層を新設)も

@@ -16,7 +16,7 @@
 実装状況は docs（古い可能性がある）ではなく、以下を直接読んで確認した:
 
 - `crates/typelisp-front/src/check/registry.rs` — Rust 組み込み型・組み込みメソッドの登録表
-- `crates/typelisp-front/src/check/checker.rs` — 特殊形の一覧（`check` の文字列 match）
+- `crates/typelisp-front/src/check/checker.rs`（現 `analyze.rs`）— 特殊形の一覧（当時は `check` の文字列 match、今は `SPECIAL_FORM_HEADS`）
 - `crates/typelisp-front/src/prelude.rs` — typelisp で書かれた標準ライブラリ（`defun`/`defmethod`/`defmacro`/`impl`）
 - `crates/typelisp-front/src/eval/interp.rs` — 組み込みメソッドの実体
 
@@ -33,7 +33,7 @@
 
 - **(D1) 静的型付け**: すべての式の型がコンパイル時に決まる。動的型の値は `Sexpr` に限られ、
   取り出すには `match` が要る。→ CL の「実行時に型を問い合わせる」系 API が原理的に載らない。
-- **(D2) `nil` が無い**: 偽は `false`、空リストは `Sexpr::Nil`、「値が無い」は `Option<T>`。
+- **(D2) `nil` が無い**: 偽は `false`、空リストは `Option<Sexpr>` の `none`、「値が無い」は `Option<T>`。
   CL の「nil を偽・空リスト・失敗の三役で使う」慣用が全滅する（[[typelisp-language-spec]]）。
 - **(D3) コンディションシステムを採らない**: 回復可能な失敗は `Result<T,E>`、回復不能は `panic`
   （language-design.md §7.1）。2026-08-16 に非採用が確定（同 §9）。ただし**非採用なのは
@@ -82,7 +82,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `symbol` | ✅ | `Symbol`（`string->symbol` で intern、`symbol->string` で名前） |
 | `keyword` | ⚠️ | 独立した型は無い。`:name` は先頭がコロンのシンボルで、`keywordp` で判定するだけ |
 | `boolean` | ✅ | `bool`（`true`/`false`） |
-| `null` | ⛔ | (D2)。`Sexpr::Nil` は `Sexpr` の1構成子であって型ではない |
+| `null` | 対象外 | (D2)。空リストは `Option<Sexpr>` の `none` であって型ではない |
 | `t`（型としての） | ⛔ | すべての値を含む上位型が無い (D1)。近いのは `Sexpr`（`Sexpr` 表現を持つ値に限る）と `:dyn Trait` |
 | `nil`（型としての、空型） | ✅ | `!`（Never）が相当（§7.2） |
 | `atom` | ⛔ | 「cons でないもの」という型が無い。`Sexpr` に対する述語 `sexpr-atom` はある |
@@ -601,7 +601,7 @@ format と pretty printer は実装済み（[printing.md](../ja/reference/functi
 いなかった——`defun` の `&optional`/`&key` に至っては、この表を書いた**その日の夜**に入っている。
 2026-09-25 の見直しでは、❌ の 32 行が 1 行残らず、実装済み・「入れない」で確定済み・代わりがある、のどれかだった。
 **表を根拠に「無い」と判断する前に、必ず `crates/typelisp-front/src/check/registry.rs` /
-`crates/typelisp-front/src/prelude.rs` / `crates/typelisp-front/src/check/checker.rs` を
+`crates/typelisp-front/src/prelude.rs` / `crates/typelisp-front/src/check/analyze.rs` を
 grep して確かめること。**
 
 ⛔ の項目については、[language-design.md](language-design.md) §7・§8・§9（採用しないと決めた

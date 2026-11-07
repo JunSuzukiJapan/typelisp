@@ -928,7 +928,8 @@ cleanup は確保する。`gc-stress` の下で、スロットは `alloca` な�
 
 症状は「100% CPU で 9 時間、何も印字されない」だった。悪化させた要因が 2 つ:
 
-- `scripts/test-serial.sh` に**ターゲットごとのタイムアウトが無い**
+- 当時の `scripts/test-serial.sh` に**ターゲットごとのタイムアウトが無かった**（今は
+  `TEST_TIMEOUT`、既定 3600 秒）
 - 出力を `grep` に通していたので**ブロック単位でバッファされ**、
   どのファイルまで進んだかも見えなかった（`--line-buffered` か
   `stdbuf -oL` が要る）

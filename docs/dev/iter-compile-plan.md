@@ -122,7 +122,7 @@ compile される。したがって本課題の本質は「底のプリミティ
 
 ```sh
 scripts/with-llvm-env.sh cargo test          # compile 関連は LLVM 環境必須
-scripts/test-serial.sh                        # LLVM テストのプロセス間並列は SIGSEGV 回避に直列化
+scripts/test-parallel.sh                      # 全体（並列。仕組みは parallel-testing.md）
 ```
 
 ## 承認

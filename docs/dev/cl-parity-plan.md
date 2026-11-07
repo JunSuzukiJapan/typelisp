@@ -24,7 +24,7 @@
 | 群 | 根拠 |
 |---|---|
 | **実行時の型問い合わせ** — `typep`/`type-of`/`subtypep`/`class-of`/`find-class`/MOP/`typecase`/`etypecase`/`ctypecase`/`check-type`/`numberp` 系/`characterp`/`stringp`/`arrayp`/`vectorp`/`streamp`/`hash-table-p`/`bit-vector-p`/`describe`/`describe-object`/`inspect`/`apropos`/`apropos-list` | (D1) 静的型付け。すべての式の型がコンパイル時に決まるので、実行時に型を尋ねる問い自体が成立しない。`Sexpr` に限れば `match` と `sexpr-consp`/`sexpr-symp` 等が相当する |
-| **`null` 相当** — 型としての `null`、`endp`、nil を「偽・空リスト・失敗」の三役に使う慣用 | (D2)。偽は `false`、空リストは `Sexpr::Nil`、「値が無い」は `Option<T>`。三役の合流はバグの温床でしかない |
+| **`null` 相当** — 型としての `null`、`endp`、nil を「偽・空リスト・失敗」の三役に使う慣用 | (D2)。偽は `false`、空リストは `Option<Sexpr>` の `none`、「値が無い」は `Option<T>`。三役の合流はバグの温床でしかない |
 | **多値** — `values`/`values-list`/`multiple-value-bind`/`multiple-value-call`/`multiple-value-list`/`multiple-value-prog1`/`multiple-value-setq`/`nth-value`、`floor` の商剰余多値、`read-from-string` の第2値、`gethash` の第2値 | 非採用。複数の結果は `cons-cell` か `defstruct`、「あるか無いか」は `Option<T>` で表す。既存の `floor-div` 系（`cons-cell` 返し）と `get`→`Option<V>` を正とする |
 | **コンディション本体** — `define-condition`/`make-condition`/`signal`/`cerror`/`break`/`handler-case`/`handler-bind`/`ignore-errors`/`restart-case`/`restart-bind`/`with-simple-restart`/`invoke-restart`/`find-restart`/`compute-restarts`/`abort`/`continue`/`muffle-warning`/`store-value`/`use-value`/`invoke-debugger`/`*debugger-hook*`、標準コンディション型階層 | (D3)、language-design.md §9 で 2026-08-16 に非採用が確定。「この関数が何を signal しうるか」が型に出ない。**ただし `Error` トレイトへ統合できる分は実装する — Phase 7a** |
 | **CLOS** — `defclass`/`make-instance`/`slot-value`/`with-slots`/`with-accessors`/`slot-boundp`/`slot-makunbound`/`defgeneric`/`call-next-method`/`next-method-p`/`:before` `:after` `:around`/`define-method-combination`/`initialize-instance`/`shared-initialize`/`reinitialize-instance`/`change-class`/`update-instance-for-*`/`make-load-form` | `deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置き換える既定方針（language-design.md §5.1/§5.2/§6）。単一・静的ディスパッチであることが型システムの前提になっている |
@@ -1588,8 +1588,8 @@ CL コードの移植と実用スクリプトで真っ先に当たる。
 1. `scripts/regen-compiler-island.sh`（島を触ったなら。**島が「吐くもの」を変えたら 2 回**——
    ビルドは新 SOURCE を*旧*島でコンパイルするので 1 パスでは収束しない）→
    `scripts/regen-prelude-bitcode.sh`。**必ずこの順**（prelude は島によってコンパイルされる）
-2. `scripts/test-serial.sh`（LLVM の process-wide Context のため直列必須。先に
-   `cargo build -p typelisp-front` で staticlib を作らないと AOT テストが古い `.a` を黙って使う）
+2. `scripts/test-parallel.sh`（全体テスト。並列の仕組みは [parallel-testing.md](parallel-testing.md)。
+   先に `cargo build -p typelisp-front` で staticlib を作らないと AOT テストが古い `.a` を黙って使う）
 3. 最低限通すテスト: `prelude_artifacts_test` / `prelude_compiled_test` / `prelude_test` /
    `compile_test` / `compile_file_test` / `editor_keyword_sync_test`。島を触ったなら
    `island_artifacts_test` / `island_self_compile_test` / `island_aot_load_test` と
