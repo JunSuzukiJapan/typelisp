@@ -164,11 +164,11 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 ```lisp
 (defstruct counter (n i32))
 (impl Stream counter
-  (open-stream-p (self) bool true)
-  (close (self) () ()))
+  (defmethod open-stream-p (self) bool true)
+  (defmethod close (self) () ()))
 (impl OutputStream counter
   (:type Item char)
-  (write-item (self (c char)) () (setf self::n (+ self::n 1))))
+  (defmethod write-item (self (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 残りのメソッドは全部デフォルト
 
 (write-line (make-instance 'counter :n 0) "四文字")  ; write-line も terpri も fresh-line も動く

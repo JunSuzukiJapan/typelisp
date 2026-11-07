@@ -53,9 +53,9 @@ src = "src"
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
 (impl point
-  (pub new ((x i32) (y i32) (tag string)) point
+  (pub defmethod new ((x i32) (y i32) (tag string)) point
     (make-instance 'point :x x :y y :tag tag))
-  (pub origin () point (point::new 0 0 "o")))
+  (pub defmethod origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:

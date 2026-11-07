@@ -23,7 +23,7 @@ TypeLisp は静的型付きの Lisp です。
 (defstruct Point (x i32) (y i32))
 
 (impl Point
-  (show (self) ()
+  (defmethod show (self) ()
     (println "Point: (x ~d y ~d)" self::x self::y)))
 
 (show (make-instance 'Point :x 1 :y 2))
@@ -93,21 +93,21 @@ TypeLisp は静的型付きの Lisp です。
 
 ```
 (deftrait Animal ()
-  (name (self) string)
-  (sound (self) string)
-  (speak (self) string
+  (defmethod name (self) string)
+  (defmethod sound (self) string)
+  (defmethod speak (self) string
     (format false "~a says ~a" (name self) (sound self))))
 
 (defstruct Dog (nick string))
 (defstruct Cat (nick string))
 
 (impl Animal Dog
-  (name (self) string self::nick)
-  (sound (self) string "Woof"))
+  (defmethod name (self) string self::nick)
+  (defmethod sound (self) string "Woof"))
 
 (impl Animal Cat
-  (name (self) string self::nick)
-  (sound (self) string "Meow"))
+  (defmethod name (self) string self::nick)
+  (defmethod sound (self) string "Meow"))
 
 (defun main () ()
   (let ((animals (the Vector<:dyn Animal> (Vector::new))))
@@ -155,7 +155,7 @@ TypeLisp は静的型付きの Lisp です。
 (defstruct Pair<A,B> (first A) (second B))
 
 (impl Pair<A,B>
-  (swap (self) Pair<B,A>
+  (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 
 (defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))

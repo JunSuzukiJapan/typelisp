@@ -136,18 +136,20 @@ fn a_struct_has_no_new_until_its_impl_writes_one() {
     let msg = format!("{:?}", Reader::new().read_all(&mut h, "(defstruct point (x int) (y int)) (point::new 1 2)").unwrap_err());
     assert!(msg.contains("type `point` has no member `new`"), "{}", msg);
     let src = "(defstruct point (x int) (y int)) \
-               (impl point (new ((x int)) point (make-instance 'point :x x :y 0))) \
+               (impl point (defmethod new ((x int)) point (make-instance 'point :x x :y 0))) \
                (y (point::new 1))";
     assert_eq!(eval_ok(src), Value::Int(0));
 }
 
-/// `defmethod` is gone; the error says what to write instead.
+/// Outside an `impl`, a `defmethod`'s receiver is a named, typed first
+/// parameter; `self` belongs to an `impl`, and the error says so.
 #[test]
-fn defmethod_points_at_impl() {
+fn defmethod_outside_an_impl_names_its_receiver() {
     for src in ["(defstruct point (x int)) (defmethod f ((self point)) int 1)", "(defstruct point (x int)) (pub defmethod f ((self point)) int 1)"] {
         let msg = format!("{:?}", check(src).unwrap_err());
-        assert!(msg.contains("defmethod is gone") && msg.contains("(impl Type"), "{}", msg);
+        assert!(msg.contains("`self` is written only inside an `impl`"), "{}", msg);
     }
+    assert_eq!(eval_ok("(defstruct point (pub x int)) (defmethod f ((p point)) int (+ p::x 1)) (f (make-instance 'point :x 41))"), Value::Int(42));
 }
 
 #[test]
@@ -305,7 +307,7 @@ fn set_field_method_call_works_without_the_path_sugar() {
 #[test]
 fn a_method_on_a_struct_receiver() {
     let src = "(defstruct point (x int) (y int)) \
-               (impl point (area (self) int (* (x self) (y self)))) \
+               (impl point (defmethod area (self) int (* (x self) (y self)))) \
                (area (make-instance 'point :x 3 :y 4))";
     assert_eq!(eval_ok(src), Value::Int(12));
 }
@@ -313,7 +315,7 @@ fn a_method_on_a_struct_receiver() {
 #[test]
 fn a_method_on_a_struct_can_use_the_field_path_sugar_on_self() {
     let src = "(defstruct point (x int) (y int)) \
-               (impl point (area (self) int (* self::x self::y))) \
+               (impl point (defmethod area (self) int (* self::x self::y))) \
                (area (make-instance 'point :x 3 :y 4))";
     assert_eq!(eval_ok(src), Value::Int(12));
 }
@@ -326,8 +328,8 @@ fn method_redefinition_on_a_struct_warns_by_default() {
         .read_all(
             &mut h,
             "(defstruct point (x int)) \
-             (impl point (tag (self) int 1)) \
-             (impl point (tag (self) int 2))",
+             (impl point (defmethod tag (self) int 1)) \
+             (impl point (defmethod tag (self) int 2))",
         )
         .expect("read failed");
     let mut chk = Checker::new();

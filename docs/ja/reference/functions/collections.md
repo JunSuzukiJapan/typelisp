@@ -103,7 +103,7 @@
 
 ```lisp
 (deftrait Hash (Eq)
-  (sxhash (self) int))              ; 非負で fixnum に入る値を返す
+  (defmethod sxhash (self) int))              ; 非負で fixnum に入る値を返す
 ```
 
 実装済み: `int` と 6 つの固定幅整数、`bool`、`char`、`string`、`symbol`（浮動小数点数には無い）。
@@ -114,10 +114,10 @@
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
 (impl Eq point
-  (equals (self (other Self)) bool
+  (defmethod equals (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")

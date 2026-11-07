@@ -399,7 +399,7 @@ fn disassemble_leaves_the_definition_interpreted() {
 fn a_method_can_be_disassembled() {
     let out = stdout_of(
         "(defstruct pt (pub x int) (pub y int))\n\
-         (impl pt (total (self) int (+ self::x self::y)))\n\
+         (impl pt (defmethod total (self) int (+ self::x self::y)))\n\
          (disassemble pt::total true)",
     );
     assert!(out.contains("pt''total"), "the method's link name is missing: {:?}", out);

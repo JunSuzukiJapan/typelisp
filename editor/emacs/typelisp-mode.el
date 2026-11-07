@@ -54,8 +54,10 @@
 ;;; Keyword tables ----------------------------------------------------------
 
 (defconst typelisp-definition-forms
-  '("defun" "defsignature" "defffi" "defmacro")
+  '("defun" "defmethod" "defsignature" "defffi" "defmacro")
   "Definition forms whose defined name is a function name.
+`defmethod' defines a method -- inside an `impl', or outside one as a method
+of its first parameter's type.
 `defsignature' declares one ahead of its definition -- the only way to write
 mutual recursion at top level, since forms are checked in source order.
 `defffi' declares one whose body is a C function, reached through a thunk;
@@ -919,6 +921,7 @@ has already claimed it for `font-lock-string-face'."
     ;; `defun'-style indentation is defined by where the *line* ends and so
     ;; does not care how many elements precede the body.
     ("defun"       . defun)
+    ("defmethod"   . defun)
     ("defmacro"    . defun)
     ("defstruct"   . defun)
     ("defenum"     . defun)

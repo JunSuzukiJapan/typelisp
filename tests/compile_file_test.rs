@@ -59,7 +59,7 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
             "format_call",
             r#"(defstruct money (yen int))
                (impl money
-  (jp (self (colon bool) (at bool)) string
+  (defmethod jp (self (colon bool) (at bool)) string
                    (format false "~a yen" (yen self))))
                (defun main () int
                  (if (equal (format false "~/jp/" (make-instance 'money :yen 300)) "300 yen") 0 1))"#,
@@ -75,12 +75,12 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
 fn each_instantiations_impl_works_in_a_compiled_executable() {
     let (code, out, err) = compile_and_capture_with(
         "per_instantiation_aot",
-        r##"(deftrait Show () (show (self) string))
+        r##"(deftrait Show () (defmethod show (self) string))
            (defstruct Box<T> (v T))
-           (impl print-object Box<int> (print-object (self (escape bool)) string (format false "#<int-box ~a>" self::v)))
-           (impl print-object Box<string> (print-object (self (escape bool)) string (format false "#<str-box ~a>" self::v)))
-           (impl Show Box<int> (show (self) string "int"))
-           (impl Show Box<string> (show (self) string "string"))
+           (impl print-object Box<int> (defmethod print-object (self (escape bool)) string (format false "#<int-box ~a>" self::v)))
+           (impl print-object Box<string> (defmethod print-object (self (escape bool)) string (format false "#<str-box ~a>" self::v)))
+           (impl Show Box<int> (defmethod show (self) string "int"))
+           (impl Show Box<string> (defmethod show (self) string "string"))
            (defun via ((s :dyn Show)) string (show s))
            (defun main () int
              (progn (println "~a ~a ~a ~a" (make-instance 'Box :v 1) (make-instance 'Box :v "s")
@@ -894,7 +894,7 @@ fn compiles_a_defstruct_with_a_method() {
             r#"
             (defstruct point (x int) (y int))
             (impl point
-  (norm (self) int (+ (* self::x self::x) (* self::y self::y))))
+  (defmethod norm (self) int (+ (* self::x self::x) (* self::y self::y))))
             (defun main () int (as int (norm (make-instance 'point :x 3 :y 4))))
             "#
         ),
@@ -910,9 +910,9 @@ fn compiles_an_impl_block() {
         compile_and_run(
             "impl_block",
             r#"
-            (deftrait Counted () (count (self) int))
+            (deftrait Counted () (defmethod count (self) int))
             (defstruct box-a (n int))
-            (impl Counted box-a (count (self) int self::n))
+            (impl Counted box-a (defmethod count (self) int self::n))
             (defun main () int (as int (count (make-instance 'box-a :n 9))))
             "#
         ),
@@ -932,11 +932,11 @@ fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
         compile_and_run(
             "dyn_dispatch",
             r#"
-            (deftrait Drawable () (draw (self) int))
+            (deftrait Drawable () (defmethod draw (self) int))
             (defstruct circle (r int))
             (defstruct square (side int))
-            (impl Drawable circle (draw (self) int 1))
-            (impl Drawable square (draw (self) int 2))
+            (impl Drawable circle (defmethod draw (self) int 1))
+            (impl Drawable square (defmethod draw (self) int 2))
             (defun render ((d :dyn Drawable)) int (draw d))
             (defun main () int
               (as int (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))))
@@ -956,17 +956,17 @@ fn compiles_and_runs_an_upcast_to_a_non_first_supertrait() {
         compile_and_run(
             "dyn_upcast",
             r#"
-            (deftrait B () (b-tag (self) int))
-            (deftrait C () (c-tag (self) int))
-            (deftrait D (B C) (d-tag (self) int))
+            (deftrait B () (defmethod b-tag (self) int))
+            (deftrait C () (defmethod c-tag (self) int))
+            (deftrait D (B C) (defmethod d-tag (self) int))
             (defstruct cell (n int))
             (defstruct pair (n int))
-            (impl B cell (b-tag (self) int 1))
-            (impl C cell (c-tag (self) int 2))
-            (impl D cell (d-tag (self) int 3))
-            (impl B pair (b-tag (self) int 4))
-            (impl C pair (c-tag (self) int 5))
-            (impl D pair (d-tag (self) int 6))
+            (impl B cell (defmethod b-tag (self) int 1))
+            (impl C cell (defmethod c-tag (self) int 2))
+            (impl D cell (defmethod d-tag (self) int 3))
+            (impl B pair (defmethod b-tag (self) int 4))
+            (impl C pair (defmethod c-tag (self) int 5))
+            (impl D pair (defmethod d-tag (self) int 6))
             (defun only-c ((c :dyn C)) int (c-tag c))
             (defun via ((d :dyn D)) int (only-c d))
             (defun main () int (as int (+ (* 10 (via (make-instance 'cell :n 0))) (via (make-instance 'pair :n 0)))))
@@ -984,12 +984,12 @@ fn compiles_and_runs_a_multi_slot_vtable() {
             "dyn_slots",
             r#"
             (deftrait Shape ()
-              (draw (self) int)
-              (sides (self) int))
+              (defmethod draw (self) int)
+              (defmethod sides (self) int))
             (defstruct tri (n int))
             (impl Shape tri
-              (draw (self) int 7)
-              (sides (self) int 3))
+              (defmethod draw (self) int 7)
+              (defmethod sides (self) int 3))
             (defun paint ((s :dyn Shape)) int (draw s))
             (defun outline ((s :dyn Shape)) int (sides s))
             (defun main () int (as int (+ (* 10 (paint (make-instance 'tri :n 1))) (outline (make-instance 'tri :n 1)))))
@@ -1456,7 +1456,6 @@ fn an_evaluated_form_resolves_a_used_module() {
 #[test]
 fn the_http_example_project_compiles_and_serves_requests() {
     use std::io::Read;
-    use std::net::TcpStream;
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let src_path = manifest_dir.join("examples/projects/http/src/main.typl");
@@ -1474,20 +1473,7 @@ fn the_http_example_project_compiles_and_serves_requests() {
         .expect("failed to start the compiled executable");
 
     let mut response = String::new();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let stream = loop {
-        match TcpStream::connect(("127.0.0.1", port)) {
-            Ok(s) => break s,
-            Err(_) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            Err(e) => {
-                let _ = child.kill();
-                panic!("could not connect to the compiled http server: {}", e);
-            }
-        }
-    };
-    let mut stream = stream;
+    let mut stream = connect_when_listening(&mut child, port);
     use std::io::Write;
     stream.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").expect("failed to send the request");
     stream.read_to_string(&mut response).expect("failed to read the response");
@@ -1837,7 +1823,7 @@ fn a_print_object_method_may_use_a_channel_in_a_standalone_executable() {
         "po_chan_aot",
         r##"(use std::sync::Chan) (defstruct point (x int) (y int))
            (impl point
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
                (let ((ch (the Chan<int> (Chan::new 1))))
                  (send ch 7)
                  (format false "#<p ~a ~a>" self::x (recv ch)))))
@@ -1858,7 +1844,7 @@ fn a_print_object_method_that_would_block_is_refused_not_aborted() {
         "po_chan_block_aot",
         r#"(use std::sync::Chan) (defstruct probe (ch Chan<int>))
            (impl probe
-  (print-object (self (escape bool)) string
+  (defmethod print-object (self (escape bool)) string
                (format false "<~a>" (recv self::ch))))
            (defun main () int
              (let ((ch (the Chan<int> (Chan::new 1))))
@@ -1892,7 +1878,7 @@ fn a_deadlocked_standalone_executable_says_so() {
 #[test]
 fn an_echo_server_runs_in_a_standalone_executable() {
     use std::io::{BufRead, BufReader, Write};
-    use std::net::{TcpListener, TcpStream};
+    use std::net::TcpListener;
 
     let exe = compile_only(
         "echo_aot",
@@ -1921,17 +1907,7 @@ fn an_echo_server_runs_in_a_standalone_executable() {
         .spawn()
         .expect("failed to start the echo server");
 
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let stream = loop {
-        match TcpStream::connect(("127.0.0.1", port)) {
-            Ok(s) => break s,
-            Err(_) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(20)),
-            Err(e) => {
-                let _ = child.kill();
-                panic!("the server never listened: {}", e);
-            }
-        }
-    };
+    let stream = connect_when_listening(&mut child, port);
     let mut writer = stream.try_clone().unwrap();
     writer.write_all(b"hello
 ").unwrap();
@@ -2273,4 +2249,34 @@ fn pop_drains_each_collection_in_a_compiled_executable() {
     );
     assert_eq!(code, Some(0), "stderr was: {}", err);
     assert_eq!(out.trim(), "#((some 6) (some 2)) #(3 2 1)\n#(1 0) #(5)");
+}
+
+/// A connection to the server `child` starts on `port`, once it listens.
+///
+/// Waits for as long as the server is alive: how soon it listens depends on
+/// how loaded the machine is (the suite runs several test binaries at once),
+/// so a short deadline only measures the load. A server that has exited will
+/// never listen, and its exit status and stderr say why. The deadline is a
+/// backstop against a server that lives on without listening.
+fn connect_when_listening(child: &mut std::process::Child, port: u16) -> std::net::TcpStream {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        match std::net::TcpStream::connect(("127.0.0.1", port)) {
+            Ok(s) => return s,
+            Err(e) => {
+                if let Some(status) = child.try_wait().unwrap() {
+                    let mut err = String::new();
+                    if let Some(mut s) = child.stderr.take() {
+                        let _ = std::io::Read::read_to_string(&mut s, &mut err);
+                    }
+                    panic!("the server exited before listening ({}): {}", status, err);
+                }
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    panic!("the server never listened: {}", e);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+    }
 }

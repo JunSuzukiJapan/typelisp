@@ -40,7 +40,7 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 (defstruct Pair<A,B> (first A) (second B))
 
 (impl Pair<A,B>
-  (swap (self) Pair<B,A>
+  (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 
 (defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))

@@ -811,13 +811,6 @@ pub struct NsContext {
 }
 
 /// What writing `defmethod` says: methods are written in the type's `impl`.
-fn defmethod_is_gone() -> Error {
-    Error::TypeError(
-        "defmethod is gone — write methods in the type's `impl`: (impl Type (pub name (self args...) ReturnType body...)); \
-         an item without `self` is a static method, called (Type::name args...)"
-            .into(),
-    )
-}
 
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
@@ -971,6 +964,9 @@ pub struct Checker {
     /// context, and the lexical scopes of type variables and local macros —
     /// see [`Info`].
     info: Info,
+    /// While a `defmethod` written outside an `impl` is checked, the module it
+    /// is written in: what its [`AssocFn::home`] records.
+    method_home: Option<Path>,
     /// Whether the forms being checked are the standard library's (the core
     /// macro layer and the prelude) — see [`Self::set_stdlib`].
     stdlib: bool,
@@ -1231,6 +1227,7 @@ impl Checker {
     pub fn new() -> Checker {
         Checker {
             info: Info::new(),
+            method_home: None,
             stdlib: false,
             loop_stack: RefCell::new(Vec::new()),
             block_stack: RefCell::new(Vec::new()),
@@ -2259,7 +2256,7 @@ impl Checker {
                     wk::DEFCONSTANT => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc, false),
                     wk::DEFMACRO => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::MODULE => return self.check_module(heap, interp, &elems[1..]),
-                    wk::DEFMETHOD => return Err(defmethod_is_gone()),
+                    wk::DEFMETHOD => return self.check_toplevel_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFSTRUCT => return self.check_defstruct(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFENUM => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFTRAIT => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
@@ -2373,7 +2370,7 @@ impl Checker {
                 }
                 wk::DEFCONSTANT => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc, false),
                 wk::DEFMACRO => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                wk::DEFMETHOD => return Err(defmethod_is_gone()),
+                wk::DEFMETHOD => return self.check_toplevel_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFSTRUCT => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFENUM => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFTRAIT => return self.check_deftrait(heap, interp, &parts[1..], inner_locs, true, def_loc),
@@ -5195,7 +5192,7 @@ impl Checker {
                 wk::KW_CONSTRUCTOR => {
                     return Err(Error::TypeError(
                         "defstruct: (:constructor ...) is gone — write the constructor as a static method in the type's `impl`, \
-                         e.g. (impl Point (pub new ((x int) (y int)) Point (make-instance 'Point :x x :y y)))"
+                         e.g. (impl Point (pub defmethod new ((x int) (y int)) Point (make-instance 'Point :x x :y y)))"
                             .into(),
                     ))
                 }
@@ -5270,7 +5267,7 @@ impl Checker {
         self.with_type_names(vars, |c| c.check_deftrait_form(heap, interp, parts, parts_locs, public, def_loc))
     }
 
-    /// `(deftrait Name (Super...) (:type AssocName)... (method-name (self params...) Ret)...)`:
+    /// `(deftrait Name (Super...) (:type AssocName)... (defmethod method-name (self params...) Ret)...)`:
     /// declares a trait as a set of method signature *templates* (no
     /// bodies) — `Self` and any declared associated type name are usable as
     /// ordinary type variables in a signature, exactly like a generic
@@ -5300,7 +5297,7 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError(
-                "deftrait: (deftrait Name (Super...) (:type AssocName)... (method (params...) ret)...) \
+                "deftrait: (deftrait Name (Super...) (:type AssocName)... (defmethod method (params...) ret)...) \
                  — the supertrait list is required; write `()` for none"
                     .into(),
             ));
@@ -5357,7 +5354,8 @@ impl Checker {
         // registry keeps for `impl` to replay.
         let mut default_written: Vec<(Vec<Value>, Vec<Option<Loc>>)> = Vec::new();
         for item in &parts[item_start..] {
-            let (item, _) = self.expand_receiver(heap, *item)?;
+            let item = self.unwrap_method_item(heap, *item, "deftrait")?;
+            let (item, _) = self.expand_receiver(heap, item)?;
             let elem_locs = heap.list_to_vec_locs(item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
@@ -5377,7 +5375,7 @@ impl Checker {
             }
             if elems.len() < 3 {
                 return Err(Error::TypeError(
-                    "deftrait: method must be (name (params...) ret) or (name (params...) ret body...)".into(),
+                    "deftrait: method must be (defmethod name (params...) ret) or (defmethod name (params...) ret body...)".into(),
                 ));
             }
             let (params, _param_locs) = self.parse_param_pairs(heap, &heap.list_to_vec(elems[1])?)?;
@@ -5509,7 +5507,7 @@ impl Checker {
     }
 
     /// `(impl Type (:where ...)? item...)`: Rust's inherent `impl`. Each item
-    /// is `(pub? name<U...>? (params...) Ret (:where ...)? body...)`; one whose
+    /// is `(pub? defmethod name<U...>? (params...) Ret (:where ...)? body...)`; one whose
     /// first parameter is `self` is an instance
     /// method, any other a static method, called `(Type::name args...)`.
     /// `Self` in a parameter or return type is the target type.
@@ -5574,11 +5572,78 @@ impl Checker {
         forms::module_form(heap, &target_fq, &body)
     }
 
+    /// `(defmethod name ((x Type) params...) Ret body...)` outside an `impl`:
+    /// a method of the first parameter's type, which may be any type with
+    /// methods — one the standard library defines, or another module's. It
+    /// is an `impl` item in every other respect, except that the receiver is
+    /// a named, typed parameter: `self` belongs to an `impl`, which names the
+    /// type the receiver has.
+    #[allow(clippy::too_many_arguments)]
+    fn check_toplevel_defmethod(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<TopLevelForm, Error> {
+        let shape = "defmethod: (defmethod name ((x Type) params...) ReturnType body...)";
+        if parts.len() < 3 {
+            return Err(Error::TypeError(shape.into()));
+        }
+        let (method, _) = generic_header(heap, parts[0]).map_err(|_| Error::TypeError(shape.into()))?;
+        let params = heap.list_to_vec_locs(parts[1]).map_err(|_| Error::TypeError(shape.into()))?;
+        let Some((first, _)) = params.first() else {
+            return Err(Error::TypeError(format!(
+                "defmethod `{}`: a method needs a first parameter, whose type it belongs to: {}",
+                method, shape
+            )));
+        };
+        let recv = heap.list_to_vec_locs(*first).ok().filter(|r| {
+            r.len() == 2 && matches!(r[0].0, Value::Symbol(_)) && !crate::types::is_type_application(heap, *first)
+        });
+        let Some(recv) = recv else {
+            if is_symbol(*first, wk::SELF) {
+                return Err(Error::TypeError(format!(
+                    "defmethod `{}`: `self` is written only inside an `impl`, which names the receiver's type; \
+                     outside one, the first parameter is named and typed: ((x Type) ...)",
+                    method
+                )));
+            }
+            return Err(Error::TypeError(format!(
+                "defmethod `{}`: the first parameter is the receiver, written (name Type): {}",
+                method, shape
+            )));
+        };
+        if is_symbol(recv[0].0, wk::SELF) {
+            return Err(Error::TypeError(format!(
+                "defmethod `{}`: `self` is written only inside an `impl`; name the receiver otherwise: ((x Type) ...)",
+                method
+            )));
+        }
+        let (recv_ty, recv_ty_loc) = recv[1].clone();
+        let mut vars = self.written_type_vars(heap, recv_ty);
+        vars.extend(Self::header_type_vars(heap, parts.first()));
+        let ty = self.with_type_names(vars, |c| c.parse_type_here_at(heap, recv_ty, recv_ty_loc.as_ref()))?;
+        let type_fq = nominal_path(&ty).ok_or_else(|| {
+            Error::TypeError(format!("defmethod `{}`: `{}` is not a type with methods", method, ty))
+        })?;
+        let method_loc = def_loc.clone();
+        let home = Path::of_symbol(self.info.ns, definition_symbol(heap, parts[0])?);
+        let outer = self.method_home.replace(home);
+        let checked = self.check_defmethod_in(heap, interp, parts, parts_locs, public, method_loc, None);
+        self.method_home = outer;
+        let tl = forms::rooted(heap, checked?);
+        forms::module_form(heap, &type_fq, &[tl])
+    }
+
     /// One inherent `impl` item, with `pub` taken off and its receiver
     /// written out by [`Self::expand_receiver`]: `(public, item, is_static)`.
     /// Values built here are rooted for the rest of the top-level form.
     fn normalize_inherent_item(&mut self, heap: &mut Heap, item: Value) -> Result<(bool, Value, bool), Error> {
-        let shape = "impl: an item is (pub? name (params...) ReturnType body...)";
+        let shape = "impl: an item is (pub? defmethod name (params...) ReturnType body...)";
+        let item = self.unwrap_method_item(heap, item, "impl")?;
         let mut elems = heap.list_to_vec_locs(item).map_err(|_| Error::TypeError(shape.into()))?;
         let public = matches!(elems.first(), Some((Value::Symbol(id), _)) if id.is(wk::PUB));
         if public {
@@ -5591,6 +5656,34 @@ impl Checker {
         let rebuilt = forms::rooted(heap, rebuilt);
         let (expanded, has_self) = self.expand_receiver(heap, rebuilt)?;
         Ok((public, expanded, !has_self))
+    }
+
+    /// A method item as written in a `deftrait` or an `impl` —
+    /// `(defmethod name (params...) Ret ...)` or `(pub defmethod ...)` — with
+    /// the `defmethod` taken off: `(name ...)` or `(pub name ...)`, the shape
+    /// the rest of the item handling reads. A `(:type ...)`/`(:where ...)`
+    /// clause is returned as it is; a method written without `defmethod` is
+    /// refused. `form` names the enclosing form for the message.
+    fn unwrap_method_item(&self, heap: &mut Heap, item: Value, form: &str) -> Result<Value, Error> {
+        let Ok(elems) = heap.list_to_vec_locs(item) else { return Ok(item) };
+        let rest = match elems.as_slice() {
+            [(Value::Symbol(k), _), ..] if k.is_keyword() => return Ok(item),
+            [(Value::Symbol(d), _), ..] if d.is(wk::DEFMETHOD) => elems[1..].to_vec(),
+            [(p @ Value::Symbol(pid), pl), (Value::Symbol(d), _), ..] if pid.is(wk::PUB) && d.is(wk::DEFMETHOD) => {
+                let mut v = vec![(*p, pl.clone())];
+                v.extend_from_slice(&elems[2..]);
+                v
+            }
+            _ => {
+                return Err(Error::TypeError(format!(
+                    "{}: a method is written (defmethod name (params...) ReturnType body...), \
+                     or (pub defmethod ...) to make it public",
+                    form
+                )))
+            }
+        };
+        let rebuilt = forms::list_from_vec_locs(heap, &rest)?;
+        Ok(forms::rooted(heap, rebuilt))
     }
 
     /// A method item `(name (params...) Ret ...)` as written in a `deftrait`
@@ -5725,6 +5818,7 @@ impl Checker {
 
         let mut method_forms: Vec<Value> = Vec::new();
         for item in &parts[item_start..] {
+            let item = &self.unwrap_method_item(heap, *item, "impl")?;
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             if let Some(head @ Value::Cons(_)) = elems.first() {
@@ -6657,7 +6751,8 @@ impl Checker {
                 .iter()
                 .map(|v| crate::owned_form::value_to_owned(heap, *v))
                 .collect::<Result<Vec<_>, Error>>()?;
-            let (item, _) = self.expand_receiver(heap, *written)?;
+            let item = self.unwrap_method_item(heap, *written, "impl")?;
+            let (item, _) = self.expand_receiver(heap, item)?;
             let elems = heap.list_to_vec(item)?;
             if !matches!(elems.first(), Some(Value::Symbol(_))) {
                 return Err(Error::TypeError("impl: item must start with a symbol".into()));
@@ -8013,11 +8108,14 @@ impl Checker {
             Some(args) => d.insts.get(&ConcreteNames::type_args(args)).and_then(|i| i.assoc.get(method)),
             None => d.assoc.get(method),
         });
+        // Re-registering a method (a redefinition, or the same one checked
+        // again) keeps where it was defined unless this check says otherwise.
+        let home = self.method_home.clone().or_else(|| previous.and_then(|e| e.home.clone()));
         if let Some(e) = previous {
             self.check_redef_outcome("method", method.name(), e.builtin())?;
         }
         if let Some(def) = self.info.reg.type_def_mut(&type_fq) {
-            let af = AssocFn { sig, instance, builtin: false };
+            let af = AssocFn { sig, instance, builtin: false, home };
             match &inst_args {
                 Some(args) => {
                     def.insts
@@ -8105,7 +8203,7 @@ impl Checker {
     ) -> Result<MethodSig, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
-                "impl: a method is (name (self params...) ReturnType body...)".into(),
+                "impl: a method is (defmethod name (self params...) ReturnType body...)".into(),
             ));
         }
         let (method, own_params) = generic_header(heap, parts[0])
@@ -8114,7 +8212,7 @@ impl Checker {
         let sig_list: Vec<Value> = sig_list_locs.iter().map(|(v, _)| *v).collect();
         if sig_list.is_empty() {
             return Err(Error::TypeError(format!(
-                "impl: method `{}` needs a receiver: (name (self params...) ReturnType body...)",
+                "impl: method `{}` needs a receiver: (defmethod name (self params...) ReturnType body...)",
                 method
             )));
         }
@@ -8359,7 +8457,7 @@ impl Checker {
                 optionals: Vec::new(),
                 keys: Vec::new(),
             };
-            assoc.insert(getter_name, AssocFn { sig: getter_sig, instance: true, builtin: false });
+            assoc.insert(getter_name, AssocFn { sig: getter_sig, instance: true, builtin: false, home: None });
             let getter = {
                 // The intermediates (`self`, then the `field-get` around it)
                 // have to stay rooted until the method node holding them is
@@ -8397,7 +8495,7 @@ impl Checker {
                 optionals: Vec::new(),
                 keys: Vec::new(),
             };
-            assoc.insert(setter_name, AssocFn { sig: setter_sig, instance: true, builtin: false });
+            assoc.insert(setter_name, AssocFn { sig: setter_sig, instance: true, builtin: false, home: None });
             let setter = {
                 let mut s = RootScope::new(members.heap());
                 let self_var = forms::var_form(&mut s, internal_local("self"))?;

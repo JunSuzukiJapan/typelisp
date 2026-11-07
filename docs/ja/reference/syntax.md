@@ -199,12 +199,12 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
     ```lisp
     (defstruct box (w i32) (h i32))
     (impl box
-      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+      (defmethod grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
     (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
     (defstruct point (x i32) (y i32))
     (impl point
-      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 静的メソッド
+      (defmethod origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 静的メソッド
     (point::origin :y 7)
     ```
 
@@ -577,32 +577,37 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 
 ```lisp
 (impl Type
-  (name ((arg Type2) ...) RetType body...)            ; 静的メソッド: (Type::name args...)
-  (name (self (arg Type2) ...) RetType body...)       ; インスタンスメソッド: (name obj args...)
-  (pub name ...))                                      ; 型を定義したモジュールの外にも公開する
+  (defmethod name ((arg Type2) ...) RetType body...)         ; 静的メソッド: (Type::name args...)
+  (defmethod name (self (arg Type2) ...) RetType body...)    ; インスタンスメソッド: (name obj args...)
+  (pub defmethod name ...))                                  ; 型を定義したモジュールの外にも公開する
 
 ; ジェネリックな型
 (impl Type<T> (:where (Trait T)...) item...)
+
+; impl の外: 第 1 引数の型のメソッド
+(defmethod name ((x Type) (arg Type2) ...) RetType body...)
 ```
 
 `defstruct`（3.6）・`defenum`（3.7）で定義した型にメソッドを持たせる。Rust の固有 impl
 （`impl Point { ... }`）に当たる。
 
-- 項目の形は `(名前 (引数...) 戻り値の型 本体...)` で、トレイトの `impl`（3.9）の項目と同じ。
+- 項目は `(defmethod 名前 (引数...) 戻り値の型 本体...)` で、トレイトの `impl`（3.9）の項目と同じ。
+  `defmethod` を付けない `(名前 (引数...) ...)` の形はエラーになる。
 - 引数の先頭が `self` の項目は**インスタンスメソッド**で、`(name obj args...)` の形で呼ぶ。
-  `self` には型を書かない（型は対象の型 `Self` になる。`(self Type)` とは書けない）。
+  `self` には型を書かない（型は対象の型 `Self` になる。`(self Type)` とは書けない）。`self` より
+  後の引数には型を書く。
 - `self` の無い項目は**静的メソッド**で、`(Type::name args...)` の形で呼ぶ。値を作る静的
   メソッドがその型のコンストラクタになる。名前は自由で、`new` を勧める。
-- **公開は項目ごと**。`(pub name ...)` と書いた項目だけが、型を定義したモジュールの外から使える。
-  付けなければそのモジュールの中だけで使える。
+- **公開は項目ごと**。`(pub defmethod name ...)` と書いた項目だけが、型を定義したモジュールの外から
+  使える。付けなければそのモジュールの中だけで使える。
 - 1 つの型に `impl` をいくつ書いてもよい。
 - 呼び出し側は `obj` の静的型からメソッドを解決する（単一・静的ディスパッチ）。メソッドは
   **第 1 引数の型だけ**から探す（3.10）。
 - **docstring** は `defun` と同じ位置・同じ規則で置ける（本体の先頭、後ろに本体フォームが続く
   場合のみ）。`(documentation Type::name)` で取り出す。トレイトの `impl` のメソッドも同じ。
 - 書けるのは自分のプログラムの型だけ。`Vector`・`Option`・`int` のような標準ライブラリの型には
-  書けない（`... is a standard library type` のエラー）。標準の型に操作を足したいときは
-  トレイトを定義して、その型に `impl` する。
+  書けない（`... is a standard library type` のエラー）。標準の型にメソッドを足すには、下の
+  `impl` の外の `defmethod` を使うか、トレイトを定義してその型に `impl` する。
 - `(impl X ...)` の `X` の次が項目（リスト）か `:where` か何も無ければこの固有 impl、
   名前ならトレイトの `impl`（`(impl Trait Type ...)`、3.9）。
 
@@ -610,11 +615,11 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 (defstruct Point (pub x f64) (pub y f64))
 
 (impl Point
-  (pub new ((x f64) (y f64)) Point
+  (pub defmethod new ((x f64) (y f64)) Point
     (make-instance 'Point :x x :y y))
-  (pub origin () Point
+  (pub defmethod origin () Point
     (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64
+  (pub defmethod area (self) f64
     (* self::x self::y)))
 
 (Point::new 1.0 2.0)          ; 静的メソッド
@@ -628,7 +633,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 (defstruct Box<T> (v T))
 
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
@@ -646,11 +651,11 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 (defstruct Box<T> (v T))
 
 (impl Box<int>
-  (twice (self) int (* 2 self::v))
-  (make () Box<int> (make-instance 'Box :v 7)))
+  (defmethod twice (self) int (* 2 self::v))
+  (defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (twice (self) string (format false "~a~a" self::v self::v))
-  (make () Box<string> (make-instance 'Box :v "s")))
+  (defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (defmethod make () Box<string> (make-instance 'Box :v "s")))
 
 (twice (make-instance 'Box :v 4))      ; => 8
 (twice (make-instance 'Box :v "ab"))   ; => "abab"
@@ -665,6 +670,37 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   書くことはできない（書いた順によらずエラー）。フィールドのアクセサも、変数で書いた側のメソッドに当たる。
 - `documentation`・`compile`・`trace` などでメソッドを名指すときは、`Box<int>::twice` のように
   具体型を書く。そのメソッドを持つ具体型が 1 つだけなら `Box::twice` でもよい。
+
+#### impl の外の defmethod
+
+```lisp
+(defmethod some-method ((x int) (y int)) int
+  (+ x y))
+(defmethod some-method ((x f64) (y f64)) f64
+  (* x y))
+
+(some-method 2 3)       ; => 5    int のメソッド
+(some-method 2.0 3.0)   ; => 6.0  f64 のメソッド
+```
+
+`impl` の外に書いた `defmethod` は、**第 1 引数の型のメソッド**になる。メソッドは第 1 引数の型
+だけから探すので、同じ名前のメソッドを第 1 引数の型ごとに定義できる。
+
+- `impl` の中の `defmethod` との違いは、第 1 引数に `self` を取れないことだけ。第 1 引数は
+  `(名前 型)` と書き、その型がメソッドの持ち主になる。`self` を書くとエラーになる。
+- **どの型にでも書ける**。`int`・`Vector` のような標準ライブラリの型や、別のモジュールで
+  定義した型にもメソッドを足せる（固有 `impl` は型を定義した側しか書けない）。
+- 公開は `impl` の中と同じく `(pub defmethod ...)`。付けなければ、定義したモジュールの中だけで
+  使える。
+- ジェネリックな型の受け手は型パラメータを変数のまま書く（`((v Vector<T>))`）。この `T` は受け手の
+  型パラメータで、メソッド自身の型パラメータとして `<T>` を重ねて宣言することはできない。
+
+```lisp
+(defmethod second-elem ((v Vector<T>)) T
+  (get v 1))
+
+(second-elem #(10 20 30))   ; => 20
+```
 
 ### 3.6 defstruct — 構造体（ユーザ定義型）
 
@@ -832,19 +868,21 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 継承リストは必須。無ければ ()
   (:type AssocName)                       ; 関連型（複数可、省略可）
-  (method-name (self params...) RetType)          ; 本体なし＝実装必須
-  (method-name (self params...) RetType body...)) ; 本体あり＝デフォルト実装
+  (defmethod method-name (self params...) RetType)           ; 本体なし＝実装必須
+  (defmethod method-name (self params...) RetType body...))  ; 本体あり＝デフォルト実装
 
 (impl TraitName TargetType
   (:where (Trait A)...)                   ; impl 全体に効く境界（省略可）
   (:type AssocName ConcreteType)          ; 関連型を具体化
-  (method-name (self params...) RetType body...))
+  (defmethod method-name (self params...) RetType body...))
 ```
 
 `impl` によって各メソッドは `TargetType` のメソッドとして登録され、固有 `impl`（3.5）のメソッドと
 同じように呼べる。トレイトの `impl` のメソッドは `pub` を書かなくても常に公開される。トレイトは
 ジェネリック関数の `:where` 節でトレイト境界として参照する（[3.1 defun](#31-defun--関数定義) 参照）。
 トレイト名には `m::Trait` のような `::` パスも書ける。
+`deftrait` のメソッドの宣言も、トレイトの `impl` のメソッドも、固有 `impl` と同じく `defmethod` で書く
+（`defmethod` の無い `(method-name (self ...) ...)` はエラー）。
 
 **継承リスト（必須）**: トレイト名の直後に必ず書く。要素は素のトレイト名か、そのトレイトが
 関連型を持つ場合は `(Trait (Assoc Type))` の形で**全ての関連型をピン留めした**もの。
@@ -853,7 +891,7 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 (deftrait Eq () ...)                       ; 継承なし
 (deftrait Ord (Eq) ...)                    ; Rust の trait Ord: Eq
 (deftrait CharSource ((Iter (Item char)))  ; 関連型のピン留め
-  (rewind (self) ()))
+  (defmethod rewind (self) ()))
 ```
 
 継承の効果は3つ。(1) `impl Ord X` は `impl Eq X` を**先に**書くことを要求する（記述順の規則。
@@ -881,7 +919,7 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 
 ```lisp
 (deftrait Clamp (Ord)
-  (clamp (self (lo Self) (hi Self)) Self
+  (defmethod clamp (self (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 本体ゼロ — 全部デフォルト
 ```
@@ -912,11 +950,11 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 場合は trait オブジェクト型 `:dyn Trait`（2 章）を使うと vtable 経由の動的ディスパッチになる:
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 
 (defun render-all ((xs Vector<:dyn Drawable>)) ()
   (doiter (d (iter xs)) (println "~a" (draw d))))   ; 1つの呼び出し地点、実装ごとの答え
@@ -1061,20 +1099,21 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
+(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` が付けられるのは上記11種類と `use` だけ（`module`/`impl` には付けられない）。
+`pub` が付けられるのは上記12種類と `use` だけ（`module`/`impl` には付けられない）。
 `(pub use path...)` は取り込んだ定義を**再公開**する: ほかのモジュールからも、このモジュールを通る
 パス（`m::name`）で引け、`(use m::name)` で取り込める。再公開できるのは定義だけで、モジュールは
 再公開できない。
 定義形を括弧で包む `(pub (defun ...))` 形式ではなく、`pub` の直後に定義キーワードを続ける。
 1つの `pub` が公開指定できる定義は1つだけ（複数の定義の一括指定はできない）。
 
-固有 `impl` のメソッドは、項目ごとに `(pub name ...)` と書く（3.5）。構造体のフィールドは
+`impl` のメソッドは、項目ごとに `(pub defmethod name ...)` と書く（3.5）。構造体のフィールドは
 `(pub x i32)` と書く（3.6）。
 
 ### 3.14 defmacro — マクロ定義

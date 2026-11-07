@@ -278,7 +278,7 @@ impl Info {
     /// function or constructor "doesn't resolve" instead of erroring with a
     /// privacy-specific message.
     pub(super) fn assoc_visible(&self, type_fq: &Path, af: &AssocFn) -> bool {
-        af.sig.public || self.in_scope(type_fq.ns())
+        af.sig.public || self.in_scope(af.home.as_ref().map_or(type_fq.ns(), Path::ns))
     }
 
     /// What `sym` — a bare name as read in the current module — names, as

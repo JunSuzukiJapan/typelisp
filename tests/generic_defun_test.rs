@@ -224,7 +224,7 @@ fn a_generic_defmethod_may_name_the_receivers_type_parameter_freely() {
         eval_ok_with_prelude(
             "(defstruct bag<T> (items Vector<T>))
              (impl bag<A>
-               (keepif (self (pred (fn (A) bool))) Vector<A>
+               (defmethod keepif (self (pred (fn (A) bool))) Vector<A>
                  (filter (iter self::items) pred)))
              (let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 5)
@@ -241,7 +241,7 @@ fn a_generic_defmethod_on_a_user_struct_may_rename_its_type_parameter() {
         eval_ok_with_prelude(
             "(defstruct box<T> (v T))
              (impl box<A>
-  (apply-to (self (f (fn (A) A))) A (f self::v)))
+  (defmethod apply-to (self (f (fn (A) A))) A (f self::v)))
              (apply-to (make-instance 'box :v 4) (lambda ((x int)) int (* x 2)))"
         ),
         Value::Int(8)

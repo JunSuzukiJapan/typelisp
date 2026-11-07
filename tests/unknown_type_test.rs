@@ -57,30 +57,30 @@ fn type_variables_declared_in_the_name_are_not_unknown() {
 #[test]
 fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
     assert_unknown("(defstruct box<T> (v T)) (impl box<T>
-  (bad (self (x U)) T self::v))", "U");
+  (defmethod bad (self (x U)) T self::v))", "U");
     assert_unknown("(defstruct pt (x int)) (impl pt
-  (m (self (y nosuch)) int 1))", "nosuch");
+  (defmethod m (self (y nosuch)) int 1))", "nosuch");
     assert_unknown("(defstruct pt (x int)) (impl pt
-  (m (self) int (the nosuch 1)))", "nosuch");
+  (defmethod m (self) int (the nosuch 1)))", "nosuch");
     assert_unknown("(defstruct box<T> (v T)) (impl box<T>
-  (mk ((x U)) box<T> (make-instance 'box :v x)))", "U");
+  (defmethod mk ((x U)) box<T> (make-instance 'box :v x)))", "U");
     let src = "(defstruct box<T> (v T))
                (impl box<T>
-  (get-v (self) T self::v)
-  (wrap ((x T)) box<T> (make-instance 'box :v x)))
+  (defmethod get-v (self) T self::v)
+  (defmethod wrap ((x T)) box<T> (make-instance 'box :v x)))
                (get-v (box::wrap 7))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
-    let defs = "(defstruct box<T> (v T)) (deftrait Show () (show (self) string))";
-    assert_unknown(&format!("{defs} (impl Show box<T> (show (self) string (let ((y (the U 1))) \"b\")))"), "U");
-    assert_unknown(&format!("{defs} (impl<T> Show Vector<T> (show (self) string (let ((y (the U 1))) \"v\")))"), "U");
+    let defs = "(defstruct box<T> (v T)) (deftrait Show () (defmethod show (self) string))";
+    assert_unknown(&format!("{defs} (impl Show box<T> (defmethod show (self) string (let ((y (the U 1))) \"b\")))"), "U");
+    assert_unknown(&format!("{defs} (impl<T> Show Vector<T> (defmethod show (self) string (let ((y (the U 1))) \"v\")))"), "U");
     let src = format!(
         "{defs}
-         (impl Show box<T> (show (self) string (let ((x (the T self::v))) \"b\")))
-         (deftrait Clamp (Ord) (clamp (self (lo Self) (hi Self)) Self
+         (impl Show box<T> (defmethod show (self) string (let ((x (the T self::v))) \"b\")))
+         (deftrait Clamp (Ord) (defmethod clamp (self (lo Self) (hi Self)) Self
            (if (less self lo) lo (if (less hi self) hi self))))
          (impl<T> Clamp T (:where (Ord T)))
          (+ (length (show (make-instance 'box :v 1))) (clamp 5 1 3))"
@@ -90,7 +90,7 @@ fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
 
 #[test]
 fn a_trait_s_type_variables_are_self_and_its_associated_types() {
-    assert_unknown("(deftrait Shape () (:type Unit2) (area (self) Unit2) (bad (self) Oops))", "Oops");
+    assert_unknown("(deftrait Shape () (:type Unit2) (defmethod area (self) Unit2) (defmethod bad (self) Oops))", "Oops");
 }
 
 #[test]

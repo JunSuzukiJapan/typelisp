@@ -169,7 +169,7 @@ fn a_method_call_can_be_spawned() {
         int(r#"(defvar (seen int) 0)
                (defstruct crate (v int))
                (impl crate
-  (stash (self) int (setf seen self::v)))
+  (defmethod stash (self) int (setf seen self::v)))
                (task (stash (make-instance 'crate :v 9)))
                seen"#),
         9
@@ -982,10 +982,10 @@ fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
         text_compiled(
             r#"(use std::thread::yield) (defvar (trail string) "")
                (deftrait Ticker ()
-                 (tick (self (n int)) int))
+                 (defmethod tick (self (n int)) int))
                (defstruct marker (name string))
                (impl Ticker marker
-                 (tick (self (n int)) int
+                 (defmethod tick (self (n int)) int
                    (progn (dotimes (i n) (setf trail (append trail self::name)) (yield)) 0)))
                (defun drive-it ((t :dyn Ticker)) int (tick t 3))
                (compile drive-it)

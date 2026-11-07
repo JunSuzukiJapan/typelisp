@@ -212,7 +212,7 @@ fn two_types_members_of_one_name_cannot_both_come_in() {
 /// pattern head all resolve `p` to `m::p`.
 #[test]
 fn a_used_type_is_the_same_name_in_type_member_position() {
-    let def = "(module m (pub defstruct p (pub x i32)) (impl p (pub origin () p (make-instance 'p :x 0)))) (use m::p)";
+    let def = "(module m (pub defstruct p (pub x i32)) (impl p (pub defmethod origin () p (make-instance 'p :x 0)))) (use m::p)";
     let m_p = Type::Named(Path::of(&["m", "p"]), vec![]);
     assert_eq!(ty_program(&format!("{} (make-instance 'p :x 1)", def)), m_p);
     assert_eq!(ty_program(&format!("{} (p::origin)", def)), m_p);
@@ -282,21 +282,21 @@ fn struct_field_path_sugar_without_pub_is_inaccessible_cross_module() {
 
 #[test]
 fn struct_field_marked_pub_is_accessible_cross_module() {
-    let src = "(module geo (pub defstruct point (pub x int) (y int)) (impl point (pub new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
+    let src = "(module geo (pub defstruct point (pub x int) (y int)) (impl point (pub defmethod new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
                (let ((p (geo::point::new 1 2))) p::x)";
     assert_eq!(ty_program(src), Type::Int);
 }
 
 #[test]
 fn struct_field_marked_pub_setter_is_accessible_cross_module() {
-    let src = "(module geo (pub defstruct point (pub x int) (y int)) (impl point (pub new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
+    let src = "(module geo (pub defstruct point (pub x int) (y int)) (impl point (pub defmethod new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
                (let ((p (geo::point::new 1 2))) (setf p::x 9))";
     assert_eq!(ty_program(src), Type::Unit);
 }
 
 #[test]
 fn struct_field_not_marked_pub_setter_is_inaccessible_cross_module() {
-    let src = "(module geo (pub defstruct point (x int) (pub y int)) (impl point (pub new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
+    let src = "(module geo (pub defstruct point (x int) (pub y int)) (impl point (pub defmethod new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
                (let ((p (geo::point::new 1 2))) (setf p::x 9))";
     assert!(program(src).is_err());
 }
@@ -397,12 +397,12 @@ fn a_type_the_library_does_not_offer_is_reached_only_through_a_use() {
 /// `:dyn`, a bound and an `impl` of the module that wrote the `use`.
 #[test]
 fn use_brings_in_a_trait() {
-    let src = "(module m (pub deftrait Area () (area (self) int)))
+    let src = "(module m (pub deftrait Area () (defmethod area (self) int)))
                (use m::Area)
                (defstruct sq (side int))
-               (impl Area sq (area (self) int (* self::side self::side)))
+               (impl Area sq (defmethod area (self) int (* self::side self::side)))
                (defun total ((s :dyn Area)) int (area s))
                (total (make-instance 'sq :side 3))";
     assert_eq!(ty_program(src), Type::Int);
-    assert!(program("(module m (pub deftrait Area () (area (self) int))) (defun f ((s :dyn Area)) int 1)").is_err());
+    assert!(program("(module m (pub deftrait Area () (defmethod area (self) int))) (defun f ((s :dyn Area)) int 1)").is_err());
 }

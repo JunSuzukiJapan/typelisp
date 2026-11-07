@@ -8,13 +8,13 @@ use common::{check_err, eval_string, eval_string_compiled};
 
 const DEFS: &str = r##"
 (deftrait Named ()
-  (name (self) string)
-  (greet (self (to string)) string (format false "~a greets ~a" (name self) to)))
+  (defmethod name (self) string)
+  (defmethod greet (self (to string)) string (format false "~a greets ~a" (name self) to)))
 (defstruct Dog (nick string))
-(impl Named Dog (name (self) string self::nick))
-(deftrait Loud () (shout (self) string))
-(impl<T> Loud T (:where (Named T)) (shout (self) string (format false "~a!" (name self))))
-(impl Dog (pub twice (self) string (format false "~a~a" self::nick self::nick)))
+(impl Named Dog (defmethod name (self) string self::nick))
+(deftrait Loud () (defmethod shout (self) string))
+(impl<T> Loud T (:where (Named T)) (defmethod shout (self) string (format false "~a!" (name self))))
+(impl Dog (pub defmethod twice (self) string (format false "~a~a" self::nick self::nick)))
 "##;
 
 /// `body` after [`DEFS`], interpreted and inside a compiled function.
@@ -40,28 +40,28 @@ fn assert_refused(src: &str) {
 
 #[test]
 fn a_typed_self_is_refused_in_deftrait() {
-    assert_refused("(deftrait T1 () (m ((self Self)) int))");
-    assert_refused("(deftrait T1 () (m ((self Self)) int 1))");
+    assert_refused("(deftrait T1 () (defmethod m ((self Self)) int))");
+    assert_refused("(deftrait T1 () (defmethod m ((self Self)) int 1))");
 }
 
 #[test]
 fn a_typed_self_is_refused_in_a_trait_impl() {
-    assert_refused("(deftrait T1 () (m (self) int)) (defstruct P (x int)) (impl T1 P (m ((self Self)) int 1))");
-    assert_refused("(deftrait T1 () (m (self) int)) (defstruct P (x int)) (impl T1 P (m ((self P)) int 1))");
+    assert_refused("(deftrait T1 () (defmethod m (self) int)) (defstruct P (x int)) (impl T1 P (defmethod m ((self Self)) int 1))");
+    assert_refused("(deftrait T1 () (defmethod m (self) int)) (defstruct P (x int)) (impl T1 P (defmethod m ((self P)) int 1))");
 }
 
 #[test]
 fn a_typed_self_is_refused_in_a_blanket_impl() {
-    assert_refused("(deftrait T1 () (m (self) int)) (impl<T> T1 T (m ((self T)) int 1))");
+    assert_refused("(deftrait T1 () (defmethod m (self) int)) (impl<T> T1 T (defmethod m ((self T)) int 1))");
 }
 
 #[test]
 fn a_typed_self_is_refused_in_an_inherent_impl() {
-    assert_refused("(defstruct P (x int)) (impl P (m ((self Self)) int 1))");
-    assert_refused("(defstruct P (x int)) (impl P (m ((self P)) int 1))");
+    assert_refused("(defstruct P (x int)) (impl P (defmethod m ((self Self)) int 1))");
+    assert_refused("(defstruct P (x int)) (impl P (defmethod m ((self P)) int 1))");
 }
 
 #[test]
 fn a_typed_self_is_refused_after_the_first_parameter() {
-    assert_refused("(defstruct P (x int)) (impl P (m ((k int) (self P)) int 1))");
+    assert_refused("(defstruct P (x int)) (impl P (defmethod m ((k int) (self P)) int 1))");
 }

@@ -13,20 +13,20 @@ use common::{check_err, eval_string, eval_string_compiled};
 const DEFS: &str = r##"
 (defstruct Box<T> (v T))
 (impl Box<T>
-  (fmap<U> (self (f (fn (T) U))) Box<U>
+  (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v)))
-  (zip-with<U,R> (self (other Box<U>) (f (fn (T U) R))) Box<R>
+  (defmethod zip-with<U,R> (self (other Box<U>) (f (fn (T U) R))) Box<R>
     (make-instance 'Box :v (f self::v other::v)))
-  (pair<U> ((a T) (b U)) Box<cons-cell<T,U>>
+  (defmethod pair<U> ((a T) (b U)) Box<cons-cell<T,U>>
     (make-instance 'Box :v (cons a b))))
 (defstruct Meter (m f64))
 (impl Meter
-  (scale<N> (self (k N) (conv (fn (N) f64))) Meter
+  (defmethod scale<N> (self (k N) (conv (fn (N) f64))) Meter
     (make-instance 'Meter :m (* self::m (conv k)))))
 (impl Box<T>
-  (twice<U> (self (f (fn (T) U)) (g (fn (U) U))) Box<U>
+  (defmethod twice<U> (self (f (fn (T) U)) (g (fn (U) U))) Box<U>
     (fmap (fmap self f) g))
-  (same<U> (self (a U) (b U)) bool (:where (Eq U))
+  (defmethod same<U> (self (a U) (b U)) bool (:where (Eq U))
     (equals a b)))
 (defun apply-it ((g (fn (Box<int> (fn (int) bool)) Box<bool>))) bool
   (v (g (make-instance 'Box :v 5) (lambda ((x int)) bool (> x 2)))))
@@ -110,7 +110,7 @@ fn as_a_function_value() {
 #[test]
 fn a_parameter_nothing_decides_is_an_error() {
     let msg = check_err(&format!(
-        "{}\n(impl Box<T> (make<U> (self) Option<U> (Option::none)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
+        "{}\n(impl Box<T> (defmethod make<U> (self) Option<U> (Option::none)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
         DEFS
     ));
     assert!(msg.contains("cannot infer type parameter `U`"), "{}", msg);
@@ -118,17 +118,17 @@ fn a_parameter_nothing_decides_is_an_error() {
 
 #[test]
 fn an_own_parameter_may_not_reuse_the_owners_name() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<T> (self (x T)) T x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (defmethod bad<T> (self (x T)) T x))");
     assert!(msg.contains("the method's own type parameter `T` has the name of a type parameter of `Box`"), "{}", msg);
     // The declared name counts too, though this receiver spells it `A`: the
     // registered signature is written in the declared names.
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<A> (bad<T> (self (x T)) T x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<A> (defmethod bad<T> (self (x T)) T x))");
     assert!(msg.contains("the method's own type parameter `T`"), "{}", msg);
 }
 
 #[test]
 fn an_own_parameter_may_not_be_declared_twice() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<U,U> (self (x U)) U x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (defmethod bad<U,U> (self (x U)) U x))");
     assert!(msg.contains("type parameter `U` is declared twice"), "{}", msg);
 }
 
@@ -136,14 +136,14 @@ fn an_own_parameter_may_not_be_declared_twice() {
 /// nothing to bind it with.
 #[test]
 fn a_partly_generic_receiver_is_refused() {
-    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (bad<U> (self (x U)) U x))");
+    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (defmethod bad<U> (self (x U)) U x))");
     assert!(msg.contains("names every type parameter of `Pair` as a distinct variable"), "{}", msg);
 }
 
 /// A name the header does not declare is still unknown.
 #[test]
 fn an_undeclared_type_variable_is_still_unknown() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<U> (self (x W)) U x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (defmethod bad<U> (self (x W)) U x))");
     assert!(msg.contains("unknown type `W`"), "{}", msg);
 }
 
@@ -152,7 +152,7 @@ fn an_undeclared_type_variable_is_still_unknown() {
 #[test]
 fn an_impl_method_cannot_add_type_parameters() {
     let msg = check_err(
-        "(deftrait Show () (show (self) string))\n(defstruct P (x int))\n(impl Show P (show<U> (self) string \"p\"))",
+        "(deftrait Show () (defmethod show (self) string))\n(defstruct P (x int))\n(impl Show P (defmethod show<U> (self) string \"p\"))",
     );
     assert!(msg.contains("`show<U>` declares type parameters of its own"), "{}", msg);
 }

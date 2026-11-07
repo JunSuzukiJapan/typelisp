@@ -35,11 +35,11 @@ fn eval_ok(src: &str) -> Value {
 }
 
 const SHAPES: &str = r#"
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r int))
 (defstruct square (side int))
-(impl Drawable circle (draw (self) string "circle"))
-(impl Drawable square (draw (self) string "square"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
+(impl Drawable square (defmethod draw (self) string "square"))
 "#;
 
 // ---- match: back down to the concrete type ------------------------------

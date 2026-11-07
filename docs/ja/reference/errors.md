@@ -59,7 +59,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `unbound variable: y` | その名前の変数が無い。綴りと、束縛の範囲（`let` の外で使っていないか）を確かめる |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | 同じモジュールで、関数・グローバル変数・マクロのうち 2 つに同じ名前を付けた。どちらかの名前を変える（[構文リファレンス 3.10](syntax.md#310-module--use--名前空間)） |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | 構造体に `new` は自動では作られない。値は `make-instance` で作るか、`impl` に `new` を書く（[構文リファレンス 3.5](syntax.md#35-impl--型のメソッド)） |
-| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` は無い。メソッドは型の `impl` に書く（[構文リファレンス 3.5](syntax.md#35-impl--型のメソッド)） |
+| `impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public` | `impl`・`deftrait` の項目に `defmethod` が無い。`(name (self) ...)` ではなく `(defmethod name (self) ...)` と書く（[構文リファレンス 3.5](syntax.md#35-impl--型のメソッド)） |
+| ``defmethod `f`: `self` is written only inside an `impl`, ...`` | `impl` の外の `defmethod` に `self` を書いた。`impl` の外では第 1 引数を `((x 型) ...)` と名前と型で書く（[構文リファレンス 3.5](syntax.md#35-impl--型のメソッド)） |
 | ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` オプションは無い。コンストラクタは `impl` に静的メソッドとして書く |
 | ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | 同じ名前のメソッドを、型パラメータを変数で書いた `impl`（`Box<T>`）と具体型の `impl`（`Box<int>`）の両方に書いた（書いた順によらない）。どちらか一方にまとめる（[構文リファレンス 3.5](syntax.md#35-impl--型のメソッド)） |
 | ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | 同じトレイトを、`Box<T>` と `Box<int>` の両方に `impl` した。どちらか一方にまとめる |

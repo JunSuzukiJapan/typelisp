@@ -7,11 +7,14 @@
 - ブランチ: `main`。`feature/keyword-markers`（とその続きの `claude/nice-feynman-dasp54`）の内容は
   2026-10-31 にすべて main へ入った。
 - 外のシンボルを明示する計画（[explicit-symbols-plan.md](explicit-symbols-plan.md)）は段階 1〜9 がすべて
-  済んだ。ダンプの形式は 30。
+  済んだ。ダンプの形式は 31（2026-11-07、`AssocFn::home` を足した）。
 - その後に入ったもの（経緯は [implementation-log.md](implementation-log.md) の該当の節）:
   - メソッドの受け手を裸の `self` だけで書く（`(self Self)`/`(self 型)` は断る）。
   - `Push`/`Pop` トレイト、組み込みメソッドの特殊化（`:dyn` と関数値）、impl の `(:where ...)` の
     判定、impl の型変数の改名。
+  - `defmethod` の復活（2026-11-07、[defmethod-revival-plan.md](defmethod-revival-plan.md)）。`impl`・
+    `deftrait` の項目は `(pub? defmethod name ...)`、`impl` の外の `defmethod` は第 1 引数の型の
+    メソッド。
 - 全体テストは main の最後のコミットで通っている。
 - 2026-11-06 の並列化作業は main に入った（`COMPILE_LOCK` の再入対応とコンパイル全体の
   直列化、`scripts/test-parallel.sh` の新設、既定の全体テストの並列化）。シリアル全走は

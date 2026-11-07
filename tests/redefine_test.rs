@@ -68,7 +68,7 @@ fn a_type_name_another_std_module_defines_is_refused_in_std() {
 
 #[test]
 fn redefining_a_builtin_instance_method_is_always_an_error() {
-    let src = "(impl int (+ (self (b int)) int self))";
+    let src = "(impl int (defmethod + (self (b int)) int self))";
     for policy in [RedefPolicy::Warn, RedefPolicy::Error, RedefPolicy::Silent] {
         let (_, result) = run(src, policy);
         assert!(result.is_err(), "policy {:?} should still reject redefining a builtin method", policy);
@@ -122,8 +122,8 @@ fn redefining_a_user_var_warns_by_default() {
 #[test]
 fn redefining_a_user_method_warns_by_default() {
     let src = "(defstruct n (v int)) \
-               (impl n (double (self) int (* self::v 2))) \
-               (impl n (double (self) int (+ self::v self::v)))";
+               (impl n (defmethod double (self) int (* self::v 2))) \
+               (impl n (defmethod double (self) int (+ self::v self::v)))";
     let (warnings, result) = run(src, RedefPolicy::Warn);
     assert!(result.is_ok());
     assert_eq!(warnings.len(), 1);

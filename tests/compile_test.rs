@@ -2783,7 +2783,7 @@ fn compile_dispatches_a_self_recursive_method_to_native_code() {
         (compile counter::n)
         (compile counter::set-n)
         (impl counter
-  (countdown (self) int
+  (defmethod countdown (self) int
             (if (<= self::n 0)
                 0
                 (let ((ignored (setf self::n (- self::n 1))))
@@ -2998,7 +2998,7 @@ fn compile_a_modules_function_and_a_same_named_types_method_are_different_symbol
         r#"
         (module a (pub defun b ((x int)) int (+ x 100)))
         (defstruct a (v int))
-        (impl a (pub b (self) int (+ self::v 1)))
+        (impl a (pub defmethod b (self) int (+ self::v 1)))
         (defun use-both () int (+ (a::b 1) (b (make-instance 'a :v 5))))
         (compile use-both)
         (use-both)
@@ -3206,9 +3206,9 @@ fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_
 fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
-        (deftrait Counted () (count (self) int))
+        (deftrait Counted () (defmethod count (self) int))
         (defstruct box-a (n int))
-        (impl Counted box-a (count (self) int self::n))
+        (impl Counted box-a (defmethod count (self) int self::n))
         (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
         (defun make-box-a ((n int)) box-a (make-instance 'box-a :n n))
         (compile box-a::n)
@@ -3230,11 +3230,11 @@ fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
 fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
-        (deftrait Counted () (count (self) int))
+        (deftrait Counted () (defmethod count (self) int))
         (defstruct box-a (n int))
         (defstruct box-b (n int))
-        (impl Counted box-a (count (self) int self::n))
-        (impl Counted box-b (count (self) int (* 2 self::n)))
+        (impl Counted box-a (defmethod count (self) int self::n))
+        (impl Counted box-b (defmethod count (self) int (* 2 self::n)))
         (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
         (defun make-box-a ((n int)) box-a (make-instance 'box-a :n n))
         (defun make-box-b ((n int)) box-b (make-instance 'box-b :n n))
@@ -4411,7 +4411,7 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
         r#"
         (defstruct point (x int))
         (impl point
-  (double (self) int (* self::x 2)))
+  (defmethod double (self) int (* self::x 2)))
         (compile point::x)
         (compile point::double)
         (defun apply1 ((f (fn (point) int)) (p point)) int (f p))
@@ -5584,11 +5584,11 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
 fn compile_dispatches_a_trait_object_call_through_its_vtable() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable () (draw (self) int))
+        (deftrait Drawable () (defmethod draw (self) int))
         (defstruct circle (r int))
         (defstruct square (side int))
-        (impl Drawable circle (draw (self) int 1))
-        (impl Drawable square (draw (self) int 2))
+        (impl Drawable circle (defmethod draw (self) int 1))
+        (impl Drawable square (defmethod draw (self) int 2))
         (defun render ((d :dyn Drawable)) int (draw d))
         (defun both () int (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4))))
         (compile both)
@@ -5607,12 +5607,12 @@ fn compile_indexes_the_right_vtable_slot_for_each_method() {
     let v = run_with_compiler_and_prelude(
         r#"
         (deftrait Shape ()
-          (draw (self) int)
-          (sides (self) int))
+          (defmethod draw (self) int)
+          (defmethod sides (self) int))
         (defstruct tri (n int))
         (impl Shape tri
-          (draw (self) int 7)
-          (sides (self) int 3))
+          (defmethod draw (self) int 7)
+          (defmethod sides (self) int 3))
         (defun outline ((s :dyn Shape)) int (sides s))
         (defun paint ((s :dyn Shape)) int (draw s))
         (defun both () int (+ (* 10 (paint (make-instance 'tri :n 1))) (outline (make-instance 'tri :n 1))))
@@ -5632,17 +5632,17 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
     let v = run_with_compiler_and_prelude(
         r#"
         (deftrait Base ()
-          (base-a (self) int)
-          (base-b (self) int))
+          (defmethod base-a (self) int)
+          (defmethod base-b (self) int))
         (shadow Sub)
         (deftrait Sub (Base)
-          (sub-c (self) int))
+          (defmethod sub-c (self) int))
         (defstruct tri (n int))
         (impl Base tri
-          (base-a (self) int 1)
-          (base-b (self) int 2))
+          (defmethod base-a (self) int 1)
+          (defmethod base-b (self) int 2))
         (impl Sub tri
-          (sub-c (self) int 3))
+          (defmethod sub-c (self) int 3))
         (defun pa ((s :dyn Sub)) int (base-a s))
         (defun pb ((s :dyn Sub)) int (base-b s))
         (defun pc ((s :dyn Sub)) int (sub-c s))
@@ -5665,17 +5665,17 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
 fn compile_upcasts_to_a_non_first_supertrait_through_the_conversion_table() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait B () (b-tag (self) int))
-        (deftrait C () (c-tag (self) int))
-        (deftrait D (B C) (d-tag (self) int))
+        (deftrait B () (defmethod b-tag (self) int))
+        (deftrait C () (defmethod c-tag (self) int))
+        (deftrait D (B C) (defmethod d-tag (self) int))
         (defstruct cell (n int))
         (defstruct pair (n int))
-        (impl B cell (b-tag (self) int 1))
-        (impl C cell (c-tag (self) int 2))
-        (impl D cell (d-tag (self) int 3))
-        (impl B pair (b-tag (self) int 4))
-        (impl C pair (c-tag (self) int 5))
-        (impl D pair (d-tag (self) int 6))
+        (impl B cell (defmethod b-tag (self) int 1))
+        (impl C cell (defmethod c-tag (self) int 2))
+        (impl D cell (defmethod d-tag (self) int 3))
+        (impl B pair (defmethod b-tag (self) int 4))
+        (impl C pair (defmethod c-tag (self) int 5))
+        (impl D pair (defmethod d-tag (self) int 6))
         (defun only-c ((c :dyn C)) int (c-tag c))
         (defun via ((d :dyn D)) int (only-c d))
         (defun both () int (+ (* 10 (via (make-instance 'cell :n 0))) (via (make-instance 'pair :n 0))))
@@ -5694,13 +5694,13 @@ fn compile_upcasts_to_a_non_first_supertrait_through_the_conversion_table() {
 fn compile_upcasts_a_trait_object_boxed_by_interpreted_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait B () (b-tag (self) int))
-        (deftrait C () (c-tag (self) int))
-        (deftrait D (B C) (d-tag (self) int))
+        (deftrait B () (defmethod b-tag (self) int))
+        (deftrait C () (defmethod c-tag (self) int))
+        (deftrait D (B C) (defmethod d-tag (self) int))
         (defstruct cell (n int))
-        (impl B cell (b-tag (self) int 1))
-        (impl C cell (c-tag (self) int 2))
-        (impl D cell (d-tag (self) int 3))
+        (impl B cell (defmethod b-tag (self) int 1))
+        (impl C cell (defmethod c-tag (self) int 2))
+        (impl D cell (defmethod d-tag (self) int 3))
         (defun only-c ((c :dyn C)) int (c-tag c))
         (defun via ((d :dyn D)) int (only-c d))
         (compile via)
@@ -5717,9 +5717,9 @@ fn compile_upcasts_a_trait_object_boxed_by_interpreted_code() {
 fn compile_passes_arguments_through_a_trait_object_call() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Scaler () (scale (self (k int)) int))
+        (deftrait Scaler () (defmethod scale (self (k int)) int))
         (defstruct fixed (n int))
-        (impl Scaler fixed (scale (self (k int)) int (* self::n k)))
+        (impl Scaler fixed (defmethod scale (self (k int)) int (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k int)) int (scale s k))
         (defun rec () int (apply-scale (make-instance 'fixed :n 6) 7))
         (compile rec)
@@ -5735,11 +5735,11 @@ fn compile_passes_arguments_through_a_trait_object_call() {
 #[test]
 fn compile_and_interpret_agree_on_a_trait_object_match() {
     let src = r#"
-        (deftrait Drawable () (draw (self) int))
+        (deftrait Drawable () (defmethod draw (self) int))
         (defstruct circle (r int))
         (defstruct square (side int))
-        (impl Drawable circle (draw (self) int 1))
-        (impl Drawable square (draw (self) int 2))
+        (impl Drawable circle (defmethod draw (self) int 1))
+        (impl Drawable square (defmethod draw (self) int 2))
         (defun area ((d :dyn Drawable)) int
           (match d
             ((circle :r) (* 100 r))
@@ -5809,11 +5809,11 @@ fn a_macro_expander_can_be_compiled() {
 fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable () (draw (self) int))
+        (deftrait Drawable () (defmethod draw (self) int))
         (defstruct circle (r int))
         (defstruct square (side int))
-        (impl Drawable circle (draw (self) int 1))
-        (impl Drawable square (draw (self) int 2))
+        (impl Drawable circle (defmethod draw (self) int 1))
+        (impl Drawable square (defmethod draw (self) int 2))
         (defun render ((d :dyn Drawable)) int (draw d))
         (compile render)
         (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))
@@ -5830,13 +5830,13 @@ fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
 fn compile_dispatches_to_an_impl_added_after_the_call_site_was_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable () (draw (self) int))
+        (deftrait Drawable () (defmethod draw (self) int))
         (defstruct circle (r int))
-        (impl Drawable circle (draw (self) int 1))
+        (impl Drawable circle (defmethod draw (self) int 1))
         (defun render ((d :dyn Drawable)) int (draw d))
         (compile render)
         (defstruct square (side int))
-        (impl Drawable square (draw (self) int 2))
+        (impl Drawable square (defmethod draw (self) int 2))
         (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))
         "#,
     )
@@ -5923,8 +5923,8 @@ fn compile_dispatches_message_on_a_dyn_error() {
         r#"(use std::num::ParseIntError) 
         (defstruct app-err (why string))
         (impl Error app-err
-          (message (self) string self::why)
-          (source (self) Option<:dyn Error> (Option::none)))
+          (defmethod message (self) string self::why)
+          (defmethod source (self) Option<:dyn Error> (Option::none)))
         (defun describe ((e :dyn Error)) string (message e))
         (defun both () string
           (append (describe (make-instance 'app-err :why "mine"))
@@ -6050,7 +6050,7 @@ fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
         (module m
           (shadow Vector)
           (pub defstruct Vector (pub a int))
-          (impl Vector (pub len (self) int (* 100 self::a)))
+          (impl Vector (pub defmethod len (self) int (* 100 self::a)))
           (pub defun call-len ((v Vector)) int (len v)))
         (compile m::call-len)
         (m::call-len (make-instance 'm::Vector :a 3))
@@ -6069,7 +6069,7 @@ fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
         (module m
           (shadow HashTable)
           (pub defstruct HashTable (pub a int) (pub b int))
-          (impl HashTable (pub count (self) int (+ self::a self::b)))
+          (impl HashTable (pub defmethod count (self) int (+ self::a self::b)))
           (pub defun call-count ((h HashTable)) int (count h)))
         (compile m::call-count)
         (m::call-count (make-instance 'm::HashTable :a 20 :b 22))
@@ -6889,10 +6889,10 @@ fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
     let prog = r#"(use std::hash::*sxhash-mask*) 
         (defstruct pt (x int) (y int))
         (impl Eq pt
-          (equals (self (other Self)) bool
+          (defmethod equals (self (other Self)) bool
             (if (= self::x other::x) (= self::y other::y) false)))
         (impl Hash pt
-          (sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+          (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
         (defun probe ((a int) (b int)) int
           (let ((h (the HashTable<pt,int> (HashTable::new))))
             (progn

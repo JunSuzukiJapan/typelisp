@@ -87,7 +87,7 @@ CL の次のディレクティブには対応しない（チェック時のエ�
 ```lisp
 (defstruct point (x i32) (y i32))
 (impl point
-  (brief (self (colon bool) (at bool)) string
+  (defmethod brief (self (colon bool) (at bool)) string
     (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
 (defun yen ((n int) (colon bool) (at bool)) string
   (format false "~a yen" n))

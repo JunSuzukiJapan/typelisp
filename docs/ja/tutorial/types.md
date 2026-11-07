@@ -170,12 +170,12 @@ none
 ```
 
 構造体に関数を持たせるには `impl` を使います。`(impl 型名 項目...)` の各項目は
-`(名前 (引数...) 戻り値の型 本体...)` の形で、最初の引数が `self` ならその型の**メソッド**に
-なります。`self` には型を書きません。
+`(defmethod 名前 (引数...) 戻り値の型 本体...)` の形で、最初の引数が `self` ならその型の
+**メソッド**になります。`self` には型を書きません。
 
 ```lisp
 (impl point
-  (norm2 (self) int
+  (defmethod norm2 (self) int
     (+ (* self::x self::x) (* self::y self::y))))
 
 (norm2 (make-instance 'point :x 3 :y 4))   ; => 25
@@ -186,9 +186,9 @@ none
 
 ```lisp
 (impl point
-  (new ((x int) (y int)) point
+  (defmethod new ((x int) (y int)) point
     (make-instance 'point :x x :y y))
-  (origin () point
+  (defmethod origin () point
     (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>

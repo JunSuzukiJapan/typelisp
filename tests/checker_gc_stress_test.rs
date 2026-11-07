@@ -78,10 +78,10 @@ fn let_star_desugaring_survives_collection() {
 fn impl_self_substitution_survives_collection() {
     assert_stress_agrees(
         "(deftrait Counted ()
-           (count (self) int))
+           (defmethod count (self) int))
          (defstruct box (n int))
          (impl Counted box
-           (count (self) int self::n))",
+           (defmethod count (self) int self::n))",
     );
 }
 
@@ -173,7 +173,7 @@ fn a_mixed_program_survives_collection() {
 fn call_directive_resolution_survives_collection() {
     assert_stress_agrees_with_prelude(
         r#"(defstruct point (x int) (y int))
-           (impl point (brief (self (colon bool) (at bool)) string (format false "~a/~a" self::x self::y)))
+           (impl point (defmethod brief (self (colon bool) (at bool)) string (format false "~a/~a" self::x self::y)))
            (defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
            (defun f () string
              (format false "~a ~/brief/ ~:/shout/ ~@{~/shout/~}" 1 (make-instance 'point :x 1 :y 2) "a" "b" "c"))

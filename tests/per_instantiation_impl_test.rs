@@ -18,11 +18,11 @@ fn both(defs: &str, body: &str, expected: &str) {
 const BOXES: &str = r##"
 (defstruct Box<T> (v T))
 (impl Box<int>
-  (pub twice (self) int (* 2 self::v))
-  (pub make () Box<int> (make-instance 'Box :v 7)))
+  (pub defmethod twice (self) int (* 2 self::v))
+  (pub defmethod make () Box<int> (make-instance 'Box :v 7)))
 (impl Box<string>
-  (pub twice (self) string (format false "~a~a" self::v self::v))
-  (pub make () Box<string> (make-instance 'Box :v "s")))
+  (pub defmethod twice (self) string (format false "~a~a" self::v self::v))
+  (pub defmethod make () Box<string> (make-instance 'Box :v "s")))
 "##;
 
 // ---- inherent impls ---------------------------------------------------------
@@ -57,8 +57,8 @@ fn a_static_method_is_picked_by_the_expected_type() {
 /// pick it.
 #[test]
 fn a_static_method_written_once_needs_no_expected_type() {
-    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub make () Box<int> (make-instance 'Box :v 3)))\n\
-                (impl Box<int> (pub get (self) int self::v))\n";
+    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod make () Box<int> (make-instance 'Box :v 3)))\n\
+                (impl Box<int> (pub defmethod get (self) int self::v))\n";
     both(defs, r##"(format false "~a" (get (Box::make)))"##, "3");
 }
 
@@ -78,8 +78,8 @@ fn a_method_value_is_the_one_for_the_expected_receiver() {
 fn a_method_with_its_own_type_parameters_for_each_instantiation() {
     let defs = r##"
 (defstruct Box<T> (v T))
-(impl Box<int> (pub with<U> (self (f (fn (int) U))) U (f (+ self::v 1))))
-(impl Box<string> (pub with<U> (self (f (fn (string) U))) U (f (format false "~a!" self::v))))
+(impl Box<int> (pub defmethod with<U> (self (f (fn (int) U))) U (f (+ self::v 1))))
+(impl Box<string> (pub defmethod with<U> (self (f (fn (string) U))) U (f (format false "~a!" self::v))))
 "##;
     both(
         defs,
@@ -94,8 +94,8 @@ fn a_method_with_its_own_type_parameters_for_each_instantiation() {
 fn a_call_directive_finds_each_instantiations_method() {
     let defs = r##"
 (defstruct Box<T> (v T))
-(impl Box<int> (pub tag (self (colon bool) (at bool)) string (format false "i~a" self::v)))
-(impl Box<string> (pub tag (self (colon bool) (at bool)) string (format false "s~a" self::v)))
+(impl Box<int> (pub defmethod tag (self (colon bool) (at bool)) string (format false "i~a" self::v)))
+(impl Box<string> (pub defmethod tag (self (colon bool) (at bool)) string (format false "s~a" self::v)))
 "##;
     both(defs, r##"(format false "~/tag/ ~/tag/" (make-instance 'Box :v 1) (make-instance 'Box :v "x"))"##, "i1 sx");
 }
@@ -103,22 +103,22 @@ fn a_call_directive_finds_each_instantiations_method() {
 /// Written for every instantiation and for one, in either order.
 #[test]
 fn a_method_for_every_instantiation_and_for_one_is_refused() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (pub m (self) int 1))\n(impl Box<int> (pub m (self) int 2))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (pub defmethod m (self) int 1))\n(impl Box<int> (pub defmethod m (self) int 2))");
     assert!(msg.contains("has a `m` for every instantiation already"), "{}", msg);
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub m (self) int 2))\n(impl Box<T> (pub m (self) int 1))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod m (self) int 2))\n(impl Box<T> (pub defmethod m (self) int 1))");
     assert!(msg.contains("`m` is written for `Box<int>` already"), "{}", msg);
     // A field's accessor is a method for every instantiation too.
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub v (self) int 2))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod v (self) int 2))");
     assert!(msg.contains("has a `v` for every instantiation already"), "{}", msg);
 }
 
 // ---- trait impls ------------------------------------------------------------
 
 const SHOW: &str = r##"
-(deftrait Show () (show (self) string))
+(deftrait Show () (defmethod show (self) string))
 (defstruct Box<T> (v T))
-(impl Show Box<int> (show (self) string (format false "int ~a" self::v)))
-(impl Show Box<string> (show (self) string (format false "string ~a" self::v)))
+(impl Show Box<int> (defmethod show (self) string (format false "int ~a" self::v)))
+(impl Show Box<string> (defmethod show (self) string (format false "string ~a" self::v)))
 (defun via-dyn ((s :dyn Show)) string (show s))
 (defun via-bound<T> ((s T)) string (:where (Show T)) (show s))
 "##;
@@ -154,10 +154,10 @@ fn a_where_bound_holds_at_each_instantiation_with_an_impl() {
 #[test]
 fn each_instantiation_binds_its_own_associated_type() {
     let defs = r##"
-(deftrait Unwrap () (:type Item) (unwrap (self) Item))
+(deftrait Unwrap () (:type Item) (defmethod unwrap (self) Item))
 (defstruct Box<T> (v T))
-(impl Unwrap Box<int> (:type Item int) (unwrap (self) int (+ self::v 1)))
-(impl Unwrap Box<string> (:type Item string) (unwrap (self) string (format false "~a!" self::v)))
+(impl Unwrap Box<int> (:type Item int) (defmethod unwrap (self) int (+ self::v 1)))
+(impl Unwrap Box<string> (:type Item string) (defmethod unwrap (self) string (format false "~a!" self::v)))
 (defun get-int ((u :dyn Unwrap<int>)) int (unwrap u))
 "##;
     both(defs, r##"(format false "~a ~a ~a" (unwrap (make-instance 'Box :v 1)) (unwrap (make-instance 'Box :v "s")) (get-int (make-instance 'Box :v 5)))"##, "2 s! 6");
@@ -169,31 +169,31 @@ fn each_instantiation_binds_its_own_associated_type() {
 /// `impl`, or by one for every instantiation).
 #[test]
 fn a_supertrait_is_needed_at_the_instantiation() {
-    let base = "(deftrait A () (a (self) int))\n(deftrait B (A) (b (self) int))\n(defstruct Box<T> (v T))\n";
+    let base = "(deftrait A () (defmethod a (self) int))\n(deftrait B (A) (defmethod b (self) int))\n(defstruct Box<T> (v T))\n";
     both(
-        &format!("{}(impl A Box<int> (a (self) int 1))\n(impl B Box<int> (b (self) int 2))\n", base),
+        &format!("{}(impl A Box<int> (defmethod a (self) int 1))\n(impl B Box<int> (defmethod b (self) int 2))\n", base),
         r##"(format false "~a" (+ (a (make-instance 'Box :v 0)) (b (make-instance 'Box :v 0))))"##,
         "3",
     );
     both(
-        &format!("{}(impl A Box<T> (a (self) int 1))\n(impl B Box<int> (b (self) int 2))\n", base),
+        &format!("{}(impl A Box<T> (defmethod a (self) int 1))\n(impl B Box<int> (defmethod b (self) int 2))\n", base),
         r##"(format false "~a" (b (make-instance 'Box :v 0)))"##,
         "2",
     );
-    let msg = check_err(&format!("{}(impl A Box<string> (a (self) int 1))\n(impl B Box<int> (b (self) int 2))", base));
+    let msg = check_err(&format!("{}(impl A Box<string> (defmethod a (self) int 1))\n(impl B Box<int> (defmethod b (self) int 2))", base));
     assert!(msg.contains("requires `A`"), "{}", msg);
 }
 
 #[test]
 fn a_trait_for_every_instantiation_and_for_one_is_refused() {
-    let base = "(deftrait Show () (show (self) string))\n(defstruct Box<T> (v T))\n";
+    let base = "(deftrait Show () (defmethod show (self) string))\n(defstruct Box<T> (v T))\n";
     let msg = check_err(&format!(
-        "{}(impl Show Box<T> (show (self) string \"any\"))\n(impl Show Box<int> (show (self) string \"int\"))",
+        "{}(impl Show Box<T> (defmethod show (self) string \"any\"))\n(impl Show Box<int> (defmethod show (self) string \"int\"))",
         base
     ));
     assert!(msg.contains("implements `Show` for every instantiation already"), "{}", msg);
     let msg = check_err(&format!(
-        "{}(impl Show Box<int> (show (self) string \"int\"))\n(impl Show Box<T> (show (self) string \"any\"))",
+        "{}(impl Show Box<int> (defmethod show (self) string \"int\"))\n(impl Show Box<T> (defmethod show (self) string \"any\"))",
         base
     ));
     assert!(msg.contains("`Show` is implemented for `Box<int>` already"), "{}", msg);
@@ -204,11 +204,11 @@ fn a_trait_for_every_instantiation_and_for_one_is_refused() {
 #[test]
 fn a_blanket_impl_at_two_instantiations_keeps_both() {
     let defs = r##"
-(deftrait Ranked () (rank (self) int))
-(deftrait Twice (Ranked) (twice-rank (self) int (* 2 (rank self))))
+(deftrait Ranked () (defmethod rank (self) int))
+(deftrait Twice (Ranked) (defmethod twice-rank (self) int (* 2 (rank self))))
 (defstruct Box<T> (v T))
-(impl Ranked Box<int> (rank (self) int self::v))
-(impl Ranked Box<string> (rank (self) int 100))
+(impl Ranked Box<int> (defmethod rank (self) int self::v))
+(impl Ranked Box<string> (defmethod rank (self) int 100))
 (impl<T> Twice T (:where (Ranked T)))
 "##;
     both(defs, r##"(format false "~a ~a" (twice-rank (make-instance 'Box :v 4)) (twice-rank (make-instance 'Box :v "s")))"##, "8 200");
@@ -219,8 +219,8 @@ fn a_blanket_impl_at_two_instantiations_keeps_both() {
 fn print_object_for_each_instantiation() {
     let defs = r##"
 (defstruct Box<T> (v T))
-(impl print-object Box<int> (print-object (self (escape bool)) string (format false "#<int-box ~a>" self::v)))
-(impl print-object Box<string> (print-object (self (escape bool)) string (format false "#<str-box ~a>" self::v)))
+(impl print-object Box<int> (defmethod print-object (self (escape bool)) string (format false "#<int-box ~a>" self::v)))
+(impl print-object Box<string> (defmethod print-object (self (escape bool)) string (format false "#<str-box ~a>" self::v)))
 "##;
     both(defs, r##"(format false "~a ~a" (make-instance 'Box :v 1) (make-instance 'Box :v "s"))"##, "#<int-box 1> #<str-box s>");
 }
@@ -229,9 +229,9 @@ fn print_object_for_each_instantiation() {
 
 const DOCUMENTED: &str = r##"
 (defstruct Box<T> (v T))
-(impl Box<int> (pub twice (self) int "doubles the int" (* 2 self::v)))
-(impl Box<string> (pub twice (self) string "repeats the string" (format false "~a~a" self::v self::v)))
-(impl Box<f64> (pub half (self) f64 "halves the float" (/ self::v 2.0)))
+(impl Box<int> (pub defmethod twice (self) int "doubles the int" (* 2 self::v)))
+(impl Box<string> (pub defmethod twice (self) string "repeats the string" (format false "~a~a" self::v self::v)))
+(impl Box<f64> (pub defmethod half (self) f64 "halves the float" (/ self::v 2.0)))
 "##;
 
 /// `Type<args>::method` names one instantiation's method; `Type::method`
@@ -273,8 +273,8 @@ fn setf_finds_a_setter_of_one_instantiation() {
         r##"
 (defstruct Box<T> (v T))
 (impl Box<int>
-  (pub doubled (self) int (* 2 self::v))
-  (pub set-doubled (self (n int)) int (progn (setf self::v (truncate n 2)) n)))
+  (pub defmethod doubled (self) int (* 2 self::v))
+  (pub defmethod set-doubled (self (n int)) int (progn (setf self::v (truncate n 2)) n)))
 "##,
         "(let ((b (make-instance 'Box<int> :v 1))) (progn (setf (doubled b) 10) (format false \"~a\" (doubled b))))",
         "10",

@@ -228,8 +228,8 @@ fn setf_on_a_user_defined_accessor_uses_the_set_prefix_convention() {
     // convention `defstruct` already uses for field accessors.
     let src = "(defstruct cells (data Vector<int>))
                (impl cells
-  (at (self (i int)) int (get self::data i))
-  (set-at (self (i int) (v int)) () (setf (get self::data i) v)))
+  (defmethod at (self (i int)) int (get self::data i))
+  (defmethod set-at (self (i int) (v int)) () (setf (get self::data i) v)))
                (defun make-c () cells
                  (let ((d (the Vector<int> (Vector::new))))
                    (push d 1)
@@ -245,7 +245,7 @@ fn setf_on_a_user_defined_accessor_uses_the_set_prefix_convention() {
 fn setf_on_a_user_defined_accessor_with_no_setter_is_rejected() {
     let src = "(defstruct cells (data Vector<int>))
                (impl cells
-  (at (self (i int)) int (get self::data i)))
+  (defmethod at (self (i int)) int (get self::data i)))
                (defun make-c () cells (make-instance 'cells :data (the Vector<int> (Vector::new))))
                (let ((c (make-c))) (setf (at c 0) 99))";
     assert!(matches!(check(src), Err(Error::TypeError(_))));

@@ -197,7 +197,7 @@ fn a_method_body_can_return_from_itself() {
         text(
             "(defstruct point (x int) (y int))
              (impl point
-               (describe (self) string
+               (defmethod describe (self) string
                  (if (= self::x 0) (return-from describe \"on the axis\") ())
                  \"off the axis\"))
              (format false \"~a/~a\" (describe (make-instance 'point :x 0 :y 3)) (describe (make-instance 'point :x 1 :y 3)))"

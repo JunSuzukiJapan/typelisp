@@ -220,18 +220,27 @@
 
 ---
 
-## 5. メソッド（impl）
+## 5. メソッド（impl / defmethod）
 
-メソッドはすべて `impl` に書く（2026-10-10 決定、[constructors-redesign.md](constructors-redesign.md)）。
-`defmethod` は廃止し、書くとエラーになる。
+メソッドは `defmethod` で書く。`impl` の中に書くか、`impl` の外に書く（2026-11-07 決定、
+[defmethod-revival-plan.md](defmethod-revival-plan.md)）。2026-10-10 のコンストラクタ再設計
+（[constructors-redesign.md](constructors-redesign.md)）で一度 `defmethod` を廃止したが、それは
+イニシャライザの変更を広げすぎた解釈だったので戻した。
 
-- **固有 impl**: `(impl Type 項目...)`。Rust の `impl Point { ... }` に当たる。
+- **固有 impl**: `(impl Type 項目...)`。Rust の `impl Point { ... }` に当たる。項目は
+  `(pub? defmethod name (params...) Ret body...)`。`defmethod` の無い `(name ...)` は断る。
   - 引数の先頭が `self` の項目は**インスタンスメソッド**で、`(name obj args...)` と呼ぶ。
     `self` には型を書かない（型は `Self`。`(self Type)` と書くと断る——2026-10-31 決定）。
   - `self` の無い項目は**静的メソッド**で、`(Type::name args...)` と呼ぶ。値を作る静的メソッドが
     その型のコンストラクタになる（名前は自由で `new` を勧める）。自動で作られる `Name::new` は無い。
-  - 公開は項目ごと（`(pub name ...)`）。1 つの型に `impl` をいくつ書いてもよく、具体型ごとに
-    別の `impl` も書ける（`(impl Box<i32> ...)`）。
+  - 公開は項目ごと（`(pub defmethod name ...)`）。1 つの型に `impl` をいくつ書いてもよく、
+    具体型ごとに別の `impl` も書ける（`(impl Box<i32> ...)`）。
+  - 固有 `impl` は型を定義した側だけが書ける（標準ライブラリの型には書けない）。
+- **impl の外の defmethod**: `(defmethod name ((x Type) params...) Ret body...)`。第 1 引数の型の
+  メソッドになる。`impl` の中のものとの違いは第 1 引数に `self` を取れないことだけで、**どの型に
+  でも付けられる**（標準ライブラリの型・別のモジュールの型も）。メソッドは第 1 引数の型だけから
+  探すので、同じ名前を第 1 引数の型ごとに定義できる。`pub` の無いものは定義したモジュールの中
+  だけで見える（`AssocFn::home` が定義したモジュールを持つ。`impl` のメソッドは型のモジュール）。
 - **構造体の値は `make-instance` で作る**（`(make-instance 'point :x 1 :y 2)`、CLOS と同じ綴り）。
   型名は検査時に決まる。
 - **ディスパッチは既定で静的**（受け手の静的型で一意に解決する）。trait 機構（§5.1）もこの単一の
@@ -244,9 +253,9 @@
 静的メソッド解決をそのまま使う設計で、trait 専用のディスパッチ機構は作らない。構文は
 [syntax.md](../ja/reference/syntax.md) §3.9。
 
-- **trait 定義**: `(deftrait Name (Super...) (:type Assoc)... (method (self params...) Ret [body...])...)`。
+- **trait 定義**: `(deftrait Name (Super...) (:type Assoc)... (defmethod method (self params...) Ret [body...])...)`。
   `Self` と関連型名はシグネチャの中で型変数として使える。
-- **trait 実装**: `(impl Trait TargetType (:type Assoc Concrete)... 項目...)`。各メソッドは
+- **trait 実装**: `(impl Trait TargetType (:type Assoc Concrete)... (defmethod ...)...)`。各メソッドは
   `TargetType` の普通のメソッドとして登録され（trait 用の別表は持たない）、`TargetType` が
   `Trait` を実装していることが記録される。trait の `impl` のメソッドは常に公開される。
 - **スーパトレイト**（2026-08-01）: 名前の直後の**必須**リスト。Rust の `trait Ord: Eq` は
@@ -296,9 +305,9 @@
 まで空白込みで読む（閉じなければ巻き戻すので `(< a b)` などに影響しない）。
 
 ```lisp
-(deftrait Drawable () (draw (self) string))
+(deftrait Drawable () (defmethod draw (self) string))
 (defstruct circle (r i32))
-(impl Drawable circle (draw (self) string "circle"))
+(impl Drawable circle (defmethod draw (self) string "circle"))
 
 (defun render ((d :dyn Drawable)) string (draw d))         ; 引数位置
 (render (make-instance 'circle :r 3))                       ; 暗黙に箱詰めされる

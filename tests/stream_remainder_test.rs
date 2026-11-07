@@ -87,11 +87,11 @@ fn a_user_stream_that_says_nothing_reports_nothing_ready() {
         eval_string(
             r#"(defstruct fixed (text string) (at int))
                (impl Stream fixed
-                 (open-stream-p (self) bool true)
-                 (close (self) () ()))
+                 (defmethod open-stream-p (self) bool true)
+                 (defmethod close (self) () ()))
                (impl InputStream fixed
                  (:type Item char)
-                 (read-item (self) Option<char>
+                 (defmethod read-item (self) Option<char>
                    (if (>= self::at (length self::text))
                        (Option::none)
                        (let ((c (ref self::text self::at)))
@@ -111,12 +111,12 @@ fn a_user_stream_that_answers_is_believed() {
         eval_string(
             r#"(defstruct always (n int))
                (impl Stream always
-                 (open-stream-p (self) bool true)
-                 (close (self) () ()))
+                 (defmethod open-stream-p (self) bool true)
+                 (defmethod close (self) () ()))
                (impl InputStream always
                  (:type Item char)
-                 (read-item (self) Option<char> (Option::some #\q))
-                 (listen (self) bool true))
+                 (defmethod read-item (self) Option<char> (Option::some #\q))
+                 (defmethod listen (self) bool true))
                (impl CharInput always)
                (let ((s (make-instance 'always :n 0)))
                  (format false "~a ~a" (listen s) (read-char-no-hang s)))"#

@@ -191,6 +191,11 @@ pub struct AssocFn {
     pub instance: bool,
     /// See [`FnSig::builtin`].
     pub builtin: bool,
+    /// The module a `defmethod` written outside an `impl` was defined in —
+    /// where a method without `pub` is visible, since that module need not
+    /// be the type's. `None` for a method an `impl` gave its type, which is
+    /// visible in the type's own module.
+    pub home: Option<Path>,
 }
 
 /// A `defmacro`'s signature: an arity and whether it's variadic (every
@@ -2079,7 +2084,7 @@ fn sexpr_variant_fields(v: usize) -> Vec<Type> {
 /// structural comparisons) special-case `Str` to compare content instead.
 fn sexpr_assoc() -> BTreeMap<String, AssocFn> {
     let mut m = BTreeMap::new();
-    let eq_fn = || AssocFn { sig: FnSig::builtin(vec![option_of(sexpr()), option_of(sexpr())], Type::Bool), instance: true, builtin: true };
+    let eq_fn = || AssocFn { sig: FnSig::builtin(vec![option_of(sexpr()), option_of(sexpr())], Type::Bool), instance: true, builtin: true, home: None };
     m.insert("eq".to_string(), eq_fn());
     m.insert("eql".to_string(), eq_fn());
     m
@@ -2093,7 +2098,7 @@ fn bool_assoc() -> BTreeMap<String, AssocFn> {
     // value comparison. See `docs/cl-equivalence-catalog.md`'s eq/eql/equal/
     // equalp section for why every one of these four is still registered
     // explicitly rather than leaving `eql`/`equal`/`equalp` undefined.
-    let eq_fn = || AssocFn { sig: FnSig::builtin(vec![Type::Bool, Type::Bool], Type::Bool), instance: true, builtin: true };
+    let eq_fn = || AssocFn { sig: FnSig::builtin(vec![Type::Bool, Type::Bool], Type::Bool), instance: true, builtin: true, home: None };
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), eq_fn());
     }
@@ -2107,7 +2112,7 @@ fn bool_assoc() -> BTreeMap<String, AssocFn> {
 /// registered (there is no structure to recurse into beyond `eq`'s identity).
 fn symbol_assoc() -> BTreeMap<String, AssocFn> {
     let mut m = BTreeMap::new();
-    let eq_fn = || AssocFn { sig: FnSig::builtin(vec![Type::Symbol, Type::Symbol], Type::Bool), instance: true, builtin: true };
+    let eq_fn = || AssocFn { sig: FnSig::builtin(vec![Type::Symbol, Type::Symbol], Type::Bool), instance: true, builtin: true, home: None };
     m.insert("eq".to_string(), eq_fn());
     m.insert("eql".to_string(), eq_fn());
     m
@@ -2173,7 +2178,7 @@ fn hashtable_def() -> AdtDef {
     // `equals`, so any type that implements `Hash` can be a key.
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![], hashtable_ty()), instance: false, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![], hashtable_ty()), instance: false, builtin: true, home: None },
     );
     // `get`/`set`/`remove` are **not here**. They are prelude `defmethod`s
     // (`(:where (Hash K))`), written on the five bucket primitives below —
@@ -2194,6 +2199,7 @@ fn hashtable_def() -> AdtDef {
         sig: FnSig { public: false, ..FnSig::builtin(params, ret) },
         instance: true,
         builtin: true,
+        home: None,
     };
     assoc.insert("bucket-count".to_string(), bucket(vec![hashtable_ty(), Type::Int], Type::Int));
     assoc.insert("bucket-key".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], tvar("K")));
@@ -2205,11 +2211,11 @@ fn hashtable_def() -> AdtDef {
     assoc.insert("bucket-delete".to_string(), bucket(vec![hashtable_ty(), Type::Int, Type::Int], Type::Unit));
     assoc.insert(
         "count".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Int), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Int), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "clear".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Unit), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Unit), instance: true, builtin: true, home: None },
     );
     // `keys`/`values`/`entries`: a Rust `HashMap` has no stable, resumable cursor the way `Vector<T>`'s
     // own index-based iterator does, so each call snapshots the table's
@@ -2224,11 +2230,11 @@ fn hashtable_def() -> AdtDef {
     // this snapshot, the same way `vector-iter<T>` walks `Vector<T>`.
     assoc.insert(
         "keys".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![tvar("K")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![tvar("K")])), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "values".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![tvar("V")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![tvar("V")])), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "entries".to_string(),
@@ -2236,6 +2242,7 @@ fn hashtable_def() -> AdtDef {
             sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::Named(Path::in_ns(typelisp_mem::StdModule::SEXPR.ns(), "cons-cell"), vec![tvar("K"), tvar("V")])])),
             instance: true,
             builtin: true,
+            home: None,
         },
     );
     builtin_adt(Path::builtin(typelisp_mem::wk::HASHTABLE), &["K", "V"], AdtKind::Sum, Vec::new(), assoc)
@@ -2257,7 +2264,7 @@ fn vector_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![], vector_ty()), instance: false, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![], vector_ty()), instance: false, builtin: true, home: None },
     );
     assoc.insert(
         "push".to_string(),
@@ -2265,6 +2272,7 @@ fn vector_def() -> AdtDef {
             sig: FnSig::builtin(vec![vector_ty(), tvar("T")], Type::Unit),
             instance: true,
             builtin: true,
+            home: None,
         },
     );
     assoc.insert(
@@ -2273,6 +2281,7 @@ fn vector_def() -> AdtDef {
             sig: FnSig::builtin(vec![vector_ty(), Type::Int], tvar("T")),
             instance: true,
             builtin: true,
+            home: None,
         },
     );
     assoc.insert(
@@ -2281,15 +2290,16 @@ fn vector_def() -> AdtDef {
             sig: FnSig::builtin(vec![vector_ty(), Type::Int, tvar("T")], Type::Unit),
             instance: true,
             builtin: true,
+            home: None,
         },
     );
     assoc.insert(
         "len".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![vector_ty()], Type::Int), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![vector_ty()], Type::Int), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "pop".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![vector_ty()], option_of(tvar("T"))), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![vector_ty()], option_of(tvar("T"))), instance: true, builtin: true, home: None },
     );
     builtin_adt(Path::builtin(typelisp_mem::wk::VECTOR), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
@@ -2329,6 +2339,7 @@ fn task_def() -> AdtDef {
             sig: FnSig::builtin(vec![task_of(tvar("T"))], tvar("T")),
             instance: true,
             builtin: true,
+            home: None,
         },
     );
     builtin_adt(Path::in_ns(crate::types::std_module("thread"), "Task"), &["T"], AdtKind::Struct, Vec::new(), assoc)
@@ -2356,19 +2367,19 @@ fn thread_def() -> AdtDef {
     // and it stops the asking *task*, not the OS thread under it.
     assoc.insert(
         "join".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![thread_of(tvar("T"))], tvar("T")), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![thread_of(tvar("T"))], tvar("T")), instance: true, builtin: true, home: None },
     );
     // `(Thread::current-id)` — a number naming the OS thread running the
     // caller, unique within the process.
     assoc.insert(
         "current-id".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true, home: None },
     );
     // `(Thread::available-parallelism)` — how many threads the machine runs
     // at once; what `TYPELISP_THREADS` defaults to.
     assoc.insert(
         "available-parallelism".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true, home: None },
     );
     builtin_adt(Path::in_ns(crate::types::std_module("thread"), "Thread"), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
@@ -2408,38 +2419,38 @@ fn chan_def() -> AdtDef {
     // here the second number is always written.
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: sig(vec![Type::Int], chan.clone()), instance: false, builtin: true },
+        AssocFn { sig: sig(vec![Type::Int], chan.clone()), instance: false, builtin: true, home: None },
     );
     // Waits for room. A closed channel is a panic, not a `Result`: sending on
     // one is a program bug, which is the line `docs/dev/language-design.md`
     // §7.1 draws (and Go's own).
     assoc.insert(
         "send".to_string(),
-        AssocFn { sig: sig(vec![chan.clone(), tvar("T")], Type::Unit), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan.clone(), tvar("T")], Type::Unit), instance: true, builtin: true, home: None },
     );
     // `none` once the channel is closed **and** drained — which is what makes
     // this the same shape as `Iter::next`, and so what lets `doiter` run a
     // channel with no new machinery (`impl Iter Chan<T>` in the prelude).
     assoc.insert(
         "recv".to_string(),
-        AssocFn { sig: sig(vec![chan.clone()], option_of(tvar("T"))), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan.clone()], option_of(tvar("T"))), instance: true, builtin: true, home: None },
     );
     // Closing twice is a panic, again Go's rule and for the same reason.
     // Resolved by receiver type, so it does not collide with the `Stream`
     // trait's `close` — `Chan<T>` deliberately does not implement `Stream`.
     assoc.insert(
         "close".to_string(),
-        AssocFn { sig: sig(vec![chan.clone()], Type::Unit), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan.clone()], Type::Unit), instance: true, builtin: true, home: None },
     );
     // CL's and Go's `len`/`cap`: how many values are buffered right now, and
     // how many fit.
     assoc.insert(
         "len".to_string(),
-        AssocFn { sig: sig(vec![chan.clone()], Type::Int), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan.clone()], Type::Int), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "cap".to_string(),
-        AssocFn { sig: sig(vec![chan], Type::Int), instance: true, builtin: true },
+        AssocFn { sig: sig(vec![chan], Type::Int), instance: true, builtin: true, home: None },
     );
     builtin_adt(Path::in_ns(crate::types::std_module("sync"), "Chan"), &["T"], AdtKind::Struct, Vec::new(), assoc)
 }
@@ -2459,7 +2470,7 @@ fn scope_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![], scope_ty()), instance: false, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![], scope_ty()), instance: false, builtin: true, home: None },
     );
     assoc.insert(
         // Shares every existing frame (by reference, not by copying their
@@ -2469,15 +2480,15 @@ fn scope_def() -> AdtDef {
         // comment for why a *fresh* top frame, not the shared ones
         // themselves, must receive that def's own parameter bindings).
         "clone-frames".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![scope_ty()], scope_ty()), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![scope_ty()], scope_ty()), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "push-frame".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![scope_ty()], Type::Unit), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![scope_ty()], Type::Unit), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "pop-frame".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![scope_ty()], Type::Unit), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![scope_ty()], Type::Unit), instance: true, builtin: true, home: None },
     );
     assoc.insert(
         "get".to_string(),
@@ -2485,6 +2496,7 @@ fn scope_def() -> AdtDef {
             sig: FnSig::builtin(vec![scope_ty(), Type::Str], option_of(tvar("V"))),
             instance: true,
             builtin: true,
+            home: None,
         },
     );
     assoc.insert(
@@ -2493,6 +2505,7 @@ fn scope_def() -> AdtDef {
             sig: FnSig::builtin(vec![scope_ty(), Type::Str, tvar("V")], Type::Unit),
             instance: true,
             builtin: true,
+            home: None,
         },
     );
     builtin_adt(Path::builtin(wk::SCOPE), &["V"], AdtKind::Sum, Vec::new(), assoc)
@@ -2520,7 +2533,7 @@ fn llvm_value_ty() -> Type {
 }
 
 fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
-    AssocFn { sig: FnSig::builtin(params, ret), instance, builtin: true }
+    AssocFn { sig: FnSig::builtin(params, ret), instance, builtin: true, home: None }
 }
 
 /// An in-progress LLVM module. `add-function` always declares a function
@@ -2993,7 +3006,7 @@ fn llvm_value_def() -> AdtDef {
 /// `upcase`/`downcase` are) instead; two separately-built equal-content
 /// `Str`s are correctly *not* `eq`/`eql`.
 fn string_assoc() -> BTreeMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig::builtin(params, ret), instance: true, builtin: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig::builtin(params, ret), instance: true, builtin: true, home: None };
     let mut m = BTreeMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Str], Type::Str));
     m.insert("downcase".to_string(), method(vec![Type::Str], Type::Str));
@@ -3031,7 +3044,7 @@ fn string_assoc() -> BTreeMap<String, AssocFn> {
 /// `equalp` is the one that differs for real: CL requires case-insensitive
 /// comparison there (`(equalp #\A #\a)` is true).
 fn char_assoc() -> BTreeMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig::builtin(params, ret), instance: true, builtin: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig::builtin(params, ret), instance: true, builtin: true, home: None };
     let mut m = BTreeMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
@@ -3071,9 +3084,9 @@ fn char_assoc() -> BTreeMap<String, AssocFn> {
 /// ordinary typelisp methods (so it compiles via the normal path); only the
 /// operations needing a genuinely primitive machine op live here.
 fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true, home: None };
+    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true, home: None };
+    let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true, home: None };
     let mut m = BTreeMap::new();
     // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/`logxor`)
     // are same-type binary ops like `+`/`-`/`*`. Every one of them works in
@@ -3095,7 +3108,7 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // it. Nothing below the checker changes — the compiled tier passes the
     // distance as a raw word and `rt_int_ash` already read it as a signed
     // count, as did `eval_int_builtin`.
-    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], ty.clone()), instance: true, builtin: true });
+    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], ty.clone()), instance: true, builtin: true, home: None });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
@@ -3113,7 +3126,7 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // operation this file registers (`(logand a b)`, `(ash x count)`,
     // `(lognot x)`); `ldb` and its family moved the same way and for the same
     // reason (`prelude.rs`'s byte-specifier section).
-    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], Type::Bool), instance: true, builtin: true });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], Type::Bool), instance: true, builtin: true, home: None });
     // `lognot` (bitwise complement), `logcount` (population count of a
     // nonnegative integer, or of the zero bits of a negative one — CL
     // §12.10's "infinite precision" reading), `integer-length` (bits needed,
@@ -3140,29 +3153,29 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // `equalp`'s `Sexpr` `Int`<->`Float` cross-type comparison
     // (`prelude.rs`) needed and previously lacked (see
     // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
-    m.insert("int->float".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::F64), instance: true, builtin: true });
+    m.insert("int->float".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::F64), instance: true, builtin: true, home: None });
     // `int->char`: the other half of `char_assoc`'s `char->int` — a Unicode
     // scalar value back to `char`. Panics at runtime on a value outside the
     // valid range (surrogates, or past `U+10FFFF`) — the type system can't
     // express "valid scalar value", same precedent as `car`/`cdr` on a
     // non-`Cons` `Sexpr` or division by zero.
-    m.insert("int->char".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Char), instance: true, builtin: true });
+    m.insert("int->char".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Char), instance: true, builtin: true, home: None });
     // `try-int->char`: the `Option`-returning counterpart of `int->char`,
     // for `(try-as char n)` (`Checker::check_as`) — same Unicode-scalar-
     // value validity check, `None` instead of a panic on failure.
     m.insert(
         "try-int->char".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::Char)), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::Char)), instance: true, builtin: true, home: None },
     );
     // `int->ratio`: the exact widening into the rational type
     // (`docs/cl-equivalence-catalog.md`'s conversion catalog).
-    m.insert("int->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true });
+    m.insert("int->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true, home: None });
     // `int->int`: the exact widening into the arbitrary-precision `int` —
     // what `(as int x)` calls. Named by the family-prefix rule every other
     // conversion here follows (`int->float` is "an integer receiver, to
     // float"), which reads oddly for this one target and is kept anyway: a
     // second naming scheme for one method would be the odder thing.
-    m.insert("int->int".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Int), instance: true, builtin: true });
+    m.insert("int->int".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Int), instance: true, builtin: true, home: None });
     // `int->i8`/`int->u32`/... and their `try-` counterparts: a cast between
     // two integer *widths*, which is a real conversion now that a type name
     // means its width and its signedness (`types::int_width_signed`) rather
@@ -3181,11 +3194,11 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
         let target = to.scalar_name().expect("the widths are scalar types");
         m.insert(
             format!("int->{}", target),
-            AssocFn { sig: FnSig::builtin(vec![ty.clone()], to.clone()), instance: true, builtin: true },
+            AssocFn { sig: FnSig::builtin(vec![ty.clone()], to.clone()), instance: true, builtin: true, home: None },
         );
         m.insert(
             format!("try-int->{}", target),
-            AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(to.clone())), instance: true, builtin: true },
+            AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(to.clone())), instance: true, builtin: true, home: None },
         );
     }
     m
@@ -3210,6 +3223,7 @@ fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
         sig: FnSig::builtin(vec![ty.clone()], ret),
         instance: true,
         builtin: true,
+        home: None,
     };
     for to in crate::types::INT_TYPES.iter().chain(crate::types::C_WORD_TYPES.iter()) {
         let target = to.scalar_name().expect("the widths are scalar types");
@@ -3230,9 +3244,9 @@ fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
 /// these primitives — `mod`/`rem` via `a - b*floor|truncate(a/b)`), so they
 /// compile via the normal path.
 fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true, home: None };
+    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true, home: None };
+    let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true, home: None };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());
@@ -3264,19 +3278,19 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // `float->ratio`: widening and *exact* — every finite `f64` is itself an
     // exact dyadic rational (CL's `rational`, not the lossy-round-trip
     // `rationalize`), via `num_rational::BigRational::from_float`.
-    m.insert("float->int".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Int), instance: true, builtin: true });
-    m.insert("float->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true });
+    m.insert("float->int".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Int), instance: true, builtin: true, home: None });
+    m.insert("float->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true, home: None });
     // `float->f32`/`float->f64` and `try-float->f32`: a cast between the two
     // float *widths*, a real conversion now that `f32` is binary32 rather
     // than a label on an `f64` (`docs/ja/reference/functions/numbers.md` §1). `float->f32` rounds
     // to nearest, `float->f64` is exact in both directions (every binary32
     // value is a binary64 value), and `try-float->f32` answers `none` when
     // the rounding would lose something — the question `try-as` asks.
-    m.insert("float->f32".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::F32), instance: true, builtin: true });
-    m.insert("float->f64".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::F64), instance: true, builtin: true });
+    m.insert("float->f32".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::F32), instance: true, builtin: true, home: None });
+    m.insert("float->f64".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::F64), instance: true, builtin: true, home: None });
     m.insert(
         "try-float->f32".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::F32)), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::F32)), instance: true, builtin: true, home: None },
     );
     // `try-float->f64` can only answer `some` — widening is exact — but it is
     // registered all the same, because `Checker::width_cast` names the method
@@ -3285,7 +3299,7 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // `some` too.
     m.insert(
         "try-float->f64".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::F64)), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::F64)), instance: true, builtin: true, home: None },
     );
     m
 }
@@ -3302,10 +3316,10 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
 /// is one method name on every integer receiver.
 fn integer_assoc() -> BTreeMap<String, AssocFn> {
     let ty = Type::Int;
-    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true };
-    let conv = |ret: Type| AssocFn { sig: FnSig::builtin(vec![ty.clone()], ret), instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true, home: None };
+    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true, home: None };
+    let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true, home: None };
+    let conv = |ret: Type| AssocFn { sig: FnSig::builtin(vec![ty.clone()], ret), instance: true, builtin: true, home: None };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "mod", "max", "min", "logand", "logior", "logxor"] {
         m.insert(op.to_string(), binop());
@@ -3313,10 +3327,10 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
     // CL's `/` on two integers is a `rational`: `(/ 6 3)` is `2`, `(/ 7 2)` is
     // `7/2`. The integer quotient is `truncate` (and `floor`/`ceiling`/
     // `round`, built on it in the prelude), CL's first value.
-    m.insert("/".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Rational), instance: true, builtin: true });
+    m.insert("/".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Rational), instance: true, builtin: true, home: None });
     m.insert("truncate".to_string(), binop());
-    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], ty.clone()), instance: true, builtin: true });
-    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], Type::Bool), instance: true, builtin: true });
+    m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], ty.clone()), instance: true, builtin: true, home: None });
+    m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], Type::Bool), instance: true, builtin: true, home: None });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
@@ -3349,8 +3363,8 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
 /// methods (built from `/` plus `ratio->bignum`/`bignum->ratio` truncation),
 /// so it compiles via the normal path.
 fn ratio_assoc() -> BTreeMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig::builtin(vec![Type::Ratio, Type::Ratio], Type::Ratio), instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig::builtin(vec![Type::Ratio, Type::Ratio], Type::Bool), instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig::builtin(vec![Type::Ratio, Type::Ratio], Type::Ratio), instance: true, builtin: true, home: None };
+    let cmp = || AssocFn { sig: FnSig::builtin(vec![Type::Ratio, Type::Ratio], Type::Bool), instance: true, builtin: true, home: None };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());
@@ -3361,14 +3375,14 @@ fn ratio_assoc() -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
-    m.insert("ratio->int".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
-    m.insert("ratio->float".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::F64), instance: true, builtin: true });
-    m.insert("numerator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
-    m.insert("denominator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
+    m.insert("ratio->int".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true, home: None });
+    m.insert("ratio->float".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::F64), instance: true, builtin: true, home: None });
+    m.insert("numerator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true, home: None });
+    m.insert("denominator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true, home: None });
     // Widening into `rational`, normalizing: an integer-valued `ratio` becomes
     // the `int`. `Checker::reconcile_expected` inserts it wherever a `ratio`
     // reaches a `rational` position.
-    m.insert("ratio->rational".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Rational), instance: true, builtin: true });
+    m.insert("ratio->rational".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Rational), instance: true, builtin: true, home: None });
     m
 }
 
@@ -3378,9 +3392,9 @@ fn ratio_assoc() -> BTreeMap<String, AssocFn> {
 /// The rest of CL's rational catalog is written in `prelude.rs` on these.
 fn rational_assoc() -> BTreeMap<String, AssocFn> {
     let ty = Type::Rational;
-    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true };
-    let conv = |ret: Type| AssocFn { sig: FnSig::builtin(vec![Type::Rational], ret), instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true, home: None };
+    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true, home: None };
+    let conv = |ret: Type| AssocFn { sig: FnSig::builtin(vec![Type::Rational], ret), instance: true, builtin: true, home: None };
     let mut m = BTreeMap::new();
     for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());

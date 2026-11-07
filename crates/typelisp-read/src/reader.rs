@@ -937,6 +937,16 @@ fn note_definition(heap: &Heap, ns: NsId, elems: &[Value]) {
                 heap.names().declare_member(ty, m);
             }
         }
+        // `(defmethod name ((x Type) ...) ...)` outside an `impl`: a member of
+        // its first parameter's type, known once the parameters are read.
+        wk::DEFMETHOD if rest.len() == 3 => {
+            let Some(name) = method_name(heap, rest[1]) else { return };
+            let Some(first) = heap.list_to_vec(rest[2]).ok().and_then(|ps| ps.first().copied()) else { return };
+            let Some(recv_ty) = heap.list_to_vec(first).ok().filter(|r| r.len() == 2).map(|r| r[1]) else { return };
+            if let Some(ty) = impl_target(heap, ns, recv_ty) {
+                heap.names().declare_member(ty, name);
+            }
+        }
         wk::IMPL if rest.len() > 2 => {
             // `(impl Type item...)` or `(impl Trait Type item...)`: the type
             // is what stands just before the first item.
@@ -957,6 +967,9 @@ fn member_name(heap: &Heap, v: Value) -> Option<SymRef> {
     let name = match v {
         Value::Symbol(s) => s,
         Value::Cons(_) => match heap.list_to_vec(v).ok()?.as_slice() {
+            // A `deftrait` method: `(pub? defmethod name ...)`.
+            [Value::Symbol(p), Value::Symbol(d), n, ..] if p.is(wk::PUB) && d.is(wk::DEFMETHOD) => method_name(heap, *n)?,
+            [Value::Symbol(d), n, ..] if d.is(wk::DEFMETHOD) => method_name(heap, *n)?,
             [Value::Symbol(p), Value::Symbol(n), ..] if p.is(wk::PUB) => *n,
             [Value::Symbol(n), ..] => *n,
             _ => return None,
@@ -1068,31 +1081,36 @@ fn impl_target(heap: &Heap, ns: NsId, v: Value) -> Option<SymRef> {
     }
 }
 
-/// The name an `impl` item defines: `(name (params...) ...)`,
-/// `(name<U> (params...) ...)` or `(pub name ...)`. A type argument list or
-/// a `(:where ...)` clause is no item.
+/// The name an `impl` item defines: `(defmethod name (params...) ...)`,
+/// `(defmethod name<U> (params...) ...)` or `(pub defmethod name ...)`. A
+/// type argument list or a `(:where ...)` clause is no item.
 fn impl_item_name(heap: &Heap, v: Value) -> Option<SymRef> {
     if !matches!(v, Value::Cons(_)) || is_marked(heap, v, wk::TYPE_APPLY) {
         return None;
     }
     let items = heap.list_to_vec(v).ok()?;
     let (written, rest) = match items.as_slice() {
-        [Value::Symbol(p), n, rest @ ..] if p.is(wk::PUB) => (*n, rest),
-        [n, rest @ ..] => (*n, rest),
-        [] => return None,
+        [Value::Symbol(p), Value::Symbol(d), n, rest @ ..] if p.is(wk::PUB) && d.is(wk::DEFMETHOD) => (*n, rest),
+        [Value::Symbol(d), n, rest @ ..] if d.is(wk::DEFMETHOD) => (*n, rest),
+        _ => return None,
     };
+    if !matches!(rest.first(), Some(Value::Cons(_) | Value::Empty)) {
+        return None;
+    }
+    method_name(heap, written)
+}
+
+/// A method's written name, `name` or `name<U>` (a method with type
+/// parameters of its own).
+fn method_name(heap: &Heap, written: Value) -> Option<SymRef> {
     let name = match written {
         Value::Symbol(n) => n,
-        // `name<U>`: a method with type parameters of its own.
         Value::Cons(_) if is_marked(heap, written, wk::TYPE_APPLY) => match heap.list_to_vec(written).ok()?.get(1) {
             Some(Value::Symbol(n)) => *n,
             _ => return None,
         },
         _ => return None,
     };
-    if !matches!(rest.first(), Some(Value::Cons(_) | Value::Empty)) {
-        return None;
-    }
     (!name.is_keyword()).then_some(name)
 }
 

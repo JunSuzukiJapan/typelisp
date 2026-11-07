@@ -3,21 +3,21 @@
 ;; トレイト: Dog と Cat が Animal を実装し、speak はトレイトの既定の本体を使う。
 ;; 2つの型の値を1つの Vector<:dyn Animal> に入れる。
 (deftrait Animal ()
-  (name (self) string)
-  (sound (self) string)
-  (speak (self) string
+  (defmethod name (self) string)
+  (defmethod sound (self) string)
+  (defmethod speak (self) string
     (format false "~a says ~a" (name self) (sound self))))
 
 (defstruct Dog (nick string))
 (defstruct Cat (nick string))
 
 (impl Animal Dog
-  (name (self) string self::nick)
-  (sound (self) string "Woof"))
+  (defmethod name (self) string self::nick)
+  (defmethod sound (self) string "Woof"))
 
 (impl Animal Cat
-  (name (self) string self::nick)
-  (sound (self) string "Meow"))
+  (defmethod name (self) string self::nick)
+  (defmethod sound (self) string "Meow"))
 
 (defun main () ()
   (let ((animals (the Vector<:dyn Animal> (Vector::new))))

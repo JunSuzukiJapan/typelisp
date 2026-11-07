@@ -185,15 +185,16 @@ CL との違いは 3 つあります。要素の型がそろっていなけれ�
 `defclass`・`defgeneric`・メソッドコンビネーションはありません。
 
 - データ型は `defstruct`（構造体）と `defenum`（直和型）で定義します。
-- `defmethod` はありません。メソッドは型ごとに `impl` にまとめて書きます（Rust の固有 impl と
-  同じ形）。呼び出し先は**最初の引数の静的な型**だけで決まり、多重ディスパッチはしません。
+- `defmethod` はありますが、総称関数ではありません。メソッドは型ごとに `impl` にまとめて
+  `defmethod` で書くか（Rust の固有 impl と同じ形）、`impl` の外で `(defmethod m ((x 型) ...) ...)`
+  と書きます。呼び出し先は**最初の引数の静的な型**だけで決まり、多重ディスパッチはしません。
 
   ```lisp
   (defstruct point (x i32) (y i32))
 
   (impl point
-    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 静的メソッド
-    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; メソッド
+    (defmethod new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 静的メソッド
+    (defmethod norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; メソッド
 
   (norm2 (point::new 3 4))   ; => 25
   ```

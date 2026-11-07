@@ -16,6 +16,8 @@
 - `defstruct` の `(:constructor ...)` オプションと、静的メソッドを書く `(defmethod name (Type ...))`
   の形は廃止し、`impl` に一本化する。
 - `self` を取る普通の `defmethod` も廃止し、メソッドはすべて `impl` に書く。
+  （2026-11-07 に取り消し。ユーザーの意図はイニシャライザの変更だけで、`defmethod` の廃止はこの
+  記録の拡大解釈だった。今の決定は [defmethod-revival-plan.md](defmethod-revival-plan.md)）
 - 構造体型の値への `match` はキーワードで書く。`((Point :x :y) ...)` はスロット `x`/`y` を
   同じ名前の変数に束縛し、`((Point :x a :y b) ...)` は `a`/`b` に束縛する。
 - 固有 impl は、Rust と同じく型と同じクレートの中に限る（§2.1 の解釈）。

@@ -8,15 +8,15 @@ use common::{check_err, eval_string, eval_string_compiled};
 const DEFS: &str = r##"
 (defstruct Point (pub x f64) (pub y f64))
 (impl Point
-  (pub at ((x f64) (y f64)) Point (make-instance 'Point :x x :y y))
-  (pub origin () Self (make-instance 'Point :x 0.0 :y 0.0))
-  (pub area (self) f64 (* self::x self::y))
-  (pub scaled (self (k f64) &optional (dk f64 0.0)) Point
+  (pub defmethod at ((x f64) (y f64)) Point (make-instance 'Point :x x :y y))
+  (pub defmethod origin () Self (make-instance 'Point :x 0.0 :y 0.0))
+  (pub defmethod area (self) f64 (* self::x self::y))
+  (pub defmethod scaled (self (k f64) &optional (dk f64 0.0)) Point
     (make-instance 'Point :x (* self::x (+ k dk)) :y (* self::y k))))
 (defstruct Box<T> (v T))
 (impl Box<T> (:where (print-object T))
-  (pub show (self) string (format false "box:~a" (print-object self::v false)))
-  (pub map<U> (self (f (fn (T) U))) Box<U> (make-instance 'Box :v (f self::v))))
+  (pub defmethod show (self) string (format false "box:~a" (print-object self::v false)))
+  (pub defmethod map<U> (self (f (fn (T) U))) Box<U> (make-instance 'Box :v (f self::v))))
 "##;
 
 /// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
@@ -64,8 +64,8 @@ fn an_item_without_pub_is_private_to_its_module() {
 (module geo
   (pub defstruct pt (pub x int))
   (impl pt
-    (pub mk ((x int)) pt (make-instance 'pt :x x))
-    (hidden ((x int)) pt (make-instance 'pt :x x))))
+    (pub defmethod mk ((x int)) pt (make-instance 'pt :x x))
+    (defmethod hidden ((x int)) pt (make-instance 'pt :x x))))
 (format false "~a" (x (geo::pt::mk 4)))
 "##;
     assert_eq!(eval_string(src), "4");
@@ -73,7 +73,7 @@ fn an_item_without_pub_is_private_to_its_module() {
         r##"
 (module geo
   (pub defstruct pt (pub x int))
-  (impl pt (hidden ((x int)) pt (make-instance 'pt :x x))))
+  (impl pt (defmethod hidden ((x int)) pt (make-instance 'pt :x x))))
 (defun f () geo::pt (geo::pt::hidden 1))
 "##,
     );
@@ -85,15 +85,29 @@ fn an_item_without_pub_is_private_to_its_module() {
 #[test]
 fn a_program_cannot_impl_a_standard_library_type() {
     for target in ["Vector<T>", "std::collections::HashSet<T>", "int", "Option<T>"] {
-        let msg = check_err(&format!("(impl {} (pub twice (self) int 2))", target));
+        let msg = check_err(&format!("(impl {} (pub defmethod twice (self) int 2))", target));
         assert!(msg.contains("is a standard library type"), "{}: {}", target, msg);
     }
 }
 
 #[test]
 fn an_item_must_have_a_parameter_list_and_a_return_type() {
-    let msg = check_err("(defstruct p (x int))\n(impl p (pub f))");
-    assert!(msg.contains("(pub? name (params...) ReturnType body...)"), "{}", msg);
+    let msg = check_err("(defstruct p (x int))\n(impl p (pub defmethod f))");
+    assert!(msg.contains("(pub? defmethod name (params...) ReturnType body...)"), "{}", msg);
+}
+
+/// An item is a `defmethod`. The form without it, which an `impl` took
+/// until 2026-11-07, is refused with the form to write.
+#[test]
+fn an_item_without_defmethod_is_refused() {
+    for item in ["(f (self) int 1)", "(pub f (self) int 1)", "(new () p (make-instance 'p :x 1))"] {
+        let msg = check_err(&format!("(defstruct p (x int))\n(impl p {})", item));
+        assert!(msg.contains("a method is written (defmethod name (params...) ReturnType body...)"), "{}: {}", item, msg);
+    }
+    let msg = check_err("(deftrait T1 () (f (self) int))");
+    assert!(msg.contains("deftrait: a method is written (defmethod"), "{}", msg);
+    let msg = check_err("(deftrait T1 () (defmethod f (self) int))\n(defstruct p (x int))\n(impl T1 p (f (self) int 1))");
+    assert!(msg.contains("impl: a method is written (defmethod"), "{}", msg);
 }
 
 /// An `impl` for one instantiation of a generic type takes that
@@ -101,7 +115,7 @@ fn an_item_must_have_a_parameter_list_and_a_return_type() {
 /// the body.
 #[test]
 fn an_impl_for_one_instantiation_takes_only_that_instantiation() {
-    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n";
+    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod twice (self) int (* 2 self::v)))\n";
     both_with(defs, r##"(format false "~a" (twice (make-instance 'Box :v 4)))"##, "8");
     let msg = check_err(&format!("{}(defun f () int (twice (make-instance 'Box :v \"s\")))", defs));
     assert!(msg.contains("no method `twice` for type `Box<string>`"), "{}", msg);
@@ -113,11 +127,11 @@ fn an_impl_for_one_instantiation_takes_only_that_instantiation() {
 /// parameter is that instantiation.
 #[test]
 fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
-    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n\
+    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod twice (self) int (* 2 self::v)))\n\
                 (defun app ((f (fn (Box<int>) int)) (b Box<int>)) int (f b))\n";
     both_with(defs, r##"(format false "~a" (app twice (make-instance 'Box :v 5)))"##, "10");
     let msg = check_err(
-        "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n\
+        "(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod twice (self) int (* 2 self::v)))\n\
          (defun app ((f (fn (Box<string>) int)) (b Box<string>)) int (f b))\n\
          (defun g () int (app twice (make-instance 'Box :v \"s\")))",
     );
@@ -130,6 +144,6 @@ fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
 /// the check and fail at run time.
 #[test]
 fn a_target_with_some_variables_and_some_types_is_refused() {
-    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (pub sb (self) int self::b))");
+    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (pub defmethod sb (self) int self::b))");
     assert!(msg.contains("names every type parameter of `Pair` as a distinct variable"), "{}", msg);
 }
