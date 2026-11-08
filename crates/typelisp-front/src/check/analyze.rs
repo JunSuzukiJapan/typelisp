@@ -1182,6 +1182,10 @@ pub struct Checker {
     /// — which is what lets a `match` nested inside a probed arm settle its
     /// own holes without forcing the outer arm to be re-checked as well.
     probe_holes: Cell<u32>,
+    /// The rebuilt checker, which checks every form instead of this one
+    /// while the switch `TYPELISP_TYPECK` is on
+    /// (`docs/dev/checker-rebuild-plan.md` 6). Removed with this checker.
+    rebuilt: Option<crate::typeck::toplevel::TypeChecker>,
 }
 
 /// The forms [`Checker::check_form_dispatch`] matches at top level. Each one
@@ -1261,6 +1265,7 @@ impl Checker {
             callback_seq: Cell::new(0),
             c_arena: Cell::new(None),
             tree_roots: Cell::new(None),
+            rebuilt: crate::typeck::toplevel::TypeChecker::from_switch(),
         }
     }
 
@@ -1672,7 +1677,10 @@ impl Checker {
         // run time reads.
         self.publish_names(heap);
         heap.names().enter_module(self.current_module());
-        let r = self.check_one_form(heap, interp, v, loc_hint);
+        let r = match &mut self.rebuilt {
+            Some(rebuilt) => rebuilt.check_form(heap, v, heap.cons_loc(v).or(loc_hint)),
+            None => self.check_one_form(heap, interp, v, loc_hint),
+        };
         self.info.reg.reexport_std_in_prelude();
         self.publish_names(heap);
         r
@@ -2310,7 +2318,10 @@ impl Checker {
     /// to is self-describing at runtime — and asking afterwards keeps those
     /// call sites unchanged.
     pub fn expr_type(&self) -> Option<&Type> {
-        self.expr_ty.as_ref()
+        match &self.rebuilt {
+            Some(rebuilt) => rebuilt.expr_type(),
+            None => self.expr_ty.as_ref(),
+        }
     }
 
     /// The type/constructor registry — exposed so a caller (e.g. the REPL)
