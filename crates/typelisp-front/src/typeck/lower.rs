@@ -7,13 +7,33 @@
 use crate::check::core;
 use crate::check::forms;
 use crate::check::lower::{Arg, CoreForms};
+use crate::types::Type;
 use crate::{Error, Heap, Value};
 
+use super::generic::Requests;
+use super::registry::Registry;
+use super::subst::Subst;
 use super::tree::{Node, Typed};
 
+/// What lowering one tree needs: the definitions, the substitution that
+/// makes a generic body one specialization (empty for any other tree), and
+/// the specializations the form asks for.
+pub(crate) struct Lowering<'a> {
+    pub(crate) reg: &'a Registry,
+    pub(crate) subst: &'a Subst,
+    pub(crate) requests: &'a mut Requests,
+}
+
+impl Lowering<'_> {
+    /// `ty` as this lowering writes it.
+    pub(crate) fn settle(&self, ty: &Type) -> Type {
+        self.subst.apply(ty)
+    }
+}
+
 /// `t`'s core form, unrooted. It carries `t`'s position on its first cell.
-pub(crate) fn lower(heap: &mut Heap, defs: &impl CoreForms, t: &Typed) -> Result<Value, Error> {
-    let form = typelisp_mem::grow_stack(|| lower_node(heap, defs, &t.node))?;
+pub(crate) fn lower(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Error> {
+    let form = typelisp_mem::grow_stack(|| lower_node(heap, lw, &t.node))?;
     if let (Value::Cons(cell), Some(loc)) = (form, &t.loc) {
         if heap.cons_loc(form).is_none() {
             heap.set_cons_loc(cell, loc.clone());
@@ -23,38 +43,45 @@ pub(crate) fn lower(heap: &mut Heap, defs: &impl CoreForms, t: &Typed) -> Result
 }
 
 /// `t` lowered and rooted on `heap`'s root stack.
-fn sub(heap: &mut Heap, defs: &impl CoreForms, t: &Typed) -> Result<Value, Error> {
-    let form = lower(heap, defs, t)?;
+pub(crate) fn lower_rooted(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Error> {
+    let form = lower(heap, lw, t)?;
     heap.push_root(form);
     Ok(form)
 }
 
-fn lower_node(heap: &mut Heap, defs: &impl CoreForms, node: &Node) -> Result<Value, Error> {
+fn lower_node(heap: &mut Heap, lw: &mut Lowering, node: &Node) -> Result<Value, Error> {
     match node {
         Node::Literal { tag, value } => match value {
             Some(v) => core::tagged(heap, *tag, &[*v]),
             None => core::tagged(heap, *tag, &[]),
         },
         Node::Local { name } => forms::var_form(heap, *name),
-        Node::Call { path, args } => {
+        Node::Call { path, targs, args } => {
+            let path = if targs.is_empty() {
+                *path
+            } else {
+                let targs = targs.iter().map(|t| lw.settle(t)).collect();
+                lw.requests.ask(path, targs)
+            };
             let mut lowered = Vec::with_capacity(args.len());
             for a in args {
-                lowered.push(Arg { ty: &a.ty, form: sub(heap, defs, a)? });
+                lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
             }
-            defs.call_form(heap, path, &lowered)
+            let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
+            lw.reg.call_form(heap, &path, &lowered)
         }
         Node::Let { binds, body } => {
             let mut lowered = Vec::with_capacity(binds.len());
             for (name, t) in binds {
-                lowered.push((*name, t.ty.clone(), sub(heap, defs, t)?));
+                lowered.push((*name, lw.settle(&t.ty), lower_rooted(heap, lw, t)?));
             }
-            let body = body.iter().map(|t| sub(heap, defs, t)).collect::<Result<Vec<_>, _>>()?;
-            defs.let_form(heap, &lowered, &body)
+            let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
+            lw.reg.let_form(heap, &lowered, &body)
         }
         Node::If { cond, then, els } => {
-            let cond = sub(heap, defs, cond)?;
-            let then = sub(heap, defs, then)?;
-            let els = sub(heap, defs, els)?;
+            let cond = lower_rooted(heap, lw, cond)?;
+            let then = lower_rooted(heap, lw, then)?;
+            let els = lower_rooted(heap, lw, els)?;
             forms::if_form(heap, cond, then, els)
         }
     }

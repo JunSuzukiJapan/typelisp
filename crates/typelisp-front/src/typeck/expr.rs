@@ -1,6 +1,8 @@
 //! Checking an expression: which kind of form it is, and the module that
 //! checks that kind.
 
+use std::cell::RefCell;
+
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
@@ -9,13 +11,26 @@ use super::literal::literal;
 use super::locals::Locals;
 use super::registry::Registry;
 use super::tree::{Node, Typed};
+use super::unify::Holes;
 use super::{binding, call, control};
 
-/// What every expression is checked against: the definitions, and the
-/// module the form is in.
+/// What every expression of one top-level form is checked against: the
+/// definitions, the module the form is in, and the form's inference holes.
 pub(crate) struct Cx<'a> {
     pub(crate) reg: &'a Registry,
     pub(crate) ns: NsId,
+    pub(crate) holes: RefCell<Holes>,
+}
+
+impl<'a> Cx<'a> {
+    pub(crate) fn new(reg: &'a Registry, ns: NsId) -> Cx<'a> {
+        Cx { reg, ns, holes: RefCell::new(Holes::new()) }
+    }
+
+    /// `ty` with every hole solved so far filled in.
+    pub(crate) fn resolve(&self, ty: &Type) -> Type {
+        self.holes.borrow().resolve(ty)
+    }
 }
 
 /// `v` checked where `expected` is expected (`None`: anything), with `locals`
@@ -34,7 +49,7 @@ pub(crate) fn check_expr(
 ) -> Result<Typed, Error> {
     let loc = heap.cons_loc(v).or(loc);
     let typed = check_form(cx, heap, locals, v, expected, loc.clone()).and_then(|t| {
-        agree(&t.ty, expected)?;
+        agree(cx, &t.ty, expected)?;
         Ok(t)
     });
     typed.map_err(|e| match &loc {
@@ -44,7 +59,10 @@ pub(crate) fn check_expr(
 }
 
 fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
-    if let Some(lit) = literal(heap, v, expected)? {
+    // A literal's type depends on what is expected, which may be a hole an
+    // earlier argument solved.
+    let solved = expected.map(|e| cx.resolve(e));
+    if let Some(lit) = literal(heap, v, solved.as_ref())? {
         if let Some(value) = lit.value {
             heap.push_root(value);
         }
@@ -78,20 +96,18 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     let path = Path::of_symbol(cx.ns, head);
     match cx.reg.fn_def(&path) {
-        Some(def) => call::check_call(cx, heap, locals, path, def, args, loc),
+        Some(def) => call::check_call(cx, heap, locals, path, def, args, expected, loc),
         None => unimplemented!("typeck: calling `{}` (only functions this checker defined are called so far)", heap.symbol_spelling(head)),
     }
 }
 
-/// Whether a value of type `found` may be where `expected` is expected.
-/// `!` is every type.
-fn agree(found: &Type, expected: Option<&Type>) -> Result<(), Error> {
-    match expected {
-        Some(e) if *found != Type::Never && found != e => {
-            Err(Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", e, found)))
-        }
-        _ => Ok(()),
-    }
+/// Whether a value of type `found` may be where `expected` is expected,
+/// solving holes to make it so. `!` is every type.
+pub(crate) fn agree(cx: &Cx, found: &Type, expected: Option<&Type>) -> Result<(), Error> {
+    let Some(e) = expected else { return Ok(()) };
+    cx.holes.borrow_mut().unify(e, found).map_err(|m| {
+        Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", m.left, m.right))
+    })
 }
 
 /// `forms` checked in order, the last where `expected` is expected: the
@@ -112,7 +128,7 @@ pub(crate) fn check_body(
     let ty = match out.last() {
         Some(t) => t.ty.clone(),
         None => {
-            agree(&Type::Unit, expected)?;
+            agree(cx, &Type::Unit, expected)?;
             Type::Unit
         }
     };

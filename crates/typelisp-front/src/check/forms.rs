@@ -480,7 +480,7 @@ pub(super) fn defmacro_form(
 /// (a `defstruct` and its accessors, a batch of monomorphized
 /// specializations): every nested definition's own name is already
 /// absolute, so the wrapper only has to ensure the namespace exists.
-pub(super) fn module_form(heap: &mut Heap, path: &Path, body: &[Value]) -> Result<Value, Error> {
+pub(crate) fn module_form(heap: &mut Heap, path: &Path, body: &[Value]) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     let p = core::root_path_form(f.heap(), path);
     f.push(p);

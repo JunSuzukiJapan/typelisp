@@ -26,6 +26,7 @@ use super::resolved::{CompileTarget, Pattern};
 use super::core::{self, Checked, Disagreement, Items, Node, NotDyn, SelectArm, Unassignable, Uncovered, Unmet, Unsafe};
 use super::{forms, lower};
 use super::lower::CoreForms;
+use crate::typeck::generic::{fn_specialization, SPECIALIZATION_BUDGET};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
@@ -579,13 +580,6 @@ struct StructOptions {
 /// no user-written `module` form can ever collide with it.
 pub const MONO_BUNDLE_MODULE: &str = "<monomorph specializations>";
 
-/// Upper bound on specializations generated while draining one top-level
-/// form's requests — the convergence guard for polymorphic recursion (a
-/// generic function calling itself at an ever-growing type, e.g. `(f T)`
-/// recursing as `(f Option<T>)`), which memoization alone cannot stop since
-/// every instantiation is new. Ordinary programs instantiate a handful of
-/// generics per form; hitting this is a `TypeError`, not a hang.
-const SPECIALIZATION_BUDGET: usize = 512;
 
 /// The variable a [`Pattern::Guard`]'s test form reads the scrutinee
 /// through — see that variant's doc comment for why one fixed name is
@@ -17239,17 +17233,6 @@ fn called_width(ty: &Type) -> Type {
     } else {
         ty.clone()
     }
-}
-
-
-
-/// `((TYPE SYM)...)` — a vtable's contents, or the implementation targets a
-/// `dyn-call` could reach: each entry the owning type's path and the method
-/// name.
-/// The specialization of the generic function `base` at `args`.
-fn fn_specialization(base: &Path, args: &[Type]) -> Path {
-    let ids: Vec<TypeId> = args.iter().map(crate::type_key::type_id).collect();
-    Path::of_symbol(base.ns(), specialization(Generic::Fn(base.ns(), base.name_symbol()), &ids))
 }
 
 /// The name `type_fq`'s `method` has as written for the instantiation

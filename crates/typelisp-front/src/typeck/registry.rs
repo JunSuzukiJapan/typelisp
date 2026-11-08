@@ -7,28 +7,45 @@
 //! and those of one that succeeds kept ([`Registry::commit`]).
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::check::lower::CoreForms;
 use crate::check::registry::AdtKind;
-use crate::types::{Path, Type};
+use crate::types::{Path, Type, TypeParam};
 use typelisp_mem::SymRef;
 
-/// A function: its parameter types and its result type.
+use super::tree::Typed;
+
+/// A function: its type parameters, its parameter types and its result
+/// type. The types may mention the type parameters.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FnDef {
+    pub(crate) type_params: Vec<TypeParam>,
     pub(crate) params: Vec<Type>,
     pub(crate) ret: Type,
+}
+
+/// A generic function's checked body, kept to be specialized: its
+/// parameters' names and types, its result type, and the body, every type in
+/// them settled except for the function's own type parameters.
+#[derive(Debug)]
+pub(crate) struct Template {
+    pub(crate) params: Vec<(SymRef, Type)>,
+    pub(crate) ret: Type,
+    pub(crate) body: Vec<Typed>,
 }
 
 /// A write, and what it replaced.
 #[derive(Debug)]
 enum Undo {
     Fn(Path, Option<FnDef>),
+    Template(Path, Option<Rc<Template>>),
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct Registry {
     fns: HashMap<Path, FnDef>,
+    templates: HashMap<Path, Rc<Template>>,
     /// The writes since the last [`Self::commit`], oldest first.
     undo: Vec<Undo>,
 }
@@ -36,6 +53,21 @@ pub(crate) struct Registry {
 impl Registry {
     pub(crate) fn fn_def(&self, path: &Path) -> Option<&FnDef> {
         self.fns.get(path)
+    }
+
+    /// The generic function `path`'s body, to specialize.
+    pub(crate) fn template(&self, path: &Path) -> Option<Rc<Template>> {
+        self.templates.get(path).cloned()
+    }
+
+    /// Keep the generic function `path`'s body, or forget the one an earlier
+    /// definition kept (`None`: `path` is not generic now).
+    pub(crate) fn set_template(&mut self, path: Path, template: Option<Template>) {
+        let replaced = match template {
+            Some(t) => self.templates.insert(path, Rc::new(t)),
+            None => self.templates.remove(&path),
+        };
+        self.undo.push(Undo::Template(path, replaced));
     }
 
     /// Define (or redefine) the function `path`. Seen at once, so a body can
@@ -59,6 +91,12 @@ impl Registry {
                 }
                 Undo::Fn(path, None) => {
                     self.fns.remove(&path);
+                }
+                Undo::Template(path, Some(t)) => {
+                    self.templates.insert(path, t);
+                }
+                Undo::Template(path, None) => {
+                    self.templates.remove(&path);
                 }
             }
         }
@@ -91,7 +129,7 @@ mod tests {
     }
 
     fn def(ret: Type) -> FnDef {
-        FnDef { params: Vec::new(), ret }
+        FnDef { type_params: Vec::new(), params: Vec::new(), ret }
     }
 
     #[test]

@@ -1,14 +1,18 @@
 //! Checking one top-level form: the rebuilt checker's entry point.
 
-use crate::types::Type;
+use crate::check::lower::CoreForms;
+use crate::check::MONO_BUNDLE_MODULE;
+use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 
-use super::defun::check_defun;
+use super::defun::{check_defun, lower_all};
 use super::expr::{check_expr, Cx};
+use super::generic::{Request, Requests};
 use super::locals::Locals;
-use super::lower::lower;
+use super::lower::{lower_rooted, Lowering};
 use super::registry::Registry;
+use super::subst::Subst;
 
 /// The rebuilt checker, as the current one hands it each top-level form
 /// while the switch `TYPELISP_TYPECK` is on (`docs/dev/checker-rebuild-plan.md` 6).
@@ -59,23 +63,67 @@ impl TypeChecker {
         self.expr_ty.as_ref()
     }
 
-    /// `v`'s core form, and its type when it is an expression.
+    /// `v`'s core form, and its type when it is an expression. The
+    /// specializations the form asks for come first, in one bundle with it.
     fn check_toplevel(&mut self, heap: &mut Heap, ns: NsId, v: Value, loc: Option<Loc>) -> Result<(Value, Option<Type>), Error> {
+        let mut requests = Requests::default();
+        let (form, ty) = self.check_primary(heap, ns, v, loc, &mut requests)?;
+        heap.push_root(form);
+        let mut forms = Vec::new();
+        while let Some(req) = requests.next()? {
+            let spec = specialize(heap, &self.reg, &mut requests, &req)?;
+            heap.push_root(spec);
+            forms.push(spec);
+        }
+        if forms.is_empty() {
+            return Ok((form, ty));
+        }
+        forms.push(form);
+        Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty))
+    }
+
+    fn check_primary(
+        &mut self,
+        heap: &mut Heap,
+        ns: NsId,
+        v: Value,
+        loc: Option<Loc>,
+        requests: &mut Requests,
+    ) -> Result<(Value, Option<Type>), Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec_locs(v)?;
             if let Value::Symbol(head) = elems[0].0 {
                 if head.is(wk::DEFUN) {
-                    return Ok((check_defun(&mut self.reg, ns, heap, &elems[1..])?, None));
+                    return Ok((check_defun(&mut self.reg, ns, heap, requests, &elems[1..])?, None));
                 }
             }
         }
-        let cx = Cx { reg: &self.reg, ns };
-        let typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
-        let form = lower(heap, &self.reg, &typed)?;
-        heap.push_root(form);
+        let mut typed = {
+            let cx = Cx::new(&self.reg, ns);
+            let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
+            typed.map_types(&|t| cx.resolve(t));
+            typed
+        };
+        let subst = Subst::default();
+        let mut lw = Lowering { reg: &self.reg, subst: &subst, requests };
+        let form = lower_rooted(heap, &mut lw, &typed)?;
         let form = crate::check::core::tagged(heap, wk::EXPR, &[form])?;
-        Ok((form, Some(typed.ty)))
+        let ty = std::mem::replace(&mut typed.ty, Type::Unit);
+        Ok((form, Some(ty)))
     }
+}
+
+/// The generic function `req.base` specialized at `req.args`: its body lowered
+/// with the type parameters replaced, under the specialization's name.
+fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Request) -> Result<Value, Error> {
+    let def = reg.fn_def(&req.base).expect("a specialization is asked for only of a defined function");
+    let template = reg.template(&req.base).expect("a specialization is asked for only of a generic function");
+    let subst = Subst::positional(&def.type_params, &req.args);
+    let params: Vec<_> = template.params.iter().map(|(n, t)| (*n, subst.apply(t))).collect();
+    let ret = subst.apply(&template.ret);
+    let mut lw = Lowering { reg, subst: &subst, requests };
+    let body = lower_all(heap, &mut lw, &template.body)?;
+    reg.defun_form(heap, &req.name, &params, &ret, &body)
 }
 
 #[cfg(test)]
@@ -183,6 +231,58 @@ mod tests {
         assert!(msg.contains("expected `int`, found `string`"), "{}", msg);
         let msg = check_err("(defun f ((a int)) int a)\n(f)");
         assert!(msg.contains("expected 1 argument(s), got 0"), "{}", msg);
+    }
+
+    #[test]
+    fn a_generic_function_is_specialized_for_each_instantiation() {
+        let src = "(defun id<T> ((x T)) T x)\n(defun pick<T> ((c bool) (a T) (b T)) T (if c (id a) b))\n(pick false (id 1) 2)";
+        assert_eq!(run(src).1, Value::Int(2));
+        let src = "(defun id<T> ((x T)) T x)\n(id true)";
+        assert_eq!(run(src).2, Type::Bool);
+    }
+
+    /// The names a generic function's parameters are declared with do not
+    /// matter to a caller that declares the same names.
+    #[test]
+    fn the_same_names_in_caller_and_callee() {
+        let src = "(defun id<T> ((x T)) T x)\n(defun wrap<T> ((y T)) T (id y))\n(wrap #\\z)";
+        assert_eq!(run(src).1, Value::Char('z'));
+    }
+
+    #[test]
+    fn a_generic_function_calls_itself() {
+        let src = "(defun again<T> ((x T) (stop bool)) T (if stop x (again x true)))\n(again 9 false)";
+        assert_eq!(run(src).1, Value::Int(9));
+    }
+
+    /// The body is checked once, with `T` abstract: a `T` is not an `int`.
+    #[test]
+    fn a_type_parameter_is_no_particular_type() {
+        let msg = check_err("(defun f<T> ((x T)) int x)");
+        assert!(msg.contains("expected `int`, found `T`"), "{}", msg);
+        let msg = check_err("(defun f<T> ((x T)) T 1)");
+        assert!(msg.contains("expected `T`, found `int`"), "{}", msg);
+    }
+
+    /// A parameter's type decides the argument's even through a hole: the
+    /// first argument makes `T` a `u8`, and the second must be one.
+    #[test]
+    fn one_argument_decides_anothers_type() {
+        let src = "(defun id8 ((x u8)) u8 x)\n(defun same<T> ((a T) (b T)) T b)\n(same (id8 1) 300)";
+        let msg = check_err(src);
+        assert!(msg.contains("integer literal 300 is out of range for u8"), "{}", msg);
+    }
+
+    #[test]
+    fn a_type_argument_nothing_decides() {
+        let msg = check_err("(defun mk<T> () int 1)\n(mk)");
+        assert!(msg.contains("cannot infer type parameter `T`"), "{}", msg);
+    }
+
+    #[test]
+    fn a_type_parameter_declared_twice() {
+        let msg = check_err("(defun f<T, T> ((x T)) T x)");
+        assert!(msg.contains("type parameter `T` is declared twice"), "{}", msg);
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it
