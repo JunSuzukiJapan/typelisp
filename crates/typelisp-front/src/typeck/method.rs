@@ -46,16 +46,32 @@ pub(crate) fn check_method_call(
     let subst = cx.holes.borrow_mut().instantiate(&sig.type_params);
     let instance = receiver.is_some();
     let mut args = Vec::with_capacity(sig.params.len());
+    let mut rational_op = false;
     if let Some(receiver) = receiver {
         agree(cx, &receiver.ty, Some(&subst.apply(&sig.params[0])))?;
-        if mixes_rationals(cx, heap, locals, method, &receiver, rest) {
-            unimplemented!("typeck: an operator mixing an `int` and a `ratio` (CL's contagion)")
-        }
+        rational_op = is_rational_operator(method, &receiver, rest);
         args.push(receiver);
     }
     let params = &sig.params[args.len()..];
     for ((arg, arg_loc), param) in rest.iter().zip(params) {
-        args.push(check_expr(cx, heap, locals, *arg, Some(&subst.apply(param)), arg_loc.clone())?);
+        let param = subst.apply(param);
+        if !rational_op {
+            args.push(check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?);
+            continue;
+        }
+        // The other operand of a rational's operator is checked with nothing
+        // expected, to see whether it is the other kind of rational: CL's
+        // contagion makes `(+ 1/2 1)` `rational`'s operator, `3/2`.
+        let other = check_expr(cx, heap, locals, *arg, None, arg_loc.clone())?;
+        if matches!(other.ty, Type::Int | Type::Ratio | Type::Rational) && other.ty != args[0].ty {
+            unimplemented!("typeck: an operator mixing an `int` and a `ratio` (CL's contagion)")
+        }
+        let at = heap.cons_loc(*arg).or(arg_loc.clone());
+        agree(cx, &other.ty, Some(&param)).map_err(|e| match at {
+            Some(l) => e.at(l),
+            None => e,
+        })?;
+        args.push(other);
     }
     let ret = subst.apply(&sig.ret);
     agree(cx, &ret, expected)?;
@@ -78,23 +94,12 @@ pub(crate) fn check_method_call(
     Ok(Typed { node: Node::MethodCall { owner, method, instance, targs, args }, ty: ret, loc })
 }
 
-/// Whether `(op receiver other)` mixes the two kinds of rational, which CL's
-/// contagion makes `rational`'s operator: `(+ 1/2 1)` is `3/2`. Deciding it
-/// checks `other` with nothing expected, and forgets what that solved.
-fn mixes_rationals(cx: &Cx, heap: &mut Heap, locals: &Locals, op: SymRef, receiver: &Typed, rest: &[(Value, Option<Loc>)]) -> bool {
+/// Whether `(op receiver other)` is an operator of `int` or `ratio`, whose
+/// other operand may be the other kind of rational.
+fn is_rational_operator(op: SymRef, receiver: &Typed, rest: &[(Value, Option<Loc>)]) -> bool {
     const OPERATORS: [u32; 12] = [
         wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE,
         wk::RETIRED_EQUALS, wk::M_OP_NE, wk::M_MAX, wk::M_MIN,
     ];
-    let [(other, other_loc)] = rest else { return false };
-    if !OPERATORS.contains(&op.well_known()) || !matches!(receiver.ty, Type::Int | Type::Ratio) {
-        return false;
-    }
-    let saved = cx.snapshot();
-    let other = check_expr(cx, heap, locals, *other, None, other_loc.clone());
-    cx.restore(saved);
-    match other {
-        Ok(t) => matches!(t.ty, Type::Int | Type::Ratio | Type::Rational) && t.ty != receiver.ty,
-        Err(_) => false,
-    }
+    rest.len() == 1 && OPERATORS.contains(&op.well_known()) && matches!(receiver.ty, Type::Int | Type::Ratio)
 }

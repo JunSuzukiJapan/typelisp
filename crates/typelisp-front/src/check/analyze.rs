@@ -1204,7 +1204,48 @@ pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 
-const TOPLEVEL_FORM_HEADS: &[u32] = &[
+/// Which call sugar ([`Checker::check_call_sugar`]) a call of `head` with
+/// `nargs` arguments is: forms keyed on the name *and* the argument count,
+/// which no single definition could express. `concatenate_is_fn` says
+/// whether `concatenate` names a function here, which then wins.
+pub(crate) fn call_sugar(head: &str, nargs: usize, concatenate_is_fn: impl FnOnce() -> bool) -> Option<CallSugar> {
+    const ARITH: [&str; 11] = ["+", "-", "*", "/", "max", "min", "logand", "logior", "logxor", "gcd", "lcm"];
+    const CMP: [&str; 6] = ["<", "<=", ">", ">=", "=", "/="];
+    Some(if nargs <= 1 && (ARITH.contains(&head) || CMP.contains(&head)) {
+        CallSugar::NullaryOrUnary
+    } else if nargs > 2 && ARITH.contains(&head) {
+        CallSugar::VariadicArith
+    } else if nargs > 2 && CMP.contains(&head) {
+        CallSugar::VariadicCmp
+    } else if head == "append" && nargs > 2 {
+        CallSugar::VariadicAppend
+    } else if head == "concatenate" && !concatenate_is_fn() {
+        CallSugar::Concatenate
+    } else if head == "aref" && nargs > 0 {
+        CallSugar::Aref
+    } else if head == "log" && nargs == 2 {
+        CallSugar::LogWithBase
+    } else if head == "atan" && nargs == 2 {
+        CallSugar::Atan2
+    } else {
+        return None;
+    })
+}
+
+/// The kinds of call sugar [`call_sugar`] tells apart.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CallSugar {
+    NullaryOrUnary,
+    VariadicArith,
+    VariadicCmp,
+    VariadicAppend,
+    Concatenate,
+    Aref,
+    LogWithBase,
+    Atan2,
+}
+
+pub(crate) const TOPLEVEL_FORM_HEADS: &[u32] = &[
     wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
     wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,
     wk::DEFTRAIT, wk::DEFTYPE, wk::IMPL, wk::USE, wk::LOAD, wk::IMPORT,
@@ -10308,33 +10349,20 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Option<Result<Checked, Error>> {
         let head = head_sym.name();
-        Some(if args.len() <= 1
-            && matches!(
-                head,
-                "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "gcd" | "lcm" | "<" | "<=" | ">" | ">=" | "=" | "/="
-            )
-        {
-            self.check_nullary_or_unary_numeric_op(heap, interp, env, head, args, expected)
-        } else if args.len() > 2 && matches!(head, "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "gcd" | "lcm") {
-            self.check_variadic_arith(heap, interp, env, head, args, expected)
-        } else if args.len() > 2 && matches!(head, "<" | "<=" | ">" | ">=" | "=" | "/=") {
-            self.check_variadic_cmp(heap, interp, env, head, args)
-        } else if head == "append" && args.len() > 2 {
-            self.check_variadic_append(heap, interp, env, args, expected)
-        } else if head == "concatenate" && self.info.resolve_fn(head_sym).is_none() {
-            self.check_concatenate(heap, interp, env, args, expected)
-        } else if head == "aref" && !args.is_empty() {
-            self.check_aref(heap, interp, env, args[0], &args[1..], None, expected)
-        } else if head == "log" && args.len() == 2 {
-            self.check_log_with_base(heap, interp, env, args, expected)
-        } else if head == "atan" && args.len() == 2 {
+        let sugar = call_sugar(head, args.len(), || self.info.resolve_fn(head_sym).is_some())?;
+        Some(match sugar {
+            CallSugar::NullaryOrUnary => self.check_nullary_or_unary_numeric_op(heap, interp, env, head, args, expected),
+            CallSugar::VariadicArith => self.check_variadic_arith(heap, interp, env, head, args, expected),
+            CallSugar::VariadicCmp => self.check_variadic_cmp(heap, interp, env, head, args),
+            CallSugar::VariadicAppend => self.check_variadic_append(heap, interp, env, args, expected),
+            CallSugar::Concatenate => self.check_concatenate(heap, interp, env, args, expected),
+            CallSugar::Aref => self.check_aref(heap, interp, env, args[0], &args[1..], None, expected),
+            CallSugar::LogWithBase => self.check_log_with_base(heap, interp, env, args, expected),
             // CL's two-argument `(atan y x)`: the prelude's `atan2`. Sugar
             // here for the same reason two-argument `log` is — a method
             // overloads on receiver type, never on arity, and one-argument
             // `atan` is already `f64`'s built-in method.
-            self.check_renamed_call(heap, interp, env, "atan2", args, arg_locs)
-        } else {
-            return None;
+            CallSugar::Atan2 => self.check_renamed_call(heap, interp, env, "atan2", args, arg_locs),
         })
     }
 
@@ -17441,7 +17469,7 @@ fn option_of_sexpr() -> Type {
 /// whichever of the two the site declared. Bare `Sexpr` still means
 /// *non-empty*, and a widening into it is just as sound: nothing these rules
 /// produce is the empty list.
-fn is_sexpr_expectation(ty: &Type) -> bool {
+pub(crate) fn is_sexpr_expectation(ty: &Type) -> bool {
     *ty == sexpr_ty() || is_option_of_sexpr(ty)
 }
 

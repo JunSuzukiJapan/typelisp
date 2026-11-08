@@ -201,10 +201,13 @@ pub(crate) struct Registry {
     pub(crate) values: Table<Path, ValueDef>,
     pub(crate) types: Table<Path, TypeEntry>,
     /// Methods, by the type and the method's member symbol.
-    pub(crate) methods: Table<(Path, SymRef), MethodDef>,
+    methods: Table<(Path, SymRef), MethodDef>,
     /// Methods written for one instantiation of a generic type, by the type,
     /// the member symbol and the instantiation's type arguments.
-    pub(crate) inst_methods: Table<(Path, SymRef), Vec<(Vec<Type>, MethodDef)>>,
+    inst_methods: Table<(Path, SymRef), Vec<(Vec<Type>, MethodDef)>>,
+    /// The member symbols some type has a method of: a call `(name x ...)`
+    /// looks for a method on `x`'s type only when `name` is one.
+    method_names: Table<SymRef, ()>,
     /// What a `use` brought into a module: the module and the name it is
     /// brought in under, and the definition.
     pub(crate) imports: Table<(NsId, SymRef), Path>,
@@ -255,6 +258,40 @@ impl Registry {
         }
     }
 
+    /// The method `name` of the type `owner` written for every instantiation.
+    pub(crate) fn method(&self, owner: &Path, name: SymRef) -> Option<&MethodDef> {
+        self.methods.get(&(*owner, name))
+    }
+
+    /// Whether `owner` has a method `name` written for one instantiation.
+    pub(crate) fn has_inst_method(&self, owner: &Path, name: SymRef) -> bool {
+        self.inst_methods.get(&(*owner, name)).is_some()
+    }
+
+    /// Whether some type has a method `name` (a member symbol).
+    pub(crate) fn has_method_named(&self, name: SymRef) -> bool {
+        self.method_names.get(&name).is_some()
+    }
+
+    /// Define (or redefine) the method `name` of `owner`.
+    pub(crate) fn define_method(&mut self, owner: Path, name: SymRef, def: MethodDef) {
+        self.methods.insert((owner, name), def);
+        self.method_names.insert(name, ());
+    }
+
+    /// Define the method `name` of `owner` for the instantiation `args`.
+    pub(crate) fn define_inst_method(&mut self, owner: Path, name: SymRef, args: Vec<Type>, def: MethodDef) {
+        let mut insts = self.inst_methods.get(&(owner, name)).cloned().unwrap_or_default();
+        insts.push((args, def));
+        self.inst_methods.insert((owner, name), insts);
+        self.method_names.insert(name, ());
+    }
+
+    /// The methods defined since the last commit.
+    pub(crate) fn methods_written(&self) -> impl Iterator<Item = &(Path, SymRef)> {
+        self.methods.written().chain(self.inst_methods.written())
+    }
+
     /// The method `name` of the type `owner` for a value whose type arguments
     /// are `args`: the instantiation's own, or the one for every
     /// instantiation.
@@ -270,6 +307,7 @@ impl Registry {
         self.types.commit();
         self.methods.commit();
         self.inst_methods.commit();
+        self.method_names.commit();
         self.imports.commit();
         self.reexports.commit();
         self.ctors.commit();
@@ -283,6 +321,7 @@ impl Registry {
         self.types.rollback();
         self.methods.rollback();
         self.inst_methods.rollback();
+        self.method_names.rollback();
         self.imports.rollback();
         self.reexports.rollback();
         self.ctors.rollback();

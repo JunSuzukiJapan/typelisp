@@ -105,16 +105,14 @@ fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
     );
     for (name, af) in def.assoc.iter() {
         let sig = fn_def(ParamOwner::Method(path, name), &def.params, &af.sig);
-        new.methods.insert((path, name), MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home, inst_args: None });
+        new.define_method(path, name, MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home, inst_args: None });
     }
     for inst in def.insts.values() {
         let args: Vec<Type> = inst.args.iter().map(|t| convert(t, &HashMap::new(), &|| format!("an instantiation of {}", path))).collect();
         for (name, af) in inst.assoc.iter() {
             let sig = fn_def(ParamOwner::Method(path, name), &[], &af.sig);
             let method = MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home, inst_args: Some(args.clone()) };
-            let mut insts = new.inst_methods.get(&(path, name)).cloned().unwrap_or_default();
-            insts.push((args.clone(), method));
-            new.inst_methods.insert((path, name), insts);
+            new.define_inst_method(path, name, args.clone(), method);
         }
     }
 }

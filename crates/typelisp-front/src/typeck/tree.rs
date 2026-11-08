@@ -71,9 +71,22 @@ impl Pat {
     }
 }
 
+/// A tree nested as deep as the program is is dropped with the stack grown
+/// as it goes, like every other walk over it.
+impl Drop for Typed {
+    fn drop(&mut self) {
+        let node = std::mem::replace(&mut self.node, Node::Let { binds: Vec::new(), body: Vec::new() });
+        typelisp_mem::grow_stack(move || drop(node));
+    }
+}
+
 impl Typed {
     /// Every type in this tree replaced with `f` of it.
     pub(crate) fn map_types(&mut self, f: &impl Fn(&Type) -> Type) {
+        typelisp_mem::grow_stack(|| self.map_types_here(f))
+    }
+
+    fn map_types_here(&mut self, f: &impl Fn(&Type) -> Type) {
         self.ty = f(&self.ty);
         match &mut self.node {
             Node::Literal { .. } | Node::Local { .. } => {}
@@ -122,6 +135,10 @@ impl Typed {
 
     /// Call `f` on every value this tree holds.
     pub(crate) fn each_value(&self, f: &mut impl FnMut(Value)) {
+        typelisp_mem::grow_stack(|| self.each_value_here(f))
+    }
+
+    fn each_value_here(&self, f: &mut impl FnMut(Value)) {
         match &self.node {
             Node::Literal { value: Some(v), .. } => f(*v),
             Node::Literal { value: None, .. } | Node::Local { .. } => {}

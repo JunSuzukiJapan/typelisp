@@ -20,9 +20,19 @@ pub(crate) struct Mismatch {
 }
 
 /// The holes of one inference and what each is solved to.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct Holes {
     solved: Vec<Option<Type>>,
+    /// The holes solved, in the order they were, so a [`Mark`] can be gone
+    /// back to.
+    trail: Vec<u32>,
+}
+
+/// How far an inference had got: the holes made and the holes solved.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Mark {
+    holes: usize,
+    solved: usize,
 }
 
 impl Holes {
@@ -34,6 +44,22 @@ impl Holes {
     pub(crate) fn fresh(&mut self) -> Type {
         self.solved.push(None);
         Type::Infer(self.solved.len() as u32 - 1)
+    }
+
+    /// How far this inference has got, to go back to with
+    /// [`Self::rollback`].
+    pub(crate) fn mark(&self) -> Mark {
+        Mark { holes: self.solved.len(), solved: self.trail.len() }
+    }
+
+    /// Forget the holes made and the solutions found since `mark`.
+    pub(crate) fn rollback(&mut self, mark: Mark) {
+        for n in self.trail.drain(mark.solved..) {
+            if let Some(slot) = self.solved.get_mut(n as usize) {
+                *slot = None;
+            }
+        }
+        self.solved.truncate(mark.holes);
     }
 
     /// A substitution replacing each of `params` with a fresh hole.
@@ -87,6 +113,7 @@ impl Holes {
                     return mismatch(self);
                 }
                 self.solved[*n as usize] = Some(other.clone());
+                self.trail.push(*n);
                 Ok(())
             }
             (Type::Named(p, xs), Type::Named(q, ys)) | (Type::Dyn(p, xs), Type::Dyn(q, ys)) => {

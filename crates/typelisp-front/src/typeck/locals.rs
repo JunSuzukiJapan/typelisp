@@ -35,10 +35,14 @@ impl<'p> Locals<'p> {
 
     /// The type of the local `name` here, if it is one.
     pub(crate) fn lookup(&self, name: SymRef) -> Option<&Type> {
-        match self.binds.iter().rev().find(|(n, _)| *n == name) {
-            Some((_, t)) => Some(t),
-            None => self.parent.and_then(|p| p.lookup(name)),
+        let mut frame = Some(self);
+        while let Some(f) = frame {
+            if let Some((_, t)) = f.binds.iter().rev().find(|(n, _)| *n == name) {
+                return Some(t);
+            }
+            frame = f.parent;
         }
+        None
     }
 }
 

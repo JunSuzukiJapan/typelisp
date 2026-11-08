@@ -61,7 +61,7 @@ impl TypeChecker {
         match result {
             Ok((form, ty)) => {
                 let types: Vec<Path> = self.reg.types.written().copied().collect();
-                let methods: Vec<(Path, SymRef)> = self.reg.methods.written().copied().collect();
+                let methods: Vec<(Path, SymRef)> = self.reg.methods_written().copied().collect();
                 self.reg.commit();
                 publish(&self.reg, heap, &types, &methods);
                 self.expr_ty = ty;
@@ -174,7 +174,7 @@ fn publish(reg: &Registry, heap: &Heap, types: &[Path], methods: &[(Path, SymRef
 fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Request) -> Result<Value, Error> {
     let type_params = match req.base {
         Base::Fn(p) => &reg.fn_def(&p).expect("a specialization is asked for only of a defined function").type_params,
-        Base::Method(owner, m) => &reg.methods.get(&(owner, m)).expect("a specialization is asked for only of a defined method").sig.type_params,
+        Base::Method(owner, m) => &reg.method(&owner, m).expect("a specialization is asked for only of a defined method").sig.type_params,
     };
     // The prelude's generic definitions were checked by the current checker,
     // which keeps their source, not a checked tree.
@@ -189,7 +189,7 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
     match (req.base, req.name) {
         (Base::Fn(_), Name::Fn(name)) => reg.defun_form(heap, &name, &params, &ret, &body),
         (Base::Method(owner, m), Name::Method(name)) => {
-            let instance = reg.methods.get(&(owner, m)).expect("checked above").instance;
+            let instance = reg.method(&owner, m).expect("checked above").instance;
             reg.defmethod_form(heap, &owner, name, instance, &params, &ret, &body)
         }
         _ => unreachable!("a specialization is named as what it specializes"),

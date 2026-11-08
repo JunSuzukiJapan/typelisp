@@ -134,7 +134,7 @@ fn define_accessor(
         }
     };
     let sig = FnDef { public: field.public, ..FnDef::plain(own.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
-    reg.methods.insert((path, method), MethodDef { sig, instance: true, home: None, inst_args: None });
+    reg.define_method(path, method, MethodDef { sig, instance: true, home: None, inst_args: None });
     if !own.is_empty() {
         reg.set_template(Base::Method(path, method), Some(Template { params, ret, body: vec![body] }));
         return Ok(None);

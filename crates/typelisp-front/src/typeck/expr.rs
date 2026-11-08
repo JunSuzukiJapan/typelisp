@@ -14,8 +14,9 @@ use super::resolve::{ctor_named, receiver_method, static_use_named, value_named}
 use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
-use super::unify::Holes;
+use super::unify::{Holes, Mark};
 use super::{binding, call, control, instance, matching, method, path_call, variant};
+use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
 use crate::check::SPECIAL_FORM_HEADS;
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -63,12 +64,12 @@ impl<'a> Cx<'a> {
     /// What the form's inference knows now, to go back to with
     /// [`Self::restore`] after checking something only to look at it.
     pub(crate) fn snapshot(&self) -> Snapshot {
-        Snapshot { holes: self.holes.borrow().clone(), undecided: self.undecided.borrow().len() }
+        Snapshot { holes: self.holes.borrow().mark(), undecided: self.undecided.borrow().len() }
     }
 
     /// Forget what the inference learned since `snap` was taken.
     pub(crate) fn restore(&self, snap: Snapshot) {
-        *self.holes.borrow_mut() = snap.holes;
+        self.holes.borrow_mut().rollback(snap.holes);
         self.undecided.borrow_mut().truncate(snap.undecided);
     }
 
@@ -104,7 +105,7 @@ impl<'a> Cx<'a> {
 
 /// What [`Cx::snapshot`] keeps.
 pub(crate) struct Snapshot {
-    holes: Holes,
+    holes: Mark,
     undecided: usize,
 }
 
@@ -123,7 +124,7 @@ pub(crate) fn check_expr(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     let loc = heap.cons_loc(v).or(loc);
-    let typed = check_form(cx, heap, locals, v, expected, loc.clone()).and_then(|t| {
+    let typed = typelisp_mem::grow_stack(|| check_form(cx, heap, locals, v, expected, loc.clone())).and_then(|t| {
         agree(cx, &t.ty, expected)?;
         Ok(t)
     });
@@ -206,11 +207,17 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     if SPECIAL_FORM_HEADS.contains(&head.well_known()) {
         unimplemented!("typeck: the special form `{}`", heap.symbol_spelling(head))
     }
+    if TOPLEVEL_FORM_HEADS.contains(&head.well_known()) {
+        unimplemented!("typeck: the form `{}`", heap.symbol_spelling(head))
+    }
     let spelling = heap.symbol_spelling(head);
     if locals.lookup(head).is_some() {
         unimplemented!("typeck: calling the local `{}`", spelling)
     }
     let value = value_named(cx.reg, cx.ns, head);
+    if call_sugar(head.name(), args.len(), || matches!(value, Some((_, ValueDef::Fn(_))))).is_some() {
+        unimplemented!("typeck: the call sugar `({} ...)` with {} argument(s)", spelling, args.len())
+    }
     if let Some((_, ValueDef::Macro)) = value {
         unimplemented!("typeck: expanding the macro `{}`", spelling)
     }
@@ -218,20 +225,26 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         return variant::check_variant(cx, heap, locals, owner, variant, args, expected, loc);
     }
     if let Some((owner, name)) = static_use_named(cx.reg, cx.ns, head) {
-        let def = cx.reg.methods.get(&(owner, name)).expect("a `use` brings in a defined static method");
+        let def = cx.reg.method(&owner, name).expect("a `use` brings in a defined static method");
         return method::check_method_call(cx, heap, locals, owner, name, def, None, args, expected, loc);
     }
-    if let Some((first, first_loc)) = args.first() {
-        let member = member_symbol(spelling);
+    let member = member_symbol(spelling);
+    if let Some((first, first_loc)) = args.first().filter(|_| cx.reg.has_method_named(member)) {
         // The receiver is checked to find its type's method. When it has
         // none, what that check solved is forgotten: the argument is checked
         // again where the function's parameter type is expected.
         let saved = cx.snapshot();
-        if let Ok(receiver) = check_expr(cx, heap, locals, *first, None, first_loc.clone()) {
-            let ty = cx.resolve(&receiver.ty);
-            if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &ty, member) {
-                return method::check_method_call(cx, heap, locals, owner, member, def, Some(receiver), &args[1..], expected, loc);
+        match check_expr(cx, heap, locals, *first, None, first_loc.clone()) {
+            Ok(receiver) => {
+                let ty = cx.resolve(&receiver.ty);
+                if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &ty, member) {
+                    return method::check_method_call(cx, heap, locals, owner, member, def, Some(receiver), &args[1..], expected, loc);
+                }
             }
+            // With no function of the name either, the receiver's own error
+            // is what is wrong with the call.
+            Err(e) if value.is_none() => return Err(e),
+            Err(_) => {}
         }
         cx.restore(saved);
     }
@@ -247,9 +260,15 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
 /// solving holes to make it so. `!` is every type.
 pub(crate) fn agree(cx: &Cx, found: &Type, expected: Option<&Type>) -> Result<(), Error> {
     let Some(e) = expected else { return Ok(()) };
-    cx.holes.borrow_mut().unify(e, found).map_err(|m| {
-        Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", m.left, m.right))
-    })
+    let unified = cx.holes.borrow_mut().unify(e, found);
+    let Err(m) = unified else { return Ok(()) };
+    // Where a trait object or a `Sexpr` is expected, the current checker
+    // widens a value of another type into one.
+    let wanted = cx.resolve(e);
+    if matches!(wanted, Type::Dyn(..)) || is_sexpr_expectation(&wanted) {
+        unimplemented!("typeck: a `{}` widened to the `{}` expected", cx.resolve(found), wanted)
+    }
+    Err(Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", m.left, m.right)))
 }
 
 /// `forms` checked in order, the last where `expected` is expected: the

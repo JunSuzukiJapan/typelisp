@@ -111,7 +111,7 @@ pub(crate) fn define_method(
         unimplemented!("typeck: a method written for one instantiation of a generic type")
     }
     let sig = FnDef { public, ..FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
-    reg.methods.insert((owner, method), MethodDef { sig, instance, home, inst_args: None });
+    reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
 
     let mut body = {
         let cx = Cx::new(reg, ns, scope, self_type);

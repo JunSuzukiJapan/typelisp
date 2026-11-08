@@ -39,8 +39,8 @@ pub(crate) fn check_path_call(
             if let Some(variant) = def.variant_index(name) {
                 return check_variant(cx, heap, locals, owner, variant, args, expected, loc);
             }
-            let Some(method) = cx.reg.methods.get(&(owner, name)) else {
-                if cx.reg.inst_methods.get(&(owner, name)).is_some() {
+            let Some(method) = cx.reg.method(&owner, name) else {
+                if cx.reg.has_inst_method(&owner, name) {
                     unimplemented!("typeck: `{}`, a method written for one instantiation, called through its type", path_spelling(heap, id))
                 }
                 return Err(Error::TypeError(format!("`{}` has no variant or method `{}`", owner, member.name())));

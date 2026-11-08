@@ -7,7 +7,7 @@
 //! argument.
 
 use crate::types::{Path, Type};
-use crate::{Error, Heap, Loc, Value};
+use crate::{wk, Error, Heap, Loc, Value};
 
 use super::expr::{agree, check_expr, Cx};
 use super::locals::Locals;
@@ -27,6 +27,15 @@ pub(crate) fn check_call(
     expected: Option<&Type>,
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
+    // `(intern NAME)`: CL's current package is the module the call is
+    // written in, which only the checker knows, so it becomes the second
+    // argument — the module's path as `intern` reads one.
+    if def.builtin && args.len() == 1 && path.std_builtin().is_some_and(|s| s.is(wk::INTERN)) {
+        let module = heap.alloc_string(typelisp_mem::symbols::ns_path(cx.ns).join("::"));
+        heap.push_root(module);
+        let both = [args[0].clone(), (module, None)];
+        return check_call(cx, heap, locals, path, def, &both, expected, loc);
+    }
     if def.rest.is_some() || !def.optionals.is_empty() || !def.keys.is_empty() || !def.bounds.is_empty() {
         unimplemented!("typeck: calling {}, which takes &rest, &optional or &key parameters or has :where bounds", path)
     }

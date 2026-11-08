@@ -7,8 +7,9 @@
 //! fields matched by the patterns; the variant is named bare, since the
 //! type is the one being matched.
 
+use crate::check::analyze::is_sexpr_expectation;
 use crate::check::registry::AdtKind;
-use crate::types::{path_is_builtin, Path, Type};
+use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -85,7 +86,7 @@ fn check_pattern(cx: &Cx, heap: &Heap, expected: &Type, v: Value, binds: &mut Bi
 /// `None` when `expected` is not a sum type or has no such variant.
 fn bare_variant(cx: &Cx, heap: &Heap, expected: &Type, id: SymRef, binds: &mut Binds) -> Result<Option<Pat>, Error> {
     let ty = cx.resolve(expected);
-    if is_sexpr_sugar(&ty) {
+    if is_sexpr_expectation(&ty) {
         // Against a `Sexpr`, a type's or a variant's name is a downcast.
         let names_type = find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))).is_some();
         if names_type || ctor_named(cx.reg, cx.ns, id).is_some() {
@@ -99,18 +100,11 @@ fn bare_variant(cx: &Cx, heap: &Heap, expected: &Type, id: SymRef, binds: &mut B
     variant_pattern(cx, heap, *owner, targs.clone(), def, variant, &[], binds).map(Some)
 }
 
-/// Whether a pattern against `ty` (resolved) is read as one against a
-/// `Sexpr`'s shapes: `ty` is `Sexpr` or `Option<Sexpr>`.
-fn is_sexpr_sugar(ty: &Type) -> bool {
-    let sexpr = |t: &Type| matches!(t, Type::Named(p, _) if path_is_builtin(p, typelisp_mem::wk::SEXPR));
-    sexpr(ty) || matches!(ty, Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::OPTION) && args.len() == 1 && sexpr(&args[0]))
-}
-
 /// The sum type a pattern `what` (for the message) matches a value of, with
 /// its type arguments and definition.
 fn sum_type<'r>(cx: &Cx<'r>, expected: &Type, what: impl Fn() -> String) -> Result<(Path, Vec<Type>, &'r TypeDef), Error> {
     let ty = cx.resolve(expected);
-    if is_sexpr_sugar(&ty) {
+    if is_sexpr_expectation(&ty) {
         unimplemented!("typeck: matching a `Sexpr`")
     }
     if let Type::Named(p, args) = &ty {
