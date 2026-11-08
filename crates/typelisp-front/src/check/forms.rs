@@ -51,7 +51,7 @@ pub(crate) fn var_form(heap: &mut Heap, name: SymRef) -> Result<Value, Error> {
 }
 
 /// `(set SYM FORM)` — assignment to a local binding.
-pub(super) fn set_form(heap: &mut Heap, name: SymRef, value: Value) -> Result<Value, Error> {
+pub(crate) fn set_form(heap: &mut Heap, name: SymRef, value: Value) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     f.push(Value::Symbol(name));
     f.push(value);

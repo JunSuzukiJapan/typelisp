@@ -19,6 +19,7 @@
 //! - [`control`]: `if`.
 //! - [`matching`]: `match`.
 //! - [`the`]: `the`.
+//! - [`setf`]: `setf`, assigning a place.
 //! - [`format`]: `format`, `print` and `println`.
 //! - [`sexpr_value`]: a value held as a `Sexpr`, encoded by its type.
 //! - [`pattern`]: a `match` arm's pattern.
@@ -69,6 +70,7 @@ pub(crate) mod pattern;
 pub(crate) mod registry;
 pub(crate) mod resolve;
 pub(crate) mod scope;
+pub(crate) mod setf;
 pub(crate) mod sexpr_value;
 pub(crate) mod subst;
 pub(crate) mod the;

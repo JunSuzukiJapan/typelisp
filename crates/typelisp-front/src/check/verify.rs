@@ -251,7 +251,7 @@ pub(super) fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) ->
 /// keyword cannot be one: CL makes every keyword a constant variable naming
 /// itself, so it can be neither bound nor assigned, and no definition takes
 /// its name either.
-pub(super) fn bound_name(id: typelisp_mem::SymRef, who: &str) -> Result<String, Error> {
+pub(crate) fn bound_name(id: typelisp_mem::SymRef, who: &str) -> Result<String, Error> {
     bound_symbol(id, who).map(|id| id.spelling().to_string())
 }
 

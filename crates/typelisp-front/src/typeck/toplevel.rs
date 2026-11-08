@@ -675,6 +675,28 @@ mod tests {
         assert_eq!(check_ok("(defun show<T> ((x T)) string (format false \"<~a>\" x))\n(show #\\q)"), Type::Str);
     }
 
+    /// `setf` of a local or a global is the value assigned; a constant is
+    /// not assigned.
+    #[test]
+    fn setf_assigns_a_variable() {
+        assert_eq!(run("(let ((x 1)) (setf x 5) x)").1, Value::Int(5));
+        assert_eq!(run("(defvar (g u8) 1)\n(setf g 7)\ng").1, Value::Int(7));
+        let msg = check_err("(defconstant (c i32) 1)\n(setf c 2)");
+        assert!(msg.contains("setf: cannot assign to constant `c`"), "{}", msg);
+        let msg = check_err("(let ((x 1)) (setf x true))");
+        assert!(msg.contains("expected `int`, found `bool`"), "{}", msg);
+    }
+
+    /// `setf` of a field goes through the struct's setter, at the
+    /// receiver's type arguments.
+    #[test]
+    fn setf_assigns_a_field() {
+        let src = "(defstruct Q<T> (y T))\n(let ((q (make-instance 'Q :y #\\a))) (setf q::y #\\b) q::y)";
+        assert_eq!(run(src).1, Value::Char('b'));
+        let msg = check_err("(defstruct P (x i32))\n(let ((p (make-instance 'P :x 1))) (setf p::z 2))");
+        assert!(msg.contains("has no field `z`"), "{}", msg);
+    }
+
     /// A definition whose checking fails is not kept (plan 4.4): calling it
     /// afterwards is not a call to anything this checker defined.
     #[test]

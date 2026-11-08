@@ -122,6 +122,15 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let field_ty = lw.settle(field_ty);
             lw.reg.field_set_form(heap, obj, *index, &field_ty, value)
         }
+        Node::Set { name, value } => {
+            let value = lower_rooted(heap, lw, value)?;
+            forms::set_form(heap, *name, value)
+        }
+        Node::SetGlobal { path, value } => {
+            let ty = lw.settle(&t.ty);
+            let value = lower_rooted(heap, lw, value)?;
+            lw.reg.set_global_form(heap, path, &ty, value)
+        }
         Node::Let { binds, body } => {
             let mut lowered = Vec::with_capacity(binds.len());
             for (name, t) in binds {

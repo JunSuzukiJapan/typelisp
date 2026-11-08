@@ -31,7 +31,7 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
             let path = Path::of_symbol(ns, sym);
             let var = m.vars.get_sym(sym).expect("a key of the table");
             let ty = convert(&var.ty, &HashMap::new(), &|| format!("the global {}", path));
-            new.values.insert(path, ValueDef::Var(VarDef { ty, public: var.public }));
+            new.values.insert(path, ValueDef::Var(VarDef { ty, public: var.public, mutable: var.mutable }));
         }
         for sym in m.macros.symbols() {
             let def = m.macros.get_sym(sym).expect("a key of the table");

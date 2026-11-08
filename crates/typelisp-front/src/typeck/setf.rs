@@ -1,0 +1,136 @@
+//! `(setf place value)`: assign `value` to `place`.
+//!
+//! A place is a variable, a field `var::field`, or a call `(accessor recv
+//! key...)`. A field's place assigns through the struct's `set-field`
+//! method, and a call's through the receiver's type's `set-accessor` method
+//! (`set` too, for `get`): what a place means is decided by the receiver's
+//! type, as a method is, so two types may give the same accessor unrelated
+//! setters. A variable's assignment is the value assigned; a setter's is
+//! what the setter returns.
+
+use crate::check::bound_name;
+use crate::types::{path_spelling, tuple_arity, Path, Type};
+use crate::{wk, Error, Heap, Loc, Value};
+use typelisp_mem::symbols::member_symbol;
+use typelisp_mem::SymRef;
+
+use super::expr::{check_expr, Cx};
+use super::locals::Locals;
+use super::method::check_method_call;
+use super::registry::{MethodDef, ValueDef};
+use super::resolve::{sees, value_named};
+use super::tree::{Node, Typed};
+
+/// `(setf place value)` — `args` without the `setf`.
+pub(crate) fn check_setf(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    let [(place, _), (value, value_loc)] = args else {
+        return Err(Error::TypeError("setf: (setf place value)".into()));
+    };
+    let value = (*value, value_loc.clone());
+    match *place {
+        Value::Path(id) => Err(Error::TypeError(format!("setf: `{}` is not a place", path_spelling(heap, id)))),
+        Value::Cons(_) => {
+            let items = heap.list_to_vec_locs(*place).map_err(|_| Error::TypeError("setf: place must be a proper list".into()))?;
+            match items.split_first() {
+                Some(((Value::Symbol(head), _), [(Value::Symbol(recv), _), (Value::Symbol(field), _)])) if head.is(wk::VALUE_MEMBER) => {
+                    set_field(cx, heap, locals, *recv, *field, value, loc)
+                }
+                Some(((Value::Symbol(head), _), rest)) => set_call_place(cx, heap, locals, *head, rest, value, loc),
+                Some(_) => Err(Error::TypeError("setf: place's head must be a function name".into())),
+                None => Err(Error::TypeError("setf: empty place".into())),
+            }
+        }
+        Value::Symbol(name) => set_variable(cx, heap, locals, name, value, loc),
+        _ => Err(Error::TypeError("setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into())),
+    }
+}
+
+/// `(setf name value)`: a local, or a global variable not a constant.
+fn set_variable(cx: &Cx, heap: &mut Heap, locals: &Locals, name: SymRef, (value, value_loc): (Value, Option<Loc>), loc: Option<Loc>) -> Result<Typed, Error> {
+    let spelling = bound_name(name, "setf")?;
+    if let Some(ty) = locals.lookup(name) {
+        let ty = ty.clone();
+        let value = check_expr(cx, heap, locals, value, Some(&ty), value_loc)?;
+        return Ok(Typed { node: Node::Set { name, value: Box::new(value) }, ty, loc });
+    }
+    match value_named(cx.reg, cx.ns, name) {
+        Some((path, ValueDef::Var(var))) => {
+            let value = check_expr(cx, heap, locals, value, Some(&var.ty), value_loc)?;
+            if !var.mutable {
+                return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", spelling)));
+            }
+            Ok(Typed { node: Node::SetGlobal { path, value: Box::new(value) }, ty: var.ty.clone(), loc })
+        }
+        _ => Err(Error::TypeError(format!("setf: unbound variable: {}", spelling))),
+    }
+}
+
+/// `(setf recv::field value)`: the struct's `set-field`, `recv` being a
+/// local or a global variable.
+fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: SymRef, value: (Value, Option<Loc>), loc: Option<Loc>) -> Result<Typed, Error> {
+    let obj = match locals.lookup(recv) {
+        Some(ty) => Typed { node: Node::Local { name: recv }, ty: cx.resolve(ty), loc: None },
+        None => match value_named(cx.reg, cx.ns, recv) {
+            Some((path, ValueDef::Var(var))) => Typed { node: Node::Global { path }, ty: var.ty.clone(), loc: None },
+            _ => return Err(Error::TypeError(format!("setf: unbound variable: {}", recv.name()))),
+        },
+    };
+    let owner = match &obj.ty {
+        Type::PtrTo(_) => unimplemented!("typeck: `setf` of a C struct's field through a pointer"),
+        Type::Named(p, _) if tuple_arity(p).is_some() => unimplemented!("typeck: `setf` of a tuple's element"),
+        Type::Named(p, _) => *p,
+        _ => return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv.name(), field.name()))),
+    };
+    let setter = member_symbol(&format!("set-{}", field.name()));
+    let Some(def) = setter_of(cx, &owner, setter) else {
+        return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", owner, field.name())));
+    };
+    check_method_call(cx, heap, locals, owner, setter, def, Some(obj), std::slice::from_ref(&value), None, loc)
+}
+
+/// `(setf (accessor recv key...) value)`: the receiver's type's
+/// `set-accessor`, or `set` for `get`, called with the keys and the value.
+fn set_call_place(
+    cx: &Cx,
+    heap: &mut Heap,
+    locals: &Locals,
+    accessor: SymRef,
+    rest: &[(Value, Option<Loc>)],
+    value: (Value, Option<Loc>),
+    loc: Option<Loc>,
+) -> Result<Typed, Error> {
+    let spelling = heap.symbol_spelling(accessor).to_string();
+    if spelling == "c-deref" || spelling == "aref" {
+        unimplemented!("typeck: `setf` of a `({} ...)` place", spelling)
+    }
+    let Some(((recv, recv_loc), keys)) = rest.split_first() else {
+        return Err(Error::TypeError(format!("setf: `({} ...)` place needs a receiver argument", spelling)));
+    };
+    let recv = check_expr(cx, heap, locals, *recv, None, recv_loc.clone())?;
+    // A number literal no type decided yet is read as its default, as a
+    // call's receiver is.
+    let Type::Named(owner, _) = cx.with_default(&recv.ty) else {
+        return Err(Error::TypeError(format!("setf: `{}` has no settable accessor `{}`", cx.with_default(&recv.ty), spelling)));
+    };
+    let mut candidates = vec![member_symbol(&format!("set-{}", spelling))];
+    if spelling == "get" {
+        candidates.push(member_symbol("set"));
+    }
+    let Some((setter, def)) = candidates.iter().find_map(|name| setter_of(cx, &owner, *name).map(|def| (*name, def))) else {
+        let tried = candidates.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(" or ");
+        return Err(Error::TypeError(format!("setf: `{}` has no setter for `{}` (looked for {})", owner, spelling, tried)));
+    };
+    let args: Vec<(Value, Option<Loc>)> = keys.iter().cloned().chain([value]).collect();
+    check_method_call(cx, heap, locals, owner, setter, def, Some(recv), &args, None, loc)
+}
+
+/// The instance method `name` of `owner`, when it is one this module sees.
+fn setter_of<'r>(cx: &Cx<'r>, owner: &Path, name: SymRef) -> Option<&'r MethodDef> {
+    let def = match cx.reg.method(owner, name) {
+        Some(def) => def,
+        None if cx.reg.has_inst_method(owner, name) => unimplemented!("typeck: `setf` through `{}::{}`, a method written for one instantiation", owner, name),
+        None => return None,
+    };
+    let home = def.home.map_or(owner.ns(), |h| h.ns());
+    (def.instance && (def.sig.public || sees(cx.ns, home))).then_some(def)
+}

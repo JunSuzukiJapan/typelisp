@@ -149,6 +149,8 @@ impl ValueDef {
 pub(crate) struct VarDef {
     pub(crate) ty: Type,
     pub(crate) public: bool,
+    /// Whether `setf` may assign it: not a `defconstant`.
+    pub(crate) mutable: bool,
 }
 
 /// A generic function's or method's checked body, kept to be specialized:

@@ -21,6 +21,7 @@ pub mod loop_dsl;
 pub mod locate;
 pub mod semantic;
 
+pub(crate) use verify::bound_name;
 pub use resolved::{CompileTarget, Pattern};
 pub use registry::{AdtDef, AdtKind, AssocFn, CField, CStructDef, DefLocs, Docs, FnSig, MacroDef, Namespace, Registry, TypeAlias, VarInfo, Variant};
 pub use analyze::{Checker, MacroExpander, MacroLambda, RedefPolicy, TestCase, TestForms, TestReturn, TopLevelForm, MONO_BUNDLE_MODULE, SPECIAL_FORM_HEADS};

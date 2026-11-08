@@ -46,6 +46,10 @@ pub(crate) enum Node {
     /// Set the field `index` (declared `field_ty` at the struct's arguments)
     /// of the struct `obj` to `value`.
     FieldSet { obj: Box<Typed>, index: usize, field_ty: Type, value: Box<Typed> },
+    /// `(setf name value)` of the local `name`.
+    Set { name: SymRef, value: Box<Typed> },
+    /// `(setf name value)` of the global variable `path`.
+    SetGlobal { path: Path, value: Box<Typed> },
     /// `let`: the bindings, each checked outside all of them, then the body
     /// in order. With no bindings it is `progn`.
     Let { binds: Vec<(SymRef, Typed)>, body: Vec<Typed> },
@@ -96,7 +100,9 @@ impl Typed {
         match &self.node {
             Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter().collect(),
-            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } => vec![&**obj],
+            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } | Node::Set { value: obj, .. } | Node::SetGlobal { value: obj, .. } => {
+                vec![&**obj]
+            }
             Node::FieldSet { obj, value, .. } => vec![&**obj, &**value],
             Node::Let { binds, body } => binds.iter().map(|(_, t)| t).chain(body).collect(),
             Node::If { cond, then, els } => vec![&**cond, &**then, &**els],
@@ -109,7 +115,9 @@ impl Typed {
         match &mut self.node {
             Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter_mut().collect(),
-            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } => vec![&mut **obj],
+            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } | Node::Set { value: obj, .. } | Node::SetGlobal { value: obj, .. } => {
+                vec![&mut **obj]
+            }
             Node::FieldSet { obj, value, .. } => vec![&mut **obj, &mut **value],
             Node::Let { binds, body } => binds.iter_mut().map(|(_, t)| t).chain(body.iter_mut()).collect(),
             Node::If { cond, then, els } => vec![&mut **cond, &mut **then, &mut **els],
@@ -150,6 +158,8 @@ impl Typed {
                 | Node::Global { .. }
                 | Node::FieldGet { .. }
                 | Node::AsSexpr { .. }
+                | Node::Set { .. }
+                | Node::SetGlobal { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

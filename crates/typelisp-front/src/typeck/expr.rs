@@ -17,7 +17,7 @@ use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
-use super::{binding, call, control, format, instance, macros, matching, method, path_call, the, variant};
+use super::{binding, call, control, format, instance, macros, matching, method, path_call, setf, the, variant};
 use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -286,6 +286,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
         wk::FORMAT => return format::check_format(cx, heap, locals, args, loc),
         wk::PRINT | wk::PRINTLN => return format::check_print(cx, heap, locals, head.well_known(), args, loc),
+        wk::SETF => return setf::check_setf(cx, heap, locals, args, loc),
         wk::THE => return the::check_the(cx, heap, locals, args),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
         wk::VALUE_MEMBER => {
