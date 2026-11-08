@@ -45,7 +45,7 @@ use crate::types::{Path, Type};
 /// impossible to forget at the next one; the extra root-stack entry on the
 /// ordinary path costs nothing, since `check_form_at`'s `truncate_roots`
 /// releases them all at once regardless of how many there were.
-pub(super) fn var_form(heap: &mut Heap, name: SymRef) -> Result<Value, Error> {
+pub(crate) fn var_form(heap: &mut Heap, name: SymRef) -> Result<Value, Error> {
     let form = core::tagged(heap, wk::VAR, &[Value::Symbol(name)])?;
     Ok(rooted(heap, form))
 }
@@ -59,7 +59,7 @@ pub(super) fn set_form(heap: &mut Heap, name: SymRef, value: Value) -> Result<Va
 }
 
 /// `(if C T E)`.
-pub(super) fn if_form(heap: &mut Heap, cond: Value, then: Value, els: Value) -> Result<Value, Error> {
+pub(crate) fn if_form(heap: &mut Heap, cond: Value, then: Value, els: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::IF, &[cond, then, els])
 }
 

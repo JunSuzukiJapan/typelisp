@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use typelisp_mem::{wk, NsId, SymRef};
+use typelisp_mem::{NsId, SymRef};
 
 use crate::{Error, Loc, Path, Type, Value};
 use super::registry::{AssocFn, Namespace, Registry, TraitBound, TypeAlias, VarInfo};
@@ -138,7 +138,7 @@ impl Env {
     /// makes this the one place a reserved name can be refused.
     pub(super) fn extended_with_locs(&self, binds: Vec<(SymRef, Type, Option<Loc>)>) -> Result<Env, Error> {
         for (name, _, _) in &binds {
-            if is_reserved_name(*name) {
+            if crate::typeck::locals::is_reserved_name(*name) {
                 return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
             }
         }
@@ -152,23 +152,6 @@ impl Env {
     pub(super) fn with_bounds(&self, bounds: BTreeMap<String, Vec<TraitBound>>) -> Env {
         Env { vars: self.vars.clone(), bounds: std::rc::Rc::new(bounds) }
     }
-}
-
-/// Names no binding may take.
-///
-/// `task` is always a special form in head position, so a variable called
-/// `task` could be bound but never called — a name that silently does nothing
-/// is worse than a rejected one. `thread` is `task`'s twin, closed for the
-/// same reason.
-///
-/// The other special forms are *not* here. `(let ((if f)) ...)` has been legal
-/// since the beginning and the prelude and tests lean on names like `list` and
-/// `format` being ordinary words; closing that is a separate, breaking change.
-/// `task` and `thread` were closed when they arrived, before anything had the
-/// chance to depend on them (`task` replaced `go` on 2026-09-25, when no
-/// program used `task` as a name).
-pub(super) fn is_reserved_name(name: SymRef) -> bool {
-    name.is(wk::TASK) || name.is(wk::THREAD)
 }
 
 /// See the module documentation.

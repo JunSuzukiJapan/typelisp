@@ -13,7 +13,7 @@ pub mod repr;
 pub mod registry;
 pub mod members;
 mod info;
-mod lower;
+pub(crate) mod lower;
 mod verify;
 pub mod analyze;
 mod fold;

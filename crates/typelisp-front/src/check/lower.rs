@@ -21,9 +21,9 @@ use super::{fold, forms};
 
 /// A child already lowered: its type, for the representation a builder
 /// writes beside it, and its form.
-pub(super) struct Arg<'a> {
-    pub ty: &'a Type,
-    pub form: Value,
+pub(crate) struct Arg<'a> {
+    pub(crate) ty: &'a Type,
+    pub(crate) form: Value,
 }
 
 /// `c`'s core form, its children lowered first.
