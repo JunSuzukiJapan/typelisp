@@ -216,7 +216,7 @@ fn mentions_hole(ty: &Type, n: u32) -> bool {
 }
 
 /// Call `f` on `ty` and every type inside it.
-fn walk(ty: &Type, f: &mut impl FnMut(&Type)) {
+pub(crate) fn walk(ty: &Type, f: &mut impl FnMut(&Type)) {
     f(ty);
     match ty {
         Type::Named(_, ts) | Type::Dyn(_, ts) => ts.iter().for_each(|t| walk(t, f)),

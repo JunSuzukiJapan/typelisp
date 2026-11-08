@@ -1,7 +1,7 @@
 //! A call to a method: `(name receiver arg...)`, the instance method found
 //! on the receiver's type, or `(Type::name arg...)`, a static method.
 
-use crate::types::{Path, Type};
+use crate::types::{Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
@@ -29,9 +29,6 @@ pub(crate) fn check_method_call(
     let sig = &def.sig;
     if sig.rest.is_some() || !sig.optionals.is_empty() || !sig.keys.is_empty() || !sig.bounds.is_empty() {
         unimplemented!("typeck: calling {}::{}, which takes &rest, &optional or &key parameters or has :where bounds", owner, method.name())
-    }
-    if !sig.type_params.is_empty() && sig.builtin {
-        unimplemented!("typeck: calling the built-in generic method {}::{} (built-in generic methods are not specialized yet)", owner, method.name())
     }
     let given = rest.len() + usize::from(receiver.is_some());
     if given != sig.params.len() {
@@ -73,15 +70,23 @@ pub(crate) fn check_method_call(
     let ret = subst.apply(&sig.ret);
     agree(cx, &ret, expected)?;
     let targs: Vec<Type> = sig.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();
-    for (p, t) in sig.type_params.iter().zip(&targs) {
-        let what = format!(
-            "{}::{}: cannot infer type parameter `{}` — no argument or expected type decides it",
-            owner,
-            method.name(),
-            p.name.name()
-        );
+    // The type's parameters come first, then the method's own.
+    let owner_params = cx.reg.type_def(&owner).map_or(0, |d| d.params.len());
+    for (i, (p, t)) in sig.type_params.iter().zip(&targs).enumerate() {
+        // A builtin whose signature never mentions `p` is not affected by
+        // it: it has no body, and nothing it is passed or returns carries
+        // `p` (`Thread::current-id`, a static function of `Thread<T>`).
+        if sig.builtin && !sig.params.iter().chain([&sig.ret]).any(|ty| mentions(ty, p)) {
+            continue;
+        }
+        let noun = if i < owner_params { "type argument" } else { "type parameter" };
+        let what = format!("cannot infer {} `{}` for `{}::{}`", noun, p.name.name(), owner, method.name());
         cx.must_decide(t.clone(), what, loc.clone());
     }
+    // A Rust builtin has no body to specialize: one entry point serves every
+    // instantiation, and the result's type, which the lowering writes,
+    // carries the instantiation (`Vector::new`'s `Vector<T>`).
+    let targs = if sig.builtin { Vec::new() } else { targs };
     // A method written for one instantiation has code under that
     // instantiation's name.
     let method = match &def.inst_args {
@@ -89,6 +94,13 @@ pub(crate) fn check_method_call(
         None => method,
     };
     Ok(Typed { node: Node::MethodCall { owner, method, instance, targs, args }, ty: ret, loc })
+}
+
+/// Whether the type `ty` mentions the type parameter `p`.
+fn mentions(ty: &Type, p: &TypeParam) -> bool {
+    let mut found = false;
+    super::unify::walk(ty, &mut |t| found |= matches!(t, Type::Param(q) if q == p));
+    found
 }
 
 /// Whether `(op receiver other)` is an operator of `int` or `ratio`, whose

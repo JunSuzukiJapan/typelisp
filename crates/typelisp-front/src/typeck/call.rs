@@ -67,7 +67,7 @@ pub(crate) fn check_call(
     // instantiation, as in the current checker.
     let call_targs = if def.builtin { Vec::new() } else { targs.clone() };
     for (p, t) in def.type_params.iter().zip(&targs) {
-        let what = format!("{}: cannot infer type parameter `{}` — no argument or expected type decides it", path, p.name.name());
+        let what = format!("cannot infer type parameter `{}` for `{}`", p.name.name(), path);
         cx.must_decide(t.clone(), what, loc.clone());
     }
     Ok(Typed { node: Node::Call { path, targs: call_targs, args: checked }, ty: ret, loc })

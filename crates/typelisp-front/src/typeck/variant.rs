@@ -47,7 +47,7 @@ pub(crate) fn check_variant(
         checked.push(check_expr(cx, heap, locals, *arg, Some(field_ty), arg_loc.clone())?);
     }
     for (p, t) in def.params.iter().zip(&targs) {
-        let what = format!("{}::{}: cannot infer type argument `{}` — no value or expected type decides it", owner, v.name, p.name.name());
+        let what = format!("cannot infer type argument `{}` for `{}`", p.name.name(), owner);
         cx.must_decide(t.clone(), what, loc.clone());
     }
     Ok(Typed { node: Node::Construct { owner, targs, variant, mutable: false, field_tys, args: checked }, ty, loc })
