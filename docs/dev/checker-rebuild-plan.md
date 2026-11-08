@@ -325,6 +325,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - `use`（`import`・`shadowing-import`・`pub use` を含む）。値・型・トレイト・別名・型の変種と静的メソッド・モジュールを名指しできる。
 - `defvar`・`defparameter`・`defconstant`（型の宣言が必須）とグローバル変数の読み出し。`the`。
 - `format`（宛先が真偽値のとき）・`print`・`println`。引数は、それぞれの型のまま `Sexpr` のリストにして渡す。どう `Sexpr` にするかは lower で、決まった型から選ぶ（`typeck::sexpr_value`）。制御文字列の指令と引数の型は、フォームをチェックし終えたところで照らし合わせる。
+- 型の書き方：関数の型 `(fn (A &rest B) R)`、`::` のパス、リストの形 `(Name A)`、タプルの型 `#{A B}`。
 - `deftrait`（`typeck::deftrait`）と、型へのトレイトの `impl`（`typeck::trait_impl`）。`Self` と関連型はトレイトの型パラメータで、`Self` が 0 番、`k` 番目の関連型が `1 + k` 番。`impl` の各メソッドは型のメソッドとして登録し、シグネチャはトレイトのものの `Self` と関連型を位置で置き換えたものと一致させる。`impl` のメソッドの型の中では、関連型の名前はその `impl` が決めた型を表す（`TypeScope::name_types`）。スーパートレイトの `impl` が先にあることも確かめる。
 - 期待する型への広げ方（`typeck::widen`）。`Sexpr` が期待されるところへは、`Sexpr` の符号がある値を広げる（`Symbol` と `Sexpr` はそのまま、ほかは `AsSexpr`）。`Option<Sexpr>` は `Sexpr` に狭めない。`rational` へは `int` と `ratio`。呼び出しの結果の型を先に期待と合わせるところでは、広げる先の型なら食い違いをエラーにせず、値をチェックしたところで決める。
 - `quote`。記号は `Symbol`、ほかのデータは `Option<Sexpr>`。
@@ -339,7 +340,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 
 新しいチェッカーがこれらに出会うと `unimplemented!()` で止まる。切り替えまでに、すべてを扱えるようにする。
 
-- 名前と型：`deftype`、`defstruct` の既定値と付属、関数の型 `(fn ...)`、C のワード（`ptr`・`c-long`・`c-ulong`）と `unsafe`。
+- 名前と型：`deftype`、`defstruct` の既定値と付属、トレイトオブジェクトの型 `:dyn`、C のポインタ `(ptr ...)` と C のワード（`ptr`・`c-long`・`c-ulong`）と `unsafe`。
 - 定義：`defmacro`、トレイトの既定の本体・`:where` を付けた `impl`・1 つの具体化のための `impl`・関連型を固定したスーパートレイト・ブランケット `impl`・`:where` の境界のある呼び出しとジェネリックな本体での境界のメソッド・`:dyn`、`defsignature`、`defffi`、`def-c-struct`、`module`・`pub`、ドキュメント文字列、標準ライブラリの中での定義（名前がモジュールをまたいで 1 つになる規則）。
 - `match`：値のパターン、`:when`、`:or`、`Sexpr` の形とダウンキャスト、構造体のパターン、トレイトオブジェクトの match。
 - `defun` の付属：ドキュメント文字列、`&optional`・`&rest`・`&key`、`:where` の境界。

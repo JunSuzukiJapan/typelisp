@@ -1,12 +1,12 @@
 //! Reading a written type.
 
-use crate::types::{is_type_application, scalar_of_symbol, Path, Type};
-use crate::{Error, Heap, Value};
+use crate::types::{is_dyn_form, is_type_application, scalar_of_symbol, scalar_type, tuple_path, written_path, Path, Type};
+use crate::{wk, Error, Heap, Value};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
-use super::registry::{Registry, TypeEntry};
-use super::resolve::find_named;
+use super::registry::{Registry, TraitDef, TypeDef, TypeEntry};
+use super::resolve::{find_named, sees};
 use super::scope::TypeScope;
 
 /// Where a type is read: the definitions, the module, the type parameters
@@ -23,7 +23,9 @@ pub(crate) struct TypeCx<'a> {
 /// A bare name is first a declared type parameter, then `Self`, then a
 /// built-in scalar type, then a type the module sees. Writing a name never declares it
 /// (`docs/dev/checker-rebuild-plan.md` 7.5). `Name<A, B>` reads as
-/// `(%type-apply Name A B)`. So far a type alias, a function type, a path
+/// `(%type-apply Name A B)`, and `(Name A B)` is the same type. A `::` path
+/// names a type in a module. `(fn (A B &rest C) R)` is a function's type
+/// and `#{A B}` a tuple's. So far a type alias, a trait object, a C pointer
 /// and the C words are not read: they are read when the checker can check
 /// what they are used for.
 pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
@@ -33,7 +35,7 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
             if let Some(t) = cx.scope.lookup_type(id) {
                 return Ok(t);
             }
-            if id.is(crate::wk::SELF_TYPE) {
+            if id.is(wk::SELF_TYPE) {
                 return match cx.self_type {
                     Some(t) => Ok(t.clone()),
                     None => Err(Error::TypeError("`Self` is the type an `impl` or a `deftrait` is for, and is written only inside one".into())),
@@ -47,31 +49,102 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
                 None => named(heap, cx, id, Vec::new()),
             }
         }
-        Value::Cons(_) if is_type_application(heap, v) => {
-            let parts = heap.list_to_vec(v)?;
-            let Some(Value::Symbol(name)) = parts.get(1) else {
-                unimplemented!("typeck: a type application whose head is a path")
-            };
-            let args = parts[2..].iter().map(|a| parse_type(heap, cx, *a)).collect::<Result<Vec<_>, _>>()?;
-            named(heap, cx, *name, args)
+        Value::Path(_) => {
+            let path = written_path(heap, cx.ns, v)?;
+            match scalar_type(&path) {
+                Some(t) => Ok(t),
+                None => at_path(cx, path, Vec::new()),
+            }
         }
-        _ => unimplemented!("typeck: a function type or a path in a type"),
+        Value::Cons(_) if is_dyn_form(heap, v) => unimplemented!("typeck: the trait object type `:dyn`"),
+        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR)) => unimplemented!("typeck: the C pointer type `(ptr ...)`"),
+        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::FN)) => fn_type(heap, cx, v),
+        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
+            Err(Error::TypeError("`Name<Args>::member` names a member of a type, not a type".to_string()))
+        }
+        Value::Cons(_) => {
+            // `(%type-apply Name A B)`, or the list spelling `(Name A B)`.
+            let parts = heap.list_to_vec(v)?;
+            let (head, args) = if is_type_application(heap, v) { (parts[1], &parts[2..]) } else { (parts[0], &parts[1..]) };
+            if args.is_empty() {
+                return Err(Error::TypeError("a type application must be (Name Arg...), with at least one argument".to_string()));
+            }
+            let args = args.iter().map(|a| parse_type(heap, cx, *a)).collect::<Result<Vec<_>, _>>()?;
+            match head {
+                Value::Symbol(name) => named(heap, cx, name, args),
+                Value::Path(_) => at_path(cx, written_path(heap, cx.ns, head)?, args),
+                other => Err(Error::TypeError(format!("a type application's head must be a plain type name, found `{:?}`", other))),
+            }
+        }
+        // `#{A B}`, written the way its values are.
+        Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
+            let n = heap.struct_field_count(id);
+            let args = (0..n).map(|i| parse_type(heap, cx, heap.struct_field(id, i))).collect::<Result<Vec<_>, _>>()?;
+            Ok(Type::Named(tuple_path(n), args))
+        }
+        other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
+    }
+}
+
+/// `(fn (A B &rest C) R)`: a function's type.
+fn fn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
+    let elems = heap.list_to_vec(v)?;
+    let [_, params, ret] = elems.as_slice() else {
+        return Err(Error::TypeError("fn type must be (fn (params) ret)".to_string()));
+    };
+    let ps = match params {
+        Value::Empty => Vec::new(),
+        Value::Cons(_) => heap.list_to_vec(*params)?,
+        _ => return Err(Error::TypeError("fn parameter list must be a list".to_string())),
+    };
+    let (fixed, rest) = match ps.iter().position(|p| matches!(p, Value::Symbol(id) if id.is(wk::REST))) {
+        Some(i) if i + 2 == ps.len() => (&ps[..i], Some(Box::new(parse_type(heap, cx, ps[i + 1])?))),
+        Some(_) => {
+            return Err(Error::TypeError(
+                "fn type: &rest must be followed by exactly one type, as the last item in the parameter list".to_string(),
+            ))
+        }
+        None => (&ps[..], None),
+    };
+    let fixed = fixed.iter().map(|p| parse_type(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
+    Ok(Type::Fn(fixed, rest, Box::new(parse_type(heap, cx, *ret)?)))
+}
+
+/// The type the path `path` names, applied to `args`. One its module does
+/// not make `pub` is not seen from another.
+fn at_path(cx: &TypeCx, path: Path, args: Vec<Type>) -> Result<Type, Error> {
+    let visible = |public: bool| public || sees(cx.ns, path.ns());
+    match cx.reg.types.get(&path) {
+        Some(entry @ TypeEntry::Type(TypeDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
+        Some(entry @ TypeEntry::Alias { public }) if visible(*public) => entry_type(path, entry, args),
+        Some(entry @ TypeEntry::Trait(TraitDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
+        Some(entry @ TypeEntry::CStruct) => entry_type(path, entry, args),
+        _ => Err(unknown_type(&path.to_string())),
     }
 }
 
 /// The type the name `id` stands for, applied to `args`.
 fn named(heap: &Heap, cx: &TypeCx, id: SymRef, args: Vec<Type>) -> Result<Type, Error> {
-    let spelling = heap.symbol_spelling(id);
-    let Some((path, entry)) = find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))) else {
-        return Err(Error::TypeError(format!(
+    match find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))) {
+        Some((path, entry)) => entry_type(path, entry, args),
+        None => Err(unknown_type(&heap.symbol_spelling(id))),
+    }
+}
+
+/// The error for a type name `spelling` that names no type here.
+fn unknown_type(spelling: &str) -> Error {
+    Error::TypeError(format!(
             "unknown type `{}`: no type of that name is visible here. A type has to be defined before \
              the first form that names it — types have no forward declaration (`defsignature` declares \
              functions only). If `{}` is meant to be a type variable, declare it: in the name of a \
              `defun`/`defmethod`/`defstruct`/`defenum`/`deftype` (`name<{}>`), in `impl<{}>`, or as a \
              `deftrait`'s `(:type {})`.",
-            spelling, spelling, spelling, spelling, spelling
-        )));
-    };
+        spelling, spelling, spelling, spelling, spelling
+    ))
+}
+
+/// The type the definition `entry` at `path` is, applied to `args`.
+fn entry_type(path: Path, entry: &TypeEntry, args: Vec<Type>) -> Result<Type, Error> {
     match entry {
         TypeEntry::Type(def) => {
             if def.params.len() != args.len() {
