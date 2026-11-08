@@ -224,7 +224,7 @@ fn target_at(reg: &Registry, here: NsId, p: &Path) -> Option<UseTarget> {
     }
     let entry = |r: &Registry, at: &Path| match r.types.get(at)? {
         TypeEntry::Type(def) => Some((def.public, 0)),
-        TypeEntry::Trait { public } => Some((*public, 1)),
+        TypeEntry::Trait(def) => Some((def.public, 1)),
         TypeEntry::Alias { public } => Some((*public, 2)),
         TypeEntry::CStruct => None,
     };
@@ -329,7 +329,7 @@ fn import_collision(
         let held = match (value, ty) {
             (Some(ValueDef::Fn(_)), _) => "function",
             (_, Some(TypeEntry::Type(_))) => "type",
-            (_, Some(TypeEntry::Trait { .. })) => "trait",
+            (_, Some(TypeEntry::Trait(_))) => "trait",
             (Some(ValueDef::Macro { .. }), _) => "macro",
             (Some(ValueDef::Var(_)), _) => "global",
             (_, Some(TypeEntry::Alias { .. })) => "type alias",

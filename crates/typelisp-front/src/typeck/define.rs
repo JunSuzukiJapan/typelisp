@@ -23,6 +23,7 @@ pub(crate) enum Kind {
     Function,
     Variable,
     Type,
+    Trait,
     Method,
 }
 
@@ -32,6 +33,7 @@ impl Kind {
             Kind::Function => "function",
             Kind::Variable => "variable",
             Kind::Type => "type",
+            Kind::Trait => "trait",
             Kind::Method => "method",
         }
     }
@@ -84,27 +86,41 @@ impl Definer<'_> {
         self.redefine(kind, name, Some(builtin))
     }
 
-    /// Whether the type `name` may be defined: no trait, type alias or C
-    /// struct of the name is here, and a type of it already here may be
-    /// replaced.
-    pub(crate) fn type_name(&mut self, reg: &Registry, name: SymRef) -> Result<(), Error> {
-        let existing = match reg.types.get(&Path::of_symbol(self.site.ns, name)) {
-            None => None,
-            Some(TypeEntry::Type(def)) => Some(def.builtin),
-            Some(TypeEntry::Trait { .. }) => {
+    /// Whether the type or the trait `name`, as `kind` says, may be
+    /// defined: types and traits share one name space with type aliases and
+    /// C structs, so nothing else of the name is here, and a definition of
+    /// the same kind already here may be replaced.
+    pub(crate) fn type_name(&mut self, reg: &Registry, kind: Kind, name: SymRef) -> Result<(), Error> {
+        let clash = |other: &str| {
+            Error::TypeError(format!(
+                "cannot define {} `{}`: a {} of that name already exists here — types and traits share one name space (write them under different modules if both are needed)",
+                kind.word(),
+                name.name(),
+                other
+            ))
+        };
+        let existing = match (reg.types.get(&Path::of_symbol(self.site.ns, name)), kind) {
+            (None, _) => None,
+            (Some(TypeEntry::Type(def)), Kind::Type) => Some(def.builtin),
+            (Some(TypeEntry::Trait(_)), Kind::Trait) => Some(false),
+            (Some(TypeEntry::Type(_)), _) => return Err(clash("type")),
+            (Some(TypeEntry::Trait(_)), _) => return Err(clash("trait")),
+            (Some(TypeEntry::Alias { .. }), _) => {
                 return Err(Error::TypeError(format!(
-                    "cannot define type `{}`: a trait of that name already exists here — types and traits share one name space (write them under different modules if both are needed)",
+                    "cannot define {} `{}`: a `deftype` alias of that name already exists here",
+                    kind.word(),
                     name.name()
                 )))
             }
-            Some(TypeEntry::Alias { .. }) => {
-                return Err(Error::TypeError(format!("cannot define type `{}`: a `deftype` alias of that name already exists here", name.name())))
-            }
-            Some(TypeEntry::CStruct) => {
-                return Err(Error::TypeError(format!("cannot define type `{}`: a `def-c-struct` of that name already exists here", name.name())))
+            (Some(TypeEntry::CStruct), _) => {
+                return Err(Error::TypeError(format!(
+                    "cannot define {} `{}`: a `def-c-struct` of that name already exists here",
+                    kind.word(),
+                    name.name()
+                )))
             }
         };
-        self.redefine(Kind::Type, name, existing)
+        self.redefine(kind, name, existing)
     }
 
     /// Whether the method `method` of `owner` may be defined again, when it

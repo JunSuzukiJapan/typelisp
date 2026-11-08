@@ -34,7 +34,7 @@ pub(crate) fn check_path_call(
         PathTarget::Member(owner, member) => {
             let def = match cx.reg.types.get(&owner) {
                 Some(TypeEntry::Type(def)) => def,
-                Some(TypeEntry::Trait { .. }) => unimplemented!("typeck: calling a trait's method through its path (`{}`)", path_spelling(heap, id)),
+                Some(TypeEntry::Trait(_)) => unimplemented!("typeck: calling a trait's method through its path (`{}`)", path_spelling(heap, id)),
                 _ => unimplemented!("typeck: the path `{}`, through a type this checker does not know", path_spelling(heap, id)),
             };
             let name = member_symbol(member.name());

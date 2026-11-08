@@ -8,7 +8,7 @@ use crate::types::{in_std, nominal_path, prelude_ns, Path, Type};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
-use super::registry::{MethodDef, Registry, ValueDef};
+use super::registry::{MethodDef, Registry, TraitDef, TypeEntry, ValueDef};
 
 /// What the bare name `sym`, read in the module `here`, names as `lookup`
 /// finds it among one module's definitions (`lookup` is given the module and
@@ -42,6 +42,15 @@ pub(crate) fn find_named<T>(reg: &Registry, here: NsId, sym: SymRef, lookup: imp
     let prelude = prelude_ns();
     reg.reexports.get(&(prelude, sym))?;
     through(prelude, sym)
+}
+
+/// The trait the bare name `sym` names in `here`.
+pub(crate) fn trait_named(reg: &Registry, here: NsId, sym: SymRef) -> Option<(Path, &TraitDef)> {
+    let (path, entry) = find_named(reg, here, sym, |ns, key| reg.types.get(&Path::of_symbol(ns, key)))?;
+    match entry {
+        TypeEntry::Trait(def) => Some((path, def)),
+        _ => None,
+    }
 }
 
 /// The function, global variable or macro the bare name `sym` names in `here`.

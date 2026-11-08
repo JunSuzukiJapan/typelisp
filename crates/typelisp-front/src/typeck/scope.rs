@@ -3,12 +3,14 @@
 //!
 //! A type parameter exists only where a declaration made it: the `<...>` of
 //! a definition's name or of `impl`, and a trait's `Self` and `(:type ...)`.
-//! Writing a name inside a type never declares it.
+//! Writing a name inside a type never declares it. In an `impl` of a trait,
+//! a name the trait declares an associated type stands for the type the
+//! `impl` binds it to.
 //!
 //! The frames form a chain in which each frame refers to its parent and
 //! neither is copied or changed.
 
-use crate::types::{ParamOwner, TypeParam};
+use crate::types::{ParamOwner, Type, TypeParam};
 use typelisp_mem::SymRef;
 
 /// A type parameter declared twice in one frame.
@@ -20,12 +22,14 @@ pub(crate) struct DeclaredTwice(pub(crate) SymRef);
 pub(crate) struct TypeScope<'p> {
     parent: Option<&'p TypeScope<'p>>,
     params: Vec<TypeParam>,
+    /// Names that stand for types.
+    named: Vec<(SymRef, Type)>,
 }
 
 impl TypeScope<'static> {
     /// Where no type parameter is declared.
     pub(crate) fn empty() -> TypeScope<'static> {
-        TypeScope { parent: None, params: Vec::new() }
+        TypeScope { parent: None, params: Vec::new(), named: Vec::new() }
     }
 }
 
@@ -39,20 +43,30 @@ impl<'p> TypeScope<'p> {
             }
         }
         let params = names.iter().enumerate().map(|(i, &name)| TypeParam { owner, index: i as u32, name }).collect();
-        Ok(TypeScope { parent: Some(self), params })
+        Ok(TypeScope { parent: Some(self), params, named: Vec::new() })
+    }
+
+    /// A frame inside `self` in which each name of `named` stands for its
+    /// type.
+    pub(crate) fn name_types<'s>(&'s self, named: Vec<(SymRef, Type)>) -> TypeScope<'s> {
+        TypeScope { parent: Some(self), params: Vec::new(), named }
+    }
+
+    /// The type `name` stands for here: the type parameter or the named type
+    /// of the innermost frame that has it.
+    pub(crate) fn lookup_type(&self, name: SymRef) -> Option<Type> {
+        if let Some(p) = self.params.iter().find(|p| p.name == name) {
+            return Some(Type::Param(*p));
+        }
+        if let Some((_, t)) = self.named.iter().find(|(n, _)| *n == name) {
+            return Some(t.clone());
+        }
+        self.parent.and_then(|s| s.lookup_type(name))
     }
 
     /// This frame's parameters, in declaration order.
     pub(crate) fn params(&self) -> &[TypeParam] {
         &self.params
-    }
-
-    /// The parameter `name` means here: the innermost frame's that declares it.
-    pub(crate) fn lookup(&self, name: SymRef) -> Option<TypeParam> {
-        match self.params.iter().find(|p| p.name == name) {
-            Some(p) => Some(*p),
-            None => self.parent.and_then(|s| s.lookup(name)),
-        }
     }
 }
 
@@ -62,6 +76,14 @@ mod tests {
     use crate::types::Path;
     use typelisp_mem::symbols::{intern, NsId};
 
+    /// The type parameter `name` means in `s`, if it is one.
+    fn param(s: &TypeScope, name: &str) -> Option<TypeParam> {
+        match s.lookup_type(intern(name)) {
+            Some(Type::Param(p)) => Some(p),
+            _ => None,
+        }
+    }
+
     fn owner(name: &str) -> ParamOwner {
         ParamOwner::Def(Path::in_ns(NsId::ROOT, name))
     }
@@ -70,7 +92,7 @@ mod tests {
     fn a_declared_name_is_its_position() {
         let root = TypeScope::empty();
         let s = root.declare(owner("pair"), &[intern("T"), intern("U")]).unwrap();
-        let u = s.lookup(intern("U")).unwrap();
+        let u = param(&s, "U").unwrap();
         assert_eq!((u.owner, u.index), (owner("pair"), 1));
     }
 
@@ -79,8 +101,8 @@ mod tests {
     fn an_undeclared_name_is_no_parameter() {
         let root = TypeScope::empty();
         let s = root.declare(owner("f"), &[intern("T")]).unwrap();
-        assert_eq!(s.lookup(intern("U")), None);
-        assert_eq!(root.lookup(intern("T")), None);
+        assert_eq!(param(&s, "U"), None);
+        assert_eq!(param(&root, "T"), None);
     }
 
     #[test]
@@ -97,7 +119,7 @@ mod tests {
         let root = TypeScope::empty();
         let method = ParamOwner::Method(Path::in_ns(NsId::ROOT, "pair"), intern("m"));
         let s = root.declare(method, &[intern("T"), intern("U"), intern("V")]).unwrap();
-        assert_eq!(s.lookup(intern("V")).map(|p| p.index), Some(2));
+        assert_eq!(param(&s, "V").map(|p| p.index), Some(2));
         assert!(root.declare(method, &[intern("T"), intern("T")]).is_err());
     }
 
@@ -106,7 +128,7 @@ mod tests {
         let root = TypeScope::empty();
         let outer = root.declare(owner("outer"), &[intern("T")]).unwrap();
         let inner = outer.declare(owner("inner"), &[intern("T")]).unwrap();
-        assert_eq!(inner.lookup(intern("T")).map(|p| p.owner), Some(owner("inner")));
-        assert_eq!(outer.lookup(intern("T")).map(|p| p.owner), Some(owner("outer")));
+        assert_eq!(param(&inner, "T").map(|p| p.owner), Some(owner("inner")));
+        assert_eq!(param(&outer, "T").map(|p| p.owner), Some(owner("outer")));
     }
 }

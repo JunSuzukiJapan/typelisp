@@ -12,6 +12,7 @@ use typelisp_mem::SymRef;
 use super::define::Definer;
 use super::macros::expand_toplevel;
 use super::defenum::check_defenum;
+use super::deftrait::check_deftrait;
 use super::defmethod::check_defmethod;
 use super::defstruct::check_defstruct;
 use super::defun::{check_defun, lower_all, parse_header};
@@ -178,6 +179,7 @@ fn check_primary(
                 wk::DEFUN => return Ok((check_defun(reg, d, heap, requests, args)?, None)),
                 wk::DEFSTRUCT => return Ok((check_defstruct(reg, d, heap, requests, args)?, None)),
                 wk::DEFENUM => return Ok((check_defenum(reg, d, heap, args)?, None)),
+                wk::DEFTRAIT => return Ok((check_deftrait(reg, d, heap, args)?, None)),
                 wk::DEFMETHOD => return Ok((check_defmethod(reg, d, heap, requests, args)?, None)),
                 wk::DEFVAR => return Ok((check_defvar(reg, d, heap, requests, Which::Defvar, args)?, None)),
                 wk::DEFPARAMETER => return Ok((check_defvar(reg, d, heap, requests, Which::Defparameter, args)?, None)),
@@ -735,6 +737,37 @@ mod tests {
         assert!(msg.contains("type mismatch") && msg.contains("Sexpr`, found `") && msg.contains("Option<"), "{}", msg);
         assert_eq!(run("(defun r ((x rational)) rational x)\n(let ((x 3)) (r x))").1, Value::Int(3));
         assert_eq!(check_ok("(the rational 1/2)"), Type::Rational);
+    }
+
+    /// A trait's methods, given bodies by an `impl`, are the type's: an
+    /// associated type's name in a method's signature is the type the
+    /// `impl` binds it to.
+    #[test]
+    fn a_trait_implemented_for_a_type() {
+        let src = "(deftrait Item () (:type Out) (defmethod item (self) Out))\n\
+                   (defstruct R (n u8))\n\
+                   (impl Item R (:type Out u8) (defmethod item (self) Out self::n))\n\
+                   (item (make-instance 'R :n 7))";
+        let (_, v, ty) = run(src);
+        assert_eq!((v, ty), (Value::Int(7), Type::U8));
+        let src = "(deftrait G () (defmethod g (self) i32))\n(defstruct W<T> (v T))\n\
+                   (impl<T> G W<T> (defmethod g (self) i32 1))\n(g (make-instance 'W :v #\\a))";
+        assert_eq!(run(src).1, Value::Int(1));
+    }
+
+    /// An `impl` gives the trait's methods with the trait's signatures, and
+    /// only those.
+    #[test]
+    fn an_impl_is_what_its_trait_declares() {
+        let pre = "(deftrait G () (defmethod g (self) i32))\n(defstruct R (n i32))\n";
+        let msg = check_err(&format!("{}(impl G R (defmethod g (self) bool true))", pre));
+        assert!(msg.contains("method `g` is `") && msg.contains("but `G` declares `"), "{}", msg);
+        let msg = check_err(&format!("{}(impl G R)", pre));
+        assert!(msg.contains("missing method `g`"), "{}", msg);
+        let msg = check_err(&format!("{}(impl G R (defmethod g (self) i32 1) (defmethod h (self) i32 2))", pre));
+        assert!(msg.contains("`h` is not a method of `G`"), "{}", msg);
+        let msg = check_err("(deftrait G () (defmethod g (self) i32))\n(deftrait H (G))\n(defstruct R (n i32))\n(impl H R)");
+        assert!(msg.contains("`H` requires `G`"), "{}", msg);
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

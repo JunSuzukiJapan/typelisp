@@ -18,7 +18,7 @@ use typelisp_mem::SymRef;
 use super::defun::{lower_all, parse_header};
 use super::generic::{Base, Requests};
 use super::lower::Lowering;
-use super::define::Definer;
+use super::define::{Definer, Kind};
 use super::registry::{Field, FnDef, MethodDef, Registry, Template, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -48,7 +48,7 @@ pub(crate) fn check_defstruct(
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
     d.ownable(heap, name, "defstruct")?;
-    d.type_name(reg, name)?;
+    d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {

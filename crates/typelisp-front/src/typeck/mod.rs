@@ -11,7 +11,9 @@
 //! - [`defstruct`]: defining a struct type and its accessors.
 //! - [`defenum`]: defining a sum type.
 //! - [`defmethod`]: defining a method outside an `impl`.
+//! - [`deftrait`]: defining a trait.
 //! - [`impl_block`]: an inherent `impl`, the methods of one type.
+//! - [`trait_impl`]: an `impl` of a trait for a type.
 //! - [`generic`]: specializations of generic definitions.
 //! - [`expr`]: which kind of form an expression is, and bodies.
 //! - [`literal`]: the atoms that are their own value, and their types.
@@ -54,6 +56,7 @@ pub(crate) mod define;
 pub(crate) mod defenum;
 pub(crate) mod defmethod;
 pub(crate) mod defstruct;
+pub(crate) mod deftrait;
 pub(crate) mod defun;
 pub(crate) mod defvar;
 pub(crate) mod exhaustive;
@@ -80,6 +83,7 @@ pub(crate) mod sexpr_value;
 pub(crate) mod subst;
 pub(crate) mod the;
 pub(crate) mod toplevel;
+pub(crate) mod trait_impl;
 pub(crate) mod tree;
 pub(crate) mod type_syntax;
 pub(crate) mod unify;

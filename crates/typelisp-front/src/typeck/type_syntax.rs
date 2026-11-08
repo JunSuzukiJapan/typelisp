@@ -30,8 +30,8 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
     match v {
         Value::Empty => Ok(Type::Unit),
         Value::Symbol(id) => {
-            if let Some(p) = cx.scope.lookup(id) {
-                return Ok(Type::Param(p));
+            if let Some(t) = cx.scope.lookup_type(id) {
+                return Ok(t);
             }
             if id.is(crate::wk::SELF_TYPE) {
                 return match cx.self_type {
@@ -85,7 +85,7 @@ fn named(heap: &Heap, cx: &TypeCx, id: SymRef, args: Vec<Type>) -> Result<Type, 
             Ok(Type::Named(path, args))
         }
         TypeEntry::Alias { .. } => unimplemented!("typeck: the type alias `{}`", path),
-        TypeEntry::Trait { .. } => unimplemented!("typeck: the trait `{}` written where a type is", path),
+        TypeEntry::Trait(_) => unimplemented!("typeck: the trait `{}` written where a type is", path),
         TypeEntry::CStruct => unimplemented!("typeck: the C struct `{}` written where a type is", path),
     }
 }

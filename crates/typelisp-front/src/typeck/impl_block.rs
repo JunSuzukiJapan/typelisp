@@ -9,7 +9,7 @@
 //! target's type; any other is a static method. `Self` in a type is the
 //! target.
 
-use crate::types::{ParamOwner, Path};
+use crate::types::{ParamOwner, Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -43,7 +43,7 @@ pub(crate) fn check_impl(
     // item, a `(:where ...)` or nothing there.
     if let Some((second, _)) = parts.get(1) {
         if !matches!(second, Value::Cons(_)) || crate::types::is_type_application(heap, *second) {
-            unimplemented!("typeck: a trait's `impl`")
+            return super::trait_impl::check_trait_impl(reg, d, heap, requests, type_names, parts);
         }
         if matches!(heap.car(*second), Ok(Value::Symbol(k)) if k.is_keyword()) {
             unimplemented!("typeck: an `impl` with a `(:where ...)` clause")
@@ -105,8 +105,18 @@ fn check_item(
     })?;
     let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, target)?;
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty) };
-    // `self` alone is the receiver; the rest are ordinary parameters.
-    let written = heap.list_to_vec(*params)?;
+    let (instance, all) = method_params(heap, &tcx, name, *params, &target_ty)?;
+    let ret = parse_type(heap, &tcx, *ret)?;
+    let def = Method { owner, method, instance, public, home: None, params: all, ret };
+    define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
+}
+
+/// The parameters `params` of the method `name` of an `impl` or a
+/// `deftrait`, read in `tcx`: whether it is an instance method, and each
+/// parameter's name and type. `self` alone, first, is the receiver, of type
+/// `self_ty`; the rest are ordinary parameters.
+pub(crate) fn method_params(heap: &Heap, tcx: &TypeCx, name: SymRef, params: Value, self_ty: &Type) -> Result<(bool, Vec<(SymRef, Type)>), Error> {
+    let written = heap.list_to_vec(params)?;
     let receiver = match written.first() {
         Some(Value::Symbol(s)) if s.is(wk::SELF) => Some(*s),
         _ => None,
@@ -119,13 +129,11 @@ fn check_item(
             )));
         }
     }
-    let rest = if receiver.is_some() { heap.cdr(*params)? } else { *params };
+    let rest = if receiver.is_some() { heap.cdr(params)? } else { params };
     let mut all = Vec::new();
     if let Some(s) = receiver {
-        all.push((s, target_ty.clone()));
+        all.push((s, self_ty.clone()));
     }
-    all.extend(parse_params(heap, &tcx, rest)?);
-    let ret = parse_type(heap, &tcx, *ret)?;
-    let def = Method { owner, method, instance: receiver.is_some(), public, home: None, params: all, ret };
-    define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
+    all.extend(parse_params(heap, tcx, rest)?);
+    Ok((receiver.is_some(), all))
 }

@@ -14,7 +14,7 @@ use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 
 use super::defun::parse_header;
-use super::define::Definer;
+use super::define::{Definer, Kind};
 use super::registry::{Registry, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
@@ -33,7 +33,7 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
     d.ownable(heap, name, "defenum")?;
-    d.type_name(reg, name)?;
+    d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {

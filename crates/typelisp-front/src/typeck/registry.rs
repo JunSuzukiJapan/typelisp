@@ -112,14 +112,45 @@ pub(crate) struct Field {
 }
 
 /// What a module-level name in the type name space is: a type, a type
-/// alias, a trait or a C struct, never two of them. Of an alias and a trait
-/// only whether it is `pub` is known so far, and of a C struct nothing.
+/// alias, a trait or a C struct, never two of them. Of an alias only
+/// whether it is `pub` is known so far, and of a C struct nothing.
 #[derive(Clone, Debug)]
 pub(crate) enum TypeEntry {
     Type(TypeDef),
     Alias { public: bool },
-    Trait { public: bool },
+    Trait(TraitDef),
     CStruct,
+}
+
+/// A trait: its type parameters, `Self` first and then its associated
+/// types (`docs/dev/checker-rebuild-plan.md` 7.4), and its own methods'
+/// signatures, written in them.
+#[derive(Clone, Debug)]
+pub(crate) struct TraitDef {
+    pub(crate) params: Vec<TypeParam>,
+    /// The trait's own methods, in the order the `deftrait` wrote them. A
+    /// method's type parameters are the trait's.
+    pub(crate) methods: Vec<(SymRef, FnDef)>,
+    /// The methods the `deftrait` gave a body, which an `impl` may leave out.
+    pub(crate) defaults: Vec<SymRef>,
+    /// The traits a type implementing this one implements too, written in
+    /// this one's parameters.
+    pub(crate) supertraits: Vec<TraitBound>,
+    pub(crate) public: bool,
+}
+
+impl TraitDef {
+    /// The signature of the trait's own method `name`.
+    pub(crate) fn method(&self, name: SymRef) -> Option<&FnDef> {
+        self.methods.iter().find(|(n, _)| *n == name).map(|(_, d)| d)
+    }
+}
+
+/// An `impl` of a trait for a type: for every instantiation of it, or for
+/// the one `args` names.
+#[derive(Clone, Debug)]
+pub(crate) struct TraitImpl {
+    pub(crate) args: Option<Vec<Type>>,
 }
 
 /// What a module-level name in the value name space is: one of three, never
@@ -247,6 +278,10 @@ pub(crate) struct Registry {
     /// makes `math` one).
     pub(crate) module_aliases: Table<(NsId, SymRef), NsId>,
     templates: Table<Base, Rc<Template>>,
+    /// The `impl`s of a trait for a type, by the trait and the type.
+    pub(crate) trait_impls: Table<(Path, Path), Vec<TraitImpl>>,
+    /// The traits some blanket `impl` (one for a type variable) implements.
+    pub(crate) blanket_impls: Table<Path, ()>,
 }
 
 impl Registry {
@@ -340,6 +375,8 @@ impl Registry {
         self.static_uses.commit();
         self.module_aliases.commit();
         self.templates.commit();
+        self.trait_impls.commit();
+        self.blanket_impls.commit();
     }
 
     /// Undo every write since the last commit.
@@ -354,6 +391,8 @@ impl Registry {
         self.static_uses.rollback();
         self.module_aliases.rollback();
         self.templates.rollback();
+        self.trait_impls.rollback();
+        self.blanket_impls.rollback();
     }
 }
 
