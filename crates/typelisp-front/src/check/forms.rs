@@ -489,7 +489,7 @@ pub(crate) fn module_form(heap: &mut Heap, path: &Path, body: &[Value]) -> Resul
 }
 
 /// `(use ALIAS TARGET)`.
-pub(super) fn use_form(heap: &mut Heap, alias: &Path, target: &Path) -> Result<Value, Error> {
+pub(crate) fn use_form(heap: &mut Heap, alias: &Path, target: &Path) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     let a = core::root_path_form(f.heap(), alias);
     f.push(a);

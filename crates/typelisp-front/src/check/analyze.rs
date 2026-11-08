@@ -1477,7 +1477,11 @@ impl Checker {
     /// `RedefPolicy::Warn` redefinition) — call after each `check_form` to
     /// surface them (see `main.rs`/`prelude.rs`).
     pub fn take_warnings(&self) -> Vec<String> {
-        std::mem::take(&mut *self.warnings.borrow_mut())
+        let mut out = std::mem::take(&mut *self.warnings.borrow_mut());
+        if let Some(rebuilt) = &self.rebuilt {
+            out.extend(rebuilt.take_warnings());
+        }
+        out
     }
 
     /// Turns error-recovery mode on or off (see [`Self::recover`]). The LSP
@@ -1714,7 +1718,10 @@ impl Checker {
         heap.names().enter_module(self.current_module());
         let ns = self.current_module();
         let r = match &mut self.rebuilt {
-            Some(rebuilt) => rebuilt.check_form(heap, &self.info.reg, ns, v, heap.cons_loc(v).or(loc_hint)),
+            Some(rebuilt) => {
+                let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
+                rebuilt.check_form(heap, &self.info.reg, site, v, heap.cons_loc(v).or(loc_hint))
+            }
             None => self.check_one_form(heap, interp, v, loc_hint),
         };
         self.info.reg.reexport_std_in_prelude();
@@ -9501,6 +9508,10 @@ impl Checker {
     /// `check_use` to report.
     pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[typelisp_mem::SymRef]) {
         use typelisp_mem::symbols::Import;
+        if let Some(rebuilt) = &self.rebuilt {
+            let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
+            return rebuilt.register_use_for_reading(heap, &self.info.reg, site, path);
+        }
         let Some(bare) = path.last().map(|s| s.name().to_string()) else { return };
         let mut names = Vec::new();
         match self.use_target(heap, path) {

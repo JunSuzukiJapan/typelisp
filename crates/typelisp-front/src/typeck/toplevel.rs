@@ -1,10 +1,12 @@
 //! Checking one top-level form: the rebuilt checker's entry point.
 
+use std::cell::{OnceCell, RefCell};
+
 use crate::check::lower::CoreForms;
 use crate::check::MONO_BUNDLE_MODULE;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
-use typelisp_mem::symbols::{intern_in, NsId};
+use typelisp_mem::symbols::intern_in;
 use typelisp_mem::SymRef;
 
 use super::defenum::check_defenum;
@@ -12,6 +14,7 @@ use super::defmethod::check_defmethod;
 use super::defstruct::check_defstruct;
 use super::defun::{check_defun, lower_all, parse_header};
 use super::impl_block::check_impl;
+use super::use_form::{check_use, register_for_reading, Site};
 use super::expr::{check_expr, Cx};
 use super::generic::{Base, Name, Request, Requests};
 use super::locals::Locals;
@@ -24,11 +27,14 @@ use super::subst::Subst;
 /// while the switch `TYPELISP_TYPECK` is on (`docs/dev/checker-rebuild-plan.md` 6).
 #[derive(Debug, Default)]
 pub(crate) struct TypeChecker {
-    reg: Registry,
-    /// Whether the current checker's registry has been copied in yet.
-    imported: bool,
+    /// What the program has defined, the current checker's registry copied
+    /// in first: when it is first needed (8.3), which may be the reader
+    /// asking what a `use` brings in before any form is checked.
+    reg: OnceCell<Registry>,
     /// The type of the last form, when it was an expression.
     expr_ty: Option<Type>,
+    /// The warnings checking has given and no one has taken yet.
+    warnings: RefCell<Vec<String>>,
 }
 
 impl TypeChecker {
@@ -37,38 +43,42 @@ impl TypeChecker {
         std::env::var_os("TYPELISP_TYPECK").is_some_and(|v| !v.is_empty()).then(TypeChecker::default)
     }
 
-    /// `v`, a form written in the module `ns`, checked: its core form,
-    /// unrooted.
+    /// The registry, `old` (the current checker's registry, which holds the
+    /// built-in definitions and the prelude) copied in when it is first
+    /// needed.
+    fn registry(&self, old: &crate::check::Registry) -> &Registry {
+        self.reg.get_or_init(|| {
+            let mut reg = Registry::default();
+            super::bridge::import(old, &mut reg);
+            reg.commit();
+            reg
+        })
+    }
+
+    /// `v`, a form written at `site`, checked: its core form, unrooted.
     ///
     /// What the form defines is kept only if checking it succeeds.
-    ///
-    /// `old` is the current checker's registry, which holds the built-in
-    /// definitions and the prelude; it is copied in before the first form
-    /// (`docs/dev/checker-rebuild-plan.md` 8.3).
-    pub(crate) fn check_form(&mut self, heap: &mut Heap, old: &crate::check::Registry, ns: NsId, v: Value, loc: Option<Loc>) -> Result<Value, Error> {
-        if !self.imported {
-            super::bridge::import(old, &mut self.reg);
-            self.reg.commit();
-            self.imported = true;
-        }
+    pub(crate) fn check_form(&mut self, heap: &mut Heap, old: &crate::check::Registry, site: Site, v: Value, loc: Option<Loc>) -> Result<Value, Error> {
+        self.registry(old);
+        let reg = self.reg.get_mut().expect("the registry was just made");
         self.expr_ty = None;
         // Every value the tree holds is rooted from here until it is lowered
         // into the form, which is then reachable from nothing but the caller.
         // Nothing allocates between releasing them and the caller rooting it.
         let roots_base = heap.root_count();
-        let result = self.check_toplevel(heap, ns, v, loc.clone());
+        let result = check_toplevel(reg, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut());
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty)) => {
-                let types: Vec<Path> = self.reg.types.written().copied().collect();
-                let methods: Vec<(Path, SymRef)> = self.reg.methods_written().copied().collect();
-                self.reg.commit();
-                publish(&self.reg, heap, &types, &methods);
+                let types: Vec<Path> = reg.types.written().copied().collect();
+                let methods: Vec<(Path, SymRef)> = reg.methods_written().copied().collect();
+                reg.commit();
+                publish(reg, heap, &types, &methods);
                 self.expr_ty = ty;
                 Ok(form)
             }
             Err(e) => {
-                self.reg.rollback();
+                reg.rollback();
                 Err(match loc {
                     Some(l) => e.at(l),
                     None => e,
@@ -77,75 +87,101 @@ impl TypeChecker {
         }
     }
 
+    /// What `(use path)` written at `site` brings in, registered for reading
+    /// the forms after it (`use_form::register_for_reading`).
+    pub(crate) fn register_use_for_reading(&self, heap: &Heap, old: &crate::check::Registry, site: Site, path: &[SymRef]) {
+        register_for_reading(self.registry(old), heap, site, path);
+    }
+
     /// The type of the last form [`Self::check_form`] checked, when it was an
     /// expression.
     pub(crate) fn expr_type(&self) -> Option<&Type> {
         self.expr_ty.as_ref()
     }
 
-    /// `v`'s core form, and its type when it is an expression. The
-    /// specializations the form asks for come first, in one bundle with it.
-    fn check_toplevel(&mut self, heap: &mut Heap, ns: NsId, v: Value, loc: Option<Loc>) -> Result<(Value, Option<Type>), Error> {
-        let mut requests = Requests::default();
-        let (form, ty) = self.check_primary(heap, ns, v, loc, &mut requests)?;
-        heap.push_root(form);
-        let mut forms = Vec::new();
-        while let Some(req) = requests.next()? {
-            let spec = specialize(heap, &self.reg, &mut requests, &req)?;
-            heap.push_root(spec);
-            forms.push(spec);
-        }
-        if forms.is_empty() {
-            return Ok((form, ty));
-        }
-        forms.push(form);
-        Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty))
+    /// The warnings given since they were last taken.
+    pub(crate) fn take_warnings(&self) -> Vec<String> {
+        std::mem::take(&mut *self.warnings.borrow_mut())
     }
+}
 
-    fn check_primary(
-        &mut self,
-        heap: &mut Heap,
-        ns: NsId,
-        v: Value,
-        loc: Option<Loc>,
-        requests: &mut Requests,
-    ) -> Result<(Value, Option<Type>), Error> {
-        if let Value::Cons(_) = v {
-            let elems = heap.list_to_vec_locs(v)?;
-            // `impl<T, U>` reads as `(%type-apply impl T U)`.
-            if crate::types::is_type_application(heap, elems[0].0) {
-                let (head, names) = parse_header(heap, elems[0].0)?;
-                if head.is(wk::IMPL) {
-                    return Ok((check_impl(&mut self.reg, ns, heap, requests, &names, &elems[1..])?, None));
-                }
-            }
-            if let Value::Symbol(head) = elems[0].0 {
-                if head.is(wk::IMPL) {
-                    return Ok((check_impl(&mut self.reg, ns, heap, requests, &[], &elems[1..])?, None));
-                }
-                match head.well_known() {
-                    wk::DEFUN => return Ok((check_defun(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
-                    wk::DEFSTRUCT => return Ok((check_defstruct(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
-                    wk::DEFENUM => return Ok((check_defenum(&mut self.reg, ns, heap, &elems[1..])?, None)),
-                    wk::DEFMETHOD => return Ok((check_defmethod(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
-                    _ => {}
-                }
+/// `v`'s core form, and its type when it is an expression. The
+/// specializations the form asks for come first, in one bundle with it.
+fn check_toplevel(
+    reg: &mut Registry,
+    heap: &mut Heap,
+    site: Site,
+    v: Value,
+    loc: Option<Loc>,
+    warnings: &mut Vec<String>,
+) -> Result<(Value, Option<Type>), Error> {
+    let mut requests = Requests::default();
+    let (form, ty) = check_primary(reg, heap, site, v, loc, &mut requests, warnings)?;
+    heap.push_root(form);
+    let mut forms = Vec::new();
+    while let Some(req) = requests.next()? {
+        let spec = specialize(heap, reg, &mut requests, &req)?;
+        heap.push_root(spec);
+        forms.push(spec);
+    }
+    if forms.is_empty() {
+        return Ok((form, ty));
+    }
+    forms.push(form);
+    Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty))
+}
+
+fn check_primary(
+    reg: &mut Registry,
+    heap: &mut Heap,
+    site: Site,
+    v: Value,
+    loc: Option<Loc>,
+    requests: &mut Requests,
+    warnings: &mut Vec<String>,
+) -> Result<(Value, Option<Type>), Error> {
+    let ns = site.ns;
+    if let Value::Cons(_) = v {
+        let elems = heap.list_to_vec_locs(v)?;
+        // `impl<T, U>` reads as `(%type-apply impl T U)`.
+        if crate::types::is_type_application(heap, elems[0].0) {
+            let (head, names) = parse_header(heap, elems[0].0)?;
+            if head.is(wk::IMPL) {
+                return Ok((check_impl(reg, ns, heap, requests, &names, &elems[1..])?, None));
             }
         }
-        let mut typed = {
-            let scope = TypeScope::empty();
-            let cx = Cx::new(&self.reg, ns, &scope, None);
-            let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
-            cx.settle(heap, std::slice::from_mut(&mut typed))?;
-            typed
-        };
-        let subst = Subst::default();
-        let mut lw = Lowering { reg: &self.reg, subst: &subst, requests };
-        let form = lower_rooted(heap, &mut lw, &typed)?;
-        let form = crate::check::core::tagged(heap, wk::EXPR, &[form])?;
-        let ty = std::mem::replace(&mut typed.ty, Type::Unit);
-        Ok((form, Some(ty)))
+        if let Value::Symbol(head) = elems[0].0 {
+            if head.is(wk::IMPL) {
+                return Ok((check_impl(reg, ns, heap, requests, &[], &elems[1..])?, None));
+            }
+            let args = &elems[1..];
+            match head.well_known() {
+                wk::DEFUN => return Ok((check_defun(reg, ns, heap, requests, args)?, None)),
+                wk::DEFSTRUCT => return Ok((check_defstruct(reg, ns, heap, requests, args)?, None)),
+                wk::DEFENUM => return Ok((check_defenum(reg, ns, heap, args)?, None)),
+                wk::DEFMETHOD => return Ok((check_defmethod(reg, ns, heap, requests, args)?, None)),
+                wk::USE | wk::IMPORT => return Ok((check_use(reg, heap, site, args, false, false, warnings)?, None)),
+                wk::SHADOWING_IMPORT => return Ok((check_use(reg, heap, site, args, true, false, warnings)?, None)),
+                wk::PUB if matches!(args.first(), Some((Value::Symbol(u), _)) if u.is(wk::USE)) => {
+                    return Ok((check_use(reg, heap, site, &args[1..], false, true, warnings)?, None));
+                }
+                _ => {}
+            }
+        }
     }
+    let mut typed = {
+        let scope = TypeScope::empty();
+        let cx = Cx::new(reg, ns, &scope, None);
+        let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
+        cx.settle(heap, std::slice::from_mut(&mut typed))?;
+        typed
+    };
+    let subst = Subst::default();
+    let mut lw = Lowering { reg, subst: &subst, requests };
+    let form = lower_rooted(heap, &mut lw, &typed)?;
+    let form = crate::check::core::tagged(heap, wk::EXPR, &[form])?;
+    let ty = std::mem::replace(&mut typed.ty, Type::Unit);
+    Ok((form, Some(ty)))
 }
 
 /// Tells the session's table of what names mean (`Heap::names`) about the
@@ -200,6 +236,10 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
 mod tests {
     use super::*;
     use crate::{Interp, Reader};
+    use typelisp_mem::symbols::NsId;
+
+    /// The module the tests' forms are written in.
+    const ROOT_SITE: Site = Site { ns: NsId::ROOT, file: None, policy: crate::check::RedefPolicy::Error };
 
     /// `src`'s forms, read, checked by the rebuilt checker and run in order:
     /// the last one's value and type.
@@ -213,7 +253,7 @@ mod tests {
         let mut last = None;
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), NsId::ROOT, v, Some(loc)).expect("check failed");
+            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc)).expect("check failed");
             heap.push_root(form);
             if let Some(value) = interp.exec(&mut heap, form).expect("run failed") {
                 last = Some((value, checker.expr_type().expect("an expression has a type").clone()));
@@ -233,7 +273,7 @@ mod tests {
         let mut result = Ok(Value::Empty);
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            result = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), NsId::ROOT, v, Some(loc));
+            result = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc));
         }
         match result {
             Err(e) => e.to_string(),
@@ -510,6 +550,34 @@ mod tests {
         assert_eq!(run(&src).1, Value::Int(0));
     }
 
+    /// `(use Type::*)` brings a type's variants in bare, for values and for
+    /// patterns alike; `(use Type::variant)` brings one.
+    #[test]
+    fn use_brings_variants_in_bare() {
+        let src = format!("{}(use Shape::*)\n(match (Rect 2 3) ((Rect w h) (* w h)) (_ 0))", SHAPE);
+        assert_eq!(run(&src).1, Value::Int(6));
+        let src = format!("{}(use Shape::Dot)\n(Dot)", SHAPE);
+        assert_eq!(run(&src).2.to_string(), "Shape");
+        let msg = check_err(&format!("{}(use Shape::Dot)\n(Circle 1)", SHAPE));
+        assert!(msg.contains("no such function"), "{}", msg);
+    }
+
+    /// A bare name stands for one member: a `use` of another type's member
+    /// under it is refused, unless it says it means to replace it.
+    #[test]
+    fn a_used_member_name_stands_for_one_member() {
+        let two = format!("{}(defenum Light (Dot) Off)\n(use Shape::*)\n", SHAPE);
+        let msg = check_err(&format!("{}(use Light::*)", two));
+        assert!(msg.contains("`Dot` already stands for `Shape::Dot` here"), "{}", msg);
+        assert_eq!(run(&format!("{}(shadowing-import Light::*)\n(Dot)", two)).2.to_string(), "Light");
+    }
+
+    #[test]
+    fn a_use_of_nothing_is_a_module_not_loaded() {
+        let msg = check_err("(use no::such::thing)");
+        assert!(msg.contains("use: unresolved `no::such::thing`"), "{}", msg);
+    }
+
     /// A definition whose checking fails is not kept (plan 4.4): calling it
     /// afterwards is not a call to anything this checker defined.
     #[test]
@@ -520,8 +588,8 @@ mod tests {
         let mut forms = reader.forms("(defun f () int true)");
         let (v, loc) = forms.next_form(&mut heap).unwrap().unwrap();
         heap.push_root(v);
-        assert!(checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), NsId::ROOT, v, Some(loc)).is_err());
+        assert!(checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc)).is_err());
         let f = crate::types::Path::of_symbol(NsId::ROOT, typelisp_mem::symbols::intern_in(NsId::ROOT, "f"));
-        assert!(checker.reg.fn_def(&f).is_none());
+        assert!(checker.reg.get().expect("made by the check").fn_def(&f).is_none());
     }
 }

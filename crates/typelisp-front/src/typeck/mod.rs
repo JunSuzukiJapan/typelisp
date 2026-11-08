@@ -23,6 +23,7 @@
 //! - [`path_call`]: calls whose head is a `::` path.
 //! - [`instance`]: `make-instance`, and reading a struct's field.
 //! - [`variant`]: a sum type's value.
+//! - [`use_form`]: `use`, and what it registers for reading.
 //! - [`resolve`]: what a name written in a module means.
 //! - [`locals`]: local variables.
 //! - [`scope`]: which type parameters a name means where a type is written.
@@ -63,4 +64,5 @@ pub(crate) mod toplevel;
 pub(crate) mod tree;
 pub(crate) mod type_syntax;
 pub(crate) mod unify;
+pub(crate) mod use_form;
 pub(crate) mod variant;

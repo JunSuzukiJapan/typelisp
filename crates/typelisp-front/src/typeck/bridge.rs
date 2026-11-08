@@ -27,23 +27,30 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
             new.values.insert(path, ValueDef::Fn(fn_def(ParamOwner::Def(path), &[], sig)));
         }
         for sym in m.vars.symbols() {
-            new.values.insert(Path::of_symbol(ns, sym), ValueDef::Var);
+            let public = m.vars.get_sym(sym).expect("a key of the table").public;
+            new.values.insert(Path::of_symbol(ns, sym), ValueDef::Var { public });
         }
         for sym in m.macros.symbols() {
-            new.values.insert(Path::of_symbol(ns, sym), ValueDef::Macro);
+            let public = m.macros.get_sym(sym).expect("a key of the table").public;
+            new.values.insert(Path::of_symbol(ns, sym), ValueDef::Macro { public });
         }
         for sym in m.types.symbols() {
             let def = m.types.get_sym(sym).expect("a key of the table");
             import_type(old, def, new);
         }
         for sym in m.type_aliases.symbols() {
-            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Alias);
+            let public = m.type_aliases.get_sym(sym).expect("a key of the table").public;
+            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Alias { public });
         }
         for sym in m.traits.symbols() {
-            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Trait);
+            let public = m.traits.get_sym(sym).expect("a key of the table").public;
+            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Trait { public });
         }
         for sym in m.c_structs.symbols() {
             new.types.insert(Path::of_symbol(ns, sym), TypeEntry::CStruct);
+        }
+        for sym in m.mod_aliases.symbols() {
+            new.module_aliases.insert((ns, sym), *m.mod_aliases.get_sym(sym).expect("a key of the table"));
         }
         for sym in m.aliases.symbols() {
             new.imports.insert((ns, sym), *m.aliases.get_sym(sym).expect("a key of the table"));

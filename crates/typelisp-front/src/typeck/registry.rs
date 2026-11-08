@@ -111,25 +111,35 @@ pub(crate) struct Field {
 }
 
 /// What a module-level name in the type name space is: a type, a type
-/// alias, a trait or a C struct, never two of them. An alias, a trait and a
-/// C struct are only known to be one so far.
+/// alias, a trait or a C struct, never two of them. Of an alias and a trait
+/// only whether it is `pub` is known so far, and of a C struct nothing.
 #[derive(Clone, Debug)]
 pub(crate) enum TypeEntry {
     Type(TypeDef),
-    Alias,
-    Trait,
+    Alias { public: bool },
+    Trait { public: bool },
     CStruct,
 }
 
 /// What a module-level name in the value name space is: one of three, never
-/// two of them (`docs/dev/name-resolution.md` 1). A global variable and a
-/// macro are only known to be one so far; what they are is recorded when the
-/// checker checks their uses.
+/// two of them (`docs/dev/name-resolution.md` 1). Of a global variable and a
+/// macro only whether it is `pub` is known so far; what they are is recorded
+/// when the checker checks their uses.
 #[derive(Clone, Debug)]
 pub(crate) enum ValueDef {
     Fn(FnDef),
-    Var,
-    Macro,
+    Var { public: bool },
+    Macro { public: bool },
+}
+
+impl ValueDef {
+    /// Whether it is visible outside its module.
+    pub(crate) fn public(&self) -> bool {
+        match self {
+            ValueDef::Fn(def) => def.public,
+            ValueDef::Var { public } | ValueDef::Macro { public } => *public,
+        }
+    }
 }
 
 /// A generic function's or method's checked body, kept to be specialized:
@@ -170,6 +180,11 @@ impl<K: Hash + Eq + Clone, V> Table<K, V> {
     pub(crate) fn remove(&mut self, k: &K) {
         let replaced = self.map.remove(k);
         self.undo.push((k.clone(), replaced));
+    }
+
+    /// Every key and value.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.map.iter()
     }
 
     /// The keys written since the last commit, each once for each write.
@@ -217,6 +232,9 @@ pub(crate) struct Registry {
     /// The static methods a `use` of a type brought in bare: the type and the
     /// method's member symbol.
     pub(crate) static_uses: Table<(NsId, SymRef), (Path, SymRef)>,
+    /// The modules a `use` brought in under a short name (`(use std::math)`
+    /// makes `math` one).
+    pub(crate) module_aliases: Table<(NsId, SymRef), NsId>,
     templates: Table<Base, Rc<Template>>,
 }
 
@@ -260,6 +278,14 @@ impl Registry {
         self.methods.get(&(*owner, name))
     }
 
+    /// The methods of the type `owner`: those for every instantiation, then
+    /// those written for one, each by its member symbol.
+    pub(crate) fn methods_of(&self, owner: Path) -> impl Iterator<Item = (SymRef, &MethodDef)> {
+        let every = self.methods.iter().filter(move |((o, _), _)| *o == owner).map(|((_, n), m)| (*n, m));
+        let one = self.inst_methods.iter().filter(move |((o, _), _)| *o == owner).flat_map(|((_, n), insts)| insts.iter().map(move |(_, m)| (*n, m)));
+        every.chain(one)
+    }
+
     /// Whether `owner` has a method `name` written for one instantiation.
     pub(crate) fn has_inst_method(&self, owner: &Path, name: SymRef) -> bool {
         self.inst_methods.get(&(*owner, name)).is_some()
@@ -301,6 +327,7 @@ impl Registry {
         self.reexports.commit();
         self.ctors.commit();
         self.static_uses.commit();
+        self.module_aliases.commit();
         self.templates.commit();
     }
 
@@ -314,6 +341,7 @@ impl Registry {
         self.reexports.rollback();
         self.ctors.rollback();
         self.static_uses.rollback();
+        self.module_aliases.rollback();
         self.templates.rollback();
     }
 }

@@ -84,8 +84,8 @@ fn named(heap: &Heap, cx: &TypeCx, id: SymRef, args: Vec<Type>) -> Result<Type, 
             }
             Ok(Type::Named(path, args))
         }
-        TypeEntry::Alias => unimplemented!("typeck: the type alias `{}`", path),
-        TypeEntry::Trait => unimplemented!("typeck: the trait `{}` written where a type is", path),
+        TypeEntry::Alias { .. } => unimplemented!("typeck: the type alias `{}`", path),
+        TypeEntry::Trait { .. } => unimplemented!("typeck: the trait `{}` written where a type is", path),
         TypeEntry::CStruct => unimplemented!("typeck: the C struct `{}` written where a type is", path),
     }
 }
