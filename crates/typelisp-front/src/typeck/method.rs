@@ -5,7 +5,8 @@ use crate::types::{Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
-use super::expr::{agree, agree_at, check_expr, Cx};
+use super::expr::{agree, check_expr, conform_at, Cx};
+use super::widen::expect;
 use super::locals::Locals;
 use super::registry::MethodDef;
 use super::tree::{Node, Typed};
@@ -64,11 +65,10 @@ pub(crate) fn check_method_call(
         if matches!(seen, Type::Int | Type::Ratio | Type::Rational) && seen != args[0].ty {
             unimplemented!("typeck: an operator mixing an `int` and a `ratio` (CL's contagion)")
         }
-        agree_at(cx, &other, &param)?;
-        args.push(other);
+        args.push(conform_at(cx, other, &param)?);
     }
     let ret = subst.apply(&sig.ret);
-    agree(cx, &ret, expected)?;
+    expect(cx, &ret, expected)?;
     let targs: Vec<Type> = sig.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();
     // The type's parameters come first, then the method's own.
     let owner_params = cx.reg.type_def(&owner).map_or(0, |d| d.params.len());

@@ -4,7 +4,8 @@
 use crate::types::{path_is_builtin, Path, Type};
 use crate::{Error, Heap, Loc, Value};
 
-use super::expr::{agree, check_expr, Cx};
+use super::expr::{check_expr, Cx};
+use super::widen::expect;
 use super::locals::Locals;
 use super::resolve::sees;
 use super::subst::Subst;
@@ -39,7 +40,7 @@ pub(crate) fn check_variant(
     }
     let targs: Vec<Type> = def.params.iter().map(|_| cx.holes.borrow_mut().fresh()).collect();
     let ty = Type::Named(owner, targs.clone());
-    agree(cx, &ty, expected)?;
+    expect(cx, &ty, expected)?;
     let subst = Subst::positional(&def.params, &targs);
     let field_tys: Vec<Type> = v.fields.iter().map(|f| subst.apply(f)).collect();
     let mut checked = Vec::with_capacity(args.len());

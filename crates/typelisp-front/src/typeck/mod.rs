@@ -19,6 +19,7 @@
 //! - [`control`]: `if`.
 //! - [`matching`]: `match`.
 //! - [`the`]: `the`.
+//! - [`widen`]: a value where another type is expected, widened.
 //! - [`quote`]: `quote`.
 //! - [`looping`]: `loop`, `break` and `return`.
 //! - [`setf`]: `setf`, assigning a place.
@@ -84,3 +85,4 @@ pub(crate) mod type_syntax;
 pub(crate) mod unify;
 pub(crate) mod use_form;
 pub(crate) mod variant;
+pub(crate) mod widen;

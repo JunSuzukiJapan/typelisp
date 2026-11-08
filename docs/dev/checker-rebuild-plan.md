@@ -325,6 +325,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - `use`（`import`・`shadowing-import`・`pub use` を含む）。値・型・トレイト・別名・型の変種と静的メソッド・モジュールを名指しできる。
 - `defvar`・`defparameter`・`defconstant`（型の宣言が必須）とグローバル変数の読み出し。`the`。
 - `format`（宛先が真偽値のとき）・`print`・`println`。引数は、それぞれの型のまま `Sexpr` のリストにして渡す。どう `Sexpr` にするかは lower で、決まった型から選ぶ（`typeck::sexpr_value`）。制御文字列の指令と引数の型は、フォームをチェックし終えたところで照らし合わせる。
+- 期待する型への広げ方（`typeck::widen`）。`Sexpr` が期待されるところへは、`Sexpr` の符号がある値を広げる（`Symbol` と `Sexpr` はそのまま、ほかは `AsSexpr`）。`Option<Sexpr>` は `Sexpr` に狭めない。`rational` へは `int` と `ratio`。呼び出しの結果の型を先に期待と合わせるところでは、広げる先の型なら食い違いをエラーにせず、値をチェックしたところで決める。
 - `quote`。記号は `Symbol`、ほかのデータは `Option<Sexpr>`。
 - 単純な `loop` と `break`・`return`（`typeck::looping`）。ループの型は、出口が解く穴にする。何も出ないループは `!`。
 - `setf`：変数（`defconstant` は断る）、フィールド `var::field`（構造体の `set-field`）、呼び出しの形の場所 `(accessor recv key...)`（受け手の型の `set-accessor`、`get` なら `set` も）。
@@ -343,7 +344,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - `defun` の付属：ドキュメント文字列、`&optional`・`&rest`・`&key`、`:where` の境界。
 - 式：拡張した `loop`（`:for`・`:collect` など）、`setf` の C のポインタ越しのフィールド・タプルの要素・`aref`・`c-deref`、関数を値として使うこと、ローカルな関数値の呼び出し、式の値を関数として呼ぶこと、`macrolet`、メソッド呼び出し、組み込みの関数とメソッド（8.3 の写しが要る）、残りの特殊形（3.2 の一覧）。
 - `format` の宛先がストリームのとき（`CharOutput` を実装しているかを問う）、`~/name/` 指令、`eprint`・`eprintln`。
-- 期待する型に合わせた広げ方（`Sexpr` や `:dyn` への暗黙の変換。今のチェッカーの `reconcile_expected`）。
+- `:dyn` への暗黙の変換（トレイトオブジェクトを作る）と、トレイトオブジェクトを `Sexpr` に入れること。
 - 定数の畳み込み（今のチェッカーは、条件がリテラルの `if` などを lower のときに畳む）。
 - LSP 向けの記録（定義位置、ドキュメント、ローカル参照、式の型）、エラー回復モード、`#[test]` の収集。
 

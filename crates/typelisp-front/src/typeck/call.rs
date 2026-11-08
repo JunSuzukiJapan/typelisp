@@ -9,7 +9,8 @@
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 
-use super::expr::{agree, agree_at, check_expr, Cx};
+use super::expr::{check_expr, conform_at, Cx};
+use super::widen::expect;
 use super::locals::Locals;
 use super::registry::FnDef;
 use super::tree::{Node, Typed};
@@ -52,8 +53,7 @@ pub(crate) fn check_call(
     let subst = cx.holes.borrow_mut().instantiate(&def.type_params);
     let mut checked = Vec::with_capacity(given);
     if let Some(first) = first {
-        agree_at(cx, &first, &subst.apply(&def.params[0]))?;
-        checked.push(first);
+        checked.push(conform_at(cx, first, &subst.apply(&def.params[0]))?);
     }
     let params = &def.params[checked.len()..];
     for ((arg, arg_loc), param) in rest.iter().zip(params) {
@@ -61,7 +61,7 @@ pub(crate) fn check_call(
         checked.push(check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?);
     }
     let ret = subst.apply(&def.ret);
-    agree(cx, &ret, expected)?;
+    expect(cx, &ret, expected)?;
     let targs: Vec<Type> = def.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();
     // A Rust builtin has no body to specialize: one entry point serves every
     // instantiation, as in the current checker.

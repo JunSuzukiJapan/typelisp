@@ -722,6 +722,21 @@ mod tests {
         assert!(msg.contains("quote: (quote datum)"), "{}", msg);
     }
 
+    /// Where a `Sexpr` is expected, a value with an encoding is widened
+    /// into one; an `Option<Sexpr>` is not narrowed. An `int` and a `ratio`
+    /// widen to `rational`.
+    #[test]
+    fn widening_to_what_is_expected() {
+        let sexpr = Type::Named(Path::builtin(typelisp_mem::wk::SEXPR), Vec::new());
+        assert_eq!(check_ok("(the Sexpr 'a)"), sexpr);
+        assert_eq!(check_ok("(the Sexpr \"s\")"), sexpr);
+        assert_eq!(check_ok("(defstruct P (x i32))\n(the Sexpr (make-instance 'P :x 1))"), sexpr);
+        let msg = check_err("(the Sexpr '(1 2))");
+        assert!(msg.contains("type mismatch") && msg.contains("Sexpr`, found `") && msg.contains("Option<"), "{}", msg);
+        assert_eq!(run("(defun r ((x rational)) rational x)\n(let ((x 3)) (r x))").1, Value::Int(3));
+        assert_eq!(check_ok("(the rational 1/2)"), Type::Rational);
+    }
+
     /// A definition whose checking fails is not kept (plan 4.4): calling it
     /// afterwards is not a call to anything this checker defined.
     #[test]

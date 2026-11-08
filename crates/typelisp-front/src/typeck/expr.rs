@@ -8,6 +8,7 @@ use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 
 use super::format::{check_directives, Directives};
+use super::widen::conform;
 use super::literal::literal;
 use super::sexpr_value::{encodable, no_encoding};
 use super::locals::Locals;
@@ -19,7 +20,7 @@ use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
 use super::{binding, call, control, format, instance, looping, macros, matching, method, path_call, quote, setf, the, variant};
-use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
+use crate::check::analyze::{call_sugar, TOPLEVEL_FORM_HEADS};
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -190,10 +191,7 @@ pub(crate) fn check_expr(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     let loc = heap.cons_loc(v).or(loc);
-    let typed = typelisp_mem::grow_stack(|| check_form(cx, heap, locals, v, expected, loc.clone())).and_then(|t| {
-        agree(cx, &t.ty, expected)?;
-        Ok(t)
-    });
+    let typed = typelisp_mem::grow_stack(|| check_form(cx, heap, locals, v, expected, loc.clone())).and_then(|t| conform(cx, t, expected));
     typed.map_err(|e| match &loc {
         Some(l) => e.at(l.clone()),
         None => e,
@@ -369,30 +367,26 @@ fn call_function(
 }
 
 /// Whether a value of type `found` may be where `expected` is expected,
-/// solving holes to make it so. `!` is every type.
+/// solving holes to make it so, with no widening: for a type that is no
+/// value's (a receiver's, a body's). `!` is every type.
 pub(crate) fn agree(cx: &Cx, found: &Type, expected: Option<&Type>) -> Result<(), Error> {
     let Some(e) = expected else { return Ok(()) };
     let unified = cx.holes.borrow_mut().unify(e, found);
     let Err(m) = unified else { return Ok(()) };
-    // Where a trait object or a `Sexpr` is expected, the current checker
-    // widens a value of another type into one.
-    let wanted = cx.resolve(e);
-    if matches!(wanted, Type::Dyn(..)) || is_sexpr_expectation(&wanted) {
-        unimplemented!("typeck: a `{}` widened to the `{}` expected", cx.resolve(found), wanted)
-    }
     Err(Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", m.left, m.right)))
 }
 
-/// [`agree`] for the expression `t`, already checked, where `expected` is
-/// expected: an error is where `t` was written.
+/// [`conform`] for the expression `t`, already checked, where `expected`
+/// is expected: an error is where `t` was written.
 ///
 /// What a checker decides only from what is expected — the empty list as
 /// `Option::none` — was decided without it; that is not done yet.
-pub(crate) fn agree_at(cx: &Cx, t: &Typed, expected: &Type) -> Result<(), Error> {
+pub(crate) fn conform_at(cx: &Cx, t: Typed, expected: &Type) -> Result<Typed, Error> {
     if matches!(t.node, Node::Literal { tag: wk::UNIT, .. }) && matches!(cx.resolve(expected), Type::Named(p, _) if crate::types::path_is_builtin(&p, wk::OPTION)) {
         unimplemented!("typeck: `()` as `Option::none`, checked before its type was known")
     }
-    agree(cx, &t.ty, Some(expected)).map_err(|e| match &t.loc {
+    let loc = t.loc.clone();
+    conform(cx, t, Some(expected)).map_err(|e| match &loc {
         Some(l) => e.at(l.clone()),
         None => e,
     })

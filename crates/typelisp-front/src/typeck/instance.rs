@@ -5,7 +5,8 @@ use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
-use super::expr::{agree, check_expr, Cx};
+use super::expr::{check_expr, Cx};
+use super::widen::expect;
 use super::locals::Locals;
 use super::registry::{TypeDef, TypeEntry, ValueDef};
 use super::resolve::{find_named, sees, value_named};
@@ -85,7 +86,7 @@ pub(crate) fn check_make_instance(
     // What is expected decides the type arguments it can before the values
     // are checked, so a value is checked against its field's type there.
     let ty = Type::Named(path, targs.clone());
-    agree(cx, &ty, expected)?;
+    expect(cx, &ty, expected)?;
     let field_tys: Vec<Type> = def.fields.iter().map(|f| subst.apply(&f.ty)).collect();
     let mut checked: Vec<Option<Typed>> = (0..def.fields.len()).map(|_| None).collect();
     for &i in &order {
