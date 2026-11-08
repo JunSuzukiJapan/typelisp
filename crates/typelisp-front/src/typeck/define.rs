@@ -9,7 +9,7 @@
 //! - Defining a name again is what the redefinition policy says; a built-in
 //!   definition is never replaced.
 
-use crate::check::RedefPolicy;
+use crate::check::{MacroExpander, RedefPolicy};
 use crate::types::{in_std, Path};
 use crate::{Error, Heap};
 use typelisp_mem::SymRef;
@@ -37,10 +37,13 @@ impl Kind {
     }
 }
 
-/// Where definitions are checked, and where what they warn of goes.
+/// Where definitions are checked, where what they warn of goes, and what
+/// expands their macro calls.
 pub(crate) struct Definer<'w> {
     pub(crate) site: Site,
     pub(crate) warnings: &'w mut Vec<String>,
+    /// What expands the macro calls the definitions' bodies make.
+    pub(crate) expander: &'w dyn MacroExpander,
 }
 
 impl Definer<'_> {

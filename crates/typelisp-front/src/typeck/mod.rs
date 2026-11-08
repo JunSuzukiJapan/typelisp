@@ -23,6 +23,7 @@
 //! - [`sexpr_value`]: a value held as a `Sexpr`, encoded by its type.
 //! - [`pattern`]: a `match` arm's pattern.
 //! - [`exhaustive`]: whether a `match`'s arms cover every value.
+//! - [`macros`]: macro calls, expanded.
 //! - [`call`]: calls to functions.
 //! - [`method`]: calls to methods.
 //! - [`path_call`]: calls whose head is a `::` path.
@@ -60,6 +61,7 @@ pub(crate) mod instance;
 pub(crate) mod literal;
 pub(crate) mod locals;
 pub(crate) mod lower;
+pub(crate) mod macros;
 pub(crate) mod matching;
 pub(crate) mod method;
 pub(crate) mod path_call;

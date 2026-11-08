@@ -203,11 +203,11 @@ type ParamsFull = (Vec<(SymRef, Type)>, Vec<Option<Loc>>, Vec<OptKeySpec>, Optio
 
 /// The call-site arity shape of a macro, derived from its [`MacroDef`] by
 /// [`Info::resolve_macro`]/[`Info::macro_at`]
-/// and consumed by [`Checker::check_macro_arity`]. Carries only what a raw
+/// and consumed by [`MacroShape::check_arity`]. Carries only what a raw
 /// argument *count* can be judged against — the `&key` names themselves aren't
 /// needed here (keyword validation happens in `Interp::expand_macro`).
-#[derive(Clone, Copy)]
-pub(super) struct MacroShape {
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MacroShape {
     required: usize,
     optional: usize,
     rest: bool,
@@ -215,8 +215,41 @@ pub(super) struct MacroShape {
 }
 
 impl MacroShape {
-    fn of(def: &MacroDef) -> MacroShape {
+    pub(crate) fn of(def: &MacroDef) -> MacroShape {
         MacroShape { required: def.required, optional: def.optional, rest: def.rest, has_keys: !def.keys.is_empty() }
+    }
+
+    /// The arity check shared by every macro-expansion site. Only the bounds a
+    /// call site can judge from raw argument *count* are checked here; the
+    /// finer validation that needs to parse the argument forms (an unknown
+    /// `&key` keyword, an odd `&key` plist) is left to `Interp::expand_macro`,
+    /// whose error is surfaced the same way (`macro `name`: ...`).
+    ///
+    /// - A minimum of `required` args always applies.
+    /// - With neither `&rest` nor `&key`, the maximum is `required + optional`
+    ///   (exact when there are no `&optional` params — the plain-macro case,
+    ///   preserving the original exact-arity message).
+    /// - With `&rest` or `&key`, there is no call-site upper bound (the
+    ///   trailing args are a `&rest` list and/or a keyword plist).
+    pub(crate) fn check_arity(self, head: &str, got: usize) -> Result<(), Error> {
+        let MacroShape { required, optional, rest, has_keys } = self;
+        if got < required {
+            return Err(Error::TypeError(format!(
+                "macro `{}` expects at least {} argument(s), got {}",
+                head, required, got
+            )));
+        }
+        if !rest && !has_keys {
+            let max = required + optional;
+            if got > max {
+                return Err(Error::TypeError(if optional == 0 {
+                    format!("macro `{}` expects {} argument(s), got {}", head, required, got)
+                } else {
+                    format!("macro `{}` expects {} to {} argument(s), got {}", head, required, max, got)
+                }));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1720,7 +1753,7 @@ impl Checker {
         let r = match &mut self.rebuilt {
             Some(rebuilt) => {
                 let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
-                rebuilt.check_form(heap, &self.info.reg, site, v, heap.cons_loc(v).or(loc_hint))
+                rebuilt.check_form(heap, &self.info.reg, interp, site, v, heap.cons_loc(v).or(loc_hint))
             }
             None => self.check_one_form(heap, interp, v, loc_hint),
         };
@@ -2586,45 +2619,13 @@ impl Checker {
             _ => return Ok(None),
         };
         let args = &elems[1..];
-        Self::check_macro_arity(&display, shape, args.len())?;
+        shape.check_arity(&display, args.len())?;
         let expanded = interp
             .expand_macro(heap, &macro_path, args.to_vec())
             .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;
         Ok(Some(expanded))
     }
 
-    /// The arity check shared by every macro-expansion site. Only the bounds a
-    /// call site can judge from raw argument *count* are checked here; the
-    /// finer validation that needs to parse the argument forms (an unknown
-    /// `&key` keyword, an odd `&key` plist) is left to `Interp::expand_macro`,
-    /// whose error is surfaced the same way (`macro `name`: ...`).
-    ///
-    /// - A minimum of `required` args always applies.
-    /// - With neither `&rest` nor `&key`, the maximum is `required + optional`
-    ///   (exact when there are no `&optional` params — the plain-macro case,
-    ///   preserving the original exact-arity message).
-    /// - With `&rest` or `&key`, there is no call-site upper bound (the
-    ///   trailing args are a `&rest` list and/or a keyword plist).
-    fn check_macro_arity(head: &str, shape: MacroShape, got: usize) -> Result<(), Error> {
-        let MacroShape { required, optional, rest, has_keys } = shape;
-        if got < required {
-            return Err(Error::TypeError(format!(
-                "macro `{}` expects at least {} argument(s), got {}",
-                head, required, got
-            )));
-        }
-        if !rest && !has_keys {
-            let max = required + optional;
-            if got > max {
-                return Err(Error::TypeError(if optional == 0 {
-                    format!("macro `{}` expects {} argument(s), got {}", head, required, got)
-                } else {
-                    format!("macro `{}` expects {} to {} argument(s), got {}", head, required, max, got)
-                }));
-            }
-        }
-        Ok(())
-    }
 
 
 
@@ -10305,7 +10306,7 @@ impl Checker {
             // expansion in place, in the use site's lexical `env`. This is
             // what makes macros unhygienic/CL-style.
             Some(Resolved::Macro(macro_path, shape)) => {
-                Self::check_macro_arity(&head, shape, args.len())?;
+                shape.check_arity(&head, args.len())?;
                 let expanded = interp
                     .expand_macro(heap, &macro_path, args.to_vec())
                     .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
@@ -10850,7 +10851,7 @@ impl Checker {
     ) -> Result<Checked, Error> {
         match self.resolve_name(env, Written::Path(target), &mut || None) {
             Some(Resolved::Macro(macro_path, shape)) => {
-                Self::check_macro_arity(&display, shape, args.len())?;
+                shape.check_arity(&display, args.len())?;
                 let expanded = interp
                     .expand_macro(heap, &macro_path, args.to_vec())
                     .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;

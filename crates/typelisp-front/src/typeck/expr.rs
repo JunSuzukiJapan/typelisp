@@ -17,9 +17,9 @@ use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
-use super::{binding, call, control, format, instance, matching, method, path_call, the, variant};
+use super::{binding, call, control, format, instance, macros, matching, method, path_call, the, variant};
 use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
-use crate::check::SPECIAL_FORM_HEADS;
+use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
@@ -28,6 +28,8 @@ use typelisp_mem::SymRef;
 /// definition declares, and the form's inference holes.
 pub(crate) struct Cx<'a> {
     pub(crate) reg: &'a Registry,
+    /// What expands a macro call: the evaluator, which holds the bodies.
+    pub(crate) expander: &'a dyn MacroExpander,
     pub(crate) ns: NsId,
     pub(crate) scope: &'a TypeScope<'a>,
     /// Inside an `impl`, the type `Self` stands for.
@@ -46,8 +48,8 @@ pub(crate) struct Cx<'a> {
 }
 
 impl<'a> Cx<'a> {
-    pub(crate) fn new(reg: &'a Registry, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), directives: RefCell::new(Vec::new()), temps: Cell::new(0) }
+    pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), directives: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -271,7 +273,11 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     let head = match elems[0].0 {
         Value::Symbol(head) => head,
         Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, args, expected, loc),
-        _ => unimplemented!("typeck: a list whose head is neither a name nor a path"),
+        // Any other head is an expression whose value is applied.
+        other => {
+            check_expr(cx, heap, locals, other, None, elems[0].1.clone())?;
+            unimplemented!("typeck: applying a function value")
+        }
     };
     match head.well_known() {
         wk::LET => return binding::check_let(cx, heap, locals, args, expected, loc),
@@ -304,8 +310,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     if call_sugar(head.name(), args.len(), || matches!(value, Some((_, ValueDef::Fn(_))))).is_some() {
         unimplemented!("typeck: the call sugar `({} ...)` with {} argument(s)", spelling, args.len())
     }
-    if let Some((_, ValueDef::Macro { .. })) = value {
-        unimplemented!("typeck: expanding the macro `{}`", spelling)
+    if let Some((path, ValueDef::Macro { shape, .. })) = value {
+        let expanded = macros::expand(cx.expander, heap, &path, *shape, spelling, args)?;
+        return check_expr(cx, heap, locals, expanded, expected, loc);
     }
     if let Some((owner, variant)) = ctor_named(cx.reg, cx.ns, head) {
         return variant::check_variant(cx, heap, locals, owner, variant, args, expected, loc);

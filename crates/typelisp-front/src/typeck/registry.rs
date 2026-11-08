@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
+use crate::check::analyze::MacroShape;
 use crate::check::lower::CoreForms;
 use crate::check::registry::{AdtKind, OptKeyParam, TraitBound, Variant};
 use crate::types::{Path, Type, TypeParam};
@@ -122,14 +123,14 @@ pub(crate) enum TypeEntry {
 }
 
 /// What a module-level name in the value name space is: one of three, never
-/// two of them (`docs/dev/name-resolution.md` 1). Of a macro only whether it
-/// is `pub` is known so far; what it is is recorded when the checker expands
-/// it.
+/// two of them (`docs/dev/name-resolution.md` 1). Of a macro, whether it is
+/// `pub` and how many arguments a call of it may have; its body is the
+/// evaluator's, which expands it.
 #[derive(Clone, Debug)]
 pub(crate) enum ValueDef {
     Fn(FnDef),
     Var(VarDef),
-    Macro { public: bool },
+    Macro { public: bool, shape: MacroShape },
 }
 
 impl ValueDef {
@@ -138,7 +139,7 @@ impl ValueDef {
         match self {
             ValueDef::Fn(def) => def.public,
             ValueDef::Var(def) => def.public,
-            ValueDef::Macro { public } => *public,
+            ValueDef::Macro { public, .. } => *public,
         }
     }
 }

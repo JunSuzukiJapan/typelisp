@@ -118,7 +118,7 @@ pub(crate) fn define_method(
     reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
 
     let mut body = {
-        let cx = Cx::new(reg, ns, scope, self_type);
+        let cx = Cx::new(reg, d.expander, ns, scope, self_type);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;

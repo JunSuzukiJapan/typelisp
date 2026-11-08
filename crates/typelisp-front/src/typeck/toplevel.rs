@@ -3,13 +3,14 @@
 use std::cell::{OnceCell, RefCell};
 
 use crate::check::lower::CoreForms;
-use crate::check::MONO_BUNDLE_MODULE;
+use crate::check::{MacroExpander, MONO_BUNDLE_MODULE};
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::intern_in;
 use typelisp_mem::SymRef;
 
 use super::define::Definer;
+use super::macros::expand_toplevel;
 use super::defenum::check_defenum;
 use super::defmethod::check_defmethod;
 use super::defstruct::check_defstruct;
@@ -58,9 +59,18 @@ impl TypeChecker {
     }
 
     /// `v`, a form written at `site`, checked: its core form, unrooted.
+    /// `expander` expands its macro calls.
     ///
     /// What the form defines is kept only if checking it succeeds.
-    pub(crate) fn check_form(&mut self, heap: &mut Heap, old: &crate::check::Registry, site: Site, v: Value, loc: Option<Loc>) -> Result<Value, Error> {
+    pub(crate) fn check_form(
+        &mut self,
+        heap: &mut Heap,
+        old: &crate::check::Registry,
+        expander: &dyn MacroExpander,
+        site: Site,
+        v: Value,
+        loc: Option<Loc>,
+    ) -> Result<Value, Error> {
         self.registry(old);
         let reg = self.reg.get_mut().expect("the registry was just made");
         self.expr_ty = None;
@@ -68,7 +78,7 @@ impl TypeChecker {
         // into the form, which is then reachable from nothing but the caller.
         // Nothing allocates between releasing them and the caller rooting it.
         let roots_base = heap.root_count();
-        let result = check_toplevel(reg, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut());
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut());
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty)) => {
@@ -111,6 +121,7 @@ impl TypeChecker {
 /// specializations the form asks for come first, in one bundle with it.
 fn check_toplevel(
     reg: &mut Registry,
+    expander: &dyn MacroExpander,
     heap: &mut Heap,
     site: Site,
     v: Value,
@@ -118,7 +129,7 @@ fn check_toplevel(
     warnings: &mut Vec<String>,
 ) -> Result<(Value, Option<Type>), Error> {
     let mut requests = Requests::default();
-    let (form, ty) = check_primary(reg, heap, site, v, loc, &mut requests, warnings)?;
+    let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings)?;
     heap.push_root(form);
     let mut forms = Vec::new();
     while let Some(req) = requests.next()? {
@@ -133,8 +144,10 @@ fn check_toplevel(
     Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_primary(
     reg: &mut Registry,
+    expander: &dyn MacroExpander,
     heap: &mut Heap,
     site: Site,
     v: Value,
@@ -143,7 +156,10 @@ fn check_primary(
     warnings: &mut Vec<String>,
 ) -> Result<(Value, Option<Type>), Error> {
     let ns = site.ns;
-    let d = &mut Definer { site, warnings };
+    if let Some(expanded) = expand_toplevel(reg, expander, heap, ns, v)? {
+        return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings);
+    }
+    let d = &mut Definer { site, warnings, expander };
     if let Value::Cons(_) = v {
         let elems = heap.list_to_vec_locs(v)?;
         // `impl<T, U>` reads as `(%type-apply impl T U)`.
@@ -177,7 +193,7 @@ fn check_primary(
     }
     let mut typed = {
         let scope = TypeScope::empty();
-        let cx = Cx::new(reg, ns, &scope, None);
+        let cx = Cx::new(reg, expander, ns, &scope, None);
         let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
         cx.settle(heap, std::slice::from_mut(&mut typed))?;
         typed
@@ -259,7 +275,7 @@ mod tests {
         let mut last = None;
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc)).expect("check failed");
+            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), &interp, ROOT_SITE, v, Some(loc)).expect("check failed");
             heap.push_root(form);
             if let Some(value) = interp.exec(&mut heap, form).expect("run failed") {
                 last = Some((value, checker.expr_type().expect("an expression has a type").clone()));
@@ -273,13 +289,14 @@ mod tests {
     fn check_err(src: &str) -> String {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
+        let interp = Interp::new();
         let mut checker = TypeChecker::default();
         crate::check::Registry::with_builtins().publish_names(&mut heap.names());
         let mut forms = reader.forms(src);
         let mut result = Ok(Value::Empty);
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            result = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc));
+            result = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), &interp, ROOT_SITE, v, Some(loc));
         }
         match result {
             Err(e) => e.to_string(),
@@ -292,12 +309,13 @@ mod tests {
     fn check_ok(src: &str) -> Type {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
+        let interp = Interp::new();
         let mut checker = TypeChecker::default();
         crate::check::Registry::with_builtins().publish_names(&mut heap.names());
         let mut forms = reader.forms(src);
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc)).expect("check failed");
+            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), &interp, ROOT_SITE, v, Some(loc)).expect("check failed");
             heap.push_root(form);
         }
         checker.expr_type().expect("the last form is an expression").clone()
@@ -663,11 +681,12 @@ mod tests {
     fn a_failed_definition_is_not_kept() {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
+        let interp = Interp::new();
         let mut checker = TypeChecker::default();
         let mut forms = reader.forms("(defun f () int true)");
         let (v, loc) = forms.next_form(&mut heap).unwrap().unwrap();
         heap.push_root(v);
-        assert!(checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc)).is_err());
+        assert!(checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), &interp, ROOT_SITE, v, Some(loc)).is_err());
         let f = crate::types::Path::of_symbol(NsId::ROOT, typelisp_mem::symbols::intern_in(NsId::ROOT, "f"));
         assert!(checker.reg.get().expect("made by the check").fn_def(&f).is_none());
     }

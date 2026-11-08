@@ -7,8 +7,8 @@ use typelisp_mem::SymRef;
 
 use super::expr::{agree, check_expr, Cx};
 use super::locals::Locals;
-use super::registry::{TypeDef, TypeEntry};
-use super::resolve::{find_named, sees};
+use super::registry::{TypeDef, TypeEntry, ValueDef};
+use super::resolve::{find_named, sees, value_named};
 use super::subst::Subst;
 use super::tree::{Node, Typed};
 use super::type_syntax::parse_type;
@@ -156,7 +156,16 @@ fn slot_shape(tname: &str, def: &TypeDef) -> Error {
 /// local of a struct type: that field.
 pub(crate) fn check_field(cx: &Cx, locals: &Locals, recv: SymRef, member: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
     let Some(recv_ty) = locals.lookup(recv) else {
-        unimplemented!("typeck: `{}::{}` where `{}` is not a local", recv.name(), member.name(), recv.name())
+        if let Some((_, ValueDef::Var(_))) = value_named(cx.reg, cx.ns, recv) {
+            unimplemented!("typeck: `{}::{}`, a member of the global `{}`", recv.name(), member.name(), recv.name())
+        }
+        return Err(Error::TypeError(format!(
+            "unresolved path: {}::{} (`{}` is not a variable, and no module or type `{}` is visible here)",
+            recv.name(),
+            member.name(),
+            recv.name(),
+            recv.name()
+        )));
     };
     let recv_ty = cx.resolve(recv_ty);
     let obj = Typed { node: Node::Local { name: recv }, ty: recv_ty.clone(), loc: loc.clone() };

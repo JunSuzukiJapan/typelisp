@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 
 use crate::check::registry::{AdtDef, AdtKind, FnSig, OptKeyParam, TraitBound, Variant};
+use crate::check::analyze::MacroShape;
 use crate::check::Registry as OldRegistry;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use typelisp_mem::symbols::intern;
@@ -33,8 +34,8 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
             new.values.insert(path, ValueDef::Var(VarDef { ty, public: var.public }));
         }
         for sym in m.macros.symbols() {
-            let public = m.macros.get_sym(sym).expect("a key of the table").public;
-            new.values.insert(Path::of_symbol(ns, sym), ValueDef::Macro { public });
+            let def = m.macros.get_sym(sym).expect("a key of the table");
+            new.values.insert(Path::of_symbol(ns, sym), ValueDef::Macro { public: def.public, shape: MacroShape::of(def) });
         }
         for sym in m.types.symbols() {
             let def = m.types.get_sym(sym).expect("a key of the table");

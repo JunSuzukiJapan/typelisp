@@ -58,7 +58,7 @@ pub(crate) fn check_defun(
     reg.define_fn(path, FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()));
 
     let mut body = {
-        let cx = Cx::new(reg, ns, &scope, None);
+        let cx = Cx::new(reg, d.expander, ns, &scope, None);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;

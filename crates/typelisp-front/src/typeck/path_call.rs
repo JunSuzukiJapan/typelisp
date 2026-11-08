@@ -4,12 +4,14 @@
 //! The path is followed as it was read (`types::path_target`): to a member
 //! of a type, or to a name in a module.
 
+use crate::check::registry::AdtKind;
 use crate::types::{path_spelling, path_target, PathTarget, Type};
 use crate::{Error, Heap, Loc, PathId, Value};
 use typelisp_mem::symbols::member_symbol;
 
 use super::call::check_call;
-use super::expr::Cx;
+use super::expr::{check_expr, Cx};
+use super::macros::expand;
 use super::locals::Locals;
 use super::method::check_method_call;
 use super::registry::{TypeEntry, ValueDef};
@@ -43,10 +45,27 @@ pub(crate) fn check_path_call(
                 if cx.reg.has_inst_method(&owner, name) {
                     unimplemented!("typeck: `{}`, a method written for one instantiation, called through its type", path_spelling(heap, id))
                 }
-                return Err(Error::TypeError(format!("`{}` has no variant or method `{}`", owner, member.name())));
+                if def.kind == AdtKind::Struct && !def.builtin {
+                    return Err(Error::TypeError(format!(
+                        "`{}` has no static method `{}`; a struct's methods are written in its `impl`, \
+                         e.g. (impl {} (pub {} (...) {} (make-instance '{} :slot value...)))",
+                        owner,
+                        member.name(),
+                        owner,
+                        member.name(),
+                        owner,
+                        owner
+                    )));
+                }
+                return Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id))));
             };
             if method.instance {
-                unimplemented!("typeck: calling the instance method `{}` through its type", path_spelling(heap, id))
+                return Err(Error::TypeError(format!(
+                    "`{}::{}` is an instance method; call it as ({} obj ...)",
+                    owner,
+                    member.name(),
+                    member.name()
+                )));
             }
             let home = method.home.map_or(owner.ns(), |h| h.ns());
             if !method.sig.public && !sees(cx.ns, home) {
@@ -68,8 +87,15 @@ pub(crate) fn check_path_call(
                 check_call(cx, heap, locals, path, def, None, args, expected, loc)
             }
             Some(ValueDef::Var(_)) => unimplemented!("typeck: calling the function the global `{}` holds", path_spelling(heap, id)),
-            Some(ValueDef::Macro { .. }) => unimplemented!("typeck: expanding the macro `{}`", path_spelling(heap, id)),
-            None => Err(Error::NoSuchFunction(path_spelling(heap, id))),
+            Some(ValueDef::Macro { public, shape }) => {
+                let spelling = path_spelling(heap, id);
+                if !public && !sees(cx.ns, path.ns()) {
+                    return Err(Error::TypeError(format!("`{}` is not `pub`, so it is not visible outside its module", spelling)));
+                }
+                let expanded = expand(cx.expander, heap, &path, *shape, &spelling, args)?;
+                check_expr(cx, heap, locals, expanded, expected, loc)
+            }
+            None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
         },
     }
 }
