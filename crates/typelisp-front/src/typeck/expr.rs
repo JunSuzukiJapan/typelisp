@@ -27,19 +27,21 @@ pub(crate) struct Cx<'a> {
     pub(crate) reg: &'a Registry,
     pub(crate) ns: NsId,
     pub(crate) scope: &'a TypeScope<'a>,
+    /// Inside an `impl`, the type `Self` stands for.
+    pub(crate) self_type: Option<&'a Type>,
     pub(crate) holes: RefCell<Holes>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
 }
 
 impl<'a> Cx<'a> {
-    pub(crate) fn new(reg: &'a Registry, ns: NsId, scope: &'a TypeScope<'a>) -> Cx<'a> {
-        Cx { reg, ns, scope, holes: RefCell::new(Holes::new()), temps: Cell::new(0) }
+    pub(crate) fn new(reg: &'a Registry, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
+        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
     pub(crate) fn types(&self) -> TypeCx<'_> {
-        TypeCx { reg: self.reg, ns: self.ns, scope: self.scope }
+        TypeCx { reg: self.reg, ns: self.ns, scope: self.scope, self_type: self.self_type }
     }
 
     /// A local variable no program can name, for a value the checker holds

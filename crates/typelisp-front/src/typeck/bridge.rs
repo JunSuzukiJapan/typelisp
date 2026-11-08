@@ -81,7 +81,7 @@ fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
     let has_defaults = old.struct_defaults.contains_key(&path);
     new.types.insert(
         path,
-        TypeEntry::Type(TypeDef { kind: def.kind, params, public: def.public, builtin: def.builtin, fields, has_defaults }),
+        TypeEntry::Type(TypeDef { kind: def.kind, params, public: def.public, builtin: def.builtin, stdlib: def.stdlib, fields, has_defaults }),
     );
     for (name, af) in def.assoc.iter() {
         let sig = fn_def(ParamOwner::Method(path, name), &def.params, &af.sig);

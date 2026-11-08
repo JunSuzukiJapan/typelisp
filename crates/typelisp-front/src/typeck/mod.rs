@@ -8,6 +8,7 @@
 //! - [`defun`]: defining a function.
 //! - [`defstruct`]: defining a struct type and its accessors.
 //! - [`defmethod`]: defining a method outside an `impl`.
+//! - [`impl_block`]: an inherent `impl`, the methods of one type.
 //! - [`generic`]: specializations of generic definitions.
 //! - [`expr`]: which kind of form an expression is, and bodies.
 //! - [`literal`]: the atoms that are their own value, and their types.
@@ -37,6 +38,7 @@ pub(crate) mod defstruct;
 pub(crate) mod defun;
 pub(crate) mod expr;
 pub(crate) mod generic;
+pub(crate) mod impl_block;
 pub(crate) mod instance;
 pub(crate) mod literal;
 pub(crate) mod locals;

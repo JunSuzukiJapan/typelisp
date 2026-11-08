@@ -48,14 +48,14 @@ pub(crate) fn check_defun(
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defun {}: type parameter `{}` is declared twice", path, twice.0.name()))
     })?;
-    let tcx = TypeCx { reg, ns, scope: &scope };
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let params = parse_params(heap, &tcx, *params)?;
     let ret = parse_type(heap, &tcx, *ret)?;
     let type_params = scope.params().to_vec();
     reg.define_fn(path, FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()));
 
     let mut body = {
-        let cx = Cx::new(reg, ns, &scope);
+        let cx = Cx::new(reg, ns, &scope, None);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;

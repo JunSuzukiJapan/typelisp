@@ -81,6 +81,9 @@ pub(crate) struct TypeDef {
     pub(crate) public: bool,
     /// Implemented in Rust (`Vector`, `HashTable`, ...): no `make-instance`.
     pub(crate) builtin: bool,
+    /// Defined by the standard library, so only the standard library may
+    /// write an inherent `impl` of it.
+    pub(crate) stdlib: bool,
     /// A struct's fields, in order. Their types are written in this type's
     /// own parameters.
     pub(crate) fields: Vec<Field>,

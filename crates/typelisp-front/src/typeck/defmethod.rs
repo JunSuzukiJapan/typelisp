@@ -11,6 +11,7 @@ use crate::check::lower::CoreForms;
 use crate::types::{is_type_application, prim_type_path, scalar_of_symbol, ParamOwner, Path, Type};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{member_symbol, NsId};
+use typelisp_mem::SymRef;
 
 use super::defun::{lower_all, parse_header, parse_params};
 use super::expr::{check_body, Cx};
@@ -62,24 +63,58 @@ pub(crate) fn check_defmethod(
     let scope = root.declare(ParamOwner::Method(owner, method), &type_names).map_err(|twice| {
         Error::TypeError(format!("defmethod {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
-    let tcx = TypeCx { reg, ns, scope: &scope };
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let params = parse_params(heap, &tcx, *params)?;
     let ret = parse_type(heap, &tcx, *ret)?;
+    let def = Method { owner, method, instance: true, public: false, home: Some(Path::of_symbol(ns, name)), params, ret };
+    let form = define_method(reg, ns, heap, requests, &scope, None, def, body)?;
+    let forms: Vec<Value> = form.into_iter().collect();
+    crate::check::forms::module_form(heap, &owner, &forms)
+}
+
+/// A method about to be defined: whose it is, its parameters (the receiver
+/// first, for an instance method) and its result type.
+pub(crate) struct Method {
+    pub(crate) owner: Path,
+    pub(crate) method: SymRef,
+    pub(crate) instance: bool,
+    pub(crate) public: bool,
+    /// The module a `defmethod` outside an `impl` was written in.
+    pub(crate) home: Option<Path>,
+    pub(crate) params: Vec<(SymRef, Type)>,
+    pub(crate) ret: Type,
+}
+
+/// Register `def` with the type parameters `scope` declares, check `body`,
+/// and return the method's code, rooted — or `None` when it is generic and
+/// kept to be specialized where it is called. `self_type` is what `Self`
+/// stands for in the body.
+///
+/// The method is registered before its body is checked, so the body can
+/// call it. The caller undoes the definition if checking fails.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn define_method(
+    reg: &mut Registry,
+    ns: NsId,
+    heap: &mut Heap,
+    requests: &mut Requests,
+    scope: &TypeScope,
+    self_type: Option<&Type>,
+    def: Method,
+    body: &[(Value, Option<Loc>)],
+) -> Result<Option<Value>, Error> {
+    let Method { owner, method, instance, public, home, params, ret } = def;
     let type_params = scope.params().to_vec();
-    // A receiver that names every type argument outright makes the method
-    // that instantiation's own.
-    let inst_args = match &params[0].1 {
-        Type::Named(_, args) if !args.is_empty() && type_params.is_empty() => Some(args.clone()),
-        _ => None,
-    };
-    if inst_args.is_some() {
+    // A receiver that names every type argument outright would make the
+    // method that instantiation's own.
+    if instance && type_params.is_empty() && matches!(&params[0].1, Type::Named(_, args) if !args.is_empty()) {
         unimplemented!("typeck: a method written for one instantiation of a generic type")
     }
-    let sig = FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone());
-    reg.methods.insert((owner, method), MethodDef { sig, instance: true, home: Some(Path::of_symbol(ns, name)), inst_args: None });
+    let sig = FnDef { public, ..FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
+    reg.methods.insert((owner, method), MethodDef { sig, instance, home, inst_args: None });
 
     let mut body = {
-        let cx = Cx::new(reg, ns, &scope);
+        let cx = Cx::new(reg, ns, scope, self_type);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
@@ -93,19 +128,19 @@ pub(crate) fn check_defmethod(
             t.each_value(&mut |v| heap.push_permanent_root(v));
         }
         reg.set_template(Base::Method(owner, method), Some(Template { params, ret, body: std::mem::take(&mut body) }));
-        return crate::check::forms::module_form(heap, &owner, &[]);
+        return Ok(None);
     }
     reg.set_template(Base::Method(owner, method), None);
     let subst = Subst::default();
     let mut lw = Lowering { reg, subst: &subst, requests };
     let forms = lower_all(heap, &mut lw, &body)?;
-    let form = reg.defmethod_form(heap, &owner, method, true, &params, &ret, &forms)?;
+    let form = reg.defmethod_form(heap, &owner, method, instance, &params, &ret, &forms)?;
     heap.push_root(form);
-    crate::check::forms::module_form(heap, &owner, &[form])
+    Ok(Some(form))
 }
 
 /// The type a receiver's written type belongs to: its head names it.
-fn receiver_type_path(heap: &Heap, reg: &Registry, ns: NsId, written: Value) -> Result<Path, Error> {
+pub(crate) fn receiver_type_path(heap: &Heap, reg: &Registry, ns: NsId, written: Value) -> Result<Path, Error> {
     let head = match written {
         Value::Cons(_) if is_type_application(heap, written) => heap.list_to_vec(written)?.get(1).copied(),
         other => Some(other),

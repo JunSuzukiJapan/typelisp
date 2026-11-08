@@ -53,9 +53,17 @@ pub(crate) fn check_defstruct(
     let params = scope.params().to_vec();
     // Registered before the fields are read, so a field can name the type
     // it belongs to.
-    let stub = TypeDef { kind: AdtKind::Struct, params: params.clone(), public: false, builtin: false, fields: Vec::new(), has_defaults: false };
+    let stub = TypeDef {
+        kind: AdtKind::Struct,
+        params: params.clone(),
+        public: false,
+        builtin: false,
+        stdlib: false,
+        fields: Vec::new(),
+        has_defaults: false,
+    };
     reg.types.insert(path, TypeEntry::Type(stub.clone()));
-    let fields = parse_fields(heap, &TypeCx { reg, ns, scope: &scope }, fields)?;
+    let fields = parse_fields(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, fields)?;
     if fields.is_empty() {
         return Err(Error::TypeError("defstruct: needs at least one field".into()));
     }

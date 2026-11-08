@@ -8,7 +8,8 @@ use typelisp_mem::symbols::NsId;
 
 use super::defmethod::check_defmethod;
 use super::defstruct::check_defstruct;
-use super::defun::{check_defun, lower_all};
+use super::defun::{check_defun, lower_all, parse_header};
+use super::impl_block::check_impl;
 use super::expr::{check_expr, Cx};
 use super::generic::{Base, Name, Request, Requests};
 use super::locals::Locals;
@@ -106,7 +107,17 @@ impl TypeChecker {
     ) -> Result<(Value, Option<Type>), Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec_locs(v)?;
+            // `impl<T, U>` reads as `(%type-apply impl T U)`.
+            if crate::types::is_type_application(heap, elems[0].0) {
+                let (head, names) = parse_header(heap, elems[0].0)?;
+                if head.is(wk::IMPL) {
+                    return Ok((check_impl(&mut self.reg, ns, heap, requests, &names, &elems[1..])?, None));
+                }
+            }
             if let Value::Symbol(head) = elems[0].0 {
+                if head.is(wk::IMPL) {
+                    return Ok((check_impl(&mut self.reg, ns, heap, requests, &[], &elems[1..])?, None));
+                }
                 match head.well_known() {
                     wk::DEFUN => return Ok((check_defun(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
                     wk::DEFSTRUCT => return Ok((check_defstruct(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
@@ -117,7 +128,7 @@ impl TypeChecker {
         }
         let mut typed = {
             let scope = TypeScope::empty();
-            let cx = Cx::new(&self.reg, ns, &scope);
+            let cx = Cx::new(&self.reg, ns, &scope, None);
             let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
             typed.map_types(&|t| cx.resolve(t));
             typed
@@ -348,6 +359,31 @@ mod tests {
     fn a_receiver_type_does_not_declare_anything() {
         let msg = check_err(&format!("{}(defmethod bad ((p Pair<T,U>)) T p::first)", PAIR));
         assert!(msg.contains("unknown type `T`"), "{}", msg);
+    }
+
+    /// `impl<T, U>` declares what the target and the methods use; each
+    /// method adds its own after them.
+    #[test]
+    fn an_impl_declares_its_type_parameters() {
+        let src = format!(
+            "{}(impl<T, U> Pair<T, U> (defmethod fst (self) T self::first) \
+               (defmethod swap (self) Pair<U,T> (make-instance (quote Pair) :first self::second :second self::first)) \
+               (defmethod me (self) Self self))\n(fst (swap (me (mk))))",
+            PAIR
+        );
+        assert_eq!(run(&src).2, Type::Str);
+        let msg = check_err(&format!("{}(impl Pair<T,U> (defmethod bad (self) T self::first))", PAIR));
+        assert!(msg.contains("unknown type `T`"), "{}", msg);
+    }
+
+    /// The case that started the rebuild: the method's own `T` is no
+    /// parameter of `Pair`'s, whatever `Pair` called its own.
+    #[test]
+    fn a_methods_own_parameter_may_have_any_name() {
+        let src = format!("{}(impl<A, B> Pair<A, B> (defmethod mk<T> (self (x T)) T x))\n(mk (mk) true)", PAIR);
+        assert_eq!(run(&src).1, Value::Bool(true));
+        let msg = check_err(&format!("{}(impl<T> Pair<T, int> (defmethod bad<T> (self) T self::first))", PAIR));
+        assert!(msg.contains("type parameter `T` is declared twice"), "{}", msg);
     }
 
     #[test]

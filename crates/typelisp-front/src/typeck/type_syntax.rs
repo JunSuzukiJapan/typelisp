@@ -9,18 +9,19 @@ use super::registry::{Registry, TypeEntry};
 use super::resolve::find_named;
 use super::scope::TypeScope;
 
-/// Where a type is read: the definitions, the module, and the type
-/// parameters declared there.
+/// Where a type is read: the definitions, the module, the type parameters
+/// declared there, and inside an `impl`, the type `Self` stands for.
 pub(crate) struct TypeCx<'a> {
     pub(crate) reg: &'a Registry,
     pub(crate) ns: NsId,
     pub(crate) scope: &'a TypeScope<'a>,
+    pub(crate) self_type: Option<&'a Type>,
 }
 
 /// The type `v` writes.
 ///
-/// A bare name is first a declared type parameter, then a built-in scalar
-/// type, then a type the module sees. Writing a name never declares it
+/// A bare name is first a declared type parameter, then `Self`, then a
+/// built-in scalar type, then a type the module sees. Writing a name never declares it
 /// (`docs/dev/checker-rebuild-plan.md` 7.5). `Name<A, B>` reads as
 /// `(%type-apply Name A B)`. So far a type alias, a function type, a path
 /// and the C words are not read: they are read when the checker can check
@@ -31,6 +32,12 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
         Value::Symbol(id) => {
             if let Some(p) = cx.scope.lookup(id) {
                 return Ok(Type::Param(p));
+            }
+            if id.is(crate::wk::SELF_TYPE) {
+                return match cx.self_type {
+                    Some(t) => Ok(t.clone()),
+                    None => Err(Error::TypeError("`Self` is the type an `impl` or a `deftrait` is for, and is written only inside one".into())),
+                };
             }
             match scalar_of_symbol(id) {
                 Some(Type::Ptr | Type::CLong | Type::CULong) => {
