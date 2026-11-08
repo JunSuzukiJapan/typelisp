@@ -1674,7 +1674,7 @@ impl Checker {
         heap.names().enter_module(self.current_module());
         let ns = self.current_module();
         let r = match &mut self.rebuilt {
-            Some(rebuilt) => rebuilt.check_form(heap, ns, v, heap.cons_loc(v).or(loc_hint)),
+            Some(rebuilt) => rebuilt.check_form(heap, &self.info.reg, ns, v, heap.cons_loc(v).or(loc_hint)),
             None => self.check_one_form(heap, interp, v, loc_hint),
         };
         self.info.reg.reexport_std_in_prelude();

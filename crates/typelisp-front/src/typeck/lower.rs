@@ -33,7 +33,7 @@ impl Lowering<'_> {
 
 /// `t`'s core form, unrooted. It carries `t`'s position on its first cell.
 pub(crate) fn lower(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Error> {
-    let form = typelisp_mem::grow_stack(|| lower_node(heap, lw, &t.node))?;
+    let form = typelisp_mem::grow_stack(|| lower_node(heap, lw, t))?;
     if let (Value::Cons(cell), Some(loc)) = (form, &t.loc) {
         if heap.cons_loc(form).is_none() {
             heap.set_cons_loc(cell, loc.clone());
@@ -49,8 +49,8 @@ pub(crate) fn lower_rooted(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Res
     Ok(form)
 }
 
-fn lower_node(heap: &mut Heap, lw: &mut Lowering, node: &Node) -> Result<Value, Error> {
-    match node {
+fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Error> {
+    match &t.node {
         Node::Literal { tag, value } => match value {
             Some(v) => core::tagged(heap, *tag, &[*v]),
             None => core::tagged(heap, *tag, &[]),
@@ -69,6 +69,15 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, node: &Node) -> Result<Value, 
             }
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             lw.reg.call_form(heap, &path, &lowered)
+        }
+        Node::MethodCall { owner, method, args } => {
+            let mut lowered = Vec::with_capacity(args.len());
+            for a in args {
+                lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
+            }
+            let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
+            let ret = lw.settle(&t.ty);
+            lw.reg.assoc_form(heap, owner, *method, true, &ret, &lowered)
         }
         Node::Let { binds, body } => {
             let mut lowered = Vec::with_capacity(binds.len());

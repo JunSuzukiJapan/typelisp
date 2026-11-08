@@ -11,17 +11,22 @@
 //! - [`literal`]: the atoms that are their own value, and their types.
 //! - [`binding`]: `let` and `progn`.
 //! - [`control`]: `if`.
-//! - [`call`]: calls to the functions the program defined.
+//! - [`call`]: calls to functions.
+//! - [`method`]: calls to instance methods.
+//! - [`resolve`]: what a name written in a module means.
 //! - [`locals`]: local variables.
 //! - [`scope`]: which type parameters a name means where a type is written.
 //! - [`type_syntax`]: reading a written type.
 //! - [`subst`]: replacing declared type parameters with types.
 //! - [`unify`]: inference holes and the unification that solves them.
 //! - [`registry`]: what the program has defined, kept only when a form checks.
+//! - [`bridge`]: the current checker's registry copied in, while the two
+//!   checkers stand side by side.
 //! - [`tree`]: the typed tree checking produces.
 //! - [`lower`]: the typed tree to core IR.
 
 pub(crate) mod binding;
+pub(crate) mod bridge;
 pub(crate) mod call;
 pub(crate) mod control;
 pub(crate) mod defun;
@@ -30,7 +35,9 @@ pub(crate) mod generic;
 pub(crate) mod literal;
 pub(crate) mod locals;
 pub(crate) mod lower;
+pub(crate) mod method;
 pub(crate) mod registry;
+pub(crate) mod resolve;
 pub(crate) mod scope;
 pub(crate) mod subst;
 pub(crate) mod toplevel;

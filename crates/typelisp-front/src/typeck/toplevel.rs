@@ -19,6 +19,8 @@ use super::subst::Subst;
 #[derive(Debug, Default)]
 pub(crate) struct TypeChecker {
     reg: Registry,
+    /// Whether the current checker's registry has been copied in yet.
+    imported: bool,
     /// The type of the last form, when it was an expression.
     expr_ty: Option<Type>,
 }
@@ -33,7 +35,16 @@ impl TypeChecker {
     /// unrooted.
     ///
     /// What the form defines is kept only if checking it succeeds.
-    pub(crate) fn check_form(&mut self, heap: &mut Heap, ns: NsId, v: Value, loc: Option<Loc>) -> Result<Value, Error> {
+    ///
+    /// `old` is the current checker's registry, which holds the built-in
+    /// definitions and the prelude; it is copied in before the first form
+    /// (`docs/dev/checker-rebuild-plan.md` 8.3).
+    pub(crate) fn check_form(&mut self, heap: &mut Heap, old: &crate::check::Registry, ns: NsId, v: Value, loc: Option<Loc>) -> Result<Value, Error> {
+        if !self.imported {
+            super::bridge::import(old, &mut self.reg);
+            self.reg.commit();
+            self.imported = true;
+        }
         self.expr_ty = None;
         // Every value the tree holds is rooted from here until it is lowered
         // into the form, which is then reachable from nothing but the caller.
@@ -117,7 +128,11 @@ impl TypeChecker {
 /// with the type parameters replaced, under the specialization's name.
 fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Request) -> Result<Value, Error> {
     let def = reg.fn_def(&req.base).expect("a specialization is asked for only of a defined function");
-    let template = reg.template(&req.base).expect("a specialization is asked for only of a generic function");
+    // The prelude's generic functions were checked by the current checker,
+    // which keeps their source, not a checked tree.
+    let Some(template) = reg.template(&req.base) else {
+        unimplemented!("typeck: specializing {}, a generic function this checker has no checked body of", req.base)
+    };
     let subst = Subst::positional(&def.type_params, &req.args);
     let params: Vec<_> = template.params.iter().map(|(n, t)| (*n, subst.apply(t))).collect();
     let ret = subst.apply(&template.ret);
@@ -142,7 +157,7 @@ mod tests {
         let mut last = None;
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            let form = checker.check_form(&mut heap, NsId::ROOT, v, Some(loc)).expect("check failed");
+            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), NsId::ROOT, v, Some(loc)).expect("check failed");
             heap.push_root(form);
             if let Some(value) = interp.exec(&mut heap, form).expect("run failed") {
                 last = Some((value, checker.expr_type().expect("an expression has a type").clone()));
@@ -161,7 +176,7 @@ mod tests {
         let mut result = Ok(Value::Empty);
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            result = checker.check_form(&mut heap, NsId::ROOT, v, Some(loc));
+            result = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), NsId::ROOT, v, Some(loc));
         }
         match result {
             Err(e) => e.to_string(),
@@ -295,8 +310,8 @@ mod tests {
         let mut forms = reader.forms("(defun f () int true)");
         let (v, loc) = forms.next_form(&mut heap).unwrap().unwrap();
         heap.push_root(v);
-        assert!(checker.check_form(&mut heap, NsId::ROOT, v, Some(loc)).is_err());
+        assert!(checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), NsId::ROOT, v, Some(loc)).is_err());
         let f = crate::types::Path::of_symbol(NsId::ROOT, typelisp_mem::symbols::intern_in(NsId::ROOT, "f"));
-        assert_eq!(checker.reg.fn_def(&f), None);
+        assert!(checker.reg.fn_def(&f).is_none());
     }
 }

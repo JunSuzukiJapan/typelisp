@@ -20,7 +20,7 @@ pub(crate) struct Mismatch {
 }
 
 /// The holes of one inference and what each is solved to.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Holes {
     solved: Vec<Option<Type>>,
 }

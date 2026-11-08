@@ -3,16 +3,20 @@
 
 use std::cell::RefCell;
 
-use crate::types::{Path, Type};
+use crate::types::Type;
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 
 use super::literal::literal;
 use super::locals::Locals;
-use super::registry::Registry;
+use super::registry::{Registry, ValueDef};
+use super::resolve::{ctor_named, receiver_method, static_use_named, value_named};
 use super::tree::{Node, Typed};
 use super::unify::Holes;
-use super::{binding, call, control};
+use super::{binding, call, control, method};
+use crate::check::SPECIAL_FORM_HEADS;
+use typelisp_mem::symbols::member_symbol;
+use typelisp_mem::SymRef;
 
 /// What every expression of one top-level form is checked against: the
 /// definitions, the module the form is in, and the form's inference holes.
@@ -69,16 +73,31 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         return Ok(Typed { node: Node::Literal { tag: lit.tag, value: lit.value }, ty: lit.ty, loc });
     }
     match v {
-        Value::Symbol(id) => match locals.lookup(id) {
-            Some(ty) => Ok(Typed { node: Node::Local { name: id }, ty: ty.clone(), loc }),
-            None => unimplemented!("typeck: the value of `{}` (only local variables are read so far)", heap.symbol_spelling(id)),
-        },
+        Value::Symbol(id) => check_symbol(cx, heap, locals, id, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
-        other => unimplemented!("typeck: checking {:?} (only literals, locals and lists are checked so far)", other),
+        other => unimplemented!("typeck: checking {:?} (only literals, names and lists are checked so far)", other),
+    }
+}
+
+/// A bare name's value: a local, or what the module-level name holds.
+fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
+    if let Some(ty) = locals.lookup(id) {
+        return Ok(Typed { node: Node::Local { name: id }, ty: ty.clone(), loc });
+    }
+    match value_named(cx.reg, cx.ns, id) {
+        Some((_, ValueDef::Fn(_))) => unimplemented!("typeck: the function `{}` as a value", heap.symbol_spelling(id)),
+        Some((_, ValueDef::Var)) => unimplemented!("typeck: the global variable `{}`", heap.symbol_spelling(id)),
+        Some((_, ValueDef::Macro)) => unimplemented!("typeck: the macro `{}` as a value", heap.symbol_spelling(id)),
+        None => Err(Error::TypeError(format!("unbound variable: {}", heap.symbol_spelling(id)))),
     }
 }
 
 /// A list form: a special form, or a call.
+///
+/// A call `(name arg...)` is resolved in this order
+/// (`docs/dev/name-resolution.md` 3.1): a local; a macro; a variant or a
+/// static method a `use` brought in; the first argument's type's method; the
+/// function the module-level name holds.
 fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let elems = heap.list_to_vec_locs(v)?;
     let Value::Symbol(head) = elems[0].0 else {
@@ -91,13 +110,39 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
         _ => {}
     }
-    if locals.lookup(head).is_some() {
-        unimplemented!("typeck: calling the local `{}` (only module functions are called so far)", heap.symbol_spelling(head))
+    if SPECIAL_FORM_HEADS.contains(&head.well_known()) {
+        unimplemented!("typeck: the special form `{}`", heap.symbol_spelling(head))
     }
-    let path = Path::of_symbol(cx.ns, head);
-    match cx.reg.fn_def(&path) {
-        Some(def) => call::check_call(cx, heap, locals, path, def, args, expected, loc),
-        None => unimplemented!("typeck: calling `{}` (only functions this checker defined are called so far)", heap.symbol_spelling(head)),
+    let spelling = heap.symbol_spelling(head);
+    if locals.lookup(head).is_some() {
+        unimplemented!("typeck: calling the local `{}`", spelling)
+    }
+    let value = value_named(cx.reg, cx.ns, head);
+    if let Some((_, ValueDef::Macro)) = value {
+        unimplemented!("typeck: expanding the macro `{}`", spelling)
+    }
+    if ctor_named(cx.reg, cx.ns, head).is_some() || static_use_named(cx.reg, cx.ns, head).is_some() {
+        unimplemented!("typeck: `{}`, a variant or a static method a `use` brought in", spelling)
+    }
+    if let Some((first, first_loc)) = args.first() {
+        let member = member_symbol(spelling);
+        // The receiver is checked to find its type's method. When it has
+        // none, what that check solved is forgotten: the argument is checked
+        // again where the function's parameter type is expected.
+        let saved = cx.holes.borrow().clone();
+        if let Ok(receiver) = check_expr(cx, heap, locals, *first, None, first_loc.clone()) {
+            let ty = cx.resolve(&receiver.ty);
+            if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &ty, member) {
+                return method::check_method_call(cx, heap, locals, owner, member, def, receiver, &args[1..], expected, loc);
+            }
+        }
+        *cx.holes.borrow_mut() = saved;
+    }
+    match value {
+        Some((path, ValueDef::Fn(def))) => call::check_call(cx, heap, locals, path, def, args, expected, loc),
+        Some((_, ValueDef::Var)) => unimplemented!("typeck: calling the function the global `{}` holds", spelling),
+        Some((_, ValueDef::Macro)) => unreachable!("a macro was dispatched above"),
+        None => Err(Error::NoSuchFunction(spelling.to_string())),
     }
 }
 

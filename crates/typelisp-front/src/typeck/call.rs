@@ -26,6 +26,12 @@ pub(crate) fn check_call(
     expected: Option<&Type>,
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
+    if def.rest.is_some() || !def.optionals.is_empty() || !def.keys.is_empty() || !def.bounds.is_empty() {
+        unimplemented!("typeck: calling {}, which takes &rest, &optional or &key parameters or has :where bounds", path)
+    }
+    if def.ffi {
+        unimplemented!("typeck: calling the C function {} (unsafe is not checked yet)", path)
+    }
     if args.len() != def.params.len() {
         return Err(Error::TypeError(format!(
             "{}: expected {} argument(s), got {}",
@@ -43,6 +49,9 @@ pub(crate) fn check_call(
     let ret = subst.apply(&def.ret);
     agree(cx, &ret, expected)?;
     let targs: Vec<Type> = def.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();
+    // A Rust builtin has no body to specialize: one entry point serves every
+    // instantiation, as in the current checker.
+    let call_targs = if def.builtin { Vec::new() } else { targs.clone() };
     for (p, t) in def.type_params.iter().zip(&targs) {
         if cx.holes.borrow().unsolved(t).is_some() {
             return Err(Error::TypeError(format!(
@@ -52,5 +61,5 @@ pub(crate) fn check_call(
             )));
         }
     }
-    Ok(Typed { node: Node::Call { path, targs, args: checked }, ty: ret, loc })
+    Ok(Typed { node: Node::Call { path, targs: call_targs, args: checked }, ty: ret, loc })
 }

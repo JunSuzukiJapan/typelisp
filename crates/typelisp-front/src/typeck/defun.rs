@@ -51,7 +51,7 @@ pub(crate) fn check_defun(
     let params = parse_params(heap, &scope, *params)?;
     let ret = parse_type(heap, &scope, *ret)?;
     let type_params = scope.params().to_vec();
-    reg.define_fn(path, FnDef { type_params: type_params.clone(), params: params.iter().map(|(_, t)| t.clone()).collect(), ret: ret.clone() });
+    reg.define_fn(path, FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()));
 
     let mut body = {
         let cx = Cx::new(reg, ns);
