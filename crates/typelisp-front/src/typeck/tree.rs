@@ -50,6 +50,14 @@ pub(crate) enum Node {
     Set { name: SymRef, value: Box<Typed> },
     /// `(setf name value)` of the global variable `path`.
     SetGlobal { path: Path, value: Box<Typed> },
+    /// `(loop body...)`: the body run again and again, until a `return` or
+    /// a `break` in it leaves.
+    Loop { body: Vec<Typed> },
+    /// `(break)`: leave the nearest loop, its value `()`.
+    Break,
+    /// `(return value?)`: leave the nearest loop with `value` (`()` when
+    /// none).
+    Return { value: Option<Box<Typed>> },
     /// `let`: the bindings, each checked outside all of them, then the body
     /// in order. With no bindings it is `progn`.
     Let { binds: Vec<(SymRef, Typed)>, body: Vec<Typed> },
@@ -98,8 +106,11 @@ impl Typed {
     /// The expressions directly inside this one.
     fn children(&self) -> Vec<&Typed> {
         match &self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter().collect(),
+            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => Vec::new(),
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
+                args.iter().collect()
+            }
+            Node::Return { value } => value.iter().map(|v| &**v).collect(),
             Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } | Node::Set { value: obj, .. } | Node::SetGlobal { value: obj, .. } => {
                 vec![&**obj]
             }
@@ -113,8 +124,11 @@ impl Typed {
     /// [`Self::children`], to change.
     fn children_mut(&mut self) -> Vec<&mut Typed> {
         match &mut self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter_mut().collect(),
+            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => Vec::new(),
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
+                args.iter_mut().collect()
+            }
+            Node::Return { value } => value.iter_mut().map(|v| &mut **v).collect(),
             Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } | Node::Set { value: obj, .. } | Node::SetGlobal { value: obj, .. } => {
                 vec![&mut **obj]
             }
@@ -160,6 +174,9 @@ impl Typed {
                 | Node::AsSexpr { .. }
                 | Node::Set { .. }
                 | Node::SetGlobal { .. }
+                | Node::Loop { .. }
+                | Node::Break
+                | Node::Return { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

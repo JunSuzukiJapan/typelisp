@@ -181,7 +181,7 @@ fn keyword(v: Value) -> Option<SymRef> {
 
 /// Whether `loop`'s argument list is a DSL body rather than a simple loop's
 /// forms — CL's own rule, read off the first argument.
-pub(super) fn is_dsl(args: &[Value]) -> bool {
+pub(crate) fn is_dsl(args: &[Value]) -> bool {
     args.first().and_then(|v| keyword(*v)).is_some()
 }
 

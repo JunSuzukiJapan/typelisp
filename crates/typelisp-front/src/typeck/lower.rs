@@ -131,6 +131,17 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let value = lower_rooted(heap, lw, value)?;
             lw.reg.set_global_form(heap, path, &ty, value)
         }
+        Node::Loop { body } => {
+            let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
+            let repr = lw.reg.repr_form(heap, &lw.settle(&t.ty))?;
+            heap.push_root(repr);
+            forms::loop_form(heap, repr, &body)
+        }
+        Node::Break => forms::break_form(heap),
+        Node::Return { value } => {
+            let value = value.as_deref().map(|v| lower_rooted(heap, lw, v)).transpose()?;
+            forms::return_form(heap, value)
+        }
         Node::Let { binds, body } => {
             let mut lowered = Vec::with_capacity(binds.len());
             for (name, t) in binds {

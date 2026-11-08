@@ -143,7 +143,7 @@ pub(super) fn erased_generic_form(heap: &mut Heap, what: &str) -> Result<Value, 
 /// `i32` whose low bits happen to look like a box tag must never be). The
 /// interpreter ignores the field: its `break`/`return` values travel in a
 /// `State::Unwind`, which the collector walks as a root source.
-pub(super) fn loop_form(heap: &mut Heap, repr: Value, body: &[Value]) -> Result<Value, Error> {
+pub(crate) fn loop_form(heap: &mut Heap, repr: Value, body: &[Value]) -> Result<Value, Error> {
     let mut items = Vec::with_capacity(body.len() + 1);
     items.push(repr);
     items.extend_from_slice(body);
@@ -151,12 +151,12 @@ pub(super) fn loop_form(heap: &mut Heap, repr: Value, body: &[Value]) -> Result<
 }
 
 /// `(break)` — leave the nearest enclosing loop with no value.
-pub(super) fn break_form(heap: &mut Heap) -> Result<Value, Error> {
+pub(crate) fn break_form(heap: &mut Heap) -> Result<Value, Error> {
     core::tagged(heap, wk::BREAK, &[])
 }
 
 /// `(return)` / `(return FORM)` — leave the nearest enclosing loop.
-pub(super) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value, Error> {
+pub(crate) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value, Error> {
     match value {
         Some(v) => core::tagged(heap, wk::RETURN, &[v]),
         None => core::tagged(heap, wk::RETURN, &[]),

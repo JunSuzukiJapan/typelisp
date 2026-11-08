@@ -19,6 +19,7 @@
 //! - [`control`]: `if`.
 //! - [`matching`]: `match`.
 //! - [`the`]: `the`.
+//! - [`looping`]: `loop`, `break` and `return`.
 //! - [`setf`]: `setf`, assigning a place.
 //! - [`format`]: `format`, `print` and `println`.
 //! - [`sexpr_value`]: a value held as a `Sexpr`, encoded by its type.
@@ -61,6 +62,7 @@ pub(crate) mod impl_block;
 pub(crate) mod instance;
 pub(crate) mod literal;
 pub(crate) mod locals;
+pub(crate) mod looping;
 pub(crate) mod lower;
 pub(crate) mod macros;
 pub(crate) mod matching;

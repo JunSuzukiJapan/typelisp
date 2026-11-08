@@ -697,6 +697,21 @@ mod tests {
         assert!(msg.contains("has no field `z`"), "{}", msg);
     }
 
+    /// A loop's value is what leaves it; every exit gives one type, and a
+    /// loop nothing leaves is `!`.
+    #[test]
+    fn a_loop_is_what_leaves_it() {
+        assert_eq!(run("(let ((i 0)) (loop (if (= i 3) (return i) (setf i (+ i 1)))))").1, Value::Int(3));
+        assert_eq!(run("(defun f () u8 (loop (return 4)))\n(f)").2, Type::U8);
+        assert_eq!(check_ok("(the bool (loop ()))"), Type::Never);
+        let msg = check_err("(loop (return \"a\") (return 1))");
+        assert!(msg.contains("expected `string`, found `int`"), "{}", msg);
+        let msg = check_err("(loop (return 1) (break))");
+        assert!(msg.contains("branches have incompatible types: `int` vs `()`"), "{}", msg);
+        let msg = check_err("(return 1)");
+        assert!(msg.contains("return: not inside a loop"), "{}", msg);
+    }
+
     /// A definition whose checking fails is not kept (plan 4.4): calling it
     /// afterwards is not a call to anything this checker defined.
     #[test]
