@@ -14,6 +14,7 @@ use crate::{wk, Error, Heap, Value};
 
 use super::generic::Requests;
 use super::registry::Registry;
+use super::sexpr_value::{encoding, no_encoding, Encoding};
 use super::subst::Subst;
 use super::tree::{Node, Pat, Typed};
 
@@ -146,6 +147,21 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 lowered.push((pat, body));
             }
             lw.reg.match_form(heap, scrut, &scrut_ty, &lowered)
+        }
+        Node::AsSexpr { value } => {
+            let ty = lw.settle(&value.ty);
+            let form = lower_rooted(heap, lw, value)?;
+            match encoding(lw.reg, &ty) {
+                Some(Encoding::Itself) => Ok(form),
+                Some(Encoding::BoxOption) => forms::box_option_form(heap, &ty, form),
+                Some(Encoding::Variant(variant)) => {
+                    let sexpr = Path::builtin(typelisp_mem::wk::SEXPR);
+                    lw.reg.construct_form(heap, &sexpr, &[], variant, false, &[ty], &[form])
+                }
+                // A generic body's type parameter, specialized to a type that
+                // has no encoding.
+                None => Err(no_encoding(&ty)),
+            }
         }
     }
 }

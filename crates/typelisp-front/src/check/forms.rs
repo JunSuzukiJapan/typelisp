@@ -408,7 +408,7 @@ pub(crate) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Res
 /// `none` = variant 1), under the identity `KEY` spells. The printer, `eq`
 /// and every other consumer of a `Sexpr` datum see the same box a boxed
 /// `Option` is; the niche is a statement about typed positions only.
-pub(super) fn box_option_form(heap: &mut Heap, option: &Type, value: Value) -> Result<Value, Error> {
+pub(crate) fn box_option_form(heap: &mut Heap, option: &Type, value: Value) -> Result<Value, Error> {
     let mut s = RootScope::new(heap);
     s.push_root(value);
     let key = core::type_form(&mut s, option, &[])?;

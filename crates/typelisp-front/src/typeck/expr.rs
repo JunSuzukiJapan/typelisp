@@ -7,7 +7,9 @@ use crate::types::Type;
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 
+use super::format::{check_directives, Directives};
 use super::literal::literal;
+use super::sexpr_value::{encodable, no_encoding};
 use super::locals::Locals;
 use super::registry::{Registry, ValueDef};
 use super::resolve::{ctor_named, receiver_method, static_use_named, value_named};
@@ -15,7 +17,7 @@ use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
-use super::{binding, call, control, instance, matching, method, path_call, the, variant};
+use super::{binding, call, control, format, instance, matching, method, path_call, the, variant};
 use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
 use crate::check::SPECIAL_FORM_HEADS;
 use typelisp_mem::symbols::member_symbol;
@@ -37,13 +39,15 @@ pub(crate) struct Cx<'a> {
     /// The holes the form's number literals were given, each an integer or
     /// a float type nothing may have decided yet.
     numbers: RefCell<Vec<Type>>,
+    /// The control strings to check against their arguments' settled types.
+    directives: RefCell<Vec<Directives>>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
 }
 
 impl<'a> Cx<'a> {
     pub(crate) fn new(reg: &'a Registry, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), temps: Cell::new(0) }
+        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), directives: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -100,12 +104,20 @@ impl<'a> Cx<'a> {
         self.undecided.borrow_mut().push((ty, what, loc));
     }
 
+    /// Check `d`'s control string against its arguments once their types
+    /// are settled ([`Self::settle`]): a later use may decide them.
+    pub(crate) fn check_directives_later(&self, d: Directives) {
+        self.directives.borrow_mut().push(d);
+    }
+
     /// The checked trees of the form, every type in them settled: a number
     /// literal's type nothing decided is the default (`int`, `f64`), then
     /// each hole is replaced by its solution, and each number literal
     /// becomes the literal of its type — refused there if it is out of that
     /// type's range. An error too if a type argument nothing decided was
-    /// required ([`Self::must_decide`]).
+    /// required ([`Self::must_decide`]), when a value held as a `Sexpr` has
+    /// a type with no encoding, or when a control string's directives do not
+    /// take its arguments.
     pub(crate) fn settle(&self, heap: &mut Heap, trees: &mut [Typed]) -> Result<(), Error> {
         for hole in self.numbers.borrow().iter() {
             self.decide(hole);
@@ -122,8 +134,23 @@ impl<'a> Cx<'a> {
         for t in trees.iter_mut() {
             t.map_types(&|ty| self.resolve(ty));
             t.walk_mut(&mut |t| settle_number(heap, t))?;
+            t.walk_mut(&mut |t| match &t.node {
+                Node::AsSexpr { value } if !encodable(self.reg, &value.ty) => Err(at(no_encoding(&value.ty), &t.loc)),
+                _ => Ok(()),
+            })?;
+        }
+        for d in self.directives.borrow().iter() {
+            check_directives(d, |ty| self.resolve(ty))?;
         }
         Ok(())
+    }
+}
+
+/// `e` at `loc`, when it is known.
+fn at(e: Error, loc: &Option<Loc>) -> Error {
+    match loc {
+        Some(l) => e.at(l.clone()),
+        None => e,
     }
 }
 
@@ -251,6 +278,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::PROGN => return binding::check_progn(cx, heap, locals, args, expected, loc),
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
         wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
+        wk::FORMAT => return format::check_format(cx, heap, locals, args, loc),
+        wk::PRINT | wk::PRINTLN => return format::check_print(cx, heap, locals, head.well_known(), args, loc),
         wk::THE => return the::check_the(cx, heap, locals, args),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
         wk::VALUE_MEMBER => {

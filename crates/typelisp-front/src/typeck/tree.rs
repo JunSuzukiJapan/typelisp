@@ -53,6 +53,9 @@ pub(crate) enum Node {
     /// `match`: the first arm whose pattern matches the scrutinee's value is
     /// run, the names its pattern binds bound.
     Match { scrut: Box<Typed>, arms: Vec<(Pat, Vec<Typed>)> },
+    /// `value`, of its own type, held as a `Sexpr`. How is chosen when the
+    /// tree is lowered, from the settled type ([`super::sexpr_value`]).
+    AsSexpr { value: Box<Typed> },
 }
 
 /// A checked pattern.
@@ -93,7 +96,7 @@ impl Typed {
         match &self.node {
             Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter().collect(),
-            Node::FieldGet { obj, .. } => vec![&**obj],
+            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } => vec![&**obj],
             Node::FieldSet { obj, value, .. } => vec![&**obj, &**value],
             Node::Let { binds, body } => binds.iter().map(|(_, t)| t).chain(body).collect(),
             Node::If { cond, then, els } => vec![&**cond, &**then, &**els],
@@ -106,7 +109,7 @@ impl Typed {
         match &mut self.node {
             Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter_mut().collect(),
-            Node::FieldGet { obj, .. } => vec![&mut **obj],
+            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } => vec![&mut **obj],
             Node::FieldSet { obj, value, .. } => vec![&mut **obj, &mut **value],
             Node::Let { binds, body } => binds.iter_mut().map(|(_, t)| t).chain(body.iter_mut()).collect(),
             Node::If { cond, then, els } => vec![&mut **cond, &mut **then, &mut **els],
@@ -146,6 +149,7 @@ impl Typed {
                 | Node::Local { .. }
                 | Node::Global { .. }
                 | Node::FieldGet { .. }
+                | Node::AsSexpr { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

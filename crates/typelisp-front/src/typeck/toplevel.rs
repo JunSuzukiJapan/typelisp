@@ -287,6 +287,22 @@ mod tests {
         }
     }
 
+    /// `src`'s forms checked in order, each expected to check: the last
+    /// one's type.
+    fn check_ok(src: &str) -> Type {
+        let mut heap = Heap::with_capacity(1 << 16);
+        let reader = Reader::new();
+        let mut checker = TypeChecker::default();
+        crate::check::Registry::with_builtins().publish_names(&mut heap.names());
+        let mut forms = reader.forms(src);
+        while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
+            heap.push_root(v);
+            let form = checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), ROOT_SITE, v, Some(loc)).expect("check failed");
+            heap.push_root(form);
+        }
+        checker.expr_type().expect("the last form is an expression").clone()
+    }
+
     #[test]
     fn integer_literals() {
         let (_, v, ty) = run("42");
@@ -614,6 +630,31 @@ mod tests {
         assert_eq!(run("(the u8 3)").2, Type::U8);
         let msg = check_err("(the bool 3)");
         assert!(msg.contains("expected `bool`, found `int`"), "{}", msg);
+    }
+
+    /// `format` checks to a string, `println` to `()`. A number literal
+    /// argument's type is the one the rest of the form decides.
+    #[test]
+    fn format_and_println_check() {
+        assert_eq!(check_ok("(let ((x 1)) (format false \"~a, ~a and ~d\" \"s\" 2.5 x))"), Type::Str);
+        assert_eq!(check_ok("(println \"~a\" (the u8 1))"), Type::Unit);
+    }
+
+    /// The directives are checked against the arguments' types.
+    #[test]
+    fn format_directives_take_their_arguments() {
+        let msg = check_err("(format false \"~a ~a\" 1)");
+        assert!(msg.contains("~a has no argument left to consume"), "{}", msg);
+        let msg = check_err("(format false \"~{~a~}\" \"s\")");
+        assert!(msg.contains("~{ needs a list"), "{}", msg);
+        let msg = check_err("(let ((c \"~a\")) (println c 1))");
+        assert!(msg.contains("the control string must be a literal"), "{}", msg);
+    }
+
+    /// A generic body is checked once: a `T` may be printed by `~a`.
+    #[test]
+    fn format_of_a_type_parameter() {
+        assert_eq!(check_ok("(defun show<T> ((x T)) string (format false \"<~a>\" x))\n(show #\\q)"), Type::Str);
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

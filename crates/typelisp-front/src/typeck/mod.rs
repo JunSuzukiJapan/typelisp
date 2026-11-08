@@ -19,6 +19,8 @@
 //! - [`control`]: `if`.
 //! - [`matching`]: `match`.
 //! - [`the`]: `the`.
+//! - [`format`]: `format`, `print` and `println`.
+//! - [`sexpr_value`]: a value held as a `Sexpr`, encoded by its type.
 //! - [`pattern`]: a `match` arm's pattern.
 //! - [`exhaustive`]: whether a `match`'s arms cover every value.
 //! - [`call`]: calls to functions.
@@ -50,6 +52,7 @@ pub(crate) mod defstruct;
 pub(crate) mod defun;
 pub(crate) mod defvar;
 pub(crate) mod exhaustive;
+pub(crate) mod format;
 pub(crate) mod expr;
 pub(crate) mod generic;
 pub(crate) mod impl_block;
@@ -64,6 +67,7 @@ pub(crate) mod pattern;
 pub(crate) mod registry;
 pub(crate) mod resolve;
 pub(crate) mod scope;
+pub(crate) mod sexpr_value;
 pub(crate) mod subst;
 pub(crate) mod the;
 pub(crate) mod toplevel;

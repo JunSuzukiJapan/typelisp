@@ -17462,13 +17462,13 @@ fn has_open_hole(t: &Type) -> bool {
 /// `defun`/`lambda`'s `&rest` now matches it, just with an added call-site
 /// check (below) that every individual variadic argument satisfies the
 /// declared element type before it's wrapped into the list.
-fn sexpr_ty() -> Type {
+pub(crate) fn sexpr_ty() -> Type {
     Type::Named(Path::builtin(typelisp_mem::wk::SEXPR), vec![])
 }
 
 /// `Option<Sexpr>` — the type an S-expression datum has once the empty list
 /// is `none` (see [`is_option_of_sexpr`]).
-fn option_of_sexpr() -> Type {
+pub(crate) fn option_of_sexpr() -> Type {
     Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![sexpr_ty()])
 }
 
@@ -17504,7 +17504,7 @@ fn is_option_of_sexpr(ty: &Type) -> bool {
 /// (`Sexpr` itself needs no wrapping — see [`Checker::wrap_rest_elem`]).
 /// `&rest`'s declared element type must be one of these (or `Sexpr`) since
 /// nothing else has a lossless `Sexpr` encoding to collect into a list with.
-fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
+pub(crate) fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
     match elem_ty {
         // One variant per width, spelled by the type's own name. There is no
         // folding left to do: `Sexpr` has an `i8` and a `u32` because the
