@@ -14,7 +14,7 @@ use super::resolve::{ctor_named, receiver_method, static_use_named, value_named}
 use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
-use super::unify::{Holes, Mark};
+use super::unify::{Holes, Kind};
 use super::{binding, call, control, instance, matching, method, path_call, variant};
 use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
 use crate::check::SPECIAL_FORM_HEADS;
@@ -34,13 +34,16 @@ pub(crate) struct Cx<'a> {
     /// The type arguments the form's checking must decide: each one's type,
     /// and what to say, and where, when nothing does.
     undecided: RefCell<Vec<(Type, String, Option<Loc>)>>,
+    /// The holes the form's number literals were given, each an integer or
+    /// a float type nothing may have decided yet.
+    numbers: RefCell<Vec<Type>>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
 }
 
 impl<'a> Cx<'a> {
     pub(crate) fn new(reg: &'a Registry, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), temps: Cell::new(0) }
+        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -61,16 +64,30 @@ impl<'a> Cx<'a> {
         self.holes.borrow().resolve(ty)
     }
 
-    /// What the form's inference knows now, to go back to with
-    /// [`Self::restore`] after checking something only to look at it.
-    pub(crate) fn snapshot(&self) -> Snapshot {
-        Snapshot { holes: self.holes.borrow().mark(), undecided: self.undecided.borrow().len() }
+    /// A hole of the kind `kind` for a number literal.
+    fn number_hole(&self, kind: Kind) -> Type {
+        let hole = self.holes.borrow_mut().fresh_of(kind);
+        self.numbers.borrow_mut().push(hole.clone());
+        hole
     }
 
-    /// Forget what the inference learned since `snap` was taken.
-    pub(crate) fn restore(&self, snap: Snapshot) {
-        self.holes.borrow_mut().rollback(snap.holes);
-        self.undecided.borrow_mut().truncate(snap.undecided);
+    /// `ty` resolved, read as its default type when it is a number literal's
+    /// hole nothing has decided yet — without deciding it.
+    pub(crate) fn with_default(&self, ty: &Type) -> Type {
+        let holes = self.holes.borrow();
+        match holes.kind_of(ty).and_then(Kind::default_type) {
+            Some(t) => t,
+            None => holes.resolve(ty),
+        }
+    }
+
+    /// Decide `ty`, when it is a number literal's hole nothing has decided
+    /// yet, as its default type.
+    pub(crate) fn decide(&self, ty: &Type) {
+        let mut holes = self.holes.borrow_mut();
+        if let Some(t) = holes.kind_of(ty).and_then(Kind::default_type) {
+            holes.unify(ty, &t).expect("a hole of a kind is solved to that kind's default");
+        }
     }
 
     /// Require that the type argument `ty` be decided by the time the form
@@ -83,10 +100,16 @@ impl<'a> Cx<'a> {
         self.undecided.borrow_mut().push((ty, what, loc));
     }
 
-    /// The checked trees of the form, every type in them settled: each hole
-    /// replaced by its solution. An error if a type argument nothing decided
-    /// was required ([`Self::must_decide`]).
-    pub(crate) fn settle(&self, trees: &mut [Typed]) -> Result<(), Error> {
+    /// The checked trees of the form, every type in them settled: a number
+    /// literal's type nothing decided is the default (`int`, `f64`), then
+    /// each hole is replaced by its solution, and each number literal
+    /// becomes the literal of its type — refused there if it is out of that
+    /// type's range. An error too if a type argument nothing decided was
+    /// required ([`Self::must_decide`]).
+    pub(crate) fn settle(&self, heap: &mut Heap, trees: &mut [Typed]) -> Result<(), Error> {
+        for hole in self.numbers.borrow().iter() {
+            self.decide(hole);
+        }
         for (ty, what, loc) in self.undecided.borrow().iter() {
             if self.holes.borrow().unsolved(ty).is_some() {
                 let e = Error::TypeError(what.clone());
@@ -98,15 +121,26 @@ impl<'a> Cx<'a> {
         }
         for t in trees.iter_mut() {
             t.map_types(&|ty| self.resolve(ty));
+            t.walk_mut(&mut |t| settle_number(heap, t))?;
         }
         Ok(())
     }
 }
 
-/// What [`Cx::snapshot`] keeps.
-pub(crate) struct Snapshot {
-    holes: Mark,
-    undecided: usize,
+/// `t` as the literal of its settled type, when it is a number literal.
+fn settle_number(heap: &mut Heap, t: &mut Typed) -> Result<(), Error> {
+    let Node::Number { value } = t.node else { return Ok(()) };
+    let lit = literal(heap, value, Some(&t.ty))
+        .map_err(|e| match &t.loc {
+            Some(l) => e.at(l.clone()),
+            None => e,
+        })?
+        .expect("a number is a literal");
+    if let Some(v) = lit.value {
+        heap.push_root(v);
+    }
+    t.node = Node::Literal { tag: lit.tag, value: lit.value };
+    Ok(())
 }
 
 /// `v` checked where `expected` is expected (`None`: anything), with `locals`
@@ -138,6 +172,16 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     // A literal's type depends on what is expected, which may be a hole an
     // earlier argument solved.
     let solved = expected.map(|e| cx.resolve(e));
+    // A number where no type is known yet is one the rest of the form
+    // decides, as in Rust: `(let ((x 1)) (id8 x))` makes `x` a `u8`.
+    if matches!(solved, None | Some(Type::Infer(_))) {
+        if let Some(kind) = number_kind(heap, v) {
+            if let Value::Boxed(_) = v {
+                heap.push_root(v);
+            }
+            return Ok(Typed { node: Node::Number { value: v }, ty: cx.number_hole(kind), loc });
+        }
+    }
     if let Some(lit) = literal(heap, v, solved.as_ref())? {
         if let Some(value) = lit.value {
             heap.push_root(value);
@@ -148,6 +192,18 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         Value::Symbol(id) => check_symbol(cx, heap, locals, id, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
         other => unimplemented!("typeck: checking {:?} (only literals, names and lists are checked so far)", other),
+    }
+}
+
+/// The kind of type the number literal `v` may have, when it is one whose
+/// type depends on where it is: an integer, or a float. A ratio is a
+/// `ratio` wherever it is.
+fn number_kind(heap: &Heap, v: Value) -> Option<Kind> {
+    match v {
+        Value::Int(_) => Some(Kind::Integer),
+        Value::Boxed(id) if heap.is_bignum(id) => Some(Kind::Integer),
+        Value::Boxed(id) if heap.is_f64(id) || heap.is_f32(id) => Some(Kind::Float),
+        _ => None,
     }
 }
 
@@ -228,30 +284,41 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         let def = cx.reg.method(&owner, name).expect("a `use` brings in a defined static method");
         return method::check_method_call(cx, heap, locals, owner, name, def, None, args, expected, loc);
     }
+    let Some(((first, first_loc), rest)) = args.split_first() else {
+        return call_function(cx, heap, locals, value, spelling, None, args, expected, loc);
+    };
+    // The first argument is checked once, with nothing expected of it. Its
+    // type says whose method the call is; when it is no method's, the same
+    // checked argument is the function's first. A number literal no type
+    // decided yet is read as its default for this (`(+ 1 x)` is `int`'s
+    // `+`), and is decided only when it is a receiver.
+    let first = check_expr(cx, heap, locals, *first, None, first_loc.clone())?;
     let member = member_symbol(spelling);
-    if let Some((first, first_loc)) = args.first().filter(|_| cx.reg.has_method_named(member)) {
-        // The receiver is checked to find its type's method. When it has
-        // none, what that check solved is forgotten: the argument is checked
-        // again where the function's parameter type is expected.
-        let saved = cx.snapshot();
-        match check_expr(cx, heap, locals, *first, None, first_loc.clone()) {
-            Ok(receiver) => {
-                let ty = cx.resolve(&receiver.ty);
-                if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &ty, member) {
-                    return method::check_method_call(cx, heap, locals, owner, member, def, Some(receiver), &args[1..], expected, loc);
-                }
-            }
-            // With no function of the name either, the receiver's own error
-            // is what is wrong with the call.
-            Err(e) if value.is_none() => return Err(e),
-            Err(_) => {}
-        }
-        cx.restore(saved);
+    if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &cx.with_default(&first.ty), member) {
+        cx.decide(&first.ty);
+        return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), rest, expected, loc);
     }
+    call_function(cx, heap, locals, value, spelling, Some(first), rest, expected, loc)
+}
+
+/// A call to what the module-level name `spelling` holds, `value`: its
+/// arguments `first`, already checked, and `rest`.
+#[allow(clippy::too_many_arguments)]
+fn call_function(
+    cx: &Cx,
+    heap: &mut Heap,
+    locals: &Locals,
+    value: Option<(crate::types::Path, &ValueDef)>,
+    spelling: &str,
+    first: Option<Typed>,
+    rest: &[(Value, Option<Loc>)],
+    expected: Option<&Type>,
+    loc: Option<Loc>,
+) -> Result<Typed, Error> {
     match value {
-        Some((path, ValueDef::Fn(def))) => call::check_call(cx, heap, locals, path, def, args, expected, loc),
+        Some((path, ValueDef::Fn(def))) => call::check_call(cx, heap, locals, path, def, first, rest, expected, loc),
         Some((_, ValueDef::Var)) => unimplemented!("typeck: calling the function the global `{}` holds", spelling),
-        Some((_, ValueDef::Macro)) => unreachable!("a macro was dispatched above"),
+        Some((_, ValueDef::Macro)) => unreachable!("a macro was dispatched before the call"),
         None => Err(Error::NoSuchFunction(spelling.to_string())),
     }
 }
@@ -269,6 +336,21 @@ pub(crate) fn agree(cx: &Cx, found: &Type, expected: Option<&Type>) -> Result<()
         unimplemented!("typeck: a `{}` widened to the `{}` expected", cx.resolve(found), wanted)
     }
     Err(Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", m.left, m.right)))
+}
+
+/// [`agree`] for the expression `t`, already checked, where `expected` is
+/// expected: an error is where `t` was written.
+///
+/// What a checker decides only from what is expected — the empty list as
+/// `Option::none` — was decided without it; that is not done yet.
+pub(crate) fn agree_at(cx: &Cx, t: &Typed, expected: &Type) -> Result<(), Error> {
+    if matches!(t.node, Node::Literal { tag: wk::UNIT, .. }) && matches!(cx.resolve(expected), Type::Named(p, _) if crate::types::path_is_builtin(&p, wk::OPTION)) {
+        unimplemented!("typeck: `()` as `Option::none`, checked before its type was known")
+    }
+    agree(cx, &t.ty, Some(expected)).map_err(|e| match &t.loc {
+        Some(l) => e.at(l.clone()),
+        None => e,
+    })
 }
 
 /// `forms` checked in order, the last where `expected` is expected: the

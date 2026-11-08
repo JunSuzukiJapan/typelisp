@@ -136,7 +136,7 @@ impl TypeChecker {
             let scope = TypeScope::empty();
             let cx = Cx::new(&self.reg, ns, &scope, None);
             let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
-            cx.settle(std::slice::from_mut(&mut typed))?;
+            cx.settle(heap, std::slice::from_mut(&mut typed))?;
             typed
         };
         let subst = Subst::default();
@@ -478,6 +478,36 @@ mod tests {
             PAIR
         );
         assert_eq!(run(&src).2, Type::Str);
+    }
+
+    /// A number literal no type decides where it is written is decided by
+    /// the rest of the form, as in Rust; with nothing deciding it, it is an
+    /// `int`.
+    #[test]
+    fn a_number_literal_is_decided_by_its_uses() {
+        let id8 = "(defun id8 ((x u8)) u8 x)\n";
+        assert_eq!(run(&format!("{}(let ((x 1)) (id8 x))", id8)).2, Type::U8);
+        let msg = check_err(&format!("{}(let ((x 300)) (id8 x))", id8));
+        assert!(msg.contains("integer literal 300 is out of range for u8") && msg.contains(":2:10:"), "{}", msg);
+        assert_eq!(run("(let ((x 1)) x)").2, Type::Int);
+        // A receiver is decided at once, as its default: `int`'s `+`.
+        assert_eq!(run("(+ 1 2)").2, Type::Int);
+        let msg = check_err(&format!("{}(id8 (+ 1 2))", id8));
+        assert!(msg.contains("expected `u8`, found `int`"), "{}", msg);
+    }
+
+    /// The first argument is checked once whatever the call turns out to
+    /// be: a function whose name is also some type's method, nested in its
+    /// own first argument, takes time in proportion to the depth.
+    #[test]
+    fn a_first_argument_is_checked_once() {
+        let depth = 200;
+        let src = format!(
+            "(defstruct Cursor (next int))\n(defun next ((n int)) int n)\n{}0{}",
+            "(next ".repeat(depth),
+            ")".repeat(depth)
+        );
+        assert_eq!(run(&src).1, Value::Int(0));
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

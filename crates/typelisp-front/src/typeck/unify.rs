@@ -19,20 +19,53 @@ pub(crate) struct Mismatch {
     pub(crate) right: Type,
 }
 
-/// The holes of one inference and what each is solved to.
+/// What a hole may be solved to: any type, or, for a numeric literal whose
+/// type nothing has decided yet, an integer type or a float type only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Any,
+    Integer,
+    Float,
+}
+
+impl Kind {
+    /// Whether a hole of this kind may be the type `ty` (not a hole).
+    fn admits(self, ty: &Type) -> bool {
+        match self {
+            Kind::Any => true,
+            // A C word counts, so `(c-malloc 16)` reads as it should
+            // (`literal::int_lit_ty`).
+            Kind::Integer => ty.is_int_family() || ty.is_c_word(),
+            Kind::Float => ty.is_float(),
+        }
+    }
+
+    /// The kind a hole of kind `self` made the same as one of kind `other`
+    /// has, if the two can be one type.
+    fn meet(self, other: Kind) -> Option<Kind> {
+        match (self, other) {
+            (Kind::Any, k) | (k, Kind::Any) => Some(k),
+            (a, b) if a == b => Some(a),
+            _ => None,
+        }
+    }
+
+    /// The type a hole of this kind is when nothing decides it: CL's and
+    /// Rust's default for an integer or a float literal.
+    pub(crate) fn default_type(self) -> Option<Type> {
+        match self {
+            Kind::Any => None,
+            Kind::Integer => Some(Type::Int),
+            Kind::Float => Some(Type::F64),
+        }
+    }
+}
+
+/// The holes of one inference: each one's kind and what it is solved to.
 #[derive(Debug, Default)]
 pub(crate) struct Holes {
     solved: Vec<Option<Type>>,
-    /// The holes solved, in the order they were, so a [`Mark`] can be gone
-    /// back to.
-    trail: Vec<u32>,
-}
-
-/// How far an inference had got: the holes made and the holes solved.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Mark {
-    holes: usize,
-    solved: usize,
+    kinds: Vec<Kind>,
 }
 
 impl Holes {
@@ -40,26 +73,25 @@ impl Holes {
         Holes::default()
     }
 
-    /// A new, unsolved hole.
+    /// A new, unsolved hole that may be any type.
     pub(crate) fn fresh(&mut self) -> Type {
+        self.fresh_of(Kind::Any)
+    }
+
+    /// A new, unsolved hole of the kind `kind`.
+    pub(crate) fn fresh_of(&mut self, kind: Kind) -> Type {
         self.solved.push(None);
+        self.kinds.push(kind);
         Type::Infer(self.solved.len() as u32 - 1)
     }
 
-    /// How far this inference has got, to go back to with
-    /// [`Self::rollback`].
-    pub(crate) fn mark(&self) -> Mark {
-        Mark { holes: self.solved.len(), solved: self.trail.len() }
-    }
-
-    /// Forget the holes made and the solutions found since `mark`.
-    pub(crate) fn rollback(&mut self, mark: Mark) {
-        for n in self.trail.drain(mark.solved..) {
-            if let Some(slot) = self.solved.get_mut(n as usize) {
-                *slot = None;
-            }
+    /// The kind of the unsolved hole `ty` is, after [`Self::resolve`]; `None`
+    /// when it is not an unsolved hole.
+    pub(crate) fn kind_of(&self, ty: &Type) -> Option<Kind> {
+        match self.resolve(ty) {
+            Type::Infer(n) => Some(self.kinds[n as usize]),
+            _ => None,
         }
-        self.solved.truncate(mark.holes);
     }
 
     /// A substitution replacing each of `params` with a fresh hole.
@@ -86,6 +118,20 @@ impl Holes {
         }
     }
 
+    /// [`Self::resolve`], with each number literal's hole nothing has
+    /// decided read as its default type: how a message shows `ty`.
+    pub(crate) fn shown(&self, ty: &Type) -> Type {
+        let each = |ts: &[Type]| ts.iter().map(|t| self.shown(t)).collect::<Vec<_>>();
+        match self.resolve(ty) {
+            Type::Infer(n) => self.kinds[n as usize].default_type().unwrap_or(Type::Infer(n)),
+            Type::Named(path, args) => Type::Named(path, each(&args)),
+            Type::Dyn(path, pins) => Type::Dyn(path, each(&pins)),
+            Type::Fn(params, rest, ret) => Type::Fn(each(&params), rest.map(|t| Box::new(self.shown(&t))), Box::new(self.shown(&ret))),
+            Type::PtrTo(t) => Type::PtrTo(Box::new(self.shown(&t))),
+            other => other,
+        }
+    }
+
     /// The first hole `ty` still has after [`Self::resolve`], if any.
     pub(crate) fn unsolved(&self, ty: &Type) -> Option<u32> {
         let mut found = None;
@@ -104,16 +150,23 @@ impl Holes {
     /// solved; a caller that goes on after one discards these holes.
     pub(crate) fn unify(&mut self, left: &Type, right: &Type) -> Result<(), Mismatch> {
         let (l, r) = (self.resolve(left), self.resolve(right));
-        let mismatch = |h: &Holes| Err(Mismatch { left: h.resolve(left), right: h.resolve(right) });
+        let mismatch = |h: &Holes| Err(Mismatch { left: h.shown(left), right: h.shown(right) });
         match (&l, &r) {
             (Type::Never, _) | (_, Type::Never) => Ok(()),
             (Type::Infer(a), Type::Infer(b)) if a == b => Ok(()),
+            (Type::Infer(a), Type::Infer(b)) => {
+                let Some(kind) = self.kinds[*a as usize].meet(self.kinds[*b as usize]) else {
+                    return mismatch(self);
+                };
+                self.kinds[*b as usize] = kind;
+                self.solved[*a as usize] = Some(Type::Infer(*b));
+                Ok(())
+            }
             (Type::Infer(n), other) | (other, Type::Infer(n)) => {
-                if mentions_hole(other, *n) {
+                if mentions_hole(other, *n) || !self.kinds[*n as usize].admits(other) {
                     return mismatch(self);
                 }
                 self.solved[*n as usize] = Some(other.clone());
-                self.trail.push(*n);
                 Ok(())
             }
             (Type::Named(p, xs), Type::Named(q, ys)) | (Type::Dyn(p, xs), Type::Dyn(q, ys)) => {
@@ -234,6 +287,23 @@ mod tests {
         let mut h = Holes::new();
         let err = h.unify(&Type::Param(param("f", 0, "T")), &Type::Int);
         assert!(err.is_err());
+    }
+
+    /// An integer literal's hole is any integer type, and only that.
+    #[test]
+    fn an_integer_hole_is_an_integer_type() {
+        let mut h = Holes::new();
+        let x = h.fresh_of(Kind::Integer);
+        assert!(h.unify(&x, &Type::Str).is_err());
+        h.unify(&x, &Type::U8).unwrap();
+        assert_eq!(h.resolve(&x), Type::U8);
+        // Made the same as a hole of any type, it stays an integer.
+        let (y, z) = (h.fresh(), h.fresh_of(Kind::Integer));
+        h.unify(&y, &z).unwrap();
+        assert_eq!(h.kind_of(&y), Some(Kind::Integer));
+        assert!(h.unify(&y, &Type::Bool).is_err());
+        let f = h.fresh_of(Kind::Float);
+        assert!(h.unify(&z, &f).is_err());
     }
 
     #[test]

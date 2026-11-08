@@ -21,6 +21,11 @@ pub(crate) struct Typed {
 pub(crate) enum Node {
     /// A literal: its core tag and its value (none for the unit value).
     Literal { tag: u32, value: Option<Value> },
+    /// A number literal whose type was not known where it was written: an
+    /// integer or a float type the rest of the form decides. It becomes a
+    /// [`Node::Literal`] when the form is settled (`Cx::settle`), so
+    /// lowering never sees one.
+    Number { value: Value },
     /// A local variable's value.
     Local { name: SymRef },
     /// A call to the function `path`, at the type arguments `targs` when it
@@ -81,88 +86,74 @@ impl Drop for Typed {
 }
 
 impl Typed {
-    /// Every type in this tree replaced with `f` of it.
-    pub(crate) fn map_types(&mut self, f: &impl Fn(&Type) -> Type) {
-        typelisp_mem::grow_stack(|| self.map_types_here(f))
+    /// The expressions directly inside this one.
+    fn children(&self) -> Vec<&Typed> {
+        match &self.node {
+            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } => Vec::new(),
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter().collect(),
+            Node::FieldGet { obj, .. } => vec![&**obj],
+            Node::FieldSet { obj, value, .. } => vec![&**obj, &**value],
+            Node::Let { binds, body } => binds.iter().map(|(_, t)| t).chain(body).collect(),
+            Node::If { cond, then, els } => vec![&**cond, &**then, &**els],
+            Node::Match { scrut, arms } => std::iter::once(&**scrut).chain(arms.iter().flat_map(|(_, body)| body)).collect(),
+        }
     }
 
-    fn map_types_here(&mut self, f: &impl Fn(&Type) -> Type) {
-        self.ty = f(&self.ty);
+    /// [`Self::children`], to change.
+    fn children_mut(&mut self) -> Vec<&mut Typed> {
         match &mut self.node {
-            Node::Literal { .. } | Node::Local { .. } => {}
-            Node::Call { targs, args, .. } => {
-                for t in targs.iter_mut() {
-                    *t = f(t);
-                }
-                args.iter_mut().for_each(|a| a.map_types(f));
-            }
-            Node::MethodCall { targs, args, .. } => {
-                for t in targs.iter_mut() {
-                    *t = f(t);
-                }
-                args.iter_mut().for_each(|a| a.map_types(f));
-            }
-            Node::Construct { targs, field_tys, args, .. } => {
-                for t in targs.iter_mut().chain(field_tys.iter_mut()) {
-                    *t = f(t);
-                }
-                args.iter_mut().for_each(|a| a.map_types(f));
-            }
-            Node::FieldGet { obj, .. } => obj.map_types(f),
-            Node::FieldSet { obj, field_ty, value, .. } => {
-                *field_ty = f(field_ty);
-                obj.map_types(f);
-                value.map_types(f);
-            }
-            Node::Let { binds, body } => {
-                binds.iter_mut().for_each(|(_, t)| t.map_types(f));
-                body.iter_mut().for_each(|t| t.map_types(f));
-            }
-            Node::If { cond, then, els } => {
-                cond.map_types(f);
-                then.map_types(f);
-                els.map_types(f);
-            }
+            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } => Vec::new(),
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter_mut().collect(),
+            Node::FieldGet { obj, .. } => vec![&mut **obj],
+            Node::FieldSet { obj, value, .. } => vec![&mut **obj, &mut **value],
+            Node::Let { binds, body } => binds.iter_mut().map(|(_, t)| t).chain(body.iter_mut()).collect(),
+            Node::If { cond, then, els } => vec![&mut **cond, &mut **then, &mut **els],
             Node::Match { scrut, arms } => {
-                scrut.map_types(f);
-                for (pat, body) in arms {
-                    pat.map_types(f);
-                    body.iter_mut().for_each(|t| t.map_types(f));
-                }
+                std::iter::once(&mut **scrut).chain(arms.iter_mut().flat_map(|(_, body)| body.iter_mut())).collect()
             }
+        }
+    }
+
+    /// Call `f` on this expression and every one inside it, outside first.
+    pub(crate) fn walk_mut<E>(&mut self, f: &mut impl FnMut(&mut Typed) -> Result<(), E>) -> Result<(), E> {
+        typelisp_mem::grow_stack(|| {
+            f(self)?;
+            self.children_mut().into_iter().try_for_each(|c| c.walk_mut(f))
+        })
+    }
+
+    /// [`Self::walk_mut`] without changing anything.
+    fn walk(&self, f: &mut impl FnMut(&Typed)) {
+        typelisp_mem::grow_stack(|| {
+            f(self);
+            self.children().into_iter().for_each(|c| c.walk(f));
+        })
+    }
+
+    /// Every type in this tree replaced with `f` of it.
+    pub(crate) fn map_types(&mut self, f: &impl Fn(&Type) -> Type) {
+        let mapped = self.walk_mut(&mut |t| {
+            t.ty = f(&t.ty);
+            match &mut t.node {
+                Node::Call { targs, .. } | Node::MethodCall { targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
+                Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
+                Node::FieldSet { field_ty, .. } => *field_ty = f(field_ty),
+                Node::Match { arms, .. } => arms.iter_mut().for_each(|(pat, _)| pat.map_types(f)),
+                Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::FieldGet { .. } | Node::Let { .. } | Node::If { .. } => {}
+            }
+            Ok::<(), std::convert::Infallible>(())
+        });
+        match mapped {
+            Ok(()) => {}
+            Err(never) => match never {},
         }
     }
 
     /// Call `f` on every value this tree holds.
     pub(crate) fn each_value(&self, f: &mut impl FnMut(Value)) {
-        typelisp_mem::grow_stack(|| self.each_value_here(f))
-    }
-
-    fn each_value_here(&self, f: &mut impl FnMut(Value)) {
-        match &self.node {
-            Node::Literal { value: Some(v), .. } => f(*v),
-            Node::Literal { value: None, .. } | Node::Local { .. } => {}
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => {
-                args.iter().for_each(|a| a.each_value(f))
-            }
-            Node::FieldGet { obj, .. } => obj.each_value(f),
-            Node::FieldSet { obj, value, .. } => {
-                obj.each_value(f);
-                value.each_value(f);
-            }
-            Node::Let { binds, body } => {
-                binds.iter().for_each(|(_, t)| t.each_value(f));
-                body.iter().for_each(|t| t.each_value(f));
-            }
-            Node::If { cond, then, els } => {
-                cond.each_value(f);
-                then.each_value(f);
-                els.each_value(f);
-            }
-            Node::Match { scrut, arms } => {
-                scrut.each_value(f);
-                arms.iter().flat_map(|(_, body)| body).for_each(|t| t.each_value(f));
-            }
-        }
+        self.walk(&mut |t| match &t.node {
+            Node::Literal { value: Some(v), .. } | Node::Number { value: v } => f(*v),
+            _ => {}
+        });
     }
 }

@@ -9,13 +9,15 @@
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 
-use super::expr::{agree, check_expr, Cx};
+use super::expr::{agree, agree_at, check_expr, Cx};
 use super::locals::Locals;
 use super::registry::FnDef;
 use super::tree::{Node, Typed};
 
-/// `(f arg...)`, `f` being the function `path` defines as `def`. Each
-/// argument is checked where its parameter's type is expected.
+/// `(f arg...)`, `f` being the function `path` defines as `def`: its first
+/// argument `first` when the caller has already checked it, and the rest.
+/// Each argument is checked where its parameter's type is expected; an
+/// argument already checked is made to agree with it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_call(
     cx: &Cx,
@@ -23,18 +25,20 @@ pub(crate) fn check_call(
     locals: &Locals,
     path: Path,
     def: &FnDef,
-    args: &[(Value, Option<Loc>)],
+    first: Option<Typed>,
+    rest: &[(Value, Option<Loc>)],
     expected: Option<&Type>,
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
+    let given = rest.len() + usize::from(first.is_some());
     // `(intern NAME)`: CL's current package is the module the call is
     // written in, which only the checker knows, so it becomes the second
     // argument — the module's path as `intern` reads one.
-    if def.builtin && args.len() == 1 && path.std_builtin().is_some_and(|s| s.is(wk::INTERN)) {
+    if def.builtin && given == 1 && path.std_builtin().is_some_and(|s| s.is(wk::INTERN)) {
         let module = heap.alloc_string(typelisp_mem::symbols::ns_path(cx.ns).join("::"));
         heap.push_root(module);
-        let both = [args[0].clone(), (module, None)];
-        return check_call(cx, heap, locals, path, def, &both, expected, loc);
+        let rest: Vec<(Value, Option<Loc>)> = rest.iter().cloned().chain([(module, None)]).collect();
+        return check_call(cx, heap, locals, path, def, first, &rest, expected, loc);
     }
     if def.rest.is_some() || !def.optionals.is_empty() || !def.keys.is_empty() || !def.bounds.is_empty() {
         unimplemented!("typeck: calling {}, which takes &rest, &optional or &key parameters or has :where bounds", path)
@@ -42,17 +46,17 @@ pub(crate) fn check_call(
     if def.ffi {
         unimplemented!("typeck: calling the C function {} (unsafe is not checked yet)", path)
     }
-    if args.len() != def.params.len() {
-        return Err(Error::TypeError(format!(
-            "{}: expected {} argument(s), got {}",
-            path,
-            def.params.len(),
-            args.len()
-        )));
+    if given != def.params.len() {
+        return Err(Error::TypeError(format!("{}: expected {} argument(s), got {}", path, def.params.len(), given)));
     }
     let subst = cx.holes.borrow_mut().instantiate(&def.type_params);
-    let mut checked = Vec::with_capacity(args.len());
-    for ((arg, arg_loc), param) in args.iter().zip(&def.params) {
+    let mut checked = Vec::with_capacity(given);
+    if let Some(first) = first {
+        agree_at(cx, &first, &subst.apply(&def.params[0]))?;
+        checked.push(first);
+    }
+    let params = &def.params[checked.len()..];
+    for ((arg, arg_loc), param) in rest.iter().zip(params) {
         let param = subst.apply(param);
         checked.push(check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?);
     }

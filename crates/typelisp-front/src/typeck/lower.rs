@@ -57,6 +57,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             Some(v) => core::tagged(heap, *tag, &[*v]),
             None => core::tagged(heap, *tag, &[]),
         },
+        Node::Number { .. } => unreachable!("a number literal is settled with its form (`Cx::settle`)"),
         Node::Local { name } => forms::var_form(heap, *name),
         Node::Call { path, targs, args } => {
             let path = if targs.is_empty() {

@@ -5,7 +5,7 @@ use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
-use super::expr::{agree, check_expr, Cx};
+use super::expr::{agree, agree_at, check_expr, Cx};
 use super::locals::Locals;
 use super::registry::MethodDef;
 use super::tree::{Node, Typed};
@@ -63,14 +63,11 @@ pub(crate) fn check_method_call(
         // expected, to see whether it is the other kind of rational: CL's
         // contagion makes `(+ 1/2 1)` `rational`'s operator, `3/2`.
         let other = check_expr(cx, heap, locals, *arg, None, arg_loc.clone())?;
-        if matches!(other.ty, Type::Int | Type::Ratio | Type::Rational) && other.ty != args[0].ty {
+        let seen = cx.with_default(&other.ty);
+        if matches!(seen, Type::Int | Type::Ratio | Type::Rational) && seen != args[0].ty {
             unimplemented!("typeck: an operator mixing an `int` and a `ratio` (CL's contagion)")
         }
-        let at = heap.cons_loc(*arg).or(arg_loc.clone());
-        agree(cx, &other.ty, Some(&param)).map_err(|e| match at {
-            Some(l) => e.at(l),
-            None => e,
-        })?;
+        agree_at(cx, &other, &param)?;
         args.push(other);
     }
     let ret = subst.apply(&sig.ret);

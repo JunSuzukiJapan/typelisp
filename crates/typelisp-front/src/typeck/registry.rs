@@ -205,9 +205,6 @@ pub(crate) struct Registry {
     /// Methods written for one instantiation of a generic type, by the type,
     /// the member symbol and the instantiation's type arguments.
     inst_methods: Table<(Path, SymRef), Vec<(Vec<Type>, MethodDef)>>,
-    /// The member symbols some type has a method of: a call `(name x ...)`
-    /// looks for a method on `x`'s type only when `name` is one.
-    method_names: Table<SymRef, ()>,
     /// What a `use` brought into a module: the module and the name it is
     /// brought in under, and the definition.
     pub(crate) imports: Table<(NsId, SymRef), Path>,
@@ -268,15 +265,9 @@ impl Registry {
         self.inst_methods.get(&(*owner, name)).is_some()
     }
 
-    /// Whether some type has a method `name` (a member symbol).
-    pub(crate) fn has_method_named(&self, name: SymRef) -> bool {
-        self.method_names.get(&name).is_some()
-    }
-
     /// Define (or redefine) the method `name` of `owner`.
     pub(crate) fn define_method(&mut self, owner: Path, name: SymRef, def: MethodDef) {
         self.methods.insert((owner, name), def);
-        self.method_names.insert(name, ());
     }
 
     /// Define the method `name` of `owner` for the instantiation `args`.
@@ -284,7 +275,6 @@ impl Registry {
         let mut insts = self.inst_methods.get(&(owner, name)).cloned().unwrap_or_default();
         insts.push((args, def));
         self.inst_methods.insert((owner, name), insts);
-        self.method_names.insert(name, ());
     }
 
     /// The methods defined since the last commit.
@@ -307,7 +297,6 @@ impl Registry {
         self.types.commit();
         self.methods.commit();
         self.inst_methods.commit();
-        self.method_names.commit();
         self.imports.commit();
         self.reexports.commit();
         self.ctors.commit();
@@ -321,7 +310,6 @@ impl Registry {
         self.types.rollback();
         self.methods.rollback();
         self.inst_methods.rollback();
-        self.method_names.rollback();
         self.imports.rollback();
         self.reexports.rollback();
         self.ctors.rollback();
