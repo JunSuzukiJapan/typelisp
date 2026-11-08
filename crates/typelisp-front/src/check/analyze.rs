@@ -25,6 +25,7 @@ use super::semantic::{TypeKind, TypeUse};
 use super::resolved::{CompileTarget, Pattern};
 use super::core::{self, Checked, Disagreement, Items, Node, NotDyn, SelectArm, Unassignable, Uncovered, Unmet, Unsafe};
 use super::{forms, lower};
+use super::lower::CoreForms;
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
