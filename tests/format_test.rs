@@ -8,7 +8,7 @@
 extern crate typelisp;
 
 mod common;
-use common::{check_err, eval_string, run};
+use common::{check_err, eval_string, eval_string_compiled, run};
 use typelisp::{load_prelude, Checker, Heap, Interp, Reader};
 
 #[test]
@@ -528,4 +528,22 @@ fn tabulate_follows_the_standard() {
     assert_eq!(eval_string(r#"(format false "abcde~1,4t|")"#), "abcde|");
     assert_eq!(eval_string(r#"(format false "ab~1,0t|")"#), "ab|");
     assert_eq!(eval_string(r#"(format false "ab~3:t|")"#), "ab|");
+}
+
+/// A generic body is checked once with its parameters abstract, and a value
+/// of a bare type variable has no `Sexpr` encoding yet. That check must not
+/// refuse it: each instantiation checks the body again with the variable
+/// bound, and the encoding is chosen there.
+#[test]
+fn a_type_variable_argument_in_a_generic_body() {
+    let defs = r#"
+(defun show<T> ((x T)) string (format false "<~a>" x))
+(defstruct Pair<T, U> (first T) (second U))
+(impl Pair<T,U> (defmethod describe (self) string (format false "~a/~a" self::first self::second)))
+"#;
+    let body = r#"(format false "~a ~a ~a ~a" (show 1) (show 2.5) (show (Option::some 3))
+                          (describe (make-instance 'Pair :first 1.5 :second "a")))"#;
+    let expected = "<1> <2.5> <(some 3)> 1.5/a";
+    assert_eq!(eval_string(&format!("{}\n{}", defs, body)), expected);
+    assert_eq!(eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body)), expected);
 }

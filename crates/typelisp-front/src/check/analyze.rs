@@ -2597,6 +2597,13 @@ impl Checker {
         if is_sexpr_expectation(elem_ty) {
             return Ok(e);
         }
+        // A type variable is met only while a generic body is checked with
+        // its parameters abstract. That check produces nothing that runs:
+        // each instantiation checks the body again with the variable bound,
+        // and the encoding is chosen there.
+        if matches!(elem_ty, Type::Var(_)) {
+            return Ok(e.retyped(sexpr_ty()));
+        }
         // A heap-repr ADT (`defstruct`/`defenum`/`Vector<T>`/`HashTable<K,V>`)
         // needs no `sexpr_ctor_for` wrap — same transparent retype as
         // `check_inner`'s expected-type fallback, see its doc comment for why
