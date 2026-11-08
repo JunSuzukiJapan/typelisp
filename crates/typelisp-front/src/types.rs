@@ -359,6 +359,71 @@ pub const NATIVE_LOWERED_PRIMITIVES: [u32; 18] = [
     wk::C_LONG, wk::C_ULONG,
 ];
 
+/// The definition a [`TypeParam`] belongs to.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ParamOwner {
+    /// A function, a type, a type alias or a trait, by its path.
+    Def(Path),
+    /// A method, by its type's path and its member symbol.
+    Method(Path, SymRef),
+}
+
+/// A declared type parameter: the `index`-th of `owner`'s. `name` is what
+/// the declaration wrote, kept for messages only — two parameters are the
+/// same parameter when their owner and index are, whatever they were called.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(into = "WrittenParam", from = "WrittenParam")]
+pub struct TypeParam {
+    pub owner: ParamOwner,
+    pub index: u32,
+    pub name: SymRef,
+}
+
+impl PartialEq for TypeParam {
+    fn eq(&self, other: &TypeParam) -> bool {
+        self.owner == other.owner && self.index == other.index
+    }
+}
+
+impl Eq for TypeParam {}
+
+impl std::hash::Hash for TypeParam {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        self.owner.hash(h);
+        self.index.hash(h);
+    }
+}
+
+/// A [`TypeParam`] as written to a dump: its symbols as
+/// [`crate::owned_form::OwnedSym`], the form that means the same thing in
+/// another process.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+enum WrittenParam {
+    Def(Path, u32, crate::owned_form::OwnedSym),
+    Method(Path, crate::owned_form::OwnedSym, u32, crate::owned_form::OwnedSym),
+}
+
+impl From<TypeParam> for WrittenParam {
+    fn from(p: TypeParam) -> WrittenParam {
+        let name = crate::owned_form::OwnedSym::of(p.name);
+        match p.owner {
+            ParamOwner::Def(path) => WrittenParam::Def(path, p.index, name),
+            ParamOwner::Method(ty, m) => WrittenParam::Method(ty, crate::owned_form::OwnedSym::of(m), p.index, name),
+        }
+    }
+}
+
+impl From<WrittenParam> for TypeParam {
+    fn from(w: WrittenParam) -> TypeParam {
+        match w {
+            WrittenParam::Def(path, index, name) => TypeParam { owner: ParamOwner::Def(path), index, name: name.symbol() },
+            WrittenParam::Method(ty, m, index, name) => {
+                TypeParam { owner: ParamOwner::Method(ty, m.symbol()), index, name: name.symbol() }
+            }
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Type {
     I8,
@@ -485,6 +550,16 @@ pub enum Type {
     /// A `def-c-struct`, by its fully-qualified path. Never the type of a
     /// value: it only ever appears as the pointee of a [`Self::PtrTo`].
     CStruct(Path),
+    // Last, so the variants before them keep the numbers a dump writes.
+    /// A declared type parameter, identified by the definition that
+    /// declares it and its position there (`docs/dev/checker-rebuild-plan.md`
+    /// 7.1). The rebuilt checker writes this; the current one writes
+    /// [`Self::Var`].
+    Param(TypeParam),
+    /// A hole the rebuilt checker solves while it infers one call's type
+    /// arguments (`docs/dev/checker-rebuild-plan.md` 7.2). It never leaves
+    /// the checker: no registry entry or output holds one.
+    Infer(u32),
 }
 
 /// The type as a program would write it — `Vector<int>`, `Option<Sexpr>`,
@@ -529,6 +604,8 @@ impl fmt::Display for Type {
                 if ts.is_empty() { Ok(()) } else { args(f, ts) }
             }
             Type::Var(name) => write!(f, "{}", name),
+            Type::Param(p) => write!(f, "{}", p.name.name()),
+            Type::Infer(_) => write!(f, "_"),
             Type::Dyn(p, pins) => {
                 write!(f, ":dyn {}", view.definition(p.ns(), p.name_symbol()))?;
                 if pins.is_empty() { Ok(()) } else { args(f, pins) }
@@ -615,7 +692,7 @@ impl Type {
             Type::Char => "char",
             Type::Str => "string",
             Type::Symbol => "symbol",
-            Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
+            Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Param(_) | Type::Infer(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
                 return None
             }
         })

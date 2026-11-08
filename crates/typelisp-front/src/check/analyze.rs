@@ -9746,90 +9746,11 @@ impl Checker {
         v: Value,
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
+        if let Some(lit) = crate::typeck::literal::literal(heap, v, expected)? {
+            let typed = self.literal(heap, lit.tag, lit.value, lit.ty);
+            return self.reconcile_expected(env, typed, expected);
+        }
         let typed = match v {
-            Value::Int(n) => {
-                let ty = int_lit_ty(expected);
-                if !int_lit_in_range(n, &ty) {
-                    return Err(int_lit_range_error(&n.to_string(), &ty, true));
-                }
-                // An `int` literal is its own node: `(int-any-width N)`
-                // compiles to a raw word, and an `int` is a *tagged* one
-                // (`Repr::Int`). The kind is the node's, not something the
-                // island could read off the number.
-                let tag = if ty == Type::Int { wk::INT } else { wk::INT_ANY_WIDTH };
-                self.literal(heap, tag, Some(Value::Int(n)), ty)
-            }
-            // A `Value::Boxed` read-literal is `Sexpr::f64`, `bignum` (an
-            // integer literal past `i32`'s range), or `ratio` (`n/d` syntax)
-            // — all heap-boxed for the same reason (`BoxedObj`'s doc comment).
-            // The literal node keeps the *same box* the reader made rather
-            // than a copy of the scalar: it is a heap value the collector
-            // reaches through the node, which is itself reachable from the
-            // registered function body, so there is nothing to keep
-            // heap-independent the way the old owned `Expr` payload had to be
-            // (`bignum` held a `BigInt`). `ratio` has no `expected`-driven
-            // family the way an integer/float literal does, so its type is
-            // always the one primitive.
-            //
-            // `bignum` does, though. The reader turns *every* literal past
-            // `i32` into one, because a token cannot know the type it will
-            // land in; here that type is known, and a literal in a
-            // fixed-width integer position is that type whenever the number
-            // fits it. This is what makes the top half of `u32` writable at
-            // all — `4294967295` and `#xFFFFFFFF` both arrive as `bignum`s,
-            // and `i32` is no longer the widest fixed-width type.
-            Value::Boxed(id) if heap.is_bignum(id) => match expected {
-                // In an `int` position the literal is an `int`, whatever its
-                // size: a fixnum node when it fits one (the reader boxes
-                // everything past `i32`, which is far short of the fixnum
-                // range), and the box itself — already an `int`'s
-                // representation — when it does not. Splitting here is what
-                // keeps `Heap::canonical_int`'s invariant at the literal:
-                // a `(bignum ..)` node re-boxes on every evaluation, and a
-                // box holding a fixnum-range value must never exist.
-                Some(Type::Int) => {
-                    let fitted = i64::try_from(&*heap.bignum_value(id)).ok().filter(|v| typelisp_mem::fixnum_fits(*v));
-                    match fitted {
-                        Some(v) => self.literal(heap, wk::INT, Some(Value::Int(v)), Type::Int),
-                        None => self.literal(heap, wk::BIGNUM, Some(Value::Boxed(id)), Type::Int),
-                    }
-                }
-                Some(t) if t.is_integer() => {
-                    let (fitted, text) = {
-                        let big = heap.bignum_value(id);
-                        (i64::try_from(&*big).ok().filter(|v| int_lit_in_range(*v, t)), big.to_string())
-                    };
-                    match fitted {
-                        Some(v) => self.literal(heap, wk::INT_ANY_WIDTH, Some(Value::Int(v)), t.clone()),
-                        None => return Err(int_lit_range_error(&text, t, false)),
-                    }
-                }
-                // No expectation, or one this is not: the literal is an
-                // `int`, the type every unannotated integer literal has.
-                _ => self.literal(heap, wk::BIGNUM, Some(Value::Boxed(id)), Type::Int),
-            },
-            Value::Boxed(id) if heap.is_ratio(id) => {
-                self.literal(heap, wk::RATIO, Some(Value::Boxed(id)), Type::Ratio)
-            }
-            // A float literal reads as an `f64` box, because a token cannot
-            // know the type it will land in. Here that type is known: in an
-            // `f32` position the literal *is* an `f32`, so it is re-boxed as
-            // one — otherwise the box and the type would disagree from the
-            // very first thing the program says, and every later reader (the
-            // printer, `eql`, a dump) would believe the box.
-            //
-            // The value is rounded to binary32 in the same step, which is
-            // what the type already claims of it.
-            Value::Boxed(id) if heap.is_f64(id) || heap.is_f32(id) => {
-                let ty = float_lit_ty(expected);
-                let boxed = if ty == Type::F32 && heap.is_f64(id) {
-                    let f = heap.f64_value(id);
-                    heap.alloc_f32(f as f32)
-                } else {
-                    Value::Boxed(id)
-                };
-                self.literal(heap, wk::FLOAT_ANY_WIDTH, Some(boxed), ty)
-            }
             // `#(..)` and `#nA(..)` written in source: a fresh collection
             // whose element type comes from the context.
             Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeId::SEXPR_VECTOR) => {
@@ -9852,33 +9773,15 @@ impl Checker {
             // datum has — the checker knows it only as an object inside
             // S-expression data.
             Value::Boxed(_) => self.quoted(heap, v, sexpr_ty()),
-            Value::Bool(b) => self.literal(heap, wk::BOOL, Some(Value::Bool(b)), Type::Bool),
-            Value::Char(c) => self.literal(heap, wk::CHAR, Some(Value::Char(c)), Type::Char),
-            Value::Str(s) => self.literal(heap, wk::STR, Some(Value::Str(s)), Type::Str),
+            Value::Int(_) | Value::Char(_) | Value::Bool(_) | Value::Str(_) => {
+                unreachable!("a literal, which `crate::typeck::literal` answered above")
+            }
+            // `crate::typeck::literal` made every other empty list a unit
+            // literal. `()` denoting `None` is a language-core inference
+            // rule, not a name-visibility one, so it does not go through
+            // `resolve_ctor`.
             Value::Empty => {
-                // The empty list `()` is the `None` value of `Option<T>` when an
-                // option type is expected, the `Nil` value of `Sexpr` when a
-                // `Sexpr` is expected, and otherwise the unit value.
-                if let Some(Type::Named(n, _)) = expected {
-                    if crate::types::path_is_builtin(n, typelisp_mem::wk::OPTION) {
-                        // `Option`'s constructors moved to `Option::`/`use
-                        // option` (no more bare `none`), but `()` denoting
-                        // `None` is a language-core inference rule, not a
-                        // name-visibility one — it must keep working
-                        // regardless of `use` status, so this bypasses
-                        // `resolve_ctor` and goes straight to the known
-                        // builtin path/variant index.
-                        return self.check_construct(heap, interp, env, (&Path::builtin(typelisp_mem::wk::OPTION), OPTION_NONE), &[], &[], expected);
-                    }
-                    // The `Sexpr::nil` branch that used to sit here is gone:
-                    // the empty list is `Option<Sexpr>`'s `none` now, which
-                    // the `option` arm just above already produces. A `()`
-                    // written where a bare `Sexpr` is expected is no longer
-                    // an empty list at all — `Sexpr` means "a non-empty
-                    // S-expression" — so it falls through to `Unit` like any
-                    // other non-option, non-sexpr context.
-                }
-                self.literal(heap, wk::UNIT, None, Type::Unit)
+                return self.check_construct(heap, interp, env, (&Path::builtin(typelisp_mem::wk::OPTION), OPTION_NONE), &[], &[], expected);
             }
             Value::Symbol(id) => {
                 let name = heap.symbol_spelling(id).to_string();
@@ -9886,9 +9789,7 @@ impl Checker {
                 // A keyword (`:name`) is self-evaluating (CL), so it is
                 // matched *before* every binding lookup below — it can never
                 // name a variable, global, function or method.
-                if id.is_keyword() {
-                    self.literal(heap, wk::SYM, Some(Value::Symbol(id)), Type::Symbol)
-                } else if let Some(t) = env.get(id) {
+                if let Some(t) = env.get(id) {
                     // A `symbol-macrolet` binding: the name is not a variable
                     // at all, it stands for a form, which is checked here in
                     // the use site's own environment (CL's rule — the
@@ -17638,74 +17539,6 @@ fn trait_operator_method(op: SymRef) -> Option<SymRef> {
             .collect()
     });
     members.iter().find(|(o, _)| *o == op).map(|(_, m)| *m)
-}
-
-fn int_lit_ty(expected: Option<&Type>) -> Type {
-    match expected {
-        // A C word too, so `(c-malloc 16)` reads the way it should. Nothing is
-        // loosened by it: the literal's type is then `c-ulong`, which
-        // `check_at`'s rule B still refuses outside `(unsafe ...)`, and
-        // `int_lit_in_range` still checks 16 against a 64-bit unsigned width
-        // — `int_width_signed` answers for these two.
-        Some(t) if t.is_integer() || t.is_c_word() => t.clone(),
-        // No expectation, or one that is not an integer type: `int`, the
-        // language's integer (CL's `integer`), which no literal can fail to
-        // fit.
-        _ => Type::Int,
-    }
-}
-
-/// Whether `n` is a number `ty` can hold — vacuously true for a `ty` that is
-/// not a fixed-width integer type.
-///
-/// A value in this language always *is* the number its type names, sign- or
-/// zero-extended into the 64-bit carrier ([`crate::types::normalize_int`]).
-/// A literal is the one place a program states a number and a type
-/// independently of each other, so it is the one place that invariant can be
-/// broken just by writing it down: `(the u8 300)` used to produce a `u8`
-/// holding 300, which every later width-aware operation would then disagree
-/// with. Rejected here rather than silently cut, because a cut is a thing the
-/// caller can ask for and mean — that request is spelled `(as u8 300)`.
-fn int_lit_in_range(n: i64, ty: &Type) -> bool {
-    match crate::types::int_width_signed(ty) {
-        Some((width, signed)) => crate::types::normalize_int(n, width, signed) == n,
-        None => true,
-    }
-}
-
-/// The error [`int_lit_in_range`] reports, naming the range that was missed.
-///
-/// `n` is text, not an `i64`, because the literal may be a `bignum` far
-/// outside the carrier's own range. `castable` says whether `(as T n)` would
-/// actually get the caller what they asked for, which is only true when the
-/// literal fit `i32` and so arrived as a `Value::Int`: a `bignum` literal
-/// reaches the width cast through `bignum->int`, which is itself `i32`-wide,
-/// so suggesting `as` for one would send the caller at a second failure.
-fn int_lit_range_error(n: &str, ty: &Type, castable: bool) -> Error {
-    let name = ty.to_string();
-    let range = match crate::types::int_width_signed(ty) {
-        Some((width, true)) => format!("{}..={}", -(1i64 << (width - 1)), (1i64 << (width - 1)) - 1),
-        Some((width, false)) => format!("0..={}", (1i64 << width) - 1),
-        None => String::new(),
-    };
-    let advice = if castable {
-        format!(" `(as {} {})` asks for the cut-back explicitly.", name, n)
-    } else {
-        " It is past `i32`, so it read as a `bignum`, and no fixed-width type here holds it.".to_string()
-    };
-    Error::TypeError(format!(
-        "integer literal {} is out of range for {} ({}) — a value always holds the number its \
-         type names, so this one has no type here.{}",
-        n, name, range, advice
-    ))
-}
-
-/// The type of a float literal: the expected float type if any, else `f64`.
-fn float_lit_ty(expected: Option<&Type>) -> Type {
-    match expected {
-        Some(t) if t.is_float() => t.clone(),
-        _ => Type::F64,
-    }
 }
 
 /// Whether `t` mentions any type parameter in `params`.

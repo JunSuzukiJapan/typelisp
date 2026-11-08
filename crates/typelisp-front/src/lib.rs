@@ -25,6 +25,7 @@ pub mod cl_symbols;
 pub mod sexpr_variant;
 pub mod type_key;
 pub mod check;
+pub(crate) mod typeck;
 pub mod eval;
 pub mod c_struct;
 pub mod ffi_callback;
