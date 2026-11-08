@@ -6,14 +6,16 @@
 
 use crate::check::core;
 use crate::check::forms;
+use crate::check::analyze::SEXPR_RESERVED_VARIANT;
 use crate::check::lower::{Arg, CoreForms};
-use crate::types::Type;
-use crate::{Error, Heap, Value};
+use crate::check::repr::Repr;
+use crate::types::{path_is_builtin, Path, Type};
+use crate::{wk, Error, Heap, Value};
 
 use super::generic::Requests;
 use super::registry::Registry;
 use super::subst::Subst;
-use super::tree::{Node, Typed};
+use super::tree::{Node, Pat, Typed};
 
 /// What lowering one tree needs: the definitions, the substitution that
 /// makes a generic body one specialization (empty for any other tree), and
@@ -70,7 +72,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             lw.reg.call_form(heap, &path, &lowered)
         }
-        Node::MethodCall { owner, method, targs, args } => {
+        Node::MethodCall { owner, method, instance, targs, args } => {
             let method = if targs.is_empty() {
                 *method
             } else {
@@ -83,12 +85,24 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             }
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             let ret = lw.settle(&t.ty);
-            lw.reg.assoc_form(heap, owner, method, true, &ret, &lowered)
+            lw.reg.assoc_form(heap, owner, method, *instance, &ret, &lowered)
         }
         Node::Construct { owner, targs, variant, mutable, field_tys, args } => {
             let targs: Vec<Type> = targs.iter().map(|t| lw.settle(t)).collect();
             let field_tys: Vec<Type> = field_tys.iter().map(|t| lw.settle(t)).collect();
             let args = args.iter().map(|a| lower_rooted(heap, lw, a)).collect::<Result<Vec<_>, _>>()?;
+            // A niched `Option<T>` builds no box: `some v` is `v` as the
+            // word a field of type `T` holds, and `none` is the empty list.
+            // Only the settled type says whether it is niched.
+            if let Some(payload) = option_niche(lw, owner, &targs) {
+                return match args[..] {
+                    [value] => forms::some_of_form(heap, &payload, value),
+                    _ => {
+                        let sexpr = Path::builtin(typelisp_mem::wk::SEXPR);
+                        lw.reg.construct_form(heap, &sexpr, &[], SEXPR_RESERVED_VARIANT, false, &[], &[])
+                    }
+                };
+            }
             lw.reg.construct_form(heap, owner, &targs, *variant, *mutable, &field_tys, &args)
         }
         Node::FieldGet { obj, index } => {
@@ -116,5 +130,52 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let els = lower_rooted(heap, lw, els)?;
             forms::if_form(heap, cond, then, els)
         }
+        Node::Match { scrut, arms } => {
+            let scrut_ty = lw.settle(&scrut.ty);
+            let scrut = lower_rooted(heap, lw, scrut)?;
+            let mut lowered = Vec::with_capacity(arms.len());
+            for (pat, body) in arms {
+                let pat = lower_pattern(heap, lw, pat)?;
+                heap.push_root(pat);
+                let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
+                lowered.push((pat, body));
+            }
+            lw.reg.match_form(heap, scrut, &scrut_ty, &lowered)
+        }
     }
+}
+
+/// `pat`'s core form, unrooted.
+fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value, Error> {
+    match pat {
+        Pat::Wild => core::tagged(heap, wk::PAT_WILD, &[]),
+        Pat::Bind(name) => core::tagged(heap, wk::PAT_BIND, &[Value::Symbol(*name)]),
+        Pat::Ctor { owner, targs, variant, field_tys, subs } => {
+            let targs: Vec<Type> = targs.iter().map(|t| lw.settle(t)).collect();
+            let field_tys: Vec<Type> = field_tys.iter().map(|t| lw.settle(t)).collect();
+            let mut lowered = Vec::with_capacity(subs.len());
+            for sub in subs {
+                let one = lower_pattern(heap, lw, sub)?;
+                heap.push_root(one);
+                lowered.push(one);
+            }
+            // A niched `Option<T>`'s two shapes, as `Construct` builds them.
+            if let Some(payload) = option_niche(lw, owner, &targs) {
+                return match lowered[..] {
+                    [sub] => lw.reg.pat_some_form(heap, &payload, sub),
+                    _ => core::tagged(heap, wk::PAT_EMPTY, &[]),
+                };
+            }
+            lw.reg.pat_ctor_form(heap, owner, &targs, *variant, false, &field_tys, &lowered)
+        }
+    }
+}
+
+/// When `owner<targs>` (settled) is an `Option` represented by a niche, the
+/// representation of its payload.
+fn option_niche(lw: &Lowering, owner: &Path, targs: &[Type]) -> Option<Repr> {
+    if !path_is_builtin(owner, typelisp_mem::wk::OPTION) {
+        return None;
+    }
+    lw.reg.repr(&Type::Named(*owner, targs.to_vec())).niche_payload().cloned()
 }

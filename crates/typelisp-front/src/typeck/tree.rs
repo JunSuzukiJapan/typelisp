@@ -26,10 +26,10 @@ pub(crate) enum Node {
     /// A call to the function `path`, at the type arguments `targs` when it
     /// is generic.
     Call { path: Path, targs: Vec<Type>, args: Vec<Typed> },
-    /// A call to the instance method `method` of the type `owner`, at the
-    /// type arguments `targs` when it is generic; the receiver is the first
-    /// argument.
-    MethodCall { owner: Path, method: SymRef, targs: Vec<Type>, args: Vec<Typed> },
+    /// A call to the method `method` of the type `owner`, at the type
+    /// arguments `targs` when it is generic. An instance method's receiver is
+    /// the first argument.
+    MethodCall { owner: Path, method: SymRef, instance: bool, targs: Vec<Type>, args: Vec<Typed> },
     /// A new value of the type `owner<targs>`: its variant `variant`'s fields,
     /// whose declared types at these arguments are `field_tys`. A struct's is
     /// mutable.
@@ -43,6 +43,32 @@ pub(crate) enum Node {
     /// in order. With no bindings it is `progn`.
     Let { binds: Vec<(SymRef, Typed)>, body: Vec<Typed> },
     If { cond: Box<Typed>, then: Box<Typed>, els: Box<Typed> },
+    /// `match`: the first arm whose pattern matches the scrutinee's value is
+    /// run, the names its pattern binds bound.
+    Match { scrut: Box<Typed>, arms: Vec<(Pat, Vec<Typed>)> },
+}
+
+/// A checked pattern.
+#[derive(Debug)]
+pub(crate) enum Pat {
+    /// `_`: matches anything.
+    Wild,
+    /// A name: matches anything, and binds the name to it.
+    Bind(SymRef),
+    /// The variant `variant` of `owner<targs>`, its fields (declared
+    /// `field_tys` at these arguments) matched by `subs`.
+    Ctor { owner: Path, targs: Vec<Type>, variant: usize, field_tys: Vec<Type>, subs: Vec<Pat> },
+}
+
+impl Pat {
+    fn map_types(&mut self, f: &impl Fn(&Type) -> Type) {
+        if let Pat::Ctor { targs, field_tys, subs, .. } = self {
+            for t in targs.iter_mut().chain(field_tys.iter_mut()) {
+                *t = f(t);
+            }
+            subs.iter_mut().for_each(|p| p.map_types(f));
+        }
+    }
 }
 
 impl Typed {
@@ -84,6 +110,13 @@ impl Typed {
                 then.map_types(f);
                 els.map_types(f);
             }
+            Node::Match { scrut, arms } => {
+                scrut.map_types(f);
+                for (pat, body) in arms {
+                    pat.map_types(f);
+                    body.iter_mut().for_each(|t| t.map_types(f));
+                }
+            }
         }
     }
 
@@ -108,6 +141,10 @@ impl Typed {
                 cond.each_value(f);
                 then.each_value(f);
                 els.each_value(f);
+            }
+            Node::Match { scrut, arms } => {
+                scrut.each_value(f);
+                arms.iter().flat_map(|(_, body)| body).for_each(|t| t.each_value(f));
             }
         }
     }

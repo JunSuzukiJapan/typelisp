@@ -61,6 +61,7 @@ pub(crate) fn check_defstruct(
         stdlib: false,
         fields: Vec::new(),
         has_defaults: false,
+        variants: Vec::new(),
     };
     reg.types.insert(path, TypeEntry::Type(stub.clone()));
     let fields = parse_fields(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, fields)?;

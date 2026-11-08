@@ -7,6 +7,7 @@
 //! - [`toplevel`]: the entry point, one top-level form at a time.
 //! - [`defun`]: defining a function.
 //! - [`defstruct`]: defining a struct type and its accessors.
+//! - [`defenum`]: defining a sum type.
 //! - [`defmethod`]: defining a method outside an `impl`.
 //! - [`impl_block`]: an inherent `impl`, the methods of one type.
 //! - [`generic`]: specializations of generic definitions.
@@ -14,9 +15,14 @@
 //! - [`literal`]: the atoms that are their own value, and their types.
 //! - [`binding`]: `let` and `progn`.
 //! - [`control`]: `if`.
+//! - [`matching`]: `match`.
+//! - [`pattern`]: a `match` arm's pattern.
+//! - [`exhaustive`]: whether a `match`'s arms cover every value.
 //! - [`call`]: calls to functions.
-//! - [`method`]: calls to instance methods.
+//! - [`method`]: calls to methods.
+//! - [`path_call`]: calls whose head is a `::` path.
 //! - [`instance`]: `make-instance`, and reading a struct's field.
+//! - [`variant`]: a sum type's value.
 //! - [`resolve`]: what a name written in a module means.
 //! - [`locals`]: local variables.
 //! - [`scope`]: which type parameters a name means where a type is written.
@@ -33,9 +39,11 @@ pub(crate) mod binding;
 pub(crate) mod bridge;
 pub(crate) mod call;
 pub(crate) mod control;
+pub(crate) mod defenum;
 pub(crate) mod defmethod;
 pub(crate) mod defstruct;
 pub(crate) mod defun;
+pub(crate) mod exhaustive;
 pub(crate) mod expr;
 pub(crate) mod generic;
 pub(crate) mod impl_block;
@@ -43,7 +51,10 @@ pub(crate) mod instance;
 pub(crate) mod literal;
 pub(crate) mod locals;
 pub(crate) mod lower;
+pub(crate) mod matching;
 pub(crate) mod method;
+pub(crate) mod path_call;
+pub(crate) mod pattern;
 pub(crate) mod registry;
 pub(crate) mod resolve;
 pub(crate) mod scope;
@@ -52,3 +63,4 @@ pub(crate) mod toplevel;
 pub(crate) mod tree;
 pub(crate) mod type_syntax;
 pub(crate) mod unify;
+pub(crate) mod variant;

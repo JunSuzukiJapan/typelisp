@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::check::registry::{AdtDef, AdtKind, FnSig, OptKeyParam, TraitBound};
+use crate::check::registry::{AdtDef, AdtKind, FnSig, OptKeyParam, TraitBound, Variant};
 use crate::check::Registry as OldRegistry;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use typelisp_mem::symbols::intern;
@@ -78,10 +78,30 @@ fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
             .collect(),
         _ => Vec::new(),
     };
+    let variants = match def.kind {
+        AdtKind::Sum => def
+            .variants
+            .iter()
+            .map(|v| Variant {
+                name: v.name,
+                fields: v.fields.iter().map(|t| convert(t, &by_name, &|| format!("a variant of {}", path))).collect(),
+            })
+            .collect(),
+        AdtKind::Struct => Vec::new(),
+    };
     let has_defaults = old.struct_defaults.contains_key(&path);
     new.types.insert(
         path,
-        TypeEntry::Type(TypeDef { kind: def.kind, params, public: def.public, builtin: def.builtin, stdlib: def.stdlib, fields, has_defaults }),
+        TypeEntry::Type(TypeDef {
+            kind: def.kind,
+            params,
+            public: def.public,
+            builtin: def.builtin,
+            stdlib: def.stdlib,
+            fields,
+            has_defaults,
+            variants,
+        }),
     );
     for (name, af) in def.assoc.iter() {
         let sig = fn_def(ParamOwner::Method(path, name), &def.params, &af.sig);

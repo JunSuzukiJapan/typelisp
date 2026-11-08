@@ -12,7 +12,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::{AdtKind, OptKeyParam, TraitBound};
+use crate::check::registry::{AdtKind, OptKeyParam, TraitBound, Variant};
 use crate::types::{Path, Type, TypeParam};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
@@ -73,7 +73,8 @@ pub(crate) struct MethodDef {
     pub(crate) inst_args: Option<Vec<Type>>,
 }
 
-/// A type: its kind, its type parameters and, for a struct, its fields.
+/// A type: its kind, its type parameters, and a struct's fields or a sum
+/// type's variants.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TypeDef {
     pub(crate) kind: AdtKind,
@@ -89,6 +90,16 @@ pub(crate) struct TypeDef {
     pub(crate) fields: Vec<Field>,
     /// Some field has a default (`(name Type default)`).
     pub(crate) has_defaults: bool,
+    /// A sum type's variants, in order: a variant is its index here. Their
+    /// field types are written in this type's own parameters.
+    pub(crate) variants: Vec<Variant>,
+}
+
+impl TypeDef {
+    /// The index of the variant `name` (a member symbol), if it is one.
+    pub(crate) fn variant_index(&self, name: SymRef) -> Option<usize> {
+        self.variants.iter().position(|v| v.name == name)
+    }
 }
 
 /// A struct's field: its member symbol, its type, and whether it is `pub`.
@@ -159,6 +170,11 @@ impl<K: Hash + Eq + Clone, V> Table<K, V> {
     pub(crate) fn remove(&mut self, k: &K) {
         let replaced = self.map.remove(k);
         self.undo.push((k.clone(), replaced));
+    }
+
+    /// The keys written since the last commit, each once for each write.
+    pub(crate) fn written(&self) -> impl Iterator<Item = &K> {
+        self.undo.iter().map(|(k, _)| k)
     }
 
     fn commit(&mut self) {

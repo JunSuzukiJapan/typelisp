@@ -657,8 +657,8 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
 /// `Option`'s variant indices (`check::registry::option_def`). Written down
 /// once because three places already depend on the order — `()`'s inference
 /// rule, the niche pattern shapes, and `check_construct`'s `None` shortcut.
-const OPTION_SOME: usize = 0;
-const OPTION_NONE: usize = 1;
+pub(crate) const OPTION_SOME: usize = 0;
+pub(crate) const OPTION_NONE: usize = 1;
 
 /// `Sexpr`'s `nil` variant — the old empty list.
 ///
@@ -673,7 +673,7 @@ const OPTION_NONE: usize = 1;
 /// `(Option::none)` would be the same word. The empty list is reached as
 /// `Option<Sexpr>`'s `none`, and the core IR still spells it `(construct
 /// sexpr 0 ..)`, which the checker emits itself.
-const SEXPR_RESERVED_VARIANT: usize = crate::sexpr_variant::NIL;
+pub(crate) const SEXPR_RESERVED_VARIANT: usize = crate::sexpr_variant::NIL;
 
 /// `Sexpr`'s old `bignum` variant, retired with the type: a bignum box is an
 /// `int` now. Same treatment as [`SEXPR_RESERVED_VARIANT`]:

@@ -1,0 +1,75 @@
+//! A call whose head is a `::` path: `(Type::Variant value...)`,
+//! `(Type::method arg...)` or `(module::function arg...)`.
+//!
+//! The path is followed as it was read (`types::path_target`): to a member
+//! of a type, or to a name in a module.
+
+use crate::types::{path_spelling, path_target, PathTarget, Type};
+use crate::{Error, Heap, Loc, PathId, Value};
+use typelisp_mem::symbols::member_symbol;
+
+use super::call::check_call;
+use super::expr::Cx;
+use super::locals::Locals;
+use super::method::check_method_call;
+use super::registry::{TypeEntry, ValueDef};
+use super::resolve::sees;
+use super::tree::Typed;
+use super::variant::check_variant;
+
+/// `(path arg...)`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn check_path_call(
+    cx: &Cx,
+    heap: &mut Heap,
+    locals: &Locals,
+    id: PathId,
+    args: &[(Value, Option<Loc>)],
+    expected: Option<&Type>,
+    loc: Option<Loc>,
+) -> Result<Typed, Error> {
+    match path_target(heap, cx.ns, id)? {
+        PathTarget::Member(owner, member) => {
+            let def = match cx.reg.types.get(&owner) {
+                Some(TypeEntry::Type(def)) => def,
+                Some(TypeEntry::Trait) => unimplemented!("typeck: calling a trait's method through its path (`{}`)", path_spelling(heap, id)),
+                _ => unimplemented!("typeck: the path `{}`, through a type this checker does not know", path_spelling(heap, id)),
+            };
+            let name = member_symbol(member.name());
+            if let Some(variant) = def.variant_index(name) {
+                return check_variant(cx, heap, locals, owner, variant, args, expected, loc);
+            }
+            let Some(method) = cx.reg.methods.get(&(owner, name)) else {
+                if cx.reg.inst_methods.get(&(owner, name)).is_some() {
+                    unimplemented!("typeck: `{}`, a method written for one instantiation, called through its type", path_spelling(heap, id))
+                }
+                return Err(Error::TypeError(format!("`{}` has no variant or method `{}`", owner, member.name())));
+            };
+            if method.instance {
+                unimplemented!("typeck: calling the instance method `{}` through its type", path_spelling(heap, id))
+            }
+            let home = method.home.map_or(owner.ns(), |h| h.ns());
+            if !method.sig.public && !sees(cx.ns, home) {
+                return Err(Error::TypeError(format!(
+                    "`{}` is not `pub`, so it is not visible outside its module",
+                    path_spelling(heap, id)
+                )));
+            }
+            check_method_call(cx, heap, locals, owner, name, method, None, args, expected, loc)
+        }
+        PathTarget::In(path) => match cx.reg.values.get(&path) {
+            Some(ValueDef::Fn(def)) => {
+                if !def.public && !sees(cx.ns, path.ns()) {
+                    return Err(Error::TypeError(format!(
+                        "`{}` is not `pub`, so it is not visible outside its module",
+                        path_spelling(heap, id)
+                    )));
+                }
+                check_call(cx, heap, locals, path, def, args, expected, loc)
+            }
+            Some(ValueDef::Var) => unimplemented!("typeck: calling the function the global `{}` holds", path_spelling(heap, id)),
+            Some(ValueDef::Macro) => unimplemented!("typeck: expanding the macro `{}`", path_spelling(heap, id)),
+            None => Err(Error::NoSuchFunction(path_spelling(heap, id))),
+        },
+    }
+}

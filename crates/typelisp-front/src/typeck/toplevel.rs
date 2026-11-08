@@ -4,8 +4,10 @@ use crate::check::lower::CoreForms;
 use crate::check::MONO_BUNDLE_MODULE;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
-use typelisp_mem::symbols::NsId;
+use typelisp_mem::symbols::{intern_in, NsId};
+use typelisp_mem::SymRef;
 
+use super::defenum::check_defenum;
 use super::defmethod::check_defmethod;
 use super::defstruct::check_defstruct;
 use super::defun::{check_defun, lower_all, parse_header};
@@ -58,7 +60,10 @@ impl TypeChecker {
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty)) => {
+                let types: Vec<Path> = self.reg.types.written().copied().collect();
+                let methods: Vec<(Path, SymRef)> = self.reg.methods.written().copied().collect();
                 self.reg.commit();
+                publish(&self.reg, heap, &types, &methods);
                 self.expr_ty = ty;
                 Ok(form)
             }
@@ -121,6 +126,7 @@ impl TypeChecker {
                 match head.well_known() {
                     wk::DEFUN => return Ok((check_defun(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
                     wk::DEFSTRUCT => return Ok((check_defstruct(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
+                    wk::DEFENUM => return Ok((check_defenum(&mut self.reg, ns, heap, &elems[1..])?, None)),
                     wk::DEFMETHOD => return Ok((check_defmethod(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
                     _ => {}
                 }
@@ -130,7 +136,7 @@ impl TypeChecker {
             let scope = TypeScope::empty();
             let cx = Cx::new(&self.reg, ns, &scope, None);
             let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
-            typed.map_types(&|t| cx.resolve(t));
+            cx.settle(std::slice::from_mut(&mut typed))?;
             typed
         };
         let subst = Subst::default();
@@ -139,6 +145,26 @@ impl TypeChecker {
         let form = crate::check::core::tagged(heap, wk::EXPR, &[form])?;
         let ty = std::mem::replace(&mut typed.ty, Type::Unit);
         Ok((form, Some(ty)))
+    }
+}
+
+/// Tells the session's table of what names mean (`Heap::names`) about the
+/// types `types` and the methods `methods` a form defined, so a path read in
+/// a later form can step into the type (`Shape::circle`, `Pair::new`). A
+/// type's members are its variants, its fields and its methods, read as in
+/// the type's own module.
+fn publish(reg: &Registry, heap: &Heap, types: &[Path], methods: &[(Path, SymRef)]) {
+    let mut names = heap.names();
+    for path in types {
+        let Some(def) = reg.type_def(path) else { continue };
+        let (home, ty) = (path.ns(), path.name_symbol());
+        names.declare_type(home, ty);
+        for member in def.variants.iter().map(|v| v.name).chain(def.fields.iter().map(|f| f.name)) {
+            names.declare_member(ty, intern_in(home, member.name()));
+        }
+    }
+    for (owner, method) in methods {
+        names.declare_member(owner.name_symbol(), intern_in(owner.ns(), method.name()));
     }
 }
 
@@ -182,6 +208,7 @@ mod tests {
         let reader = Reader::new();
         let interp = Interp::new();
         let mut checker = TypeChecker::default();
+        crate::check::Registry::with_builtins().publish_names(&mut heap.names());
         let mut forms = reader.forms(src);
         let mut last = None;
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
@@ -201,6 +228,7 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
         let mut checker = TypeChecker::default();
+        crate::check::Registry::with_builtins().publish_names(&mut heap.names());
         let mut forms = reader.forms(src);
         let mut result = Ok(Value::Empty);
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
@@ -394,6 +422,62 @@ mod tests {
         assert!(msg.contains("expected `int`, found `string`"), "{}", msg);
         // Written out of order, the values still run in the order written.
         assert_eq!(run(&format!("{}(second (make-instance (quote Pair) :second 2 :first 1))", PAIR)).1, Value::Int(2));
+    }
+
+    const SHAPE: &str = "(defenum Shape (Circle int) (Rect int int) Dot)\n";
+
+    #[test]
+    fn an_enum_is_made_and_matched() {
+        let area = "(defun area ((s Shape)) int (match s ((Circle r) r) ((Rect w h) (* w h)) (Dot 0)))\n";
+        assert_eq!(run(&format!("{}{}(area (Shape::Rect 2 3))", SHAPE, area)).1, Value::Int(6));
+        assert_eq!(run(&format!("{}{}(area (Shape::Dot))", SHAPE, area)).1, Value::Int(0));
+        let msg = check_err(&format!("{}(Shape::Circle \"x\")", SHAPE));
+        assert!(msg.contains("expected `int`, found `string`"), "{}", msg);
+    }
+
+    #[test]
+    fn a_generic_recursive_enum() {
+        let src = "(defenum Tree<T> (Leaf) (Node Tree<T> T Tree<T>))\n\
+            (defun size<T> ((t Tree<T>)) int (match t ((Leaf) 0) ((Node l _ r) (+ 1 (+ (size l) (size r))))))\n\
+            (size (Tree::Node (Tree::Leaf) \"a\" (Tree::Node (Tree::Leaf) \"b\" (Tree::Leaf))))";
+        assert_eq!(run(src).1, Value::Int(2));
+    }
+
+    /// A nested pattern covers only what it matches.
+    #[test]
+    fn a_match_must_cover_every_value() {
+        let msg = check_err(&format!("{}(defun f ((s Shape)) int (match s ((Circle r) r) (Dot 0)))", SHAPE));
+        assert!(msg.contains("`(Rect _ _)` is not covered"), "{}", msg);
+        let src = format!("{}(defenum Box (Full Shape) Empty)\n(defun f ((b Box)) int (match b ((Full (Circle r)) r) (Empty 0)))", SHAPE);
+        let msg = check_err(&src);
+        assert!(msg.contains("`(Full (Rect _ _))` is not covered"), "{}", msg);
+        let src = format!("{}(defenum Box (Full Shape) Empty)\n(defun f ((b Box)) int (match b ((Full (Circle r)) r) ((Full _) 1) (Empty 0)))", SHAPE);
+        assert!(run(&format!("{}\n(f (Box::Full (Shape::Dot)))", src)).1 == Value::Int(1));
+    }
+
+    #[test]
+    fn a_bare_name_in_an_arm_is_a_variant() {
+        let msg = check_err(&format!("{}(defun f ((s Shape)) int (match s (Square 0) (_ 1)))", SHAPE));
+        assert!(msg.contains("`Square` is not a variant of `Shape`"), "{}", msg);
+    }
+
+    /// `Option<int>` is represented by a niche; the pattern reads it the way
+    /// the value is built.
+    #[test]
+    fn an_option_is_matched() {
+        let src = "(defun get ((o Option<int>)) int (match o ((some x) x) ((none) 0)))\n";
+        assert_eq!(run(&format!("{}(get (Option::some 3))", src)).1, Value::Int(3));
+        assert_eq!(run(&format!("{}(get (Option::none))", src)).1, Value::Int(0));
+    }
+
+    #[test]
+    fn a_static_method_through_its_type() {
+        let src = format!(
+            "{}(impl<T, U> Pair<T, U> (defmethod new ((a T) (b U)) Self (make-instance (quote Pair) :first a :second b)))\n\
+             (second (Pair::new 1 \"x\"))",
+            PAIR
+        );
+        assert_eq!(run(&src).2, Type::Str);
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

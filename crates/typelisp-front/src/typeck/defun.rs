@@ -59,9 +59,7 @@ pub(crate) fn check_defun(
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
-        for t in body.iter_mut() {
-            t.map_types(&|ty| cx.resolve(ty));
-        }
+        cx.settle(&mut body)?;
         body
     };
 

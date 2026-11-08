@@ -93,9 +93,7 @@ pub(crate) fn check_make_instance(
         checked[i] = Some(check_expr(cx, heap, locals, value, Some(&field_tys[i]), value_loc)?);
     }
     for (p, t) in def.params.iter().zip(&targs) {
-        if cx.holes.borrow().unsolved(t).is_some() {
-            return Err(Error::TypeError(format!("cannot infer type argument `{}` for `{}`", p.name.name(), tname)));
-        }
+        cx.must_decide(t.clone(), format!("cannot infer type argument `{}` for `{}`", p.name.name(), tname), loc.clone());
     }
 
     // The values are evaluated in the order written; when that is not the

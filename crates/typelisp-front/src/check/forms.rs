@@ -396,7 +396,7 @@ pub(super) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) ->
 /// the tagged word a field of type `T` holds (`Repr::Niche`, `check/repr.rs`).
 /// `REPR` is `T`'s representation, which is what the island tags by; the
 /// interpreter's `Value` already is that word.
-pub(super) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Result<Value, Error> {
+pub(crate) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Result<Value, Error> {
     let repr = payload.write(heap)?;
     let mut s = RootScope::new(heap);
     s.push_root(repr);

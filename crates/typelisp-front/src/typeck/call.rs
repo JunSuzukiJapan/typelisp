@@ -3,7 +3,8 @@
 //! A generic function's type parameters are replaced with fresh holes for
 //! each call (`docs/dev/checker-rebuild-plan.md` 7.2), solved by the
 //! arguments and by what the call's result is expected to be. A hole still
-//! unsolved after that is an error: nothing decides that type argument.
+//! unsolved when the form is checked is an error: nothing decides that type
+//! argument.
 
 use crate::types::{Path, Type};
 use crate::{Error, Heap, Loc, Value};
@@ -53,13 +54,8 @@ pub(crate) fn check_call(
     // instantiation, as in the current checker.
     let call_targs = if def.builtin { Vec::new() } else { targs.clone() };
     for (p, t) in def.type_params.iter().zip(&targs) {
-        if cx.holes.borrow().unsolved(t).is_some() {
-            return Err(Error::TypeError(format!(
-                "{}: cannot infer type parameter `{}` — no argument or expected type decides it",
-                path,
-                p.name.name()
-            )));
-        }
+        let what = format!("{}: cannot infer type parameter `{}` — no argument or expected type decides it", path, p.name.name());
+        cx.must_decide(t.clone(), what, loc.clone());
     }
     Ok(Typed { node: Node::Call { path, targs: call_targs, args: checked }, ty: ret, loc })
 }

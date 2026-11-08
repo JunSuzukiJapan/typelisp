@@ -15,7 +15,7 @@ use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::Holes;
-use super::{binding, call, control, instance, method};
+use super::{binding, call, control, instance, matching, method, path_call, variant};
 use crate::check::SPECIAL_FORM_HEADS;
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -30,13 +30,16 @@ pub(crate) struct Cx<'a> {
     /// Inside an `impl`, the type `Self` stands for.
     pub(crate) self_type: Option<&'a Type>,
     pub(crate) holes: RefCell<Holes>,
+    /// The type arguments the form's checking must decide: each one's type,
+    /// and what to say, and where, when nothing does.
+    undecided: RefCell<Vec<(Type, String, Option<Loc>)>>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
 }
 
 impl<'a> Cx<'a> {
     pub(crate) fn new(reg: &'a Registry, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), temps: Cell::new(0) }
+        Cx { reg, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -56,6 +59,53 @@ impl<'a> Cx<'a> {
     pub(crate) fn resolve(&self, ty: &Type) -> Type {
         self.holes.borrow().resolve(ty)
     }
+
+    /// What the form's inference knows now, to go back to with
+    /// [`Self::restore`] after checking something only to look at it.
+    pub(crate) fn snapshot(&self) -> Snapshot {
+        Snapshot { holes: self.holes.borrow().clone(), undecided: self.undecided.borrow().len() }
+    }
+
+    /// Forget what the inference learned since `snap` was taken.
+    pub(crate) fn restore(&self, snap: Snapshot) {
+        *self.holes.borrow_mut() = snap.holes;
+        self.undecided.borrow_mut().truncate(snap.undecided);
+    }
+
+    /// Require that the type argument `ty` be decided by the time the form
+    /// is checked; if it is not, the error says `what`, at `loc`.
+    ///
+    /// Not asked at once: a later argument, or the expectation of a form
+    /// around this one, may decide it — `(Tree::Node (Tree::Leaf) 1
+    /// (Tree::Leaf))`'s first `Leaf` has its `T` from the `1`.
+    pub(crate) fn must_decide(&self, ty: Type, what: String, loc: Option<Loc>) {
+        self.undecided.borrow_mut().push((ty, what, loc));
+    }
+
+    /// The checked trees of the form, every type in them settled: each hole
+    /// replaced by its solution. An error if a type argument nothing decided
+    /// was required ([`Self::must_decide`]).
+    pub(crate) fn settle(&self, trees: &mut [Typed]) -> Result<(), Error> {
+        for (ty, what, loc) in self.undecided.borrow().iter() {
+            if self.holes.borrow().unsolved(ty).is_some() {
+                let e = Error::TypeError(what.clone());
+                return Err(match loc {
+                    Some(l) => e.at(l.clone()),
+                    None => e,
+                });
+            }
+        }
+        for t in trees.iter_mut() {
+            t.map_types(&|ty| self.resolve(ty));
+        }
+        Ok(())
+    }
+}
+
+/// What [`Cx::snapshot`] keeps.
+pub(crate) struct Snapshot {
+    holes: Holes,
+    undecided: usize,
 }
 
 /// `v` checked where `expected` is expected (`None`: anything), with `locals`
@@ -100,15 +150,27 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
 }
 
-/// A bare name's value: a local, or what the module-level name holds.
+/// A bare name's value: a local, or what the module-level name holds. A
+/// variant or a static method a `use` brought in is called, never a value:
+/// `(none)`, not `none`.
 fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
     if let Some(ty) = locals.lookup(id) {
         return Ok(Typed { node: Node::Local { name: id }, ty: ty.clone(), loc });
     }
-    match value_named(cx.reg, cx.ns, id) {
+    let value = value_named(cx.reg, cx.ns, id);
+    if let Some((_, ValueDef::Macro)) = value {
+        unimplemented!("typeck: the macro `{}` as a value", heap.symbol_spelling(id))
+    }
+    if ctor_named(cx.reg, cx.ns, id).is_some() || static_use_named(cx.reg, cx.ns, id).is_some() {
+        return Err(Error::TypeError(format!(
+            "`{}` is a constructor or a static method, which is called rather than taken as a value",
+            heap.symbol_spelling(id)
+        )));
+    }
+    match value {
         Some((_, ValueDef::Fn(_))) => unimplemented!("typeck: the function `{}` as a value", heap.symbol_spelling(id)),
         Some((_, ValueDef::Var)) => unimplemented!("typeck: the global variable `{}`", heap.symbol_spelling(id)),
-        Some((_, ValueDef::Macro)) => unimplemented!("typeck: the macro `{}` as a value", heap.symbol_spelling(id)),
+        Some((_, ValueDef::Macro)) => unreachable!("a macro was dispatched above"),
         None => Err(Error::TypeError(format!("unbound variable: {}", heap.symbol_spelling(id)))),
     }
 }
@@ -121,14 +183,17 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, loc: Opti
 /// function the module-level name holds.
 fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let elems = heap.list_to_vec_locs(v)?;
-    let Value::Symbol(head) = elems[0].0 else {
-        unimplemented!("typeck: a list whose head is not a symbol (only named calls are checked so far)")
-    };
     let args = &elems[1..];
+    let head = match elems[0].0 {
+        Value::Symbol(head) => head,
+        Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, args, expected, loc),
+        _ => unimplemented!("typeck: a list whose head is neither a name nor a path"),
+    };
     match head.well_known() {
         wk::LET => return binding::check_let(cx, heap, locals, args, expected, loc),
         wk::PROGN => return binding::check_progn(cx, heap, locals, args, expected, loc),
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
+        wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
         wk::VALUE_MEMBER => {
             let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
@@ -149,22 +214,26 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     if let Some((_, ValueDef::Macro)) = value {
         unimplemented!("typeck: expanding the macro `{}`", spelling)
     }
-    if ctor_named(cx.reg, cx.ns, head).is_some() || static_use_named(cx.reg, cx.ns, head).is_some() {
-        unimplemented!("typeck: `{}`, a variant or a static method a `use` brought in", spelling)
+    if let Some((owner, variant)) = ctor_named(cx.reg, cx.ns, head) {
+        return variant::check_variant(cx, heap, locals, owner, variant, args, expected, loc);
+    }
+    if let Some((owner, name)) = static_use_named(cx.reg, cx.ns, head) {
+        let def = cx.reg.methods.get(&(owner, name)).expect("a `use` brings in a defined static method");
+        return method::check_method_call(cx, heap, locals, owner, name, def, None, args, expected, loc);
     }
     if let Some((first, first_loc)) = args.first() {
         let member = member_symbol(spelling);
         // The receiver is checked to find its type's method. When it has
         // none, what that check solved is forgotten: the argument is checked
         // again where the function's parameter type is expected.
-        let saved = cx.holes.borrow().clone();
+        let saved = cx.snapshot();
         if let Ok(receiver) = check_expr(cx, heap, locals, *first, None, first_loc.clone()) {
             let ty = cx.resolve(&receiver.ty);
             if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &ty, member) {
-                return method::check_method_call(cx, heap, locals, owner, member, def, receiver, &args[1..], expected, loc);
+                return method::check_method_call(cx, heap, locals, owner, member, def, Some(receiver), &args[1..], expected, loc);
             }
         }
-        *cx.holes.borrow_mut() = saved;
+        cx.restore(saved);
     }
     match value {
         Some((path, ValueDef::Fn(def))) => call::check_call(cx, heap, locals, path, def, args, expected, loc),

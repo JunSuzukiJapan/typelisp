@@ -644,6 +644,53 @@ pub(crate) trait CoreForms {
         f.finish(wk::FIELD_SET)
     }
 
+    /// `(pat-ctor PATH KEY VARIANT DOWNCAST (REPR...) SUB...)`: the variant
+    /// `variant` of `type_name<targs>`, its fields (declared `field_tys` at
+    /// these arguments) matched by the patterns `subs`, already lowered and
+    /// rooted.
+    ///
+    /// The instantiation is spelled the way the constructing site spells it
+    /// ([`Self::construct_form`]): for an ordinary pattern the scrutinee's
+    /// static type already guarantees it, and for a downcast it is the test
+    /// itself, so a `gen<string>` value is not taken for a `gen<i32>`. The
+    /// field representations travel with the site for the reason
+    /// `construct_form` gives.
+    #[allow(clippy::too_many_arguments)]
+    fn pat_ctor_form(
+        &self,
+        heap: &mut Heap,
+        type_name: &Path,
+        targs: &[Type],
+        variant: usize,
+        downcast: bool,
+        field_tys: &[Type],
+        subs: &[Value],
+    ) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let tp = core::definition_form(type_name);
+        f.push(tp);
+        let key = core::type_form(f.heap(), &Type::Named(*type_name, targs.to_vec()), &[])?;
+        f.push(key);
+        f.push(Value::Int(variant as i64));
+        f.push(Value::Bool(downcast));
+        let reprs = self.repr_forms(f.heap(), field_tys.iter().cloned())?;
+        f.push(reprs);
+        f.extend(subs.iter().copied());
+        f.finish(wk::PAT_CTOR)
+    }
+
+    /// `(pat-some REPR SUB)`: a niched `Option<T>`'s `some`, any word but the
+    /// empty list, its payload read back through `T`'s representation
+    /// `payload` — the island untags a narrow payload and opens a float box
+    /// before `SUB` (already lowered and rooted) can compare or bind it. Its
+    /// `none` is `(pat-empty)`.
+    fn pat_some_form(&self, heap: &mut Heap, payload: &Repr, sub: Value) -> Result<Value, Error> {
+        let repr = payload.write(heap)?;
+        let mut s = RootScope::new(heap);
+        s.push_root(repr);
+        core::tagged(&mut s, wk::PAT_SOME, &[repr, sub])
+    }
+
     /// `(match SCRUT REPR (PAT BODY...)...)`.
     ///
     /// The scrutinee's representation is what a whole-value `(pat-bind x)`
@@ -1054,12 +1101,10 @@ impl Info {
             // compare or bind it.
             Pattern::Empty => core::tagged(heap, wk::PAT_EMPTY, &[])?,
             Pattern::Some(payload, sub) => {
-                let repr = payload.write(heap)?;
                 let mut s = RootScope::new(heap);
-                s.push_root(repr);
                 let inner = self.pattern_form(&mut s, sub)?;
                 s.push_root(inner);
-                core::tagged(&mut s, wk::PAT_SOME, &[repr, inner])?
+                self.pat_some_form(&mut s, payload, inner)?
             }
             // The empty list is its own pattern node, not `Sexpr`'s `nil` variant.
             // Today the two are the same test; they stop being the same when
@@ -1075,29 +1120,14 @@ impl Info {
                 core::tagged(heap, wk::PAT_EMPTY, &[])?
             }
             Pattern::Ctor { type_name, targs, variant, args, field_types, downcast } => {
-                let mut f = Items::new(heap);
-                let tp = core::definition_form(type_name);
-                f.push(tp);
-                // The instantiation this pattern accepts, spelled the way the
-                // constructing site spells it (`Checker::construct_form`). For
-                // an ordinary same-ADT pattern the scrutinee's static type
-                // already guarantees a match, so this changes nothing; for a
-                // *downcast* it is the whole point — testing the base path
-                // alone let a `gen<string>` value into a `(the gen<i32> ...)`
-                // arm, which then read its field as an `i32`.
-                let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.clone()), &[])?;
-                f.push(key);
-                f.push(Value::Int(*variant as i64));
-                f.push(Value::Bool(*downcast));
-                // Per-field representations, for the same reason
-                // `construct` carries them — see `construct_form`.
-                let reprs = self.repr_forms(f.heap(), field_types.iter().cloned())?;
-                f.push(reprs);
+                let mut s = RootScope::new(heap);
+                let mut subs = Vec::with_capacity(args.len());
                 for sub in args {
-                    let one = self.pattern_form(f.heap(), sub)?;
-                    f.push(one);
+                    let one = self.pattern_form(&mut s, sub)?;
+                    s.push_root(one);
+                    subs.push(one);
                 }
-                f.finish(wk::PAT_CTOR)?
+                self.pat_ctor_form(&mut s, type_name, targs, *variant, *downcast, field_types, &subs)?
             }
             Pattern::TypeTest(ty, sub) => {
                 let path = nominal_path(ty)
