@@ -28,7 +28,19 @@ fn write(dir: &Path, name: &str, source: &str) -> PathBuf {
 
 /// `typl ARGS...` run in `dir`: exit code, stdout, stderr.
 fn typl(dir: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_typl")).args(args).current_dir(dir).output().expect("running typl");
+    let exe = env!("CARGO_BIN_EXE_typl");
+    // Starting a process fails with "not found" both when the program is
+    // missing and when the directory it is started in is: say which.
+    let out = Command::new(exe).args(args).current_dir(dir).output().unwrap_or_else(|e| {
+        panic!(
+            "running typl: {} (typl `{}` exists: {}; directory `{}` exists: {})",
+            e,
+            exe,
+            Path::new(exe).exists(),
+            dir.display(),
+            dir.exists()
+        )
+    });
     (
         out.status.code().expect("typl did not exit normally"),
         String::from_utf8_lossy(&out.stdout).into_owned(),
