@@ -18,7 +18,6 @@ use crate::{wk, nominal_path, parse_type_spanned, prim_type_path, Error, Heap, L
 
 use super::loop_dsl;
 use typelisp_mem::ConcreteNames;
-use typelisp_mem::specialization::{specialization, Generic};
 use typelisp_mem::{SymRef, TypeId};
 use super::semantic::{TypeKind, TypeUse};
 
@@ -26,7 +25,7 @@ use super::resolved::{CompileTarget, Pattern};
 use super::core::{self, Checked, Disagreement, Items, Node, NotDyn, SelectArm, Unassignable, Uncovered, Unmet, Unsafe};
 use super::{forms, lower};
 use super::lower::CoreForms;
-use crate::typeck::generic::{fn_specialization, SPECIALIZATION_BUDGET};
+use crate::typeck::generic::{fn_specialization, method_specialization, SPECIALIZATION_BUDGET};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
@@ -17245,14 +17244,6 @@ fn written_member(type_fq: &Path, method: SymRef, inst: Option<&[Type]>) -> SymR
     }
 }
 
-/// The name of `type_fq`'s method `method` at the type arguments `args`:
-/// the owner's, then the method's own. What a method written for one
-/// instantiation is named too, so a call names it the same way whichever
-/// `impl` wrote it.
-fn method_specialization(type_fq: &Path, method: SymRef, args: &[Type]) -> SymRef {
-    let ids: Vec<TypeId> = args.iter().map(crate::type_key::type_id).collect();
-    specialization(Generic::Method(type_fq.ns(), type_fq.name_symbol(), method), &ids)
-}
 
 pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<Value, Error> {
     let mut f = Items::new(heap);

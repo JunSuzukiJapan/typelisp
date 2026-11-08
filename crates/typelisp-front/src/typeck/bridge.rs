@@ -10,12 +10,12 @@
 
 use std::collections::HashMap;
 
-use crate::check::registry::{AdtDef, FnSig, OptKeyParam, TraitBound};
+use crate::check::registry::{AdtDef, AdtKind, FnSig, OptKeyParam, TraitBound};
 use crate::check::Registry as OldRegistry;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use typelisp_mem::symbols::intern;
 
-use super::registry::{FnDef, MethodDef, Registry, TypeDef, ValueDef};
+use super::registry::{Field, FnDef, MethodDef, Registry, TypeDef, TypeEntry, ValueDef};
 
 /// Copy everything `old` defines into `new`.
 pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
@@ -34,7 +34,16 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
         }
         for sym in m.types.symbols() {
             let def = m.types.get_sym(sym).expect("a key of the table");
-            import_type(def, new);
+            import_type(old, def, new);
+        }
+        for sym in m.type_aliases.symbols() {
+            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Alias);
+        }
+        for sym in m.traits.symbols() {
+            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Trait);
+        }
+        for sym in m.c_structs.symbols() {
+            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::CStruct);
         }
         for sym in m.aliases.symbols() {
             new.imports.insert((ns, sym), *m.aliases.get_sym(sym).expect("a key of the table"));
@@ -52,19 +61,37 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
 }
 
 /// A type and its methods.
-fn import_type(def: &AdtDef, new: &mut Registry) {
+fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
     let path = def.name;
     let params = type_params(ParamOwner::Def(path), &def.params);
-    new.types.insert(path, TypeDef { kind: def.kind, params, public: def.public });
+    let by_name: HashMap<String, Type> = def.params.iter().cloned().zip(params.iter().map(|p| Type::Param(*p))).collect();
+    let fields = match (def.kind, def.variants.as_slice()) {
+        (AdtKind::Struct, [v]) => def
+            .field_names
+            .iter()
+            .zip(&v.fields)
+            .map(|(name, ty)| Field {
+                name: *name,
+                ty: convert(ty, &by_name, &|| format!("a field of {}", path)),
+                public: def.assoc.get(*name).is_some_and(|af| af.sig.public),
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let has_defaults = old.struct_defaults.contains_key(&path);
+    new.types.insert(
+        path,
+        TypeEntry::Type(TypeDef { kind: def.kind, params, public: def.public, builtin: def.builtin, fields, has_defaults }),
+    );
     for (name, af) in def.assoc.iter() {
         let sig = fn_def(ParamOwner::Method(path, name), &def.params, &af.sig);
-        new.methods.insert((path, name), MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home });
+        new.methods.insert((path, name), MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home, inst_args: None });
     }
     for inst in def.insts.values() {
         let args: Vec<Type> = inst.args.iter().map(|t| convert(t, &HashMap::new(), &|| format!("an instantiation of {}", path))).collect();
         for (name, af) in inst.assoc.iter() {
             let sig = fn_def(ParamOwner::Method(path, name), &[], &af.sig);
-            let method = MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home };
+            let method = MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home, inst_args: Some(args.clone()) };
             let mut insts = new.inst_methods.get(&(path, name)).cloned().unwrap_or_default();
             insts.push((args.clone(), method));
             new.inst_methods.insert((path, name), insts);

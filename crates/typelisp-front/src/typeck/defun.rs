@@ -13,14 +13,14 @@ use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
 use super::expr::{check_body, Cx};
-use super::generic::Requests;
+use super::generic::{Base, Requests};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
 use super::registry::{FnDef, Registry, Template};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::tree::Typed;
-use super::type_syntax::parse_type;
+use super::type_syntax::{parse_type, TypeCx};
 
 const SHAPE: &str = "defun: (defun name<T...>? ((param Type)...) ReturnType body...)";
 
@@ -48,13 +48,14 @@ pub(crate) fn check_defun(
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defun {}: type parameter `{}` is declared twice", path, twice.0.name()))
     })?;
-    let params = parse_params(heap, &scope, *params)?;
-    let ret = parse_type(heap, &scope, *ret)?;
+    let tcx = TypeCx { reg, ns, scope: &scope };
+    let params = parse_params(heap, &tcx, *params)?;
+    let ret = parse_type(heap, &tcx, *ret)?;
     let type_params = scope.params().to_vec();
     reg.define_fn(path, FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()));
 
     let mut body = {
-        let cx = Cx::new(reg, ns);
+        let cx = Cx::new(reg, ns, &scope);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
@@ -69,10 +70,10 @@ pub(crate) fn check_defun(
         for t in &body {
             t.each_value(&mut |v| heap.push_permanent_root(v));
         }
-        reg.set_template(path, Some(Template { params, ret, body: std::mem::take(&mut body) }));
+        reg.set_template(Base::Fn(path), Some(Template { params, ret, body: std::mem::take(&mut body) }));
         return crate::check::forms::module_form(heap, &path, &[]);
     }
-    reg.set_template(path, None);
+    reg.set_template(Base::Fn(path), None);
     let subst = Subst::default();
     let mut lw = Lowering { reg, subst: &subst, requests };
     let forms = lower_all(heap, &mut lw, &body)?;
@@ -86,7 +87,7 @@ pub(crate) fn lower_all(heap: &mut Heap, lw: &mut Lowering, body: &[Typed]) -> R
 
 /// `name` or `name<T...>` (read as `(%type-apply name T...)`): the name and
 /// the type parameters it declares.
-fn parse_header(heap: &Heap, v: Value) -> Result<(SymRef, Vec<SymRef>), Error> {
+pub(crate) fn parse_header(heap: &Heap, v: Value) -> Result<(SymRef, Vec<SymRef>), Error> {
     match v {
         Value::Symbol(id) => Ok((id, Vec::new())),
         Value::Cons(_) if crate::types::is_type_application(heap, v) => {
@@ -105,7 +106,7 @@ fn parse_header(heap: &Heap, v: Value) -> Result<(SymRef, Vec<SymRef>), Error> {
 }
 
 /// `((param Type)...)`.
-fn parse_params(heap: &Heap, scope: &TypeScope, v: Value) -> Result<Vec<(SymRef, Type)>, Error> {
+pub(crate) fn parse_params(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Vec<(SymRef, Type)>, Error> {
     let mut out = Vec::new();
     for (p, _) in heap.list_to_vec_locs(v)? {
         if let Value::Symbol(id) = p {
@@ -117,7 +118,7 @@ fn parse_params(heap: &Heap, scope: &TypeScope, v: Value) -> Result<Vec<(SymRef,
         let [Value::Symbol(name), ty] = pair.as_slice() else {
             return Err(Error::TypeError(format!("defun: a parameter is (name Type): {}", SHAPE)));
         };
-        out.push((*name, parse_type(heap, scope, *ty)?));
+        out.push((*name, parse_type(heap, cx, *ty)?));
     }
     Ok(out)
 }

@@ -691,7 +691,12 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
                 wk::TYPE_VAR
             }
         },
-        Type::Param(p) => unimplemented!("type_form: the rebuilt checker's type parameter `{}` (its lowering is not designed yet)", p.name.name()),
+        // The rebuilt checker writes a field's type in its type's own
+        // parameters, by position, and lowers nothing else that has one.
+        Type::Param(p) => {
+            f.push(Value::Int(p.index as i64));
+            wk::TYPE_PARAM
+        }
         Type::Infer(_) => unreachable!("type_form: an inference hole left the checker"),
         Type::Unit => wk::TYPE_UNIT,
         Type::Never => wk::TYPE_NEVER,

@@ -1,7 +1,7 @@
 //! Checking an expression: which kind of form it is, and the module that
 //! checks that kind.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use crate::types::Type;
 use crate::{wk, Error, Heap, Loc, Value};
@@ -12,23 +12,42 @@ use super::locals::Locals;
 use super::registry::{Registry, ValueDef};
 use super::resolve::{ctor_named, receiver_method, static_use_named, value_named};
 use super::tree::{Node, Typed};
+use super::scope::TypeScope;
+use super::type_syntax::TypeCx;
 use super::unify::Holes;
-use super::{binding, call, control, method};
+use super::{binding, call, control, instance, method};
 use crate::check::SPECIAL_FORM_HEADS;
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
 /// What every expression of one top-level form is checked against: the
-/// definitions, the module the form is in, and the form's inference holes.
+/// definitions, the module the form is in, the type parameters the
+/// definition declares, and the form's inference holes.
 pub(crate) struct Cx<'a> {
     pub(crate) reg: &'a Registry,
     pub(crate) ns: NsId,
+    pub(crate) scope: &'a TypeScope<'a>,
     pub(crate) holes: RefCell<Holes>,
+    /// The temporaries the form has made, to name the next one.
+    temps: Cell<u32>,
 }
 
 impl<'a> Cx<'a> {
-    pub(crate) fn new(reg: &'a Registry, ns: NsId) -> Cx<'a> {
-        Cx { reg, ns, holes: RefCell::new(Holes::new()) }
+    pub(crate) fn new(reg: &'a Registry, ns: NsId, scope: &'a TypeScope<'a>) -> Cx<'a> {
+        Cx { reg, ns, scope, holes: RefCell::new(Holes::new()), temps: Cell::new(0) }
+    }
+
+    /// Where a type written in this form is read.
+    pub(crate) fn types(&self) -> TypeCx<'_> {
+        TypeCx { reg: self.reg, ns: self.ns, scope: self.scope }
+    }
+
+    /// A local variable no program can name, for a value the checker holds
+    /// for a moment.
+    pub(crate) fn temp(&self) -> SymRef {
+        let n = self.temps.get();
+        self.temps.set(n + 1);
+        typelisp_mem::symbols::intern(&format!("%place-tmp-{}", n))
     }
 
     /// `ty` with every hole solved so far filled in.
@@ -108,6 +127,13 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::LET => return binding::check_let(cx, heap, locals, args, expected, loc),
         wk::PROGN => return binding::check_progn(cx, heap, locals, args, expected, loc),
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
+        wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
+        wk::VALUE_MEMBER => {
+            let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
+                return Err(Error::TypeError("a member of a value is written `value::member`".into()));
+            };
+            return instance::check_field(cx, locals, *recv, *member, loc);
+        }
         _ => {}
     }
     if SPECIAL_FORM_HEADS.contains(&head.well_known()) {

@@ -6,12 +6,15 @@ use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 
+use super::defmethod::check_defmethod;
+use super::defstruct::check_defstruct;
 use super::defun::{check_defun, lower_all};
 use super::expr::{check_expr, Cx};
-use super::generic::{Request, Requests};
+use super::generic::{Base, Name, Request, Requests};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
 use super::registry::Registry;
+use super::scope::TypeScope;
 use super::subst::Subst;
 
 /// The rebuilt checker, as the current one hands it each top-level form
@@ -104,13 +107,17 @@ impl TypeChecker {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec_locs(v)?;
             if let Value::Symbol(head) = elems[0].0 {
-                if head.is(wk::DEFUN) {
-                    return Ok((check_defun(&mut self.reg, ns, heap, requests, &elems[1..])?, None));
+                match head.well_known() {
+                    wk::DEFUN => return Ok((check_defun(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
+                    wk::DEFSTRUCT => return Ok((check_defstruct(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
+                    wk::DEFMETHOD => return Ok((check_defmethod(&mut self.reg, ns, heap, requests, &elems[1..])?, None)),
+                    _ => {}
                 }
             }
         }
         let mut typed = {
-            let cx = Cx::new(&self.reg, ns);
+            let scope = TypeScope::empty();
+            let cx = Cx::new(&self.reg, ns, &scope);
             let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
             typed.map_types(&|t| cx.resolve(t));
             typed
@@ -124,21 +131,32 @@ impl TypeChecker {
     }
 }
 
-/// The generic function `req.base` specialized at `req.args`: its body lowered
-/// with the type parameters replaced, under the specialization's name.
+/// The generic function or method `req.base` specialized at `req.args`: its
+/// body lowered with the type parameters replaced, under the
+/// specialization's name.
 fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Request) -> Result<Value, Error> {
-    let def = reg.fn_def(&req.base).expect("a specialization is asked for only of a defined function");
-    // The prelude's generic functions were checked by the current checker,
+    let type_params = match req.base {
+        Base::Fn(p) => &reg.fn_def(&p).expect("a specialization is asked for only of a defined function").type_params,
+        Base::Method(owner, m) => &reg.methods.get(&(owner, m)).expect("a specialization is asked for only of a defined method").sig.type_params,
+    };
+    // The prelude's generic definitions were checked by the current checker,
     // which keeps their source, not a checked tree.
     let Some(template) = reg.template(&req.base) else {
-        unimplemented!("typeck: specializing {}, a generic function this checker has no checked body of", req.base)
+        unimplemented!("typeck: specializing {:?}, which this checker has no checked body of", req.base)
     };
-    let subst = Subst::positional(&def.type_params, &req.args);
+    let subst = Subst::positional(type_params, &req.args);
     let params: Vec<_> = template.params.iter().map(|(n, t)| (*n, subst.apply(t))).collect();
     let ret = subst.apply(&template.ret);
     let mut lw = Lowering { reg, subst: &subst, requests };
     let body = lower_all(heap, &mut lw, &template.body)?;
-    reg.defun_form(heap, &req.name, &params, &ret, &body)
+    match (req.base, req.name) {
+        (Base::Fn(_), Name::Fn(name)) => reg.defun_form(heap, &name, &params, &ret, &body),
+        (Base::Method(owner, m), Name::Method(name)) => {
+            let instance = reg.methods.get(&(owner, m)).expect("checked above").instance;
+            reg.defmethod_form(heap, &owner, name, instance, &params, &ret, &body)
+        }
+        _ => unreachable!("a specialization is named as what it specializes"),
+    }
 }
 
 #[cfg(test)]
@@ -298,6 +316,48 @@ mod tests {
     fn a_type_parameter_declared_twice() {
         let msg = check_err("(defun f<T, T> ((x T)) T x)");
         assert!(msg.contains("type parameter `T` is declared twice"), "{}", msg);
+    }
+
+    const PAIR: &str = "(defstruct Pair<T, U> (first T) (second U))\n\
+        (defun mk () Pair<int,string> (make-instance (quote Pair) :first 1 :second \"Hello\"))\n";
+
+    #[test]
+    fn a_struct_its_accessors_and_its_fields() {
+        assert_eq!(run(&format!("{}(first (mk))", PAIR)).1, Value::Int(1));
+        assert_eq!(run(&format!("{}(let ((p (mk))) (set-first p 5) p::first)", PAIR)).1, Value::Int(5));
+        assert_eq!(run(&format!("{}(mk)", PAIR)).2.to_string(), "Pair<int,string>");
+    }
+
+    /// A method declares its type parameters in its name; the receiver's
+    /// type only uses them, and which names `Pair` declared does not matter.
+    #[test]
+    fn a_method_declares_its_own_type_parameters() {
+        let src = format!("{}(defmethod pair-first<T, U> ((p Pair<T,U>)) T p::first)\n(pair-first (mk))", PAIR);
+        assert_eq!(run(&src).1, Value::Int(1));
+        let src = format!(
+            "{}(defmethod swap<A, B> ((p Pair<A,B>)) Pair<B,A> (make-instance (quote Pair) :first p::second :second p::first))\n(first (swap (mk)))",
+            PAIR
+        );
+        assert_eq!(run(&src).2, Type::Str);
+        // `mk<T>`'s `T` is not `Pair`'s: they are two parameters.
+        let src = format!("{}(defmethod with<T> ((p Pair<int,string>) (x T)) T x)\n(with (mk) true)", PAIR);
+        assert_eq!(run(&src).1, Value::Bool(true));
+    }
+
+    #[test]
+    fn a_receiver_type_does_not_declare_anything() {
+        let msg = check_err(&format!("{}(defmethod bad ((p Pair<T,U>)) T p::first)", PAIR));
+        assert!(msg.contains("unknown type `T`"), "{}", msg);
+    }
+
+    #[test]
+    fn make_instance_infers_and_checks() {
+        let msg = check_err(&format!("{}(make-instance (quote Pair) :first 1)", PAIR));
+        assert!(msg.contains("slot `second` is not given"), "{}", msg);
+        let msg = check_err(&format!("{}(defun f () Pair<int,int> (make-instance (quote Pair) :first 1 :second \"x\"))", PAIR));
+        assert!(msg.contains("expected `int`, found `string`"), "{}", msg);
+        // Written out of order, the values still run in the order written.
+        assert_eq!(run(&format!("{}(second (make-instance (quote Pair) :second 2 :first 1))", PAIR)).1, Value::Int(2));
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

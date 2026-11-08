@@ -6,6 +6,8 @@
 //!
 //! - [`toplevel`]: the entry point, one top-level form at a time.
 //! - [`defun`]: defining a function.
+//! - [`defstruct`]: defining a struct type and its accessors.
+//! - [`defmethod`]: defining a method outside an `impl`.
 //! - [`generic`]: specializations of generic definitions.
 //! - [`expr`]: which kind of form an expression is, and bodies.
 //! - [`literal`]: the atoms that are their own value, and their types.
@@ -13,6 +15,7 @@
 //! - [`control`]: `if`.
 //! - [`call`]: calls to functions.
 //! - [`method`]: calls to instance methods.
+//! - [`instance`]: `make-instance`, and reading a struct's field.
 //! - [`resolve`]: what a name written in a module means.
 //! - [`locals`]: local variables.
 //! - [`scope`]: which type parameters a name means where a type is written.
@@ -29,9 +32,12 @@ pub(crate) mod binding;
 pub(crate) mod bridge;
 pub(crate) mod call;
 pub(crate) mod control;
+pub(crate) mod defmethod;
+pub(crate) mod defstruct;
 pub(crate) mod defun;
 pub(crate) mod expr;
 pub(crate) mod generic;
+pub(crate) mod instance;
 pub(crate) mod literal;
 pub(crate) mod locals;
 pub(crate) mod lower;

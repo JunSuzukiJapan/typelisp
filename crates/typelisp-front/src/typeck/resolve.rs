@@ -62,8 +62,8 @@ pub(crate) fn static_use_named(reg: &Registry, here: NsId, sym: SymRef) -> Optio
 /// The instance method `name` (a member symbol) a receiver of type `ty`
 /// answers to, seen from `here`, with the type it belongs to.
 ///
-/// A method without `pub` is seen only from the module it was written in,
-/// and within the standard library from any of its modules.
+/// A method without `pub` is seen as [`sees`] says, from the module it was
+/// written in.
 pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name: SymRef) -> Option<(Path, &'r MethodDef)> {
     let owner = nominal_path(ty)?;
     let args = match ty {
@@ -72,6 +72,13 @@ pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name
     };
     let m = reg.method_at(&owner, name, args)?;
     let home = m.home.map_or(owner.ns(), |h| h.ns());
-    let visible = m.sig.public || home == here || (in_std(here) && in_std(home));
-    (m.instance && visible).then_some((owner, m))
+    (m.instance && (m.sig.public || sees(here, home))).then_some((owner, m))
+}
+
+/// Whether what the module `home` defines without `pub` is visible from
+/// `here`: only from that module itself, and within the standard library
+/// from any of its modules. An enclosing or an enclosed module is another
+/// module.
+pub(crate) fn sees(here: NsId, home: NsId) -> bool {
+    home == here || (in_std(here) && in_std(home))
 }

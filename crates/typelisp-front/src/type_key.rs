@@ -94,6 +94,8 @@ fn type_id_in(ty: &Type, params: &[String]) -> TypeId {
         Type::CStruct(p) => TypeShape::CStruct(p.ns(), p.name_symbol()),
         Type::Unit => TypeShape::Unit,
         Type::Never => TypeShape::Never,
+        Type::Param(p) => TypeShape::Param(p.index),
+        Type::Infer(_) => unreachable!("an inference hole left the checker"),
         Type::Var(name) => match params.iter().position(|p| p == name) {
             Some(i) => TypeShape::Param(i as u32),
             None => panic!("the type variable `{}` has no runtime identity (internal error)", name),
@@ -230,6 +232,8 @@ impl TypeKey for Type {
             Type::CStruct(p) => p.to_string(),
             Type::Named(p, args) => ConcreteNames::instantiated_type(&p.to_string(), args),
             Type::Var(name) => name.clone(),
+            Type::Param(p) => p.name.name().to_string(),
+            Type::Infer(_) => unreachable!("an inference hole left the checker"),
             Type::Dyn(p, pins) => ConcreteNames::dyn_type(&p.to_string(), pins),
             Type::Fn(ps, rest, r) => ConcreteNames::fn_type(ps, rest.as_deref(), &**r),
             scalar => type_key_of(&Path::primitive(scalar.scalar_name().expect("every other type is matched above"))).into_owned(),

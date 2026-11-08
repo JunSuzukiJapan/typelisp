@@ -26,9 +26,19 @@ pub(crate) enum Node {
     /// A call to the function `path`, at the type arguments `targs` when it
     /// is generic.
     Call { path: Path, targs: Vec<Type>, args: Vec<Typed> },
-    /// A call to the instance method `method` of the type `owner`; the
-    /// receiver is the first argument.
-    MethodCall { owner: Path, method: SymRef, args: Vec<Typed> },
+    /// A call to the instance method `method` of the type `owner`, at the
+    /// type arguments `targs` when it is generic; the receiver is the first
+    /// argument.
+    MethodCall { owner: Path, method: SymRef, targs: Vec<Type>, args: Vec<Typed> },
+    /// A new value of the type `owner<targs>`: its variant `variant`'s fields,
+    /// whose declared types at these arguments are `field_tys`. A struct's is
+    /// mutable.
+    Construct { owner: Path, targs: Vec<Type>, variant: usize, mutable: bool, field_tys: Vec<Type>, args: Vec<Typed> },
+    /// The field `index` of the struct `obj`.
+    FieldGet { obj: Box<Typed>, index: usize },
+    /// Set the field `index` (declared `field_ty` at the struct's arguments)
+    /// of the struct `obj` to `value`.
+    FieldSet { obj: Box<Typed>, index: usize, field_ty: Type, value: Box<Typed> },
     /// `let`: the bindings, each checked outside all of them, then the body
     /// in order. With no bindings it is `progn`.
     Let { binds: Vec<(SymRef, Typed)>, body: Vec<Typed> },
@@ -47,7 +57,24 @@ impl Typed {
                 }
                 args.iter_mut().for_each(|a| a.map_types(f));
             }
-            Node::MethodCall { args, .. } => args.iter_mut().for_each(|a| a.map_types(f)),
+            Node::MethodCall { targs, args, .. } => {
+                for t in targs.iter_mut() {
+                    *t = f(t);
+                }
+                args.iter_mut().for_each(|a| a.map_types(f));
+            }
+            Node::Construct { targs, field_tys, args, .. } => {
+                for t in targs.iter_mut().chain(field_tys.iter_mut()) {
+                    *t = f(t);
+                }
+                args.iter_mut().for_each(|a| a.map_types(f));
+            }
+            Node::FieldGet { obj, .. } => obj.map_types(f),
+            Node::FieldSet { obj, field_ty, value, .. } => {
+                *field_ty = f(field_ty);
+                obj.map_types(f);
+                value.map_types(f);
+            }
             Node::Let { binds, body } => {
                 binds.iter_mut().for_each(|(_, t)| t.map_types(f));
                 body.iter_mut().for_each(|t| t.map_types(f));
@@ -65,7 +92,14 @@ impl Typed {
         match &self.node {
             Node::Literal { value: Some(v), .. } => f(*v),
             Node::Literal { value: None, .. } | Node::Local { .. } => {}
-            Node::Call { args, .. } | Node::MethodCall { args, .. } => args.iter().for_each(|a| a.each_value(f)),
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => {
+                args.iter().for_each(|a| a.each_value(f))
+            }
+            Node::FieldGet { obj, .. } => obj.each_value(f),
+            Node::FieldSet { obj, value, .. } => {
+                obj.each_value(f);
+                value.each_value(f);
+            }
             Node::Let { binds, body } => {
                 binds.iter().for_each(|(_, t)| t.each_value(f));
                 body.iter().for_each(|t| t.each_value(f));

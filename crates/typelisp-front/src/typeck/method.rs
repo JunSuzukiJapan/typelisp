@@ -30,8 +30,8 @@ pub(crate) fn check_method_call(
     if sig.rest.is_some() || !sig.optionals.is_empty() || !sig.keys.is_empty() || !sig.bounds.is_empty() {
         unimplemented!("typeck: calling {}::{}, which takes &rest, &optional or &key parameters or has :where bounds", owner, method.name())
     }
-    if !sig.type_params.is_empty() {
-        unimplemented!("typeck: calling the generic method {}::{} (generic methods are not specialized yet)", owner, method.name())
+    if !sig.type_params.is_empty() && sig.builtin {
+        unimplemented!("typeck: calling the built-in generic method {}::{} (built-in generic methods are not specialized yet)", owner, method.name())
     }
     if rest.len() + 1 != sig.params.len() {
         return Err(Error::TypeError(format!(
@@ -42,17 +42,35 @@ pub(crate) fn check_method_call(
             rest.len() + 1
         )));
     }
-    agree(cx, &receiver.ty, Some(&sig.params[0]))?;
+    let subst = cx.holes.borrow_mut().instantiate(&sig.type_params);
+    agree(cx, &receiver.ty, Some(&subst.apply(&sig.params[0])))?;
     if mixes_rationals(cx, heap, locals, method, &receiver, rest) {
         unimplemented!("typeck: an operator mixing an `int` and a `ratio` (CL's contagion)")
     }
     let mut args = vec![receiver];
     for ((arg, arg_loc), param) in rest.iter().zip(&sig.params[1..]) {
-        args.push(check_expr(cx, heap, locals, *arg, Some(param), arg_loc.clone())?);
+        args.push(check_expr(cx, heap, locals, *arg, Some(&subst.apply(param)), arg_loc.clone())?);
     }
-    let ret = sig.ret.clone();
+    let ret = subst.apply(&sig.ret);
     agree(cx, &ret, expected)?;
-    Ok(Typed { node: Node::MethodCall { owner, method, args }, ty: ret, loc })
+    let targs: Vec<Type> = sig.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();
+    for (p, t) in sig.type_params.iter().zip(&targs) {
+        if cx.holes.borrow().unsolved(t).is_some() {
+            return Err(Error::TypeError(format!(
+                "{}::{}: cannot infer type parameter `{}` — no argument or expected type decides it",
+                owner,
+                method.name(),
+                p.name.name()
+            )));
+        }
+    }
+    // A method written for one instantiation has code under that
+    // instantiation's name.
+    let method = match &def.inst_args {
+        Some(inst) => super::generic::method_specialization(&owner, method, inst),
+        None => method,
+    };
+    Ok(Typed { node: Node::MethodCall { owner, method, targs, args }, ty: ret, loc })
 }
 
 /// Whether `(op receiver other)` mixes the two kinds of rational, which CL's

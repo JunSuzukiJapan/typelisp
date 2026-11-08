@@ -17,6 +17,7 @@ use crate::types::{Path, Type, TypeParam};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
+use super::generic::Base;
 use super::tree::Typed;
 
 /// A function: its type parameters, its parameter types and its result
@@ -67,14 +68,43 @@ pub(crate) struct MethodDef {
     /// The module a `defmethod` outside an `impl` was written in, where a
     /// method without `pub` is visible; `None` for one an `impl` gave.
     pub(crate) home: Option<Path>,
+    /// For a method written for one instantiation of a generic type, that
+    /// instantiation's type arguments: its code is named for them.
+    pub(crate) inst_args: Option<Vec<Type>>,
 }
 
-/// A type: its kind and its type parameters.
+/// A type: its kind, its type parameters and, for a struct, its fields.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TypeDef {
     pub(crate) kind: AdtKind,
     pub(crate) params: Vec<TypeParam>,
     pub(crate) public: bool,
+    /// Implemented in Rust (`Vector`, `HashTable`, ...): no `make-instance`.
+    pub(crate) builtin: bool,
+    /// A struct's fields, in order. Their types are written in this type's
+    /// own parameters.
+    pub(crate) fields: Vec<Field>,
+    /// Some field has a default (`(name Type default)`).
+    pub(crate) has_defaults: bool,
+}
+
+/// A struct's field: its member symbol, its type, and whether it is `pub`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Field {
+    pub(crate) name: SymRef,
+    pub(crate) ty: Type,
+    pub(crate) public: bool,
+}
+
+/// What a module-level name in the type name space is: a type, a type
+/// alias, a trait or a C struct, never two of them. An alias, a trait and a
+/// C struct are only known to be one so far.
+#[derive(Clone, Debug)]
+pub(crate) enum TypeEntry {
+    Type(TypeDef),
+    Alias,
+    Trait,
+    CStruct,
 }
 
 /// What a module-level name in the value name space is: one of three, never
@@ -88,9 +118,10 @@ pub(crate) enum ValueDef {
     Macro,
 }
 
-/// A generic function's checked body, kept to be specialized: its
-/// parameters' names and types, its result type, and the body, every type in
-/// them settled except for the function's own type parameters.
+/// A generic function's or method's checked body, kept to be specialized:
+/// its parameters' names and types (a method's receiver first), its result
+/// type, and the body, every type in them settled except for the
+/// definition's own type parameters.
 #[derive(Debug)]
 pub(crate) struct Template {
     pub(crate) params: Vec<(SymRef, Type)>,
@@ -149,7 +180,7 @@ impl<K: Hash + Eq + Clone, V> Table<K, V> {
 pub(crate) struct Registry {
     /// Functions, global variables and macros: one name space.
     pub(crate) values: Table<Path, ValueDef>,
-    pub(crate) types: Table<Path, TypeDef>,
+    pub(crate) types: Table<Path, TypeEntry>,
     /// Methods, by the type and the method's member symbol.
     pub(crate) methods: Table<(Path, SymRef), MethodDef>,
     /// Methods written for one instantiation of a generic type, by the type,
@@ -167,10 +198,17 @@ pub(crate) struct Registry {
     /// The static methods a `use` of a type brought in bare: the type and the
     /// method's member symbol.
     pub(crate) static_uses: Table<(NsId, SymRef), (Path, SymRef)>,
-    templates: Table<Path, Rc<Template>>,
+    templates: Table<Base, Rc<Template>>,
 }
 
 impl Registry {
+    pub(crate) fn type_def(&self, path: &Path) -> Option<&TypeDef> {
+        match self.types.get(path) {
+            Some(TypeEntry::Type(def)) => Some(def),
+            _ => None,
+        }
+    }
+
     pub(crate) fn fn_def(&self, path: &Path) -> Option<&FnDef> {
         match self.values.get(path) {
             Some(ValueDef::Fn(def)) => Some(def),
@@ -184,17 +222,17 @@ impl Registry {
         self.values.insert(path, ValueDef::Fn(def));
     }
 
-    /// The generic function `path`'s body, to specialize.
-    pub(crate) fn template(&self, path: &Path) -> Option<Rc<Template>> {
-        self.templates.get(path).cloned()
+    /// The generic function's or method's body, to specialize.
+    pub(crate) fn template(&self, base: &Base) -> Option<Rc<Template>> {
+        self.templates.get(base).cloned()
     }
 
-    /// Keep the generic function `path`'s body, or forget the one an earlier
-    /// definition kept (`None`: `path` is not generic now).
-    pub(crate) fn set_template(&mut self, path: Path, template: Option<Template>) {
+    /// Keep the generic function's or method's body, or forget the one an
+    /// earlier definition kept (`None`: it is not generic now).
+    pub(crate) fn set_template(&mut self, base: Base, template: Option<Template>) {
         match template {
-            Some(t) => self.templates.insert(path, Rc::new(t)),
-            None => self.templates.remove(&path),
+            Some(t) => self.templates.insert(base, Rc::new(t)),
+            None => self.templates.remove(&base),
         }
     }
 
@@ -237,7 +275,7 @@ impl Registry {
 /// What building core IR asks of the types this registry knows.
 impl CoreForms for Registry {
     fn type_kind(&self, p: &Path) -> Option<AdtKind> {
-        self.types.get(p).map(|d| d.kind)
+        self.type_def(p).map(|d| d.kind)
     }
 
     fn builtin_fn_sig(&self, p: &Path) -> Option<(Vec<Type>, Type)> {
