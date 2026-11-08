@@ -3274,7 +3274,7 @@ impl Checker {
     /// [`Self::reject_raw_word_nested`] covers the slots that are spelled as
     /// part of a type; these are spelled as declarations. Same reason, and the
     /// same non-answer from `unsafe`.
-    fn reject_raw_word_storage(ty: &Type, what: &str, name: &str) -> Result<(), Error> {
+    pub(crate) fn reject_raw_word_storage(ty: &Type, what: &str, name: &str) -> Result<(), Error> {
         if type_mentions_raw_word(ty) {
             return Err(Error::TypeError(format!(
                 "{} `{}` is declared `{}`, and a raw C word cannot be stored: the slot tags what \

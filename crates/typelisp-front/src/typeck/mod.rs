@@ -5,7 +5,9 @@
 //! others only through [`crate::types::Type`] and the types it exports.
 //!
 //! - [`toplevel`]: the entry point, one top-level form at a time.
+//! - [`define`]: whether a definition may take its name.
 //! - [`defun`]: defining a function.
+//! - [`defvar`]: global variables.
 //! - [`defstruct`]: defining a struct type and its accessors.
 //! - [`defenum`]: defining a sum type.
 //! - [`defmethod`]: defining a method outside an `impl`.
@@ -16,6 +18,7 @@
 //! - [`binding`]: `let` and `progn`.
 //! - [`control`]: `if`.
 //! - [`matching`]: `match`.
+//! - [`the`]: `the`.
 //! - [`pattern`]: a `match` arm's pattern.
 //! - [`exhaustive`]: whether a `match`'s arms cover every value.
 //! - [`call`]: calls to functions.
@@ -40,10 +43,12 @@ pub(crate) mod binding;
 pub(crate) mod bridge;
 pub(crate) mod call;
 pub(crate) mod control;
+pub(crate) mod define;
 pub(crate) mod defenum;
 pub(crate) mod defmethod;
 pub(crate) mod defstruct;
 pub(crate) mod defun;
+pub(crate) mod defvar;
 pub(crate) mod exhaustive;
 pub(crate) mod expr;
 pub(crate) mod generic;
@@ -60,6 +65,7 @@ pub(crate) mod registry;
 pub(crate) mod resolve;
 pub(crate) mod scope;
 pub(crate) mod subst;
+pub(crate) mod the;
 pub(crate) mod toplevel;
 pub(crate) mod tree;
 pub(crate) mod type_syntax;

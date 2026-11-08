@@ -9,10 +9,12 @@ use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::intern_in;
 use typelisp_mem::SymRef;
 
+use super::define::Definer;
 use super::defenum::check_defenum;
 use super::defmethod::check_defmethod;
 use super::defstruct::check_defstruct;
 use super::defun::{check_defun, lower_all, parse_header};
+use super::defvar::{check_defvar, Which};
 use super::impl_block::check_impl;
 use super::use_form::{check_use, register_for_reading, Site};
 use super::expr::{check_expr, Cx};
@@ -141,29 +143,33 @@ fn check_primary(
     warnings: &mut Vec<String>,
 ) -> Result<(Value, Option<Type>), Error> {
     let ns = site.ns;
+    let d = &mut Definer { site, warnings };
     if let Value::Cons(_) = v {
         let elems = heap.list_to_vec_locs(v)?;
         // `impl<T, U>` reads as `(%type-apply impl T U)`.
         if crate::types::is_type_application(heap, elems[0].0) {
             let (head, names) = parse_header(heap, elems[0].0)?;
             if head.is(wk::IMPL) {
-                return Ok((check_impl(reg, ns, heap, requests, &names, &elems[1..])?, None));
+                return Ok((check_impl(reg, d, heap, requests, &names, &elems[1..])?, None));
             }
         }
         if let Value::Symbol(head) = elems[0].0 {
             if head.is(wk::IMPL) {
-                return Ok((check_impl(reg, ns, heap, requests, &[], &elems[1..])?, None));
+                return Ok((check_impl(reg, d, heap, requests, &[], &elems[1..])?, None));
             }
             let args = &elems[1..];
             match head.well_known() {
-                wk::DEFUN => return Ok((check_defun(reg, ns, heap, requests, args)?, None)),
-                wk::DEFSTRUCT => return Ok((check_defstruct(reg, ns, heap, requests, args)?, None)),
-                wk::DEFENUM => return Ok((check_defenum(reg, ns, heap, args)?, None)),
-                wk::DEFMETHOD => return Ok((check_defmethod(reg, ns, heap, requests, args)?, None)),
-                wk::USE | wk::IMPORT => return Ok((check_use(reg, heap, site, args, false, false, warnings)?, None)),
-                wk::SHADOWING_IMPORT => return Ok((check_use(reg, heap, site, args, true, false, warnings)?, None)),
+                wk::DEFUN => return Ok((check_defun(reg, d, heap, requests, args)?, None)),
+                wk::DEFSTRUCT => return Ok((check_defstruct(reg, d, heap, requests, args)?, None)),
+                wk::DEFENUM => return Ok((check_defenum(reg, d, heap, args)?, None)),
+                wk::DEFMETHOD => return Ok((check_defmethod(reg, d, heap, requests, args)?, None)),
+                wk::DEFVAR => return Ok((check_defvar(reg, d, heap, requests, Which::Defvar, args)?, None)),
+                wk::DEFPARAMETER => return Ok((check_defvar(reg, d, heap, requests, Which::Defparameter, args)?, None)),
+                wk::DEFCONSTANT => return Ok((check_defvar(reg, d, heap, requests, Which::Defconstant, args)?, None)),
+                wk::USE | wk::IMPORT => return Ok((check_use(reg, heap, site, args, false, false, d.warnings)?, None)),
+                wk::SHADOWING_IMPORT => return Ok((check_use(reg, heap, site, args, true, false, d.warnings)?, None)),
                 wk::PUB if matches!(args.first(), Some((Value::Symbol(u), _)) if u.is(wk::USE)) => {
-                    return Ok((check_use(reg, heap, site, &args[1..], false, true, warnings)?, None));
+                    return Ok((check_use(reg, heap, site, &args[1..], false, true, d.warnings)?, None));
                 }
                 _ => {}
             }
@@ -576,6 +582,38 @@ mod tests {
     fn a_use_of_nothing_is_a_module_not_loaded() {
         let msg = check_err("(use no::such::thing)");
         assert!(msg.contains("use: unresolved `no::such::thing`"), "{}", msg);
+    }
+
+    #[test]
+    fn global_variables() {
+        assert_eq!(run("(defvar (*n* int) 3)\n*n*").1, Value::Int(3));
+        assert_eq!(run("(defconstant (k u8) 7)\nk").2, Type::U8);
+        let msg = check_err("(defvar *n* 3)");
+        assert!(msg.contains("a global needs a declared type"), "{}", msg);
+        let msg = check_err("(defvar (*n* u8) 300)");
+        assert!(msg.contains("integer literal 300 is out of range for u8"), "{}", msg);
+    }
+
+    /// A name has one meaning in its name space, and defining it again is
+    /// what the redefinition policy says: here, an error.
+    #[test]
+    fn a_definition_takes_its_name_once() {
+        let msg = check_err("(defun f () int 1)\n(defvar (f int) 2)");
+        assert!(msg.contains("cannot define variable `f`: a function of that name already exists here"), "{}", msg);
+        let msg = check_err("(defun f () int 1)\n(defun f () int 2)");
+        assert!(msg.contains("function `f` is already defined"), "{}", msg);
+        let msg = check_err(&format!("{}(defstruct Shape (x int))", SHAPE));
+        assert!(msg.contains("type `Shape` is already defined"), "{}", msg);
+        // `first` is already the field's accessor.
+        let msg = check_err(&format!("{}(impl<T, U> Pair<T, U> (defmethod first (self) T self::first))", PAIR));
+        assert!(msg.contains("method `first` is already defined"), "{}", msg);
+    }
+
+    #[test]
+    fn the_checks_against_a_written_type() {
+        assert_eq!(run("(the u8 3)").2, Type::U8);
+        let msg = check_err("(the bool 3)");
+        assert!(msg.contains("expected `bool`, found `int`"), "{}", msg);
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

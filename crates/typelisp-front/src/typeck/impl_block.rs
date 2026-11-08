@@ -11,12 +11,13 @@
 
 use crate::types::{ParamOwner, Path};
 use crate::{wk, Error, Heap, Loc, Value};
-use typelisp_mem::symbols::{member_symbol, NsId};
+use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
 use super::defmethod::{define_method, receiver_type_path, Method};
 use super::defun::{parse_header, parse_params};
 use super::generic::Requests;
+use super::define::Definer;
 use super::registry::Registry;
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
@@ -28,12 +29,13 @@ const ITEM_SHAPE: &str = "impl: an item is (pub? defmethod name<T...>? (params..
 /// definitions if checking fails.
 pub(crate) fn check_impl(
     reg: &mut Registry,
-    ns: NsId,
+    d: &mut Definer,
     heap: &mut Heap,
     requests: &mut Requests,
     type_names: &[SymRef],
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
+    let ns = d.site.ns;
     let Some((target, _)) = parts.first() else {
         return Err(Error::TypeError("impl: (impl<T...>? Type (defmethod ...)...)".into()));
     };
@@ -57,7 +59,7 @@ pub(crate) fn check_impl(
     }
     let mut forms = Vec::new();
     for (item, _) in &parts[1..] {
-        if let Some(form) = check_item(reg, ns, heap, requests, owner, type_names, *target, *item)? {
+        if let Some(form) = check_item(reg, d, heap, requests, owner, type_names, *target, *item)? {
             forms.push(form);
         }
     }
@@ -69,7 +71,7 @@ pub(crate) fn check_impl(
 #[allow(clippy::too_many_arguments)]
 fn check_item(
     reg: &mut Registry,
-    ns: NsId,
+    d: &mut Definer,
     heap: &mut Heap,
     requests: &mut Requests,
     owner: Path,
@@ -82,15 +84,16 @@ fn check_item(
         Some(((Value::Symbol(p), _), rest)) if p.is(wk::PUB) => (true, rest),
         _ => (false, &elems[..]),
     };
-    let [(Value::Symbol(d), _), (header, _), (params, _), (ret, _), body @ ..] = elems else {
+    let [(Value::Symbol(head), _), (header, _), (params, _), (ret, _), body @ ..] = elems else {
         return Err(Error::TypeError(ITEM_SHAPE.into()));
     };
-    if !d.is(wk::DEFMETHOD) {
+    if !head.is(wk::DEFMETHOD) {
         return Err(Error::TypeError(
             "impl: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public".into(),
         ));
     }
     let (name, own_names) = parse_header(heap, *header)?;
+    let ns = d.site.ns;
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a method with a documentation string")
     }
@@ -124,5 +127,5 @@ fn check_item(
     all.extend(parse_params(heap, &tcx, rest)?);
     let ret = parse_type(heap, &tcx, *ret)?;
     let def = Method { owner, method, instance: receiver.is_some(), public, home: None, params: all, ret };
-    define_method(reg, ns, heap, requests, &scope, Some(&target_ty), def, body)
+    define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }

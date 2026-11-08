@@ -12,12 +12,13 @@ use crate::check::lower::CoreForms;
 use crate::check::registry::AdtKind;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
-use typelisp_mem::symbols::{intern, member_symbol, NsId};
+use typelisp_mem::symbols::{intern, member_symbol};
 use typelisp_mem::SymRef;
 
 use super::defun::{lower_all, parse_header};
 use super::generic::{Base, Requests};
 use super::lower::Lowering;
+use super::define::Definer;
 use super::registry::{Field, FnDef, MethodDef, Registry, Template, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -30,7 +31,7 @@ const SHAPE: &str = "defstruct: (defstruct Name<T...>? (field Type)...)";
 /// unrooted: the type's definition, then its accessors.
 pub(crate) fn check_defstruct(
     reg: &mut Registry,
-    ns: NsId,
+    d: &mut Definer,
     heap: &mut Heap,
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
@@ -45,6 +46,9 @@ pub(crate) fn check_defstruct(
         unimplemented!("typeck: a `defstruct` with a documentation string")
     }
     let (name, type_names) = parse_header(heap, *header)?;
+    let ns = d.site.ns;
+    d.ownable(heap, name, "defstruct")?;
+    d.type_name(reg, name)?;
     let path = Path::of_symbol(ns, name);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {

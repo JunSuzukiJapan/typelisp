@@ -15,7 +15,7 @@ use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
-use super::{binding, call, control, instance, matching, method, path_call, variant};
+use super::{binding, call, control, instance, matching, method, path_call, the, variant};
 use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
 use crate::check::SPECIAL_FORM_HEADS;
 use typelisp_mem::symbols::member_symbol;
@@ -226,7 +226,7 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, loc: Opti
     }
     match value {
         Some((_, ValueDef::Fn(_))) => unimplemented!("typeck: the function `{}` as a value", heap.symbol_spelling(id)),
-        Some((_, ValueDef::Var { .. })) => unimplemented!("typeck: the global variable `{}`", heap.symbol_spelling(id)),
+        Some((path, ValueDef::Var(var))) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
         Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched above"),
         None => Err(Error::TypeError(format!("unbound variable: {}", heap.symbol_spelling(id)))),
     }
@@ -251,6 +251,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::PROGN => return binding::check_progn(cx, heap, locals, args, expected, loc),
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
         wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
+        wk::THE => return the::check_the(cx, heap, locals, args),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
         wk::VALUE_MEMBER => {
             let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
@@ -317,7 +318,7 @@ fn call_function(
 ) -> Result<Typed, Error> {
     match value {
         Some((path, ValueDef::Fn(def))) => call::check_call(cx, heap, locals, path, def, first, rest, expected, loc),
-        Some((_, ValueDef::Var { .. })) => unimplemented!("typeck: calling the function the global `{}` holds", spelling),
+        Some((_, ValueDef::Var(_))) => unimplemented!("typeck: calling the function the global `{}` holds", spelling),
         Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched before the call"),
         None => Err(Error::NoSuchFunction(spelling.to_string())),
     }

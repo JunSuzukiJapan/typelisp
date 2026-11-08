@@ -9,13 +9,13 @@
 use crate::check::lower::CoreForms;
 use crate::types::{ParamOwner, Path, Type};
 use crate::{Error, Heap, Loc, Value};
-use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
 use super::expr::{check_body, Cx};
 use super::generic::{Base, Requests};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
+use super::define::{Definer, Kind};
 use super::registry::{FnDef, Registry, Template};
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -31,7 +31,7 @@ const SHAPE: &str = "defun: (defun name<T...>? ((param Type)...) ReturnType body
 /// it. The caller undoes the definition if checking fails.
 pub(crate) fn check_defun(
     reg: &mut Registry,
-    ns: NsId,
+    d: &mut Definer,
     heap: &mut Heap,
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
@@ -40,6 +40,9 @@ pub(crate) fn check_defun(
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
+    let ns = d.site.ns;
+    d.ownable(heap, name, "defun")?;
+    d.value(reg, Kind::Function, name)?;
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a `defun` with a documentation string")
     }

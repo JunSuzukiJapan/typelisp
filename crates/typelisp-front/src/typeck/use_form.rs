@@ -331,7 +331,7 @@ fn import_collision(
             (_, Some(TypeEntry::Type(_))) => "type",
             (_, Some(TypeEntry::Trait { .. })) => "trait",
             (Some(ValueDef::Macro { .. }), _) => "macro",
-            (Some(ValueDef::Var { .. }), _) => "global",
+            (Some(ValueDef::Var(_)), _) => "global",
             (_, Some(TypeEntry::Alias { .. })) => "type alias",
             _ => return Ok(()),
         };

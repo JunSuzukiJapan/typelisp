@@ -67,7 +67,7 @@ pub(crate) fn check_path_call(
                 }
                 check_call(cx, heap, locals, path, def, None, args, expected, loc)
             }
-            Some(ValueDef::Var { .. }) => unimplemented!("typeck: calling the function the global `{}` holds", path_spelling(heap, id)),
+            Some(ValueDef::Var(_)) => unimplemented!("typeck: calling the function the global `{}` holds", path_spelling(heap, id)),
             Some(ValueDef::Macro { .. }) => unimplemented!("typeck: expanding the macro `{}`", path_spelling(heap, id)),
             None => Err(Error::NoSuchFunction(path_spelling(heap, id))),
         },

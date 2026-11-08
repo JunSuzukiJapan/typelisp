@@ -122,13 +122,13 @@ pub(crate) enum TypeEntry {
 }
 
 /// What a module-level name in the value name space is: one of three, never
-/// two of them (`docs/dev/name-resolution.md` 1). Of a global variable and a
-/// macro only whether it is `pub` is known so far; what they are is recorded
-/// when the checker checks their uses.
+/// two of them (`docs/dev/name-resolution.md` 1). Of a macro only whether it
+/// is `pub` is known so far; what it is is recorded when the checker expands
+/// it.
 #[derive(Clone, Debug)]
 pub(crate) enum ValueDef {
     Fn(FnDef),
-    Var { public: bool },
+    Var(VarDef),
     Macro { public: bool },
 }
 
@@ -137,9 +137,17 @@ impl ValueDef {
     pub(crate) fn public(&self) -> bool {
         match self {
             ValueDef::Fn(def) => def.public,
-            ValueDef::Var { public } | ValueDef::Macro { public } => *public,
+            ValueDef::Var(def) => def.public,
+            ValueDef::Macro { public } => *public,
         }
     }
+}
+
+/// A global variable: its type, and whether it is `pub`.
+#[derive(Clone, Debug)]
+pub(crate) struct VarDef {
+    pub(crate) ty: Type,
+    pub(crate) public: bool,
 }
 
 /// A generic function's or method's checked body, kept to be specialized:

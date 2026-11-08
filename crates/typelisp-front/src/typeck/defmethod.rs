@@ -18,6 +18,7 @@ use super::expr::{check_body, Cx};
 use super::generic::{Base, Requests};
 use super::locals::Locals;
 use super::lower::Lowering;
+use super::define::Definer;
 use super::registry::{FnDef, MethodDef, Registry, Template, TypeEntry};
 use super::resolve::find_named;
 use super::scope::TypeScope;
@@ -30,7 +31,7 @@ const SHAPE: &str = "defmethod: (defmethod name<T...>? ((x Type) params...) Retu
 /// unrooted. The caller undoes the definition if checking fails.
 pub(crate) fn check_defmethod(
     reg: &mut Registry,
-    ns: NsId,
+    d: &mut Definer,
     heap: &mut Heap,
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
@@ -39,6 +40,7 @@ pub(crate) fn check_defmethod(
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
+    let ns = d.site.ns;
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a `defmethod` with a documentation string")
     }
@@ -67,7 +69,7 @@ pub(crate) fn check_defmethod(
     let params = parse_params(heap, &tcx, *params)?;
     let ret = parse_type(heap, &tcx, *ret)?;
     let def = Method { owner, method, instance: true, public: false, home: Some(Path::of_symbol(ns, name)), params, ret };
-    let form = define_method(reg, ns, heap, requests, &scope, None, def, body)?;
+    let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;
     let forms: Vec<Value> = form.into_iter().collect();
     crate::check::forms::module_form(heap, &owner, &forms)
 }
@@ -95,7 +97,7 @@ pub(crate) struct Method {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn define_method(
     reg: &mut Registry,
-    ns: NsId,
+    d: &mut Definer,
     heap: &mut Heap,
     requests: &mut Requests,
     scope: &TypeScope,
@@ -111,6 +113,8 @@ pub(crate) fn define_method(
         unimplemented!("typeck: a method written for one instantiation of a generic type")
     }
     let sig = FnDef { public, ..FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
+    d.method(reg, &owner, method)?;
+    let ns = d.site.ns;
     reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
 
     let mut body = {

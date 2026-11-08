@@ -15,7 +15,7 @@ use crate::check::Registry as OldRegistry;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use typelisp_mem::symbols::intern;
 
-use super::registry::{Field, FnDef, MethodDef, Registry, TypeDef, TypeEntry, ValueDef};
+use super::registry::{Field, FnDef, MethodDef, Registry, TypeDef, TypeEntry, ValueDef, VarDef};
 
 /// Copy everything `old` defines into `new`.
 pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
@@ -27,8 +27,10 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
             new.values.insert(path, ValueDef::Fn(fn_def(ParamOwner::Def(path), &[], sig)));
         }
         for sym in m.vars.symbols() {
-            let public = m.vars.get_sym(sym).expect("a key of the table").public;
-            new.values.insert(Path::of_symbol(ns, sym), ValueDef::Var { public });
+            let path = Path::of_symbol(ns, sym);
+            let var = m.vars.get_sym(sym).expect("a key of the table");
+            let ty = convert(&var.ty, &HashMap::new(), &|| format!("the global {}", path));
+            new.values.insert(path, ValueDef::Var(VarDef { ty, public: var.public }));
         }
         for sym in m.macros.symbols() {
             let public = m.macros.get_sym(sym).expect("a key of the table").public;

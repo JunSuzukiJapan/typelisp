@@ -11,9 +11,10 @@ use crate::check::lower::CoreForms;
 use crate::check::registry::{AdtKind, Variant};
 use crate::types::{ParamOwner, Path};
 use crate::{Error, Heap, Loc, Value};
-use typelisp_mem::symbols::{member_symbol, NsId};
+use typelisp_mem::symbols::member_symbol;
 
 use super::defun::parse_header;
+use super::define::Definer;
 use super::registry::{Registry, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
@@ -22,7 +23,7 @@ const SHAPE: &str = "defenum: (defenum Name<T...>? (Variant Type...) Variant...)
 
 /// `(defenum ...)` — `parts` without the `defenum` — and its core form,
 /// unrooted. The caller undoes the definition if checking fails.
-pub(crate) fn check_defenum(reg: &mut Registry, ns: NsId, heap: &mut Heap, parts: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
+pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, parts: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
     let [(header, _), items @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
@@ -30,6 +31,9 @@ pub(crate) fn check_defenum(reg: &mut Registry, ns: NsId, heap: &mut Heap, parts
         unimplemented!("typeck: a `defenum` with a documentation string")
     }
     let (name, type_names) = parse_header(heap, *header)?;
+    let ns = d.site.ns;
+    d.ownable(heap, name, "defenum")?;
+    d.type_name(reg, name)?;
     let path = Path::of_symbol(ns, name);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {

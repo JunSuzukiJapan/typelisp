@@ -28,6 +28,8 @@ pub(crate) enum Node {
     Number { value: Value },
     /// A local variable's value.
     Local { name: SymRef },
+    /// The global variable `path`'s value.
+    Global { path: Path },
     /// A call to the function `path`, at the type arguments `targs` when it
     /// is generic.
     Call { path: Path, targs: Vec<Type>, args: Vec<Typed> },
@@ -89,7 +91,7 @@ impl Typed {
     /// The expressions directly inside this one.
     fn children(&self) -> Vec<&Typed> {
         match &self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } => Vec::new(),
+            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter().collect(),
             Node::FieldGet { obj, .. } => vec![&**obj],
             Node::FieldSet { obj, value, .. } => vec![&**obj, &**value],
@@ -102,7 +104,7 @@ impl Typed {
     /// [`Self::children`], to change.
     fn children_mut(&mut self) -> Vec<&mut Typed> {
         match &mut self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } => Vec::new(),
+            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } => Vec::new(),
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } => args.iter_mut().collect(),
             Node::FieldGet { obj, .. } => vec![&mut **obj],
             Node::FieldSet { obj, value, .. } => vec![&mut **obj, &mut **value],
@@ -139,7 +141,13 @@ impl Typed {
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
                 Node::FieldSet { field_ty, .. } => *field_ty = f(field_ty),
                 Node::Match { arms, .. } => arms.iter_mut().for_each(|(pat, _)| pat.map_types(f)),
-                Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::FieldGet { .. } | Node::Let { .. } | Node::If { .. } => {}
+                Node::Literal { .. }
+                | Node::Number { .. }
+                | Node::Local { .. }
+                | Node::Global { .. }
+                | Node::FieldGet { .. }
+                | Node::Let { .. }
+                | Node::If { .. } => {}
             }
             Ok::<(), std::convert::Infallible>(())
         });

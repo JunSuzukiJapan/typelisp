@@ -59,6 +59,10 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         },
         Node::Number { .. } => unreachable!("a number literal is settled with its form (`Cx::settle`)"),
         Node::Local { name } => forms::var_form(heap, *name),
+        Node::Global { path } => {
+            let ty = lw.settle(&t.ty);
+            lw.reg.global_form(heap, path, &ty)
+        }
         Node::Call { path, targs, args } => {
             let path = if targs.is_empty() {
                 *path
