@@ -19,6 +19,7 @@
 //! - [`control`]: `if`.
 //! - [`matching`]: `match`.
 //! - [`the`]: `the`.
+//! - [`quote`]: `quote`.
 //! - [`looping`]: `loop`, `break` and `return`.
 //! - [`setf`]: `setf`, assigning a place.
 //! - [`format`]: `format`, `print` and `println`.
@@ -69,6 +70,7 @@ pub(crate) mod matching;
 pub(crate) mod method;
 pub(crate) mod path_call;
 pub(crate) mod pattern;
+pub(crate) mod quote;
 pub(crate) mod registry;
 pub(crate) mod resolve;
 pub(crate) mod scope;

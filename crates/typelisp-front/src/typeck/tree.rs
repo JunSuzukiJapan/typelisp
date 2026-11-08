@@ -21,6 +21,8 @@ pub(crate) struct Typed {
 pub(crate) enum Node {
     /// A literal: its core tag and its value (none for the unit value).
     Literal { tag: u32, value: Option<Value> },
+    /// `(quote datum)`: the datum as it was read.
+    Quote { datum: Value },
     /// A number literal whose type was not known where it was written: an
     /// integer or a float type the rest of the form decides. It becomes a
     /// [`Node::Literal`] when the form is settled (`Cx::settle`), so
@@ -106,7 +108,9 @@ impl Typed {
     /// The expressions directly inside this one.
     fn children(&self) -> Vec<&Typed> {
         match &self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => Vec::new(),
+            Node::Literal { .. } | Node::Number { .. } | Node::Quote { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => {
+                Vec::new()
+            }
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
                 args.iter().collect()
             }
@@ -124,7 +128,9 @@ impl Typed {
     /// [`Self::children`], to change.
     fn children_mut(&mut self) -> Vec<&mut Typed> {
         match &mut self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => Vec::new(),
+            Node::Literal { .. } | Node::Number { .. } | Node::Quote { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => {
+                Vec::new()
+            }
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
                 args.iter_mut().collect()
             }
@@ -168,6 +174,7 @@ impl Typed {
                 Node::Match { arms, .. } => arms.iter_mut().for_each(|(pat, _)| pat.map_types(f)),
                 Node::Literal { .. }
                 | Node::Number { .. }
+                | Node::Quote { .. }
                 | Node::Local { .. }
                 | Node::Global { .. }
                 | Node::FieldGet { .. }
@@ -191,7 +198,7 @@ impl Typed {
     /// Call `f` on every value this tree holds.
     pub(crate) fn each_value(&self, f: &mut impl FnMut(Value)) {
         self.walk(&mut |t| match &t.node {
-            Node::Literal { value: Some(v), .. } | Node::Number { value: v } => f(*v),
+            Node::Literal { value: Some(v), .. } | Node::Number { value: v } | Node::Quote { datum: v } => f(*v),
             _ => {}
         });
     }

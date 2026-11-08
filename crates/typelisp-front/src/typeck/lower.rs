@@ -59,6 +59,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             None => core::tagged(heap, *tag, &[]),
         },
         Node::Number { .. } => unreachable!("a number literal is settled with its form (`Cx::settle`)"),
+        Node::Quote { datum } => forms::quote_form(heap, *datum),
         Node::Local { name } => forms::var_form(heap, *name),
         Node::Global { path } => {
             let ty = lw.settle(&t.ty);

@@ -18,7 +18,7 @@ use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
-use super::{binding, call, control, format, instance, looping, macros, matching, method, path_call, setf, the, variant};
+use super::{binding, call, control, format, instance, looping, macros, matching, method, path_call, quote, setf, the, variant};
 use crate::check::analyze::{call_sugar, is_sexpr_expectation, TOPLEVEL_FORM_HEADS};
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -292,6 +292,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::LOOP => return looping::check_loop(cx, heap, locals, args, loc),
         wk::BREAK => return looping::check_break(cx, args, loc),
         wk::RETURN => return looping::check_return(cx, heap, locals, args, loc),
+        wk::QUOTE => return quote::check_quote(heap, args, loc),
         wk::SETF => return setf::check_setf(cx, heap, locals, args, loc),
         wk::THE => return the::check_the(cx, heap, locals, args),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),

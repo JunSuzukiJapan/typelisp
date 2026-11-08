@@ -71,7 +71,7 @@ pub(crate) fn if_form(heap: &mut Heap, cond: Value, then: Value, els: Value) -> 
 /// unlike the old `QuotedSexpr` there is nothing to copy into
 /// heap-independent Rust memory (the collector could not see a raw pointer
 /// baked into an `Expr`).
-pub(super) fn quote_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
+pub(crate) fn quote_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::QUOTE, &[datum])
 }
 

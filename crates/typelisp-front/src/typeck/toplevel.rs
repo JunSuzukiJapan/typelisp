@@ -712,6 +712,16 @@ mod tests {
         assert!(msg.contains("return: not inside a loop"), "{}", msg);
     }
 
+    /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
+    #[test]
+    fn quote_types_its_datum() {
+        assert_eq!(check_ok("'foo"), Type::Symbol);
+        assert_eq!(check_ok("'(1 2)"), crate::check::analyze::option_of_sexpr());
+        assert_eq!(check_ok("'()"), crate::check::analyze::option_of_sexpr());
+        let msg = check_err("(quote a b)");
+        assert!(msg.contains("quote: (quote datum)"), "{}", msg);
+    }
+
     /// A definition whose checking fails is not kept (plan 4.4): calling it
     /// afterwards is not a call to anything this checker defined.
     #[test]

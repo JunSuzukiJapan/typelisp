@@ -325,6 +325,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - `use`（`import`・`shadowing-import`・`pub use` を含む）。値・型・トレイト・別名・型の変種と静的メソッド・モジュールを名指しできる。
 - `defvar`・`defparameter`・`defconstant`（型の宣言が必須）とグローバル変数の読み出し。`the`。
 - `format`（宛先が真偽値のとき）・`print`・`println`。引数は、それぞれの型のまま `Sexpr` のリストにして渡す。どう `Sexpr` にするかは lower で、決まった型から選ぶ（`typeck::sexpr_value`）。制御文字列の指令と引数の型は、フォームをチェックし終えたところで照らし合わせる。
+- `quote`。記号は `Symbol`、ほかのデータは `Option<Sexpr>`。
 - 単純な `loop` と `break`・`return`（`typeck::looping`）。ループの型は、出口が解く穴にする。何も出ないループは `!`。
 - `setf`：変数（`defconstant` は断る）、フィールド `var::field`（構造体の `set-field`）、呼び出しの形の場所 `(accessor recv key...)`（受け手の型の `set-accessor`、`get` なら `set` も）。
 - マクロの呼び出し（`typeck::macros`）。書かれたままの引数で展開し、展開したものを呼び出しの位置でチェックする。最上位では、定義のフォームとして読む前に展開する。マクロの本体は評価器が持ち（`MacroExpander`）、チェッカーは呼び出せる引数の数（`MacroShape`）だけを持つ。
