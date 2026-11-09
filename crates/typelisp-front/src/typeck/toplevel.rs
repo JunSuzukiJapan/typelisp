@@ -791,6 +791,28 @@ mod tests {
         assert!(msg.contains("as: no conversion from `int` to `string`"), "{}", msg);
     }
 
+    /// A call leaves out an `&optional` or `&key` parameter for its
+    /// default, or `none` when it has none; `&rest` takes the arguments
+    /// left as one list.
+    #[test]
+    fn optional_key_and_rest_parameters() {
+        assert_eq!(run("(defun f ((a int) &optional (b int 10)) int (+ a b))\n(f 1)").1, Value::Int(11));
+        assert_eq!(run("(defun f ((a int) &optional (b int 10)) int (+ a b))\n(f 1 5)").1, Value::Int(6));
+        assert_eq!(run("(defun f (&key (x int 0) (y int 0)) int (+ x (* 10 y)))\n(f :y 4 :x 3)").1, Value::Int(43));
+        assert_eq!(run("(defun f (&key (x int 0) (y int 0)) int (+ x (* 10 y)))\n(f)").1, Value::Int(0));
+        assert_eq!(run("(defun f ((a int) &rest (xs int)) int a)\n(f 1 2 3)").1, Value::Int(1));
+        let msg = check_err("(defun f (&key (x int 0)) int x)\n(f :y 1)");
+        assert!(msg.contains("unknown keyword argument :y"), "{}", msg);
+        let msg = check_err("(defun f (&key (x int 0)) int x)\n(f :x 1 :x 2)");
+        assert!(msg.contains("duplicate keyword argument :x"), "{}", msg);
+        let msg = check_err("(defun f ((a int) &optional (b int 1)) int a)\n(f 1 2 3)");
+        assert!(msg.contains("expected at most 2 argument(s), got 3"), "{}", msg);
+        let msg = check_err("(defun f (&optional (a int 1) &key (b int 2)) int a)");
+        assert!(msg.contains("&key cannot be combined with &optional/&rest"), "{}", msg);
+        let msg = check_err("(defun f<T> (&key (x Option<T> (Option::none))) Option<T> x)");
+        assert!(msg.contains("may not default when its type mentions the function's own type parameter"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

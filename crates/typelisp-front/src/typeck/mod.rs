@@ -49,6 +49,7 @@
 //! - [`tree`]: the typed tree checking produces.
 //! - [`lower`]: the typed tree to core IR.
 
+pub(crate) mod args;
 pub(crate) mod binding;
 pub(crate) mod bridge;
 pub(crate) mod call;
@@ -67,6 +68,7 @@ pub(crate) mod expr;
 pub(crate) mod generic;
 pub(crate) mod impl_block;
 pub(crate) mod instance;
+pub(crate) mod lambda_list;
 pub(crate) mod list_form;
 pub(crate) mod literal;
 pub(crate) mod locals;

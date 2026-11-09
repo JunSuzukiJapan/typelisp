@@ -143,6 +143,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let value = value.as_deref().map(|v| lower_rooted(heap, lw, v)).transpose()?;
             forms::return_form(heap, value)
         }
+        Node::Default { form } => crate::owned_form::owned_to_value(heap, form),
         Node::Panic { message } => {
             let message = lower_rooted(heap, lw, message)?;
             forms::panic_form(heap, message)

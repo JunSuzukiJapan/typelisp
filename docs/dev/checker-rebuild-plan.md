@@ -334,6 +334,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - `quote`。記号は `Symbol`、ほかのデータは `Option<Sexpr>`。
 - `list`（`typeck::list_form`）。各要素は `Option<Sexpr>` を期待してチェックし、`Sexpr` の cons 変種でつなぐ。`panic`（型は `!`）と `unwind-protect`（型は守られる式の型、後始末の値は捨てる）。
 - `as`・`try-as`（`typeck::cast`）。変換は元の型のメソッドの呼び出しにする（表は旧チェッカーの `as_conversion`）。整数・浮動小数点数の族への変換は族の広い型で登録されているので、狭い型へはその後に幅の変換をつなぐ。トレイトオブジェクトへの `as` はまだ扱わない。
+- `defun` の `&optional`・`&rest`・`&key`（`typeck::lambda_list`）と、それらを持つ関数・メソッドの呼び出し（`typeck::args`）。呼び出しは引数を 1 つずつそろえた呼び出しにする。省いた引数は、既定値（`defun` のときに引数を束縛せずにチェックし、core IR にして持つ）か `none`、既定値のない引数を渡したら `some` で包む。`&rest` の引数は 1 つの `Sexpr` のリストにする。既定値を持つ引数の型は、関数の型パラメータを含んではいけない。メソッドの引数の目印はまだ扱わない。
 - 単純な `loop` と `break`・`return`（`typeck::looping`）。ループの型は、出口が解く穴にする。何も出ないループは `!`。
 - `setf`：変数（`defconstant` は断る）、フィールド `var::field`（構造体の `set-field`）、呼び出しの形の場所 `(accessor recv key...)`（受け手の型の `set-accessor`、`get` なら `set` も）。
 - マクロの呼び出し（`typeck::macros`）。書かれたままの引数で展開し、展開したものを呼び出しの位置でチェックする。最上位では、定義のフォームとして読む前に展開する。マクロの本体は評価器が持ち（`MacroExpander`）、チェッカーは呼び出せる引数の数（`MacroShape`）だけを持つ。

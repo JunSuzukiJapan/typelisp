@@ -9,15 +9,15 @@
 //! after it. The table of conversions is the old checker's
 //! ([`as_conversion`]).
 
-use crate::check::analyze::{as_conversion, called_width, OPTION_SOME};
-use crate::types::{prim_type_path, Path, Type};
+use crate::check::analyze::{as_conversion, called_width};
+use crate::types::{prim_type_path, Type};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
 use super::method::check_method_call;
-use super::tree::{Node, Typed};
+use super::tree::Typed;
 use super::type_syntax::parse_type;
 
 /// `(as Type expr)`, or `(try-as Type expr)` when `try_variant` — `args`
@@ -94,18 +94,9 @@ fn call_conversion(cx: &Cx, heap: &mut Heap, locals: &Locals, src: Typed, name: 
 
 /// `value`, or `(some value)` for `try-as`.
 fn wrapped(value: Typed, try_variant: bool, loc: Option<Loc>) -> Typed {
-    if !try_variant {
-        return value;
+    if try_variant {
+        Typed::some(value, loc)
+    } else {
+        value
     }
-    let inner = value.ty.clone();
-    let ty = Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![inner.clone()]);
-    let node = Node::Construct {
-        owner: Path::builtin(typelisp_mem::wk::OPTION),
-        targs: vec![inner.clone()],
-        variant: OPTION_SOME,
-        mutable: false,
-        field_tys: vec![inner],
-        args: vec![value],
-    };
-    Typed { node, ty, loc }
 }

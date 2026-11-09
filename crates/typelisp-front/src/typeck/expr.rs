@@ -19,6 +19,7 @@ use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
+use super::args::First;
 use super::{binding, call, cast, control, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, the, variant};
 use crate::check::analyze::{call_sugar, TOPLEVEL_FORM_HEADS};
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
@@ -341,13 +342,14 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     // checked argument is the function's first. A number literal no type
     // decided yet is read as its default for this (`(+ 1 x)` is `int`'s
     // `+`), and is decided only when it is a receiver.
+    let written = (*first, first_loc.clone());
     let first = check_expr(cx, heap, locals, *first, None, first_loc.clone())?;
     let member = member_symbol(spelling);
     if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &cx.with_default(&first.ty), member) {
         cx.decide(&first.ty);
         return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), rest, expected, loc);
     }
-    call_function(cx, heap, locals, value, spelling, Some(first), rest, expected, loc)
+    call_function(cx, heap, locals, value, spelling, Some(First { checked: first, written }), rest, expected, loc)
 }
 
 /// A call to what the module-level name `spelling` holds, `value`: its
@@ -359,7 +361,7 @@ fn call_function(
     locals: &Locals,
     value: Option<(crate::types::Path, &ValueDef)>,
     spelling: &str,
-    first: Option<Typed>,
+    first: Option<First>,
     rest: &[(Value, Option<Loc>)],
     expected: Option<&Type>,
     loc: Option<Loc>,

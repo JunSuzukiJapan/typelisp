@@ -44,6 +44,11 @@ pub(crate) fn check_defmethod(
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a `defmethod` with a documentation string")
     }
+    if let Some((first, _)) = body.first() {
+        if crate::check::analyze::is_where_clause(heap, *first)? {
+            unimplemented!("typeck: a `defmethod` with a `(:where ...)` clause")
+        }
+    }
     let written: Vec<Value> = heap.list_to_vec(*params)?;
     let receiver = written.first().and_then(|r| heap.list_to_vec(*r).ok()).filter(|r| r.len() == 2 && matches!(r[0], Value::Symbol(_)));
     let Some(receiver) = receiver.filter(|_| !is_type_application(heap, written[0])) else {

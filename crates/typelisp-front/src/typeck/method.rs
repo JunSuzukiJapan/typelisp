@@ -5,6 +5,7 @@ use crate::types::{Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
+use super::args::{check_tail, has_tail};
 use super::expr::{agree, check_expr, conform_at, Cx};
 use super::widen::expect;
 use super::locals::Locals;
@@ -28,18 +29,17 @@ pub(crate) fn check_method_call(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     let sig = &def.sig;
-    if sig.rest.is_some() || !sig.optionals.is_empty() || !sig.keys.is_empty() || !sig.bounds.is_empty() {
-        unimplemented!("typeck: calling {}::{}, which takes &rest, &optional or &key parameters or has :where bounds", owner, method.name())
+    if !sig.bounds.is_empty() {
+        unimplemented!("typeck: calling {}::{}, which has :where bounds", owner, method.name())
     }
     let given = rest.len() + usize::from(receiver.is_some());
-    if given != sig.params.len() {
-        return Err(Error::TypeError(format!(
-            "{}::{}: expected {} argument(s), got {}",
-            owner,
-            method.name(),
-            sig.params.len(),
-            given
-        )));
+    let required = sig.params.len();
+    let what = format!("{}::{}", owner, method.name());
+    if has_tail(sig) && given < required {
+        return Err(Error::TypeError(format!("{}: expected at least {} argument(s), got {}", what, required, given)));
+    }
+    if !has_tail(sig) && given != required {
+        return Err(Error::TypeError(format!("{}: expected {} argument(s), got {}", what, required, given)));
     }
     let subst = cx.holes.borrow_mut().instantiate(&sig.type_params);
     let instance = receiver.is_some();
@@ -50,8 +50,8 @@ pub(crate) fn check_method_call(
         rational_op = is_rational_operator(method, &receiver, rest);
         args.push(receiver);
     }
-    let params = &sig.params[args.len()..];
-    for ((arg, arg_loc), param) in rest.iter().zip(params) {
+    let (fixed, tail) = rest.split_at(required - args.len());
+    for ((arg, arg_loc), param) in fixed.iter().zip(&sig.params[args.len()..]) {
         let param = subst.apply(param);
         if !rational_op {
             args.push(check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?);
@@ -67,6 +67,7 @@ pub(crate) fn check_method_call(
         }
         args.push(conform_at(cx, other, &param)?);
     }
+    args.extend(check_tail(cx, heap, locals, &what, sig, &subst, None, tail, given)?);
     let ret = subst.apply(&sig.ret);
     expect(cx, &ret, expected)?;
     let targs: Vec<Type> = sig.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();

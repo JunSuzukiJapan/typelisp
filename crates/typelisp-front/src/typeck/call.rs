@@ -9,6 +9,7 @@
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 
+use super::args::{check_tail, has_tail, First};
 use super::expr::{check_expr, conform_at, Cx};
 use super::widen::expect;
 use super::locals::Locals;
@@ -26,7 +27,7 @@ pub(crate) fn check_call(
     locals: &Locals,
     path: Path,
     def: &FnDef,
-    first: Option<Typed>,
+    first: Option<First>,
     rest: &[(Value, Option<Loc>)],
     expected: Option<&Type>,
     loc: Option<Loc>,
@@ -41,25 +42,37 @@ pub(crate) fn check_call(
         let rest: Vec<(Value, Option<Loc>)> = rest.iter().cloned().chain([(module, None)]).collect();
         return check_call(cx, heap, locals, path, def, first, &rest, expected, loc);
     }
-    if def.rest.is_some() || !def.optionals.is_empty() || !def.keys.is_empty() || !def.bounds.is_empty() {
-        unimplemented!("typeck: calling {}, which takes &rest, &optional or &key parameters or has :where bounds", path)
+    if !def.bounds.is_empty() {
+        unimplemented!("typeck: calling {}, which has :where bounds", path)
     }
     if def.ffi {
         unimplemented!("typeck: calling the C function {} (unsafe is not checked yet)", path)
     }
-    if given != def.params.len() {
-        return Err(Error::TypeError(format!("{}: expected {} argument(s), got {}", path, def.params.len(), given)));
+    let required = def.params.len();
+    if has_tail(def) && given < required {
+        return Err(Error::TypeError(format!("{}: expected at least {} argument(s), got {}", path, required, given)));
+    }
+    if !has_tail(def) && given != required {
+        return Err(Error::TypeError(format!("{}: expected {} argument(s), got {}", path, required, given)));
     }
     let subst = cx.holes.borrow_mut().instantiate(&def.type_params);
     let mut checked = Vec::with_capacity(given);
-    if let Some(first) = first {
-        checked.push(conform_at(cx, first, &subst.apply(&def.params[0]))?);
-    }
-    let params = &def.params[checked.len()..];
-    for ((arg, arg_loc), param) in rest.iter().zip(params) {
+    // With no required parameter, a first argument already checked is the
+    // first of the tail.
+    let (pre, tail): (Option<Typed>, Vec<(Value, Option<Loc>)>) = match first {
+        Some(first) if required == 0 => (Some(first.checked), std::iter::once(first.written).chain(rest.iter().cloned()).collect()),
+        Some(first) => {
+            checked.push(conform_at(cx, first.checked, &subst.apply(&def.params[0]))?);
+            (None, rest[required - 1..].to_vec())
+        }
+        None => (None, rest[required..].to_vec()),
+    };
+    let fixed = &rest[..required - checked.len()];
+    for ((arg, arg_loc), param) in fixed.iter().zip(&def.params[checked.len()..]) {
         let param = subst.apply(param);
         checked.push(check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?);
     }
+    checked.extend(check_tail(cx, heap, locals, &path.to_string(), def, &subst, pre, &tail, given)?);
     let ret = subst.apply(&def.ret);
     expect(cx, &ret, expected)?;
     let targs: Vec<Type> = def.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();

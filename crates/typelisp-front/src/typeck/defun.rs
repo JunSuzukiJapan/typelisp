@@ -13,6 +13,7 @@ use typelisp_mem::SymRef;
 
 use super::expr::{check_body, Cx};
 use super::generic::{Base, Requests};
+use super::lambda_list::{parse_lambda_list, LambdaList};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
 use super::define::{Definer, Kind};
@@ -22,7 +23,7 @@ use super::subst::Subst;
 use super::tree::Typed;
 use super::type_syntax::{parse_type, TypeCx};
 
-const SHAPE: &str = "defun: (defun name<T...>? ((param Type)...) ReturnType body...)";
+pub(crate) const SHAPE: &str = "defun: (defun name<T...>? ((param Type)...) ReturnType body...)";
 
 /// `(defun name ((param Type)...) Ret body...)` — `parts` without the
 /// `defun` — and its core form, unrooted.
@@ -46,16 +47,28 @@ pub(crate) fn check_defun(
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a `defun` with a documentation string")
     }
+    if let Some((first, _)) = body.first() {
+        if crate::check::analyze::is_where_clause(heap, *first)? {
+            unimplemented!("typeck: a `defun` with a `(:where ...)` clause")
+        }
+    }
     let path = Path::of_symbol(ns, name);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defun {}: type parameter `{}` is declared twice", path, twice.0.name()))
     })?;
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
-    let params = parse_params(heap, &tcx, *params)?;
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let list = parse_lambda_list(reg, d, heap, requests, &scope, &path, *params)?;
+    let ret = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, *ret)?;
     let type_params = scope.params().to_vec();
-    reg.define_fn(path, FnDef { public: d.public, ..FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) });
+    let LambdaList { required, optionals, rest, keys, bound: params } = list;
+    let def = FnDef {
+        public: d.public,
+        rest: rest.map(|(_, t)| t),
+        optionals,
+        keys,
+        ..FnDef::plain(type_params.clone(), required.into_iter().map(|(_, t)| t).collect(), ret.clone())
+    };
+    reg.define_fn(path, def);
 
     let mut body = {
         let cx = Cx::new(reg, d.expander, ns, &scope, None);

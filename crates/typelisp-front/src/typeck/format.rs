@@ -11,7 +11,7 @@
 //! arguments each one takes and of what type. That is checked once the form
 //! is, when every argument's type is settled ([`super::expr::Cx::settle`]).
 
-use crate::check::analyze::{option_of_sexpr, sexpr_ty, OPTION_NONE};
+use crate::check::analyze::{option_of_sexpr, sexpr_ty};
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_print::format::{call_sites, ArgKind, ArgType};
@@ -95,18 +95,10 @@ fn check_control(
 }
 
 /// `items` as one `Sexpr` list, each held as a `Sexpr` by its own type.
-fn sexpr_list(items: Vec<Typed>) -> Typed {
+pub(crate) fn sexpr_list(items: Vec<Typed>) -> Typed {
     let list_ty = option_of_sexpr();
-    let none = Node::Construct {
-        owner: Path::builtin(typelisp_mem::wk::OPTION),
-        targs: vec![sexpr_ty()],
-        variant: OPTION_NONE,
-        mutable: false,
-        field_tys: Vec::new(),
-        args: Vec::new(),
-    };
     let cons = Path::in_ns(typelisp_mem::StdModule::SEXPR.ns(), "sexpr-cons");
-    let mut acc = Typed { node: none, ty: list_ty.clone(), loc: None };
+    let mut acc = Typed::none(sexpr_ty());
     for item in items.into_iter().rev() {
         let loc = item.loc.clone();
         let held = Typed { node: Node::AsSexpr { value: Box::new(item) }, ty: sexpr_ty(), loc };

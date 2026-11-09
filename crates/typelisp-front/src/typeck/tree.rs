@@ -5,6 +5,8 @@
 //! hold an inference hole while the form is being checked, and the core IR
 //! writes each value's representation, which only a solved type has.
 
+use crate::check::analyze::{OPTION_NONE, OPTION_SOME};
+use crate::owned_form::OwnedForm;
 use crate::types::{Path, Type};
 use crate::{Loc, Value};
 use typelisp_mem::SymRef;
@@ -72,6 +74,9 @@ pub(crate) enum Node {
     /// `match`: the first arm whose pattern matches the scrutinee's value is
     /// run, the names its pattern binds bound.
     Match { scrut: Box<Typed>, arms: Vec<(Pat, Vec<Typed>)> },
+    /// An `&optional` or `&key` parameter's default, which the call left
+    /// out: the core form its definition checked.
+    Default { form: OwnedForm },
     /// `value`, of its own type, held as a `Sexpr`. How is chosen when the
     /// tree is lowered, from the settled type ([`super::sexpr_value`]).
     AsSexpr { value: Box<Typed> },
@@ -110,10 +115,36 @@ impl Drop for Typed {
 }
 
 impl Typed {
+    /// `(some value)`, an `Option` of `value`'s type.
+    pub(crate) fn some(value: Typed, loc: Option<Loc>) -> Typed {
+        let inner = value.ty.clone();
+        let node = Node::Construct {
+            owner: option_path(),
+            targs: vec![inner.clone()],
+            variant: OPTION_SOME,
+            mutable: false,
+            field_tys: vec![inner.clone()],
+            args: vec![value],
+        };
+        Typed { node, ty: Type::Named(option_path(), vec![inner]), loc }
+    }
+
+    /// `none`, an `Option<inner>`.
+    pub(crate) fn none(inner: Type) -> Typed {
+        let node = Node::Construct { owner: option_path(), targs: vec![inner.clone()], variant: OPTION_NONE, mutable: false, field_tys: Vec::new(), args: Vec::new() };
+        Typed { node, ty: Type::Named(option_path(), vec![inner]), loc: None }
+    }
+
     /// The expressions directly inside this one.
     fn children(&self) -> Vec<&Typed> {
         match &self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Quote { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => {
+            Node::Literal { .. }
+            | Node::Number { .. }
+            | Node::Quote { .. }
+            | Node::Local { .. }
+            | Node::Global { .. }
+            | Node::Break
+            | Node::Default { .. } => {
                 Vec::new()
             }
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
@@ -137,7 +168,13 @@ impl Typed {
     /// [`Self::children`], to change.
     fn children_mut(&mut self) -> Vec<&mut Typed> {
         match &mut self.node {
-            Node::Literal { .. } | Node::Number { .. } | Node::Quote { .. } | Node::Local { .. } | Node::Global { .. } | Node::Break => {
+            Node::Literal { .. }
+            | Node::Number { .. }
+            | Node::Quote { .. }
+            | Node::Local { .. }
+            | Node::Global { .. }
+            | Node::Break
+            | Node::Default { .. } => {
                 Vec::new()
             }
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
@@ -199,6 +236,7 @@ impl Typed {
                 | Node::Return { .. }
                 | Node::UnwindProtect { .. }
                 | Node::Panic { .. }
+                | Node::Default { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }
@@ -217,4 +255,8 @@ impl Typed {
             _ => {}
         });
     }
+}
+
+fn option_path() -> Path {
+    Path::builtin(typelisp_mem::wk::OPTION)
 }
