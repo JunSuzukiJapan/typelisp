@@ -19,6 +19,8 @@ use super::define::Definer;
 use super::defmethod::{define_method, receiver_type_path, Method};
 use super::defun::parse_header;
 use super::generic::Requests;
+use super::bounds::parse_where;
+use super::defun::by_param;
 use super::impl_block::method_params;
 use super::lambda_list::LambdaList;
 use super::registry::{Registry, TraitDef, TraitImpl};
@@ -50,9 +52,12 @@ pub(crate) fn check_trait_impl(
         Value::Path(_) => unimplemented!("typeck: an `impl` of a trait named by a path"),
         _ => return Err(Error::TypeError("impl: trait name must be a name or `::` path".into())),
     };
-    if matches!(items.first(), Some((first, _)) if matches!(heap.car(*first), Ok(Value::Symbol(k)) if k.is(wk::KW_WHERE))) {
-        unimplemented!("typeck: an `impl` of a trait with a `(:where ...)` clause")
-    }
+    // `(:where ...)` bounds the type's parameters: the type implements the
+    // trait when its arguments meet them, and every method may use them.
+    let (clause, items) = match items.split_first() {
+        Some(((first, _), rest)) if crate::check::analyze::is_where_clause(heap, *first)? => (Some(*first), rest),
+        _ => (None, items),
+    };
     let owner = receiver_type_path(heap, reg, ns, *target).map_err(|_| Error::TypeError("impl: target must be a data type".into()))?;
     // The target written in the type's own parameters, which `impl<...>`
     // declares in order.
@@ -69,6 +74,10 @@ pub(crate) fn check_trait_impl(
         _ => unimplemented!("typeck: an `impl<...>` of a trait for a type without parameters"),
     }
     let shown = format!("impl {} {}", trait_path, owner);
+    let impl_bounds = match clause {
+        Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, c)?,
+        None => Vec::new(),
+    };
     let (assoc, methods) = items_of(heap, reg, ns, &head, &target_ty, &tdef, &shown, items)?;
     for (written, _) in &methods {
         if tdef.method(*written).is_none() {
@@ -97,7 +106,7 @@ pub(crate) fn check_trait_impl(
     let mut forms = Vec::new();
     for (method, item) in methods {
         let want = tdef.method(method).expect("checked above").clone();
-        let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc };
+        let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc, clause };
         if let Some(form) = check_method(reg, d, heap, requests, &tdef, &of, method, &want, &shown, item)? {
             forms.push(form);
         }
@@ -105,7 +114,7 @@ pub(crate) fn check_trait_impl(
     let mut all = reg.trait_impls.get(&(trait_path, owner)).cloned().unwrap_or_default();
     all.retain(|i| i.args.is_some());
     let assoc = tdef.params[1..].iter().map(|a| a.name.name().to_string()).zip(assoc).collect();
-    all.push(TraitImpl { args: None, assoc, bounds: Vec::new() });
+    all.push(TraitImpl { args: None, assoc, bounds: by_param(impl_bounds) });
     reg.trait_impls.insert((trait_path, owner), all);
     crate::check::forms::module_form(heap, &owner, &forms)
 }
@@ -194,6 +203,8 @@ struct Of<'a> {
     type_names: &'a [SymRef],
     target: &'a Type,
     assoc: &'a [Type],
+    /// The `impl`'s `(:where ...)`, which bounds each method's parameters.
+    clause: Option<Value>,
 }
 
 /// One method of the `impl`, `want` its signature in the trait: checked to
@@ -222,6 +233,11 @@ fn check_method(
     };
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a method with a documentation string")
+    }
+    if let Some((first, _)) = body.first() {
+        if crate::check::analyze::is_where_clause(heap, *first)? {
+            unimplemented!("typeck: a method of a trait's `impl` with a `(:where ...)` clause of its own")
+        }
     }
     let (name, _) = parse_header(heap, *header)?;
     let (ns, owner) = (d.site.ns, of.owner);
@@ -276,6 +292,7 @@ fn check_method(
             describe(&want_params, &want_ret)
         )));
     }
-    let def = Method { owner, method, instance, public: true, home: None, params: LambdaList::plain(ps), ret };
+    let bounds = of.clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
+    let def = Method { owner, method, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }

@@ -15,7 +15,8 @@ use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
 use super::defmethod::{define_method, receiver_type_path, Method};
-use super::defun::{parse_header, parse_param};
+use super::bounds::parse_where;
+use super::defun::{parse_header, parse_param, split_where};
 use super::lambda_list::{parse_lambda_list, Written};
 use super::generic::Requests;
 use super::define::Definer;
@@ -46,10 +47,13 @@ pub(crate) fn check_impl(
         if !matches!(second, Value::Cons(_)) || crate::types::is_type_application(heap, *second) {
             return super::trait_impl::check_trait_impl(reg, d, heap, requests, type_names, parts);
         }
-        if matches!(heap.car(*second), Ok(Value::Symbol(k)) if k.is_keyword()) {
-            unimplemented!("typeck: an `impl` with a `(:where ...)` clause")
-        }
     }
+    // The bounds an `impl`'s `(:where ...)` writes are on every method's
+    // type parameters.
+    let (clause, items) = match parts.get(1) {
+        Some((second, _)) if crate::check::analyze::is_where_clause(heap, *second)? => (Some(*second), &parts[2..]),
+        _ => (None, &parts[1..]),
+    };
     let owner = receiver_type_path(heap, reg, ns, *target)?;
     if reg.type_def(&owner).is_some_and(|d| d.stdlib) {
         return Err(Error::TypeError(format!(
@@ -59,8 +63,8 @@ pub(crate) fn check_impl(
         )));
     }
     let mut forms = Vec::new();
-    for (item, _) in &parts[1..] {
-        if let Some(form) = check_item(reg, d, heap, requests, owner, type_names, *target, *item)? {
+    for (item, _) in items {
+        if let Some(form) = check_item(reg, d, heap, requests, owner, type_names, clause, *target, *item)? {
             forms.push(form);
         }
     }
@@ -77,6 +81,7 @@ fn check_item(
     requests: &mut Requests,
     owner: Path,
     impl_names: &[SymRef],
+    impl_where: Option<Value>,
     target: Value,
     item: Value,
 ) -> Result<Option<Value>, Error> {
@@ -95,13 +100,9 @@ fn check_item(
     }
     let (name, own_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
+    let (own_where, body) = split_where(heap, body)?;
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a method with a documentation string")
-    }
-    if let Some((first, _)) = body.first() {
-        if crate::check::analyze::is_where_clause(heap, *first)? {
-            unimplemented!("typeck: a method with a `(:where ...)` clause")
-        }
     }
     let method = member_symbol(name.name());
     let names: Vec<SymRef> = impl_names.iter().chain(&own_names).copied().collect();
@@ -119,8 +120,13 @@ fn check_item(
         Some(s) => list.after((s, target_ty.clone())),
         None => list,
     };
-    let ret = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty) }, *ret)?;
-    let def = Method { owner, method, instance: receiver.is_some(), public, home: None, params: list, ret };
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty) };
+    let ret = parse_type(heap, &tcx, *ret)?;
+    let mut bounds = Vec::new();
+    for clause in impl_where.into_iter().chain(own_where) {
+        bounds.extend(parse_where(heap, &tcx, clause)?);
+    }
+    let def = Method { owner, method, instance: receiver.is_some(), public, home: None, params: list, ret, bounds };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }
 

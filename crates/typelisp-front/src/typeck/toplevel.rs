@@ -919,6 +919,27 @@ mod tests {
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
     }
 
+    /// An `impl`'s `(:where ...)` bounds every method's type parameters; a
+    /// trait's `impl` with one is an `impl` for the arguments meeting it.
+    #[test]
+    fn method_and_impl_bounds() {
+        let src = "(deftrait shape () (defmethod area (self) int))
+(defstruct sq (n int))
+(impl shape sq (defmethod area (self) int (* self::n self::n)))
+(defstruct pair<T> (a T) (b T))
+(impl<T> pair<T> (:where (shape T)) (pub defmethod sum (self) int (+ (area self::a) (area self::b))))
+(impl<T> shape pair<T> (:where (shape T)) (defmethod area (self) int (sum self)))
+(defmethod bigger<U> ((p pair<U>)) int (:where (shape U)) (* 2 (sum p)))
+(defun total<T> ((x T)) int (:where (shape T)) (area x))
+";
+        let p = "(make-instance 'pair :a (make-instance 'sq :n 2) :b (make-instance 'sq :n 3))";
+        assert_eq!(run(&format!("{}(+ (sum {p}) (+ (bigger {p}) (total {p})))", src, p = p)).1, Value::Int(52));
+        let msg = check_err(&format!("{}(total (make-instance 'pair :a 1 :b 2))", src));
+        assert!(msg.contains("type `pair<int>` does not implement trait `shape`"), "{}", msg);
+        let msg = check_err(&format!("{}(sum (make-instance 'pair :a 1 :b 2))", src));
+        assert!(msg.contains("pair::sum: type `int` does not implement trait `shape`"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

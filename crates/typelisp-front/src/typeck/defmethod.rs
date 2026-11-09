@@ -8,12 +8,14 @@
 //! are other parameters, whatever they are called.
 
 use crate::check::lower::CoreForms;
-use crate::types::{is_type_application, prim_type_path, scalar_of_symbol, ParamOwner, Path, Type};
+use crate::check::registry::TraitBound;
+use crate::types::{is_type_application, prim_type_path, scalar_of_symbol, ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{member_symbol, NsId};
 use typelisp_mem::SymRef;
 
-use super::defun::{lower_all, parse_header};
+use super::bounds::parse_where;
+use super::defun::{by_param, lower_all, parse_header, split_where};
 use super::lambda_list::{parse_lambda_list, LambdaList, Written};
 use super::expr::{check_body, Cx};
 use super::generic::{Base, Requests};
@@ -42,13 +44,9 @@ pub(crate) fn check_defmethod(
     };
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
+    let (clause, body) = split_where(heap, body)?;
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a `defmethod` with a documentation string")
-    }
-    if let Some((first, _)) = body.first() {
-        if crate::check::analyze::is_where_clause(heap, *first)? {
-            unimplemented!("typeck: a `defmethod` with a `(:where ...)` clause")
-        }
     }
     let written: Vec<Value> = heap.list_to_vec(*params)?;
     let receiver = written.first().and_then(|r| heap.list_to_vec(*r).ok()).filter(|r| r.len() == 2 && matches!(r[0], Value::Symbol(_)));
@@ -74,8 +72,10 @@ pub(crate) fn check_defmethod(
     let named = format!("method {}::{}", owner, method);
     let at = Written { what: "defmethod", named: &named, owner: ParamOwner::Method(owner, method) };
     let params = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &written)?;
-    let ret = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, *ret)?;
-    let def = Method { owner, method, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret };
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
+    let ret = parse_type(heap, &tcx, *ret)?;
+    let bounds = clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
+    let def = Method { owner, method, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret, bounds };
     let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;
     let forms: Vec<Value> = form.into_iter().collect();
     crate::check::forms::module_form(heap, &owner, &forms)
@@ -92,6 +92,8 @@ pub(crate) struct Method {
     pub(crate) home: Option<Path>,
     pub(crate) params: LambdaList,
     pub(crate) ret: Type,
+    /// The `:where` bounds on its type parameters.
+    pub(crate) bounds: Vec<(TypeParam, TraitBound)>,
 }
 
 /// Register `def` with the type parameters `scope` declares, check `body`,
@@ -112,7 +114,8 @@ pub(crate) fn define_method(
     def: Method,
     body: &[(Value, Option<Loc>)],
 ) -> Result<Option<Value>, Error> {
-    let Method { owner, method, instance, public, home, params: list, ret } = def;
+    let Method { owner, method, instance, public, home, params: list, ret, bounds } = def;
+    let bounded = scope.bound(bounds.clone());
     let type_params = scope.params().to_vec();
     // A receiver that names every type argument outright would make the
     // method that instantiation's own.
@@ -125,6 +128,7 @@ pub(crate) fn define_method(
         rest: rest.map(|(_, t)| t),
         optionals,
         keys,
+        bounds: by_param(bounds),
         ..FnDef::plain(type_params.clone(), required.into_iter().map(|(_, t)| t).collect(), ret.clone())
     };
     d.method(reg, &owner, method)?;
@@ -132,7 +136,7 @@ pub(crate) fn define_method(
     reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
 
     let mut body = {
-        let cx = Cx::new(reg, d.expander, ns, scope, self_type);
+        let cx = Cx::new(reg, d.expander, ns, &bounded, self_type);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
