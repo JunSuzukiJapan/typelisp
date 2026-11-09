@@ -25,6 +25,7 @@ pub(crate) enum Kind {
     Type,
     Trait,
     Method,
+    Macro,
 }
 
 impl Kind {
@@ -35,6 +36,7 @@ impl Kind {
             Kind::Type => "type",
             Kind::Trait => "trait",
             Kind::Method => "method",
+            Kind::Macro => "macro",
         }
     }
 }
@@ -78,9 +80,7 @@ impl Definer<'_> {
             None => return self.redefine(kind, name, None),
             Some(ValueDef::Fn(def)) => (Kind::Function, def.builtin),
             Some(ValueDef::Var(_)) => (Kind::Variable, false),
-            Some(ValueDef::Macro { .. }) => {
-                return Err(clash(kind, name, "macro"));
-            }
+            Some(ValueDef::Macro { .. }) => (Kind::Macro, false),
         };
         if held != kind {
             return Err(clash(kind, name, held.word()));

@@ -58,6 +58,7 @@ pub(crate) mod cast;
 pub(crate) mod control;
 pub(crate) mod define;
 pub(crate) mod defenum;
+pub(crate) mod defmacro;
 pub(crate) mod defmethod;
 pub(crate) mod defstruct;
 pub(crate) mod deftrait;

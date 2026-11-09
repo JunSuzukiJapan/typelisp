@@ -362,6 +362,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::BREAK => return looping::check_break(cx, args, loc),
         wk::RETURN => return looping::check_return(cx, heap, locals, args, loc),
         wk::QUOTE => return quote::check_quote(heap, args, loc),
+        wk::QUASIQUOTE => return quote::check_quasiquote(cx, heap, locals, args, loc),
         wk::LIST => return list_form::check_list(cx, heap, locals, args, loc),
         wk::SETF => return setf::check_setf(cx, heap, locals, args, loc),
         wk::THE => return the::check_the(cx, heap, locals, args),

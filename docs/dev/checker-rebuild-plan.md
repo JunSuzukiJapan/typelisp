@@ -338,7 +338,8 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - 型の書き方：関数の型 `(fn (A &rest B) R)`、`::` のパス、リストの形 `(Name A)`、タプルの型 `#{A B}`。
 - `deftrait`（`typeck::deftrait`）と、型へのトレイトの `impl`（`typeck::trait_impl`）。`Self` と関連型はトレイトの型パラメータで、`Self` が 0 番、`k` 番目の関連型が `1 + k` 番。`impl` の各メソッドは型のメソッドとして登録し、シグネチャはトレイトのものの `Self` と関連型を位置で置き換えたものと一致させる。`impl` のメソッドの型の中では、関連型の名前はその `impl` が決めた型を表す（`TypeScope::name_types`）。スーパートレイトの `impl` が先にあることも確かめる。
 - 期待する型への広げ方（`typeck::widen`）。`Sexpr` が期待されるところへは、`Sexpr` の符号がある値を広げる（`Symbol` と `Sexpr` はそのまま、ほかは `AsSexpr`）。`Option<Sexpr>` は `Sexpr` に狭めない。`rational` へは `int` と `ratio`。呼び出しの結果の型を先に期待と合わせるところでは、広げる先の型なら食い違いをエラーにせず、値をチェックしたところで決める。
-- `quote`。記号は `Symbol`、ほかのデータは `Option<Sexpr>`。
+- `quote`。記号は `Symbol`、ほかのデータは `Option<Sexpr>`。`quasiquote`：`,x` は `x` を `Option<Sexpr>` を期待してチェックし、`,@x` は prelude の `sexpr-append` でつなぐ。
+- `defmacro`（`typeck::defmacro`）：引数と結果は `Option<Sexpr>`。`&optional`・`&key` の既定値は、それより前の引数を束縛してチェックする。本体は評価器が持つ。
 - `list`（`typeck::list_form`）。各要素は `Option<Sexpr>` を期待してチェックし、`Sexpr` の cons 変種でつなぐ。`panic`（型は `!`）と `unwind-protect`（型は守られる式の型、後始末の値は捨てる）。
 - `as`・`try-as`（`typeck::cast`）。変換は元の型のメソッドの呼び出しにする（表は旧チェッカーの `as_conversion`）。整数・浮動小数点数の族への変換は族の広い型で登録されているので、狭い型へはその後に幅の変換をつなぐ。トレイトオブジェクトへの `as` はまだ扱わない。
 - `defun` の `&optional`・`&rest`・`&key`（`typeck::lambda_list`）と、それらを持つ関数・メソッドの呼び出し（`typeck::args`）。呼び出しは引数を 1 つずつそろえた呼び出しにする。省いた引数は、既定値（`defun` のときに引数を束縛せずにチェックし、core IR にして持つ）か `none`、既定値のない引数を渡したら `some` で包む。`&rest` の引数は 1 つの `Sexpr` のリストにする。既定値を持つ引数の型は、関数の型パラメータを含んではいけない。`defmethod` と型の `impl` のメソッドも同じ。トレイトの `impl` のメソッドは目印を書けない（トレイトのメソッドの引数の数は `deftrait` が決める）。
@@ -358,7 +359,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 新しいチェッカーがこれらに出会うと `unimplemented!()` で止まる。切り替えまでに、すべてを扱えるようにする。
 
 - 名前と型：`deftype`、`defstruct` の既定値と付属、トレイトオブジェクトの型 `:dyn`、C のポインタ `(ptr ...)` と C のワード（`ptr`・`c-long`・`c-ulong`）と `unsafe`。
-- 定義：`defmacro`、トレイトの既定の本体・`:where` を付けた `impl`・1 つの具体化のための `impl`・関連型を固定したスーパートレイト・ブランケット `impl`・`:where` の境界のある呼び出しとジェネリックな本体での境界のメソッド・`:dyn`、`defsignature`、`defffi`、`def-c-struct`、`pub` を付けた `defsignature`・`defffi`・`defmacro`・`deftype`、ドキュメント文字列、標準ライブラリの中での定義（名前がモジュールをまたいで 1 つになる規則）。
+- 定義：トレイトの既定の本体・`:where` を付けた `impl`・1 つの具体化のための `impl`・関連型を固定したスーパートレイト・ブランケット `impl`・`:where` の境界のある呼び出しとジェネリックな本体での境界のメソッド・`:dyn`、`defsignature`、`defffi`、`def-c-struct`、`pub` を付けた `defsignature`・`defffi`・`deftype`、ドキュメント文字列、標準ライブラリの中での定義（名前がモジュールをまたいで 1 つになる規則）。
 - `match`：値のパターン、`:when`、`:or`、`Sexpr` の形とダウンキャスト、構造体のパターン、トレイトオブジェクトの match。
 - `defun` の付属：ドキュメント文字列。
 - 式：拡張した `loop`（`:for`・`:collect` など）、`setf` の C のポインタ越しのフィールド・タプルの要素・`aref`・`c-deref`、関数を値として使うこと、ローカルな関数値の呼び出し、式の値を関数として呼ぶこと、`macrolet`、メソッド呼び出し、組み込みの関数とメソッド（8.3 の写しが要る）、残りの特殊形（3.2 の一覧）。

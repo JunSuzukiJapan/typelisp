@@ -829,7 +829,7 @@ pub(super) type LabelsDef = (SymRef, Vec<(SymRef, Type)>, Type, Vec<Checked>);
 /// the `&optional` parameters (each with its default form, if it declared
 /// one), the `&rest` name, and the `&key` parameters in the same shape as the
 /// optionals.
-type MacroLambdaList = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
+pub(crate) type MacroLambdaList = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
 
 /// Opaque saved namespace context — see [`Checker::suspend_ns_context`].
 pub struct NsContext {
@@ -17878,7 +17878,7 @@ fn take_leading_docstring(heap: &Heap, parts: &[Value], at: usize) -> Option<Str
     }
 }
 
-fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLambdaList, Error> {
+pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLambdaList, Error> {
     // Section rank: required=0, &optional=1, &rest=2, &key=3. A marker may
     // only advance the rank forward, so each appears at most once and in
     // order.

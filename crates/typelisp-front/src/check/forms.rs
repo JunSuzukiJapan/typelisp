@@ -428,7 +428,7 @@ pub(super) fn dyn_value_form(heap: &mut Heap, value: Value) -> Result<Value, Err
 /// A macro is an ordinary callable body — expanding it is calling it — so
 /// the only extra structure is how the non-required regions of its lambda
 /// list are filled at expansion time.
-pub(super) fn defmacro_form(
+pub(crate) fn defmacro_form(
     heap: &mut Heap,
     name: &Path,
     params: &[SymRef],

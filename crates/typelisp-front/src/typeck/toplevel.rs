@@ -203,6 +203,7 @@ fn check_primary(
                 wk::DEFSTRUCT => return Ok((check_defstruct(reg, d, heap, requests, args)?, None)),
                 wk::DEFENUM => return Ok((check_defenum(reg, d, heap, args)?, None)),
                 wk::DEFTRAIT => return Ok((check_deftrait(reg, d, heap, args)?, None)),
+                wk::DEFMACRO => return Ok((super::defmacro::check_defmacro(reg, d, heap, requests, args)?, None)),
                 wk::DEFMETHOD => return Ok((check_defmethod(reg, d, heap, requests, args)?, None)),
                 wk::DEFVAR => return Ok((check_defvar(reg, d, heap, requests, Which::Defvar, args)?, None)),
                 wk::DEFPARAMETER => return Ok((check_defvar(reg, d, heap, requests, Which::Defparameter, args)?, None)),
@@ -238,8 +239,8 @@ fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc
         return Err(Error::TypeError("pub: expected a definition form".into()));
     };
     match head.well_known() {
-        wk::DEFUN | wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT | wk::DEFMETHOD | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::USE => Ok(inner),
-        wk::DEFSIGNATURE | wk::DEFFFI | wk::DEFMACRO | wk::DEFTYPE => unimplemented!("typeck: the form `pub {}`", head.name()),
+        wk::DEFUN | wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT | wk::DEFMETHOD | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::USE | wk::DEFMACRO => Ok(inner),
+        wk::DEFSIGNATURE | wk::DEFFFI | wk::DEFTYPE => unimplemented!("typeck: the form `pub {}`", head.name()),
         _ if head.is(wk::DEF_C_STRUCT) => Err(Error::TypeError(
             "def-c-struct is written at top level, inside `(unsafe ...)`: (unsafe (def-c-struct name (field type)...))".into(),
         )),
@@ -938,6 +939,18 @@ mod tests {
         assert!(msg.contains("type `pair<int>` does not implement trait `shape`"), "{}", msg);
         let msg = check_err(&format!("{}(sum (make-instance 'pair :a 1 :b 2))", src));
         assert!(msg.contains("pair::sum: type `int` does not implement trait `shape`"), "{}", msg);
+    }
+
+    /// A macro's parameters and result are S-expression data; a quasiquote
+    /// builds it, `,x` putting a value in.
+    #[test]
+    fn defmacro_and_quasiquote() {
+        assert_eq!(run("(defmacro twice (x) `(+ ,x ,x))\n(twice 4)").1, Value::Int(8));
+        assert_eq!(run("(defmacro opt (a &optional (b '2)) `(* ,a ,b))\n(opt 5)").1, Value::Int(10));
+        let msg = check_err("(defun f () int 1)\n(defmacro f (x) x)");
+        assert!(msg.contains("cannot define macro `f`: a function of that name already exists here"), "{}", msg);
+        let msg = check_err("(defmacro f (x &rest) x)");
+        assert!(msg.contains("defmacro: &rest must be followed by exactly one parameter name"), "{}", msg);
     }
 
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
