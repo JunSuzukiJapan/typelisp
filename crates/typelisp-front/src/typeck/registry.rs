@@ -13,6 +13,8 @@ use std::rc::Rc;
 
 use crate::check::analyze::MacroShape;
 use crate::check::lower::CoreForms;
+use std::collections::BTreeMap;
+
 use crate::check::registry::{AdtKind, OptKeyParam, TraitBound, Variant};
 use crate::types::{Path, Type, TypeParam};
 use typelisp_mem::symbols::NsId;
@@ -147,10 +149,14 @@ impl TraitDef {
 }
 
 /// An `impl` of a trait for a type: for every instantiation of it, or for
-/// the one `args` names.
+/// the one `args` names. The associated types it binds, by name, and the
+/// bounds its `(:where ...)` puts on the type's parameters are written in
+/// the type's parameters.
 #[derive(Clone, Debug)]
 pub(crate) struct TraitImpl {
     pub(crate) args: Option<Vec<Type>>,
+    pub(crate) assoc: BTreeMap<String, Type>,
+    pub(crate) bounds: Vec<(TypeParam, Vec<TraitBound>)>,
 }
 
 /// What a module-level name in the value name space is: one of three, never

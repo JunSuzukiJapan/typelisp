@@ -20,7 +20,7 @@ use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
 use super::args::First;
-use super::bounds::{bound_method, unmet};
+use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::check::registry::TraitBound;
 use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
@@ -117,9 +117,17 @@ impl<'a> Cx<'a> {
     }
 
     /// Require that the type argument `ty`, given the type parameter `param`
-    /// of the callee `of`, meet `bound`, once the form's types are settled.
-    pub(crate) fn require_bound(&self, ty: Type, bound: TraitBound, of: String, param: String, loc: Option<Loc>) {
-        self.required.borrow_mut().push(Required { ty, bound, of, param, loc });
+    /// of the callee `of`, meet `bound`: now, or once the form decides `ty`.
+    pub(crate) fn require_bound(&self, ty: Type, bound: TraitBound, of: String, param: String, loc: Option<Loc>) -> Result<(), Error> {
+        let r = Required { ty, bound, of, param, loc };
+        match meets(self, &r.ty, &r.bound) {
+            Meets::Yes => Ok(()),
+            Meets::No(why) => Err(r.error(&why)),
+            Meets::NotYet => {
+                self.required.borrow_mut().push(r);
+                Ok(())
+            }
+        }
     }
 
     /// Check `d`'s control string against its arguments once their types
@@ -139,6 +147,25 @@ impl<'a> Cx<'a> {
     pub(crate) fn settle(&self, heap: &mut Heap, trees: &mut [Typed]) -> Result<(), Error> {
         for hole in self.numbers.borrow().iter() {
             self.decide(hole);
+        }
+        // A bound met decides the holes its pins have, which may decide the
+        // type another bound is on.
+        loop {
+            let pending = std::mem::take(&mut *self.required.borrow_mut());
+            let before = pending.len();
+            let mut left = Vec::new();
+            for r in pending {
+                match meets(self, &r.ty, &r.bound) {
+                    Meets::Yes => {}
+                    Meets::No(why) => return Err(r.error(&why)),
+                    Meets::NotYet => left.push(r),
+                }
+            }
+            let stuck = left.len() == before;
+            *self.required.borrow_mut() = left;
+            if stuck {
+                break;
+            }
         }
         for (ty, what, loc) in self.undecided.borrow().iter() {
             if self.holes.borrow().unsolved(ty).is_some() {
@@ -160,10 +187,8 @@ impl<'a> Cx<'a> {
         for d in self.directives.borrow().iter() {
             check_directives(d, |ty| self.resolve(ty))?;
         }
-        for r in self.required.borrow().iter() {
-            if let Some(why) = unmet(self.reg, self.scope, &self.resolve(&r.ty), &r.bound) {
-                return Err(at(Error::TypeError(bound_message(&r.of, &r.param, &why)), &r.loc));
-            }
+        if let Some(r) = self.required.borrow().first() {
+            unimplemented!("typeck: the `:where` bound on `{}` of `{}`, whose type argument nothing decided", r.param, r.of)
         }
         Ok(())
     }
@@ -176,6 +201,14 @@ struct Required {
     of: String,
     param: String,
     loc: Option<Loc>,
+}
+
+impl Required {
+    /// The error for the type argument not meeting the bound, as `why`
+    /// says.
+    fn error(&self, why: &crate::check::core::Unmet) -> Error {
+        at(Error::TypeError(bound_message(&self.of, &self.param, why)), &self.loc)
+    }
 }
 
 /// `e` at `loc`, when it is known.

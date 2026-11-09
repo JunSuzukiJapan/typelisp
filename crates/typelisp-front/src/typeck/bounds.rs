@@ -13,6 +13,7 @@ use crate::check::registry::TraitBound;
 use crate::types::{prim_type_path, Path, Type, TypeParam};
 use crate::{Error, Heap, Value};
 
+use super::expr::Cx;
 use super::registry::{FnDef, Registry, TraitDef, TypeEntry};
 use super::resolve::trait_named;
 use super::scope::TypeScope;
@@ -62,6 +63,13 @@ pub(crate) fn parse_where(heap: &Heap, tcx: &TypeCx, clause: Value) -> Result<Ve
         out.push((p, TraitBound { trait_path, assoc }));
     }
     Ok(out)
+}
+
+impl TraitBound {
+    /// This bound with `s` applied to the types it pins.
+    pub(crate) fn at(&self, s: &Subst) -> TraitBound {
+        TraitBound { trait_path: self.trait_path, assoc: self.assoc.iter().map(|(k, v)| (k.clone(), s.apply(v))).collect() }
+    }
 }
 
 /// A method of a trait bounding a type parameter: which trait, its
@@ -146,43 +154,101 @@ fn trait_def<'r>(reg: &'r Registry, path: &Path) -> Option<&'r TraitDef> {
     }
 }
 
-/// Whether the trait `sub` is `sup` or has it among its supertraits.
-fn inherits(reg: &Registry, sub: &Path, sup: &Path, depth: usize) -> bool {
-    assert!(depth < 64, "the supertraits of `{}` do not end", sub);
-    sub == sup || trait_def(reg, sub).is_some_and(|d| d.supertraits.iter().any(|s| inherits(reg, &s.trait_path, sup, depth + 1)))
+/// Whether a type meets a bound.
+pub(crate) enum Meets {
+    Yes,
+    No(Unmet),
+    /// The type is a hole nothing has decided yet.
+    NotYet,
 }
 
-/// Why the settled type `ty` does not meet the bound `b`, or `None` when it
-/// does. A type parameter meets it by a bound of its own, in `scope`.
-pub(crate) fn unmet(reg: &Registry, scope: &TypeScope, ty: &Type, b: &TraitBound) -> Option<Unmet> {
-    if !b.assoc.is_empty() {
-        unimplemented!("typeck: a `:where` bound pinning `{}`'s associated types, at a call", b.trait_path)
-    }
+/// Whether `ty` meets the bound `b`, whose pins are written in the types
+/// of this form. A pin is made to agree with what the `impl` binds the
+/// associated type to, which may decide the pin's holes. A type parameter
+/// meets a bound by a bound of its own in `cx`'s scope.
+pub(crate) fn meets(cx: &Cx, ty: &Type, b: &TraitBound) -> Meets {
+    meets_at(cx, &cx.resolve(ty), b, 0)
+}
+
+fn meets_at(cx: &Cx, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
+    assert!(depth < 64, "the bounds of `impl`s of `{}` do not end", b.trait_path);
     let path = match ty {
+        Type::Infer(_) => return Meets::NotYet,
         // It has no values: nothing can be asked of one.
-        Type::Never => return None,
-        Type::Param(p) => {
-            let declared = scope.bounds_of(*p).iter().any(|own| inherits(reg, &own.trait_path, &b.trait_path, 0));
-            return (!declared).then(|| Unmet::Undeclared { var: p.name.name().to_string(), trait_path: b.trait_path });
-        }
+        Type::Never => return Meets::Yes,
+        Type::Param(p) => return param_meets(cx, *p, b),
         Type::Dyn(..) => unimplemented!("typeck: whether a trait object meets a `:where` bound"),
-        Type::Infer(_) => unimplemented!("typeck: a `:where` bound on a type argument nothing decided"),
         Type::Named(path, _) => *path,
         other => match prim_type_path(other) {
             Some(path) => path,
-            None => return Some(Unmet::NoImpls { ty: ty.clone() }),
+            None => return Meets::No(Unmet::NoImpls { ty: ty.clone() }),
         },
     };
     let args: &[Type] = match ty {
         Type::Named(_, args) => args,
         _ => &[],
     };
-    let impls = reg.trait_impls.get(&(b.trait_path, path));
-    if impls.is_some_and(|all| all.iter().any(|i| i.args.as_deref().is_none_or(|a| a == args))) {
-        return None;
+    let found = cx.reg.trait_impls.get(&(b.trait_path, path)).and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)));
+    let Some(imp) = found else {
+        if cx.reg.blanket_impls.get(&b.trait_path).is_some() {
+            unimplemented!("typeck: whether a blanket `impl` of `{}` covers `{}`", b.trait_path, ty)
+        }
+        return Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None });
+    };
+    // The `impl`'s types are written in the type's parameters.
+    let type_params = cx.reg.type_def(&path).map(|d| d.params.clone()).unwrap_or_default();
+    // One written for one instantiation binds concrete types.
+    let at = if imp.args.is_none() { Subst::positional(&type_params, args) } else { Subst::default() };
+    for (p, bounds) in &imp.bounds {
+        let arg = at.apply(&Type::Param(*p));
+        for inner in bounds {
+            match meets_at(cx, &cx.resolve(&arg), &inner.at(&at), depth + 1) {
+                Meets::Yes => {}
+                Meets::No(_) => return Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None }),
+                Meets::NotYet => return Meets::NotYet,
+            }
+        }
     }
-    if reg.blanket_impls.get(&b.trait_path).is_some() {
-        unimplemented!("typeck: whether a blanket `impl` of `{}` covers `{}`", b.trait_path, ty)
+    for (name, required) in &b.assoc {
+        let actual = imp.assoc.get(name).map(|t| at.apply(t));
+        let agreed = actual.as_ref().is_some_and(|actual| cx.holes.borrow_mut().unify(required, actual).is_ok());
+        if !agreed {
+            return Meets::No(Unmet::Assoc { ty: ty.clone(), assoc: name.clone(), actual, required: cx.resolve(required) });
+        }
     }
-    Some(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None })
+    Meets::Yes
+}
+
+/// Whether the type parameter `p` meets `b` by its own bounds: one on `b`'s
+/// trait or on a trait that has it among its supertraits, pinning what `b`
+/// pins to the same types.
+fn param_meets(cx: &Cx, p: TypeParam, b: &TraitBound) -> Meets {
+    let undeclared = || Meets::No(Unmet::Undeclared { var: p.name.name().to_string(), trait_path: b.trait_path });
+    let Some(tdef) = trait_def(cx.reg, &b.trait_path) else { return undeclared() };
+    for own in cx.scope.bounds_of(p) {
+        let Some(own_at) = bound_at(cx.reg, Type::Param(p), own) else { continue };
+        let Some(at) = trait_at(cx.reg, own.trait_path, own_at, &b.trait_path, 0) else { continue };
+        let pinned = b.assoc.iter().all(|(name, required)| {
+            let i = tdef.params.iter().position(|a| a.name.name() == name).expect("a bound pins an associated type of its trait");
+            at[i].as_ref().is_some_and(|t| cx.holes.borrow_mut().unify(required, t).is_ok())
+        });
+        if pinned {
+            return Meets::Yes;
+        }
+    }
+    undeclared()
+}
+
+/// The parameters of the trait `want` at the trait `from`'s parameters
+/// `at`, when `want` is `from` or one of its supertraits.
+fn trait_at(reg: &Registry, from: Path, at: Vec<Option<Type>>, want: &Path, depth: usize) -> Option<Vec<Option<Type>>> {
+    assert!(depth < 64, "the supertraits of `{}` do not end", from);
+    if from == *want {
+        return Some(at);
+    }
+    let tdef = trait_def(reg, &from)?;
+    tdef.supertraits.iter().find_map(|sup| {
+        let sup_at = supertrait_at(reg, tdef, &at, sup)?;
+        trait_at(reg, sup.trait_path, sup_at, want, depth + 1)
+    })
 }

@@ -124,13 +124,32 @@ fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
         let sig = fn_def(ParamOwner::Method(path, name), &def.params, &af.sig);
         new.define_method(path, name, MethodDef { sig: FnDef { builtin: af.builtin, ..sig }, instance: af.instance, home: af.home, inst_args: None });
     }
+    let conv = |t: &Type| convert(t, &by_name, &|| format!("an impl for {}", path));
     for t in &def.impls {
-        add_impl(new, *t, path, TraitImpl { args: None });
+        let assoc = def.trait_assoc.get(t).map(|m| m.iter().map(|(k, v)| (k.clone(), conv(v))).collect()).unwrap_or_default();
+        let bounds = def
+            .impl_bounds
+            .get(t)
+            .map(|m| {
+                m.iter()
+                    .map(|(name, bs)| {
+                        let Some(Type::Param(p)) = by_name.get(name) else {
+                            panic!("bridge: an impl for {} bounds `{}`, which is none of its type parameters", path, name)
+                        };
+                        let bs = bs.iter().map(|b| TraitBound { trait_path: b.trait_path, assoc: b.assoc.iter().map(|(k, v)| (k.clone(), conv(v))).collect() }).collect();
+                        (*p, bs)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        add_impl(new, *t, path, TraitImpl { args: None, assoc, bounds });
     }
     for inst in def.insts.values() {
-        let args: Vec<Type> = inst.args.iter().map(|t| convert(t, &HashMap::new(), &|| format!("an instantiation of {}", path))).collect();
+        let concrete = |t: &Type| convert(t, &HashMap::new(), &|| format!("an instantiation of {}", path));
+        let args: Vec<Type> = inst.args.iter().map(concrete).collect();
         for t in &inst.impls {
-            add_impl(new, *t, path, TraitImpl { args: Some(args.clone()) });
+            let assoc = inst.trait_assoc.get(t).map(|m| m.iter().map(|(k, v)| (k.clone(), concrete(v))).collect()).unwrap_or_default();
+            add_impl(new, *t, path, TraitImpl { args: Some(args.clone()), assoc, bounds: Vec::new() });
         }
         for (name, af) in inst.assoc.iter() {
             let sig = fn_def(ParamOwner::Method(path, name), &[], &af.sig);

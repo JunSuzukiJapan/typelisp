@@ -900,6 +900,25 @@ mod tests {
         assert!(msg.contains("`U` is not a type parameter this definition declares"), "{}", msg);
     }
 
+    /// A bound's pin agrees with what the `impl` binds the associated type
+    /// to, which decides the pin's type parameter.
+    #[test]
+    fn pinned_associated_types() {
+        let src = "(deftrait source () (:type Item) (defmethod take (self) Item))
+(defstruct ints (n int))
+(impl source ints (:type Item int) (defmethod take (self) int self::n))
+(defstruct box<T> (v T))
+(impl<T> source box<T> (:type Item T) (defmethod take (self) T self::v))
+(defun grab<S, A> ((s S)) A (:where (source S (Item A))) (take s))
+(defun grab2<S, A> ((s S)) A (:where (source S (Item A))) (grab s))
+(defun grab-str<S> ((s S)) string (:where (source S (Item string))) (take s))
+";
+        assert_eq!(run(&format!("{}(+ 1 (grab (make-instance 'ints :n 41)))", src)).1, Value::Int(42));
+        assert_eq!(run(&format!("{}(grab2 (make-instance 'box :v true))", src)).1, Value::Bool(true));
+        let msg = check_err(&format!("{}(grab-str (make-instance 'ints :n 41))", src));
+        assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

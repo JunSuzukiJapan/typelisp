@@ -84,7 +84,7 @@ pub(crate) fn check_method_call(
     }
     for (p, bounds) in &sig.bounds {
         for b in bounds {
-            cx.require_bound(subst.apply(&Type::Param(*p)), b.clone(), format!("{}::{}", owner, method.name()), p.name.name().to_string(), loc.clone());
+            cx.require_bound(subst.apply(&Type::Param(*p)), b.at(&subst), format!("{}::{}", owner, method.name()), p.name.name().to_string(), loc.clone())?;
         }
     }
     // A Rust builtin has no body to specialize: one entry point serves every

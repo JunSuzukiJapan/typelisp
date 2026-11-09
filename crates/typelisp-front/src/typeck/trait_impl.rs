@@ -104,7 +104,8 @@ pub(crate) fn check_trait_impl(
     }
     let mut all = reg.trait_impls.get(&(trait_path, owner)).cloned().unwrap_or_default();
     all.retain(|i| i.args.is_some());
-    all.push(TraitImpl { args: None });
+    let assoc = tdef.params[1..].iter().map(|a| a.name.name().to_string()).zip(assoc).collect();
+    all.push(TraitImpl { args: None, assoc, bounds: Vec::new() });
     reg.trait_impls.insert((trait_path, owner), all);
     crate::check::forms::module_form(heap, &owner, &forms)
 }

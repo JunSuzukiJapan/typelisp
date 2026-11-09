@@ -82,7 +82,7 @@ pub(crate) fn check_call(
     }
     for (p, bounds) in &def.bounds {
         for b in bounds {
-            cx.require_bound(subst.apply(&Type::Param(*p)), b.clone(), path.to_string(), p.name.name().to_string(), loc.clone());
+            cx.require_bound(subst.apply(&Type::Param(*p)), b.at(&subst), path.to_string(), p.name.name().to_string(), loc.clone())?;
         }
     }
     Ok(Typed { node: Node::Call { path, targs: call_targs, args: checked }, ty: ret, loc })
