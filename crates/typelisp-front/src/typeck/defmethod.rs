@@ -68,7 +68,7 @@ pub(crate) fn check_defmethod(
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let params = parse_params(heap, &tcx, *params)?;
     let ret = parse_type(heap, &tcx, *ret)?;
-    let def = Method { owner, method, instance: true, public: false, home: Some(Path::of_symbol(ns, name)), params, ret };
+    let def = Method { owner, method, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret };
     let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;
     let forms: Vec<Value> = form.into_iter().collect();
     crate::check::forms::module_form(heap, &owner, &forms)

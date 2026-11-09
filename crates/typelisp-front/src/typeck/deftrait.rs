@@ -64,7 +64,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     let params = scope.params().to_vec();
     // Registered before the signatures are read, so a signature can name the
     // trait (`:dyn Name`).
-    let mut def = TraitDef { params: params.clone(), methods: Vec::new(), defaults: Vec::new(), supertraits, public: false };
+    let mut def = TraitDef { params: params.clone(), methods: Vec::new(), defaults: Vec::new(), supertraits, public: d.public };
     reg.types.insert(path, TypeEntry::Trait(def.clone()));
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let self_ty = Type::Param(params[0]);

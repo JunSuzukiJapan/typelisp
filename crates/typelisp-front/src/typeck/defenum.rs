@@ -44,7 +44,7 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
     let stub = TypeDef {
         kind: AdtKind::Sum,
         params: scope.params().to_vec(),
-        public: false,
+        public: d.public,
         builtin: false,
         stdlib: false,
         fields: Vec::new(),

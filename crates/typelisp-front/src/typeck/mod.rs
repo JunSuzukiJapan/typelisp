@@ -36,6 +36,7 @@
 //! - [`instance`]: `make-instance`, and reading a struct's field.
 //! - [`variant`]: a sum type's value.
 //! - [`use_form`]: `use`, and what it registers for reading.
+//! - [`module`]: `module`, forms checked in a module.
 //! - [`resolve`]: what a name written in a module means.
 //! - [`locals`]: local variables.
 //! - [`scope`]: which type parameters a name means where a type is written.
@@ -72,6 +73,7 @@ pub(crate) mod lower;
 pub(crate) mod macros;
 pub(crate) mod matching;
 pub(crate) mod method;
+pub(crate) mod module;
 pub(crate) mod path_call;
 pub(crate) mod pattern;
 pub(crate) mod quote;

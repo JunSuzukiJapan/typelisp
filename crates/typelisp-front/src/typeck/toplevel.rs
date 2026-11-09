@@ -11,6 +11,7 @@ use typelisp_mem::SymRef;
 
 use super::define::Definer;
 use super::macros::expand_toplevel;
+use super::module::module_site;
 use super::defenum::check_defenum;
 use super::deftrait::check_deftrait;
 use super::defmethod::check_defmethod;
@@ -160,9 +161,31 @@ fn check_primary(
     if let Some(expanded) = expand_toplevel(reg, expander, heap, ns, v)? {
         return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings);
     }
-    let d = &mut Definer { site, warnings, expander };
-    if let Value::Cons(_) = v {
+    if matches!(heap.car(v), Ok(Value::Symbol(h)) if h.is(wk::MODULE)) {
         let elems = heap.list_to_vec_locs(v)?;
+        let (inner, path) = module_site(heap, site, &elems[1..])?;
+        let mut body = Vec::new();
+        for (form, form_loc) in &elems[2..] {
+            let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings)?;
+            heap.push_root(checked);
+            if crate::project::needs_immediate_exec(heap, checked) {
+                expander.install(heap, checked).map_err(Error::TypeError)?;
+            }
+            body.push(checked);
+        }
+        return Ok((crate::check::forms::module_form(heap, &path, &body)?, None));
+    }
+    let d = &mut Definer { site, warnings, expander, public: false };
+    if let Value::Cons(_) = v {
+        let all = heap.list_to_vec_locs(v)?;
+        // `(pub definition)`: the definition, visible outside its module.
+        let elems = match all.split_first() {
+            Some(((Value::Symbol(p), _), inner)) if p.is(wk::PUB) => {
+                d.public = true;
+                pub_definition(inner)?
+            }
+            _ => &all[..],
+        };
         // `impl<T, U>` reads as `(%type-apply impl T U)`.
         if crate::types::is_type_application(heap, elems[0].0) {
             let (head, names) = parse_header(heap, elems[0].0)?;
@@ -184,11 +207,11 @@ fn check_primary(
                 wk::DEFVAR => return Ok((check_defvar(reg, d, heap, requests, Which::Defvar, args)?, None)),
                 wk::DEFPARAMETER => return Ok((check_defvar(reg, d, heap, requests, Which::Defparameter, args)?, None)),
                 wk::DEFCONSTANT => return Ok((check_defvar(reg, d, heap, requests, Which::Defconstant, args)?, None)),
-                wk::USE | wk::IMPORT => return Ok((check_use(reg, heap, site, args, false, false, d.warnings)?, None)),
-                wk::SHADOWING_IMPORT => return Ok((check_use(reg, heap, site, args, true, false, d.warnings)?, None)),
-                wk::PUB if matches!(args.first(), Some((Value::Symbol(u), _)) if u.is(wk::USE)) => {
-                    return Ok((check_use(reg, heap, site, &args[1..], false, true, d.warnings)?, None));
+                wk::USE | wk::IMPORT => {
+                    let public = d.public;
+                    return Ok((check_use(reg, heap, site, args, false, public, d.warnings)?, None));
                 }
+                wk::SHADOWING_IMPORT => return Ok((check_use(reg, heap, site, args, true, false, d.warnings)?, None)),
                 _ => {}
             }
         }
@@ -206,6 +229,24 @@ fn check_primary(
     let form = crate::check::core::tagged(heap, wk::EXPR, &[form])?;
     let ty = std::mem::replace(&mut typed.ty, Type::Unit);
     Ok((form, Some(ty)))
+}
+
+/// The definition a `(pub ...)` makes visible outside its module, `inner`
+/// being what follows the `pub`.
+fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc>)], Error> {
+    let Some((Value::Symbol(head), _)) = inner.first() else {
+        return Err(Error::TypeError("pub: expected a definition form".into()));
+    };
+    match head.well_known() {
+        wk::DEFUN | wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT | wk::DEFMETHOD | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::USE => Ok(inner),
+        wk::DEFSIGNATURE | wk::DEFFFI | wk::DEFMACRO | wk::DEFTYPE => unimplemented!("typeck: the form `pub {}`", head.name()),
+        _ if head.is(wk::DEF_C_STRUCT) => Err(Error::TypeError(
+            "def-c-struct is written at top level, inside `(unsafe ...)`: (unsafe (def-c-struct name (field type)...))".into(),
+        )),
+        _ => Err(Error::TypeError(
+            "pub: expected defun/defsignature/defffi/defmacro/defstruct/defenum/deftrait/deftype/defvar/defparameter/defconstant/use".into(),
+        )),
+    }
 }
 
 /// Tells the session's table of what names mean (`Heap::names`) about the
@@ -780,6 +821,19 @@ mod tests {
         assert!(msg.contains("fn type must be (fn (params) ret)"), "{}", msg);
         let msg = check_err("(defun f ((v (Vector))) i32 1)");
         assert!(msg.contains("a type application must be (Name Arg...)"), "{}", msg);
+    }
+
+    /// A module's forms are checked in it; what it does not make `pub` is
+    /// not there for another module.
+    #[test]
+    fn a_module_and_what_it_makes_pub() {
+        let src = "(module geo (pub defun area ((w u8) (h u8)) u8 (* w h)) (pub defvar (unit u8) 1))\n(geo::area geo::unit 3)";
+        let (_, v, ty) = run(src);
+        assert_eq!((v, ty), (Value::Int(3), Type::U8));
+        let msg = check_err("(module geo (defun hidden () i32 1))\n(geo::hidden)");
+        assert!(msg.contains("unresolved path: geo::hidden"), "{}", msg);
+        let msg = check_err("(pub impl foo)");
+        assert!(msg.contains("pub: expected defun"), "{}", msg);
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

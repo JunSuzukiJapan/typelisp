@@ -46,6 +46,8 @@ pub(crate) struct Definer<'w> {
     pub(crate) warnings: &'w mut Vec<String>,
     /// What expands the macro calls the definitions' bodies make.
     pub(crate) expander: &'w dyn MacroExpander,
+    /// The definition was written `(pub ...)`: visible outside its module.
+    pub(crate) public: bool,
 }
 
 impl Definer<'_> {

@@ -60,7 +60,7 @@ pub(crate) fn check_defstruct(
     let stub = TypeDef {
         kind: AdtKind::Struct,
         params: params.clone(),
-        public: false,
+        public: d.public,
         builtin: false,
         stdlib: false,
         fields: Vec::new(),

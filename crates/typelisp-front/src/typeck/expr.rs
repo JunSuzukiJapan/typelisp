@@ -220,6 +220,7 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     match v {
         Value::Symbol(id) => check_symbol(cx, heap, locals, id, loc),
+        Value::Path(id) => path_call::check_path_value(cx, heap, id, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
         other => unimplemented!("typeck: checking {:?} (only literals, names and lists are checked so far)", other),
     }
