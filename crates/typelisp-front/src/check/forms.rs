@@ -100,7 +100,7 @@ pub(super) fn rooted(heap: &mut Heap, form: Value) -> Value {
 }
 
 /// `(panic FORM)` — diverges with the message the form evaluates to.
-pub(super) fn panic_form(heap: &mut Heap, msg: Value) -> Result<Value, Error> {
+pub(crate) fn panic_form(heap: &mut Heap, msg: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::PANIC, &[msg])
 }
 
@@ -374,7 +374,7 @@ pub(super) fn throw_form(heap: &mut Heap, tag: Value, value: Value, repr: Value)
 /// most direct instance of what [`loop_form`]'s comment describes — the
 /// protected value is put away *precisely so that* the cleanup can run, and
 /// the cleanup is the code that allocates.
-pub(super) fn unwind_protect_form(
+pub(crate) fn unwind_protect_form(
     heap: &mut Heap,
     protected: Value,
     cleanup: Value,

@@ -66,6 +66,7 @@ pub(crate) mod expr;
 pub(crate) mod generic;
 pub(crate) mod impl_block;
 pub(crate) mod instance;
+pub(crate) mod list_form;
 pub(crate) mod literal;
 pub(crate) mod locals;
 pub(crate) mod looping;

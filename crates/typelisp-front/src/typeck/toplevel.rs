@@ -755,6 +755,31 @@ mod tests {
         assert!(msg.contains("return: not inside a loop"), "{}", msg);
     }
 
+    /// `unwind-protect` is its protected form's value, the cleanup run after
+    /// it however it leaves; the cleanup's own value is dropped.
+    #[test]
+    fn unwind_protect_is_its_protected_value() {
+        let src = "(let ((n 0)) (let ((r (loop (unwind-protect (return 5) (setf n (+ n 1)))))) (+ r n)))";
+        assert_eq!(run(src).1, Value::Int(6));
+        assert_eq!(run("(defun f () u8 (unwind-protect 3 \"done\"))\n(f)").2, Type::U8);
+        let msg = check_err("(unwind-protect 1)");
+        assert!(msg.contains("unwind-protect: (unwind-protect protected cleanup)"), "{}", msg);
+    }
+
+    /// `panic` never returns, so it is any type a branch needs.
+    #[test]
+    fn panic_never_returns() {
+        assert_eq!(check_ok("(if true 1 (panic \"no\"))"), Type::Int);
+        let msg = check_err("(panic 1)");
+        assert!(msg.contains("expected `string`, found `int`"), "{}", msg);
+    }
+
+    /// `list` is an `Option<Sexpr>`, each item held as a `Sexpr`.
+    #[test]
+    fn list_holds_its_items_as_sexprs() {
+        assert_eq!(check_ok("(list 1 \"a\" 'b (list))"), crate::check::analyze::option_of_sexpr());
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

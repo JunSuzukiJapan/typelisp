@@ -60,6 +60,11 @@ pub(crate) enum Node {
     /// `(return value?)`: leave the nearest loop with `value` (`()` when
     /// none).
     Return { value: Option<Box<Typed>> },
+    /// `(panic message)`: stop with `message`.
+    Panic { message: Box<Typed> },
+    /// `(unwind-protect protected cleanup)`: `protected`'s value, `cleanup`
+    /// run after it however it leaves.
+    UnwindProtect { protected: Box<Typed>, cleanup: Box<Typed> },
     /// `let`: the bindings, each checked outside all of them, then the body
     /// in order. With no bindings it is `progn`.
     Let { binds: Vec<(SymRef, Typed)>, body: Vec<Typed> },
@@ -115,10 +120,14 @@ impl Typed {
                 args.iter().collect()
             }
             Node::Return { value } => value.iter().map(|v| &**v).collect(),
-            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } | Node::Set { value: obj, .. } | Node::SetGlobal { value: obj, .. } => {
+            Node::FieldGet { obj, .. }
+            | Node::AsSexpr { value: obj }
+            | Node::Set { value: obj, .. }
+            | Node::SetGlobal { value: obj, .. }
+            | Node::Panic { message: obj } => {
                 vec![&**obj]
             }
-            Node::FieldSet { obj, value, .. } => vec![&**obj, &**value],
+            Node::FieldSet { obj, value, .. } | Node::UnwindProtect { protected: obj, cleanup: value } => vec![&**obj, &**value],
             Node::Let { binds, body } => binds.iter().map(|(_, t)| t).chain(body).collect(),
             Node::If { cond, then, els } => vec![&**cond, &**then, &**els],
             Node::Match { scrut, arms } => std::iter::once(&**scrut).chain(arms.iter().flat_map(|(_, body)| body)).collect(),
@@ -135,10 +144,14 @@ impl Typed {
                 args.iter_mut().collect()
             }
             Node::Return { value } => value.iter_mut().map(|v| &mut **v).collect(),
-            Node::FieldGet { obj, .. } | Node::AsSexpr { value: obj } | Node::Set { value: obj, .. } | Node::SetGlobal { value: obj, .. } => {
+            Node::FieldGet { obj, .. }
+            | Node::AsSexpr { value: obj }
+            | Node::Set { value: obj, .. }
+            | Node::SetGlobal { value: obj, .. }
+            | Node::Panic { message: obj } => {
                 vec![&mut **obj]
             }
-            Node::FieldSet { obj, value, .. } => vec![&mut **obj, &mut **value],
+            Node::FieldSet { obj, value, .. } | Node::UnwindProtect { protected: obj, cleanup: value } => vec![&mut **obj, &mut **value],
             Node::Let { binds, body } => binds.iter_mut().map(|(_, t)| t).chain(body.iter_mut()).collect(),
             Node::If { cond, then, els } => vec![&mut **cond, &mut **then, &mut **els],
             Node::Match { scrut, arms } => {
@@ -184,6 +197,8 @@ impl Typed {
                 | Node::Loop { .. }
                 | Node::Break
                 | Node::Return { .. }
+                | Node::UnwindProtect { .. }
+                | Node::Panic { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

@@ -143,6 +143,17 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let value = value.as_deref().map(|v| lower_rooted(heap, lw, v)).transpose()?;
             forms::return_form(heap, value)
         }
+        Node::Panic { message } => {
+            let message = lower_rooted(heap, lw, message)?;
+            forms::panic_form(heap, message)
+        }
+        Node::UnwindProtect { protected, cleanup } => {
+            let protected = lower_rooted(heap, lw, protected)?;
+            let cleanup = lower_rooted(heap, lw, cleanup)?;
+            let repr = lw.reg.repr_form(heap, &lw.settle(&t.ty))?;
+            heap.push_root(repr);
+            forms::unwind_protect_form(heap, protected, cleanup, repr)
+        }
         Node::Let { binds, body } => {
             let mut lowered = Vec::with_capacity(binds.len());
             for (name, t) in binds {
