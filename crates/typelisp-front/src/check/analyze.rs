@@ -17216,7 +17216,7 @@ fn same_or_bindings(first: &PatternBindings, other: &PatternBindings) -> Result<
 /// needs to name the `i32` method once. An `i32`<->`i64` source/target pair
 /// itself never reaches this table — `check_as` relabels that directly,
 /// before the lookup.
-fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'static str>)> {
+pub(crate) fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'static str>)> {
     use Type::*;
     // Widths do not appear in a conversion method's name: every integer type
     // has the same `int->float`/`int->bignum`/... catalog (they share one
@@ -17264,7 +17264,7 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
 /// The width a conversion *into* `ty`'s family is actually registered at:
 /// `i32` for every integer, `f64` for both floats, and `ty` itself for
 /// everything else. See [`as_conversion`].
-fn called_width(ty: &Type) -> Type {
+pub(crate) fn called_width(ty: &Type) -> Type {
     if ty.is_integer() {
         Type::Int
     } else if ty.is_float() {

@@ -780,6 +780,17 @@ mod tests {
         assert_eq!(check_ok("(list 1 \"a\" 'b (list))"), crate::check::analyze::option_of_sexpr());
     }
 
+    /// `as` converts through the source type's method, a narrower width
+    /// after it; `try-as` is `none` where the value would be lost.
+    #[test]
+    fn as_converts_between_numbers() {
+        assert_eq!(run("(as int 2.7)").1, Value::Int(2));
+        assert_eq!(run("(as u8 300)").2, Type::U8);
+        assert_eq!(run("(try-as u8 30)").2, Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![Type::U8]));
+        let msg = check_err("(as string 1)");
+        assert!(msg.contains("as: no conversion from `int` to `string`"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

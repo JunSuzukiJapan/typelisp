@@ -52,6 +52,7 @@
 pub(crate) mod binding;
 pub(crate) mod bridge;
 pub(crate) mod call;
+pub(crate) mod cast;
 pub(crate) mod control;
 pub(crate) mod define;
 pub(crate) mod defenum;

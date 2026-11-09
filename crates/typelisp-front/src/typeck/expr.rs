@@ -19,7 +19,7 @@ use super::scope::TypeScope;
 use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
-use super::{binding, call, control, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, the, variant};
+use super::{binding, call, cast, control, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, the, variant};
 use crate::check::analyze::{call_sugar, TOPLEVEL_FORM_HEADS};
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -285,6 +285,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::LET => return binding::check_let(cx, heap, locals, args, expected, loc),
         wk::PROGN => return binding::check_progn(cx, heap, locals, args, expected, loc),
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
+        wk::AS => return cast::check_as(cx, heap, locals, args, false, loc),
+        wk::TRY_AS => return cast::check_as(cx, heap, locals, args, true, loc),
         wk::PANIC => return control::check_panic(cx, heap, locals, args, loc),
         wk::UNWIND_PROTECT => return control::check_unwind_protect(cx, heap, locals, args, expected, loc),
         wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
