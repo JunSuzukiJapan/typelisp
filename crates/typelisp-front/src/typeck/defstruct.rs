@@ -15,11 +15,11 @@ use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{intern, member_symbol};
 use typelisp_mem::SymRef;
 
-use super::defun::{lower_all, parse_header};
+use super::defun::{lower_all, parse_header, split_doc};
 use super::generic::{Base, Requests};
 use super::lower::Lowering;
 use super::define::{Definer, Kind};
-use super::registry::{Field, FnDef, MethodDef, Registry, Template, TypeDef, TypeEntry};
+use super::registry::{Doc, Field, FnDef, MethodDef, Registry, Template, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::tree::{Node, Typed};
@@ -42,14 +42,15 @@ pub(crate) fn check_defstruct(
     if matches!(header, Value::Cons(_)) && !crate::types::is_type_application(heap, *header) {
         unimplemented!("typeck: `defstruct` options (`(defstruct (Name option...) ...)`)")
     }
-    if matches!(fields.first(), Some((Value::Str(_), _))) {
-        unimplemented!("typeck: a `defstruct` with a documentation string")
-    }
+    let (doc, fields) = split_doc(heap, fields);
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
     d.ownable(heap, name, "defstruct")?;
     d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Type(path), doc);
+    }
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defstruct {}: type parameter `{}` is declared twice", path, twice.0.name()))
@@ -62,7 +63,7 @@ pub(crate) fn check_defstruct(
         params: params.clone(),
         public: d.public,
         builtin: false,
-        stdlib: false,
+        stdlib: crate::types::in_std(ns),
         fields: Vec::new(),
         has_defaults: false,
         variants: Vec::new(),

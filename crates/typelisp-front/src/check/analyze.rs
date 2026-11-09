@@ -17494,7 +17494,7 @@ pub(crate) fn is_sexpr_expectation(ty: &Type) -> bool {
 /// "an `Option` whose payload *represents* like a `Sexpr`", which
 /// `Option<Option<Sexpr>>` does — the outer level would claim the same
 /// empty-list word as the inner one and the two `none`s would collide.
-fn is_option_of_sexpr(ty: &Type) -> bool {
+pub(crate) fn is_option_of_sexpr(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, args)
         if crate::types::path_is_builtin(p, typelisp_mem::wk::OPTION)
             && args.len() == 1

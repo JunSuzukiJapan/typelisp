@@ -16,11 +16,11 @@ use typelisp_mem::SymRef;
 
 use super::defmethod::{define_method, receiver_type_path, Method};
 use super::bounds::parse_where;
-use super::defun::{parse_header, parse_param, split_where};
+use super::defun::{parse_header, parse_param, split_doc, split_where};
 use super::lambda_list::{parse_lambda_list, Written};
 use super::generic::Requests;
 use super::define::Definer;
-use super::registry::Registry;
+use super::registry::{Doc, Registry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
 
@@ -55,7 +55,9 @@ pub(crate) fn check_impl(
         _ => (None, &parts[1..]),
     };
     let owner = receiver_type_path(heap, reg, ns, *target)?;
-    if reg.type_def(&owner).is_some_and(|d| d.stdlib) {
+    // The standard library may add methods to its own types in any of its
+    // modules.
+    if reg.type_def(&owner).is_some_and(|d| d.stdlib) && !crate::types::in_std(ns) {
         return Err(Error::TypeError(format!(
             "impl: `{}` is a standard library type; methods can be added to a type only where it is defined. \
              Define a trait and `(impl Trait {} ...)` to give it new behavior",
@@ -101,10 +103,11 @@ fn check_item(
     let (name, own_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
     let (own_where, body) = split_where(heap, body)?;
-    if matches!(body, [(Value::Str(_), _), _, ..]) {
-        unimplemented!("typeck: a method with a documentation string")
-    }
+    let (doc, body) = split_doc(heap, body);
     let method = member_symbol(name.name());
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Method(owner, method), doc);
+    }
     let names: Vec<SymRef> = impl_names.iter().chain(&own_names).copied().collect();
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Method(owner, method), &names).map_err(|twice| {

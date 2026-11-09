@@ -84,6 +84,10 @@ impl TypeChecker {
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty)) => {
+                if crate::types::in_std(site.ns) {
+                    super::library::reexport(reg);
+                    super::library::publish(reg, &mut heap.names());
+                }
                 let types: Vec<Path> = reg.types.written().copied().collect();
                 let methods: Vec<(Path, SymRef)> = reg.methods_written().copied().collect();
                 reg.commit();
@@ -924,6 +928,19 @@ mod tests {
         assert_eq!(run(&format!("{}(grab2 (make-instance 'box :v true))", src)).1, Value::Bool(true));
         let msg = check_err(&format!("{}(grab-str (make-instance 'ints :n 41))", src));
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
+    }
+
+    /// A documentation string is kept, not checked as the body; `()` where
+    /// an `Option` is expected is `none`; an `Option<Sexpr>` has `Sexpr`'s
+    /// methods.
+    #[test]
+    fn docs_none_and_sexpr_receivers() {
+        assert_eq!(run("(defun f () int \"one\" 1)\n(f)").1, Value::Int(1));
+        assert_eq!(run("(defvar (v int) 2 \"two\")\nv").1, Value::Int(2));
+        assert_eq!(run("(defun g ((o Option<int>)) int (match o ((some x) x) (none 0)))\n(g ())").1, Value::Int(0));
+        assert_eq!(run("(eq (quote a) (quote a))").1, Value::Bool(true));
+        let msg = check_err("(defun f () string \"doc\" 1)");
+        assert!(msg.contains("expected `string`, found `int`"), "{}", msg);
     }
 
     /// A trait's default body is checked once at the `deftrait`, and an

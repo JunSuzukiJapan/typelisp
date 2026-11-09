@@ -19,7 +19,7 @@ use super::lambda_list::{parse_lambda_list, LambdaList, Written};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
 use super::define::{Definer, Kind};
-use super::registry::{FnDef, Registry, Template};
+use super::registry::{Doc, FnDef, Registry, Template};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::tree::Typed;
@@ -47,10 +47,11 @@ pub(crate) fn check_defun(
     d.ownable(heap, name, "defun")?;
     d.value(reg, Kind::Function, name)?;
     let (clause, body) = split_where(heap, body)?;
-    if matches!(body, [(Value::Str(_), _), _, ..]) {
-        unimplemented!("typeck: a `defun` with a documentation string")
-    }
+    let (doc, body) = split_doc(heap, body);
     let path = Path::of_symbol(ns, name);
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Fn(path), doc);
+    }
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defun {}: type parameter `{}` is declared twice", path, twice.0.name()))
@@ -126,6 +127,15 @@ pub(crate) fn by_param(bounds: Vec<(TypeParam, TraitBound)>) -> Vec<(TypeParam, 
 /// `body` lowered in order, each form rooted.
 pub(crate) fn lower_all(heap: &mut Heap, lw: &mut Lowering, body: &[Typed]) -> Result<Vec<Value>, Error> {
     body.iter().map(|t| lower_rooted(heap, lw, t)).collect()
+}
+
+/// A documentation string written first in `items` with something after
+/// it, as the definition forms take one, and the items after it.
+pub(crate) fn split_doc<'a>(heap: &Heap, items: &'a [(Value, Option<Loc>)]) -> (Option<String>, &'a [(Value, Option<Loc>)]) {
+    match items {
+        [(Value::Str(id), _), rest @ ..] if !rest.is_empty() => (Some(heap.string(*id).to_string()), rest),
+        _ => (None, items),
+    }
 }
 
 /// The generic body `template` at `lw`'s substitution: its parameters and

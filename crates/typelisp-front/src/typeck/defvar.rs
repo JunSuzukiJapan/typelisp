@@ -17,7 +17,7 @@ use super::expr::{check_expr, Cx};
 use super::generic::Requests;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
-use super::registry::{Registry, ValueDef, VarDef};
+use super::registry::{Doc, Registry, ValueDef, VarDef};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::type_syntax::parse_type;
@@ -41,9 +41,9 @@ pub(crate) fn check_defvar(
     which: Which,
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
-    let (head, value) = match parts {
-        [(head, _), value] => (*head, value),
-        [_, _, (Value::Str(_), _)] => unimplemented!("typeck: a `defvar` with a documentation string"),
+    let (head, value, doc) = match parts {
+        [(head, _), value] => (*head, value, None),
+        [(head, _), value, (Value::Str(id), _)] => (*head, value, Some(heap.string(*id).to_string())),
         [_, _, _] => return Err(Error::TypeError("defvar/defconstant: third argument must be a docstring".into())),
         _ => return Err(Error::TypeError(SHAPE.into())),
     };
@@ -67,6 +67,9 @@ pub(crate) fn check_defvar(
         )));
     }
     d.ownable(heap, name, "defvar")?;
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Var(Path::of_symbol(d.site.ns, name)), doc);
+    }
     let scope = TypeScope::empty();
     let ty = parse_type(heap, &super::type_syntax::TypeCx { reg, ns: d.site.ns, scope: &scope, self_type: None }, ty)?;
     Checker::reject_raw_word_storage(&ty, "the global", &heap.symbol_spelling(name))?;

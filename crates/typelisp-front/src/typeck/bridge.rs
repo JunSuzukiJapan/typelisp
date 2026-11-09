@@ -19,8 +19,9 @@ use crate::check::registry::TraitDef as OldTraitDef;
 use crate::check::Registry as OldRegistry;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use typelisp_mem::symbols::intern;
+use typelisp_mem::SymRef;
 
-use super::registry::{Field, FnDef, MethodDef, Registry, TraitDef, TraitImpl, TypeDef, TypeEntry, ValueDef, VarDef};
+use super::registry::{Doc, Field, FnDef, MethodDef, Registry, TraitDef, TraitImpl, TypeDef, TypeEntry, ValueDef, VarDef};
 
 /// Copy everything `old` defines into `new`.
 pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
@@ -73,6 +74,19 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
         }
         for sym in m.static_uses.symbols() {
             new.static_uses.insert((ns, sym), *m.static_uses.get_sym(sym).expect("a key of the table"));
+        }
+    }
+    let docs = &old.docs;
+    let paths = [(&docs.fns, Doc::Fn as fn(Path) -> Doc), (&docs.types, Doc::Type), (&docs.vars, Doc::Var), (&docs.traits, Doc::Trait), (&docs.macros, Doc::Macro)];
+    for (table, doc) in paths {
+        for (path, text) in table {
+            new.docs.insert(doc(*path), text.clone());
+        }
+    }
+    let members = [(&docs.methods, Doc::Method as fn(Path, SymRef) -> Doc), (&docs.trait_methods, Doc::TraitMethod)];
+    for (table, doc) in members {
+        for ((owner, member), text) in table {
+            new.docs.insert(doc(*owner, *member), text.clone());
         }
     }
 }

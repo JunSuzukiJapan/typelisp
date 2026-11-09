@@ -428,7 +428,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; The receiver's type parameter (`T`/`E` here) is resolved per call site
 ;; from the receiver's concrete type, exactly like `HashTable<K,V>`'s own
 ;; methods — no relation to `defun`'s separate generic-parameter syntax.
-(impl Option<T>
+(impl<T> Option<T>
   (pub defmethod unwrap (self) T
     (match self ((some x) x) ((none) (panic "unwrap: called on none"))))
   (pub defmethod unwrap-or (self (default T)) T
@@ -438,7 +438,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
   (pub defmethod is-none (self) bool
     (not (is-some self))))
 
-(impl Result<T,E>
+(impl<T,E> Result<T,E>
   (pub defmethod unwrap (self) T
     (match self ((ok x) x) ((err _) (panic "unwrap: called on err"))))
   (pub defmethod unwrap-or (self (default T)) T
@@ -453,7 +453,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; one name on both types. A method named `map` does not shadow the `Iter`
 ;; combinator `map`: a call reaches the method only when its first argument's
 ;; type has one. The receiver comes first, so they chain with `->`.
-(impl Option<T>
+(impl<T> Option<T>
   (pub defmethod map<U> (self (f (fn (T) U))) Option<U>
     (match self ((some x) (Option::some (f x))) ((none) (Option::none))))
   (pub defmethod and-then<U> (self (f (fn (T) Option<U>))) Option<U>
@@ -467,7 +467,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
   (pub defmethod expect (self (msg string)) T
     (match self ((some x) x) ((none) (panic msg)))))
 
-(impl Result<T,E>
+(impl<T,E> Result<T,E>
   (pub defmethod map<U> (self (f (fn (T) U))) Result<U,E>
     (match self ((ok x) (Result::ok (f x))) ((err e) (Result::err e))))
   (pub defmethod map-err<E2> (self (f (fn (E) E2))) Result<T,E2>
@@ -1530,7 +1530,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; cursor per `(v::iter)` call).
 (module vec
 (pub defstruct vector-iter<T> (vec Vector<T>) (pos int))
-(impl Iter vector-iter<T>
+(impl<T> Iter vector-iter<T>
   (:type Item T)
   (defmethod next (self) Option<T>
     (if (< self::pos (len self::vec))
@@ -1538,11 +1538,11 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (setf self::pos (+ self::pos 1))
           (Option::some v))
         (Option::none))))
-(impl Vector<T>
+(impl<T> Vector<T>
   (pub defmethod iter (self) vector-iter<T> (make-instance 'vector-iter :vec self :pos 0)))
 ;; The built-in `push` and `pop` are the methods.
-(impl Push Vector<T> (:type Item T))
-(impl Pop Vector<T> (:type Item T)))
+(impl<T> Push Vector<T> (:type Item T))
+(impl<T> Pop Vector<T> (:type Item T)))
 
 ;; Generic collection combinators (redesign Phase 4). Each takes an
 ;; *iterator* — any type implementing the `Iter` trait — rather than one
@@ -1996,7 +1996,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; than duplicating it.
 (module collections
 (pub defstruct hashtable-iter<K,V> (snapshot Vector<cons-cell<K,V>>) (pos int))
-(impl Iter hashtable-iter<K,V>
+(impl<K,V> Iter hashtable-iter<K,V>
   (:type Item cons-cell<K,V>)
   (defmethod next (self) Option<cons-cell<K,V>>
     (if (< self::pos (len self::snapshot))
@@ -2004,7 +2004,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (setf self::pos (+ self::pos 1))
           (Option::some e))
         (Option::none))))
-(impl HashTable<K,V>
+(impl<K,V> HashTable<K,V>
   (pub defmethod iter (self) hashtable-iter<K,V> (make-instance 'hashtable-iter :snapshot (entries self) :pos 0))))
 
 ;; CL's `maphash` and `hash-table-size`, receiver-first and without the type
@@ -2015,7 +2015,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; user-visible capacity distinct from its occupancy, and reporting a made-up
 ;; number would be worse than reporting the real one. CL only promises that
 ;; `hash-table-size` is a non-negative integer.
-(impl HashTable<K,V>
+(impl<K,V> HashTable<K,V>
   (pub defmethod maphash (self (f (fn (K V) ()))) ()
     "Call `f` on every key/value pair, in no particular order. CL's `maphash`."
     (doiter (e (iter self)) (f (car e) (cdr e))))
@@ -2229,7 +2229,7 @@ user-visible capacity."
           (setf i (+ i 1))))
       found))))
 
-(impl HashTable<K,V>
+(impl<K,V> HashTable<K,V>
   (pub defmethod get (self (k K)) Option<V>
     (:where (Hash K))
     "The value `k` maps to, or `none`. CL's `gethash`."
@@ -2577,7 +2577,7 @@ user-visible capacity."
 ;; instantiation). Note the bound names must be the *owner's* declared type
 ;; parameters (`A`/`B`, exactly as written on the `defstruct`) — a method's
 ;; signature can only be generic through them.
-(impl Eq cons-cell<A,B> (:where (Eq A) (Eq B))
+(impl<A,B> Eq cons-cell<A,B> (:where (Eq A) (Eq B))
   (defmethod equals (self (other Self)) bool
     (if (equals self::car other::car)
         (equals self::cdr other::cdr)
@@ -2592,7 +2592,7 @@ user-visible capacity."
 ;; before supertraits existed this shape additionally avoided writing
 ;; `(Eq A)` in the bound list.
 ;; `less-equal`/`greater`/`greater-equal` come from `Ord`'s default bodies.
-(impl Ord cons-cell<A,B> (:where (Ord A) (Ord B))
+(impl<A,B> Ord cons-cell<A,B> (:where (Ord A) (Ord B))
   (defmethod less (self (other Self)) bool
     (if (less self::car other::car)
         true
@@ -2958,7 +2958,7 @@ user-visible capacity."
 ;; CL's `make-list`/`make-sequence`: `n` copies of `x`. A static method, so it
 ;; reads like `Vector::new` — and, like `Vector::new`, its type argument comes
 ;; from the surrounding expected type, so a bare `let` binding needs `the`.
-(impl Vector<T>
+(impl<T> Vector<T>
   (pub defmethod filled ((n int) (x T)) Vector<T>
     (let ((out (the Vector<T> (Vector::new))) (i 0))
       (progn (while (< i n) (progn (push out x) (setf i (+ i 1)))) out))))
@@ -3357,7 +3357,7 @@ user-visible capacity."
 ;; `Vector<T>` itself was declared with — a generic method's registered
 ;; signature is rewritten into the owner's parameter names, so any name works,
 ;; but matching keeps the two readable side by side.
-(impl Vector<T>
+(impl<T> Vector<T>
   (pub defmethod set-contents (self (src Vector<T>)) Vector<T>
     "Replaces every element of `self` with `src`'s, in place, changing its
    length. The shared bottom half of the `delete`/`n...` family: each of them
@@ -3388,7 +3388,7 @@ user-visible capacity."
 ;; either direction. What the two halves do share is the *core* that does the
 ;; work (`seq-edit-core`, `seq-dedup-core`), which takes the resolved
 ;; closures; only the two `let` lines that resolve them repeat.
-(impl Vector<T>
+(impl<T> Vector<T>
   (pub defmethod delete (self (x T)
                      &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
                           (start int) (end int) (from-end bool) (count int))
@@ -3478,7 +3478,7 @@ user-visible capacity."
 ;; `fill` takes CL's `:start`/`:end`, and `replace` CL's four-window set —
 ;; whose numbering means here exactly what it means in CL, since the receiver
 ;; is CL's own `sequence-1`.
-(impl Vector<T>
+(impl<T> Vector<T>
   (pub defmethod fill (self (x T) &key (start int) (end int)) Vector<T>
     (let ((i 0))
       (progn
@@ -3501,7 +3501,7 @@ user-visible capacity."
 ;; why it is the one destructive operation (D4) genuinely warned about. Here
 ;; there is no last cons and nothing is shared: `other`'s elements are simply
 ;; appended into `self`, which `other` neither observes nor is affected by.
-(impl Vector<T>
+(impl<T> Vector<T>
   (pub defmethod nconc (self (other Vector<T>)) Vector<T>
     (progn (doiter (x (iter other)) (push self x)) self))
   (pub defmethod nreconc (self (other Vector<T>)) Vector<T>
@@ -3512,7 +3512,7 @@ user-visible capacity."
 ;; cons carries its `car`'s source span inline (`value::Cell::car_loc`), and
 ;; overwriting the `car` would leave the old element's position attached to
 ;; the new one, quietly misplacing every later diagnostic.
-(impl cons-cell<A,B>
+(impl<A,B> cons-cell<A,B>
   (pub defmethod rplaca (self (x A)) cons-cell<A,B>
     (progn (set-car self x) self))
   (pub defmethod rplacd (self (x B)) cons-cell<A,B>
@@ -3829,7 +3829,7 @@ user-visible capacity."
 ;; `pushnew`: push unless already present. A method rather than a macro —
 ;; CL needs a macro because its `place` must be re-written, and a `Vector<T>`
 ;; mutates in place instead.
-(impl Vector<T>
+(impl<T> Vector<T>
   (pub defmethod pushnew (self (x T)) () (:where (Eq T))
     (if (member x (iter self)) () (push self x))))
 
@@ -3956,7 +3956,7 @@ user-visible capacity."
   ;; these names as; the lazy ones are this module's own.
   (shadow map filter take)
   (pub defstruct map-iter<I,A,U> (src I) (f (fn (A) U)))
-  (impl Iter map-iter<I,A,U> (:where (Iter I (Item A)))
+  (impl<I,A,U> Iter map-iter<I,A,U> (:where (Iter I (Item A)))
     (:type Item U)
     (defmethod next (self) Option<U>
       (match (next self::src)
@@ -3966,7 +3966,7 @@ user-visible capacity."
     (make-instance 'map-iter :src it :f f))
 
   (pub defstruct filter-iter<I,A> (src I) (pred (fn (A) bool)))
-  (impl Iter filter-iter<I,A> (:where (Iter I (Item A)))
+  (impl<I,A> Iter filter-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
     (defmethod next (self) Option<A>
       (let ((p self::pred) (found (the Option<A> (Option::none))))
@@ -3979,7 +3979,7 @@ user-visible capacity."
     (make-instance 'filter-iter :src it :pred pred))
 
   (pub defstruct take-iter<I,A> (src I) (n int))
-  (impl Iter take-iter<I,A> (:where (Iter I (Item A)))
+  (impl<I,A> Iter take-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
     (defmethod next (self) Option<A>
       (if (> self::n 0)
@@ -3989,7 +3989,7 @@ user-visible capacity."
     (make-instance 'take-iter :src it :n n))
 
   (pub defstruct take-while-iter<I,A> (src I) (pred (fn (A) bool)) (done bool))
-  (impl Iter take-while-iter<I,A> (:where (Iter I (Item A)))
+  (impl<I,A> Iter take-while-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
     (defmethod next (self) Option<A>
       (if self::done
@@ -4002,7 +4002,7 @@ user-visible capacity."
     (make-instance 'take-while-iter :src it :pred pred :done false))
 
   (pub defstruct skip-iter<I,A> (src I) (n int))
-  (impl Iter skip-iter<I,A> (:where (Iter I (Item A)))
+  (impl<I,A> Iter skip-iter<I,A> (:where (Iter I (Item A)))
     (:type Item A)
     (defmethod next (self) Option<A>
       (while (> self::n 0)
@@ -4013,7 +4013,7 @@ user-visible capacity."
     (make-instance 'skip-iter :src it :n n))
 
   (pub defstruct enumerate-iter<I,A> (src I) (i int))
-  (impl Iter enumerate-iter<I,A> (:where (Iter I (Item A)))
+  (impl<I,A> Iter enumerate-iter<I,A> (:where (Iter I (Item A)))
     (:type Item #{int A})
     (defmethod next (self) Option<#{int A}>
       (match (next self::src)
@@ -4023,7 +4023,7 @@ user-visible capacity."
     (make-instance 'enumerate-iter :src it :i 0))
 
   (pub defstruct zip-iter<I,J,A,B> (left I) (right J))
-  (impl Iter zip-iter<I,J,A,B> (:where (Iter I (Item A)) (Iter J (Item B)))
+  (impl<I,J,A,B> Iter zip-iter<I,J,A,B> (:where (Iter I (Item A)) (Iter J (Item B)))
     (:type Item #{A B})
     (defmethod next (self) Option<#{A B}>
       (match (next self::left)
@@ -4035,7 +4035,7 @@ user-visible capacity."
     (make-instance 'zip-iter :left a :right b))
 
   (pub defstruct chain-iter<I,J,A> (left I) (right J) (left-done bool))
-  (impl Iter chain-iter<I,J,A> (:where (Iter I (Item A)) (Iter J (Item A)))
+  (impl<I,J,A> Iter chain-iter<I,J,A> (:where (Iter I (Item A)) (Iter J (Item A)))
     (:type Item A)
     (defmethod next (self) Option<A>
       (if self::left-done
@@ -4047,7 +4047,7 @@ user-visible capacity."
     (make-instance 'chain-iter :left a :right b :left-done false))
 
   (pub defstruct flat-map-iter<I,A,J,B> (src I) (f (fn (A) J)) (cur Option<J>))
-  (impl Iter flat-map-iter<I,A,J,B> (:where (Iter I (Item A)) (Iter J (Item B)))
+  (impl<I,A,J,B> Iter flat-map-iter<I,A,J,B> (:where (Iter I (Item A)) (Iter J (Item B)))
     (:type Item B)
     (defmethod next (self) Option<B>
       (let ((out (the Option<B> (Option::none))))
@@ -4067,7 +4067,7 @@ user-visible capacity."
     (make-instance 'flat-map-iter :src it :f f :cur (the Option<J> (Option::none))))
 
   (pub defstruct iterate-iter<A> (cur A) (f (fn (A) A)) (started bool))
-  (impl Iter iterate-iter<A>
+  (impl<A> Iter iterate-iter<A>
     (:type Item A)
     (defmethod next (self) Option<A>
       (when self::started
@@ -4078,7 +4078,7 @@ user-visible capacity."
     (make-instance 'iterate-iter :cur seed :f f :started false))
 
   (pub defstruct repeat-iter<A> (elem A))
-  (impl Iter repeat-iter<A>
+  (impl<A> Iter repeat-iter<A>
     (:type Item A)
     (defmethod next (self) Option<A> (Option::some self::elem)))
   (pub defun repeat<A> ((x A)) repeat-iter<A> (make-instance 'repeat-iter :elem x)))
@@ -4093,7 +4093,7 @@ user-visible capacity."
 ;; A set is a table whose values are `()`.
 (module collections
 (pub defstruct HashSet<T> (table HashTable<T,()>))
-(impl HashSet<T>
+(impl<T> HashSet<T>
   (pub defmethod new () HashSet<T> (make-instance 'HashSet :table (the HashTable<T,()> (HashTable::new))))
   (pub defmethod insert (self (x T)) bool (:where (Hash T))
     (if (is-some (get self::table x)) false (progn (set self::table x ()) true)))
@@ -4105,10 +4105,10 @@ user-visible capacity."
   (pub defmethod clear (self) () (clear self::table))
   (pub defmethod iter (self) vector-iter<T> (iter (keys self::table))))
 ;; `insert`, without its answer of whether `x` was new.
-(impl Push HashSet<T> (:where (Hash T))
+(impl<T> Push HashSet<T> (:where (Hash T))
   (:type Item T)
   (defmethod push (self (x T)) () (insert self x) ()))
-(impl print-object HashSet<T> (:where (print-object T))
+(impl<T> print-object HashSet<T> (:where (print-object T))
   (defmethod print-object (self (escape bool)) string
     (let ((out "#<hashset"))
       (doiter (x (iter self))
@@ -4141,7 +4141,7 @@ user-visible capacity."
     x)))
 (module collections
 (pub defstruct SortedTable<K,V> (ks Vector<K>) (vs Vector<V>))
-(impl SortedTable<K,V>
+(impl<K,V> SortedTable<K,V>
   (pub defmethod new () SortedTable<K,V>
     (make-instance 'SortedTable :ks (the Vector<K> (Vector::new)) :vs (the Vector<V> (Vector::new))))
   (pub defmethod get (self (k K)) Option<V> (:where (Ord K))
@@ -4172,7 +4172,7 @@ user-visible capacity."
         (push out (tuple (get self::ks i) (get self::vs i)))
         (setf i (+ i 1)))
       (iter out))))
-(impl print-object SortedTable<K,V> (:where (print-object K) (print-object V))
+(impl<K,V> print-object SortedTable<K,V> (:where (print-object K) (print-object V))
   (defmethod print-object (self (escape bool)) string
     (let ((out "#<sortedtable"))
       (doiter (#{k v} (iter self))
@@ -4186,7 +4186,7 @@ user-visible capacity."
 ;; costs a constant amount per element.
 (module collections
 (pub defstruct Deque<T> (before Vector<T>) (after Vector<T>))
-(impl Deque<T>
+(impl<T> Deque<T>
   (pub defmethod new () Deque<T>
     (make-instance 'Deque :before (the Vector<T> (Vector::new)) :after (the Vector<T> (Vector::new))))
   (pub defmethod count (self) int (+ (len self::before) (len self::after)))
@@ -4200,7 +4200,7 @@ user-visible capacity."
     (while (> (len from) 0) (pop from))
     (doiter (x (iter rest)) (push from x)))))
 (module collections
-(impl Deque<T>
+(impl<T> Deque<T>
   (pub defmethod pop-front (self) Option<T>
     (when (= 0 (len self::before)) (std::%internal::deque-refill self::before self::after))
     (pop self::before))
@@ -4228,14 +4228,14 @@ user-visible capacity."
       (while (>= i 0) (push out (get self::before i)) (setf i (- i 1)))
       (doiter (x (iter self::after)) (push out x))
       (iter out))))
-(impl Push Deque<T>
+(impl<T> Push Deque<T>
   (:type Item T)
   (defmethod push (self (x T)) () (push-back self x)))
 ;; The back, where `push` adds.
-(impl Pop Deque<T>
+(impl<T> Pop Deque<T>
   (:type Item T)
   (defmethod pop (self) Option<T> (pop-back self)))
-(impl print-object Deque<T> (:where (print-object T))
+(impl<T> print-object Deque<T> (:where (print-object T))
   (defmethod print-object (self (escape bool)) string
     (let ((out "#<deque"))
       (doiter (x (iter self))
@@ -6856,7 +6856,7 @@ user-visible capacity."
 ;; CL's `make-array`. `dims` is copied, so a later `push` to the caller's own
 ;; vector cannot change the array's shape behind its back.
 (module array
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod new ((dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>
     (let ((d (the Vector<int> (Vector::new))) (n 1))
       (progn
@@ -6882,21 +6882,21 @@ user-visible capacity."
 ;; CL's `array-rank` / `array-dimension` / `array-dimensions` /
 ;; `array-total-size`. The type name is not repeated in the method name:
 ;; the receiver already says which type is being asked.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod rank (self) int (len self::dims))
   (pub defmethod dimension (self (n int)) int (get self::dims n))
   (pub defmethod total-size (self) int (len self::data)))
 ;; A fresh vector, like CL's `array-dimensions` returns a fresh list — the
 ;; array's own is its representation and handing it out would let a caller
 ;; reshape the array by mutating what it got back.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod dimensions (self) Vector<int>
     (let ((out (the Vector<int> (Vector::new))))
       (progn (doiter (x (iter self::dims)) (push out x)) out))))
 
 ;; CL's `array-in-bounds-p`: false for the wrong number of subscripts too,
 ;; which is what CL says (it is not an error to ask).
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod in-bounds (self (idx Vector<int>)) bool
     (if (/= (len idx) (len self::dims))
         false
@@ -6913,7 +6913,7 @@ user-visible capacity."
 ;; fold that row-major order *is*. Out-of-range subscripts are an error here
 ;; rather than a wrong-but-in-range offset — without the check `(aref a 0 5)`
 ;; on a 3x3 would quietly read row 1 rather than say anything.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod row-major-index (self (idx Vector<int>)) int
     (if (in-bounds self idx)
         (let ((acc 0) (i 0) (r (len self::dims)))
@@ -6927,20 +6927,20 @@ user-visible capacity."
 
 ;; `aref` / `(setf (aref ...))`, spelled the way every other indexed container
 ;; in this language spells them. `(aref a i j)` is checker sugar for these.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod get (self (idx Vector<int>)) T
     (get self::data (row-major-index self idx)))
   (pub defmethod set (self (idx Vector<int>) (x T)) ()
     (set self::data (row-major-index self idx) x)))
 
 ;; CL's `row-major-aref` and its `setf`: the flat offset directly.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod row-major-get (self (i int)) T (get self::data i))
   (pub defmethod row-major-set (self (i int) (x T)) () (set self::data i x)))
 
 ;; CL's `length` on an array: the fill pointer when there is one, and the
 ;; whole array when there is not.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod len (self) int
     (match self::fill-pointer ((some n) n) ((none) (len self::data)))))
 
@@ -6948,7 +6948,7 @@ user-visible capacity."
 ;; a separate cursor per `(iter a)` call, walking row-major order and stopping
 ;; at the fill pointer if there is one.
 (defstruct array-iter<T> (arr Array<T>) (pos int))
-(impl Iter array-iter<T>
+(impl<T> Iter array-iter<T>
   (:type Item T)
   (defmethod next (self) Option<T>
     (if (< self::pos (len self::arr))
@@ -6956,14 +6956,14 @@ user-visible capacity."
           (setf self::pos (+ self::pos 1))
           (Option::some v))
         (Option::none))))
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod iter (self) array-iter<T> (make-instance 'array-iter :arr self :pos 0)))
 
 ;; CL's `vector-push-extend`: write at the fill pointer, growing the storage
 ;; when the pointer has reached the end. A fill-pointer array is
 ;; one-dimensional by construction (`Array::new` refuses any other rank), so
 ;; growing it means growing its single dimension.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod push-extend (self (x T)) ()
     (match self::fill-pointer
       ((none) (panic "push-extend: this array has no fill pointer"))
@@ -6972,13 +6972,13 @@ user-visible capacity."
          (if (< n (len self::data)) (set self::data n x) (push self::data x))
          (set self::dims 0 (len self::data))
          (setf self::fill-pointer (Option::some (+ n 1))))))))
-(impl Push Array<T>
+(impl<T> Push Array<T>
   (:type Item T)
   (defmethod push (self (x T)) () (push-extend self x)))
 
 ;; CL's `vector-pop`. `Option<T>` on an empty array rather than an error, the
 ;; same answer `Vector<T>`'s own `pop` gives.
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod pop (self) Option<T>
     (match self::fill-pointer
       ((none) (panic "pop: this array has no fill pointer"))
@@ -6988,7 +6988,7 @@ user-visible capacity."
            (let ((v (get self::data (- n 1))))
              (setf self::fill-pointer (Option::some (- n 1)))
              (Option::some v))))))))
-(impl Pop Array<T> (:type Item T))
+(impl<T> Pop Array<T> (:type Item T))
 
 ;; Decode a row-major offset back into subscripts, into `out` (which must
 ;; already have one slot per dimension). The inverse of `row-major-index`'s
@@ -7021,7 +7021,7 @@ user-visible capacity."
 ;; non-adjustable CL array may come back as a *different* array. Every array
 ;; here is adjustable, so there is never a second one to return.
 (module array
-(impl Array<T>
+(impl<T> Array<T>
   (pub defmethod adjust (self (newdims Vector<int>) (init T)) ()
     (let ((nd (the Vector<int> (Vector::new))) (n 1))
       (progn
@@ -7117,7 +7117,7 @@ user-visible capacity."
       out))))
 
 (module array
-(impl print-object Array<T> (:where (print-object T))
+(impl<T> print-object Array<T> (:where (print-object T))
   (defmethod print-object (self (escape bool)) string
     (if *print-array*
         (let ((r (len self::dims)))
@@ -7449,7 +7449,7 @@ user-visible capacity."
 ;; this. Unlike `Vector<T>`, a channel really is its own cursor: receiving
 ;; consumes, so there is no second cursor to keep.
 (module sync
-(impl Iter Chan<T>
+(impl<T> Iter Chan<T>
   (:type Item T)
   (defmethod next (self) Option<T> (recv self))))
 
@@ -7544,7 +7544,7 @@ user-visible capacity."
 ;; the `Thread<T>` whose `join` answers with what it returned. `(thread (f))`
 ;; spelled as a function, for a body that is a closure already.
 (module thread
-(impl Thread<T>
+(impl<T> Thread<T>
   (pub defmethod spawn ((f (fn () T))) Thread<T>
     "Run `f` on an OS thread of its own. `(join th)` waits for its result."
     (thread (f)))))
@@ -7578,7 +7578,7 @@ user-visible capacity."
 (module sync
 (pub defstruct Mutex<T> (pub v T) (gate Chan<()>))
 
-(impl Mutex<T>
+(impl<T> Mutex<T>
   (pub defmethod new ((v T)) Mutex<T>
     "A mutex holding `v`, unlocked."
     (let ((g (the Chan<()> (Chan::new 1))))

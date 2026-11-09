@@ -72,6 +72,7 @@ pub(crate) mod impl_block;
 pub(crate) mod instance;
 pub(crate) mod lambda;
 pub(crate) mod lambda_list;
+pub(crate) mod library;
 pub(crate) mod list_form;
 pub(crate) mod literal;
 pub(crate) mod locals;

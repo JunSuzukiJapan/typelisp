@@ -10,8 +10,10 @@
 //!   definition is never replaced.
 
 use crate::check::{MacroExpander, RedefPolicy};
-use crate::types::{in_std, Path};
+use crate::check::registry::PRELUDE_MODULES;
+use crate::types::{in_std, std_module, Path};
 use crate::{Error, Heap};
+use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
 use super::registry::{Registry, TypeEntry, ValueDef};
@@ -77,7 +79,7 @@ impl Definer<'_> {
     pub(crate) fn value(&mut self, reg: &Registry, kind: Kind, name: SymRef) -> Result<(), Error> {
         let path = Path::of_symbol(self.site.ns, name);
         let (held, builtin) = match reg.values.get(&path) {
-            None => return self.redefine(kind, name, None),
+            None => return self.redefine(reg, kind, name, None),
             Some(ValueDef::Fn(def)) => (Kind::Function, def.builtin),
             Some(ValueDef::Var(_)) => (Kind::Variable, false),
             Some(ValueDef::Macro { .. }) => (Kind::Macro, false),
@@ -85,7 +87,7 @@ impl Definer<'_> {
         if held != kind {
             return Err(clash(kind, name, held.word()));
         }
-        self.redefine(kind, name, Some(builtin))
+        self.redefine(reg, kind, name, Some(builtin))
     }
 
     /// Whether the type or the trait `name`, as `kind` says, may be
@@ -122,7 +124,7 @@ impl Definer<'_> {
                 )))
             }
         };
-        self.redefine(kind, name, existing)
+        self.redefine(reg, kind, name, existing)
     }
 
     /// Whether the method `method` of `owner` may be defined again, when it
@@ -136,9 +138,14 @@ impl Definer<'_> {
 
     /// The redefinition policy's answer for `name`, a `kind`, already
     /// defined here (`existing` says whether as a built-in) or not.
-    fn redefine(&mut self, kind: Kind, name: SymRef, existing: Option<bool>) -> Result<(), Error> {
-        if in_std(self.site.ns) {
-            unimplemented!("typeck: a definition in the standard library, whose names are one across its modules")
+    fn redefine(&mut self, reg: &Registry, kind: Kind, name: SymRef, existing: Option<bool>) -> Result<(), Error> {
+        if let Some(other) = std_elsewhere(reg, self.site.ns, name) {
+            return Err(Error::TypeError(format!(
+                "cannot define {} `{}` here: the standard library already defines `{}`",
+                kind.word(),
+                name.name(),
+                other
+            )));
         }
         match existing {
             None => Ok(()),
@@ -159,6 +166,29 @@ impl Definer<'_> {
             RedefPolicy::Silent => Ok(()),
         }
     }
+}
+
+/// Another module of the standard library that defines `name`, when `ns`
+/// is one of its modules: a name has one definition across the modules
+/// `std::prelude` offers, and a type name one across all of them.
+fn std_elsewhere(reg: &Registry, ns: NsId, name: SymRef) -> Option<Path> {
+    if !in_std(ns) {
+        return None;
+    }
+    let library = |m: NsId| m == NsId::STD || PRELUDE_MODULES.iter().any(|seg| std_module(seg) == m);
+    let elsewhere = |p: &Path, within: &dyn Fn(NsId) -> bool| p.ns() != ns && within(p.ns()) && p.name_symbol().name() == name.name();
+    if library(ns) {
+        let value = reg.values.iter().map(|(p, _)| *p).find(|p| elsewhere(p, &library));
+        let ty = || reg.types.iter().map(|(p, _)| *p).find(|p| elsewhere(p, &library));
+        let ctor = || reg.ctors.iter().find(|((m, s), _)| *m != ns && library(*m) && s.name() == name.name()).map(|((m, s), _)| Path::of_symbol(*m, *s));
+        if let Some(p) = value.or_else(ty).or_else(ctor) {
+            return Some(p);
+        }
+    }
+    reg.types
+        .iter()
+        .find(|(p, entry)| elsewhere(p, &in_std) && !matches!(entry, TypeEntry::Alias { .. }))
+        .map(|(p, _)| *p)
 }
 
 /// A `kind` defined under the name of a `held` already here.

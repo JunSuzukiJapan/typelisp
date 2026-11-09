@@ -15,14 +15,14 @@ use typelisp_mem::symbols::{member_symbol, NsId};
 use typelisp_mem::SymRef;
 
 use super::bounds::parse_where;
-use super::defun::{by_param, lower_all, parse_header, split_where};
+use super::defun::{by_param, lower_all, parse_header, split_doc, split_where};
 use super::lambda_list::{parse_lambda_list, LambdaList, Written};
 use super::expr::{check_body, Cx};
 use super::generic::{Base, Requests};
 use super::locals::Locals;
 use super::lower::Lowering;
 use super::define::Definer;
-use super::registry::{FnDef, MethodDef, Registry, Template, TypeEntry};
+use super::registry::{Doc, FnDef, MethodDef, Registry, Template, TypeEntry};
 use super::resolve::find_named;
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -45,9 +45,7 @@ pub(crate) fn check_defmethod(
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
     let (clause, body) = split_where(heap, body)?;
-    if matches!(body, [(Value::Str(_), _), _, ..]) {
-        unimplemented!("typeck: a `defmethod` with a documentation string")
-    }
+    let (doc, body) = split_doc(heap, body);
     let written: Vec<Value> = heap.list_to_vec(*params)?;
     let receiver = written.first().and_then(|r| heap.list_to_vec(*r).ok()).filter(|r| r.len() == 2 && matches!(r[0], Value::Symbol(_)));
     let Some(receiver) = receiver.filter(|_| !is_type_application(heap, written[0])) else {
@@ -65,6 +63,9 @@ pub(crate) fn check_defmethod(
     }
     let owner = receiver_type_path(heap, reg, ns, receiver[1])?;
     let method = member_symbol(name.name());
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Method(owner, method), doc);
+    }
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Method(owner, method), &type_names).map_err(|twice| {
         Error::TypeError(format!("defmethod {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))

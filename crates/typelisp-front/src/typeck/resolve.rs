@@ -4,6 +4,7 @@
 //! A module sees what it defines and what it brings in. No enclosing module
 //! is consulted.
 
+use crate::check::analyze::is_option_of_sexpr;
 use crate::types::{in_std, nominal_path, prelude_ns, Path, Type};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
@@ -73,7 +74,17 @@ pub(crate) fn static_use_named(reg: &Registry, here: NsId, sym: SymRef) -> Optio
 ///
 /// A method without `pub` is seen as [`sees`] says, from the module it was
 /// written in.
+///
+/// An `Option<Sexpr>` is the type an S-expression has, so it answers to
+/// `Sexpr`'s instance methods too, whose signatures take it; what `Sexpr`
+/// does not have is `Option`'s.
 pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name: SymRef) -> Option<(Path, &'r MethodDef)> {
+    if is_option_of_sexpr(ty) {
+        let sexpr = Path::builtin(typelisp_mem::wk::SEXPR);
+        if let Some(m) = reg.method(&sexpr, name).filter(|m| m.instance) {
+            return Some((sexpr, m));
+        }
+    }
     let owner = nominal_path(ty)?;
     let args = match ty {
         Type::Named(_, args) => args.as_slice(),

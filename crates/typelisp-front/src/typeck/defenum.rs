@@ -13,9 +13,9 @@ use crate::types::{ParamOwner, Path};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 
-use super::defun::parse_header;
+use super::defun::{parse_header, split_doc};
 use super::define::{Definer, Kind};
-use super::registry::{Registry, TypeDef, TypeEntry};
+use super::registry::{Doc, Registry, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
 
@@ -27,14 +27,15 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
     let [(header, _), items @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
-    if matches!(items.first(), Some((Value::Str(_), _))) {
-        unimplemented!("typeck: a `defenum` with a documentation string")
-    }
+    let (doc, items) = split_doc(heap, items);
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
     d.ownable(heap, name, "defenum")?;
     d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Type(path), doc);
+    }
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defenum {}: type parameter `{}` is declared twice", path, twice.0.name()))
@@ -46,7 +47,7 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
         params: scope.params().to_vec(),
         public: d.public,
         builtin: false,
-        stdlib: false,
+        stdlib: crate::types::in_std(ns),
         fields: Vec::new(),
         has_defaults: false,
         variants: Vec::new(),

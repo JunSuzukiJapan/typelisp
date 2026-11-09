@@ -292,6 +292,22 @@ pub(crate) struct Registry {
     /// body, by the type and the member symbol: the trait, and its
     /// parameters there, written in the method's type parameters.
     defaulted: Table<(Path, SymRef), (Path, Vec<Type>)>,
+    /// The documentation strings definitions wrote.
+    pub(crate) docs: Table<Doc, String>,
+}
+
+/// A definition a documentation string is kept for: a function, a macro, a
+/// global variable, a type or a trait by its path, a type's method or a
+/// trait's own method by the type or the trait and the member symbol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Doc {
+    Fn(Path),
+    Macro(Path),
+    Var(Path),
+    Type(Path),
+    Trait(Path),
+    Method(Path, SymRef),
+    TraitMethod(Path, SymRef),
 }
 
 impl Registry {
@@ -404,6 +420,7 @@ impl Registry {
         self.trait_impls.commit();
         self.blanket_impls.commit();
         self.defaulted.commit();
+        self.docs.commit();
     }
 
     /// Undo every write since the last commit.
@@ -421,6 +438,7 @@ impl Registry {
         self.trait_impls.rollback();
         self.blanket_impls.rollback();
         self.defaulted.rollback();
+        self.docs.rollback();
     }
 }
 

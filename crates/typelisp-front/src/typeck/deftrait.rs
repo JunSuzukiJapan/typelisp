@@ -17,9 +17,9 @@ use super::define::{Definer, Kind};
 use super::expr::{check_body, Cx};
 use super::generic::Base;
 use super::locals::Locals;
-use super::defun::parse_header;
+use super::defun::{parse_header, split_doc};
 use super::impl_block::method_params;
-use super::registry::{FnDef, Registry, Template, TraitDef, TypeEntry};
+use super::registry::{Doc, FnDef, Registry, Template, TraitDef, TypeEntry};
 use super::resolve::trait_named;
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
@@ -37,13 +37,14 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
         return Err(Error::TypeError("deftrait: name must be a symbol".into()));
     };
     let spelling = bound_name(name, "deftrait")?;
-    if matches!(items.first(), Some((Value::Str(_), _))) {
-        unimplemented!("typeck: a `deftrait` with a documentation string")
-    }
+    let (doc, items) = split_doc(heap, items);
     d.ownable(heap, name, "deftrait")?;
     d.type_name(reg, Kind::Trait, name)?;
     let ns = d.site.ns;
     let path = Path::of_symbol(ns, name);
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Trait(path), doc);
+    }
     // Read before the trait is registered, so a trait cannot list itself.
     let supertraits = supertraits(heap, reg, ns, &spelling, *supers)?;
     let mut names = vec![well_known_symbol(wk::SELF_TYPE)];
@@ -87,6 +88,11 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
         }
     }
     reg.types.insert(path, TypeEntry::Trait(def));
+    for w in &methods {
+        if let Some(doc) = &w.doc {
+            reg.docs.insert(Doc::TraitMethod(path, member_symbol(w.name.name())), doc.clone());
+        }
+    }
     for m in bodyless {
         reg.set_template(Base::Method(path, m), None);
     }
@@ -118,6 +124,9 @@ struct Written {
     name: SymRef,
     params: Value,
     ret: Value,
+    /// Only a method with a default body has one: in a signature alone, a
+    /// string at the end is the result type's place.
+    doc: Option<String>,
     body: Vec<(Value, Option<Loc>)>,
 }
 
@@ -156,15 +165,13 @@ fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
     if !own.is_empty() {
         unimplemented!("typeck: a trait method with type parameters of its own")
     }
-    if matches!(body, [(Value::Str(_), _), _, ..]) {
-        unimplemented!("typeck: a trait method with a documentation string")
-    }
+    let (doc, body) = split_doc(heap, body);
     if let Some((first, _)) = body.first() {
         if crate::check::analyze::is_where_clause(heap, *first)? {
             unimplemented!("typeck: a trait method with a `(:where ...)` clause")
         }
     }
-    Ok(Item::Method(Written { name, params: *params, ret: *ret, body: body.to_vec() }))
+    Ok(Item::Method(Written { name, params: *params, ret: *ret, doc, body: body.to_vec() }))
 }
 
 /// The supertrait list `v` of the trait `name`.

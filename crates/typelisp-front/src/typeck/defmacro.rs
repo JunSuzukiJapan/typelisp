@@ -16,11 +16,12 @@ use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
 use super::define::{Definer, Kind};
+use super::defun::split_doc;
 use super::expr::{check_body, check_expr, Cx};
 use super::generic::Requests;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
-use super::registry::{Registry, ValueDef};
+use super::registry::{Doc, Registry, ValueDef};
 use super::scope::TypeScope;
 use super::subst::Subst;
 
@@ -43,9 +44,7 @@ pub(crate) fn check_defmacro(
     d.ownable(heap, name, "defmacro")?;
     bound_name(name, "defmacro")?;
     d.value(reg, Kind::Macro, name)?;
-    if matches!(body, [(Value::Str(_), _), _, ..]) {
-        unimplemented!("typeck: a `defmacro` with a documentation string")
-    }
+    let (doc, body) = split_doc(heap, body);
     let (required, optionals, rest, keys) = parse_macro_lambda_list(heap, &heap.list_to_vec(*params)?)?;
     let def = MacroDef {
         required: required.len(),
@@ -57,6 +56,9 @@ pub(crate) fn check_defmacro(
     };
     let path = Path::of_symbol(d.site.ns, name);
     reg.values.insert(path, ValueDef::Macro { public: d.public, shape: MacroShape::of(&def) });
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Macro(path), doc);
+    }
 
     // Each default sees the parameters before it.
     let sexpr = option_of_sexpr();

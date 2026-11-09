@@ -23,8 +23,8 @@ use super::bounds::parse_where;
 use super::defun::by_param;
 use super::impl_block::method_params;
 use super::lambda_list::LambdaList;
-use super::registry::{FnDef, MethodDef, Registry, Template, TraitDef, TraitImpl, TypeEntry};
-use super::defun::lower_template;
+use super::registry::{Doc, FnDef, MethodDef, Registry, Template, TraitDef, TraitImpl, TypeEntry};
+use super::defun::{lower_template, split_doc};
 use super::generic::Base;
 use super::lower::Lowering;
 use crate::check::lower::CoreForms;
@@ -298,8 +298,9 @@ fn check_method(
     let [(header, _), (params, _), (ret, _), body @ ..] = rest else {
         return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
     };
-    if matches!(body, [(Value::Str(_), _), _, ..]) {
-        unimplemented!("typeck: a method with a documentation string")
+    let (doc, body) = split_doc(heap, body);
+    if let Some(doc) = doc {
+        reg.docs.insert(Doc::Method(of.owner, method), doc);
     }
     if let Some((first, _)) = body.first() {
         if crate::check::analyze::is_where_clause(heap, *first)? {

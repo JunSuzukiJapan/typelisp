@@ -281,6 +281,15 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         Value::Symbol(id) => check_symbol(cx, heap, locals, id, loc),
         Value::Path(id) => path_call::check_path_value(cx, heap, id, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
+        // Where an `Option` is expected, the empty list is its `none`.
+        Value::Empty => match solved {
+            Some(Type::Named(_, args)) => {
+                let mut none = Typed::none(args[0].clone());
+                none.loc = loc;
+                Ok(none)
+            }
+            _ => unreachable!("`crate::typeck::literal` made every other empty list a unit literal"),
+        },
         other => unimplemented!("typeck: checking {:?} (only literals, names and lists are checked so far)", other),
     }
 }
@@ -460,11 +469,18 @@ pub(crate) fn agree(cx: &Cx, found: &Type, expected: Option<&Type>) -> Result<()
 /// [`conform`] for the expression `t`, already checked, where `expected`
 /// is expected: an error is where `t` was written.
 ///
-/// What a checker decides only from what is expected — the empty list as
-/// `Option::none` — was decided without it; that is not done yet.
+/// What a checker decides only from what is expected was decided without
+/// it: the empty list, checked as the unit value, is `Option::none` where an
+/// `Option` is expected.
 pub(crate) fn conform_at(cx: &Cx, t: Typed, expected: &Type) -> Result<Typed, Error> {
-    if matches!(t.node, Node::Literal { tag: wk::UNIT, .. }) && matches!(cx.resolve(expected), Type::Named(p, _) if crate::types::path_is_builtin(&p, wk::OPTION)) {
-        unimplemented!("typeck: `()` as `Option::none`, checked before its type was known")
+    if matches!(t.node, Node::Literal { tag: wk::UNIT, .. }) {
+        if let Type::Named(p, args) = cx.resolve(expected) {
+            if crate::types::path_is_builtin(&p, wk::OPTION) {
+                let mut none = Typed::none(args[0].clone());
+                none.loc = t.loc.clone();
+                return Ok(none);
+            }
+        }
     }
     let loc = t.loc.clone();
     conform(cx, t, Some(expected)).map_err(|e| match &loc {
