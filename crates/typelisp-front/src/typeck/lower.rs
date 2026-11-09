@@ -175,6 +175,11 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             lw.reg.apply_form(heap, callee, &ret, &lowered)
         }
+        Node::Tool { tag, targets, llvm_ir } => match *tag {
+            wk::COMPILE => forms::compile_fn_form(heap, &targets[0]),
+            wk::DISASSEMBLE => forms::disassemble_fn_form(heap, &targets[0], *llvm_ir),
+            tag => forms::trace_form(heap, tag, targets),
+        },
         Node::Default { form } => crate::owned_form::owned_to_value(heap, form),
         Node::Panic { message } => {
             let message = lower_rooted(heap, lw, message)?;

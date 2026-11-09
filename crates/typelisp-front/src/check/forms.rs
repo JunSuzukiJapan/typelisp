@@ -519,7 +519,7 @@ pub(super) fn expr_form(heap: &mut Heap, form: Value) -> Result<Value, Error> {
 }
 
 /// `(compile-fn (fn PATH))` or `(compile-fn (method PATH SYM))`.
-pub(super) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
+pub(crate) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
     let payload = compile_target_payload(heap, target)?;
     core::tagged(heap, wk::COMPILE_FN, &[payload])
 }
@@ -528,7 +528,7 @@ pub(super) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result
 /// `(fn ..)`/`(method ..)` resolutions `compile-fn` carries — the four forms
 /// that name a single body all resolve it the same way, so they all travel in
 /// the same shape.
-pub(super) fn trace_form(heap: &mut Heap, tag: u32, targets: &[CompileTarget]) -> Result<Value, Error> {
+pub(crate) fn trace_form(heap: &mut Heap, tag: u32, targets: &[CompileTarget]) -> Result<Value, Error> {
     let mut payloads = Vec::with_capacity(targets.len());
     for t in targets {
         payloads.push(compile_target_payload(heap, t)?);
@@ -538,7 +538,7 @@ pub(super) fn trace_form(heap: &mut Heap, tag: u32, targets: &[CompileTarget]) -
 
 /// `(disassemble-fn PAYLOAD LLVM)` — one target and whether to print LLVM IR
 /// instead of host assembly.
-pub(super) fn disassemble_fn_form(heap: &mut Heap, target: &CompileTarget, llvm_ir: bool) -> Result<Value, Error> {
+pub(crate) fn disassemble_fn_form(heap: &mut Heap, target: &CompileTarget, llvm_ir: bool) -> Result<Value, Error> {
     let payload = compile_target_payload(heap, target)?;
     core::tagged(heap, wk::DISASSEMBLE_FN, &[payload, Value::Bool(llvm_ir)])
 }

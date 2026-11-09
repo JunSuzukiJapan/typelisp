@@ -90,6 +90,7 @@ pub(crate) mod sexpr_value;
 pub(crate) mod subst;
 pub(crate) mod sugar;
 pub(crate) mod the;
+pub(crate) mod tools;
 pub(crate) mod toplevel;
 pub(crate) mod trait_impl;
 pub(crate) mod tree;

@@ -865,6 +865,19 @@ mod tests {
         assert!(msg.contains("let*: binding must be (name val)"), "{}", msg);
     }
 
+    /// `compile` and the other tools name one body: a function, a macro or
+    /// a method, never a generic one.
+    #[test]
+    fn tools_name_one_body() {
+        assert_eq!(check_ok("(defun sq ((n int)) int (* n n))\n(compile sq)"), Type::Bool);
+        let msg = check_err("(defun id<T> ((x T)) T x)\n(compile id)");
+        assert!(msg.contains("compile: `id` is generic"), "{}", msg);
+        let msg = check_err("(compile nope)");
+        assert!(msg.contains("compile: no function `nope` is visible from here"), "{}", msg);
+        let msg = check_err("(defvar (v int) 1)\n(compile v)");
+        assert!(msg.contains("compile: `v` is a variable, not a function"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

@@ -337,6 +337,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - `defun` の `&optional`・`&rest`・`&key`（`typeck::lambda_list`）と、それらを持つ関数・メソッドの呼び出し（`typeck::args`）。呼び出しは引数を 1 つずつそろえた呼び出しにする。省いた引数は、既定値（`defun` のときに引数を束縛せずにチェックし、core IR にして持つ）か `none`、既定値のない引数を渡したら `some` で包む。`&rest` の引数は 1 つの `Sexpr` のリストにする。既定値を持つ引数の型は、関数の型パラメータを含んではいけない。`defmethod` と型の `impl` のメソッドも同じ。トレイトの `impl` のメソッドは目印を書けない（トレイトのメソッドの引数の数は `deftrait` が決める）。
 - 関数の値（`typeck::lambda`）：`lambda`、`labels`、`apply`、関数の型を持つ値の呼び出し、型パラメータと `&optional`・`&key` を持たない関数を値として取り出すこと。`lambda` と `labels` の関数の本体からは、外のループを抜けられない。`block` を扱うときは、`labels` の関数に名前の暗黙の block を付ける（旧チェッカーと同じ）。
 - `let*`（入れ子の `let` にする）と、引数の数で意味が変わる呼び出し（`typeck::sugar`）：可変個の算術と比較、0 個・1 個の算術と比較、`(log x base)`、`(atan y x)`。書き換えた形をその位置でチェックする。3 つ以上の `append`・`concatenate`・`aref` はまだ扱わない。
+- 1 つの本体を名指す道具（`typeck::tools`）：`compile`・`trace`・`untrace`・`disassemble`。名前は関数・マクロ・型のメソッドを指し、ジェネリックな定義は断る。1 つの具体化のためのメソッド（`Type<args>::member`）はまだ扱わない。
 - 単純な `loop` と `break`・`return`（`typeck::looping`）。ループの型は、出口が解く穴にする。何も出ないループは `!`。
 - `setf`：変数（`defconstant` は断る）、フィールド `var::field`（構造体の `set-field`）、呼び出しの形の場所 `(accessor recv key...)`（受け手の型の `set-accessor`、`get` なら `set` も）。
 - マクロの呼び出し（`typeck::macros`）。書かれたままの引数で展開し、展開したものを呼び出しの位置でチェックする。最上位では、定義のフォームとして読む前に展開する。マクロの本体は評価器が持ち（`MacroExpander`）、チェッカーは呼び出せる引数の数（`MacroShape`）だけを持つ。

@@ -72,6 +72,9 @@ pub(crate) enum Node {
     /// A call of the function value `callee`, its `&rest` arguments as one
     /// list.
     Apply { callee: Box<Typed>, args: Vec<Typed> },
+    /// `compile`, `trace`, `untrace` or `disassemble` (`tag`) of the bodies
+    /// `targets`; `llvm_ir` says what `disassemble` shows.
+    Tool { tag: u32, targets: Vec<crate::check::resolved::CompileTarget>, llvm_ir: bool },
     /// `(panic message)`: stop with `message`.
     Panic { message: Box<Typed> },
     /// `(unwind-protect protected cleanup)`: `protected`'s value, `cleanup`
@@ -155,7 +158,8 @@ impl Typed {
             | Node::Global { .. }
             | Node::Break
             | Node::Default { .. }
-            | Node::FnRef { .. } => {
+            | Node::FnRef { .. }
+            | Node::Tool { .. } => {
                 Vec::new()
             }
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
@@ -188,7 +192,8 @@ impl Typed {
             | Node::Global { .. }
             | Node::Break
             | Node::Default { .. }
-            | Node::FnRef { .. } => {
+            | Node::FnRef { .. }
+            | Node::Tool { .. } => {
                 Vec::new()
             }
             Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
@@ -263,6 +268,7 @@ impl Typed {
                 | Node::Panic { .. }
                 | Node::Default { .. }
                 | Node::Apply { .. }
+                | Node::Tool { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

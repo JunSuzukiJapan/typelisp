@@ -20,7 +20,7 @@ use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
 use super::args::First;
-use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, the, variant};
+use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -289,6 +289,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
         wk::AS => return cast::check_as(cx, heap, locals, args, false, loc),
         wk::TRY_AS => return cast::check_as(cx, heap, locals, args, true, loc),
+        wk::COMPILE => return tools::check_compile(cx, heap, args, loc),
+        wk::TRACE | wk::UNTRACE => return tools::check_trace(cx, heap, head, args, loc),
+        wk::DISASSEMBLE => return tools::check_disassemble(cx, heap, args, loc),
         wk::LABELS => return lambda::check_labels(cx, heap, locals, args, expected, loc),
         wk::LAMBDA => return lambda::check_lambda(cx, heap, locals, args, loc),
         wk::APPLY => return lambda::check_apply_form(cx, heap, locals, args, loc),
