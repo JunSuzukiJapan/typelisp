@@ -933,6 +933,14 @@ mod tests {
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
     }
 
+    /// A symbol macro is its form where the name is written, a place too;
+    /// a binding inside hides it.
+    #[test]
+    fn symbol_macros() {
+        let src = "(defstruct p (x int))\n(defun f () int (let ((v (make-instance 'p :x 1))) (symbol-macrolet ((px v::x)) (setf px 5) (+ px (let ((px 10)) px)))))\n(f)";
+        assert_eq!(run(src).1, Value::Int(15));
+    }
+
     /// `task` and `thread` take a call, and nothing else.
     #[test]
     fn spawning() {

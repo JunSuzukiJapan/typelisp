@@ -278,6 +278,11 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         return Ok(Typed { node: Node::Literal { tag: lit.tag, value: lit.value }, ty: lit.ty, loc });
     }
     match v {
+        // A symbol macro is its form, written here.
+        Value::Symbol(id) if locals.symbol_macro(id).is_some() => {
+            let form = locals.symbol_macro(id).expect("checked above");
+            check_expr(cx, heap, locals, form, expected, loc)
+        }
         Value::Symbol(id) => check_symbol(cx, heap, locals, id, loc),
         Value::Path(id) => path_call::check_path_value(cx, heap, id, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
@@ -292,6 +297,31 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         },
         other => unimplemented!("typeck: checking {:?} (only literals, names and lists are checked so far)", other),
     }
+}
+
+/// `(symbol-macrolet ((name form)...) body...)`: the body, in which each
+/// `name` stands for its `form`, checked where the name is written. A
+/// binding inside the body hides it as it hides a variable.
+fn check_symbol_macrolet(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
+    let Some(((bindings, _), body)) = args.split_first() else {
+        return Err(Error::TypeError("symbol-macrolet: (symbol-macrolet ((name form)...) body...)".into()));
+    };
+    let bindings = heap.list_to_vec(*bindings).map_err(|_| Error::TypeError("symbol-macrolet: the binding list must be a proper list".into()))?;
+    let mut macros = Vec::with_capacity(bindings.len());
+    for b in bindings {
+        let parts = heap.list_to_vec(b).map_err(|_| Error::TypeError("symbol-macrolet: each binding is (name form)".into()))?;
+        let [name, form] = parts[..] else {
+            return Err(Error::TypeError("symbol-macrolet: each binding is (name form)".into()));
+        };
+        let Value::Symbol(name) = name else {
+            return Err(Error::TypeError("symbol-macrolet: the binding name must be a symbol".into()));
+        };
+        crate::check::bound_name(name, "symbol-macrolet")?;
+        macros.push((name, form));
+    }
+    let inner = locals.bind_macros(macros)?;
+    let (body, ty) = check_body(cx, heap, &inner, body, expected)?;
+    Ok(Typed { node: Node::Let { binds: Vec::new(), body }, ty, loc })
 }
 
 /// The kind of type the number literal `v` may have, when it is one whose
@@ -362,6 +392,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::LABELS => return lambda::check_labels(cx, heap, locals, args, expected, loc),
         wk::LAMBDA => return lambda::check_lambda(cx, heap, locals, args, loc),
         wk::SELECT => return select::check_select(cx, heap, locals, args, expected, loc),
+        wk::SYMBOL_MACROLET => return check_symbol_macrolet(cx, heap, locals, args, expected, loc),
         wk::TASK | wk::THREAD => return spawn::check_spawn(cx, heap, locals, head.well_known(), args, loc),
         wk::APPLY => return lambda::check_apply_form(cx, heap, locals, args, loc),
         wk::PANIC => return control::check_panic(cx, heap, locals, args, loc),

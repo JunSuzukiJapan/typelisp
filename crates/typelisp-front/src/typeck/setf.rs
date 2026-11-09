@@ -40,6 +40,11 @@ pub(crate) fn check_setf(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Val
                 None => Err(Error::TypeError("setf: empty place".into())),
             }
         }
+        // A symbol macro's place is its form's.
+        Value::Symbol(name) if locals.symbol_macro(name).is_some() => {
+            let form = locals.symbol_macro(name).expect("checked above");
+            check_setf(cx, heap, locals, &[(form, heap.cons_loc(form)), value], loc)
+        }
         Value::Symbol(name) => set_variable(cx, heap, locals, name, value, loc),
         _ => Err(Error::TypeError("setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into())),
     }

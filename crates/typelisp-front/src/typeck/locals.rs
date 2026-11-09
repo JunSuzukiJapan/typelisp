@@ -1,11 +1,12 @@
-//! Local variables: what a name bound by a parameter list or a `let` means.
+//! Local variables: what a name bound by a parameter list or a `let` means,
+//! and the symbol macros `symbol-macrolet` binds the same way.
 //!
 //! The frames form a chain in which each frame refers to its parent and
 //! neither is copied or changed, so entering a `let` costs only its own
 //! bindings however deep it is nested.
 
 use crate::types::Type;
-use crate::Error;
+use crate::{Error, Value};
 use typelisp_mem::SymRef;
 
 /// One frame of local bindings, and the frames around it.
@@ -13,12 +14,15 @@ use typelisp_mem::SymRef;
 pub(crate) struct Locals<'p> {
     parent: Option<&'p Locals<'p>>,
     binds: Vec<(SymRef, Type)>,
+    /// Names that stand for a form, written where the name is
+    /// (`symbol-macrolet`).
+    macros: Vec<(SymRef, Value)>,
 }
 
 impl Locals<'static> {
     /// Where no local is bound: a top-level expression.
     pub(crate) fn empty() -> Locals<'static> {
-        Locals { parent: None, binds: Vec::new() }
+        Locals { parent: None, binds: Vec::new(), macros: Vec::new() }
     }
 }
 
@@ -30,7 +34,32 @@ impl<'p> Locals<'p> {
         if let Some((name, _)) = binds.iter().find(|(n, _)| is_reserved_name(*n)) {
             return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
         }
-        Ok(Locals { parent: Some(self), binds })
+        Ok(Locals { parent: Some(self), binds, macros: Vec::new() })
+    }
+
+    /// A frame inside `self` in which each name of `macros` stands for its
+    /// form. The forms are the program's, rooted with it.
+    pub(crate) fn bind_macros<'s>(&'s self, macros: Vec<(SymRef, Value)>) -> Result<Locals<'s>, Error> {
+        if let Some((name, _)) = macros.iter().find(|(n, _)| is_reserved_name(*n)) {
+            return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
+        }
+        Ok(Locals { parent: Some(self), binds: Vec::new(), macros })
+    }
+
+    /// The form the symbol macro `name` stands for here, when the nearest
+    /// binding of `name` is one.
+    pub(crate) fn symbol_macro(&self, name: SymRef) -> Option<Value> {
+        let mut frame = Some(self);
+        while let Some(f) = frame {
+            if f.binds.iter().any(|(n, _)| *n == name) {
+                return None;
+            }
+            if let Some((_, form)) = f.macros.iter().rev().find(|(n, _)| *n == name) {
+                return Some(*form);
+            }
+            frame = f.parent;
+        }
+        None
     }
 
     /// Whether the type of some local here is one `pred` holds of.
@@ -45,12 +74,16 @@ impl<'p> Locals<'p> {
         false
     }
 
-    /// The type of the local `name` here, if it is one.
+    /// The type of the local variable `name` here, if it is one.
     pub(crate) fn lookup(&self, name: SymRef) -> Option<&Type> {
         let mut frame = Some(self);
         while let Some(f) = frame {
             if let Some((_, t)) = f.binds.iter().rev().find(|(n, _)| *n == name) {
                 return Some(t);
+            }
+            // A symbol macro hides a variable around it.
+            if f.macros.iter().any(|(n, _)| *n == name) {
+                return None;
             }
             frame = f.parent;
         }
