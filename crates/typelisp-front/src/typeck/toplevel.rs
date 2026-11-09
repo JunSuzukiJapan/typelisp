@@ -878,6 +878,28 @@ mod tests {
         assert!(msg.contains("compile: `v` is a variable, not a function"), "{}", msg);
     }
 
+    /// A generic body calls the methods of its type parameters' bounds, a
+    /// supertrait's too; a call's type arguments must meet the bounds.
+    #[test]
+    fn where_bounds() {
+        let traits = "(deftrait shape () (defmethod area (self) int))
+(deftrait named (shape) (defmethod label (self) string))
+(defstruct sq (n int))
+(impl shape sq (defmethod area (self) int (* self::n self::n)))
+(impl named sq (defmethod label (self) string \"square\"))
+(defun total<T> ((a T) (b T)) int (:where (shape T)) (+ (area a) (area b)))
+(defun via-named<T> ((a T)) int (:where (named T)) (area a))
+";
+        assert_eq!(run(&format!("{}(total (make-instance 'sq :n 3) (make-instance 'sq :n 4))", traits)).1, Value::Int(25));
+        assert_eq!(run(&format!("{}(via-named (make-instance 'sq :n 3))", traits)).1, Value::Int(9));
+        let msg = check_err(&format!("{}(total 1 2)", traits));
+        assert!(msg.contains("type `int` does not implement trait `shape` required by `:where` clause on type parameter `T`"), "{}", msg);
+        let msg = check_err(&format!("{}(defun outer<U> ((u U)) int (total u u))", traits));
+        assert!(msg.contains("only known here as the enclosing function's own `U`"), "{}", msg);
+        let msg = check_err(&format!("{}(defun f<T> ((a T)) int (:where (shape U)) 1)", traits));
+        assert!(msg.contains("`U` is not a type parameter this definition declares"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

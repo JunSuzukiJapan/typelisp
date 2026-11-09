@@ -6,6 +6,7 @@ use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
 use super::args::{check_tail, has_tail};
+use super::bounds::{in_params, BoundMethod};
 use super::expr::{agree, check_expr, conform_at, Cx};
 use super::widen::expect;
 use super::locals::Locals;
@@ -29,9 +30,6 @@ pub(crate) fn check_method_call(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     let sig = &def.sig;
-    if !sig.bounds.is_empty() {
-        unimplemented!("typeck: calling {}::{}, which has :where bounds", owner, method.name())
-    }
     let given = rest.len() + usize::from(receiver.is_some());
     let required = sig.params.len();
     let what = format!("{}::{}", owner, method.name());
@@ -84,6 +82,11 @@ pub(crate) fn check_method_call(
         let what = format!("cannot infer {} `{}` for `{}::{}`", noun, p.name.name(), owner, method.name());
         cx.must_decide(t.clone(), what, loc.clone());
     }
+    for (p, bounds) in &sig.bounds {
+        for b in bounds {
+            cx.require_bound(subst.apply(&Type::Param(*p)), b.clone(), format!("{}::{}", owner, method.name()), p.name.name().to_string(), loc.clone());
+        }
+    }
     // A Rust builtin has no body to specialize: one entry point serves every
     // instantiation, and the result's type, which the lowering writes,
     // carries the instantiation (`Vector::new`'s `Vector<T>`).
@@ -95,6 +98,43 @@ pub(crate) fn check_method_call(
         None => method,
     };
     Ok(Typed { node: Node::MethodCall { owner, method, instance, targs, args }, ty: ret, loc })
+}
+
+/// A call of the method `method` of a trait bounding the type parameter
+/// that is `receiver`'s type, `bound` saying which trait and at what.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn check_trait_call(
+    cx: &Cx,
+    heap: &mut Heap,
+    locals: &Locals,
+    bound: BoundMethod,
+    method: SymRef,
+    receiver: Typed,
+    rest: &[(Value, Option<Loc>)],
+    expected: Option<&Type>,
+    loc: Option<Loc>,
+) -> Result<Typed, Error> {
+    let sig = bound.sig;
+    let what = format!("{}::{}", bound.trait_path, method.name());
+    let at = |ty: &Type| match in_params(&sig.type_params, &bound.at, ty) {
+        Some(t) => t,
+        None => unimplemented!("typeck: `{}`, whose type has an associated type its bound does not pin", what),
+    };
+    if super::args::has_tail(sig) {
+        unimplemented!("typeck: the trait method `{}` with &optional, &rest or &key parameters", what)
+    }
+    let given = rest.len() + 1;
+    if given != sig.params.len() {
+        return Err(Error::TypeError(format!("{}: expected {} argument(s), got {}", what, sig.params.len(), given)));
+    }
+    agree(cx, &receiver.ty, Some(&at(&sig.params[0])))?;
+    let mut args = vec![receiver];
+    for ((arg, arg_loc), param) in rest.iter().zip(&sig.params[1..]) {
+        args.push(check_expr(cx, heap, locals, *arg, Some(&at(param)), arg_loc.clone())?);
+    }
+    let ret = at(&sig.ret);
+    expect(cx, &ret, expected)?;
+    Ok(Typed { node: Node::TraitCall { trait_path: bound.trait_path, method, args }, ty: ret, loc })
 }
 
 /// Whether the type `ty` mentions the type parameter `p`.

@@ -24,6 +24,13 @@ impl Subst {
         Subst { map: params.iter().copied().zip(args.iter().cloned()).collect() }
     }
 
+    /// Each of `params` whose entry in `args` is a type replaced with it;
+    /// one whose entry is `None` is left as it is.
+    pub(crate) fn some_of(params: &[TypeParam], args: &[Option<Type>]) -> Subst {
+        assert_eq!(params.len(), args.len(), "a definition's type parameters and the arguments bound to them differ in number");
+        Subst { map: params.iter().zip(args).filter_map(|(p, a)| a.clone().map(|a| (*p, a))).collect() }
+    }
+
     /// `ty` with every parameter this substitution binds replaced.
     pub(crate) fn apply(&self, ty: &Type) -> Type {
         let each = |ts: &[Type]| ts.iter().map(|t| self.apply(t)).collect::<Vec<_>>();

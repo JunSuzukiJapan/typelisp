@@ -7,11 +7,13 @@
 //! empty `(module PATH)`, the form that defines a name and runs nothing.
 
 use crate::check::lower::CoreForms;
-use crate::types::{ParamOwner, Path, Type};
+use crate::check::registry::TraitBound;
+use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
 use super::expr::{check_body, Cx};
+use super::bounds::parse_where;
 use super::generic::{Base, Requests};
 use super::lambda_list::{parse_lambda_list, LambdaList, Written};
 use super::locals::Locals;
@@ -44,13 +46,9 @@ pub(crate) fn check_defun(
     let ns = d.site.ns;
     d.ownable(heap, name, "defun")?;
     d.value(reg, Kind::Function, name)?;
+    let (clause, body) = split_where(heap, body)?;
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a `defun` with a documentation string")
-    }
-    if let Some((first, _)) = body.first() {
-        if crate::check::analyze::is_where_clause(heap, *first)? {
-            unimplemented!("typeck: a `defun` with a `(:where ...)` clause")
-        }
     }
     let path = Path::of_symbol(ns, name);
     let root = TypeScope::empty();
@@ -60,7 +58,13 @@ pub(crate) fn check_defun(
     let named = format!("defun {}", path.last_segment());
     let at = Written { what: "defun", named: &named, owner: ParamOwner::Def(path) };
     let list = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &heap.list_to_vec(*params)?)?;
-    let ret = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, *ret)?;
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
+    let ret = parse_type(heap, &tcx, *ret)?;
+    let bounds = match clause {
+        Some(clause) => parse_where(heap, &tcx, clause)?,
+        None => Vec::new(),
+    };
+    let bounded = scope.bound(bounds.clone());
     let type_params = scope.params().to_vec();
     let LambdaList { required, optionals, rest, keys, bound: params } = list;
     let def = FnDef {
@@ -68,12 +72,13 @@ pub(crate) fn check_defun(
         rest: rest.map(|(_, t)| t),
         optionals,
         keys,
+        bounds: by_param(bounds),
         ..FnDef::plain(type_params.clone(), required.into_iter().map(|(_, t)| t).collect(), ret.clone())
     };
     reg.define_fn(path, def);
 
     let mut body = {
-        let cx = Cx::new(reg, d.expander, ns, &scope, None);
+        let cx = Cx::new(reg, d.expander, ns, &bounded, None);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
@@ -94,6 +99,28 @@ pub(crate) fn check_defun(
     let mut lw = Lowering { reg, subst: &subst, requests };
     let forms = lower_all(heap, &mut lw, &body)?;
     reg.defun_form(heap, &path, &params, &ret, &forms)
+}
+
+/// What follows a definition's result type: its `(:where ...)` clause, when
+/// it has one, and the rest.
+pub(crate) fn split_where<'b>(heap: &Heap, body: &'b [(Value, Option<Loc>)]) -> Result<(Option<Value>, &'b [(Value, Option<Loc>)]), Error> {
+    match body.split_first() {
+        Some(((first, _), rest)) if crate::check::analyze::is_where_clause(heap, *first)? => Ok((Some(*first), rest)),
+        _ => Ok((None, body)),
+    }
+}
+
+/// `bounds`, each parameter's together, in the order the parameters are
+/// first bounded.
+pub(crate) fn by_param(bounds: Vec<(TypeParam, TraitBound)>) -> Vec<(TypeParam, Vec<TraitBound>)> {
+    let mut out: Vec<(TypeParam, Vec<TraitBound>)> = Vec::new();
+    for (p, b) in bounds {
+        match out.iter_mut().find(|(q, _)| *q == p) {
+            Some((_, bs)) => bs.push(b),
+            None => out.push((p, vec![b])),
+        }
+    }
+    out
 }
 
 /// `body` lowered in order, each form rooted.

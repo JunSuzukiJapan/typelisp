@@ -20,6 +20,9 @@ use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
 use super::args::First;
+use super::bounds::{bound_method, unmet};
+use crate::check::bound_message;
+use crate::check::registry::TraitBound;
 use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
@@ -48,13 +51,15 @@ pub(crate) struct Cx<'a> {
     pub(crate) loops: RefCell<Vec<LoopExit>>,
     /// The control strings to check against their arguments' settled types.
     directives: RefCell<Vec<Directives>>,
+    /// The bounds the form's calls require of their type arguments.
+    required: RefCell<Vec<Required>>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
 }
 
 impl<'a> Cx<'a> {
     pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), directives: RefCell::new(Vec::new()), temps: Cell::new(0) }
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -111,6 +116,12 @@ impl<'a> Cx<'a> {
         self.undecided.borrow_mut().push((ty, what, loc));
     }
 
+    /// Require that the type argument `ty`, given the type parameter `param`
+    /// of the callee `of`, meet `bound`, once the form's types are settled.
+    pub(crate) fn require_bound(&self, ty: Type, bound: TraitBound, of: String, param: String, loc: Option<Loc>) {
+        self.required.borrow_mut().push(Required { ty, bound, of, param, loc });
+    }
+
     /// Check `d`'s control string against its arguments once their types
     /// are settled ([`Self::settle`]): a later use may decide them.
     pub(crate) fn check_directives_later(&self, d: Directives) {
@@ -149,8 +160,22 @@ impl<'a> Cx<'a> {
         for d in self.directives.borrow().iter() {
             check_directives(d, |ty| self.resolve(ty))?;
         }
+        for r in self.required.borrow().iter() {
+            if let Some(why) = unmet(self.reg, self.scope, &self.resolve(&r.ty), &r.bound) {
+                return Err(at(Error::TypeError(bound_message(&r.of, &r.param, &why)), &r.loc));
+            }
+        }
         Ok(())
     }
+}
+
+/// A bound a call requires of a type argument ([`Cx::require_bound`]).
+struct Required {
+    ty: Type,
+    bound: TraitBound,
+    of: String,
+    param: String,
+    loc: Option<Loc>,
 }
 
 /// `e` at `loc`, when it is known.
@@ -357,6 +382,11 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &cx.with_default(&first.ty), member) {
         cx.decide(&first.ty);
         return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), rest, expected, loc);
+    }
+    if let Type::Param(p) = cx.resolve(&first.ty) {
+        if let Some(bound) = bound_method(cx.reg, cx.scope, p, member) {
+            return method::check_trait_call(cx, heap, locals, bound, member, first, rest, expected, loc);
+        }
     }
     call_function(cx, heap, locals, value, spelling, Some(First { checked: first, written }), rest, expected, loc)
 }

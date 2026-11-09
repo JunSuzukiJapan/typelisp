@@ -42,9 +42,6 @@ pub(crate) fn check_call(
         let rest: Vec<(Value, Option<Loc>)> = rest.iter().cloned().chain([(module, None)]).collect();
         return check_call(cx, heap, locals, path, def, first, &rest, expected, loc);
     }
-    if !def.bounds.is_empty() {
-        unimplemented!("typeck: calling {}, which has :where bounds", path)
-    }
     if def.ffi {
         unimplemented!("typeck: calling the C function {} (unsafe is not checked yet)", path)
     }
@@ -82,6 +79,11 @@ pub(crate) fn check_call(
     for (p, t) in def.type_params.iter().zip(&targs) {
         let what = format!("cannot infer type parameter `{}` for `{}`", p.name.name(), path);
         cx.must_decide(t.clone(), what, loc.clone());
+    }
+    for (p, bounds) in &def.bounds {
+        for b in bounds {
+            cx.require_bound(subst.apply(&Type::Param(*p)), b.clone(), path.to_string(), p.name.name().to_string(), loc.clone());
+        }
     }
     Ok(Typed { node: Node::Call { path, targs: call_targs, args: checked }, ty: ret, loc })
 }

@@ -41,6 +41,11 @@ pub(crate) enum Node {
     /// arguments `targs` when it is generic. An instance method's receiver is
     /// the first argument.
     MethodCall { owner: Path, method: SymRef, instance: bool, targs: Vec<Type>, args: Vec<Typed> },
+    /// A call of the method `method` of the trait `trait_path`, on a
+    /// receiver whose type is a type parameter the trait bounds. Once the
+    /// tree is specialized, the receiver's type is one with an `impl` of the
+    /// trait, whose method the call is.
+    TraitCall { trait_path: Path, method: SymRef, args: Vec<Typed> },
     /// A new value of the type `owner<targs>`: its variant `variant`'s fields,
     /// whose declared types at these arguments are `field_tys`. A struct's is
     /// mutable.
@@ -162,7 +167,7 @@ impl Typed {
             | Node::Tool { .. } => {
                 Vec::new()
             }
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::TraitCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
                 args.iter().collect()
             }
             Node::Apply { callee, args } => std::iter::once(&**callee).chain(args).collect(),
@@ -196,7 +201,7 @@ impl Typed {
             | Node::Tool { .. } => {
                 Vec::new()
             }
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::TraitCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
                 args.iter_mut().collect()
             }
             Node::Apply { callee, args } => std::iter::once(&mut **callee).chain(args.iter_mut()).collect(),
@@ -269,6 +274,7 @@ impl Typed {
                 | Node::Default { .. }
                 | Node::Apply { .. }
                 | Node::Tool { .. }
+                | Node::TraitCall { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

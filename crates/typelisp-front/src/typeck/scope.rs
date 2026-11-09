@@ -7,9 +7,13 @@
 //! a name the trait declares an associated type stands for the type the
 //! `impl` binds it to.
 //!
+//! A `:where` clause bounds the parameters of the frame it is written for,
+//! in a frame inside that one ([`TypeScope::bound`]).
+//!
 //! The frames form a chain in which each frame refers to its parent and
 //! neither is copied or changed.
 
+use crate::check::registry::TraitBound;
 use crate::types::{ParamOwner, Type, TypeParam};
 use typelisp_mem::SymRef;
 
@@ -24,12 +28,14 @@ pub(crate) struct TypeScope<'p> {
     params: Vec<TypeParam>,
     /// Names that stand for types.
     named: Vec<(SymRef, Type)>,
+    /// The bounds on parameters of the frames outside this one.
+    bounds: Vec<(TypeParam, TraitBound)>,
 }
 
 impl TypeScope<'static> {
     /// Where no type parameter is declared.
     pub(crate) fn empty() -> TypeScope<'static> {
-        TypeScope { parent: None, params: Vec::new(), named: Vec::new() }
+        TypeScope { parent: None, params: Vec::new(), named: Vec::new(), bounds: Vec::new() }
     }
 }
 
@@ -43,13 +49,28 @@ impl<'p> TypeScope<'p> {
             }
         }
         let params = names.iter().enumerate().map(|(i, &name)| TypeParam { owner, index: i as u32, name }).collect();
-        Ok(TypeScope { parent: Some(self), params, named: Vec::new() })
+        Ok(TypeScope { parent: Some(self), params, named: Vec::new(), bounds: Vec::new() })
     }
 
     /// A frame inside `self` in which each name of `named` stands for its
     /// type.
     pub(crate) fn name_types<'s>(&'s self, named: Vec<(SymRef, Type)>) -> TypeScope<'s> {
-        TypeScope { parent: Some(self), params: Vec::new(), named }
+        TypeScope { parent: Some(self), params: Vec::new(), named, bounds: Vec::new() }
+    }
+
+    /// A frame inside `self` in which each parameter of `bounds` is bounded
+    /// by its trait.
+    pub(crate) fn bound<'s>(&'s self, bounds: Vec<(TypeParam, TraitBound)>) -> TypeScope<'s> {
+        TypeScope { parent: Some(self), params: Vec::new(), named: Vec::new(), bounds }
+    }
+
+    /// The bounds on the parameter `p` here.
+    pub(crate) fn bounds_of(&self, p: TypeParam) -> Vec<&TraitBound> {
+        let mut out: Vec<&TraitBound> = self.bounds.iter().filter(|(q, _)| *q == p).map(|(_, b)| b).collect();
+        if let Some(parent) = self.parent {
+            out.extend(parent.bounds_of(p));
+        }
+        out
     }
 
     /// The type `name` stands for here: the type parameter or the named type

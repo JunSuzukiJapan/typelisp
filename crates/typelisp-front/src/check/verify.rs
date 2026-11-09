@@ -98,7 +98,7 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
 
 /// What a call says when the type it decided for `of`'s type parameter
 /// `param` falls short of `param`'s bound as `unmet` says.
-pub(super) fn bound_message(of: &str, param: &str, unmet: &Unmet) -> String {
+pub(crate) fn bound_message(of: &str, param: &str, unmet: &Unmet) -> String {
     match unmet {
         Unmet::Undeclared { var, trait_path } => format!(
             "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
