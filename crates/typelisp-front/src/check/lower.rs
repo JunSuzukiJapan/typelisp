@@ -314,6 +314,14 @@ fn lower_assoc(
     info.assoc_form(heap, owner, method, instance, ret, args)
 }
 
+/// A `labels` function, its body lowered.
+pub(crate) struct LoweredLabel {
+    pub(crate) name: SymRef,
+    pub(crate) params: Vec<(SymRef, Type)>,
+    pub(crate) ret: Type,
+    pub(crate) body: Vec<Value>,
+}
+
 /// The core-form builders: one per tag in `tests/core_vocabulary_test.rs`.
 /// They read the type information (a type's representation) and nothing else.
 pub(crate) trait CoreForms {
@@ -745,6 +753,28 @@ pub(crate) trait CoreForms {
         f.finish_list()
     }
 
+    /// `(labels ((NAME ((SYM REPR)...) REPR BODY...)...) BODY...)`, the
+    /// functions' bodies and `body` lowered already.
+    fn labels_core_form(&self, heap: &mut Heap, defs: &[LoweredLabel], body: &[Value]) -> Result<Value, Error> {
+        let mut f = Items::new(heap);
+        let mut ds = Items::new(f.heap());
+        for def in defs {
+            let mut d = Items::new(ds.heap());
+            d.push(Value::Symbol(def.name));
+            let ps = self.param_list_form(d.heap(), &def.params)?;
+            d.push(ps);
+            let r = self.repr_form(d.heap(), &def.ret)?;
+            d.push(r);
+            d.extend(def.body.iter().copied());
+            let one = d.finish_list()?;
+            ds.push(one);
+        }
+        let defs = ds.finish_list()?;
+        f.push(defs);
+        f.extend(body.iter().copied());
+        f.finish(wk::LABELS)
+    }
+
     /// `(dyn-new TYPE TRAIT ((TYPE SYM)...) ((TRAIT ((TYPE SYM)...))...) REPR
     /// FORM)` — boxing a concrete value as a trait object.
     ///
@@ -1154,26 +1184,17 @@ impl Info {
     /// mutually recursive local functions, each of the same shape a `lambda`
     /// has plus a name. See [`LabelsDef`] for one definition's four parts.
     pub(super) fn labels_form(&self, heap: &mut Heap, defs: &[LabelsDef], body: &[Value]) -> Result<Value, Error> {
-        let mut f = Items::new(heap);
-        let mut ds = Items::new(f.heap());
+        let mut lowered = Vec::with_capacity(defs.len());
         for (name, params, ret, def_body) in defs {
-            let mut d = Items::new(ds.heap());
-            d.push(Value::Symbol(*name));
-            let ps = self.param_list_form(d.heap(), params)?;
-            d.push(ps);
-            let r = self.repr_form(d.heap(), ret)?;
-            d.push(r);
+            let mut forms = Vec::with_capacity(def_body.len());
             for c in def_body {
-                let form = lower(d.heap(), self, c)?;
-                d.push(form);
+                let form = lower(heap, self, c)?;
+                heap.push_root(form);
+                forms.push(form);
             }
-            let one = d.finish_list()?;
-            ds.push(one);
+            lowered.push(LoweredLabel { name: *name, params: params.clone(), ret: ret.clone(), body: forms });
         }
-        let defs = ds.finish_list()?;
-        f.push(defs);
-        f.extend(body.iter().copied());
-        f.finish(wk::LABELS)
+        self.labels_core_form(heap, &lowered, body)
     }
 
     /// The declared field types of `adt`'s variant `variant`, with `args`

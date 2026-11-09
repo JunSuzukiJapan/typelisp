@@ -7,10 +7,11 @@
 use crate::check::core;
 use crate::check::forms;
 use crate::check::analyze::SEXPR_RESERVED_VARIANT;
-use crate::check::lower::{Arg, CoreForms};
+use crate::check::lower::{Arg, CoreForms, LoweredLabel};
 use crate::check::repr::Repr;
 use crate::types::{path_is_builtin, Path, Type};
 use crate::{wk, Error, Heap, Value};
+use typelisp_mem::SymRef;
 
 use super::generic::Requests;
 use super::registry::Registry;
@@ -142,6 +143,37 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         Node::Return { value } => {
             let value = value.as_deref().map(|v| lower_rooted(heap, lw, v)).transpose()?;
             forms::return_form(heap, value)
+        }
+        Node::Lambda { params, ret, body } => {
+            let params: Vec<(SymRef, Type)> = params.iter().map(|(n, ty)| (*n, lw.settle(ty))).collect();
+            let ret = lw.settle(ret);
+            let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
+            lw.reg.lambda_form(heap, &params, &ret, &body)
+        }
+        Node::Labels { defs, body } => {
+            let mut lowered = Vec::with_capacity(defs.len());
+            for d in defs {
+                let params: Vec<(SymRef, Type)> = d.params.iter().map(|(n, ty)| (*n, lw.settle(ty))).collect();
+                let ret = lw.settle(&d.ret);
+                let body = d.body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
+                lowered.push(LoweredLabel { name: d.name, params, ret, body });
+            }
+            let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
+            lw.reg.labels_core_form(heap, &lowered, &body)
+        }
+        Node::FnRef { path, params } => {
+            let params: Vec<Type> = params.iter().map(|ty| lw.settle(ty)).collect();
+            lw.reg.fnref_form(heap, path, &params)
+        }
+        Node::Apply { callee, args } => {
+            let ret = lw.settle(&t.ty);
+            let callee = lower_rooted(heap, lw, callee)?;
+            let mut lowered = Vec::with_capacity(args.len());
+            for a in args {
+                lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
+            }
+            let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
+            lw.reg.apply_form(heap, callee, &ret, &lowered)
         }
         Node::Default { form } => crate::owned_form::owned_to_value(heap, form),
         Node::Panic { message } => {

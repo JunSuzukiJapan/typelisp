@@ -33,6 +33,18 @@ impl<'p> Locals<'p> {
         Ok(Locals { parent: Some(self), binds })
     }
 
+    /// Whether the type of some local here is one `pred` holds of.
+    pub(crate) fn any(&self, pred: impl Fn(&Type) -> bool) -> bool {
+        let mut frame = Some(self);
+        while let Some(f) = frame {
+            if f.binds.iter().any(|(_, t)| pred(t)) {
+                return true;
+            }
+            frame = f.parent;
+        }
+        false
+    }
+
     /// The type of the local `name` here, if it is one.
     pub(crate) fn lookup(&self, name: SymRef) -> Option<&Type> {
         let mut frame = Some(self);

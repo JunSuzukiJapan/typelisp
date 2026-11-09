@@ -20,7 +20,7 @@ use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
 use super::args::First;
-use super::{binding, call, cast, control, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, the, variant};
+use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, the, variant};
 use crate::check::analyze::{call_sugar, TOPLEVEL_FORM_HEADS};
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -257,7 +257,7 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, loc: Opti
         )));
     }
     match value {
-        Some((_, ValueDef::Fn(_))) => unimplemented!("typeck: the function `{}` as a value", heap.symbol_spelling(id)),
+        Some((path, ValueDef::Fn(def))) => lambda::fn_value(path, def, loc),
         Some((path, ValueDef::Var(var))) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
         Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched above"),
         None => Err(Error::TypeError(format!("unbound variable: {}", heap.symbol_spelling(id)))),
@@ -278,8 +278,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, args, expected, loc),
         // Any other head is an expression whose value is applied.
         other => {
-            check_expr(cx, heap, locals, other, None, elems[0].1.clone())?;
-            unimplemented!("typeck: applying a function value")
+            let callee = check_expr(cx, heap, locals, other, None, elems[0].1.clone())?;
+            return lambda::check_apply(cx, heap, locals, callee, args, expected, loc);
         }
     };
     match head.well_known() {
@@ -288,6 +288,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
         wk::AS => return cast::check_as(cx, heap, locals, args, false, loc),
         wk::TRY_AS => return cast::check_as(cx, heap, locals, args, true, loc),
+        wk::LABELS => return lambda::check_labels(cx, heap, locals, args, expected, loc),
+        wk::LAMBDA => return lambda::check_lambda(cx, heap, locals, args, loc),
+        wk::APPLY => return lambda::check_apply_form(cx, heap, locals, args, loc),
         wk::PANIC => return control::check_panic(cx, heap, locals, args, loc),
         wk::UNWIND_PROTECT => return control::check_unwind_protect(cx, heap, locals, args, expected, loc),
         wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
@@ -316,8 +319,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         unimplemented!("typeck: the form `{}`", heap.symbol_spelling(head))
     }
     let spelling = heap.symbol_spelling(head);
-    if locals.lookup(head).is_some() {
-        unimplemented!("typeck: calling the local `{}`", spelling)
+    if let Some(ty) = locals.lookup(head) {
+        let callee = Typed { node: Node::Local { name: head }, ty: ty.clone(), loc: elems[0].1.clone() };
+        return lambda::check_apply(cx, heap, locals, callee, args, expected, loc);
     }
     let value = value_named(cx.reg, cx.ns, head);
     if call_sugar(head.name(), args.len(), || matches!(value, Some((_, ValueDef::Fn(_))))).is_some() {

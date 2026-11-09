@@ -96,7 +96,7 @@ pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, loc: Option<Loc
     match path_target(heap, cx.ns, id)? {
         PathTarget::In(path) => match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
             Some(ValueDef::Var(var)) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
-            Some(ValueDef::Fn(_)) => unimplemented!("typeck: the function `{}` as a value", path_spelling(heap, id)),
+            Some(ValueDef::Fn(def)) => super::lambda::fn_value(path, def, loc),
             Some(ValueDef::Macro { .. }) => unimplemented!("typeck: the macro `{}` as a value", path_spelling(heap, id)),
             None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
         },

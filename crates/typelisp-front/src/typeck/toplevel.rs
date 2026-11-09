@@ -830,6 +830,27 @@ mod tests {
         assert!(msg.contains("arity is fixed by its vtable slot"), "{}", msg);
     }
 
+    /// A `lambda`, a `labels` function and a named function are values of
+    /// a function type, which a call applies.
+    #[test]
+    fn function_values() {
+        let twice = "(defun twice ((f (fn (int) int)) (x int)) int (f (f x)))\n";
+        assert_eq!(run(&format!("{}(twice (lambda ((n int)) int (* n 3)) 2)", twice)).1, Value::Int(18));
+        assert_eq!(run(&format!("{}(defun inc ((n int)) int (+ n 1))\n(twice inc 5)", twice)).1, Value::Int(7));
+        assert_eq!(run("(let ((k 10)) (let ((f (lambda ((n int)) int (+ n k)))) (f 1)))").1, Value::Int(11));
+        assert_eq!(run("(apply (lambda ((a int) &rest (xs int)) int a) 7 '(1 2))").1, Value::Int(7));
+        let src = "(labels ((ev ((n int)) bool (if (= n 0) true (od (- n 1)))) (od ((n int)) bool (if (= n 0) false (ev (- n 1))))) (ev 10))";
+        assert_eq!(run(src).1, Value::Bool(true));
+        let msg = check_err("((lambda ((a int)) int a) 1 2)");
+        assert!(msg.contains("function expects 1 argument(s), got 2"), "{}", msg);
+        let msg = check_err("(let ((x 1)) (x 2))");
+        assert!(msg.contains("value is not callable: `int`"), "{}", msg);
+        let msg = check_err("(lambda (&optional (a int 1)) int a)");
+        assert!(msg.contains("&optional/&key need a named callee"), "{}", msg);
+        let msg = check_err("(loop (let ((f (lambda () int (return 1)))) (break)))");
+        assert!(msg.contains("return: not inside a loop"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

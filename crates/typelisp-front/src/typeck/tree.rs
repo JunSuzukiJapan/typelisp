@@ -62,6 +62,16 @@ pub(crate) enum Node {
     /// `(return value?)`: leave the nearest loop with `value` (`()` when
     /// none).
     Return { value: Option<Box<Typed>> },
+    /// `(lambda (params) ret body...)`: a function value.
+    Lambda { params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Typed> },
+    /// `(labels (def...) body...)`: local functions, which see each other.
+    Labels { defs: Vec<super::lambda::Label>, body: Vec<Typed> },
+    /// The function `path` as a value; `params` are the types of the
+    /// parameters it really takes, a `&rest` one as a list.
+    FnRef { path: Path, params: Vec<Type> },
+    /// A call of the function value `callee`, its `&rest` arguments as one
+    /// list.
+    Apply { callee: Box<Typed>, args: Vec<Typed> },
     /// `(panic message)`: stop with `message`.
     Panic { message: Box<Typed> },
     /// `(unwind-protect protected cleanup)`: `protected`'s value, `cleanup`
@@ -144,12 +154,15 @@ impl Typed {
             | Node::Local { .. }
             | Node::Global { .. }
             | Node::Break
-            | Node::Default { .. } => {
+            | Node::Default { .. }
+            | Node::FnRef { .. } => {
                 Vec::new()
             }
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
                 args.iter().collect()
             }
+            Node::Apply { callee, args } => std::iter::once(&**callee).chain(args).collect(),
+            Node::Labels { defs, body } => defs.iter().flat_map(|d| &d.body).chain(body).collect(),
             Node::Return { value } => value.iter().map(|v| &**v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
@@ -174,12 +187,15 @@ impl Typed {
             | Node::Local { .. }
             | Node::Global { .. }
             | Node::Break
-            | Node::Default { .. } => {
+            | Node::Default { .. }
+            | Node::FnRef { .. } => {
                 Vec::new()
             }
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } => {
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
                 args.iter_mut().collect()
             }
+            Node::Apply { callee, args } => std::iter::once(&mut **callee).chain(args.iter_mut()).collect(),
+            Node::Labels { defs, body } => defs.iter_mut().flat_map(|d| d.body.iter_mut()).chain(body.iter_mut()).collect(),
             Node::Return { value } => value.iter_mut().map(|v| &mut **v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
@@ -221,6 +237,15 @@ impl Typed {
                 Node::Call { targs, .. } | Node::MethodCall { targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
                 Node::FieldSet { field_ty, .. } => *field_ty = f(field_ty),
+                Node::Lambda { params, ret, .. } => {
+                    params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
+                    *ret = f(ret);
+                }
+                Node::FnRef { params, .. } => params.iter_mut().for_each(|ty| *ty = f(ty)),
+                Node::Labels { defs, .. } => defs.iter_mut().for_each(|d| {
+                    d.params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
+                    d.ret = f(&d.ret);
+                }),
                 Node::Match { arms, .. } => arms.iter_mut().for_each(|(pat, _)| pat.map_types(f)),
                 Node::Literal { .. }
                 | Node::Number { .. }
@@ -237,6 +262,7 @@ impl Typed {
                 | Node::UnwindProtect { .. }
                 | Node::Panic { .. }
                 | Node::Default { .. }
+                | Node::Apply { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }
