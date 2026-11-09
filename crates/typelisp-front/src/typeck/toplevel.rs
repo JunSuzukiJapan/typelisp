@@ -813,6 +813,23 @@ mod tests {
         assert!(msg.contains("may not default when its type mentions the function's own type parameter"), "{}", msg);
     }
 
+    /// A method takes `&optional`, `&rest` and `&key` parameters as a
+    /// function does; a trait method may not, its arity being the trait's.
+    #[test]
+    fn method_parameter_sections() {
+        let src = "(defstruct thing (n int))
+(impl thing
+  (pub defmethod add (self &optional (k int 1) &rest (xs int)) int (+ self::n k))
+  (pub defmethod make (&key (n int 0)) thing (make-instance 'thing :n n)))
+(defmethod twice ((t thing) &key (by int 2)) int (* t::n by))
+(let ((x (thing::make :n 5))) (+ (+ (add x) (add x 10 1 2)) (+ (twice x) (twice x :by 3))))";
+        assert_eq!(run(src).1, Value::Int(46));
+        let msg = check_err("(deftrait greet () (defmethod hello (self) int))
+(defstruct thing (n int))
+(impl greet thing (defmethod hello (self &key (extra int 0)) int (+ self::n extra)))");
+        assert!(msg.contains("arity is fixed by its vtable slot"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

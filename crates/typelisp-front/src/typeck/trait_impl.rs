@@ -20,6 +20,7 @@ use super::defmethod::{define_method, receiver_type_path, Method};
 use super::defun::parse_header;
 use super::generic::Requests;
 use super::impl_block::method_params;
+use super::lambda_list::LambdaList;
 use super::registry::{Registry, TraitDef, TraitImpl};
 use super::resolve::trait_named;
 use super::scope::TypeScope;
@@ -76,6 +77,9 @@ pub(crate) fn check_trait_impl(
     }
     for (m, _) in &tdef.methods {
         if !methods.iter().any(|(w, _)| w == m) {
+            if reg.method(&owner, *m).is_some() {
+                unimplemented!("typeck: an `impl` that adopts `{}::{}`, written before it, as the trait's method", owner, m)
+            }
             if tdef.defaults.contains(m) {
                 unimplemented!("typeck: an `impl` that leaves the trait's default method `{}` out", m)
             }
@@ -233,6 +237,15 @@ fn check_method(
     let named: Vec<(SymRef, Type)> = tdef.params[1..].iter().map(|p| p.name).zip(assoc.iter().cloned()).collect();
     let inner = scope.name_types(named);
     let tcx = TypeCx { reg, ns, scope: &inner, self_type: Some(&target_ty) };
+    // A trait method's arity is fixed by its vtable slot: a call through a
+    // trait object fills its arguments in from the trait's declaration, a
+    // call on the type from this method's, and `deftrait` has no sections.
+    if heap.list_to_vec(*params)?.iter().any(|p| matches!(p, Value::Symbol(s) if s.name().starts_with('&'))) {
+        return Err(Error::TypeError(format!(
+            "{}: method `{}` may not declare &optional/&key/&rest — a trait method's arity is fixed by its vtable slot, and `{}` declares none",
+            shown, method, of.trait_path
+        )));
+    }
     let (instance, ps) = method_params(heap, &tcx, name, *params, &target_ty)?;
     let ret = parse_type(heap, &tcx, *ret)?;
     let to_impl = Subst::positional(&tdef.params, &std::iter::once(target_ty.clone()).chain(assoc).collect::<Vec<_>>());
@@ -262,6 +275,6 @@ fn check_method(
             describe(&want_params, &want_ret)
         )));
     }
-    let def = Method { owner, method, instance, public: true, home: None, params: ps, ret };
+    let def = Method { owner, method, instance, public: true, home: None, params: LambdaList::plain(ps), ret };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }

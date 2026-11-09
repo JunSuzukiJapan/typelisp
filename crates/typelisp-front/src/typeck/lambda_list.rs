@@ -1,5 +1,5 @@
-//! A `defun`'s parameter list: its required parameters, then `&optional`,
-//! `&rest` and `&key` ones, in that order.
+//! A function's or a method's parameter list: its required parameters, then
+//! `&optional`, `&rest` and `&key` ones, in that order.
 //!
 //! An `&optional` or `&key` parameter is `(name Type)` or `(name Type
 //! default)`. One with a default is bound at `Type` in the body; one with
@@ -17,7 +17,7 @@
 use crate::check::analyze::option_of_sexpr;
 use crate::check::registry::{opt_key_effective_ty, OptKeyParam};
 use crate::owned_form::value_to_owned;
-use crate::types::{ParamOwner, Path, Type};
+use crate::types::{ParamOwner, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::intern_keyword;
 use typelisp_mem::SymRef;
@@ -46,46 +46,60 @@ pub(crate) struct LambdaList {
 
 /// An `&optional` or `&key` parameter as written: its name, its type, and
 /// its default.
-type Written = (SymRef, Type, Option<(Value, Option<Loc>)>);
+type OptKey = (SymRef, Type, Option<(Value, Option<Loc>)>);
 
-/// The parameter list `v` of the `defun` `path`, its defaults checked where
-/// `scope` holds the function's type parameters.
+/// Where a parameter list is written: what a message calls the definition
+/// (`defun`, ``impl: method `m` ``), what it calls the definition by name
+/// (`defun f`), and whose type parameters may not be in a default's type.
+pub(crate) struct Written<'a> {
+    pub(crate) what: &'a str,
+    pub(crate) named: &'a str,
+    pub(crate) owner: ParamOwner,
+}
+
+/// The parameters `items`, written as `at` says, their defaults checked
+/// where `scope` holds the definition's type parameters and `self_type` is
+/// what `Self` stands for.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn parse_lambda_list(
     reg: &Registry,
     d: &Definer,
     heap: &mut Heap,
     requests: &mut Requests,
     scope: &TypeScope,
-    path: &Path,
-    v: Value,
+    self_type: Option<&Type>,
+    at: &Written,
+    items: &[Value],
 ) -> Result<LambdaList, Error> {
-    let [required, optionals, rest, keys] = sections(heap, v)?;
-    let tcx = TypeCx { reg, ns: d.site.ns, scope, self_type: None };
-    let required = required.iter().map(|p| required_param(heap, &tcx, *p)).collect::<Result<Vec<_>, _>>()?;
+    let [required, optionals, rest, keys] = sections(items, at.what)?;
+    let tcx = TypeCx { reg, ns: d.site.ns, scope, self_type };
+    let required = required.iter().map(|p| required_param(heap, &tcx, *p, at.what)).collect::<Result<Vec<_>, _>>()?;
     let rest = match rest.as_slice() {
         [] => None,
-        [p] => Some(required_param(heap, &tcx, *p)?),
+        [p] => Some(required_param(heap, &tcx, *p, at.what)?),
         _ => unreachable!("`sections` takes one `&rest` parameter"),
     };
-    let optionals = optionals.iter().map(|p| written(heap, &tcx, *p, "&optional")).collect::<Result<Vec<_>, _>>()?;
-    let keys = keys.iter().map(|p| written(heap, &tcx, *p, "&key")).collect::<Result<Vec<_>, _>>()?;
-    let owner = ParamOwner::Def(*path);
-    let mut checked = |section: &str, params: Vec<Written>| -> Result<Vec<OptKeyParam>, Error> {
+    let optionals = optionals.iter().map(|p| written(heap, &tcx, *p, at.what, "&optional")).collect::<Result<Vec<_>, _>>()?;
+    let keys = keys.iter().map(|p| written(heap, &tcx, *p, at.what, "&key")).collect::<Result<Vec<_>, _>>()?;
+    let mut checked = |section: &str, params: Vec<OptKey>| -> Result<Vec<OptKeyParam>, Error> {
         params
             .into_iter()
             .map(|(name, decl_ty, default)| {
                 let default = match default {
-                    Some(_) if mentions_own_param(&decl_ty, owner) => {
-                        return Err(Error::TypeError(format!(
-                            "defun {}: {} parameter `{}` may not default when its type mentions the \
-                             function's own type parameter — declare it with no default (`Option<{}>`) instead",
-                            path.last_segment(),
-                            section,
-                            name.name(),
-                            decl_ty
-                        )));
+                    Some(_) if mentions_own_param(&decl_ty, at.owner) => {
+                        let what = match at.owner {
+                            ParamOwner::Method(..) => "may not default when its type mentions a type parameter \
+                                                       (the owner's or the method's own) — declare it with no default instead"
+                                .to_string(),
+                            _ => format!(
+                                "may not default when its type mentions the function's own type parameter — \
+                                 declare it with no default (`Option<{}>`) instead",
+                                decl_ty
+                            ),
+                        };
+                        return Err(Error::TypeError(format!("{}: {} parameter `{}` {}", at.named, section, name.name(), what)));
                     }
-                    Some((form, loc)) => Some(check_default(reg, d, heap, requests, scope, form, loc, &decl_ty)?),
+                    Some((form, loc)) => Some(check_default(reg, d, heap, requests, scope, self_type, form, loc, &decl_ty)?),
                     None => None,
                 };
                 Ok(OptKeyParam { name: intern_keyword(name.name()), decl_ty, default })
@@ -103,6 +117,20 @@ pub(crate) fn parse_lambda_list(
     Ok(LambdaList { required, optionals, rest, keys, bound })
 }
 
+impl LambdaList {
+    /// Required parameters alone.
+    pub(crate) fn plain(params: Vec<(SymRef, Type)>) -> LambdaList {
+        LambdaList { required: params.clone(), optionals: Vec::new(), rest: None, keys: Vec::new(), bound: params }
+    }
+
+    /// This list after the receiver `receiver`, the first parameter.
+    pub(crate) fn after(mut self, receiver: (SymRef, Type)) -> LambdaList {
+        self.required.insert(0, receiver.clone());
+        self.bound.insert(0, receiver);
+        self
+    }
+}
+
 /// The type `p` is bound at in the body.
 fn effective(p: &OptKeyParam) -> Type {
     opt_key_effective_ty(&p.decl_ty, p.default.is_some())
@@ -115,23 +143,23 @@ fn mentions_own_param(ty: &Type, owner: ParamOwner) -> bool {
     found
 }
 
-/// The parameter list `v` split at its markers: the required, `&optional`,
-/// `&rest` and `&key` parameters.
-fn sections(heap: &Heap, v: Value) -> Result<[Vec<Value>; 4], Error> {
+/// The parameters `items` split at their markers: the required,
+/// `&optional`, `&rest` and `&key` parameters.
+fn sections(items: &[Value], what: &str) -> Result<[Vec<Value>; 4], Error> {
     let mut out: [Vec<Value>; 4] = Default::default();
     let mut rank = 0;
-    for p in heap.list_to_vec(v)? {
+    for &p in items {
         if let Value::Symbol(id) = p {
             let (at, message) = match id.well_known() {
-                wk::OPTIONAL => (1, "defun: &optional must precede &rest and &key, and appear once"),
-                wk::REST => (2, "defun: &rest must precede &key, and appear once"),
-                wk::KEY => (3, "defun: &key may appear only once"),
+                wk::OPTIONAL => (1, "&optional must precede &rest and &key, and appear once"),
+                wk::REST => (2, "&rest must precede &key, and appear once"),
+                wk::KEY => (3, "&key may appear only once"),
                 _ if id.name().starts_with('&') => unimplemented!("typeck: the `{}` parameter marker", id.name()),
                 _ => (0, ""),
             };
             if at > 0 {
                 if rank >= at {
-                    return Err(Error::TypeError(message.into()));
+                    return Err(Error::TypeError(format!("{}: {}", what, message)));
                 }
                 rank = at;
                 continue;
@@ -141,35 +169,35 @@ fn sections(heap: &Heap, v: Value) -> Result<[Vec<Value>; 4], Error> {
     }
     let [_, optionals, rest, keys] = &out;
     if rank == 2 && rest.is_empty() {
-        return Err(Error::TypeError("defun: &rest must be followed by exactly one parameter".into()));
+        return Err(Error::TypeError(format!("{}: &rest must be followed by exactly one parameter", what)));
     }
     if rest.len() > 1 {
-        return Err(Error::TypeError("defun: &rest takes exactly one parameter, as the last item in the parameter list".into()));
+        return Err(Error::TypeError(format!("{}: &rest takes exactly one parameter, as the last item in the parameter list", what)));
     }
     if !keys.is_empty() && (!optionals.is_empty() || !rest.is_empty()) {
-        return Err(Error::TypeError("defun: &key cannot be combined with &optional/&rest in the same parameter list".into()));
+        return Err(Error::TypeError(format!("{}: &key cannot be combined with &optional/&rest in the same parameter list", what)));
     }
     Ok(out)
 }
 
 /// A required or `&rest` parameter, `(name Type)`.
-fn required_param(heap: &Heap, tcx: &TypeCx, p: Value) -> Result<(SymRef, Type), Error> {
-    let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError(super::defun::SHAPE.into()))?;
+fn required_param(heap: &Heap, tcx: &TypeCx, p: Value, what: &str) -> Result<(SymRef, Type), Error> {
+    let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError(format!("{}: a parameter is (name Type)", what)))?;
     let [Value::Symbol(name), ty] = pair.as_slice() else {
-        return Err(Error::TypeError(format!("defun: a parameter is (name Type): {}", super::defun::SHAPE)));
+        return Err(Error::TypeError(format!("{}: a parameter is (name Type)", what)));
     };
     Ok((*name, parse_type(heap, tcx, *ty)?))
 }
 
 /// An `&optional` or `&key` parameter, `(name Type)` or `(name Type
 /// default)`, of the section `section`.
-fn written(heap: &Heap, tcx: &TypeCx, p: Value, section: &str) -> Result<Written, Error> {
+fn written(heap: &Heap, tcx: &TypeCx, p: Value, what: &str, section: &str) -> Result<OptKey, Error> {
     let items = heap.list_to_vec_locs(p)?;
     if items.len() < 2 || items.len() > 3 {
-        return Err(Error::TypeError(format!("defun: {} parameter must be `(name type)` or `(name type default)`", section)));
+        return Err(Error::TypeError(format!("{}: {} parameter must be `(name type)` or `(name type default)`", what, section)));
     }
     let Value::Symbol(name) = items[0].0 else {
-        return Err(Error::TypeError(format!("defun: {} parameter name must be a symbol", section)));
+        return Err(Error::TypeError(format!("{}: {} parameter name must be a symbol", what, section)));
     };
     let ty = parse_type(heap, tcx, items[1].0)?;
     Ok((name, ty, items.get(2).cloned()))
@@ -184,12 +212,13 @@ fn check_default(
     heap: &mut Heap,
     requests: &mut Requests,
     scope: &TypeScope,
+    self_type: Option<&Type>,
     form: Value,
     loc: Option<Loc>,
     decl_ty: &Type,
 ) -> Result<crate::owned_form::OwnedForm, Error> {
     let mut tree = {
-        let cx = Cx::new(reg, d.expander, d.site.ns, scope, None);
+        let cx = Cx::new(reg, d.expander, d.site.ns, scope, self_type);
         let t = check_expr(&cx, heap, &Locals::empty(), form, Some(decl_ty), loc)?;
         let mut tree = vec![t];
         cx.settle(heap, &mut tree)?;

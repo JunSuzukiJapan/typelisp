@@ -15,7 +15,8 @@ use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
 use super::defmethod::{define_method, receiver_type_path, Method};
-use super::defun::{parse_header, parse_params};
+use super::defun::{parse_header, parse_param};
+use super::lambda_list::{parse_lambda_list, Written};
 use super::generic::Requests;
 use super::define::Definer;
 use super::registry::Registry;
@@ -97,6 +98,11 @@ fn check_item(
     if matches!(body, [(Value::Str(_), _), _, ..]) {
         unimplemented!("typeck: a method with a documentation string")
     }
+    if let Some((first, _)) = body.first() {
+        if crate::check::analyze::is_where_clause(heap, *first)? {
+            unimplemented!("typeck: a method with a `(:where ...)` clause")
+        }
+    }
     let method = member_symbol(name.name());
     let names: Vec<SymRef> = impl_names.iter().chain(&own_names).copied().collect();
     let root = TypeScope::empty();
@@ -104,10 +110,17 @@ fn check_item(
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
     let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, target)?;
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty) };
-    let (instance, all) = method_params(heap, &tcx, name, *params, &target_ty)?;
-    let ret = parse_type(heap, &tcx, *ret)?;
-    let def = Method { owner, method, instance, public, home: None, params: all, ret };
+    let (receiver, written) = split_receiver(heap, name, *params)?;
+    let what = format!("impl: method `{}`", method);
+    let named = format!("method {}::{}", owner, method);
+    let at = Written { what: &what, named: &named, owner: ParamOwner::Method(owner, method) };
+    let list = parse_lambda_list(reg, d, heap, requests, &scope, Some(&target_ty), &at, &written)?;
+    let list = match receiver {
+        Some(s) => list.after((s, target_ty.clone())),
+        None => list,
+    };
+    let ret = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty) }, *ret)?;
+    let def = Method { owner, method, instance: receiver.is_some(), public, home: None, params: list, ret };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }
 
@@ -116,11 +129,21 @@ fn check_item(
 /// parameter's name and type. `self` alone, first, is the receiver, of type
 /// `self_ty`; the rest are ordinary parameters.
 pub(crate) fn method_params(heap: &Heap, tcx: &TypeCx, name: SymRef, params: Value, self_ty: &Type) -> Result<(bool, Vec<(SymRef, Type)>), Error> {
-    let written = heap.list_to_vec(params)?;
-    let receiver = match written.first() {
-        Some(Value::Symbol(s)) if s.is(wk::SELF) => Some(*s),
-        _ => None,
-    };
+    let (receiver, written) = split_receiver(heap, name, params)?;
+    let mut all = Vec::new();
+    if let Some(s) = receiver {
+        all.push((s, self_ty.clone()));
+    }
+    for p in written {
+        all.push(parse_param(heap, tcx, p)?);
+    }
+    Ok((receiver.is_some(), all))
+}
+
+/// The parameters `params` of the method `name`: the receiver `self`, when
+/// it is written first, and the others.
+pub(crate) fn split_receiver(heap: &Heap, name: SymRef, params: Value) -> Result<(Option<SymRef>, Vec<Value>), Error> {
+    let mut written = heap.list_to_vec(params)?;
     for p in &written {
         if matches!(heap.car(*p), Ok(Value::Symbol(s)) if s.is(wk::SELF)) {
             return Err(Error::TypeError(format!(
@@ -129,11 +152,12 @@ pub(crate) fn method_params(heap: &Heap, tcx: &TypeCx, name: SymRef, params: Val
             )));
         }
     }
-    let rest = if receiver.is_some() { heap.cdr(params)? } else { params };
-    let mut all = Vec::new();
-    if let Some(s) = receiver {
-        all.push((s, self_ty.clone()));
+    match written.first() {
+        Some(Value::Symbol(s)) if s.is(wk::SELF) => {
+            let s = *s;
+            written.remove(0);
+            Ok((Some(s), written))
+        }
+        _ => Ok((None, written)),
     }
-    all.extend(parse_params(heap, tcx, rest)?);
-    Ok((receiver.is_some(), all))
 }

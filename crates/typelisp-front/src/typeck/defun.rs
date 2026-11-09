@@ -13,7 +13,7 @@ use typelisp_mem::SymRef;
 
 use super::expr::{check_body, Cx};
 use super::generic::{Base, Requests};
-use super::lambda_list::{parse_lambda_list, LambdaList};
+use super::lambda_list::{parse_lambda_list, LambdaList, Written};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
 use super::define::{Definer, Kind};
@@ -23,7 +23,7 @@ use super::subst::Subst;
 use super::tree::Typed;
 use super::type_syntax::{parse_type, TypeCx};
 
-pub(crate) const SHAPE: &str = "defun: (defun name<T...>? ((param Type)...) ReturnType body...)";
+const SHAPE: &str = "defun: (defun name<T...>? ((param Type)...) ReturnType body...)";
 
 /// `(defun name ((param Type)...) Ret body...)` — `parts` without the
 /// `defun` — and its core form, unrooted.
@@ -57,7 +57,9 @@ pub(crate) fn check_defun(
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defun {}: type parameter `{}` is declared twice", path, twice.0.name()))
     })?;
-    let list = parse_lambda_list(reg, d, heap, requests, &scope, &path, *params)?;
+    let named = format!("defun {}", path.last_segment());
+    let at = Written { what: "defun", named: &named, owner: ParamOwner::Def(path) };
+    let list = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &heap.list_to_vec(*params)?)?;
     let ret = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, *ret)?;
     let type_params = scope.params().to_vec();
     let LambdaList { required, optionals, rest, keys, bound: params } = list;
@@ -119,20 +121,16 @@ pub(crate) fn parse_header(heap: &Heap, v: Value) -> Result<(SymRef, Vec<SymRef>
     }
 }
 
-/// `((param Type)...)`.
-pub(crate) fn parse_params(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Vec<(SymRef, Type)>, Error> {
-    let mut out = Vec::new();
-    for (p, _) in heap.list_to_vec_locs(v)? {
-        if let Value::Symbol(id) = p {
-            if id.name().starts_with('&') {
-                unimplemented!("typeck: the `{}` parameter marker", id.name())
-            }
+/// A required parameter `(param Type)`, which no marker may be.
+pub(crate) fn parse_param(heap: &Heap, cx: &TypeCx, p: Value) -> Result<(SymRef, Type), Error> {
+    if let Value::Symbol(id) = p {
+        if id.name().starts_with('&') {
+            unimplemented!("typeck: the `{}` parameter marker", id.name())
         }
-        let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError(SHAPE.into()))?;
-        let [Value::Symbol(name), ty] = pair.as_slice() else {
-            return Err(Error::TypeError(format!("defun: a parameter is (name Type): {}", SHAPE)));
-        };
-        out.push((*name, parse_type(heap, cx, *ty)?));
     }
-    Ok(out)
+    let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError(SHAPE.into()))?;
+    let [Value::Symbol(name), ty] = pair.as_slice() else {
+        return Err(Error::TypeError(format!("defun: a parameter is (name Type): {}", SHAPE)));
+    };
+    Ok((*name, parse_type(heap, cx, *ty)?))
 }

@@ -13,7 +13,8 @@ use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{member_symbol, NsId};
 use typelisp_mem::SymRef;
 
-use super::defun::{lower_all, parse_header, parse_params};
+use super::defun::{lower_all, parse_header};
+use super::lambda_list::{parse_lambda_list, LambdaList, Written};
 use super::expr::{check_body, Cx};
 use super::generic::{Base, Requests};
 use super::locals::Locals;
@@ -70,9 +71,10 @@ pub(crate) fn check_defmethod(
     let scope = root.declare(ParamOwner::Method(owner, method), &type_names).map_err(|twice| {
         Error::TypeError(format!("defmethod {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
-    let params = parse_params(heap, &tcx, *params)?;
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let named = format!("method {}::{}", owner, method);
+    let at = Written { what: "defmethod", named: &named, owner: ParamOwner::Method(owner, method) };
+    let params = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &written)?;
+    let ret = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, *ret)?;
     let def = Method { owner, method, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret };
     let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;
     let forms: Vec<Value> = form.into_iter().collect();
@@ -88,7 +90,7 @@ pub(crate) struct Method {
     pub(crate) public: bool,
     /// The module a `defmethod` outside an `impl` was written in.
     pub(crate) home: Option<Path>,
-    pub(crate) params: Vec<(SymRef, Type)>,
+    pub(crate) params: LambdaList,
     pub(crate) ret: Type,
 }
 
@@ -110,14 +112,21 @@ pub(crate) fn define_method(
     def: Method,
     body: &[(Value, Option<Loc>)],
 ) -> Result<Option<Value>, Error> {
-    let Method { owner, method, instance, public, home, params, ret } = def;
+    let Method { owner, method, instance, public, home, params: list, ret } = def;
     let type_params = scope.params().to_vec();
     // A receiver that names every type argument outright would make the
     // method that instantiation's own.
-    if instance && type_params.is_empty() && matches!(&params[0].1, Type::Named(_, args) if !args.is_empty()) {
+    if instance && type_params.is_empty() && matches!(&list.required[0].1, Type::Named(_, args) if !args.is_empty()) {
         unimplemented!("typeck: a method written for one instantiation of a generic type")
     }
-    let sig = FnDef { public, ..FnDef::plain(type_params.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
+    let LambdaList { required, optionals, rest, keys, bound: params } = list;
+    let sig = FnDef {
+        public,
+        rest: rest.map(|(_, t)| t),
+        optionals,
+        keys,
+        ..FnDef::plain(type_params.clone(), required.into_iter().map(|(_, t)| t).collect(), ret.clone())
+    };
     d.method(reg, &owner, method)?;
     let ns = d.site.ns;
     reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
