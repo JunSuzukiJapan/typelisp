@@ -87,6 +87,10 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
             bodies.push((m, ps, ret, &w.body));
         }
     }
+    // The vtable a trait object of it is called through: a method may not
+    // be inherited twice, or declared again.
+    let own: Vec<SymRef> = def.methods.iter().map(|(m, _)| *m).collect();
+    super::dyn_trait::linearize(reg, &spelling, path, &def.supertraits, &own)?;
     reg.types.insert(path, TypeEntry::Trait(def));
     for w in &methods {
         if let Some(doc) = &w.doc {

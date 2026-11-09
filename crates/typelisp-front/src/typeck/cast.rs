@@ -53,8 +53,13 @@ pub(crate) fn check_as(
         // `try-int->u8` is an `Option<u8>` already.
         return width_cast(cx, heap, locals, src, &target, try_variant, loc);
     }
-    if let Type::Dyn(..) = target {
-        unimplemented!("typeck: `{}` to the trait object `{}`", what, target)
+    if let Type::Dyn(to, pins) = &target {
+        if try_variant {
+            unimplemented!("typeck: `{}` to the trait object `{}`", what, target)
+        }
+        let mut boxed = super::dyn_trait::coerce(cx, src, to, pins)?;
+        boxed.loc = loc;
+        return Ok(boxed);
     }
     let Some((panic_method, try_method)) = as_conversion(&from, &target) else {
         return Err(Error::TypeError(format!(

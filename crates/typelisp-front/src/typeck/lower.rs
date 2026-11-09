@@ -130,6 +130,25 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let ret = lw.settle(&t.ty);
             lw.reg.assoc_form(heap, &owner, method, true, &ret, &lowered)
         }
+        Node::DynNew { trait_path, value } => {
+            let concrete = lw.settle(&value.ty);
+            let (slots, supers) = super::dyn_trait::tables(lw, &concrete, trait_path)?;
+            let form = lower_rooted(heap, lw, value)?;
+            lw.reg.dyn_new_form(heap, trait_path, &slots, &supers, &concrete, form)
+        }
+        Node::DynCall { trait_path, method, slot, args } => {
+            let mut lowered = Vec::with_capacity(args.len());
+            for a in args {
+                lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
+            }
+            let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
+            let targets = super::dyn_trait::targets(lw.reg, trait_path, *method);
+            lw.reg.dyn_call_form(heap, trait_path, *method, *slot, &targets, &lowered)
+        }
+        Node::DynUpcast { to, value } => {
+            let form = lower_rooted(heap, lw, value)?;
+            forms::dyn_upcast_form(heap, to, form)
+        }
         Node::Construct { owner, targs, variant, mutable, field_tys, args } => {
             let targs: Vec<Type> = targs.iter().map(|t| lw.settle(t)).collect();
             let field_tys: Vec<Type> = field_tys.iter().map(|t| lw.settle(t)).collect();

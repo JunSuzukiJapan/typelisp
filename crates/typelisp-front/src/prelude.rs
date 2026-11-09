@@ -124,7 +124,8 @@ fn tuple_source() -> String {
         let new_slots: Vec<String> = fields.iter().enumerate().map(|(i, f)| format!(":{} x{}", f, i)).collect();
         writeln!(
             out,
-            "(impl {} (pub defmethod new ({}) Self (make-instance '{} {})))",
+            "(impl<{}> {} (pub defmethod new ({}) Self (make-instance '{} {})))",
+            params.join(","),
             generic,
             new_params.join(" "),
             path,
@@ -136,7 +137,8 @@ fn tuple_source() -> String {
         let eq_body = if n == 1 { eqs[0].clone() } else { format!("(and {})", eqs.join(" ")) };
         writeln!(
             out,
-            "(impl Eq {} (:where {}) (defmethod equals (self (other Self)) bool {}))",
+            "(impl<{}> Eq {} (:where {}) (defmethod equals (self (other Self)) bool {}))",
+            params.join(","),
             generic,
             bound("Eq"),
             eq_body
@@ -147,7 +149,7 @@ fn tuple_source() -> String {
         for f in fields[..n - 1].iter().rev() {
             less = format!("(if (less self::{f} other::{f}) true (if (less other::{f} self::{f}) false {less}))");
         }
-        writeln!(out, "(impl Ord {} (:where {}) (defmethod less (self (other Self)) bool {}))", generic, bound("Ord"), less)
+        writeln!(out, "(impl<{}> Ord {} (:where {}) (defmethod less (self (other Self)) bool {}))", params.join(","), generic, bound("Ord"), less)
             .unwrap();
         // `sxhash`: the elements' hashes folded as `h * 31 + x`, kept in range
         // at every step.
@@ -155,13 +157,14 @@ fn tuple_source() -> String {
         for f in &fields[1..] {
             hash = format!("(logand (+ (* 31 {hash}) (sxhash self::{f})) *sxhash-mask*)");
         }
-        writeln!(out, "(impl Hash {} (:where {}) (defmethod sxhash (self) int {}))", generic, bound("Hash"), hash).unwrap();
+        writeln!(out, "(impl<{}> Hash {} (:where {}) (defmethod sxhash (self) int {}))", params.join(","), generic, bound("Hash"), hash).unwrap();
         // `#{a b}`, each element printed with the same `escape`.
         let directives = vec!["~a"; n].join(" ");
         let shown: Vec<String> = fields.iter().map(|f| format!("(print-object self::{f} escape)")).collect();
         writeln!(
             out,
-            "(impl print-object {} (:where {}) (defmethod print-object (self (escape bool)) string (format false \"#{{{}}}\" {})))",
+            "(impl<{}> print-object {} (:where {}) (defmethod print-object (self (escape bool)) string (format false \"#{{{}}}\" {})))",
+            params.join(","),
             generic,
             bound("print-object"),
             directives,

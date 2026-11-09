@@ -137,6 +137,17 @@ fn instance_type(cx: &Cx, heap: &Heap, written: Value) -> Result<(Path, TypeDef,
             return Ok((path, def, targs));
         }
     }
+    // A path to the type, its arguments left to be inferred too.
+    if let Value::Path(_) = written {
+        let path = crate::types::written_path(heap, cx.ns, written)?;
+        if let Some(TypeEntry::Type(def)) = cx.reg.types.get(&path) {
+            if !def.public && !super::resolve::sees(cx.ns, path.ns()) {
+                return Err(Error::TypeError(format!("make-instance: `{}` is not `pub`, so it is not visible outside its module", path)));
+            }
+            let targs = def.params.iter().map(|_| cx.holes.borrow_mut().fresh()).collect();
+            return Ok((path, def.clone(), targs));
+        }
+    }
     let ty = parse_type(heap, &cx.types(), written)?;
     let Type::Named(path, targs) = &ty else {
         return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", ty)));

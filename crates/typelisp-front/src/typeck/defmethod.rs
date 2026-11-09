@@ -177,6 +177,13 @@ pub(crate) fn receiver_type_path(heap: &Heap, reg: &Registry, ns: NsId, written:
         Value::Cons(_) if is_type_application(heap, written) => heap.list_to_vec(written)?.get(1).copied(),
         other => Some(other),
     };
+    if let Some(written @ Value::Path(_)) = head {
+        let path = crate::types::written_path(heap, ns, written)?;
+        return match reg.types.get(&path) {
+            Some(TypeEntry::Type(_)) => Ok(path),
+            _ => Err(Error::TypeError(format!("defmethod: `{}` is not a type with methods", path))),
+        };
+    }
     let Some(Value::Symbol(id)) = head else {
         unimplemented!("typeck: a `defmethod` receiver whose type is not a name")
     };

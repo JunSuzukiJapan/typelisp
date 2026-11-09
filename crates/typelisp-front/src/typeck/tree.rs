@@ -95,6 +95,16 @@ pub(crate) enum Node {
     /// An `&optional` or `&key` parameter's default, which the call left
     /// out: the core form its definition checked.
     Default { form: OwnedForm },
+    /// `value` boxed as the trait object of the trait `trait_path` this
+    /// expression's type is. Its table is laid out from `value`'s type when
+    /// the tree is lowered.
+    DynNew { trait_path: Path, value: Box<Typed> },
+    /// A call of the method `method`, the slot `slot` of the trait
+    /// `trait_path`'s table, on the trait object `args[0]`.
+    DynCall { trait_path: Path, method: SymRef, slot: usize, args: Vec<Typed> },
+    /// The trait object `value` given the table of its trait's supertrait
+    /// `to`, which the box carries.
+    DynUpcast { to: Path, value: Box<Typed> },
     /// `value`, of its own type, held as a `Sexpr`. How is chosen when the
     /// tree is lowered, from the settled type ([`super::sexpr_value`]).
     AsSexpr { value: Box<Typed> },
@@ -167,7 +177,7 @@ impl Typed {
             | Node::Tool { .. } => {
                 Vec::new()
             }
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::TraitCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::TraitCall { args, .. } | Node::DynCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
                 args.iter().collect()
             }
             Node::Apply { callee, args } => std::iter::once(&**callee).chain(args).collect(),
@@ -175,6 +185,8 @@ impl Typed {
             Node::Return { value } => value.iter().map(|v| &**v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
+            | Node::DynNew { value: obj, .. }
+            | Node::DynUpcast { value: obj, .. }
             | Node::Set { value: obj, .. }
             | Node::SetGlobal { value: obj, .. }
             | Node::Panic { message: obj } => {
@@ -201,7 +213,7 @@ impl Typed {
             | Node::Tool { .. } => {
                 Vec::new()
             }
-            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::TraitCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
+            Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::TraitCall { args, .. } | Node::DynCall { args, .. } | Node::Construct { args, .. } | Node::Loop { body: args } | Node::Lambda { body: args, .. } => {
                 args.iter_mut().collect()
             }
             Node::Apply { callee, args } => std::iter::once(&mut **callee).chain(args.iter_mut()).collect(),
@@ -209,6 +221,8 @@ impl Typed {
             Node::Return { value } => value.iter_mut().map(|v| &mut **v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
+            | Node::DynNew { value: obj, .. }
+            | Node::DynUpcast { value: obj, .. }
             | Node::Set { value: obj, .. }
             | Node::SetGlobal { value: obj, .. }
             | Node::Panic { message: obj } => {
@@ -275,6 +289,9 @@ impl Typed {
                 | Node::Apply { .. }
                 | Node::Tool { .. }
                 | Node::TraitCall { .. }
+                | Node::DynNew { .. }
+                | Node::DynCall { .. }
+                | Node::DynUpcast { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

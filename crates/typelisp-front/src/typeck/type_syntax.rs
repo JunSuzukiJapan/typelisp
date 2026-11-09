@@ -56,7 +56,7 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
                 None => at_path(cx, path, Vec::new()),
             }
         }
-        Value::Cons(_) if is_dyn_form(heap, v) => unimplemented!("typeck: the trait object type `:dyn`"),
+        Value::Cons(_) if is_dyn_form(heap, v) => dyn_type(heap, cx, v),
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR)) => unimplemented!("typeck: the C pointer type `(ptr ...)`"),
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::FN)) => fn_type(heap, cx, v),
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
@@ -121,6 +121,38 @@ fn at_path(cx: &TypeCx, path: Path, args: Vec<Type>) -> Result<Type, Error> {
         Some(entry @ TypeEntry::CStruct) => entry_type(path, entry, args),
         _ => Err(unknown_type(&path.to_string())),
     }
+}
+
+/// `(:dyn Trait)` or `(:dyn Trait<pins...>)`: a trait object of the trait,
+/// its associated types pinned.
+fn dyn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
+    let elems = heap.list_to_vec(v)?;
+    let [_, inner] = elems.as_slice() else {
+        return Err(Error::TypeError("`:dyn` must be followed by exactly one trait name".to_string()));
+    };
+    let (head, pins) = match inner {
+        Value::Cons(_) if is_type_application(heap, *inner) => {
+            let parts = heap.list_to_vec(*inner)?;
+            (parts[1], parts[2..].to_vec())
+        }
+        _ => (*inner, Vec::new()),
+    };
+    let found = match head {
+        Value::Symbol(id) => find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))).map(|(p, e)| (p, e.clone())),
+        Value::Path(_) => {
+            let path = written_path(heap, cx.ns, head)?;
+            cx.reg.types.get(&path).map(|e| (path, e.clone()))
+        }
+        _ => None,
+    };
+    let Some((path, TypeEntry::Trait(TraitDef { public, .. }))) = found else {
+        return Err(Error::TypeError(format!("`:dyn` must be followed by a trait name, found `{}`", crate::check::core::print(heap, *inner))));
+    };
+    if !public && !sees(cx.ns, path.ns()) {
+        return Err(unknown_type(&path.to_string()));
+    }
+    let pins = pins.iter().map(|p| parse_type(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
+    Ok(Type::Dyn(path, pins))
 }
 
 /// The type the name `id` stands for, applied to `args`.

@@ -64,6 +64,7 @@ pub(crate) mod defstruct;
 pub(crate) mod deftrait;
 pub(crate) mod defun;
 pub(crate) mod defvar;
+pub(crate) mod dyn_trait;
 pub(crate) mod exhaustive;
 pub(crate) mod format;
 pub(crate) mod expr;

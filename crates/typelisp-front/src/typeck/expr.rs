@@ -23,7 +23,7 @@ use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::check::registry::TraitBound;
-use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
+use super::{binding, call, cast, control, dyn_trait, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -422,6 +422,24 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     let written = (*first, first_loc.clone());
     let first = check_expr(cx, heap, locals, *first, None, first_loc.clone())?;
     let member = member_symbol(spelling);
+    if let Type::Dyn(trait_path, pins) = cx.resolve(&first.ty) {
+        if dyn_trait::has_method(cx.reg, &trait_path, member) {
+            return dyn_trait::check_dyn_call(cx, heap, locals, first, &trait_path, &pins, member, rest, loc);
+        }
+        // A trait object answers to `Sexpr`'s methods as the value inside it.
+        let sexpr = crate::types::Path::builtin(wk::SEXPR);
+        if cx.reg.method(&sexpr, member).is_some_and(|m| m.instance) {
+            unimplemented!("typeck: `Sexpr`'s method `{}` on the trait object `{}`", spelling, cx.resolve(&first.ty))
+        }
+        // Neither a function nor the trait's method: the name may be a
+        // function of the library this module has not brought in.
+        if value.is_none() {
+            return Err(Error::TypeError(format!(
+                "no function `{}` is visible here, and it is not a method of `{}` either — a `:dyn {}` value can only call the trait's own or inherited methods",
+                member, trait_path, trait_path
+            )));
+        }
+    }
     if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &cx.with_default(&first.ty), member) {
         cx.decide(&first.ty);
         return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), rest, expected, loc);

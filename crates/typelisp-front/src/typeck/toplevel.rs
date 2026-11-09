@@ -217,6 +217,9 @@ fn check_primary(
                     return Ok((check_use(reg, heap, site, args, false, public, d.warnings)?, None));
                 }
                 wk::SHADOWING_IMPORT => return Ok((check_use(reg, heap, site, args, true, false, d.warnings)?, None)),
+                // The reader made each name the module's own; nothing is left
+                // to run.
+                wk::SHADOW => return Ok((crate::check::forms::module_form(heap, &Path::in_ns(ns, "nothing"), &[])?, None)),
                 _ => {}
             }
         }
@@ -928,6 +931,34 @@ mod tests {
         assert_eq!(run(&format!("{}(grab2 (make-instance 'box :v true))", src)).1, Value::Bool(true));
         let msg = check_err(&format!("{}(grab-str (make-instance 'ints :n 41))", src));
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
+    }
+
+    /// A value is boxed as a trait object where one is expected, and its
+    /// methods are called through the table; a trait object of a subtrait
+    /// is one of its supertraits.
+    #[test]
+    fn trait_objects() {
+        let src = "(deftrait shape () (defmethod area (self) int))
+(deftrait solid (shape) (defmethod vol (self) int))
+(defstruct sq (n int))
+(defstruct cube (n int))
+(impl shape sq (defmethod area (self) int (* self::n self::n)))
+(impl shape cube (defmethod area (self) int (* 6 self::n self::n)))
+(impl solid cube (defmethod vol (self) int (* self::n self::n self::n)))
+(defun a ((s :dyn shape)) int (area s))
+(defun up ((s :dyn solid)) :dyn shape s)
+(defun g<T> ((x T)) :dyn shape (:where (shape T)) (as :dyn shape x))
+";
+        assert_eq!(run(&format!("{}(a (make-instance 'sq :n 3))", src)).1, Value::Int(9));
+        assert_eq!(run(&format!("{}(a (up (make-instance 'cube :n 1)))", src)).1, Value::Int(6));
+        assert_eq!(run(&format!("{}(vol (the :dyn solid (make-instance 'cube :n 2)))", src)).1, Value::Int(8));
+        assert_eq!(run(&format!("{}(a (g (make-instance 'sq :n 4)))", src)).1, Value::Int(16));
+        let msg = check_err(&format!("{}(defstruct ci (n int))\n(a (make-instance 'ci :n 1))", src));
+        assert!(msg.contains("`ci` does not implement `shape`, so it cannot be used as `:dyn shape`"), "{}", msg);
+        let msg = check_err(&format!("{}(defun b ((s :dyn shape)) :dyn solid s)", src));
+        assert!(msg.contains("`shape` does not inherit `solid`"), "{}", msg);
+        let msg = check_err("(deftrait a () (defmethod m (self) int))\n(deftrait b () (defmethod m (self) int))\n(deftrait c (a b))");
+        assert!(msg.contains("method `m` is inherited from both `a` and `b`"), "{}", msg);
     }
 
     /// An `impl` that writes no method the type already has adopts it,

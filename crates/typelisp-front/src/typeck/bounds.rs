@@ -120,7 +120,7 @@ fn find_method(reg: &Registry, trait_path: Path, at: Vec<Option<Type>>, name: ty
 
 /// The supertrait `sup` of the trait `tdef`, whose parameters are `at`:
 /// its own parameters there.
-fn supertrait_at(reg: &Registry, tdef: &TraitDef, at: &[Option<Type>], sup: &TraitBound) -> Option<Vec<Option<Type>>> {
+pub(crate) fn supertrait_at(reg: &Registry, tdef: &TraitDef, at: &[Option<Type>], sup: &TraitBound) -> Option<Vec<Option<Type>>> {
     let sdef = trait_def(reg, &sup.trait_path)?;
     let mut out = vec![at[0].clone()];
     for a in &sdef.params[1..] {
@@ -147,7 +147,7 @@ pub(crate) fn in_params(params: &[TypeParam], at: &[Option<Type>], ty: &Type) ->
 }
 
 /// The trait `path`'s definition.
-fn trait_def<'r>(reg: &'r Registry, path: &Path) -> Option<&'r TraitDef> {
+pub(crate) fn trait_def<'r>(reg: &'r Registry, path: &Path) -> Option<&'r TraitDef> {
     match reg.types.get(path) {
         Some(TypeEntry::Trait(def)) => Some(def),
         _ => None,

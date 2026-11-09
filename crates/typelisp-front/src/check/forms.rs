@@ -384,7 +384,7 @@ pub(crate) fn unwind_protect_form(
 }
 
 /// `(dyn-upcast TRAIT FORM)`.
-pub(super) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) -> Result<Value, Error> {
+pub(crate) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     let tp = definition_form(to_trait);
     f.push(tp);

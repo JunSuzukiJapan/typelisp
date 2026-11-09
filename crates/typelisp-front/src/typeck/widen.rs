@@ -23,6 +23,9 @@ pub(crate) fn conform(cx: &Cx, t: Typed, expected: Option<&Type>) -> Result<Type
     let Some(e) = expected else { return Ok(t) };
     let unified = cx.holes.borrow_mut().unify(e, &t.ty);
     let Err(m) = unified else { return Ok(t) };
+    if let Type::Dyn(to, pins) = cx.resolve(e) {
+        return super::dyn_trait::coerce(cx, t, &to, &pins);
+    }
     match widen(cx, t, &cx.resolve(e)) {
         Ok(widened) => Ok(widened),
         Err(_) => Err(Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", m.left, m.right))),
@@ -57,9 +60,6 @@ fn widens_to(ty: &Type) -> bool {
 fn widen(cx: &Cx, t: Typed, wanted: &Type) -> Result<Typed, Typed> {
     // A number literal no type decided yet is read as its default.
     let found = cx.with_default(&t.ty);
-    if let Type::Dyn(..) = wanted {
-        unimplemented!("typeck: a `{}` widened to the trait object `{}`", found, wanted)
-    }
     if *wanted == Type::Rational {
         return match found {
             Type::Int => {
