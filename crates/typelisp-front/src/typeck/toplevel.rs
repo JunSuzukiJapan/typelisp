@@ -933,6 +933,15 @@ mod tests {
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
     }
 
+    /// `task` and `thread` take a call, and nothing else.
+    #[test]
+    fn spawning() {
+        let msg = check_err("(task (if true 1 2))");
+        assert!(msg.contains("`task` cannot start `if`"), "{}", msg);
+        let msg = check_err("(thread 5)");
+        assert!(msg.contains("`thread` takes a call form"), "{}", msg);
+    }
+
     /// A supertrait's associated types are pinned in the subtrait's
     /// parameters, and an `impl` of the subtrait needs the supertrait's to
     /// bind them so.

@@ -80,6 +80,11 @@ pub(crate) enum Node {
     /// `compile`, `trace`, `untrace` or `disassemble` (`tag`) of the bodies
     /// `targets`; `llvm_ir` says what `disassemble` shows.
     Tool { tag: u32, targets: Vec<crate::check::resolved::CompileTarget>, llvm_ir: bool },
+    /// `(task call)` or `(thread call)` (`tag`): `call` run on its own, the
+    /// value a handle on it.
+    Spawn { tag: u32, call: Box<Typed> },
+    /// `(select arm...)`: the first arm whose channel operation can go.
+    Select { arms: Vec<SelectArm> },
     /// `(panic message)`: stop with `message`.
     Panic { message: Box<Typed> },
     /// `(unwind-protect protected cleanup)`: `protected`'s value, `cleanup`
@@ -108,6 +113,37 @@ pub(crate) enum Node {
     /// `value`, of its own type, held as a `Sexpr`. How is chosen when the
     /// tree is lowered, from the settled type ([`super::sexpr_value`]).
     AsSexpr { value: Box<Typed> },
+}
+
+/// One arm of a `select`. Its channel and value are locals the `let`
+/// around the `select` binds; its body is a `let` with no bindings.
+#[derive(Debug)]
+pub(crate) enum SelectArm {
+    /// `((var (recv chan)) body...)`; `var` is bound to `bound`, the
+    /// `Option` of the channel's element.
+    Recv { var: SymRef, bound: Type, chan: Typed, body: Typed },
+    /// `((send chan value) body...)`, `elem` the channel's element type.
+    Send { elem: Type, chan: Typed, value: Typed, body: Typed },
+    /// `(:else body...)`.
+    Else { body: Typed },
+}
+
+impl SelectArm {
+    fn parts(&self) -> Vec<&Typed> {
+        match self {
+            SelectArm::Recv { chan, body, .. } => vec![chan, body],
+            SelectArm::Send { chan, value, body, .. } => vec![chan, value, body],
+            SelectArm::Else { body } => vec![body],
+        }
+    }
+
+    fn parts_mut(&mut self) -> Vec<&mut Typed> {
+        match self {
+            SelectArm::Recv { chan, body, .. } => vec![chan, body],
+            SelectArm::Send { chan, value, body, .. } => vec![chan, value, body],
+            SelectArm::Else { body } => vec![body],
+        }
+    }
 }
 
 /// A checked pattern.
@@ -206,12 +242,14 @@ impl Typed {
                 args.iter().collect()
             }
             Node::Apply { callee, args } => std::iter::once(&**callee).chain(args).collect(),
+            Node::Select { arms } => arms.iter().flat_map(SelectArm::parts).collect(),
             Node::Labels { defs, body } => defs.iter().flat_map(|d| &d.body).chain(body).collect(),
             Node::Return { value } => value.iter().map(|v| &**v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
             | Node::DynNew { value: obj, .. }
             | Node::DynUpcast { value: obj, .. }
+            | Node::Spawn { call: obj, .. }
             | Node::Set { value: obj, .. }
             | Node::SetGlobal { value: obj, .. }
             | Node::Panic { message: obj } => {
@@ -242,12 +280,14 @@ impl Typed {
                 args.iter_mut().collect()
             }
             Node::Apply { callee, args } => std::iter::once(&mut **callee).chain(args.iter_mut()).collect(),
+            Node::Select { arms } => arms.iter_mut().flat_map(SelectArm::parts_mut).collect(),
             Node::Labels { defs, body } => defs.iter_mut().flat_map(|d| d.body.iter_mut()).chain(body.iter_mut()).collect(),
             Node::Return { value } => value.iter_mut().map(|v| &mut **v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
             | Node::DynNew { value: obj, .. }
             | Node::DynUpcast { value: obj, .. }
+            | Node::Spawn { call: obj, .. }
             | Node::Set { value: obj, .. }
             | Node::SetGlobal { value: obj, .. }
             | Node::Panic { message: obj } => {
@@ -296,6 +336,10 @@ impl Typed {
                     d.ret = f(&d.ret);
                 }),
                 Node::Match { arms, .. } => arms.iter_mut().for_each(|(pat, _)| pat.map_types(f)),
+                Node::Select { arms } => arms.iter_mut().for_each(|a| match a {
+                    SelectArm::Recv { bound: ty, .. } | SelectArm::Send { elem: ty, .. } => *ty = f(ty),
+                    SelectArm::Else { .. } => {}
+                }),
                 Node::Literal { .. }
                 | Node::Number { .. }
                 | Node::Quote { .. }
@@ -317,6 +361,7 @@ impl Typed {
                 | Node::DynNew { .. }
                 | Node::DynCall { .. }
                 | Node::DynUpcast { .. }
+                | Node::Spawn { .. }
                 | Node::Let { .. }
                 | Node::If { .. } => {}
             }

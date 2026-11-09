@@ -23,7 +23,7 @@ use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::check::registry::TraitBound;
-use super::{binding, call, cast, control, dyn_trait, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
+use super::{binding, call, cast, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -361,6 +361,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::DISASSEMBLE => return tools::check_disassemble(cx, heap, args, loc),
         wk::LABELS => return lambda::check_labels(cx, heap, locals, args, expected, loc),
         wk::LAMBDA => return lambda::check_lambda(cx, heap, locals, args, loc),
+        wk::SELECT => return select::check_select(cx, heap, locals, args, expected, loc),
+        wk::TASK | wk::THREAD => return spawn::check_spawn(cx, heap, locals, head.well_known(), args, loc),
         wk::APPLY => return lambda::check_apply_form(cx, heap, locals, args, loc),
         wk::PANIC => return control::check_panic(cx, heap, locals, args, loc),
         wk::UNWIND_PROTECT => return control::check_unwind_protect(cx, heap, locals, args, expected, loc),

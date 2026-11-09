@@ -225,7 +225,7 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 ///
 /// `tag` is `"task"` or `"thread"`: `(thread RET-R KEY CALL)` is the same node
 /// for a task that runs on an OS thread of its own.
-pub(super) fn spawn_form(heap: &mut Heap, tag: u32, ret: Value, handle: &Type, call: Value) -> Result<Value, Error> {
+pub(crate) fn spawn_form(heap: &mut Heap, tag: u32, ret: Value, handle: &Type, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
     let ret = rooted(heap, ret);
     let key = core::type_form(heap, handle, &[])?;
@@ -248,7 +248,7 @@ pub(super) fn spawn_form(heap: &mut Heap, tag: u32, ret: Value, handle: &Type, c
 /// The arms carry plain data — a tag symbol (`recv`, `send`, `:else`), the
 /// bound name, the `Option<T>` key, a field kind — rather than lowered literal
 /// nodes, the same way `assoc` carries its result key.
-pub(super) fn select_form(heap: &mut Heap, arms: &[Value]) -> Result<Value, Error> {
+pub(crate) fn select_form(heap: &mut Heap, arms: &[Value]) -> Result<Value, Error> {
     let form = core::tagged(heap, wk::SELECT, arms)?;
     Ok(rooted(heap, form))
 }
@@ -263,7 +263,7 @@ pub(super) fn select_form(heap: &mut Heap, arms: &[Value]) -> Result<Value, Erro
 /// a `let`'s are. That is not only tidiness: the free-variable walk holds
 /// `SymRef`s and runs on a `&Heap`, so a name it had to intern would need a
 /// mutable one.
-pub(super) fn select_recv_arm(
+pub(crate) fn select_recv_arm(
     heap: &mut Heap,
     var: SymRef,
     bound: &Type,
@@ -294,7 +294,7 @@ pub(super) fn select_recv_arm(
 /// for the compiled side: a value reaches the driver as one machine word and a
 /// word does not say whether it is a number or a pointer. The interpreter
 /// ignores it, as it ignores every other repr field.
-pub(super) fn select_send_arm(
+pub(crate) fn select_send_arm(
     heap: &mut Heap,
     value_kind: i64,
     chan: Value,
@@ -319,7 +319,7 @@ pub(super) fn select_send_arm(
 /// `(:else BODY)` — the arm that runs when nothing else is ready.
 ///
 /// Always last, which is what lets its index be the number of channel arms.
-pub(super) fn select_else_arm(heap: &mut Heap, body: Value) -> Result<Value, Error> {
+pub(crate) fn select_else_arm(heap: &mut Heap, body: Value) -> Result<Value, Error> {
     let body = rooted(heap, body);
     let arm_heap = &mut *heap;
     let mut f = Items::new(arm_heap);

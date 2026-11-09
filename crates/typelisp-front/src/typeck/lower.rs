@@ -17,7 +17,7 @@ use super::generic::Requests;
 use super::registry::Registry;
 use super::sexpr_value::{encoding, no_encoding, Encoding};
 use super::subst::Subst;
-use super::tree::{Node, Pat, Typed};
+use super::tree::{Node, Pat, SelectArm, Typed};
 
 /// What lowering one tree needs: the definitions, the substitution that
 /// makes a generic body one specialization (empty for any other tree), and
@@ -144,6 +144,48 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             let targets = super::dyn_trait::targets(lw.reg, trait_path, *method);
             lw.reg.dyn_call_form(heap, trait_path, *method, *slot, &targets, &lowered)
+        }
+        Node::Select { arms } => {
+            let mut lowered = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let form = match arm {
+                    SelectArm::Recv { var, bound, chan, body } => {
+                        let chan = lower_rooted(heap, lw, chan)?;
+                        let body = lower_rooted(heap, lw, body)?;
+                        forms::select_recv_arm(heap, *var, &lw.settle(bound), chan, body)?
+                    }
+                    SelectArm::Send { elem, chan, value, body } => {
+                        let kind = lw.reg.repr(&lw.settle(elem)).field_kind();
+                        let chan = lower_rooted(heap, lw, chan)?;
+                        let value = lower_rooted(heap, lw, value)?;
+                        let body = lower_rooted(heap, lw, body)?;
+                        forms::select_send_arm(heap, kind, chan, value, body)?
+                    }
+                    SelectArm::Else { body } => {
+                        let body = lower_rooted(heap, lw, body)?;
+                        forms::select_else_arm(heap, body)?
+                    }
+                };
+                heap.push_root(form);
+                lowered.push(form);
+            }
+            forms::select_form(heap, &lowered)
+        }
+        Node::Spawn { tag, call } => {
+            let form = lower_rooted(heap, lw, call)?;
+            // A macro may have expanded to something that is not a call, and
+            // a builtin call over literals folds to its value: what it
+            // lowered to is the last word.
+            let is_call = matches!(heap.car(form), Ok(Value::Symbol(id)) if matches!(heap.symbol_spelling(id), "call" | "assoc" | "dyn-call" | "apply"));
+            if !is_call {
+                return Err(Error::TypeError(format!("`{}` needs a call, and this is not one. {}", super::spawn::form_name(*tag), super::spawn::shape(*tag))));
+            }
+            let ret = lw.reg.repr_form(heap, &lw.settle(&call.ty))?;
+            heap.push_root(ret);
+            let handle = lw.settle(&t.ty);
+            let spawned = forms::spawn_form(heap, *tag, ret, &handle, form);
+            heap.pop_root();
+            spawned
         }
         Node::DynUpcast { to, value } => {
             let form = lower_rooted(heap, lw, value)?;
