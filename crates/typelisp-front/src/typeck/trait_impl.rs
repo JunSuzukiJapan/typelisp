@@ -10,7 +10,7 @@
 //! The `<T...>` after `impl` declares the type parameters `Type` is written
 //! in. So far they are the type's own, in order: `(impl<T> Show Box<T> ...)`.
 
-use crate::types::{ParamOwner, Path, Type};
+use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -92,13 +92,16 @@ pub(crate) fn check_trait_impl(
     let mut left = Vec::new();
     for (m, _) in &tdef.methods {
         if !methods.iter().any(|(w, _)| w == m) {
-            if reg.method(&owner, *m).is_some() {
-                unimplemented!("typeck: an `impl` that adopts `{}::{}`, written before it, as the trait's method", owner, m)
+            if tdef.defaults.contains(m) {
+                left.push(*m);
+                continue;
             }
-            if !tdef.defaults.contains(m) {
+            // A method the type already has is the trait's, when it has the
+            // signature the trait gives it.
+            let Some(existing) = reg.method(&owner, *m) else {
                 return Err(Error::TypeError(format!("{}: missing method `{}` (`{}` declares no default body for it)", shown, m, trait_path)));
-            }
-            left.push(*m);
+            };
+            adopt(&tdef, existing, &target_ty, &assoc, head.params(), &shown, &trait_path, *m)?;
         }
     }
     for sup in &tdef.supertraits {
@@ -174,7 +177,7 @@ fn items_of(
                 let Value::Symbol(name) = name else {
                     return Err(Error::TypeError("impl: associated type name must be a symbol".into()));
                 };
-                let Some(i) = assoc_names.iter().position(|a| a == name) else {
+                let Some(i) = assoc_names.iter().position(|a| a.name() == name.name()) else {
                     return Err(Error::TypeError(format!("{}: `{}` is not an associated type of the trait", shown, name.name())));
                 };
                 bound[i] = Some(parse_type(heap, &TypeCx { reg, ns, scope: head, self_type: Some(target_ty) }, *ty)?);
@@ -228,6 +231,57 @@ struct Of<'a> {
     assoc: &'a [Type],
     /// The `impl`'s `(:where ...)`, which bounds each method's parameters.
     clause: Option<Value>,
+}
+
+/// Whether `existing`, the method `method` the type already has, is the
+/// trait's: an instance method or not as the trait declares it, with no
+/// `&optional`, `&key` or `&rest`, and the trait's signature with `Self` and
+/// the associated types where the `impl` puts them (`target` and `assoc`,
+/// written in the type's parameters `own`).
+#[allow(clippy::too_many_arguments)]
+fn adopt(tdef: &TraitDef, existing: &MethodDef, target: &Type, assoc: &[Type], own: &[TypeParam], shown: &str, trait_path: &Path, method: SymRef) -> Result<(), Error> {
+    let want = tdef.method(method).expect("a method of the trait");
+    let to_impl = Subst::positional(&tdef.params, &std::iter::once(target.clone()).chain(assoc.iter().cloned()).collect::<Vec<_>>());
+    let want_params: Vec<Type> = want.params.iter().map(|t| to_impl.apply(t)).collect();
+    let want_ret = to_impl.apply(&want.ret);
+    let want_instance = want.params.first() == Some(&Type::Param(tdef.params[0]));
+    let kind = |i: bool| if i { "an instance method" } else { "a static function" };
+    if existing.instance != want_instance {
+        return Err(Error::TypeError(format!(
+            "{}: method `{}` is {}, but `{}` declares it {}",
+            shown,
+            method,
+            kind(existing.instance),
+            trait_path,
+            kind(want_instance)
+        )));
+    }
+    let sig = &existing.sig;
+    if !sig.optionals.is_empty() || !sig.keys.is_empty() || sig.rest.is_some() {
+        return Err(Error::TypeError(format!(
+            "{}: method `{}` may not declare &optional/&key/&rest — a trait method's arity is fixed by its vtable slot, and `{}` declares none",
+            shown, method, trait_path
+        )));
+    }
+    if sig.type_params.len() != own.len() {
+        unimplemented!("typeck: adopting `{}`, a method with type parameters of its own, as a trait's", method)
+    }
+    // The method's types are written in its own parameters, the type's.
+    let reown = Subst::positional(&sig.type_params, &own.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
+    let params: Vec<Type> = sig.params.iter().map(|t| reown.apply(t)).collect();
+    let ret = reown.apply(&sig.ret);
+    if params != want_params || ret != want_ret {
+        let describe = |params: &[Type], ret: &Type| format!("({}) {}", params.iter().map(Type::to_string).collect::<Vec<_>>().join(" "), ret);
+        return Err(Error::TypeError(format!(
+            "{}: method `{}` is `{}`, but `{}` declares `{}`",
+            shown,
+            method,
+            describe(&params, &ret),
+            trait_path,
+            describe(&want_params, &want_ret)
+        )));
+    }
+    Ok(())
 }
 
 /// Define the method `method`, which the `impl` leaves out, as the trait's

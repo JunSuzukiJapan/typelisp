@@ -7,9 +7,10 @@
 //! fields matched by the patterns; the variant is named bare, since the
 //! type is the one being matched.
 
-use crate::check::analyze::is_sexpr_expectation;
+use crate::check::analyze::{is_option_of_sexpr, is_sexpr_expectation, BIGNUM_IS_GONE, NIL_IS_GONE};
+use crate::sexpr_variant::{self, is_ctor_name};
 use crate::check::registry::AdtKind;
-use crate::types::{Path, Type};
+use crate::types::{path_is_builtin, Path, Type};
 use crate::{wk, Error, Heap, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -69,10 +70,28 @@ fn check_pattern(cx: &Cx, heap: &Heap, expected: &Type, v: Value, binds: &mut Bi
                 Value::Symbol(h) => h,
                 _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
             };
+            let ty = cx.resolve(expected);
+            if is_sexpr_expectation(&ty) && !option_variant(cx, &ty, head) {
+                if !is_ctor_name(head.name()) && names_type(cx, head) {
+                    unimplemented!("typeck: a downcast pattern")
+                }
+                // An `Option<Sexpr>` is matched by `Sexpr`'s variants as if
+                // its `some` were peeled, beside `none` in the same arms.
+                if is_option_of_sexpr(&ty) && is_ctor_name(head.name()) {
+                    return check_pattern(cx, heap, &sexpr_ty(), v, binds);
+                }
+            }
             let (owner, targs, def) = sum_type(cx, expected, || format!("({} ...)", heap.symbol_spelling(head)))?;
             let Some(variant) = def.variant_index(member_symbol(head.name())) else {
                 return Err(Error::TypeError(format!("`{}` is not a constructor of `{}`", heap.symbol_spelling(head), owner)));
             };
+            if path_is_builtin(&owner, wk::SEXPR) {
+                match variant {
+                    sexpr_variant::NIL => return Err(Error::TypeError(NIL_IS_GONE.into())),
+                    sexpr_variant::RETIRED_BIGNUM => return Err(Error::TypeError(BIGNUM_IS_GONE.into())),
+                    _ => {}
+                }
+            }
             variant_pattern(cx, heap, owner, targs, def, variant, &parts[1..], binds)
         }
         Value::Int(_) | Value::Bool(_) | Value::Char(_) | Value::Str(_) | Value::Boxed(_) => {
@@ -86,27 +105,40 @@ fn check_pattern(cx: &Cx, heap: &Heap, expected: &Type, v: Value, binds: &mut Bi
 /// `None` when `expected` is not a sum type or has no such variant.
 fn bare_variant(cx: &Cx, heap: &Heap, expected: &Type, id: SymRef, binds: &mut Binds) -> Result<Option<Pat>, Error> {
     let ty = cx.resolve(expected);
-    if is_sexpr_expectation(&ty) {
+    let Type::Named(owner, targs) = &ty else { return Ok(None) };
+    if is_sexpr_expectation(&ty) && !option_variant(cx, &ty, id) {
         // Against a `Sexpr`, a type's or a variant's name is a downcast.
-        let names_type = find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))).is_some();
-        if names_type || ctor_named(cx.reg, cx.ns, id).is_some() {
+        if names_type(cx, id) {
             unimplemented!("typeck: a downcast pattern")
         }
         return Ok(None);
     }
-    let Type::Named(owner, targs) = &ty else { return Ok(None) };
     let Some(def) = cx.reg.type_def(owner).filter(|d| d.kind == AdtKind::Sum) else { return Ok(None) };
     let Some(variant) = def.variant_index(member_symbol(id.name())) else { return Ok(None) };
     variant_pattern(cx, heap, *owner, targs.clone(), def, variant, &[], binds).map(Some)
+}
+
+/// Whether `id` names a type, or a variant a `use` brought in: against a
+/// `Sexpr`, a pattern headed by one is a downcast.
+fn names_type(cx: &Cx, id: SymRef) -> bool {
+    find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))).is_some() || ctor_named(cx.reg, cx.ns, id).is_some()
+}
+
+/// Whether `id` is a variant of `ty` when it is `Option<Sexpr>`: `some` and
+/// `none` are its own, not downcasts.
+fn option_variant(cx: &Cx, ty: &Type, id: SymRef) -> bool {
+    is_option_of_sexpr(ty) && cx.reg.type_def(&Path::builtin(wk::OPTION)).is_some_and(|d| d.variant_index(member_symbol(id.name())).is_some())
+}
+
+/// `Sexpr`.
+fn sexpr_ty() -> Type {
+    Type::Named(Path::builtin(wk::SEXPR), Vec::new())
 }
 
 /// The sum type a pattern `what` (for the message) matches a value of, with
 /// its type arguments and definition.
 fn sum_type<'r>(cx: &Cx<'r>, expected: &Type, what: impl Fn() -> String) -> Result<(Path, Vec<Type>, &'r TypeDef), Error> {
     let ty = cx.resolve(expected);
-    if is_sexpr_expectation(&ty) {
-        unimplemented!("typeck: matching a `Sexpr`")
-    }
     if let Type::Named(p, args) = &ty {
         if let Some(def) = cx.reg.type_def(p) {
             return match def.kind {

@@ -79,7 +79,9 @@ impl<'p> TypeScope<'p> {
         if let Some(p) = self.params.iter().find(|p| p.name == name) {
             return Some(Type::Param(*p));
         }
-        if let Some((_, t)) = self.named.iter().find(|(n, _)| *n == name) {
+        // An associated type's name comes from the trait, which may have been
+        // read in another module than the `impl`: the spelling is the name.
+        if let Some((_, t)) = self.named.iter().find(|(n, _)| n.name() == name.name()) {
             return Some(t.clone());
         }
         self.parent.and_then(|s| s.lookup_type(name))

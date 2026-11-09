@@ -18,7 +18,7 @@ use super::bounds::parse_where;
 use super::defun::{by_param, lower_all, parse_header, split_doc, split_where};
 use super::lambda_list::{parse_lambda_list, LambdaList, Written};
 use super::expr::{check_body, Cx};
-use super::generic::{Base, Requests};
+use super::generic::{method_specialization, Base, Requests};
 use super::locals::Locals;
 use super::lower::Lowering;
 use super::define::Definer;
@@ -118,11 +118,12 @@ pub(crate) fn define_method(
     let Method { owner, method, instance, public, home, params: list, ret, bounds } = def;
     let bounded = scope.bound(bounds.clone());
     let type_params = scope.params().to_vec();
-    // A receiver that names every type argument outright would make the
-    // method that instantiation's own.
-    if instance && type_params.is_empty() && matches!(&list.required[0].1, Type::Named(_, args) if !args.is_empty()) {
-        unimplemented!("typeck: a method written for one instantiation of a generic type")
-    }
+    // A receiver that names every type argument outright makes the method
+    // that instantiation's own, its code named for the instantiation.
+    let inst = match &list.required.first() {
+        Some((_, Type::Named(_, args))) if instance && type_params.is_empty() && !args.is_empty() => Some(args.clone()),
+        _ => None,
+    };
     let LambdaList { required, optionals, rest, keys, bound: params } = list;
     let sig = FnDef {
         public,
@@ -132,9 +133,19 @@ pub(crate) fn define_method(
         bounds: by_param(bounds),
         ..FnDef::plain(type_params.clone(), required.into_iter().map(|(_, t)| t).collect(), ret.clone())
     };
-    d.method(reg, &owner, method)?;
     let ns = d.site.ns;
-    reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
+    let code_name = match &inst {
+        Some(args) => {
+            d.inst_method(reg, &owner, method, args)?;
+            reg.define_inst_method(owner, method, args.clone(), MethodDef { sig, instance, home, inst_args: Some(args.clone()) });
+            method_specialization(&owner, method, args)
+        }
+        None => {
+            d.method(reg, &owner, method)?;
+            reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
+            method
+        }
+    };
 
     let mut body = {
         let cx = Cx::new(reg, d.expander, ns, &bounded, self_type);
@@ -155,7 +166,7 @@ pub(crate) fn define_method(
     let subst = Subst::default();
     let mut lw = Lowering { reg, subst: &subst, requests };
     let forms = lower_all(heap, &mut lw, &body)?;
-    let form = reg.defmethod_form(heap, &owner, method, instance, &params, &ret, &forms)?;
+    let form = reg.defmethod_form(heap, &owner, code_name, instance, &params, &ret, &forms)?;
     heap.push_root(form);
     Ok(Some(form))
 }

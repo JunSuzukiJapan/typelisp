@@ -11,7 +11,7 @@
 
 use crate::check::{MacroExpander, RedefPolicy};
 use crate::check::registry::PRELUDE_MODULES;
-use crate::types::{in_std, std_module, Path};
+use crate::types::{in_std, std_module, Path, Type};
 use crate::{Error, Heap};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
@@ -131,6 +131,16 @@ impl Definer<'_> {
     /// is already.
     pub(crate) fn method(&mut self, reg: &Registry, owner: &Path, method: SymRef) -> Result<(), Error> {
         match reg.method(owner, method) {
+            None => Ok(()),
+            Some(m) => self.outcome(Kind::Method, method, m.sig.builtin),
+        }
+    }
+
+    /// Whether the method `method` of `owner` may be defined for the
+    /// instantiation `args`, when the type already has one for it or for
+    /// every instantiation.
+    pub(crate) fn inst_method(&mut self, reg: &Registry, owner: &Path, method: SymRef, args: &[Type]) -> Result<(), Error> {
+        match reg.method_at(owner, method, args) {
             None => Ok(()),
             Some(m) => self.outcome(Kind::Method, method, m.sig.builtin),
         }

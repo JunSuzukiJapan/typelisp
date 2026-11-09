@@ -714,11 +714,11 @@ pub(crate) const SEXPR_RESERVED_VARIANT: usize = crate::sexpr_variant::NIL;
 const SEXPR_RETIRED_BIGNUM: usize = crate::sexpr_variant::RETIRED_BIGNUM;
 
 /// Message for a `(bignum ..)` constructor or pattern.
-const BIGNUM_IS_GONE: &str = "`bignum` is no longer a `Sexpr` constructor: the `bignum` type was folded \
+pub(crate) const BIGNUM_IS_GONE: &str = "`bignum` is no longer a `Sexpr` constructor: the `bignum` type was folded \
      into `int`, so a big integer is `(int n)` like any other.";
 
 /// Message for a `(nil)` that survived in source somewhere.
-const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty list is \
+pub(crate) const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty list is \
      `Option<Sexpr>`'s `none`. Write `()` where an `Option<Sexpr>` is expected, or \
      `(Option::none)`; match it with `((none) ...)`.";
 

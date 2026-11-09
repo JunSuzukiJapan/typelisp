@@ -51,7 +51,7 @@ pub(crate) fn parse_where(heap: &Heap, tcx: &TypeCx, clause: Value) -> Result<Ve
             let [Value::Symbol(assoc_name), ty] = pair.as_slice() else {
                 return Err(Error::TypeError(":where: associated-type pin must be (AssocName Type)".into()));
             };
-            if !tdef.params[1..].iter().any(|a| a.name == *assoc_name) {
+            if !tdef.params[1..].iter().any(|a| a.name.name() == assoc_name.name()) {
                 return Err(Error::TypeError(format!(
                     ":where: trait `{}` has no associated type `{}`",
                     trait_path,

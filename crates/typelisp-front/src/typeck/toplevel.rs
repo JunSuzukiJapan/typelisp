@@ -930,6 +930,44 @@ mod tests {
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
     }
 
+    /// An `impl` that writes no method the type already has adopts it,
+    /// when the signature is the trait's; a method for one instantiation is
+    /// that instantiation's.
+    #[test]
+    fn adopted_and_instantiation_methods() {
+        let src = "(deftrait sized () (defmethod size (self) int))
+(defstruct bag (n int))
+(impl bag (pub defmethod size (self) int self::n))
+(impl sized bag)
+(defun sz<T> ((x T)) int (:where (sized T)) (size x))
+";
+        assert_eq!(run(&format!("{}(sz (make-instance 'bag :n 3))", src)).1, Value::Int(3));
+        let msg = check_err("(deftrait sized () (defmethod size (self) int))\n(defstruct bag (n int))\n(impl bag (pub defmethod size (self) bool true))\n(impl sized bag)");
+        assert!(msg.contains("method `size` is `(bag) bool`, but `sized` declares `(bag) int`"), "{}", msg);
+        let src = "(defstruct two<A,B> (a A) (b B))
+(impl two<int,int> (pub defmethod sum (self) int (+ self::a self::b)))
+";
+        assert_eq!(run(&format!("{}(sum (the two<int,int> (make-instance 'two :a 1 :b 2)))", src)).1, Value::Int(3));
+    }
+
+    /// A `Sexpr` is matched by its variants; an `Option<Sexpr>` by them and
+    /// `none` in one list, which must cover both.
+    #[test]
+    fn sexpr_patterns() {
+        let f = "(defun k ((x Option<Sexpr>)) int (match x ((cons a _) 1) ((int n) n) ((none) 0) (_ 9)))\n";
+        assert_eq!(run(&format!("{}(k (quote (1)))", f)).1, Value::Int(1));
+        assert_eq!(run(&format!("{}(k 5)", f)).1, Value::Int(5));
+        assert_eq!(run(&format!("{}(k ())", f)).1, Value::Int(0));
+        assert_eq!(run(&format!("{}(k (quote a))", f)).1, Value::Int(9));
+        assert_eq!(run("(defun m ((x Option<Sexpr>)) int (match x ((some (int n)) n) ((some _) 1) ((none) 0)))\n(m 4)").1, Value::Int(4));
+        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((some _) 1)))");
+        assert!(msg.contains("`(none)` is not covered"), "{}", msg);
+        let msg = check_err("(defun k ((x Sexpr)) int (match x ((cons a _) 1)))");
+        assert!(msg.contains("`(int _)` is not covered"), "{}", msg);
+        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((nil) 1) (_ 0)))");
+        assert!(msg.contains("`nil` is no longer a `Sexpr` constructor"), "{}", msg);
+    }
+
     /// A documentation string is kept, not checked as the body; `()` where
     /// an `Option` is expected is `none`; an `Option<Sexpr>` has `Sexpr`'s
     /// methods.

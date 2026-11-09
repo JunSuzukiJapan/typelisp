@@ -90,6 +90,13 @@ pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name
         Type::Named(_, args) => args.as_slice(),
         _ => &[],
     };
+    if reg.has_inst_method(&owner, name) && args.iter().any(|a| {
+        let mut open = false;
+        super::unify::walk(a, &mut |t| open |= matches!(t, Type::Infer(_)));
+        open
+    }) {
+        unimplemented!("typeck: `{}`, which `{}` has for one instantiation, on a receiver whose type arguments are not decided yet", name.name(), owner)
+    }
     let m = reg.method_at(&owner, name, args)?;
     let home = m.home.map_or(owner.ns(), |h| h.ns());
     (m.instance && (m.sig.public || sees(here, home))).then_some((owner, m))

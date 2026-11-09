@@ -384,9 +384,11 @@ impl Registry {
         self.defaulted.get(&(*owner, name))
     }
 
-    /// Define the method `name` of `owner` for the instantiation `args`.
+    /// Define (or redefine) the method `name` of `owner` for the
+    /// instantiation `args`.
     pub(crate) fn define_inst_method(&mut self, owner: Path, name: SymRef, args: Vec<Type>, def: MethodDef) {
         let mut insts = self.inst_methods.get(&(owner, name)).cloned().unwrap_or_default();
+        insts.retain(|(a, _)| *a != args);
         insts.push((args, def));
         self.inst_methods.insert((owner, name), insts);
     }
