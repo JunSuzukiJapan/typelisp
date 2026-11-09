@@ -16,7 +16,7 @@ use super::defenum::check_defenum;
 use super::deftrait::check_deftrait;
 use super::defmethod::check_defmethod;
 use super::defstruct::check_defstruct;
-use super::defun::{check_defun, lower_all, parse_header};
+use super::defun::{check_defun, parse_header};
 use super::defvar::{check_defvar, Which};
 use super::impl_block::check_impl;
 use super::use_form::{check_use, register_for_reading, Site};
@@ -278,16 +278,22 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
         Base::Fn(p) => &reg.fn_def(&p).expect("a specialization is asked for only of a defined function").type_params,
         Base::Method(owner, m) => &reg.method(&owner, m).expect("a specialization is asked for only of a defined method").sig.type_params,
     };
-    // The prelude's generic definitions were checked by the current checker,
-    // which keeps their source, not a checked tree.
-    let Some(template) = reg.template(&req.base) else {
-        unimplemented!("typeck: specializing {:?}, which this checker has no checked body of", req.base)
+    let (template, subst) = match (reg.template(&req.base), req.base) {
+        (Some(template), _) => (template, Subst::positional(type_params, &req.args)),
+        // A method an `impl` took from the trait's default body is that
+        // body, the trait's parameters where the `impl` puts them.
+        (None, Base::Method(owner, m)) if reg.defaulted(&owner, m).is_some() => {
+            let (trait_path, at) = reg.defaulted(&owner, m).expect("checked above");
+            let outer = Subst::positional(type_params, &req.args);
+            let at: Vec<Type> = at.iter().map(|t| outer.apply(t)).collect();
+            super::trait_impl::default_body(reg, trait_path, m, &at)
+        }
+        // The prelude's generic definitions were checked by the current
+        // checker, which keeps their source, not a checked tree.
+        (None, _) => unimplemented!("typeck: specializing {:?}, which this checker has no checked body of", req.base),
     };
-    let subst = Subst::positional(type_params, &req.args);
-    let params: Vec<_> = template.params.iter().map(|(n, t)| (*n, subst.apply(t))).collect();
-    let ret = subst.apply(&template.ret);
     let mut lw = Lowering { reg, subst: &subst, requests };
-    let body = lower_all(heap, &mut lw, &template.body)?;
+    let (params, ret, body) = super::defun::lower_template(heap, &mut lw, &template)?;
     match (req.base, req.name) {
         (Base::Fn(_), Name::Fn(name)) => reg.defun_form(heap, &name, &params, &ret, &body),
         (Base::Method(owner, m), Name::Method(name)) => {
@@ -918,6 +924,28 @@ mod tests {
         assert_eq!(run(&format!("{}(grab2 (make-instance 'box :v true))", src)).1, Value::Bool(true));
         let msg = check_err(&format!("{}(grab-str (make-instance 'ints :n 41))", src));
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
+    }
+
+    /// A trait's default body is checked once at the `deftrait`, and an
+    /// `impl` that leaves the method out has it at its own types.
+    #[test]
+    fn default_bodies() {
+        let src = "(deftrait counted () (:type Item) (defmethod item (self) Item) (defmethod n (self) int) \
+(defmethod twice (self) int (* 2 (n self))) (defmethod first (self) Option<Item> (some (item self))))
+(defstruct c (k int))
+(impl counted c (:type Item bool) (defmethod item (self) bool true) (defmethod n (self) int self::k))
+(defstruct w<T> (v T))
+(impl<T> counted w<T> (:type Item T) (defmethod item (self) T self::v) (defmethod n (self) int 5) (defmethod twice (self) int 0))
+(defun t2<X> ((x X)) int (:where (counted X)) (twice x))
+";
+        assert_eq!(run(&format!("{}(twice (make-instance 'c :k 21))", src)).1, Value::Int(42));
+        assert_eq!(run(&format!("{}(t2 (make-instance 'c :k 4))", src)).1, Value::Int(8));
+        assert_eq!(run(&format!("{}(t2 (make-instance 'w :v 1))", src)).1, Value::Int(0));
+        assert_eq!(run(&format!("{}(match (first (make-instance 'w :v 7)) ((some v) v) (none 0))", src)).1, Value::Int(7));
+        let msg = check_err("(deftrait a () (defmethod n (self) int) (defmethod m (self) string (n self)))");
+        assert!(msg.contains("expected `string`, found `int`"), "{}", msg);
+        let msg = check_err("(deftrait a () (defmethod n (self) int) (defmethod m (self) int (n self)))\n(defstruct d (k int))\n(impl a d)");
+        assert!(msg.contains("missing method `n`"), "{}", msg);
     }
 
     /// An `impl`'s `(:where ...)` bounds every method's type parameters; a

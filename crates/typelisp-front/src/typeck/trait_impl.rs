@@ -23,7 +23,12 @@ use super::bounds::parse_where;
 use super::defun::by_param;
 use super::impl_block::method_params;
 use super::lambda_list::LambdaList;
-use super::registry::{Registry, TraitDef, TraitImpl};
+use super::registry::{FnDef, MethodDef, Registry, Template, TraitDef, TraitImpl, TypeEntry};
+use super::defun::lower_template;
+use super::generic::Base;
+use super::lower::Lowering;
+use crate::check::lower::CoreForms;
+use std::rc::Rc;
 use super::resolve::trait_named;
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -84,15 +89,16 @@ pub(crate) fn check_trait_impl(
             return Err(Error::TypeError(format!("{}: `{}` is not a method of `{}`", shown, written, trait_path)));
         }
     }
+    let mut left = Vec::new();
     for (m, _) in &tdef.methods {
         if !methods.iter().any(|(w, _)| w == m) {
             if reg.method(&owner, *m).is_some() {
                 unimplemented!("typeck: an `impl` that adopts `{}::{}`, written before it, as the trait's method", owner, m)
             }
-            if tdef.defaults.contains(m) {
-                unimplemented!("typeck: an `impl` that leaves the trait's default method `{}` out", m)
+            if !tdef.defaults.contains(m) {
+                return Err(Error::TypeError(format!("{}: missing method `{}` (`{}` declares no default body for it)", shown, m, trait_path)));
             }
-            return Err(Error::TypeError(format!("{}: missing method `{}` (`{}` declares no default body for it)", shown, m, trait_path)));
+            left.push(*m);
         }
     }
     for sup in &tdef.supertraits {
@@ -103,13 +109,30 @@ pub(crate) fn check_trait_impl(
             )));
         }
     }
+    let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc, clause };
+    // The methods left out are defined first, so a written one can call
+    // them, and lowered last, once every method they may call is defined.
+    let mut defaulted = Vec::new();
+    for method in left {
+        defaulted.push((method, define_defaulted(reg, d, heap, &tdef, &of, method)?));
+    }
     let mut forms = Vec::new();
     for (method, item) in methods {
         let want = tdef.method(method).expect("checked above").clone();
-        let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc, clause };
         if let Some(form) = check_method(reg, d, heap, requests, &tdef, &of, method, &want, &shown, item)? {
             forms.push(form);
         }
+    }
+    for (method, at) in defaulted {
+        // A generic one is specialized where it is called.
+        let Some(at) = at else { continue };
+        let (template, subst) = default_body(reg, &trait_path, method, &at);
+        let mut lw = Lowering { reg, subst: &subst, requests };
+        let (params, ret, body) = lower_template(heap, &mut lw, &template)?;
+        let instance = reg.method(&owner, method).expect("defined above").instance;
+        let form = reg.defmethod_form(heap, &owner, method, instance, &params, &ret, &body)?;
+        heap.push_root(form);
+        forms.push(form);
     }
     let mut all = reg.trait_impls.get(&(trait_path, owner)).cloned().unwrap_or_default();
     all.retain(|i| i.args.is_some());
@@ -205,6 +228,50 @@ struct Of<'a> {
     assoc: &'a [Type],
     /// The `impl`'s `(:where ...)`, which bounds each method's parameters.
     clause: Option<Value>,
+}
+
+/// Define the method `method`, which the `impl` leaves out, as the trait's
+/// default body: the trait's parameters where the `impl` puts them, written
+/// in the method's type parameters. Those are returned when the method has
+/// none, to lower its body at.
+fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &TraitDef, of: &Of, method: SymRef) -> Result<Option<Vec<Type>>, Error> {
+    let (ns, owner) = (d.site.ns, of.owner);
+    let root = TypeScope::empty();
+    let scope = root.declare(ParamOwner::Method(owner, method), of.type_names).map_err(|twice| {
+        Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
+    })?;
+    let type_params = reg.type_def(&owner).map(|t| t.params.clone()).unwrap_or_default();
+    let own: Vec<Type> = scope.params().iter().map(|p| Type::Param(*p)).collect();
+    let reown = Subst::positional(&type_params, &own);
+    let at: Vec<Type> = std::iter::once(reown.apply(of.target)).chain(of.assoc.iter().map(|t| reown.apply(t))).collect();
+    let to_impl = Subst::positional(&tdef.params, &at);
+    let want = tdef.method(method).expect("a default is of the trait's own method");
+    let instance = want.params.first() == Some(&Type::Param(tdef.params[0]));
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&at[0]) };
+    let bounds = of.clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
+    let sig = FnDef {
+        public: true,
+        bounds: by_param(bounds),
+        ..FnDef::plain(scope.params().to_vec(), want.params.iter().map(|t| to_impl.apply(t)).collect(), to_impl.apply(&want.ret))
+    };
+    d.method(reg, &owner, method)?;
+    let generic = !scope.params().is_empty();
+    reg.define_defaulted_method(owner, method, MethodDef { sig, instance, home: None, inst_args: None }, of.trait_path, at.clone());
+    Ok((!generic).then_some(at))
+}
+
+/// The trait `trait_path`'s default body of `method`, and the substitution
+/// that puts the trait's parameters at `at`.
+pub(crate) fn default_body(reg: &Registry, trait_path: &Path, method: SymRef, at: &[Type]) -> (Rc<Template>, Subst) {
+    let Some(TypeEntry::Trait(tdef)) = reg.types.get(trait_path) else {
+        unreachable!("a method is defaulted only from a trait")
+    };
+    // The prelude's traits were checked by the current checker, which keeps
+    // their source, not a checked tree.
+    let Some(template) = reg.template(&Base::Method(*trait_path, method)) else {
+        unimplemented!("typeck: the default body of `{}::{}`, which this checker has no checked body of", trait_path, method)
+    };
+    (template, Subst::positional(&tdef.params, at))
 }
 
 /// One method of the `impl`, `want` its signature in the trait: checked to

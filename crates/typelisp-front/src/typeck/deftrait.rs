@@ -14,9 +14,12 @@ use typelisp_mem::symbols::{member_symbol, well_known_symbol};
 use typelisp_mem::SymRef;
 
 use super::define::{Definer, Kind};
+use super::expr::{check_body, Cx};
+use super::generic::Base;
+use super::locals::Locals;
 use super::defun::parse_header;
 use super::impl_block::method_params;
-use super::registry::{FnDef, Registry, TraitDef, TypeEntry};
+use super::registry::{FnDef, Registry, Template, TraitDef, TypeEntry};
 use super::resolve::trait_named;
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
@@ -44,16 +47,16 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     // Read before the trait is registered, so a trait cannot list itself.
     let supertraits = supertraits(heap, reg, ns, &spelling, *supers)?;
     let mut names = vec![well_known_symbol(wk::SELF_TYPE)];
-    let mut methods: Vec<(SymRef, Value, Value)> = Vec::new();
+    let mut methods: Vec<Written> = Vec::new();
     for (item, _) in items {
         match item_of(heap, *item)? {
             Item::Assoc(a) => names.push(a),
-            Item::Method(name, params, ret) => {
-                let m = member_symbol(name.name());
-                if methods.iter().any(|(n, _, _)| member_symbol(n.name()) == m) {
+            Item::Method(written) => {
+                let m = member_symbol(written.name.name());
+                if methods.iter().any(|w| member_symbol(w.name.name()) == m) {
                     return Err(Error::TypeError(format!("deftrait: duplicate method `{}`", m)));
                 }
-                methods.push((name, params, ret));
+                methods.push(written);
             }
         }
     }
@@ -68,44 +71,83 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     reg.types.insert(path, TypeEntry::Trait(def.clone()));
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let self_ty = Type::Param(params[0]);
-    for (name, written, ret) in methods {
-        let (_, ps) = method_params(heap, &tcx, name, written, &self_ty)?;
-        let ret = parse_type(heap, &tcx, ret)?;
-        let sig = FnDef { public: true, ..FnDef::plain(params.clone(), ps.into_iter().map(|(_, t)| t).collect(), ret) };
-        def.methods.push((member_symbol(name.name()), sig));
+    let mut bodies = Vec::new();
+    let mut bodyless = Vec::new();
+    for w in &methods {
+        let (_, ps) = method_params(heap, &tcx, w.name, w.params, &self_ty)?;
+        let ret = parse_type(heap, &tcx, w.ret)?;
+        let m = member_symbol(w.name.name());
+        let sig = FnDef { public: true, ..FnDef::plain(params.clone(), ps.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
+        def.methods.push((m, sig));
+        if w.body.is_empty() {
+            bodyless.push(m);
+        } else {
+            def.defaults.push(m);
+            bodies.push((m, ps, ret, &w.body));
+        }
     }
     reg.types.insert(path, TypeEntry::Trait(def));
+    for m in bodyless {
+        reg.set_template(Base::Method(path, m), None);
+    }
+    // A default body is checked once, for every type implementing the
+    // trait: `Self` is a type parameter that has the trait, its associated
+    // types the trait's other parameters.
+    let assoc = params[1..].iter().map(|a| (a.name.name().to_string(), Type::Param(*a))).collect();
+    let bounded = scope.bound(vec![(params[0], TraitBound { trait_path: path, assoc })]);
+    for (m, ps, ret, body) in bodies {
+        let mut body = {
+            let cx = Cx::new(reg, d.expander, ns, &bounded, Some(&self_ty));
+            let locals_root = Locals::empty();
+            let locals = locals_root.bind(ps.clone())?;
+            let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
+            cx.settle(heap, &mut body)?;
+            body
+        };
+        for t in &body {
+            t.each_value(&mut |v| heap.push_permanent_root(v));
+        }
+        reg.set_template(Base::Method(path, m), Some(Template { params: ps, ret, body: std::mem::take(&mut body) }));
+    }
     crate::check::forms::module_form(heap, &path, &[])
+}
+
+/// A method of a `deftrait` as written: its name, its parameters, its
+/// result type and its default body, empty when it has none.
+struct Written {
+    name: SymRef,
+    params: Value,
+    ret: Value,
+    body: Vec<(Value, Option<Loc>)>,
 }
 
 /// One item of a `deftrait`.
 enum Item {
     /// `(:type Name)`.
     Assoc(SymRef),
-    /// `(defmethod name (params...) Ret)`: the name, the parameters and the
-    /// result type, as written.
-    Method(SymRef, Value, Value),
+    /// `(defmethod name (params...) Ret body...)`.
+    Method(Written),
 }
 
 fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
-    let elems = heap.list_to_vec(item).map_err(|_| Error::TypeError("deftrait: item must start with a symbol".into()))?;
+    let elems = heap.list_to_vec_locs(item).map_err(|_| Error::TypeError("deftrait: item must start with a symbol".into()))?;
     let elems = match elems.as_slice() {
-        [Value::Symbol(k), rest @ ..] if k.is(wk::KW_TYPE) => {
+        [(Value::Symbol(k), _), rest @ ..] if k.is(wk::KW_TYPE) => {
             return match rest {
-                [Value::Symbol(a)] => Ok(Item::Assoc(*a)),
+                [(Value::Symbol(a), _)] => Ok(Item::Assoc(*a)),
                 [_] => Err(Error::TypeError("deftrait: associated type name must be a symbol".into())),
                 _ => Err(Error::TypeError("deftrait: (:type AssocName)".into())),
             };
         }
-        [Value::Symbol(d), rest @ ..] if d.is(wk::DEFMETHOD) => rest,
-        [Value::Symbol(p), Value::Symbol(d), rest @ ..] if p.is(wk::PUB) && d.is(wk::DEFMETHOD) => rest,
+        [(Value::Symbol(d), _), rest @ ..] if d.is(wk::DEFMETHOD) => rest,
+        [(Value::Symbol(p), _), (Value::Symbol(d), _), rest @ ..] if p.is(wk::PUB) && d.is(wk::DEFMETHOD) => rest,
         _ => {
             return Err(Error::TypeError(
                 "deftrait: a method is written (defmethod name (params...) ReturnType body...), or (pub defmethod ...) to make it public".into(),
             ))
         }
     };
-    let [header, params, ret, rest @ ..] = elems else {
+    let [(header, _), (params, _), (ret, _), body @ ..] = elems else {
         return Err(Error::TypeError(
             "deftrait: method must be (defmethod name (params...) ret) or (defmethod name (params...) ret body...)".into(),
         ));
@@ -114,10 +156,15 @@ fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
     if !own.is_empty() {
         unimplemented!("typeck: a trait method with type parameters of its own")
     }
-    if !rest.is_empty() {
-        unimplemented!("typeck: a trait method with a default body, a `:where` clause or a documentation string")
+    if matches!(body, [(Value::Str(_), _), _, ..]) {
+        unimplemented!("typeck: a trait method with a documentation string")
     }
-    Ok(Item::Method(name, *params, *ret))
+    if let Some((first, _)) = body.first() {
+        if crate::check::analyze::is_where_clause(heap, *first)? {
+            unimplemented!("typeck: a trait method with a `(:where ...)` clause")
+        }
+    }
+    Ok(Item::Method(Written { name, params: *params, ret: *ret, body: body.to_vec() }))
 }
 
 /// The supertrait list `v` of the trait `name`.

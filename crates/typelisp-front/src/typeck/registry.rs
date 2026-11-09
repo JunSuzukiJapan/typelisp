@@ -288,6 +288,10 @@ pub(crate) struct Registry {
     pub(crate) trait_impls: Table<(Path, Path), Vec<TraitImpl>>,
     /// The traits some blanket `impl` (one for a type variable) implements.
     pub(crate) blanket_impls: Table<Path, ()>,
+    /// The methods an `impl` left out and took from the trait's default
+    /// body, by the type and the member symbol: the trait, and its
+    /// parameters there, written in the method's type parameters.
+    defaulted: Table<(Path, SymRef), (Path, Vec<Type>)>,
 }
 
 impl Registry {
@@ -345,7 +349,23 @@ impl Registry {
 
     /// Define (or redefine) the method `name` of `owner`.
     pub(crate) fn define_method(&mut self, owner: Path, name: SymRef, def: MethodDef) {
+        if self.defaulted.get(&(owner, name)).is_some() {
+            self.defaulted.remove(&(owner, name));
+        }
         self.methods.insert((owner, name), def);
+    }
+
+    /// Define the method `name` of `owner` as the default body of the trait
+    /// `trait_path`, whose parameters are `at` there.
+    pub(crate) fn define_defaulted_method(&mut self, owner: Path, name: SymRef, def: MethodDef, trait_path: Path, at: Vec<Type>) {
+        self.define_method(owner, name, def);
+        self.defaulted.insert((owner, name), (trait_path, at));
+    }
+
+    /// The trait whose default body the method `name` of `owner` is, and the
+    /// trait's parameters there.
+    pub(crate) fn defaulted(&self, owner: &Path, name: SymRef) -> Option<&(Path, Vec<Type>)> {
+        self.defaulted.get(&(*owner, name))
     }
 
     /// Define the method `name` of `owner` for the instantiation `args`.
@@ -383,6 +403,7 @@ impl Registry {
         self.templates.commit();
         self.trait_impls.commit();
         self.blanket_impls.commit();
+        self.defaulted.commit();
     }
 
     /// Undo every write since the last commit.
@@ -399,6 +420,7 @@ impl Registry {
         self.templates.rollback();
         self.trait_impls.rollback();
         self.blanket_impls.rollback();
+        self.defaulted.rollback();
     }
 }
 
