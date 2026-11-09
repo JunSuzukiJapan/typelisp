@@ -851,6 +851,20 @@ mod tests {
         assert!(msg.contains("return: not inside a loop"), "{}", msg);
     }
 
+    /// Call sugar is checked as the form it stands for, and `let*` binds in
+    /// order.
+    #[test]
+    fn call_sugar_and_let_star() {
+        assert_eq!(run("(+ 1 2 3 4)").1, Value::Int(10));
+        assert_eq!(run("(- 5)").1, Value::Int(-5));
+        assert_eq!(run("(+)").1, Value::Int(0));
+        assert_eq!(run("(let* ((a 1) (b (+ a 1))) (* b 10))").1, Value::Int(20));
+        let msg = check_err("(-)");
+        assert!(msg.contains("-: requires at least 1 argument"), "{}", msg);
+        let msg = check_err("(let* ((a 1) (b)) a)");
+        assert!(msg.contains("let*: binding must be (name val)"), "{}", msg);
+    }
+
     /// A quoted symbol is a `Symbol`; any other datum is `Option<Sexpr>`.
     #[test]
     fn quote_types_its_datum() {

@@ -663,7 +663,7 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
 /// (`Heap::set_elem_loc`) — used by `check_impl`'s method-signature
 /// rebuild so the elements carried over unchanged keep the positions
 /// they were read with.
-pub(super) fn list_from_vec_locs(heap: &mut Heap, items: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
+pub(crate) fn list_from_vec_locs(heap: &mut Heap, items: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
     // Both halves of this need rooting across the conses below, since every
     // `cons` can collect: the partially-built tail, and the items
     // themselves — an item is often a freshly substituted form
@@ -692,7 +692,7 @@ pub(super) fn list_from_vec_locs(heap: &mut Heap, items: &[(Value, Option<Loc>)]
 /// binding's `val` may itself reference the current place's own earlier
 /// temporaries, e.g. `Self::check_rotatef_shiftf`'s value-reading
 /// bindings reference the just-bound subform temporaries).
-pub(super) fn wrap_let_star(heap: &mut Heap, bindings: Vec<(Value, Value)>, body: Value) -> Result<Value, Error> {
+pub(crate) fn wrap_let_star(heap: &mut Heap, bindings: Vec<(Value, Value)>, body: Value) -> Result<Value, Error> {
     if bindings.is_empty() {
         return Ok(body);
     }
@@ -720,7 +720,7 @@ pub(super) fn wrap_let_star(heap: &mut Heap, bindings: Vec<(Value, Value)>, body
 /// `alloc_ratio`) rather than a `(int->ratio 0)`-style call form — the same representation the reader itself produces for a
 /// literal, so `Self::check`'s existing `Value::Boxed` handling picks up
 /// the right type with no special-casing needed here.
-pub(super) fn numeric_identity_literal(heap: &mut Heap, expected: Option<&Type>, value: i64) -> Value {
+pub(crate) fn numeric_identity_literal(heap: &mut Heap, expected: Option<&Type>, value: i64) -> Value {
     match expected {
         Some(Type::F64) => heap.alloc_f64(value as f64),
         Some(Type::F32) => heap.alloc_f32(value as f32),

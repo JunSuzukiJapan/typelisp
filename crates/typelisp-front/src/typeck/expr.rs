@@ -20,8 +20,8 @@ use super::type_syntax::TypeCx;
 use super::unify::{Holes, Kind};
 use super::looping::LoopExit;
 use super::args::First;
-use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, the, variant};
-use crate::check::analyze::{call_sugar, TOPLEVEL_FORM_HEADS};
+use super::{binding, call, cast, control, lambda, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, the, variant};
+use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -284,6 +284,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     };
     match head.well_known() {
         wk::LET => return binding::check_let(cx, heap, locals, args, expected, loc),
+        wk::LET_STAR => return binding::check_let_star(cx, heap, locals, args, expected, loc),
         wk::PROGN => return binding::check_progn(cx, heap, locals, args, expected, loc),
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
         wk::AS => return cast::check_as(cx, heap, locals, args, false, loc),
@@ -324,8 +325,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         return lambda::check_apply(cx, heap, locals, callee, args, expected, loc);
     }
     let value = value_named(cx.reg, cx.ns, head);
-    if call_sugar(head.name(), args.len(), || matches!(value, Some((_, ValueDef::Fn(_))))).is_some() {
-        unimplemented!("typeck: the call sugar `({} ...)` with {} argument(s)", spelling, args.len())
+    let head_is_fn = matches!(value, Some((_, ValueDef::Fn(_))));
+    if let Some(checked) = sugar::check_sugar(cx, heap, locals, head, head_is_fn, args, expected, loc.clone()) {
+        return checked;
     }
     if let Some((path, ValueDef::Macro { shape, .. })) = value {
         let expanded = macros::expand(cx.expander, heap, &path, *shape, spelling, args)?;
