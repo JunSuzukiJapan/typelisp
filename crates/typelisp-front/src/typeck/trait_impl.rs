@@ -111,6 +111,34 @@ pub(crate) fn check_trait_impl(
                 shown, trait_path, sup.trait_path, owner, sup.trait_path
             )));
         }
+        // What the supertrait entry pins, in this trait's parameters, is
+        // what the supertrait's `impl` binds. A type with a parameter left in
+        // it is the current checker's to leave unchecked, and is left so.
+        let to_impl = Subst::positional(&tdef.params, &std::iter::once(target_ty.clone()).chain(assoc.iter().cloned()).collect::<Vec<_>>());
+        let sup_impl = reg.trait_impls.get(&(sup.trait_path, owner)).and_then(|all| all.iter().find(|i| i.args.is_none())).expect("checked above");
+        let open = |t: &Type| {
+            let mut found = false;
+            super::unify::walk(t, &mut |u| found |= matches!(u, Type::Param(_)));
+            found
+        };
+        for (name, pinned) in &sup.assoc {
+            let want = to_impl.apply(pinned);
+            match sup_impl.assoc.get(name) {
+                Some(actual) if *actual == want || open(&want) || open(actual) => {}
+                Some(actual) => {
+                    return Err(Error::TypeError(format!(
+                        "{}: `{}` requires `{}`'s `{} = {}`, but `{}`'s `impl {}` binds it to `{}`",
+                        shown, trait_path, sup.trait_path, name, want, owner, sup.trait_path, actual
+                    )))
+                }
+                None => {
+                    return Err(Error::TypeError(format!(
+                        "{}: `{}`'s `impl {}` does not bind the associated type `{}`",
+                        shown, owner, sup.trait_path, name
+                    )))
+                }
+            }
+        }
     }
     let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc, clause };
     // The methods left out are defined first, so a written one can call

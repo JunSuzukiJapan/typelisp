@@ -17076,7 +17076,7 @@ fn nth_loc(locs: &[Option<Loc>], i: usize) -> Option<Loc> {
 /// `Str` literal, and the three boxed numbers) are named; anything else
 /// falls back to the variant that binds without destructuring, which is
 /// always true and always available.
-fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
+pub(crate) fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
     match v {
         Value::Str(_) => "str",
         Value::Boxed(id) if heap.is_f64(id) => "f64",

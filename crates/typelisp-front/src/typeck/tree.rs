@@ -118,11 +118,36 @@ pub(crate) enum Pat {
     /// A name: matches anything, and binds the name to it.
     Bind(SymRef),
     /// The variant `variant` of `owner<targs>`, its fields (declared
-    /// `field_tys` at these arguments) matched by `subs`.
-    Ctor { owner: Path, targs: Vec<Type>, variant: usize, field_tys: Vec<Type>, subs: Vec<Pat> },
+    /// `field_tys` at these arguments) matched by `subs`. A `downcast` one
+    /// matches a `Sexpr` holding such a value.
+    Ctor { owner: Path, targs: Vec<Type>, variant: usize, downcast: bool, field_tys: Vec<Type>, subs: Vec<Pat> },
+    /// An integer, a `bool` or a `char` literal of the value's own type
+    /// (`tag` its core tag): matches the value with that word.
+    Lit { tag: u32, value: Value },
+    /// Matches a value for which `test` is true, the value bound to `name`
+    /// while it runs.
+    Guard { name: SymRef, test: Box<Typed> },
 }
 
 impl Pat {
+    /// The tests in this pattern and the patterns inside it.
+    fn tests(&self) -> Vec<&Typed> {
+        match self {
+            Pat::Guard { test, .. } => vec![&**test],
+            Pat::Ctor { subs, .. } => subs.iter().flat_map(Pat::tests).collect(),
+            Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } => Vec::new(),
+        }
+    }
+
+    /// [`Self::tests`], to change.
+    fn tests_mut(&mut self) -> Vec<&mut Typed> {
+        match self {
+            Pat::Guard { test, .. } => vec![&mut **test],
+            Pat::Ctor { subs, .. } => subs.iter_mut().flat_map(Pat::tests_mut).collect(),
+            Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } => Vec::new(),
+        }
+    }
+
     fn map_types(&mut self, f: &impl Fn(&Type) -> Type) {
         if let Pat::Ctor { targs, field_tys, subs, .. } = self {
             for t in targs.iter_mut().chain(field_tys.iter_mut()) {
@@ -195,7 +220,7 @@ impl Typed {
             Node::FieldSet { obj, value, .. } | Node::UnwindProtect { protected: obj, cleanup: value } => vec![&**obj, &**value],
             Node::Let { binds, body } => binds.iter().map(|(_, t)| t).chain(body).collect(),
             Node::If { cond, then, els } => vec![&**cond, &**then, &**els],
-            Node::Match { scrut, arms } => std::iter::once(&**scrut).chain(arms.iter().flat_map(|(_, body)| body)).collect(),
+            Node::Match { scrut, arms } => std::iter::once(&**scrut).chain(arms.iter().flat_map(|(pat, body)| pat.tests().into_iter().chain(body))).collect(),
         }
     }
 
@@ -232,7 +257,7 @@ impl Typed {
             Node::Let { binds, body } => binds.iter_mut().map(|(_, t)| t).chain(body.iter_mut()).collect(),
             Node::If { cond, then, els } => vec![&mut **cond, &mut **then, &mut **els],
             Node::Match { scrut, arms } => {
-                std::iter::once(&mut **scrut).chain(arms.iter_mut().flat_map(|(_, body)| body.iter_mut())).collect()
+                std::iter::once(&mut **scrut).chain(arms.iter_mut().flat_map(|(pat, body)| pat.tests_mut().into_iter().chain(body.iter_mut()))).collect()
             }
         }
     }

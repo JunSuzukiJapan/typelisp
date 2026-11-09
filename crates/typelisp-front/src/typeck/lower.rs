@@ -295,7 +295,7 @@ fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value,
     match pat {
         Pat::Wild => core::tagged(heap, wk::PAT_WILD, &[]),
         Pat::Bind(name) => core::tagged(heap, wk::PAT_BIND, &[Value::Symbol(*name)]),
-        Pat::Ctor { owner, targs, variant, field_tys, subs } => {
+        Pat::Ctor { owner, targs, variant, downcast, field_tys, subs } => {
             let targs: Vec<Type> = targs.iter().map(|t| lw.settle(t)).collect();
             let field_tys: Vec<Type> = field_tys.iter().map(|t| lw.settle(t)).collect();
             let mut lowered = Vec::with_capacity(subs.len());
@@ -311,7 +311,18 @@ fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value,
                     _ => core::tagged(heap, wk::PAT_EMPTY, &[]),
                 };
             }
-            lw.reg.pat_ctor_form(heap, owner, &targs, *variant, false, &field_tys, &lowered)
+            lw.reg.pat_ctor_form(heap, owner, &targs, *variant, *downcast, &field_tys, &lowered)
+        }
+        Pat::Lit { tag, value } => {
+            let lit = core::tagged(heap, *tag, &[*value])?;
+            heap.push_root(lit);
+            let form = core::tagged(heap, wk::PAT_LIT, &[lit]);
+            heap.pop_root();
+            form
+        }
+        Pat::Guard { name, test } => {
+            let test = lower_rooted(heap, lw, test)?;
+            core::tagged(heap, wk::PAT_GUARD, &[Value::Symbol(*name), test])
         }
     }
 }

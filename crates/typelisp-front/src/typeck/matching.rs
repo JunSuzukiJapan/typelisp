@@ -47,7 +47,7 @@ pub(crate) fn check_match(
         }
         let (pat, pat_loc) = &parts[0];
         let mut binds = Vec::new();
-        let pat = check_arm_pattern(cx, heap, &scrut_ty, *pat, &mut binds).map_err(|e| match heap.cons_loc(*pat).or(pat_loc.clone()) {
+        let pat = check_arm_pattern(cx, heap, locals, &scrut_ty, *pat, &mut binds).map_err(|e| match heap.cons_loc(*pat).or(pat_loc.clone()) {
             Some(l) => e.at(l),
             None => e,
         })?;

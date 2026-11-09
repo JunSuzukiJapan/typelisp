@@ -12,6 +12,7 @@
 //! is, when every argument's type is settled ([`super::expr::Cx::settle`]).
 
 use crate::check::analyze::{option_of_sexpr, sexpr_ty};
+use crate::check::registry::TraitBound;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_print::format::{call_sites, ArgKind, ArgType};
@@ -39,11 +40,47 @@ pub(crate) fn check_format(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(V
     // with nothing expected of it.
     let dest = check_expr(cx, heap, locals, *dest, None, dest_loc.clone())?;
     if cx.resolve(&dest.ty) != Type::Bool {
-        unimplemented!("typeck: `format` to a stream")
+        return to_stream(cx, heap, locals, dest, &args[1..], loc);
     }
     let (control, list) = check_control(cx, heap, locals, "format", (*control, control_loc.clone()), items, loc.clone())?;
     let path = Path::internal_builtin(wk::F_FORMAT_RT);
     Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: vec![dest, control, list] }, ty: Type::Str, loc })
+}
+
+/// `(format stream control arg...)`, `dest` the stream checked: the string
+/// written to it with its `CharOutput` method `write-string`, whose value
+/// `()` is the form's. The stream is bound to a temporary, so that
+/// `(write-string tmp (format false control arg...))` is checked with it in
+/// hand, whether its type is a stream type, a trait object or a type
+/// parameter bounded by `CharOutput`.
+fn to_stream(cx: &Cx, heap: &mut Heap, locals: &Locals, dest: Typed, rest: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    // A number literal is its default type here.
+    cx.decide(&dest.ty);
+    let ty = cx.resolve(&dest.ty);
+    let concrete = matches!(&ty, Type::Named(p, _) if cx.reg.type_def(p).is_some()) || crate::types::prim_type_path(&ty).is_some();
+    let char_output = TraitBound { trait_path: Path::in_ns(crate::types::std_module("io"), "CharOutput"), assoc: Default::default() };
+    if concrete && matches!(super::bounds::meets(cx, &ty, &char_output), super::bounds::Meets::No(_)) {
+        return Err(Error::TypeError(format!(
+            "format: the destination must be `true` (stdout), `false` (build the string only), or a stream implementing `CharOutput` — found `{}`",
+            ty
+        )));
+    }
+    let tmp = cx.temp();
+    let format = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "format"));
+    let mut inner = vec![(format, None), (Value::Bool(false), None)];
+    inner.extend(rest.iter().cloned());
+    let inner = crate::check::forms::list_from_vec_locs(heap, &inner)?;
+    heap.push_root(inner);
+    let write_string = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "write-string"));
+    let form = crate::check::forms::list_from_vec_locs(heap, &[(write_string, None), (Value::Symbol(tmp), None), (inner, None)]);
+    heap.pop_root();
+    let form = form?;
+    heap.push_root(form);
+    let written = locals.bind(vec![(tmp, dest.ty.clone())]).and_then(|l| check_expr(cx, heap, &l, form, None, loc.clone()));
+    heap.pop_root();
+    let written = written?;
+    let ty = written.ty.clone();
+    Ok(Typed { node: Node::Let { binds: vec![(tmp, dest)], body: vec![written] }, ty, loc })
 }
 
 /// `(print control arg...)` or `(println control arg...)`, `head` saying

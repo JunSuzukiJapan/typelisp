@@ -45,24 +45,27 @@ pub(crate) fn parse_where(heap: &Heap, tcx: &TypeCx, clause: Value) -> Result<Ve
                 heap.symbol_spelling(param_name)
             )));
         };
-        let mut assoc = BTreeMap::new();
-        for pin in pins {
-            let pair = heap.list_to_vec(*pin)?;
-            let [Value::Symbol(assoc_name), ty] = pair.as_slice() else {
-                return Err(Error::TypeError(":where: associated-type pin must be (AssocName Type)".into()));
-            };
-            if !tdef.params[1..].iter().any(|a| a.name.name() == assoc_name.name()) {
-                return Err(Error::TypeError(format!(
-                    ":where: trait `{}` has no associated type `{}`",
-                    trait_path,
-                    heap.symbol_spelling(*assoc_name)
-                )));
-            }
-            assoc.insert(assoc_name.name().to_string(), parse_type(heap, tcx, *ty)?);
-        }
+        let assoc = parse_pins(heap, tcx, ":where", trait_path, tdef, pins)?;
         out.push((p, TraitBound { trait_path, assoc }));
     }
     Ok(out)
+}
+
+/// The pins `(Assoc Type)...` a bound on the trait `trait_path` writes,
+/// read where `tcx` says; `what` names the form in the messages.
+pub(crate) fn parse_pins(heap: &Heap, tcx: &TypeCx, what: &str, trait_path: Path, tdef: &TraitDef, pins: &[Value]) -> Result<BTreeMap<String, Type>, Error> {
+    let mut assoc = BTreeMap::new();
+    for pin in pins {
+        let pair = heap.list_to_vec(*pin)?;
+        let [Value::Symbol(assoc_name), ty] = pair.as_slice() else {
+            return Err(Error::TypeError(format!("{}: associated-type pin must be (AssocName Type)", what)));
+        };
+        if !tdef.params[1..].iter().any(|a| a.name.name() == assoc_name.name()) {
+            return Err(Error::TypeError(format!("{}: trait `{}` has no associated type `{}`", what, trait_path, heap.symbol_spelling(*assoc_name))));
+        }
+        assoc.insert(assoc_name.name().to_string(), parse_type(heap, tcx, *ty)?);
+    }
+    Ok(assoc)
 }
 
 impl TraitBound {

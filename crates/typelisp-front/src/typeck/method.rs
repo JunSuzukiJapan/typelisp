@@ -1,7 +1,8 @@
 //! A call to a method: `(name receiver arg...)`, the instance method found
 //! on the receiver's type, or `(Type::name arg...)`, a static method.
 
-use crate::types::{Path, Type, TypeParam};
+use crate::check::analyze::is_option_of_sexpr;
+use crate::types::{path_is_builtin, Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
@@ -44,7 +45,12 @@ pub(crate) fn check_method_call(
     let mut args = Vec::with_capacity(sig.params.len());
     let mut rational_op = false;
     if let Some(receiver) = receiver {
-        agree(cx, &receiver.ty, Some(&subst.apply(&sig.params[0])))?;
+        // An `Option<Sexpr>` is the type an S-expression has: it is the
+        // receiver of `Sexpr`'s methods as it is (`resolve::receiver_method`).
+        let sexpr_receiver = path_is_builtin(&owner, wk::SEXPR) && is_option_of_sexpr(&cx.resolve(&receiver.ty));
+        if !sexpr_receiver {
+            agree(cx, &receiver.ty, Some(&subst.apply(&sig.params[0])))?;
+        }
         rational_op = is_rational_operator(method, &receiver, rest);
         args.push(receiver);
     }

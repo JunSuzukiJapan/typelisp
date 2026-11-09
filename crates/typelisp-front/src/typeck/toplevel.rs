@@ -933,6 +933,35 @@ mod tests {
         assert!(msg.contains("type `ints`'s associated type `Item` is `int`, but `:where` clause requires `string`"), "{}", msg);
     }
 
+    /// A supertrait's associated types are pinned in the subtrait's
+    /// parameters, and an `impl` of the subtrait needs the supertrait's to
+    /// bind them so.
+    #[test]
+    fn pinned_supertraits() {
+        let src = "(deftrait src () (:type Item) (defmethod take (self) Item))
+(deftrait twice ((src (Item Out))) (:type Out) (defmethod two (self) Out))
+(defstruct b (n int))
+(impl src b (:type Item int) (defmethod take (self) int self::n))
+";
+        let ok = format!("{}(impl twice b (:type Out int) (defmethod two (self) int (* 2 (take self))))\n(defun g<T> ((x T)) int (:where (twice T (Out int))) (+ (take x) (two x)))\n", src);
+        assert_eq!(run(&format!("{}(g (make-instance 'b :n 5))", ok)).1, Value::Int(15));
+        let msg = check_err(&format!("{}(impl twice b (:type Out bool) (defmethod two (self) bool true))", src));
+        assert!(msg.contains("`twice` requires `src`'s `Item = bool`, but `b`'s `impl src` binds it to `int`"), "{}", msg);
+    }
+
+    /// A literal of the value's own type is matched by its word, any other
+    /// value by `equals` (the prelude's, not loaded here); `true` and
+    /// `false` cover a `bool`.
+    #[test]
+    fn value_patterns() {
+        assert_eq!(run("(defun n ((x i32)) int (match x (0 10) (1 11) (_ 12)))\n(n 1)").1, Value::Int(11));
+        assert_eq!(run("(defun b ((x bool)) int (match x (true 1) (false 0)))\n(b false)").1, Value::Int(0));
+        let msg = check_err("(defun b ((x bool)) int (match x (true 1)))");
+        assert!(msg.contains("`false` is not covered"), "{}", msg);
+        let msg = check_err("(defstruct p (k int))\n(defun s ((x p)) int (match x (1 1) (_ 0)))");
+        assert!(msg.contains("cannot be compared by value — its type `p` does not implement `Eq`"), "{}", msg);
+    }
+
     /// A value is boxed as a trait object where one is expected, and its
     /// methods are called through the table; a trait object of a subtrait
     /// is one of its supertraits.

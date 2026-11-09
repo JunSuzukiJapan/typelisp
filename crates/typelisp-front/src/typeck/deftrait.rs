@@ -45,8 +45,6 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     if let Some(doc) = doc {
         reg.docs.insert(Doc::Trait(path), doc);
     }
-    // Read before the trait is registered, so a trait cannot list itself.
-    let supertraits = supertraits(heap, reg, ns, &spelling, *supers)?;
     let mut names = vec![well_known_symbol(wk::SELF_TYPE)];
     let mut methods: Vec<Written> = Vec::new();
     for (item, _) in items {
@@ -66,6 +64,9 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
         Error::TypeError(format!("deftrait {}: `{}` is declared twice", spelling, twice.0.name()))
     })?;
     let params = scope.params().to_vec();
+    // Read before the trait is registered, so a trait cannot list itself. A
+    // pin may name the trait's own associated types.
+    let supertraits = supertraits(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, &spelling, *supers)?;
     // Registered before the signatures are read, so a signature can name the
     // trait (`:dyn Name`).
     let mut def = TraitDef { params: params.clone(), methods: Vec::new(), defaults: Vec::new(), supertraits, public: d.public };
@@ -179,17 +180,23 @@ fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
 }
 
 /// The supertrait list `v` of the trait `name`.
-fn supertraits(heap: &Heap, reg: &Registry, ns: typelisp_mem::symbols::NsId, name: &str, v: Value) -> Result<Vec<TraitBound>, Error> {
+fn supertraits(heap: &Heap, tcx: &TypeCx, name: &str, v: Value) -> Result<Vec<TraitBound>, Error> {
+    let (reg, ns) = (tcx.reg, tcx.ns);
     let elems = heap
         .list_to_vec(v)
         .map_err(|_| Error::TypeError(format!("deftrait {}: the supertrait list must be a list — write `()` for none", name)))?;
     let mut out: Vec<TraitBound> = Vec::new();
     for elem in elems {
-        let Value::Symbol(sym) = elem else {
-            match elem {
-                Value::Cons(_) => unimplemented!("typeck: a supertrait whose associated types are pinned"),
-                _ => return Err(Error::TypeError(format!("deftrait {}: supertrait name must be a symbol", name))),
+        // A bare name, or `(Trait (Assoc Type)...)`.
+        let (head, pins) = match elem {
+            Value::Cons(_) => {
+                let parts = heap.list_to_vec(elem)?;
+                (parts[0], parts[1..].to_vec())
             }
+            _ => (elem, Vec::new()),
+        };
+        let Value::Symbol(sym) = head else {
+            return Err(Error::TypeError(format!("deftrait {}: supertrait name must be a symbol", name)));
         };
         let Some((trait_path, sdef)) = trait_named(reg, ns, sym) else {
             return Err(Error::TypeError(format!(
@@ -199,7 +206,8 @@ fn supertraits(heap: &Heap, reg: &Registry, ns: typelisp_mem::symbols::NsId, nam
                 heap.symbol_spelling(sym)
             )));
         };
-        if let Some(a) = sdef.params.get(1) {
+        let assoc = super::bounds::parse_pins(heap, tcx, "deftrait", trait_path, sdef, &pins)?;
+        if let Some(a) = sdef.params[1..].iter().find(|a| !assoc.contains_key(a.name.name())) {
             return Err(Error::TypeError(format!(
                 "deftrait {}: supertrait `{}` has an associated type `{}`, which must be pinned here — \
                  write `({} ({} <type>))`",
@@ -213,7 +221,7 @@ fn supertraits(heap: &Heap, reg: &Registry, ns: typelisp_mem::symbols::NsId, nam
         if out.iter().any(|b| b.trait_path == trait_path) {
             return Err(Error::TypeError(format!("deftrait {}: `{}` is listed as a supertrait twice", name, trait_path)));
         }
-        out.push(TraitBound { trait_path, assoc: Default::default() });
+        out.push(TraitBound { trait_path, assoc });
     }
     Ok(out)
 }

@@ -42,7 +42,7 @@ fn missing<'p>(reg: &Registry, wild: &'p Pat, rows: &[Vec<&'p Pat>], tys: &[Type
             let tys: Vec<Type> = fields.into_iter().chain(rest_tys.iter().cloned()).collect();
             let mut w = missing(reg, wild, &rows, &tys)?;
             let rest = w.split_off(arity);
-            let head = if w.is_empty() { format!("({})", name) } else { format!("({} {})", name, w.join(" ")) };
+            let head = if *ty == Type::Bool { name } else if w.is_empty() { format!("({})", name) } else { format!("({} {})", name, w.join(" ")) };
             Some(std::iter::once(head).chain(rest).collect())
         }),
         // Some variant, or every value of a type without variants, is
@@ -51,6 +51,7 @@ fn missing<'p>(reg: &Registry, wild: &'p Pat, rows: &[Vec<&'p Pat>], tys: &[Type
             let rows: Vec<Vec<&Pat>> = rows.iter().filter(|r| cases(r[0], wild, &all).is_none()).map(|r| r[1..].to_vec()).collect();
             let w = missing(reg, wild, &rows, rest_tys)?;
             let head = match sum_variants(reg, ty).and_then(|vs| vs.into_iter().find(|(i, _, _)| !heads.contains(i))) {
+                Some((_, name, _)) if *ty == Type::Bool => name,
                 Some((_, name, fields)) if fields.is_empty() => format!("({})", name),
                 Some((_, name, fields)) => format!("({} {})", name, vec!["_"; fields.len()].join(" ")),
                 None => "_".to_string(),
@@ -83,7 +84,16 @@ fn specialize<'p>(wild: &'p Pat, rows: &[Vec<&'p Pat>], variant: usize, arity: u
 /// variants, `none` in the slot `Sexpr`'s retired `nil` keeps: `(some p)`
 /// is what `p` matches, and `(some _)` every `Sexpr` variant.
 fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, Vec<&'p Pat>)>> {
-    let Pat::Ctor { owner, variant, subs, .. } = p else { return None };
+    let (owner, variant, subs) = match p {
+        Pat::Wild | Pat::Bind(_) => return None,
+        // `true` and `false` are a `bool`'s two values.
+        Pat::Lit { value: crate::Value::Bool(b), .. } => return Some(vec![(usize::from(!*b), Vec::new())]),
+        // Any other value matches only some values, and covers no variant.
+        Pat::Lit { .. } | Pat::Guard { .. } => return Some(Vec::new()),
+        // Out of a `Sexpr`, it matches only the values of one type.
+        Pat::Ctor { downcast: true, .. } => return Some(Vec::new()),
+        Pat::Ctor { owner, variant, subs, .. } => (owner, variant, subs),
+    };
     let flat = all.iter().any(|(i, name, _)| *i == sexpr_variant::NIL && name == "none");
     if !flat || !path_is_builtin(owner, wk::OPTION) {
         return Some(vec![(*variant, subs.iter().collect())]);
@@ -92,16 +102,18 @@ fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, V
         return Some(vec![(sexpr_variant::NIL, Vec::new())]);
     }
     match &subs[0] {
+        Pat::Ctor { downcast: true, .. } => Some(Vec::new()),
         Pat::Ctor { variant, subs, .. } => Some(vec![(*variant, subs.iter().collect())]),
         Pat::Wild | Pat::Bind(_) => Some(all.iter().filter(|(i, _, _)| *i != sexpr_variant::NIL).map(|(i, _, f)| (*i, vec![wild; f.len()])).collect()),
+        Pat::Lit { .. } | Pat::Guard { .. } => Some(Vec::new()),
     }
 }
 
 /// A variant: its index, its name and its field types.
 type Variant = (usize, String, Vec<Type>);
 
-/// A sum type's variants: each one's index, name, and field types at `ty`'s
-/// type arguments. `None` for any other type.
+/// A sum type's variants, or a struct's one shape: each one's index, name,
+/// and field types at `ty`'s type arguments. `None` for any other type.
 ///
 /// `Sexpr`'s are the ones a pattern can write, without the retired `nil`
 /// and `bignum`; an `Option<Sexpr>`'s are those and `none` (see [`cases`]).
@@ -117,11 +129,21 @@ fn sum_variants(reg: &Registry, ty: &Type) -> Option<Vec<Variant>> {
     if is_option_of_sexpr(ty) {
         return Some(std::iter::once((sexpr_variant::NIL, "none".to_string(), Vec::new())).chain(sexpr()).collect());
     }
+    if *ty == Type::Bool {
+        return Some(vec![(0, "true".to_string(), Vec::new()), (1, "false".to_string(), Vec::new())]);
+    }
     let Type::Named(p, args) = ty else { return None };
     if path_is_builtin(p, wk::SEXPR) {
         return Some(sexpr().collect());
     }
-    let def = reg.type_def(p).filter(|d| d.kind == AdtKind::Sum)?;
+    let def = reg.type_def(p)?;
     let subst = Subst::positional(&def.params, args);
+    // A struct is its one shape, its fields.
+    if def.kind == AdtKind::Struct && !def.builtin {
+        return Some(vec![(0, p.last_segment().to_string(), def.fields.iter().map(|f| subst.apply(&f.ty)).collect())]);
+    }
+    if def.kind != AdtKind::Sum {
+        return None;
+    }
     Some(def.variants.iter().enumerate().map(|(i, v)| (i, v.name.name().to_string(), v.fields.iter().map(|f| subst.apply(f)).collect())).collect())
 }
