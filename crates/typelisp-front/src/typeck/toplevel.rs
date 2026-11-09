@@ -40,6 +40,9 @@ pub(crate) struct TypeChecker {
     expr_ty: Option<Type>,
     /// The warnings checking has given and no one has taken yet.
     warnings: RefCell<Vec<String>>,
+    /// Whether it was decided where the prelude's generic bodies come from
+    /// ([`Self::prelude_bodies`]).
+    bodies_decided: bool,
 }
 
 impl TypeChecker {
@@ -74,6 +77,10 @@ impl TypeChecker {
         loc: Option<Loc>,
     ) -> Result<Value, Error> {
         self.registry(old);
+        if !self.bodies_decided {
+            self.bodies_decided = true;
+            self.prelude_bodies(heap, old, expander);
+        }
         let reg = self.reg.get_mut().expect("the registry was just made");
         self.expr_ty = None;
         // Every value the tree holds is rooted from here until it is lowered
@@ -103,6 +110,41 @@ impl TypeChecker {
                 })
             }
         }
+    }
+
+    /// The prelude's generic bodies, which the current checker's registry
+    /// does not have: the core macro layer and the prelude checked by a
+    /// checker of their own, its bodies and the methods it took from a
+    /// trait's default body taken into this one's registry
+    /// (`docs/dev/checker-rebuild-plan.md` 8.3). Only when `old` holds the
+    /// prelude, as its first definition, `sexpr-append`, says; nothing
+    /// is run, since the session has run it already.
+    ///
+    /// The source is fixed: a form the checker refuses is a bug of the
+    /// checker, not the program's.
+    fn prelude_bodies(&mut self, heap: &mut Heap, old: &crate::check::Registry, expander: &dyn MacroExpander) {
+        if old.module_at(typelisp_mem::NsId::STD).and_then(|m| m.fns.get("sexpr-append")).is_none() {
+            return;
+        }
+        let base = crate::check::Registry::with_builtins();
+        let mut scratch = TypeChecker { bodies_decided: true, ..TypeChecker::default() };
+        let site = Site { ns: typelisp_mem::NsId::STD, file: None, policy: crate::check::RedefPolicy::Error };
+        let reader = crate::Reader::new();
+        for src in [crate::core_macros::SOURCE, crate::prelude::SOURCE.as_str()] {
+            let mut forms = reader.forms_within(crate::LIBRARY_FILE, src, typelisp_mem::NsId::STD);
+            while let Some((v, loc)) = forms.next_form(heap).expect("the prelude reads") {
+                let base_roots = heap.root_count();
+                heap.push_root(v);
+                if let Err(e) = scratch.check_form(heap, &base, expander, site, v, Some(loc)) {
+                    panic!("the rebuilt checker refuses the prelude: {:?}", e)
+                }
+                heap.truncate_roots(base_roots);
+            }
+        }
+        let checked = scratch.reg.take().expect("checking made it");
+        let reg = self.reg.get_mut().expect("made before");
+        reg.adopt_bodies(&checked);
+        reg.commit();
     }
 
     /// What `(use path)` written at `site` brings in, registered for reading
@@ -1208,5 +1250,28 @@ mod tests {
         assert!(checker.check_form(&mut heap, &crate::check::Registry::with_builtins(), &interp, ROOT_SITE, v, Some(loc)).is_err());
         let f = crate::types::Path::of_symbol(NsId::ROOT, typelisp_mem::symbols::intern_in(NsId::ROOT, "f"));
         assert!(checker.reg.get().expect("made by the check").fn_def(&f).is_none());
+    }
+
+    /// The rebuilt checker checks the core macro layer and the prelude, and
+    /// what it makes of them runs: what it takes the prelude's generic
+    /// bodies from (`TypeChecker::prelude_bodies`).
+    #[test]
+    fn the_prelude_checks_and_runs() {
+        let mut heap = Heap::with_capacity(1 << 20);
+        let reader = Reader::new();
+        let interp = Interp::new();
+        let mut checker = TypeChecker::default();
+        let old = crate::check::Registry::with_builtins();
+        old.publish_names(&mut heap.names());
+        let site = Site { ns: NsId::STD, file: None, policy: crate::check::RedefPolicy::Error };
+        for src in [crate::core_macros::SOURCE, crate::prelude::SOURCE.as_str()] {
+            let mut forms = reader.forms_within(crate::LIBRARY_FILE, src, NsId::STD);
+            while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
+                heap.push_root(v);
+                let form = checker.check_form(&mut heap, &old, &interp, site, v, Some(loc.clone())).unwrap_or_else(|e| panic!("{:?}: {:?}", loc, e));
+                heap.push_root(form);
+                interp.exec(&mut heap, form).unwrap_or_else(|e| panic!("{:?}: {:?}", loc, e));
+            }
+        }
     }
 }

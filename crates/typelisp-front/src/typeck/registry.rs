@@ -345,6 +345,22 @@ impl Registry {
         }
     }
 
+    /// Take `from`'s generic bodies, and the methods it took from a trait's
+    /// default body, where this registry has none: what a registry copied
+    /// from the current checker's lacks of the prelude.
+    pub(crate) fn adopt_bodies(&mut self, from: &Registry) {
+        for (base, template) in from.templates.iter() {
+            if self.templates.get(base).is_none() {
+                self.templates.insert(*base, template.clone());
+            }
+        }
+        for (key, defaulted) in from.defaulted.iter() {
+            if self.defaulted.get(key).is_none() {
+                self.defaulted.insert(*key, defaulted.clone());
+            }
+        }
+    }
+
     /// The method `name` of the type `owner` written for every instantiation.
     pub(crate) fn method(&self, owner: &Path, name: SymRef) -> Option<&MethodDef> {
         self.methods.get(&(*owner, name))
