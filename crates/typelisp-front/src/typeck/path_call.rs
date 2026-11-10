@@ -5,9 +5,10 @@
 //! of a type, or to a name in a module.
 
 use crate::check::registry::AdtKind;
-use crate::types::{path_spelling, path_target, PathTarget, Type};
+use crate::types::{path_spelling, path_target, Path, PathTarget, Type};
 use crate::{Error, Heap, Loc, PathId, Value};
 use typelisp_mem::symbols::member_symbol;
+use typelisp_mem::SymRef;
 
 use super::call::check_call;
 use super::expr::{check_expr, Cx};
@@ -31,51 +32,7 @@ pub(crate) fn check_path_call(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     match path_target(heap, cx.ns, id)? {
-        PathTarget::Member(owner, member) => {
-            let def = match cx.reg.types.get(&owner) {
-                Some(TypeEntry::Type(def)) => def,
-                Some(TypeEntry::Trait(_)) => unimplemented!("typeck: calling a trait's method through its path (`{}`)", path_spelling(heap, id)),
-                _ => unimplemented!("typeck: the path `{}`, through a type this checker does not know", path_spelling(heap, id)),
-            };
-            let name = member_symbol(member.name());
-            if let Some(variant) = def.variant_index(name) {
-                return check_variant(cx, heap, locals, owner, variant, args, expected, loc);
-            }
-            let Some(method) = cx.reg.method(&owner, name) else {
-                if cx.reg.has_inst_method(&owner, name) {
-                    unimplemented!("typeck: `{}`, a method written for one instantiation, called through its type", path_spelling(heap, id))
-                }
-                if def.kind == AdtKind::Struct && !def.builtin {
-                    return Err(Error::TypeError(format!(
-                        "`{}` has no static method `{}`; a struct's methods are written in its `impl`, \
-                         e.g. (impl {} (pub {} (...) {} (make-instance '{} :slot value...)))",
-                        owner,
-                        member.name(),
-                        owner,
-                        member.name(),
-                        owner,
-                        owner
-                    )));
-                }
-                return Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id))));
-            };
-            if method.instance {
-                return Err(Error::TypeError(format!(
-                    "`{}::{}` is an instance method; call it as ({} obj ...)",
-                    owner,
-                    member.name(),
-                    member.name()
-                )));
-            }
-            let home = method.home.map_or(owner.ns(), |h| h.ns());
-            if !method.sig.public && !sees(cx.ns, home) {
-                return Err(Error::TypeError(format!(
-                    "`{}` is not `pub`, so it is not visible outside its module",
-                    path_spelling(heap, id)
-                )));
-            }
-            check_method_call(cx, heap, locals, owner, name, method, None, args, expected, loc)
-        }
+        PathTarget::Member(owner, member) => check_member_call(cx, heap, locals, owner, member, &path_spelling(heap, id), args, expected, loc),
         // A definition another module does not make `pub` is not there for
         // this one.
         PathTarget::In(path) => match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
@@ -89,6 +46,65 @@ pub(crate) fn check_path_call(
             None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
         },
     }
+}
+
+/// `(Type::member arg...)`, `spelling` how the path is written: a variant of
+/// the type, or its static method.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn check_member_call(
+    cx: &Cx,
+    heap: &mut Heap,
+    locals: &Locals,
+    owner: Path,
+    member: SymRef,
+    spelling: &str,
+    args: &[(Value, Option<Loc>)],
+    expected: Option<&Type>,
+    loc: Option<Loc>,
+) -> Result<Typed, Error> {
+    let def = match cx.reg.types.get(&owner) {
+        Some(TypeEntry::Type(def)) => def,
+        Some(TypeEntry::Trait(_)) => unimplemented!("typeck: calling a trait's method through its path (`{}`)", spelling),
+        _ => unimplemented!("typeck: the path `{}`, through a type this checker does not know", spelling),
+    };
+    let name = member_symbol(member.name());
+    if let Some(variant) = def.variant_index(name) {
+        return check_variant(cx, heap, locals, owner, variant, args, expected, loc);
+    }
+    let Some(method) = cx.reg.method(&owner, name) else {
+        if cx.reg.has_inst_method(&owner, name) {
+            unimplemented!("typeck: `{}`, a method written for one instantiation, called through its type", spelling)
+        }
+        if def.kind == AdtKind::Struct && !def.builtin {
+            return Err(Error::TypeError(format!(
+                "`{}` has no static method `{}`; a struct's methods are written in its `impl`, \
+                 e.g. (impl {} (pub {} (...) {} (make-instance '{} :slot value...)))",
+                owner,
+                member.name(),
+                owner,
+                member.name(),
+                owner,
+                owner
+            )));
+        }
+        return Err(Error::TypeError(format!("unresolved path: {}", spelling)));
+    };
+    if method.instance {
+        return Err(Error::TypeError(format!(
+            "`{}::{}` is an instance method; call it as ({} obj ...)",
+            owner,
+            member.name(),
+            member.name()
+        )));
+    }
+    let home = method.home.map_or(owner.ns(), |h| h.ns());
+    if !method.sig.public && !sees(cx.ns, home) {
+        return Err(Error::TypeError(format!(
+            "`{}` is not `pub`, so it is not visible outside its module",
+            spelling
+        )));
+    }
+    check_method_call(cx, heap, locals, owner, name, method, None, args, expected, loc)
 }
 
 /// The value the path `id` names: a global variable of a module.

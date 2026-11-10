@@ -1,7 +1,8 @@
 //! A sum type's value: `(Name::Variant value...)`, or the bare variant name
 //! a `use` of the type brought in.
 
-use crate::types::{path_is_builtin, Path, Type};
+use crate::check::analyze::{is_retired_bignum, is_retired_nil, BIGNUM_IS_GONE, NIL_IS_GONE};
+use crate::types::{Path, Type};
 use crate::{Error, Heap, Loc, Value};
 
 use super::expr::{check_expr, Cx};
@@ -27,8 +28,13 @@ pub(crate) fn check_variant(
     expected: Option<&Type>,
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
-    if path_is_builtin(&owner, typelisp_mem::wk::SEXPR) {
-        unimplemented!("typeck: a `Sexpr` value made from its variant")
+    // `Sexpr`'s retired variants keep their places, so that the others keep
+    // their numbers.
+    if is_retired_nil(&owner, variant) {
+        return Err(Error::TypeError(NIL_IS_GONE.to_string()));
+    }
+    if is_retired_bignum(&owner, variant) {
+        return Err(Error::TypeError(BIGNUM_IS_GONE.to_string()));
     }
     let def = cx.reg.type_def(&owner).expect("a variant's type is defined");
     if !def.public && !sees(cx.ns, owner.ns()) {

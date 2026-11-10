@@ -23,7 +23,7 @@ use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::check::registry::TraitBound;
-use super::{binding, call, cast, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
+use super::{binding, call, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -295,6 +295,7 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             }
             _ => unreachable!("`crate::typeck::literal` made every other empty list a unit literal"),
         },
+        Value::Boxed(id) => collection_literal::check_boxed(cx, heap, locals, id, expected, loc),
         other => unimplemented!("typeck: checking {:?} (only literals, names and lists are checked so far)", other),
     }
 }
@@ -373,6 +374,17 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     let head = match elems[0].0 {
         Value::Symbol(head) => head,
         Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, args, expected, loc),
+        // `(%type-member Type member)`: a member of a type, as a form the
+        // checker writes (`forms::member_form`) or `Type<args>::member`.
+        Value::Cons(_) if matches!(heap.car(elems[0].0), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
+            let parts = heap.list_to_vec(elems[0].0)?;
+            let [_, ty @ (Value::Symbol(_) | Value::Path(_)), Value::Symbol(member)] = parts.as_slice() else {
+                unimplemented!("typeck: calling a member of one instantiation (`Type<args>::member`)")
+            };
+            let owner = super::type_syntax::type_path(heap, &cx.types(), *ty)?;
+            let spelling = format!("{}::{}", owner, member.name());
+            return path_call::check_member_call(cx, heap, locals, owner, *member, &spelling, args, expected, loc);
+        }
         // Any other head is an expression whose value is applied.
         other => {
             let callee = check_expr(cx, heap, locals, other, None, elems[0].1.clone())?;

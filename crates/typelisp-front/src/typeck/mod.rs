@@ -55,6 +55,7 @@ pub(crate) mod bounds;
 pub(crate) mod bridge;
 pub(crate) mod call;
 pub(crate) mod cast;
+pub(crate) mod collection_literal;
 pub(crate) mod control;
 pub(crate) mod define;
 pub(crate) mod defenum;

@@ -747,7 +747,7 @@ pub(super) fn value_member_form(heap: &mut Heap, recv: &str, member: &str) -> Re
 /// or one named by its module's own symbol), or else the path from the root,
 /// each module by its name in the one before. Both tables are permanent, so
 /// the result needs no rooting of its own.
-pub(super) fn name_form(heap: &mut Heap, p: &Path) -> Value {
+pub(crate) fn name_form(heap: &mut Heap, p: &Path) -> Value {
     let sym = p.name_symbol();
     if p.ns() == NsId::ROOT || sym.home() == p.ns() {
         return Value::Symbol(sym);
@@ -761,7 +761,7 @@ pub(super) fn name_form(heap: &mut Heap, p: &Path) -> Value {
 /// module reads it. Not a `TYPE::MEMBER` path: each segment of a path before
 /// the last is a module, so a module named like the type beside it would
 /// take the path.
-pub(super) fn member_form(heap: &mut Heap, type_path: &Path, member: &str) -> Result<Value, Error> {
+pub(crate) fn member_form(heap: &mut Heap, type_path: &Path, member: &str) -> Result<Value, Error> {
     let mut items = Items::new(heap);
     items.push(Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::TYPE_MEMBER)));
     let ty = name_form(items.heap(), type_path);

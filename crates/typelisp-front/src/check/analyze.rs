@@ -630,7 +630,7 @@ const VECTOR_LITERAL_VAR: &str = "$vector-literal";
 /// `T` of an expected `Vector<T>`/`Array<T>` (`collection` names which), or
 /// `Option<Sexpr>` when the literal is expected as S-expression data. `None`
 /// when the context says nothing, and the first element decides.
-fn literal_element_type(expected: Option<&Type>, collection: &Path) -> Option<Type> {
+pub(crate) fn literal_element_type(expected: Option<&Type>, collection: &Path) -> Option<Type> {
     match expected {
         Some(Type::Named(p, args)) if p == collection && args.len() == 1 => {
             Some(args[0].clone())
@@ -645,7 +645,7 @@ fn literal_element_type(expected: Option<&Type>, collection: &Path) -> Option<Ty
 /// quoted; numbers, strings, characters, booleans and nested literals
 /// evaluate to themselves already. In a data vector (`data`) every element
 /// is quoted, so that each one is S-expression data.
-fn literal_element_form(heap: &mut Heap, e: Value, data: bool) -> Result<Value, Error> {
+pub(crate) fn literal_element_form(heap: &mut Heap, e: Value, data: bool) -> Result<Value, Error> {
     if data || matches!(e, Value::Symbol(_) | Value::Path(_) | Value::Cons(_)) {
         let quote = heap.intern_symbol("quote");
         forms::list_from_vec_locs(heap, &[(quote, None), (e, None)])
@@ -656,18 +656,25 @@ fn literal_element_form(heap: &mut Heap, e: Value, data: bool) -> Result<Value, 
 
 /// `(let (($vector-literal (the Vector<T> (Vector::new))))
 ///    (push $vector-literal E)... $vector-literal)` for the elements `elems`.
-fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Result<Value, Error> {
-    let data = is_option_of_sexpr(elem_ty);
+/// With no `elem_ty`, the vector is `(Vector::new)` and the first element
+/// decides `T`.
+pub(crate) fn vector_literal_form(heap: &mut Heap, elem_ty: Option<&Type>, elems: &[Value]) -> Result<Value, Error> {
+    let data = elem_ty.is_some_and(is_option_of_sexpr);
     let mut s = RootScope::new(heap);
     let var = s.intern_symbol(VECTOR_LITERAL_VAR);
-    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![elem_ty.clone()]))?;
-    s.push_root(vec_ty);
     let new = forms::member_form(&mut s, &Path::builtin(typelisp_mem::wk::VECTOR), "new")?;
     s.push_root(new);
     let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
     s.push_root(new_call);
-    let the = s.intern_symbol("the");
-    let init = forms::list_from_vec_locs(&mut s, &[(the, None), (vec_ty, None), (new_call, None)])?;
+    let init = match elem_ty {
+        Some(elem_ty) => {
+            let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![elem_ty.clone()]))?;
+            s.push_root(vec_ty);
+            let the = s.intern_symbol("the");
+            forms::list_from_vec_locs(&mut s, &[(the, None), (vec_ty, None), (new_call, None)])?
+        }
+        None => new_call,
+    };
     s.push_root(init);
     let binding = forms::list_from_vec_locs(&mut s, &[(var, None), (init, None)])?;
     s.push_root(binding);
@@ -723,12 +730,12 @@ pub(crate) const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: 
      `(Option::none)`; match it with `((none) ...)`.";
 
 /// Is `(adt, variant)` the retired `Sexpr::nil`?
-fn is_retired_nil(adt: &Path, variant: usize) -> bool {
+pub(crate) fn is_retired_nil(adt: &Path, variant: usize) -> bool {
     variant == SEXPR_RESERVED_VARIANT && crate::types::path_is_builtin(adt, typelisp_mem::wk::SEXPR)
 }
 
 /// Is `(adt, variant)` the retired `Sexpr::bignum`?
-fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
+pub(crate) fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
     variant == SEXPR_RETIRED_BIGNUM && crate::types::path_is_builtin(adt, typelisp_mem::wk::SEXPR)
 }
 
@@ -9613,7 +9620,7 @@ impl Checker {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &elems, "#(..)", "Vector<T>")?,
         };
-        let form = vector_literal_form(heap, &elem_ty, &elems)?;
+        let form = vector_literal_form(heap, Some(&elem_ty), &elems)?;
         let mut s = RootScope::new(heap);
         s.push_root(form);
         self.check_inner(&mut s, interp, env, form, expected)
@@ -9683,9 +9690,9 @@ impl Checker {
             None => self.first_element_type(heap, interp, env, &data, "#nA(..)", "Array<T>")?,
         };
         let mut s = RootScope::new(heap);
-        let dims_form = vector_literal_form(&mut s, &Type::Int, &dims)?;
+        let dims_form = vector_literal_form(&mut s, Some(&Type::Int), &dims)?;
         s.push_root(dims_form);
-        let data_form = vector_literal_form(&mut s, &elem_ty, &data)?;
+        let data_form = vector_literal_form(&mut s, Some(&elem_ty), &data)?;
         s.push_root(data_form);
         let make = forms::name_form(&mut s, &Path::internal("array-from-row-major"));
         let form = forms::list_from_vec_locs(&mut s, &[(make, None), (dims_form, None), (data_form, None)])?;
