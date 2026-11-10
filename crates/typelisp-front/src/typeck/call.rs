@@ -54,8 +54,8 @@ pub(crate) fn check_call(
             path.last_segment()
         )));
     }
-    if def.ffi && def.params.iter().any(|t| matches!(t, Type::Fn(..))) {
-        unimplemented!("typeck: passing a callback to the C function `{}`", path)
+    if def.ffi && first.is_some() && matches!(def.params.first(), Some(Type::Fn(..))) {
+        unimplemented!("typeck: a callback to the C function `{}` as an argument already checked", path)
     }
     let required = def.params.len();
     if has_tail(def) && given < required {
@@ -79,7 +79,12 @@ pub(crate) fn check_call(
     let fixed = &rest[..required - checked.len()];
     for ((arg, arg_loc), param) in fixed.iter().zip(&def.params[checked.len()..]) {
         let param = subst.apply(param);
-        checked.push(check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?);
+        // A function C calls back is checked for what C cannot give it.
+        let arg = match &param {
+            Type::Fn(..) if def.ffi => super::callback::check_callback_arg(cx, heap, locals, &(*arg, arg_loc.clone()), &param, &path)?,
+            _ => check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?,
+        };
+        checked.push(arg);
     }
     checked.extend(check_tail(cx, heap, locals, &path.to_string(), def, &subst, pre, &tail, given)?);
     let ret = subst.apply(&def.ret);

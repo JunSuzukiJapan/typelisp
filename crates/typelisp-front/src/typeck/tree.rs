@@ -87,8 +87,13 @@ pub(crate) enum Node {
     UntagInt { value: Box<Typed> },
     /// `(lambda (params) ret body...)`: a function value.
     Lambda { #[serde(with = "super::wire::sym_pairs")] params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Typed> },
-    /// `(labels (def...) body...)`: local functions, which see each other.
-    Labels { defs: Vec<super::lambda::Label>, body: Vec<Typed> },
+    /// `(labels (def...) body...)`: local functions, which see each other;
+    /// `lifted` are those passed to C.
+    Labels { defs: Vec<super::lambda::Label>, body: Vec<Typed>, lifted: Vec<super::lambda::LiftedLabel> },
+    /// A function handed to C as a callback of the type `fn_ty`: the
+    /// address of an entry that calls the top-level function `target`.
+    /// `lifted` is the `lambda` `target` is made of, when it is one.
+    Callback { target: Path, fn_ty: Type, lifted: Option<Box<Typed>> },
     /// The function `path` as a value; `params` are the types of the
     /// parameters it really takes, a `&rest` one as a list.
     FnRef { path: Path, params: Vec<Type> },
@@ -280,7 +285,8 @@ impl Typed {
             }
             Node::Apply { callee, args } => std::iter::once(&**callee).chain(args).collect(),
             Node::Select { arms } => arms.iter().flat_map(SelectArm::parts).collect(),
-            Node::Labels { defs, body } => defs.iter().flat_map(|d| &d.body).chain(body).collect(),
+            Node::Labels { defs, body, .. } => defs.iter().flat_map(|d| &d.body).chain(body).collect(),
+            Node::Callback { lifted, .. } => lifted.iter().map(|l| &**l).collect(),
             Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter().map(|v| &**v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
@@ -323,7 +329,8 @@ impl Typed {
             }
             Node::Apply { callee, args } => std::iter::once(&mut **callee).chain(args.iter_mut()).collect(),
             Node::Select { arms } => arms.iter_mut().flat_map(SelectArm::parts_mut).collect(),
-            Node::Labels { defs, body } => defs.iter_mut().flat_map(|d| d.body.iter_mut()).chain(body.iter_mut()).collect(),
+            Node::Labels { defs, body, .. } => defs.iter_mut().flat_map(|d| d.body.iter_mut()).chain(body.iter_mut()).collect(),
+            Node::Callback { lifted, .. } => lifted.iter_mut().map(|l| &mut **l).collect(),
             Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter_mut().map(|v| &mut **v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
@@ -371,7 +378,7 @@ impl Typed {
             match &mut t.node {
                 Node::Call { targs, .. } | Node::MethodCall { targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
-                Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } | Node::TypeValue { ty: field_ty } => *field_ty = f(field_ty),
+                Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } | Node::TypeValue { ty: field_ty } | Node::Callback { fn_ty: field_ty, .. } => *field_ty = f(field_ty),
                 Node::Lambda { params, ret, .. } => {
                     params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
                     *ret = f(ret);

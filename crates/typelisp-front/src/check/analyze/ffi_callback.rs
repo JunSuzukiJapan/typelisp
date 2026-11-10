@@ -59,6 +59,9 @@ impl Checker {
     /// asked. Read by `compile::aot::compile_file`, which emits one entry per
     /// callback and registers it at startup.
     pub fn ffi_callbacks(&self) -> Vec<CallbackSig> {
+        if let Some(rebuilt) = &self.rebuilt {
+            return rebuilt.ffi_callbacks();
+        }
         self.callbacks.borrow().clone()
     }
 

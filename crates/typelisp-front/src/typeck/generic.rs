@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 
 use crate::types::{Path, Type};
-use crate::Error;
+use crate::{Error, Value};
 use crate::TypeId;
 use typelisp_mem::specialization::{specialization, Generic};
 use typelisp_mem::SymRef;
@@ -60,15 +60,37 @@ pub(crate) struct Request {
     pub(crate) name: Name,
 }
 
-/// The specializations one top-level form asks for, each once.
+/// What one top-level form asks to be made besides itself: the
+/// specializations, each once, the functions lifted for C callbacks, and the
+/// callback entries.
 #[derive(Debug, Default)]
 pub(crate) struct Requests {
     asked: HashSet<Name>,
     pending: Vec<Request>,
     taken: usize,
+    /// The lifted functions' definitions, rooted.
+    lifted: Vec<Value>,
+    callbacks: Vec<crate::ffi_callback::CallbackSig>,
 }
 
 impl Requests {
+    /// The definition `form`, rooted, of a function lifted for a callback.
+    pub(crate) fn lift(&mut self, form: Value) {
+        self.lifted.push(form);
+    }
+
+    /// The callback entry `sig`, which the form's code asks for.
+    pub(crate) fn callback(&mut self, sig: crate::ffi_callback::CallbackSig) {
+        if !self.callbacks.contains(&sig) {
+            self.callbacks.push(sig);
+        }
+    }
+
+    /// The lifted definitions and the callback entries asked for.
+    pub(crate) fn take_lifted(&mut self) -> (Vec<Value>, Vec<crate::ffi_callback::CallbackSig>) {
+        (std::mem::take(&mut self.lifted), std::mem::take(&mut self.callbacks))
+    }
+
     /// The name the function `base` has specialized at `args`; asked for
     /// the first time, it is queued to be generated.
     pub(crate) fn ask_fn(&mut self, base: &Path, args: Vec<Type>) -> Path {

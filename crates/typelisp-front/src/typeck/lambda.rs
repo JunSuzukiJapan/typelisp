@@ -15,8 +15,7 @@ use typelisp_mem::SymRef;
 use super::expr::{check_body, check_expr, Cx};
 use super::format::sexpr_list;
 use super::block::check_named_body;
-use super::c_memory::mentions_typed_ptr;
-use super::locals::Locals;
+use super::locals::{LabelsCallback, Locals};
 use super::registry::FnDef;
 use super::tree::{Node, Typed};
 use super::type_syntax::parse_type;
@@ -28,12 +27,19 @@ pub(crate) const OPT_KEY_NEEDS_A_NAME: &str = "{}: &optional/&key need a named c
 
 /// `(lambda (params) Ret body...)` — `args` without the `lambda`.
 pub(crate) fn check_lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    lambda(cx, heap, locals, args, loc, false)
+}
+
+/// [`check_lambda`] of a `lambda` handed to C, which can give it nothing
+/// but its arguments: its body may name no local around it.
+pub(crate) fn check_callback_lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    lambda(cx, heap, locals, args, loc, true)
+}
+
+fn lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>, callback: bool) -> Result<Typed, Error> {
     let [(params, _), (ret, _), body @ ..] = args else {
         return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
     };
-    if locals.any(|t| mentions_typed_ptr(t)) {
-        unimplemented!("typeck: a `lambda` where a typed pointer is in scope, which it must not capture")
-    }
     let written = heap.list_to_vec(*params)?;
     if written.iter().any(|p| matches!(p, Value::Symbol(s) if s.is(wk::OPTIONAL) || s.is(wk::KEY))) {
         return Err(Error::TypeError(OPT_KEY_NEEDS_A_NAME.replace("{}", "lambda")));
@@ -54,7 +60,7 @@ pub(crate) fn check_lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(V
     // A loop or a block around the `lambda` is not one its body can leave.
     let outer = cx.loops.replace(Vec::new());
     let outer_blocks = cx.blocks.replace(Vec::new());
-    let checked = cx.own_arena(|| locals.bind(params.clone()).and_then(|inner| check_body(cx, heap, &inner, body, Some(&ret))));
+    let checked = cx.own_arena(|| locals.bind_function(params.clone(), "a `lambda`".into(), callback).and_then(|inner| check_body(cx, heap, &inner, body, Some(&ret))));
     cx.loops.replace(outer);
     cx.blocks.replace(outer_blocks);
     let (body, _) = checked?;
@@ -160,6 +166,18 @@ pub(crate) fn fn_value(path: Path, def: &FnDef, loc: Option<Loc>) -> Result<Type
     Ok(Typed { node: Node::FnRef { path, params }, ty, loc })
 }
 
+/// A `labels` function passed to C, and the top-level function `path` C is
+/// handed: a copy of the block, `kept` being the functions it reaches,
+/// that calls it.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct LiftedLabel {
+    #[serde(with = "crate::owned_form::sym_serde")]
+    pub(crate) name: SymRef,
+    pub(crate) path: Path,
+    #[serde(with = "super::wire::syms")]
+    pub(crate) kept: Vec<SymRef>,
+}
+
 /// One function of a `labels`.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Label {
@@ -185,9 +203,6 @@ pub(crate) fn check_labels(
     let Some(((specs, _), body)) = args.split_first() else {
         return Err(Error::TypeError("labels: (labels ((name (params) ret body...)...) body...)".into()));
     };
-    if locals.any(|t| mentions_typed_ptr(t)) {
-        unimplemented!("typeck: a `labels` where a typed pointer is in scope, which it must not capture")
-    }
     let tcx = cx.types();
     let mut parsed = Vec::new();
     for spec in heap.list_to_vec(*specs)? {
@@ -211,19 +226,71 @@ pub(crate) fn check_labels(
         .iter()
         .map(|(name, params, ret, _)| (*name, Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(ret.clone()))))
         .collect();
-    let scope = locals.bind(names)?;
+    let scope = locals.bind_labels(names)?;
     let mut defs = Vec::with_capacity(parsed.len());
+    let mut captured = Vec::with_capacity(parsed.len());
     for (name, params, ret, def_body) in parsed {
         // Each function is a function of its own, as a `lambda` is, with a
         // block named after itself.
+        let inner = scope.bind_function(params.clone(), format!("the `labels` function `{}`", name.name()), false)?;
         let outer = cx.loops.replace(Vec::new());
         let outer_blocks = cx.blocks.replace(Vec::new());
-        let checked = cx.own_arena(|| scope.bind(params.clone()).and_then(|inner| check_named_body(cx, heap, &inner, name, &def_body, &ret)));
+        let checked = cx.own_arena(|| check_named_body(cx, heap, &inner, name, &def_body, &ret));
         cx.loops.replace(outer);
         cx.blocks.replace(outer_blocks);
         let body = checked?;
+        captured.push(inner.captured());
         defs.push(Label { name, params, ret, body });
     }
     let (body, ty) = check_body(cx, heap, &scope, body, expected)?;
-    Ok(Typed { node: Node::Labels { defs, body }, ty, loc })
+    let lifted = scope
+        .take_labels_callbacks()
+        .into_iter()
+        .map(|c| {
+            let loc = c.loc.clone();
+            lift_label(&defs, &captured, c).map_err(|e| match loc {
+                Some(l) => e.at(l),
+                None => e,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Typed { node: Node::Labels { defs, body, lifted }, ty, loc })
+}
+
+/// The `labels` function `c.name` passed to C, lifted with every sibling it
+/// reaches: siblings share one environment, so a sibling's capture is the
+/// function's too, and C can give it none. `captured` is what each of
+/// `defs` names outside its own parameters.
+fn lift_label(defs: &[Label], captured: &[Vec<SymRef>], c: LabelsCallback) -> Result<LiftedLabel, Error> {
+    let siblings: Vec<SymRef> = defs.iter().map(|d| d.name).collect();
+    let at = |name: SymRef| siblings.iter().position(|n| *n == name).expect("a sibling is the block's");
+    let mut reached = vec![c.name];
+    let mut i = 0;
+    while i < reached.len() {
+        for n in &captured[at(reached[i])] {
+            if siblings.contains(n) && !reached.contains(n) {
+                reached.push(*n);
+            }
+        }
+        i += 1;
+    }
+    let capturing: Vec<String> = reached
+        .iter()
+        .filter_map(|n| {
+            let outside: Vec<String> = captured[at(*n)].iter().filter(|c| !siblings.contains(c)).map(|c| format!("`{}`", c.name())).collect();
+            (!outside.is_empty()).then(|| format!("`{}` refers to {}", n.name(), outside.join(", ")))
+        })
+        .collect();
+    if !capturing.is_empty() {
+        return Err(Error::TypeError(format!(
+            "the local function `{}` cannot be passed to C as a callback: C calls it with \
+             nothing but its arguments, and it needs local variables of the code around it \
+             ({}{})",
+            c.name.name(),
+            capturing.join("; "),
+            if reached.len() > 1 { " — the local functions it calls count too" } else { "" }
+        )));
+    }
+    let kept = siblings.into_iter().filter(|n| reached.contains(n)).collect();
+    Ok(LiftedLabel { name: c.name, path: c.lifted, kept })
 }

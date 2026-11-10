@@ -56,6 +56,7 @@ pub(crate) mod bounds;
 pub(crate) mod bridge;
 pub(crate) mod c_memory;
 pub(crate) mod call;
+pub(crate) mod callback;
 pub(crate) mod cast;
 pub(crate) mod catch;
 pub(crate) mod collection_literal;

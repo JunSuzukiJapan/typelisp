@@ -32,6 +32,12 @@ impl Subst {
     }
 
     /// `ty` with every parameter this substitution binds replaced.
+    /// Whether nothing is replaced: the tree lowered is no generic body's
+    /// specialization.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     pub(crate) fn apply(&self, ty: &Type) -> Type {
         let each = |ts: &[Type]| ts.iter().map(|t| self.apply(t)).collect::<Vec<_>>();
         match ty {

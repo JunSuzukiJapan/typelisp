@@ -447,7 +447,7 @@ fn number_kind(heap: &Heap, v: Value) -> Option<Kind> {
 /// variant or a static method a `use` brought in is called, never a value:
 /// `(none)`, not `none`.
 fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
-    if let Some(ty) = locals.lookup(id) {
+    if let Some(ty) = locals.lookup(id)? {
         return Ok(Typed { node: Node::Local { name: id }, ty: ty.clone(), loc });
     }
     let value = value_named(cx.reg, cx.ns, id);
@@ -555,7 +555,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         unimplemented!("typeck: the form `{}`", heap.symbol_spelling(head))
     }
     let spelling = heap.symbol_spelling(head);
-    if let Some(ty) = locals.lookup(head) {
+    if let Some(ty) = locals.lookup(head)? {
         let callee = Typed { node: Node::Local { name: head }, ty: ty.clone(), loc: elems[0].1.clone() };
         return lambda::check_apply(cx, heap, locals, callee, args, expected, loc);
     }

@@ -53,7 +53,7 @@ pub(crate) fn check_setf(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Val
 /// `(setf name value)`: a local, or a global variable not a constant.
 fn set_variable(cx: &Cx, heap: &mut Heap, locals: &Locals, name: SymRef, (value, value_loc): (Value, Option<Loc>), loc: Option<Loc>) -> Result<Typed, Error> {
     let spelling = bound_name(name, "setf")?;
-    if let Some(ty) = locals.lookup(name) {
+    if let Some(ty) = locals.lookup(name)? {
         let ty = ty.clone();
         let value = check_expr(cx, heap, locals, value, Some(&ty), value_loc)?;
         return Ok(Typed { node: Node::Set { name, value: Box::new(value) }, ty, loc });
@@ -73,7 +73,7 @@ fn set_variable(cx: &Cx, heap: &mut Heap, locals: &Locals, name: SymRef, (value,
 /// `(setf recv::field value)`: the struct's `set-field`, `recv` being a
 /// local or a global variable.
 fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: SymRef, value: (Value, Option<Loc>), loc: Option<Loc>) -> Result<Typed, Error> {
-    let obj = match locals.lookup(recv) {
+    let obj = match locals.lookup(recv)? {
         Some(ty) => Typed { node: Node::Local { name: recv }, ty: cx.resolve(ty), loc: None },
         None => match value_named(cx.reg, cx.ns, recv) {
             Some((path, ValueDef::Var(var))) => Typed { node: Node::Global { path }, ty: var.ty.clone(), loc: None },

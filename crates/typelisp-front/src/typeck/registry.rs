@@ -304,6 +304,8 @@ pub(crate) struct Registry {
     /// Written when a form is settled (`Cx::settle`), which holds the
     /// registry to read only.
     throw_tags: RefCell<Table<SymRef, Type>>,
+    /// The functions lifted for C callbacks so far, to name the next one.
+    callbacks_lifted: std::cell::Cell<u64>,
 }
 
 /// A definition a documentation string is kept for: a function, a macro, a
@@ -353,6 +355,13 @@ impl Registry {
             Some(t) => self.templates.insert(base, Rc::new(t)),
             None => self.templates.remove(&base),
         }
+    }
+
+    /// A number no lifted callback's name has had.
+    pub(crate) fn next_callback(&self) -> u64 {
+        let n = self.callbacks_lifted.get();
+        self.callbacks_lifted.set(n + 1);
+        n
     }
 
     /// The type the tag `tag` carries, once a form has said.

@@ -167,7 +167,7 @@ fn slot_shape(tname: &str, def: &TypeDef) -> Error {
 /// `recv::member` (read as `(%value-member recv member)`), where `recv` is a
 /// local of a struct type: that field.
 pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, member: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
-    let Some(recv_ty) = locals.lookup(recv) else {
+    let Some(recv_ty) = locals.lookup(recv)? else {
         if let Some((_, ValueDef::Var(_))) = value_named(cx.reg, cx.ns, recv) {
             unimplemented!("typeck: `{}::{}`, a member of the global `{}`", recv.name(), member.name(), recv.name())
         }

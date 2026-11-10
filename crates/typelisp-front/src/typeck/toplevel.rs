@@ -44,6 +44,9 @@ pub(crate) struct TypeChecker {
     /// The generic bodies dumps wrote, read before the registry was made,
     /// for it to take when it is ([`Self::take_bodies`]).
     pending: RefCell<Vec<Bodies>>,
+    /// Every C callback entry the checked code asks for, in the order first
+    /// asked.
+    callbacks: Vec<crate::ffi_callback::CallbackSig>,
 }
 
 impl TypeChecker {
@@ -88,7 +91,12 @@ impl TypeChecker {
         let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut());
         heap.truncate_roots(roots_base);
         match result {
-            Ok((form, ty)) => {
+            Ok((form, ty, callbacks)) => {
+                for sig in callbacks {
+                    if !self.callbacks.contains(&sig) {
+                        self.callbacks.push(sig);
+                    }
+                }
                 if crate::types::in_std(site.ns) {
                     super::library::reexport(reg);
                     super::library::publish(reg, &mut heap.names());
@@ -113,6 +121,12 @@ impl TypeChecker {
     /// The generic bodies a dump wrote (`docs/dev/checker-rebuild-plan.md`
     /// 8.3): what a registry copied from the current checker's lacks of the
     /// prelude.
+    /// Every C callback entry the checked code asks for, for an executable
+    /// to emit.
+    pub(crate) fn ffi_callbacks(&self) -> Vec<crate::ffi_callback::CallbackSig> {
+        self.callbacks.clone()
+    }
+
     pub(crate) fn take_bodies(&mut self, bodies: Bodies) {
         match self.reg.get_mut() {
             Some(reg) => {
@@ -179,8 +193,9 @@ pub(crate) fn prelude_bodies(heap: &mut Heap, expander: &dyn MacroExpander) -> R
     RebuiltBodies::of(heap, checker.reg.get().expect("checking made it"))
 }
 
-/// `v`'s core form, and its type when it is an expression. The
-/// specializations the form asks for come first, in one bundle with it.
+/// `v`'s core form, its type when it is an expression, and the C callback
+/// entries it asks for. The specializations the form asks for come first,
+/// then the functions lifted for its callbacks, in one bundle with it.
 fn check_toplevel(
     reg: &mut Registry,
     expander: &dyn MacroExpander,
@@ -189,7 +204,7 @@ fn check_toplevel(
     v: Value,
     loc: Option<Loc>,
     warnings: &mut Vec<String>,
-) -> Result<(Value, Option<Type>), Error> {
+) -> Result<(Value, Option<Type>, Vec<crate::ffi_callback::CallbackSig>), Error> {
     let mut requests = Requests::default();
     let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings)?;
     heap.push_root(form);
@@ -199,11 +214,13 @@ fn check_toplevel(
         heap.push_root(spec);
         forms.push(spec);
     }
+    let (lifted, callbacks) = requests.take_lifted();
+    forms.extend(lifted);
     if forms.is_empty() {
-        return Ok((form, ty));
+        return Ok((form, ty, callbacks));
     }
     forms.push(form);
-    Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty))
+    Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty, callbacks))
 }
 
 #[allow(clippy::too_many_arguments)]

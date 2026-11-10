@@ -67,6 +67,23 @@ pub(crate) mod sym_pairs {
     }
 }
 
+/// A list of names, written as symbols.
+pub(crate) mod syms {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::owned_form::OwnedSym;
+    use typelisp_mem::SymRef;
+
+    pub(crate) fn serialize<S: Serializer>(names: &[SymRef], s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(names.iter().map(|name| OwnedSym::of(*name)))
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SymRef>, D::Error> {
+        let names: Vec<OwnedSym> = Deserialize::deserialize(d)?;
+        Ok(names.into_iter().map(|name| name.symbol()).collect())
+    }
+}
+
 /// A method an `impl` took from its trait's default body.
 #[derive(Serialize, Deserialize)]
 struct Defaulted {
