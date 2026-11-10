@@ -222,12 +222,14 @@ fn admit(cx: &Cx, ty: &Type, path: &Path, tdef: &TraitDef, pins: &[Type]) -> Res
         Type::Named(_, args) => args,
         _ => &[],
     };
-    let imp = cx
-        .reg
-        .trait_impls
-        .get(&(*path, owner))
-        .and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)))
-        .expect("it meets the bound, so it has an `impl`");
+    let found = cx.reg.trait_impls.get(&(*path, owner)).and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)));
+    // Met with no `impl` of its own: through the blanket `impl`.
+    let Some(imp) = found else {
+        if !pins.is_empty() {
+            unimplemented!("typeck: the associated types a blanket `impl` of `{}` binds, pinned by `:dyn`", path)
+        }
+        return Ok(());
+    };
     let type_params = cx.reg.type_def(&owner).map(|d| d.params.clone()).unwrap_or_default();
     let at = Subst::positional(&type_params, args);
     for (a, pin) in tdef.params[1..].iter().zip(pins) {
@@ -331,8 +333,10 @@ pub(crate) fn tables(lw: &mut Lowering, concrete: &Type, trait_path: &Path) -> R
             Some(def) if def.sig.builtin || def.sig.type_params.is_empty() => *m,
             Some(def) if def.sig.type_params.len() == targs.len() => lw.requests.ask_method(&owner, *m, targs.clone()),
             Some(_) => unimplemented!("typeck: `{}::{}`, with type parameters of its own, in the table of `{}`", owner, m, to),
-            None if lw.reg.blanket_impls.get(decl).is_some() => unimplemented!("typeck: a blanket `impl`'s method in the table of `{}`", to),
-            None => return Err(Error::TypeError(format!("`{}`'s `impl {}` is missing method `{}`", owner, decl, m))),
+            None => match lw.reg.blanket_with_method(*m).map(|b| b.owner) {
+                Some(blanket) => lw.requests.ask_method(&blanket, *m, vec![concrete.clone()]),
+                None => return Err(Error::TypeError(format!("`{}`'s `impl {}` is missing method `{}`", owner, decl, m))),
+            },
         };
         slots.push((owner, name));
     }

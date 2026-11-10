@@ -97,9 +97,23 @@ pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name
     }) {
         unimplemented!("typeck: `{}`, which `{}` has for one instantiation, on a receiver whose type arguments are not decided yet", name.name(), owner)
     }
-    let m = reg.method_at(&owner, name, args)?;
+    let Some(m) = reg.method_at(&owner, name, args) else {
+        return blanket_method(reg, ty, name);
+    };
     let home = m.home.map_or(owner.ns(), |h| h.ns());
     (m.instance && (m.sig.public || sees(here, home))).then_some((owner, m))
+}
+
+/// The method `name` the blanket `impl` that has one gives `ty`, when it
+/// covers `ty`: under the blanket `impl`'s owner, to be specialized at `ty`.
+fn blanket_method<'r>(reg: &'r Registry, ty: &Type, name: SymRef) -> Option<(Path, &'r MethodDef)> {
+    let blanket = reg.blanket_with_method(name)?;
+    let trait_path = reg.blanket_trait(&blanket.owner).expect("a blanket `impl`'s owner is registered with it");
+    let bound = crate::check::registry::TraitBound { trait_path, assoc: Default::default() };
+    if !super::bounds::blanket_covers(reg, ty, &bound) {
+        return None;
+    }
+    reg.method(&blanket.owner, name).filter(|m| m.instance).map(|m| (blanket.owner, m))
 }
 
 /// Whether what the module `home` defines without `pub` is visible from

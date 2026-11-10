@@ -66,6 +66,12 @@ pub(crate) fn check_trait_impl(
         Some(((first, _), rest)) if crate::check::analyze::is_where_clause(heap, *first)? => (Some(*first), rest),
         _ => (None, items),
     };
+    // `(impl<T> Trait T ...)`: every type that meets the bounds.
+    if let Value::Symbol(var) = *target {
+        if type_names.contains(&var) {
+            return check_blanket_impl(reg, d, heap, requests, type_names, trait_path, &tdef, clause, var, items);
+        }
+    }
     let owner = receiver_type_path(heap, reg, ns, *target).map_err(|_| Error::TypeError("impl: target must be a data type".into()))?;
     // The target written in the type's own parameters, which `impl<...>`
     // declares in order.
@@ -114,6 +120,12 @@ pub(crate) fn check_trait_impl(
         }
     }
     for sup in &tdef.supertraits {
+        if !implements(reg, &sup.trait_path, &owner, inst.as_deref()) && super::bounds::blanket_covers(reg, &target_ty, sup) {
+            if !sup.assoc.is_empty() {
+                unimplemented!("typeck: a supertrait with pinned associated types that a blanket `impl` gives `{}`", owner)
+            }
+            continue;
+        }
         if !implements(reg, &sup.trait_path, &owner, inst.as_deref()) {
             return Err(Error::TypeError(format!(
                 "{}: `{}` requires `{}`, but `{}` has no `impl {}` — write it before this one",
@@ -149,7 +161,7 @@ pub(crate) fn check_trait_impl(
             }
         }
     }
-    let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc, clause, inst: inst.as_deref() };
+    let of = Of { trait_path, owner, type_names, head: head.params(), target: &target_ty, assoc: &assoc, clause, inst: inst.as_deref(), blanket: false };
     // The methods left out are defined first, so a written one can call
     // them, and lowered last, once every method they may call is defined.
     let mut defaulted = Vec::new();
@@ -279,12 +291,18 @@ struct Of<'a> {
     trait_path: Path,
     owner: Path,
     type_names: &'a [SymRef],
+    /// The parameters `impl<...>` declares, which the target and the
+    /// associated types are written in.
+    head: &'a [TypeParam],
     target: &'a Type,
     assoc: &'a [Type],
     /// The `impl`'s `(:where ...)`, which bounds each method's parameters.
     clause: Option<Value>,
     /// The instantiation the `impl` is for, when it is for one.
     inst: Option<&'a [Type]>,
+    /// A blanket `impl`: its type parameter is bounded by the trait too, so
+    /// each method may call the trait's others.
+    blanket: bool,
 }
 
 /// Whether `existing`, the method `method` the type already has, is the
@@ -348,13 +366,13 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
     let scope = root.declare(ParamOwner::Method(owner, method), of.type_names).map_err(|twice| {
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
-    let reown = reown(reg, &owner, &scope, of);
+    let reown = reown(&scope, of);
     let at: Vec<Type> = std::iter::once(reown.apply(of.target)).chain(of.assoc.iter().map(|t| reown.apply(t))).collect();
     let to_impl = Subst::positional(&tdef.params, &at);
     let want = tdef.method(method).expect("a default is of the trait's own method");
     let instance = want.params.first() == Some(&Type::Param(tdef.params[0]));
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&at[0]) };
-    let bounds = of.clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
+    let bounds = method_bounds(heap, &tcx, &scope, of)?;
     let sig = FnDef {
         public: true,
         bounds: by_param(bounds),
@@ -375,16 +393,123 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
     Ok((!generic).then_some(at))
 }
 
-/// What puts the `impl`'s types, written in `owner`'s parameters, in a
-/// method's, which `scope` declares: nothing, for an `impl` of one
-/// instantiation, whose types have none.
-fn reown(reg: &Registry, owner: &Path, scope: &TypeScope, of: &Of) -> Subst {
-    if of.inst.is_some() {
-        return Subst::default();
-    }
-    let type_params = reg.type_def(owner).map(|t| t.params.clone()).unwrap_or_default();
+/// What puts the `impl`'s types, written in the parameters `impl<...>`
+/// declares, in a method's, which `scope` declares.
+fn reown(scope: &TypeScope, of: &Of) -> Subst {
     let own: Vec<Type> = scope.params().iter().map(|p| Type::Param(*p)).collect();
-    Subst::positional(&type_params, &own)
+    Subst::positional(of.head, &own)
+}
+
+/// The bounds a method of the `impl` `of` has: its `(:where ...)`, read
+/// where `tcx` says, and for a blanket `impl` the trait itself on its type
+/// parameter.
+fn method_bounds(heap: &Heap, tcx: &TypeCx, scope: &TypeScope, of: &Of) -> Result<Vec<(TypeParam, crate::check::registry::TraitBound)>, Error> {
+    let mut bounds = of.clause.map(|c| parse_where(heap, tcx, c)).transpose()?.unwrap_or_default();
+    if of.blanket {
+        bounds.push((scope.params()[0], crate::check::registry::TraitBound { trait_path: of.trait_path, assoc: Default::default() }));
+    }
+    Ok(bounds)
+}
+
+/// `(impl<T> Trait T (:where ...) items...)` — what follows the trait's
+/// name being `var`, the one type parameter `impl<...>` declares: the trait
+/// for every type that meets the bounds. Its methods are checked once here,
+/// with `T` a parameter, and kept to be specialized at each type a call
+/// reaches them at, as that type's methods.
+#[allow(clippy::too_many_arguments)]
+fn check_blanket_impl(
+    reg: &mut Registry,
+    d: &mut Definer,
+    heap: &mut Heap,
+    requests: &mut Requests,
+    type_names: &[SymRef],
+    trait_path: Path,
+    tdef: &TraitDef,
+    clause: Option<Value>,
+    var: SymRef,
+    items: &[(Value, Option<Loc>)],
+) -> Result<Value, Error> {
+    let ns = d.site.ns;
+    let names = type_names.iter().map(|n| n.name()).collect::<Vec<_>>().join(",");
+    if type_names.len() != 1 {
+        unimplemented!("typeck: a blanket `impl` declaring type parameters besides its target")
+    }
+    // Which of two would apply to a type could depend on bounds met later.
+    if reg.blanket_impls.get(&trait_path).is_some() {
+        return Err(Error::TypeError(format!(
+            "impl<{}> {} {}: `{}` already has a blanket impl — a trait may have at most one, \
+             since which of two applies to a given type could depend on bounds established later",
+            names,
+            trait_path,
+            var.name(),
+            trait_path
+        )));
+    }
+    if let Some(c) = clause {
+        for bound in &heap.list_to_vec(c)?[1..] {
+            if let Some(Value::Symbol(p)) = heap.list_to_vec(*bound)?.get(1) {
+                if !type_names.contains(p) {
+                    return Err(Error::TypeError(format!(
+                        "impl<{}> {}: `:where` bounds `{}`, which is not one of the impl's type parameters",
+                        names,
+                        trait_path,
+                        p.name()
+                    )));
+                }
+            }
+        }
+    }
+    // A leading space is unwritable in source.
+    let owner = Path::in_ns(trait_path.ns(), &format!(" blanket {}", trait_path.name_symbol().name()));
+    let root = TypeScope::empty();
+    let head = root.declare(ParamOwner::Def(owner), type_names).expect("one parameter is declared once");
+    let param = head.params()[0];
+    let target_ty = Type::Param(param);
+    let shown = format!("impl<{}> {} {}", names, trait_path, var.name());
+    let impl_bounds = match clause {
+        Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, c)?,
+        None => Vec::new(),
+    };
+    // A type the `impl` covers has the trait's supertraits: the bounds
+    // have to say it does.
+    for sup in &tdef.supertraits {
+        let implied = impl_bounds.iter().any(|(_, b)| super::bounds::trait_implies(reg, &b.trait_path, &sup.trait_path));
+        if !implied {
+            return Err(Error::TypeError(format!(
+                "{}: `{}` requires `{}`, but the `:where` clause does not bound `{}` by it",
+                shown,
+                trait_path,
+                sup.trait_path,
+                var.name()
+            )));
+        }
+    }
+    let (assoc, methods) = items_of(heap, reg, ns, &head, &target_ty, tdef, &shown, items)?;
+    for (written, _) in &methods {
+        if tdef.method(*written).is_none() {
+            return Err(Error::TypeError(format!("{}: `{}` is not a method of `{}`", shown, written, trait_path)));
+        }
+    }
+    let mut left = Vec::new();
+    for (m, _) in &tdef.methods {
+        if !methods.iter().any(|(w, _)| w == m) {
+            if !tdef.defaults.contains(m) {
+                return Err(Error::TypeError(format!("{}: missing method `{}` (`{}` declares no default body for it)", shown, m, trait_path)));
+            }
+            left.push(*m);
+        }
+    }
+    let of = Of { trait_path, owner, type_names, head: head.params(), target: &target_ty, assoc: &assoc, clause, inst: None, blanket: true };
+    for method in left {
+        define_defaulted(reg, d, heap, tdef, &of, method)?;
+    }
+    for (method, item) in methods {
+        let want = tdef.method(method).expect("checked above").clone();
+        check_method(reg, d, heap, requests, tdef, &of, method, &want, &shown, item)?;
+    }
+    let bounds = impl_bounds.into_iter().map(|(_, b)| b).collect();
+    reg.define_blanket(trait_path, super::registry::BlanketImpl { owner, param, bounds });
+    crate::check::forms::module_form(heap, &Path::in_ns(ns, "nothing"), &[])
 }
 
 /// The trait `trait_path`'s default body of `method`, and the substitution
@@ -441,7 +566,7 @@ fn check_method(
     let scope = root.declare(ParamOwner::Method(owner, method), of.type_names).map_err(|twice| {
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
-    let reown = reown(reg, &owner, &scope, of);
+    let reown = reown(&scope, of);
     let target_ty = reown.apply(of.target);
     let assoc: Vec<Type> = of.assoc.iter().map(|t| reown.apply(t)).collect();
     let named: Vec<(SymRef, Type)> = tdef.params[1..].iter().map(|p| p.name).zip(assoc.iter().cloned()).collect();
@@ -485,7 +610,7 @@ fn check_method(
             describe(&want_params, &want_ret)
         )));
     }
-    let bounds = of.clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
+    let bounds = method_bounds(heap, &tcx, &scope, of)?;
     let def = Method { owner, method, name, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds, inst: of.inst.map(<[Type]>::to_vec) };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }

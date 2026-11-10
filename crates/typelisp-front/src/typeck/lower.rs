@@ -95,7 +95,12 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             let ret = lw.settle(&t.ty);
             request_print_object(lw, &ret);
-            lw.reg.assoc_form(heap, owner, method, *instance, &ret, &lowered)
+            // A blanket `impl`'s method is specialized as its type's.
+            let owner = match lw.reg.blanket_trait(owner) {
+                Some(_) => crate::types::nominal_path(&lw.settle(&targs[0])).expect("a blanket `impl` covers only a type with a name"),
+                None => *owner,
+            };
+            lw.reg.assoc_form(heap, &owner, method, *instance, &ret, &lowered)
         }
         Node::TraitCall { trait_path, method, args } => {
             // The receiver's type is the specialization's.
@@ -121,10 +126,19 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 },
             };
             let Some(def) = lw.reg.method_at(&owner, *method, &type_args) else {
-                if lw.reg.blanket_impls.get(trait_path).is_some() {
-                    unimplemented!("typeck: `{}::{}` on a `{}`, through a blanket `impl`", trait_path, method, recv)
+                // No `impl` of the type gave it: the blanket `impl`'s,
+                // specialized at the type.
+                let Some(blanket) = lw.reg.blanket_with_method(*method).map(|b| b.owner) else {
+                    unreachable!("`{}` meets the bound on `{}`, so it has `{}`", recv, trait_path, method)
+                };
+                let code = lw.requests.ask_method(&blanket, *method, vec![recv.clone()]);
+                let mut lowered = Vec::with_capacity(args.len());
+                for a in args {
+                    lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
                 }
-                unreachable!("`{}` meets the bound on `{}`, so it has `{}`", recv, trait_path, method)
+                let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
+                let ret = lw.settle(&t.ty);
+                return lw.reg.assoc_form(heap, &owner, code, true, &ret, &lowered);
             };
             // An `impl`'s methods have the type's parameters, in order; one
             // for one instantiation has code under that instantiation's name.

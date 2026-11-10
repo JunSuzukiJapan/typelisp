@@ -177,13 +177,27 @@ pub(crate) fn meets(cx: &Cx, ty: &Type, b: &TraitBound) -> Meets {
             cx.decide_all(ty);
         }
     }
-    meets_at(Asker::Checking(cx), &cx.resolve(ty), b, 0)
+    meets_at(Asker::Checking(cx), &cx.resolve(ty), b, &[])
 }
 
 /// [`meets`] of a settled type, which has no hole and no type parameter:
 /// what lowering asks.
 pub(crate) fn settled_meets(reg: &Registry, ty: &Type, b: &TraitBound) -> bool {
-    matches!(meets_at(Asker::Settled(reg), ty, b, 0), Meets::Yes)
+    matches!(meets_at(Asker::Settled(reg), ty, b, &[]), Meets::Yes)
+}
+
+/// Whether the settled type `ty` meets `b` through the blanket `impl` of
+/// `b`'s trait, having no `impl` of it of its own.
+pub(crate) fn blanket_covers(reg: &Registry, ty: &Type, b: &TraitBound) -> bool {
+    let mut open = false;
+    super::unify::walk(ty, &mut |t| open |= matches!(t, Type::Param(_) | Type::Infer(_)));
+    !open && reg.blanket_impls.get(&b.trait_path).is_some() && settled_meets(reg, ty, b)
+}
+
+/// Whether a type implementing the trait `from` implements `want`: `want`
+/// is `from` or one of its supertraits.
+pub(crate) fn trait_implies(reg: &Registry, from: &Path, want: &Path) -> bool {
+    from == want || trait_def(reg, from).is_some_and(|t| t.supertraits.iter().any(|s| trait_implies(reg, &s.trait_path, want)))
 }
 
 /// Who asks whether a type meets a bound: a form being checked, whose
@@ -220,8 +234,10 @@ impl Asker<'_, '_> {
     }
 }
 
-fn meets_at(q: Asker, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
-    assert!(depth < 64, "the bounds of `impl`s of `{}` do not end", b.trait_path);
+/// Whether `ty` meets `b`; `seen` are the bounds asked of the types on the
+/// way here, which a blanket `impl`'s bounds may ask again.
+fn meets_at(q: Asker, ty: &Type, b: &TraitBound, seen: &[(Path, Type)]) -> Meets {
+    assert!(seen.len() < 64, "the bounds of `impl`s of `{}` do not end", b.trait_path);
     let path = match ty {
         Type::Infer(_) => return Meets::NotYet,
         // It has no values: nothing can be asked of one.
@@ -244,11 +260,28 @@ fn meets_at(q: Asker, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
     };
     let reg = q.reg();
     let found = reg.trait_impls.get(&(b.trait_path, path)).and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)));
+    let mut next = seen.to_vec();
+    next.push((b.trait_path, ty.clone()));
     let Some(imp) = found else {
-        if reg.blanket_impls.get(&b.trait_path).is_some() {
-            unimplemented!("typeck: whether a blanket `impl` of `{}` covers `{}`", b.trait_path, ty)
+        let unmet = || Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None });
+        let Some(blanket) = reg.blanket_impls.get(&b.trait_path) else { return unmet() };
+        // Its bounds asking what is being asked already: they never end,
+        // and cover nothing.
+        if seen.iter().any(|(t, s)| *t == b.trait_path && s == ty) {
+            return unmet();
         }
-        return Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None });
+        let at = Subst::positional(&[blanket.param], std::slice::from_ref(ty));
+        for inner in &blanket.bounds {
+            match meets_at(q, ty, &inner.at(&at), &next) {
+                Meets::Yes => {}
+                Meets::No(_) => return unmet(),
+                Meets::NotYet => return Meets::NotYet,
+            }
+        }
+        if !b.assoc.is_empty() {
+            unimplemented!("typeck: whether a blanket `impl` of `{}` binds the associated types a bound pins", b.trait_path)
+        }
+        return Meets::Yes;
     };
     // The `impl`'s types are written in the type's parameters.
     let type_params = reg.type_def(&path).map(|d| d.params.clone()).unwrap_or_default();
@@ -257,7 +290,7 @@ fn meets_at(q: Asker, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
     for (p, bounds) in &imp.bounds {
         let arg = at.apply(&Type::Param(*p));
         for inner in bounds {
-            match meets_at(q, &q.resolve(&arg), &inner.at(&at), depth + 1) {
+            match meets_at(q, &q.resolve(&arg), &inner.at(&at), &next) {
                 Meets::Yes => {}
                 Meets::No(_) => return Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None }),
                 Meets::NotYet => return Meets::NotYet,

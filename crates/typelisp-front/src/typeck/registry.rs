@@ -152,6 +152,16 @@ impl TraitDef {
     }
 }
 
+/// A blanket `impl`, `(impl<T> Trait T ...)`: the owner its methods are
+/// defined under, which no program can name; its type parameter; and the
+/// bounds a type meets to be covered, written in that parameter.
+#[derive(Clone, Debug)]
+pub(crate) struct BlanketImpl {
+    pub(crate) owner: Path,
+    pub(crate) param: TypeParam,
+    pub(crate) bounds: Vec<TraitBound>,
+}
+
 /// An `impl` of a trait for a type: for every instantiation of it, or for
 /// the one `args` names. The associated types it binds, by name, and the
 /// bounds its `(:where ...)` puts on the type's parameters are written in
@@ -294,8 +304,11 @@ pub(crate) struct Registry {
     templates: Table<Base, Rc<Template>>,
     /// The `impl`s of a trait for a type, by the trait and the type.
     pub(crate) trait_impls: Table<(Path, Path), Vec<TraitImpl>>,
-    /// The traits some blanket `impl` (one for a type variable) implements.
-    pub(crate) blanket_impls: Table<Path, ()>,
+    /// The blanket `impl` (one for a type variable) of each trait that has
+    /// one.
+    pub(crate) blanket_impls: Table<Path, BlanketImpl>,
+    /// The trait whose blanket `impl`'s methods each owner holds.
+    blanket_owners: Table<Path, Path>,
     /// The methods an `impl` left out and took from the trait's default
     /// body, by the type and the member symbol: the trait, and its
     /// parameters there, written in the method's type parameters.
@@ -443,6 +456,29 @@ impl Registry {
         self.inst_methods.get(&(*owner, name)).map_or(&[], Vec::as_slice)
     }
 
+    /// Define the blanket `impl` `def` of the trait `trait_path`.
+    pub(crate) fn define_blanket(&mut self, trait_path: Path, def: BlanketImpl) {
+        self.blanket_owners.insert(def.owner, trait_path);
+        self.blanket_impls.insert(trait_path, def);
+    }
+
+    /// The trait whose blanket `impl`'s methods `owner` holds, when it is
+    /// such an owner.
+    pub(crate) fn blanket_trait(&self, owner: &Path) -> Option<Path> {
+        self.blanket_owners.get(owner).copied()
+    }
+
+    /// The owner of the blanket `impl` methods named `name`: the one blanket
+    /// `impl` that has a method of the name.
+    pub(crate) fn blanket_with_method(&self, name: SymRef) -> Option<&BlanketImpl> {
+        let mut found = self.blanket_impls.iter().filter(|(_, b)| self.method(&b.owner, name).is_some());
+        let first = found.next().map(|(_, b)| b);
+        if found.next().is_some() {
+            unimplemented!("typeck: `{}`, a method of more than one blanket `impl`", name.name())
+        }
+        first
+    }
+
     /// Define (or redefine) the trait `path`.
     pub(crate) fn define_trait(&mut self, path: Path, def: TraitDef) {
         for (name, _) in &def.methods {
@@ -502,7 +538,7 @@ impl Registry {
         let mut out: Vec<String> = self
             .methods
             .iter()
-            .filter(|((_, m), def)| *m == name && def.instance)
+            .filter(|((owner, m), def)| *m == name && def.instance && self.blanket_owners.get(owner).is_none())
             .map(|((owner, _), _)| view.definition(owner.ns(), owner.name_symbol()))
             .collect();
         for ((owner, m), insts) in self.inst_methods.iter() {
@@ -544,6 +580,7 @@ impl Registry {
         self.templates.commit();
         self.trait_impls.commit();
         self.blanket_impls.commit();
+        self.blanket_owners.commit();
         self.defaulted.commit();
         self.docs.commit();
         self.locs.commit();
@@ -566,6 +603,7 @@ impl Registry {
         self.templates.rollback();
         self.trait_impls.rollback();
         self.blanket_impls.rollback();
+        self.blanket_owners.rollback();
         self.defaulted.rollback();
         self.docs.rollback();
         self.locs.rollback();

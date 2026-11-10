@@ -510,6 +510,11 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
         (Base::Fn(_), Name::Fn(name)) => reg.defun_form(heap, &name, &params, &ret, &body),
         (Base::Method(owner, m), Name::Method(name)) => {
             let instance = reg.method(&owner, m).expect("checked above").instance;
+            // A blanket `impl`'s method is its type's.
+            let owner = match reg.blanket_trait(&owner) {
+                Some(_) => crate::types::nominal_path(&req.args[0]).expect("a blanket `impl` covers only a type with a name"),
+                None => owner,
+            };
             reg.defmethod_form(heap, &owner, name, instance, &params, &ret, &body)
         }
         _ => unreachable!("a specialization is named as what it specializes"),

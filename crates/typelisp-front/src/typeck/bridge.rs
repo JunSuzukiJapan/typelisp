@@ -58,8 +58,8 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
             let def = m.traits.get_sym(sym).expect("a key of the table");
             new.define_trait(Path::of_symbol(ns, sym), import_trait(def));
         }
-        for b in &m.blanket_impls {
-            new.blanket_impls.insert(b.trait_path, ());
+        if let Some(b) = m.blanket_impls.first() {
+            unimplemented!("typeck: the blanket `impl` of `{}` the current checker checked", b.trait_path)
         }
         for sym in m.c_structs.symbols() {
             let def = m.c_structs.get_sym(sym).expect("a key of the table");
