@@ -369,10 +369,27 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let scrut = lower_rooted(heap, lw, scrut)?;
             let mut lowered = Vec::with_capacity(arms.len());
             for (pat, body) in arms {
-                let pat = lower_pattern(heap, lw, pat)?;
-                heap.push_root(pat);
-                let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
-                lowered.push((pat, body));
+                // An arm with `:or` alternatives is an arm for each, with
+                // the same condition and body.
+                let (alts, test) = match pat {
+                    Pat::When { pat, test } => (pat.as_ref(), Some(test.as_ref())),
+                    other => (other, None),
+                };
+                let alts: Vec<&Pat> = match alts {
+                    Pat::Or(alts) => alts.iter().collect(),
+                    one => vec![one],
+                };
+                for alt in alts {
+                    let mut pat = lower_pattern(heap, lw, alt)?;
+                    if let Some(test) = test {
+                        heap.push_root(pat);
+                        let test = lower_rooted(heap, lw, test)?;
+                        pat = core::tagged(heap, wk::PAT_WHEN, &[pat, test])?;
+                    }
+                    heap.push_root(pat);
+                    let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
+                    lowered.push((pat, body));
+                }
             }
             lw.reg.match_form(heap, scrut, &scrut_ty, &lowered)
         }
@@ -428,6 +445,20 @@ fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value,
             let test = lower_rooted(heap, lw, test)?;
             core::tagged(heap, wk::PAT_GUARD, &[Value::Symbol(*name), test])
         }
+        Pat::TypeTest { ty, sub } => {
+            let ty = lw.settle(ty);
+            let path = crate::types::nominal_path(&ty).ok_or_else(|| Error::TypeError(format!("(the `{}` pattern): not a named type", ty)))?;
+            // The whole instantiation: `(the gen<i32> x)` takes no `gen<string>`.
+            let key = core::type_form(heap, &ty, &[])?;
+            heap.push_root(key);
+            let sub = lower_pattern(heap, lw, sub)?;
+            heap.push_root(sub);
+            let form = core::tagged(heap, wk::PAT_TYPETEST, &[core::definition_form(&path), key, sub]);
+            heap.pop_root();
+            heap.pop_root();
+            form
+        }
+        Pat::Or(_) | Pat::When { .. } => unreachable!("`:or` and `:when` are an arm's whole pattern, lowered with the arm"),
     }
 }
 

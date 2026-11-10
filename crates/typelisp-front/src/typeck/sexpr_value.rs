@@ -60,7 +60,7 @@ pub(crate) fn no_encoding(ty: &Type) -> crate::Error {
 
 /// Whether a value of type `ty` is a reference to the heap whose word a
 /// `Sexpr` holds as it is.
-fn heap_value(reg: &Registry, ty: &Type) -> bool {
+pub(crate) fn heap_value(reg: &Registry, ty: &Type) -> bool {
     match ty {
         Type::Named(p, _) if path_is_builtin(p, wk::SCOPE) || path_is_builtin(p, wk::SEXPR) || path_is_builtin(p, wk::HASHTABLE) => true,
         Type::Named(p, _) => match reg.type_def(p) {

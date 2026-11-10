@@ -17162,7 +17162,7 @@ pub(crate) fn tuple_element_field(ty: &Type, name: &str) -> Result<Option<String
 /// `(:= expr)` and `'datum` hold an expression and a datum, not patterns, so
 /// nothing inside them is an alternative. The lists built here are rooted
 /// on the heap's stack, which the enclosing top-level check releases.
-fn expand_or_patterns(heap: &mut Heap, v: Value) -> Result<Vec<Value>, Error> {
+pub(crate) fn expand_or_patterns(heap: &mut Heap, v: Value) -> Result<Vec<Value>, Error> {
     let Value::Cons(_) = v else { return Ok(vec![v]) };
     let items = heap.list_to_vec(v)?;
     let Some(&head) = items.first() else { return Ok(vec![v]) };

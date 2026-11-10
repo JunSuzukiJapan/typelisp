@@ -11,8 +11,8 @@ use crate::{wk, Error, Heap, Loc, Value};
 use super::exhaustive::uncovered;
 use super::expr::{check_body, check_expr, Cx};
 use super::locals::Locals;
-use super::pattern::check_arm_pattern;
-use super::tree::{Node, Typed};
+use super::pattern::{check_arm_pattern, Binds};
+use super::tree::{Node, Pat, Typed};
 
 /// `(match ...)` — `args` without the `match`.
 pub(crate) fn check_match(
@@ -42,17 +42,45 @@ pub(crate) fn check_match(
         let Some(parts) = parts else {
             return Err(Error::TypeError("match: arm must be (pattern body...)".into()));
         };
-        if matches!(parts.get(1), Some((Value::Symbol(k), _)) if k.is(wk::KW_WHEN)) {
-            unimplemented!("typeck: a `match` arm with a `:when` guard")
-        }
+        // `(pattern :when test body...)`: the condition sits between the
+        // pattern and the body.
+        let guard = match parts.get(1) {
+            Some((Value::Symbol(k), _)) if k.is(wk::KW_WHEN) => match parts.get(2) {
+                Some(test) => Some(test.clone()),
+                None => return Err(Error::TypeError("match: `:when` needs a condition: (pattern :when test body...)".into())),
+            },
+            _ => None,
+        };
+        let body_start = if guard.is_some() { 3 } else { 1 };
         let (pat, pat_loc) = &parts[0];
-        let mut binds = Vec::new();
-        let pat = check_arm_pattern(cx, heap, locals, &scrut_ty, *pat, &mut binds).map_err(|e| match heap.cons_loc(*pat).or(pat_loc.clone()) {
-            Some(l) => e.at(l),
+        let where_ = heap.cons_loc(*pat).or(pat_loc.clone());
+        let at = |e: Error| match &where_ {
+            Some(l) => e.at(l.clone()),
             None => e,
-        })?;
-        let arm_locals = locals.bind(binds)?;
-        let (body, ty) = check_body(cx, heap, &arm_locals, &parts[1..], Some(&result))?;
+        };
+        // `(:or p1 p2 ...)`, anywhere in the pattern, is the whole patterns
+        // it stands for, which one body reads the names of.
+        let alternatives = crate::check::analyze::expand_or_patterns(heap, *pat).map_err(at)?;
+        let mut pats = Vec::with_capacity(alternatives.len());
+        let mut first: Option<Binds> = None;
+        for alt in alternatives {
+            let mut binds = Vec::new();
+            pats.push(check_arm_pattern(cx, heap, locals, &scrut_ty, alt, &mut binds).map_err(at)?);
+            match &first {
+                None => first = Some(binds),
+                Some(first) => same_binds(cx, first, &binds).map_err(at)?,
+            }
+        }
+        let arm_locals = locals.bind(first.expect("a pattern has an alternative"))?;
+        let pat = if pats.len() == 1 { pats.remove(0) } else { Pat::Or(pats) };
+        let pat = match guard {
+            Some((test, test_loc)) => {
+                let test = check_expr(cx, heap, &arm_locals, test, Some(&Type::Bool), test_loc)?;
+                Pat::When { pat: Box::new(pat), test: Box::new(test) }
+            }
+            None => pat,
+        };
+        let (body, ty) = check_body(cx, heap, &arm_locals, &parts[body_start..], Some(&result))?;
         returns |= cx.resolve(&ty) != Type::Never;
         checked.push((pat, body));
     }
@@ -66,4 +94,29 @@ pub(crate) fn check_match(
     // Arms that all never return leave nothing to decide the type by.
     let ty = if returns { cx.resolve(&result) } else { Type::Never };
     Ok(Typed { node: Node::Match { scrut: Box::new(scrut), arms: checked }, ty, loc })
+}
+
+/// That two `:or` alternatives bind the same names at the same types.
+fn same_binds(cx: &Cx, first: &Binds, other: &Binds) -> Result<(), Error> {
+    let key = |b: &Binds| {
+        let mut v: Vec<(String, Type)> = b.iter().map(|(n, t)| (n.name().to_string(), cx.resolve(t))).collect();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        v
+    };
+    let (a, b) = (key(first), key(other));
+    if a == b {
+        return Ok(());
+    }
+    let show = |v: &[(String, Type)]| {
+        if v.is_empty() {
+            "nothing".to_string()
+        } else {
+            v.iter().map(|(n, t)| format!("`{}: {}`", n, t)).collect::<Vec<_>>().join(", ")
+        }
+    };
+    Err(Error::TypeError(format!(
+        "pattern: the alternatives of `(:or ...)` must bind the same variables at the same types, but one binds {} and another {}",
+        show(&a),
+        show(&b)
+    )))
 }

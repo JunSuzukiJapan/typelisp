@@ -189,6 +189,17 @@ pub(crate) enum Pat {
     /// Matches a value for which `test` is true, the value bound to `name`
     /// while it runs.
     Guard { #[serde(with = "crate::owned_form::sym_serde")] name: SymRef, test: Box<Typed> },
+    /// An arm's `(:or p1 p2 ...)`, written anywhere in its pattern, as the
+    /// whole patterns it stands for: matches what one of them matches. Each
+    /// binds the same names at the same types, which the arm's body reads.
+    Or(Vec<Pat>),
+    /// An arm's pattern `pat` with its `:when` condition `test`, checked
+    /// with what `pat` binds: matches what `pat` matches when `test` is
+    /// true.
+    When { pat: Box<Pat>, test: Box<Typed> },
+    /// `(the ty sub)`: matches a `Sexpr` holding a value of `ty`, which
+    /// `sub` matches.
+    TypeTest { ty: Type, sub: Box<Pat> },
 }
 
 impl Pat {
@@ -196,7 +207,9 @@ impl Pat {
     fn tests(&self) -> Vec<&Typed> {
         match self {
             Pat::Guard { test, .. } => vec![&**test],
-            Pat::Ctor { subs, .. } => subs.iter().flat_map(Pat::tests).collect(),
+            Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter().flat_map(Pat::tests).collect(),
+            Pat::When { pat, test } => pat.tests().into_iter().chain([&**test]).collect(),
+            Pat::TypeTest { sub, .. } => sub.tests(),
             Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } => Vec::new(),
         }
     }
@@ -205,7 +218,9 @@ impl Pat {
     fn tests_mut(&mut self) -> Vec<&mut Typed> {
         match self {
             Pat::Guard { test, .. } => vec![&mut **test],
-            Pat::Ctor { subs, .. } => subs.iter_mut().flat_map(Pat::tests_mut).collect(),
+            Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter_mut().flat_map(Pat::tests_mut).collect(),
+            Pat::When { pat, test } => pat.tests_mut().into_iter().chain([&mut **test]).collect(),
+            Pat::TypeTest { sub, .. } => sub.tests_mut(),
             Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } => Vec::new(),
         }
     }
@@ -214,7 +229,8 @@ impl Pat {
     fn each_value(&self, f: &mut dyn FnMut(Value)) {
         match self {
             Pat::Lit { value, .. } => f(*value),
-            Pat::Ctor { subs, .. } => subs.iter().for_each(|p| p.each_value(f)),
+            Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter().for_each(|p| p.each_value(f)),
+            Pat::When { pat, .. } | Pat::TypeTest { sub: pat, .. } => pat.each_value(f),
             Pat::Wild | Pat::Bind(_) | Pat::Guard { .. } => {}
         }
     }
@@ -223,17 +239,27 @@ impl Pat {
     fn values_mut(&mut self, f: &mut dyn FnMut(&mut Value)) {
         match self {
             Pat::Lit { value, .. } => f(value),
-            Pat::Ctor { subs, .. } => subs.iter_mut().for_each(|p| p.values_mut(f)),
+            Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter_mut().for_each(|p| p.values_mut(f)),
+            Pat::When { pat, .. } | Pat::TypeTest { sub: pat, .. } => pat.values_mut(f),
             Pat::Wild | Pat::Bind(_) | Pat::Guard { .. } => {}
         }
     }
 
     fn map_types(&mut self, f: &impl Fn(&Type) -> Type) {
-        if let Pat::Ctor { targs, field_tys, subs, .. } = self {
-            for t in targs.iter_mut().chain(field_tys.iter_mut()) {
-                *t = f(t);
+        match self {
+            Pat::Ctor { targs, field_tys, subs, .. } => {
+                for t in targs.iter_mut().chain(field_tys.iter_mut()) {
+                    *t = f(t);
+                }
+                subs.iter_mut().for_each(|p| p.map_types(f));
             }
-            subs.iter_mut().for_each(|p| p.map_types(f));
+            Pat::Or(alts) => alts.iter_mut().for_each(|p| p.map_types(f)),
+            Pat::When { pat, .. } => pat.map_types(f),
+            Pat::TypeTest { ty, sub } => {
+                *ty = f(ty);
+                sub.map_types(f);
+            }
+            Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } | Pat::Guard { .. } => {}
         }
     }
 }

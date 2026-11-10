@@ -67,12 +67,14 @@ fn missing<'p>(reg: &Registry, wild: &'p Pat, rows: &[Vec<&'p Pat>], tys: &[Type
 fn specialize<'p>(wild: &'p Pat, rows: &[Vec<&'p Pat>], variant: usize, arity: usize, all: &[Variant]) -> Vec<Vec<&'p Pat>> {
     rows.iter()
         .filter_map(|r| {
-            let fields: Vec<&Pat> = match cases(r[0], wild, all) {
-                Some(cs) => cs.into_iter().find(|(v, _)| *v == variant)?.1,
-                None => vec![wild; arity],
+            // A row with `:or` alternatives of the variant is one row for each.
+            let fields: Vec<Vec<&Pat>> = match cases(r[0], wild, all) {
+                Some(cs) => cs.into_iter().filter(|(v, _)| *v == variant).map(|(_, f)| f).collect(),
+                None => vec![vec![wild; arity]],
             };
-            Some(fields.into_iter().chain(r[1..].iter().copied()).collect())
+            Some(fields.into_iter().map(|f| f.into_iter().chain(r[1..].iter().copied()).collect::<Vec<_>>()).collect::<Vec<_>>())
         })
+        .flatten()
         .collect()
 }
 
@@ -88,8 +90,19 @@ fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, V
         Pat::Wild | Pat::Bind(_) => return None,
         // `true` and `false` are a `bool`'s two values.
         Pat::Lit { value: crate::Value::Bool(b), .. } => return Some(vec![(usize::from(!*b), Vec::new())]),
-        // Any other value matches only some values, and covers no variant.
-        Pat::Lit { .. } | Pat::Guard { .. } => return Some(Vec::new()),
+        // Any other value matches only some values, and covers no variant;
+        // nor does an arm whose `:when` may be false.
+        Pat::Lit { .. } | Pat::Guard { .. } | Pat::When { .. } => return Some(Vec::new()),
+        // Out of a `Sexpr`, it matches only the values of one type.
+        Pat::TypeTest { .. } => return Some(Vec::new()),
+        // What one of the alternatives matches.
+        Pat::Or(alts) => {
+            let mut all_cases = Vec::new();
+            for alt in alts {
+                all_cases.extend(cases(alt, wild, all)?);
+            }
+            return Some(all_cases);
+        }
         // Out of a `Sexpr`, it matches only the values of one type.
         Pat::Ctor { downcast: true, .. } => return Some(Vec::new()),
         Pat::Ctor { owner, variant, subs, .. } => (owner, variant, subs),
@@ -105,7 +118,8 @@ fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, V
         Pat::Ctor { downcast: true, .. } => Some(Vec::new()),
         Pat::Ctor { variant, subs, .. } => Some(vec![(*variant, subs.iter().collect())]),
         Pat::Wild | Pat::Bind(_) => Some(all.iter().filter(|(i, _, _)| *i != sexpr_variant::NIL).map(|(i, _, f)| (*i, vec![wild; f.len()])).collect()),
-        Pat::Lit { .. } | Pat::Guard { .. } => Some(Vec::new()),
+        Pat::Lit { .. } | Pat::Guard { .. } | Pat::TypeTest { .. } => Some(Vec::new()),
+        Pat::Or(_) | Pat::When { .. } => unreachable!("`:or` and `:when` are an arm's whole pattern, never a field's"),
     }
 }
 

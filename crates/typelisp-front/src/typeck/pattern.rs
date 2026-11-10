@@ -77,7 +77,9 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                     let Value::Symbol(sym) = parts[1] else { unreachable!("matched above") };
                     return symbol_pattern(cx, heap, locals, expected, sym);
                 }
-                Value::Symbol(h) if h.is_keyword() || h.is(wk::QUOTE) || h.is(wk::THE) => {
+                // `(the Type pattern)`: out of a `Sexpr`, a value of `Type`.
+                Value::Symbol(h) if h.is(wk::THE) => return type_test(cx, heap, locals, expected, &parts, binds),
+                Value::Symbol(h) if h.is_keyword() || h.is(wk::QUOTE) => {
                     unimplemented!("typeck: the pattern `({} ...)`", heap.symbol_spelling(h))
                 }
                 Value::Symbol(h) => Some(h),
@@ -89,16 +91,20 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
             if let Type::Named(owner, targs) = &ty {
                 if let Some(def) = cx.reg.type_def(owner).filter(|d| d.kind == AdtKind::Struct && !d.builtin) {
                     let def = def.clone();
-                    return struct_pattern(cx, heap, locals, *owner, targs.clone(), &def, &parts, binds);
+                    return struct_pattern(cx, heap, locals, *owner, targs.clone(), &def, &parts, false, binds);
+                }
+            }
+            // Out of a `Sexpr`, a struct's or a variant's name is a value
+            // of that type.
+            if is_sexpr_expectation(&ty) {
+                if let Some(pat) = downcast(cx, heap, locals, &ty, &parts, binds)? {
+                    return Ok(pat);
                 }
             }
             let Some(head) = head else {
                 return Err(Error::TypeError("pattern: constructor must be a symbol".into()));
             };
             if is_sexpr_expectation(&ty) && !option_variant(cx, &ty, head) {
-                if !is_ctor_name(head.name()) && names_type(cx, head) {
-                    unimplemented!("typeck: a downcast pattern")
-                }
                 // An `Option<Sexpr>` is matched by `Sexpr`'s variants as if
                 // its `some` were peeled, beside `none` in the same arms.
                 if is_option_of_sexpr(&ty) && is_ctor_name(head.name()) {
@@ -148,21 +154,12 @@ fn bare_variant(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, id: 
     let Type::Named(owner, targs) = &ty else { return Ok(None) };
     if is_sexpr_expectation(&ty) && !option_variant(cx, &ty, id) {
         // Against a `Sexpr`, a type's or a variant's name is a downcast.
-        if names_type(cx, id) {
-            unimplemented!("typeck: a downcast pattern")
-        }
-        return Ok(None);
+        return downcast(cx, heap, locals, &ty, &[Value::Symbol(id)], binds);
     }
     let Some(def) = cx.reg.type_def(owner).filter(|d| d.kind == AdtKind::Sum) else { return Ok(None) };
     let Some(variant) = def.variant_index(member_symbol(id.name())) else { return Ok(None) };
     let def = def.clone();
     variant_pattern(cx, heap, locals, *owner, targs.clone(), &def, variant, &[], binds).map(Some)
-}
-
-/// Whether `id` names a type, or a variant a `use` brought in: against a
-/// `Sexpr`, a pattern headed by one is a downcast.
-fn names_type(cx: &Cx, id: SymRef) -> bool {
-    find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))).is_some() || ctor_named(cx.reg, cx.ns, id).is_some()
 }
 
 /// Whether `id` is a variant of `ty` when it is `Option<Sexpr>`: `some` and
@@ -244,11 +241,11 @@ fn fields_pattern(
 }
 
 /// `(Type :slot pattern... :slot...)`, matching a value of the struct
-/// `owner<targs>`: each slot written is matched by its pattern, a slot
+/// `owner<targs>` (or, `downcast`, a `Sexpr` holding one): each slot written is matched by its pattern, a slot
 /// written with no pattern binds a variable of its own name, and a slot not
 /// written is not matched.
 #[allow(clippy::too_many_arguments)]
-fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs: Vec<Type>, def: &TypeDef, parts: &[Value], binds: &mut Binds) -> Result<Pat, Error> {
+fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs: Vec<Type>, def: &TypeDef, parts: &[Value], downcast: bool, binds: &mut Binds) -> Result<Pat, Error> {
     let short = owner.last_segment();
     let first = def.fields.first().map_or("slot", |f| f.name.name());
     let head = super::type_syntax::type_path(heap, &cx.types(), parts[0]).ok();
@@ -298,7 +295,92 @@ fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs:
         });
     }
     let subs: Vec<Value> = slots.into_iter().map(|s| s.unwrap_or(wild)).collect();
-    fields_pattern(cx, heap, locals, owner, targs, def, 0, false, &subs, binds)
+    fields_pattern(cx, heap, locals, owner, targs, def, 0, downcast, &subs, binds)
+}
+
+/// `(Head sub...)` against `ty`, a `Sexpr` or an `Option<Sexpr>`, when
+/// `Head` names a struct or (a `use` bringing it in bare, or a path) a
+/// variant: a value of that type held as the `Sexpr`, its fields matched as
+/// a pattern of that type matches them. `None` when `Head` names neither,
+/// or is one of the `Sexpr`'s (or the `Option`'s) own variants.
+fn downcast(cx: &Cx, heap: &mut Heap, locals: &Locals, ty: &Type, parts: &[Value], binds: &mut Binds) -> Result<Option<Pat>, Error> {
+    let generic = |path: &Path| {
+        Error::TypeError(format!(
+            "pattern: `{}` is generic — a downcast pattern can't infer its type arguments; use `(the {}<...> p)` for a whole-value bind instead",
+            path, path
+        ))
+    };
+    let (owner, variant) = match parts[0] {
+        Value::Symbol(id) => {
+            if is_ctor_name(id.name()) || option_variant(cx, ty, id) {
+                return Ok(None);
+            }
+            let named = find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.type_def(&Path::of_symbol(ns, key)).cloned());
+            if let Some((path, def)) = named.filter(|(_, d)| d.kind == AdtKind::Struct && !d.builtin) {
+                if !def.params.is_empty() {
+                    return Err(generic(&path));
+                }
+                return struct_pattern(cx, heap, locals, path, Vec::new(), &def, parts, true, binds).map(Some);
+            }
+            // `Option`'s and `Result`'s variants, offered bare, are generic,
+            // so no downcast names them.
+            let offered = |p: &Path| path_is_builtin(p, wk::OPTION) || path_is_builtin(p, wk::RESULT) || path_is_builtin(p, wk::SEXPR);
+            match ctor_named(cx.reg, cx.ns, id).filter(|(p, _)| !offered(p)) {
+                Some(found) => found,
+                None => return Ok(None),
+            }
+        }
+        Value::Path(id) => {
+            let crate::types::PathTarget::Member(owner, member) = crate::types::path_target(heap, cx.ns, id)? else { return Ok(None) };
+            match cx.reg.type_def(&owner).and_then(|d| d.variant_index(member_symbol(member.name()))) {
+                Some(variant) => (owner, variant),
+                None => return Ok(None),
+            }
+        }
+        _ => return Ok(None),
+    };
+    let def = cx.reg.type_def(&owner).expect("a variant's type is defined").clone();
+    if !def.params.is_empty() {
+        return Err(generic(&owner));
+    }
+    fields_pattern(cx, heap, locals, owner, Vec::new(), &def, variant, true, &parts[1..], binds).map(Some)
+}
+
+/// `(the Type pattern)` against `expected`, a `Sexpr` or an `Option<Sexpr>`:
+/// a value of `Type` held as the `Sexpr`, matched by `pattern` as a value of
+/// `Type` — the whole value, with a mutable struct's identity, and the one
+/// way a `Vector<T>` or a `HashTable<K,V>` comes back out of a `Sexpr`.
+fn type_test(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, parts: &[Value], binds: &mut Binds) -> Result<Pat, Error> {
+    let [_, ty, sub] = parts else {
+        return Err(Error::TypeError("pattern: (the Type pattern)".into()));
+    };
+    if !is_sexpr_expectation(&cx.resolve(expected)) {
+        return Err(Error::TypeError(format!("pattern: `(the Type pattern)` takes a value out of a `Sexpr`, and this one matches a `{}`", cx.resolve(expected))));
+    }
+    let ty = super::type_syntax::parse_type(heap, &cx.types(), *ty)?;
+    if !super::sexpr_value::heap_value(cx.reg, &ty) {
+        return Err(Error::TypeError(format!("pattern: `{}` has no Sexpr representation, cannot downcast with `the`", ty)));
+    }
+    // A niched `Option` sits in a `Sexpr` as a box of its own, which the
+    // pattern has to read as a downcast constructor does: binding the
+    // whole value would bind the box to a name whose type says niche.
+    if crate::check::lower::CoreForms::repr(cx.reg, &ty).niche_payload().is_some() {
+        let must_name = || {
+            Error::TypeError(format!(
+                "pattern: `(the {} ..)` on a niche-represented Option must name a constructor — `(the {} (some x))` or `(the {} (none))` — since the Sexpr holds it boxed",
+                ty, ty, ty
+            ))
+        };
+        let inner = heap.list_to_vec(*sub).map_err(|_| must_name())?;
+        let Some(Value::Symbol(head)) = inner.first() else { return Err(must_name()) };
+        let Type::Named(owner, targs) = &ty else { unreachable!("an `Option` is a named type") };
+        let def = cx.reg.type_def(owner).expect("`Option` is defined").clone();
+        let variant = def.variant_index(member_symbol(head.name())).ok_or_else(must_name)?;
+        let sub = fields_pattern(cx, heap, locals, *owner, targs.clone(), &def, variant, true, &inner[1..], binds)?;
+        return Ok(Pat::TypeTest { ty, sub: Box::new(sub) });
+    }
+    let sub = check_pattern(cx, heap, locals, &ty, *sub, binds)?;
+    Ok(Pat::TypeTest { ty, sub: Box::new(sub) })
 }
 
 /// `#{p0 p1 ...}`: a tuple's elements, each matched by its own pattern.
