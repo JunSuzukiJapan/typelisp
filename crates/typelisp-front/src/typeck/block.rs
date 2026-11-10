@@ -60,8 +60,10 @@ fn within(cx: &Cx, heap: &mut Heap, locals: &Locals, name: SymRef, seed: Option<
     let (body, body_ty) = checked?;
     let ty = match exit.ty {
         Some(t) => {
-            if cx.resolve(&body_ty) != Type::Never {
-                agree(cx, &body_ty, Some(&t))?;
+            // The body's end is one of the block's exits.
+            if cx.resolve(&body_ty) != Type::Never && cx.holes.borrow_mut().unify(&t, &body_ty).is_err() {
+                let holes = cx.holes.borrow();
+                return Err(Error::TypeError(format!("branches have incompatible types: `{}` vs `{}`", holes.shown(&t), holes.shown(&body_ty))));
             }
             t
         }

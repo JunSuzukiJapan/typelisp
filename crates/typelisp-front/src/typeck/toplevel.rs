@@ -129,6 +129,19 @@ impl TypeChecker {
         register_for_reading(self.registry(old), heap, site, path);
     }
 
+    /// The functions a `defsignature` declared that no `defun` has defined,
+    /// forgotten: what finishing a unit reports.
+    pub(crate) fn take_predeclared(&mut self) -> Vec<Path> {
+        let Some(reg) = self.reg.get_mut() else { return Vec::new() };
+        let mut paths: Vec<Path> = reg.predeclared.iter().map(|(p, _)| *p).collect();
+        for p in &paths {
+            reg.predeclared.remove(p);
+        }
+        reg.commit();
+        paths.sort_by_key(|p| p.to_string());
+        paths
+    }
+
     /// The type of the last form [`Self::check_form`] checked, when it was an
     /// expression.
     pub(crate) fn expr_type(&self) -> Option<&Type> {
@@ -251,6 +264,7 @@ fn check_primary(
                 wk::DEFENUM => return Ok((check_defenum(reg, d, heap, args)?, None)),
                 wk::DEFTRAIT => return Ok((check_deftrait(reg, d, heap, args)?, None)),
                 wk::DEFTYPE => return Ok((super::deftype::check_deftype(reg, d, heap, args)?, None)),
+                wk::DEFSIGNATURE => return Ok((super::defsignature::check_defsignature(reg, d, heap, args)?, None)),
                 wk::DEFMACRO => return Ok((super::defmacro::check_defmacro(reg, d, heap, requests, args)?, None)),
                 wk::DEFMETHOD => return Ok((check_defmethod(reg, d, heap, requests, args)?, None)),
                 wk::DEFVAR => return Ok((check_defvar(reg, d, heap, requests, Which::Defvar, args)?, None)),
@@ -290,8 +304,8 @@ fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc
         return Err(Error::TypeError("pub: expected a definition form".into()));
     };
     match head.well_known() {
-        wk::DEFUN | wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT | wk::DEFMETHOD | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::DEFTYPE | wk::USE | wk::DEFMACRO => Ok(inner),
-        wk::DEFSIGNATURE | wk::DEFFFI => unimplemented!("typeck: the form `pub {}`", head.name()),
+        wk::DEFUN | wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT | wk::DEFMETHOD | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::DEFTYPE | wk::DEFSIGNATURE | wk::USE | wk::DEFMACRO => Ok(inner),
+        wk::DEFFFI => unimplemented!("typeck: the form `pub {}`", head.name()),
         _ if head.is(wk::DEF_C_STRUCT) => Err(Error::TypeError(
             "def-c-struct is written at top level, inside `(unsafe ...)`: (unsafe (def-c-struct name (field type)...))".into(),
         )),

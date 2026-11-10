@@ -46,10 +46,20 @@ pub(crate) fn check_defun(
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
     d.ownable(heap, name, "defun")?;
-    d.value(reg, Kind::Function, name)?;
+    let path = Path::of_symbol(ns, name);
+    // The definition a `defsignature` announced is not a redefinition.
+    let declared = match reg.predeclared.get(&path) {
+        Some(()) => {
+            reg.predeclared.remove(&path);
+            reg.fn_def(&path).cloned()
+        }
+        None => {
+            d.value(reg, Kind::Function, name)?;
+            None
+        }
+    };
     let (clause, body) = split_where(heap, body)?;
     let (doc, body) = split_doc(heap, body);
-    let path = Path::of_symbol(ns, name);
     if let Some(doc) = doc {
         reg.docs.insert(Doc::Fn(path), doc);
     }
@@ -77,6 +87,9 @@ pub(crate) fn check_defun(
         bounds: by_param(bounds),
         ..FnDef::plain(type_params.clone(), required.into_iter().map(|(_, t)| t).collect(), ret.clone())
     };
+    if let Some(declared) = &declared {
+        super::defsignature::agrees(name.name(), declared, &def)?;
+    }
     reg.define_fn(path, def);
 
     let mut body = {

@@ -63,6 +63,7 @@ pub(crate) mod define;
 pub(crate) mod defenum;
 pub(crate) mod defmacro;
 pub(crate) mod defmethod;
+pub(crate) mod defsignature;
 pub(crate) mod defstruct;
 pub(crate) mod deftrait;
 pub(crate) mod deftype;

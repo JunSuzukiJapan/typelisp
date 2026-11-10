@@ -6,12 +6,14 @@
 //! The exits are met while the body is checked, so the loop's type is a hole
 //! they solve.
 
-use crate::check::loop_dsl::is_dsl;
-use crate::types::Type;
-use crate::{Error, Heap, Loc, Value};
+use crate::check::loop_dsl::{self, is_dsl, Acc, Verdict};
+use crate::types::{Path, Type};
+use crate::{wk, Error, Heap, Loc, Value};
+use typelisp_mem::SymRef;
 
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
+use super::unify::Kind;
 use super::tree::{Node, Typed};
 
 /// A loop being checked: its type, and whether anything leaves it with a
@@ -22,10 +24,10 @@ pub(crate) struct LoopExit {
 }
 
 /// `(loop body...)` — `args` without the `loop`.
-pub(crate) fn check_loop(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+pub(crate) fn check_loop(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let raw: Vec<Value> = args.iter().map(|(v, _)| *v).collect();
     if is_dsl(&raw) {
-        unimplemented!("typeck: the extended `loop` (`:for`, `:collect` ...)")
+        return check_extended(cx, heap, locals, args, expected, loc);
     }
     let hole = cx.holes.borrow_mut().fresh();
     cx.loops.borrow_mut().push(LoopExit { ty: hole.clone(), left: false });
@@ -33,6 +35,57 @@ pub(crate) fn check_loop(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Val
     let exit = cx.loops.borrow_mut().pop().expect("pushed above");
     let ty = if exit.left { hole } else { Type::Never };
     Ok(Typed { node: Node::Loop { body: body? }, ty, loc })
+}
+
+/// CL's extended `loop` (`(loop :for x :in xs :collect x)`), written as the
+/// simple loop and the bindings it is (`loop_dsl::build`, the old
+/// checker's), which is checked in its place.
+///
+/// What each accumulator starts as is a value whose type what is
+/// accumulated decides: an empty `Vector`, `none`, or a zero of any numeric
+/// type (bound, so that the zero is one checked value outside the form).
+fn check_extended(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
+    let raw: Vec<Value> = args.iter().map(|(v, _)| *v).collect();
+    let locs: Vec<Option<Loc>> = args.iter().map(|(_, l)| l.clone()).collect();
+    let plan = loop_dsl::parse(heap, &raw, &locs)?;
+    let mut zeros: Vec<(SymRef, Typed)> = Vec::new();
+    let mut acc_inits = Vec::with_capacity(plan.accs.len());
+    for acc in &plan.accs {
+        let init = match acc.acc {
+            Acc::Collect | Acc::Append => call_of(heap, &Path::builtin(wk::VECTOR), "new")?,
+            Acc::Maximize | Acc::Minimize => call_of(heap, &Path::builtin(wk::OPTION), "none")?,
+            Acc::Count => Value::Int(0),
+            Acc::Sum => {
+                let zero = cx.temp();
+                let ty = cx.number_hole(Kind::Number);
+                zeros.push((zero, Typed { node: Node::Number { value: Value::Int(0) }, ty, loc: None }));
+                Value::Symbol(zero)
+            }
+        };
+        acc_inits.push((acc.name, init));
+    }
+    let thereis_none = match plan.verdict {
+        Some(Verdict::Optional) => Some(call_of(heap, &Path::builtin(wk::OPTION), "none")?),
+        _ => None,
+    };
+    let built = loop_dsl::build(heap, &plan, &loop_dsl::Resolved { acc_inits, thereis_none })?;
+    heap.push_root(built);
+    if zeros.is_empty() {
+        return check_expr(cx, heap, locals, built, expected, loc);
+    }
+    let inner = locals.bind(zeros.iter().map(|(n, t)| (*n, t.ty.clone())).collect())?;
+    let body = check_expr(cx, heap, &inner, built, expected, loc.clone())?;
+    let ty = body.ty.clone();
+    Ok(Typed { node: Node::Let { binds: zeros, body: vec![body] }, ty, loc })
+}
+
+/// `(Type::member)`, as the checker writes it, rooted.
+fn call_of(heap: &mut Heap, owner: &Path, member: &str) -> Result<Value, Error> {
+    let head = crate::check::forms::member_form(heap, owner, member)?;
+    heap.push_root(head);
+    let call = crate::check::forms::list_from_vec_locs(heap, &[(head, None)])?;
+    heap.push_root(call);
+    Ok(call)
 }
 
 /// `(break)`: leave the nearest loop with `()`.

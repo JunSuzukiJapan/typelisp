@@ -96,7 +96,7 @@ impl<'a> Cx<'a> {
     }
 
     /// A hole of the kind `kind` for a number literal.
-    fn number_hole(&self, kind: Kind) -> Type {
+    pub(crate) fn number_hole(&self, kind: Kind) -> Type {
         let hole = self.holes.borrow_mut().fresh_of(kind);
         self.numbers.borrow_mut().push(hole.clone());
         hole
@@ -240,6 +240,16 @@ fn at(e: Error, loc: &Option<Loc>) -> Error {
 /// `t` as the literal of its settled type, when it is a number literal.
 fn settle_number(heap: &mut Heap, t: &mut Typed) -> Result<(), Error> {
     let Node::Number { value } = t.node else { return Ok(()) };
+    // An integer a hole of any numeric type held (`Kind::Number`) is that
+    // type's.
+    let value = match value {
+        Value::Int(n) => {
+            let v = crate::check::forms::numeric_identity_literal(heap, Some(&t.ty), n);
+            heap.push_root(v);
+            v
+        }
+        other => other,
+    };
     let lit = literal(heap, value, Some(&t.ty))
         .map_err(|e| match &t.loc {
             Some(l) => e.at(l.clone()),
@@ -430,7 +440,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
         wk::FORMAT => return format::check_format(cx, heap, locals, args, loc),
         wk::PRINT | wk::PRINTLN => return format::check_print(cx, heap, locals, head.well_known(), args, loc),
-        wk::LOOP => return looping::check_loop(cx, heap, locals, args, loc),
+        wk::LOOP => return looping::check_loop(cx, heap, locals, args, expected, loc),
         wk::BLOCK => return block::check_block(cx, heap, locals, args, expected, loc),
         wk::CATCH => return catch::check_catch(cx, heap, locals, args, expected, loc),
         wk::THROW => return catch::check_throw(cx, heap, locals, args, loc),

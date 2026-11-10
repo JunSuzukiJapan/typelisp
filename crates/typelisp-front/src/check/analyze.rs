@@ -2294,6 +2294,9 @@ impl Checker {
     /// line and its definition on the next are two batches, and both are one
     /// session.
     pub fn finish_unit(&mut self) -> Result<(), Error> {
+        if let Some(rebuilt) = &mut self.rebuilt {
+            self.predeclared.extend(rebuilt.take_predeclared());
+        }
         if self.predeclared.is_empty() {
             return Ok(());
         }

@@ -502,7 +502,7 @@ pub(crate) fn use_form(heap: &mut Heap, alias: &Path, target: &Path) -> Result<V
 /// whole of its effect happened while checking (the signature is in the
 /// registry), so what reaches `Interp::exec` is an empty marker, the way
 /// `(use ...)` is one.
-pub(super) fn defsignature_form(heap: &mut Heap) -> Result<Value, Error> {
+pub(crate) fn defsignature_form(heap: &mut Heap) -> Result<Value, Error> {
     core::tagged(heap, wk::DEFSIGNATURE, &[])
 }
 

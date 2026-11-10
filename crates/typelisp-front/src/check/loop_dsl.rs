@@ -42,7 +42,7 @@ use super::forms;
 
 /// Where a `:for … :from` range stops.
 #[derive(Debug)]
-pub(super) enum RangeEnd {
+pub(crate) enum RangeEnd {
     /// `:to` — inclusive, counting up. `:downto` is the same bound counting
     /// down, which `Range::down` records.
     Inclusive(Value),
@@ -54,7 +54,7 @@ pub(super) enum RangeEnd {
 
 /// How one `:for` variable advances.
 #[derive(Debug)]
-pub(super) enum ForIter {
+pub(crate) enum ForIter {
     /// `:in` / `:across` — the elements of any `Iter`. CL distinguishes the
     /// two (list vs vector); this language has one sequence protocol, so they
     /// are the same clause under two spellings.
@@ -71,7 +71,7 @@ pub(super) enum ForIter {
 
 /// What an accumulation clause accumulates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Acc {
+pub(crate) enum Acc {
     Collect,
     Append,
     Sum,
@@ -82,7 +82,7 @@ pub(super) enum Acc {
 
 /// A clause that runs once per iteration, in written order.
 #[derive(Debug)]
-pub(super) enum Step {
+pub(crate) enum Step {
     /// `:do form...`
     Do(Vec<Value>),
     /// `:collect`/`:append`/`:sum`/`:count`/`:maximize`/`:minimize`, with the
@@ -104,14 +104,14 @@ pub(super) enum Step {
 
 /// One `:with` or `:for` variable, in written order.
 #[derive(Debug)]
-pub(super) struct Var {
+pub(crate) struct Var {
     pub name: SymRef,
     pub loc: Option<Loc>,
     pub kind: VarKind,
 }
 
 #[derive(Debug)]
-pub(super) enum VarKind {
+pub(crate) enum VarKind {
     /// `:with v := e` — bound once, never stepped.
     With(Value),
     For(ForIter),
@@ -119,7 +119,7 @@ pub(super) enum VarKind {
 
 /// Everything [`build`] needs, with nothing resolved.
 #[derive(Debug)]
-pub(super) struct Plan {
+pub(crate) struct Plan {
     /// `:named foo` — the name of the `block` this loop is wrapped in, so
     /// `(return-from foo v)` leaves it. `None` for a loop with no name, which
     /// is then wrapped in nothing at all.
@@ -145,7 +145,7 @@ pub(super) struct Plan {
 }
 
 #[derive(Debug)]
-pub(super) struct AccVar {
+pub(crate) struct AccVar {
     pub name: SymRef,
     pub acc: Acc,
     /// The expression whose type decides the accumulator's — kept so
@@ -154,7 +154,7 @@ pub(super) struct AccVar {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Verdict {
+pub(crate) enum Verdict {
     /// `:always`/`:never` — `true` if the loop ran to exhaustion.
     Boolean,
     /// `:thereis` — `(none)` if the loop ran to exhaustion. The `Option`'s
@@ -261,7 +261,7 @@ impl<'a> Cursor<'a> {
 }
 
 /// Read `args` as a clause sequence.
-pub(super) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result<Plan, Error> {
+pub(crate) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result<Plan, Error> {
     let mut c = Cursor { args, locs, i: 0 };
     let mut plan = Plan {
         named: None,
@@ -511,7 +511,7 @@ fn state_name(prefix: &str, n: usize) -> String {
 /// one initializer form per accumulator (in `Plan::accs` order), and the
 /// `(the Option<T> (Option::none))` a `:thereis` leaves with when nothing
 /// matched.
-pub(super) struct Resolved {
+pub(crate) struct Resolved {
     pub acc_inits: Vec<(SymRef, Value)>,
     pub thereis_none: Option<Value>,
 }
@@ -623,7 +623,7 @@ impl Build<'_, '_> {
 }
 
 /// Turn `plan` back into ordinary source for the checker to check.
-pub(super) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result<Value, Error> {
+pub(crate) fn build(heap: &mut Heap, plan: &Plan, resolved: &Resolved) -> Result<Value, Error> {
     let mut scope = crate::RootScope::new(heap);
     let mut b = Build { s: &mut scope, tmp: 0 };
 
@@ -944,7 +944,7 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: SymRef) -> Resul
 
 /// A form whose type is the type `var` will have — checked, never evaluated,
 /// by `Checker::check_loop_dsl`'s first pass.
-pub(super) fn var_probe(heap: &mut Heap, var: &Var) -> Result<Value, Error> {
+pub(crate) fn var_probe(heap: &mut Heap, var: &Var) -> Result<Value, Error> {
     let mut scope = crate::RootScope::new(heap);
     let mut b = Build { s: &mut scope, tmp: 0 };
     match &var.kind {
@@ -960,7 +960,7 @@ pub(super) fn var_probe(heap: &mut Heap, var: &Var) -> Result<Value, Error> {
 }
 
 /// A form whose type is the type `acc` accumulates.
-pub(super) fn acc_probe(heap: &mut Heap, acc: &AccVar) -> Result<Value, Error> {
+pub(crate) fn acc_probe(heap: &mut Heap, acc: &AccVar) -> Result<Value, Error> {
     match acc.acc {
         // `:append` splices a sequence in, so what it accumulates is that
         // sequence's element, not the sequence.
@@ -975,7 +975,7 @@ pub(super) fn acc_probe(heap: &mut Heap, acc: &AccVar) -> Result<Value, Error> {
 }
 
 /// The `:thereis` expression, if the loop has one.
-pub(super) fn thereis_expr(plan: &Plan) -> Option<Value> {
+pub(crate) fn thereis_expr(plan: &Plan) -> Option<Value> {
     fn walk(step: &Step) -> Option<Value> {
         match step {
             Step::Thereis { expr } => Some(*expr),

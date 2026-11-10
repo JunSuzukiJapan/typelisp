@@ -297,6 +297,9 @@ pub(crate) struct Registry {
     defaulted: Table<(Path, SymRef), (Path, Vec<Type>)>,
     /// The documentation strings definitions wrote.
     pub(crate) docs: Table<Doc, String>,
+    /// The functions a `defsignature` declared whose `defun` has not come
+    /// yet.
+    pub(crate) predeclared: Table<Path, ()>,
     /// The type each `catch` and `throw` tag carries, by the tag's symbol.
     /// Written when a form is settled (`Cx::settle`), which holds the
     /// registry to read only.
@@ -468,6 +471,7 @@ impl Registry {
         self.blanket_impls.commit();
         self.defaulted.commit();
         self.docs.commit();
+        self.predeclared.commit();
         self.throw_tags.get_mut().commit();
     }
 
@@ -487,6 +491,7 @@ impl Registry {
         self.blanket_impls.rollback();
         self.defaulted.rollback();
         self.docs.rollback();
+        self.predeclared.rollback();
         self.throw_tags.get_mut().rollback();
     }
 }

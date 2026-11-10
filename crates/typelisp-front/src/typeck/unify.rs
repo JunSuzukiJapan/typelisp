@@ -24,6 +24,9 @@ pub(crate) struct Mismatch {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Any,
+    /// A number of any numeric type: an accumulator's zero, which what is
+    /// added to it decides.
+    Number,
     Integer,
     Float,
 }
@@ -33,6 +36,7 @@ impl Kind {
     fn admits(self, ty: &Type) -> bool {
         match self {
             Kind::Any => true,
+            Kind::Number => ty.is_int_family() || ty.is_float() || matches!(ty, Type::Ratio),
             // A C word counts, so `(c-malloc 16)` reads as it should
             // (`literal::int_lit_ty`).
             Kind::Integer => ty.is_int_family() || ty.is_c_word(),
@@ -46,6 +50,7 @@ impl Kind {
         match (self, other) {
             (Kind::Any, k) | (k, Kind::Any) => Some(k),
             (a, b) if a == b => Some(a),
+            (Kind::Number, k) | (k, Kind::Number) => Some(k),
             _ => None,
         }
     }
@@ -55,7 +60,7 @@ impl Kind {
     pub(crate) fn default_type(self) -> Option<Type> {
         match self {
             Kind::Any => None,
-            Kind::Integer => Some(Type::Int),
+            Kind::Integer | Kind::Number => Some(Type::Int),
             Kind::Float => Some(Type::F64),
         }
     }
