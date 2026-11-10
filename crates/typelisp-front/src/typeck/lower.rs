@@ -345,7 +345,14 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             request_print_object(lw, &ret);
             lw.reg.methodref_form(heap, owner, method, &params, &ret)
         }
-        Node::FnRef { path, params } => {
+        Node::FnRef { path, targs, params } => {
+            let path = if targs.is_empty() {
+                *path
+            } else {
+                let targs = targs.iter().map(|t| lw.settle(t)).collect();
+                lw.requests.ask_fn(path, targs)
+            };
+            let path = &path;
             let params: Vec<Type> = params.iter().map(|ty| lw.settle(ty)).collect();
             lw.reg.fnref_form(heap, path, &params)
         }

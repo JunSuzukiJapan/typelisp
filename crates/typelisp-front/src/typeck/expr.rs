@@ -391,7 +391,7 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             check_expr(cx, heap, locals, form, expected, loc)
         }
         Value::Symbol(id) => check_symbol(cx, heap, locals, id, expected, loc),
-        Value::Path(id) => path_call::check_path_value(cx, heap, id, loc),
+        Value::Path(id) => path_call::check_path_value(cx, heap, id, expected, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
         // Where an `Option` is expected, the empty list is its `none`.
         Value::Empty => match solved {
@@ -499,7 +499,7 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected:
     }
     let value = value_named(cx.reg, cx.ns, id);
     if let Some((_, ValueDef::Macro { .. })) = value {
-        unimplemented!("typeck: the macro `{}` as a value", heap.symbol_spelling(id))
+        return Err(Error::TypeError(format!("`{}` is a macro, which has no value", heap.symbol_spelling(id))));
     }
     if ctor_named(cx.reg, cx.ns, id).is_some() || static_use_named(cx.reg, cx.ns, id).is_some() {
         return Err(Error::TypeError(format!(
@@ -508,7 +508,7 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected:
         )));
     }
     match value {
-        Some((path, ValueDef::Fn(def))) => lambda::fn_value(path, def, loc),
+        Some((path, ValueDef::Fn(def))) => lambda::fn_value(cx, path, def, expected, loc),
         Some((path, ValueDef::Var(var))) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
         Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched above"),
         None => Err(Error::TypeError(format!("unbound variable: {}", heap.symbol_spelling(id)))),
@@ -541,7 +541,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         // Any other head is an expression whose value is applied.
         other => {
             let callee = check_expr(cx, heap, locals, other, None, elems[0].1.clone())?;
-            return lambda::check_apply(cx, heap, locals, callee, args, expected, loc);
+            return lambda::check_apply(cx, heap, locals, callee, None, args, expected, loc);
         }
     };
     match head.well_known() {
@@ -633,7 +633,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     if let Some(ty) = locals.lookup(head)? {
         let callee = Typed { node: Node::Local { name: head }, ty: ty.clone(), loc: elems[0].1.clone() };
-        return lambda::check_apply(cx, heap, locals, callee, args, expected, loc);
+        return lambda::check_apply(cx, heap, locals, callee, None, args, expected, loc);
     }
     let value = value_named(cx.reg, cx.ns, head);
     let head_is_fn = matches!(value, Some((_, ValueDef::Fn(_))));
@@ -752,7 +752,10 @@ fn call_function(
 ) -> Result<Typed, Error> {
     match value {
         Some((path, ValueDef::Fn(def))) => call::check_call(cx, heap, locals, path, def, first, rest, expected, loc),
-        Some((_, ValueDef::Var(_))) => unimplemented!("typeck: calling the function the global `{}` holds", spelling),
+        Some((path, ValueDef::Var(var))) => {
+            let callee = Typed { node: Node::Global { path }, ty: var.ty.clone(), loc: None };
+            lambda::check_apply(cx, heap, locals, callee, first, rest, expected, loc)
+        }
         Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched before the call"),
         None => Err(Error::NoSuchFunction(spelling.to_string())),
     }

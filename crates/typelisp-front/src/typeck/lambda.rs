@@ -12,7 +12,8 @@ use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
-use super::expr::{agree, check_body, check_expr, Cx};
+use super::args::First;
+use super::expr::{agree, check_body, check_expr, conform_at, Cx};
 use super::format::sexpr_list;
 use super::block::check_named_body;
 use super::locals::{LabelsCallback, Locals};
@@ -76,12 +77,15 @@ fn param(heap: &Heap, tcx: &super::type_syntax::TypeCx, p: Value) -> Result<(Sym
     Ok((*name, parse_type(heap, tcx, *ty)?))
 }
 
-/// `callee`, a value, called with `args`.
+/// `callee`, a value, called with `first`, when it is already checked, and
+/// `args`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_apply(
     cx: &Cx,
     heap: &mut Heap,
     locals: &Locals,
     callee: Typed,
+    first: Option<First>,
     args: &[(Value, Option<Loc>)],
     expected: Option<&Type>,
     loc: Option<Loc>,
@@ -92,25 +96,36 @@ pub(crate) fn check_apply(
         other => return Err(Error::TypeError(format!("value is not callable: `{}`", other))),
     };
     let fixed = params.len();
+    let given = args.len() + usize::from(first.is_some());
     match &rest {
-        None if args.len() != fixed => {
-            return Err(Error::TypeError(format!("function expects {} argument(s), got {}", fixed, args.len())));
+        None if given != fixed => {
+            return Err(Error::TypeError(format!("function expects {} argument(s), got {}", fixed, given)));
         }
-        Some(_) if args.len() < fixed => {
-            return Err(Error::TypeError(format!("function expects at least {} argument(s), got {}", fixed, args.len())));
+        Some(_) if given < fixed => {
+            return Err(Error::TypeError(format!("function expects at least {} argument(s), got {}", fixed, given)));
         }
         _ => {}
     }
     super::widen::expect(cx, &ret, expected)?;
     let mut checked = Vec::with_capacity(fixed + 1);
-    for ((arg, arg_loc), param) in args.iter().zip(&params) {
-        checked.push(check_expr(cx, heap, locals, *arg, Some(param), arg_loc.clone())?);
-    }
-    if let Some(elem) = &rest {
-        let mut items = Vec::with_capacity(args.len() - fixed);
-        for (arg, arg_loc) in &args[fixed..] {
-            items.push(check_expr(cx, heap, locals, *arg, Some(elem), arg_loc.clone())?);
+    let mut items = Vec::new();
+    let mut first = first.map(|f| f.checked);
+    let written: Vec<Option<&(Value, Option<Loc>)>> = first.iter().map(|_| None).chain(args.iter().map(Some)).collect();
+    for (i, arg) in written.into_iter().enumerate() {
+        let want = match params.get(i) {
+            Some(p) => p,
+            None => rest.as_deref().expect("the count was checked against the parameters"),
+        };
+        let t = match arg {
+            Some((v, arg_loc)) => check_expr(cx, heap, locals, *v, Some(want), arg_loc.clone())?,
+            None => conform_at(cx, first.take().expect("the first argument was checked"), want)?,
+        };
+        match i < fixed {
+            true => checked.push(t),
+            false => items.push(t),
         }
+    }
+    if rest.is_some() {
         checked.push(sexpr_list(items));
     }
     Ok(Typed { node: Node::Apply { callee: Box::new(callee), args: checked }, ty: ret, loc })
@@ -145,25 +160,49 @@ pub(crate) fn check_apply_form(cx: &Cx, heap: &mut Heap, locals: &Locals, args: 
     Ok(Typed { node: Node::Apply { callee: Box::new(callee), args: checked }, ty: ret, loc })
 }
 
-/// The function `path`, defined as `def`, taken as a value.
-pub(crate) fn fn_value(path: Path, def: &FnDef, loc: Option<Loc>) -> Result<Typed, Error> {
+/// The function `path`, defined as `def`, taken as a value, where
+/// `expected` is expected: a generic one at the type arguments the
+/// function's type is found to have. Its `&optional` and `&key` parameters
+/// are passed by position, each its default's type when it has a default,
+/// an `Option` when it has none.
+pub(crate) fn fn_value(cx: &Cx, path: Path, def: &FnDef, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     if def.ffi {
         return Err(Error::TypeError(format!(
             "`{0}` is a C function declared by `defffi` and cannot be used as a value — it has no body to close over, only a native entry point. Wrap it: `(unsafe (lambda (...) ... ({0} ...)))`.",
             path
         )));
     }
+    let subst = cx.holes.borrow_mut().instantiate(&def.type_params);
+    let mut params: Vec<Type> = def.params.iter().map(|p| subst.apply(p)).collect();
+    params.extend(def.optionals.iter().chain(&def.keys).map(|p| subst.apply(&p.effective_ty())));
+    let rest = def.rest.as_ref().map(|r| subst.apply(r));
+    let ty = Type::Fn(params.clone(), rest.clone().map(Box::new), Box::new(subst.apply(&def.ret)));
     if !def.type_params.is_empty() {
-        unimplemented!("typeck: the generic function `{}` as a value", path)
+        agree(cx, &ty, expected)?;
+        for (p, bounds) in &def.bounds {
+            for b in bounds {
+                cx.require_bound(subst.apply(&Type::Param(*p)), b.at(&subst), path.to_string(), p.name.name().to_string(), loc.clone())?;
+            }
+        }
     }
-    if !def.optionals.is_empty() || !def.keys.is_empty() {
-        unimplemented!("typeck: the function `{}`, which takes &optional or &key parameters, as a value", path)
+    // A Rust builtin has one entry point for every instantiation.
+    let targs: Vec<Type> = match def.builtin {
+        true => Vec::new(),
+        false => def.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect(),
+    };
+    for t in &targs {
+        let what = format!(
+            "generic function `{}` used as a value needs a concrete function-type context (e.g. a typed let binding, parameter position, or `the`)",
+            path
+        );
+        cx.must_decide(t.clone(), what, loc.clone());
     }
-    let ty = Type::Fn(def.params.clone(), def.rest.clone().map(Box::new), Box::new(def.ret.clone()));
-    // Every parameter the function really takes: a `&rest` one is a list.
-    let mut params = def.params.clone();
-    params.extend(def.rest.as_ref().map(|_| option_of_sexpr()));
-    Ok(Typed { node: Node::FnRef { path, params }, ty, loc })
+    // Every parameter the function really takes: a `&rest` one is a list,
+    // after the `&optional` ones.
+    if rest.is_some() {
+        params.insert(def.params.len() + def.optionals.len(), option_of_sexpr());
+    }
+    Ok(Typed { node: Node::FnRef { path, targs, params }, ty, loc })
 }
 
 /// The method `method` of `owner`, defined as `def`, taken as a value: what

@@ -97,9 +97,10 @@ pub(crate) enum Node {
     /// A control string whose `~/name/` directives were renamed to the
     /// definitions `targets` they call, which an executable registers.
     FormatCalls { control: Box<Typed>, targets: Vec<crate::check::resolved::CompileTarget> },
-    /// The function `path` as a value; `params` are the types of the
-    /// parameters it really takes, a `&rest` one as a list.
-    FnRef { path: Path, params: Vec<Type> },
+    /// The function `path` as a value, `targs` its type arguments (none for
+    /// a builtin, whose one entry serves them all); `params` are the types
+    /// of the parameters it really takes, a `&rest` one as a list.
+    FnRef { path: Path, targs: Vec<Type>, params: Vec<Type> },
     /// The method `method` of `owner` as a value, `targs` its type
     /// arguments (none for a builtin, whose one entry serves them all);
     /// `params` are the types of the parameters it really takes, a `&rest`
@@ -430,7 +431,7 @@ impl Typed {
                     params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
                     *ret = f(ret);
                 }
-                Node::FnRef { params, .. } => params.iter_mut().for_each(|ty| *ty = f(ty)),
+                Node::FnRef { targs, params, .. } => targs.iter_mut().chain(params.iter_mut()).for_each(|ty| *ty = f(ty)),
                 Node::MethodRef { targs, params, ret, .. } => {
                     targs.iter_mut().chain(params.iter_mut()).for_each(|ty| *ty = f(ty));
                     *ret = f(ret);

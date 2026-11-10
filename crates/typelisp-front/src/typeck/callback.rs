@@ -56,6 +56,9 @@ pub(crate) fn check_callback_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (arg
                      Pass a `lambda` that calls it instead.",
                     callee, path
                 ))),
+                Node::FnRef { path, ref targs, .. } if !targs.is_empty() => {
+                    unimplemented!("typeck: handing C the generic function `{}` at its type arguments", path)
+                }
                 Node::FnRef { path, .. } => Ok(callback(path, None)),
                 _ => Err(written_here(callee)),
             }

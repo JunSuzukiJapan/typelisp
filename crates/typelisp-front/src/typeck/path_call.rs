@@ -136,12 +136,12 @@ fn inst_static<'r>(cx: &Cx<'r>, owner: Path, name: SymRef, spelling: &str, expec
 }
 
 /// The value the path `id` names: a global variable of a module.
-pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, loc: Option<Loc>) -> Result<Typed, Error> {
+pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     match path_target(heap, cx.ns, id)? {
         PathTarget::In(path) => match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
             Some(ValueDef::Var(var)) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
-            Some(ValueDef::Fn(def)) => super::lambda::fn_value(path, def, loc),
-            Some(ValueDef::Macro { .. }) => unimplemented!("typeck: the macro `{}` as a value", path_spelling(heap, id)),
+            Some(ValueDef::Fn(def)) => super::lambda::fn_value(cx, path, def, expected, loc),
+            Some(ValueDef::Macro { .. }) => Err(Error::TypeError(format!("`{}` is a macro, which has no value", path_spelling(heap, id)))),
             None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
         },
         PathTarget::Member(..) => unimplemented!("typeck: the member `{}` of a type as a value", path_spelling(heap, id)),
