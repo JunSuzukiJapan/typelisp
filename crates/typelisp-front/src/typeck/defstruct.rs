@@ -30,7 +30,7 @@ use super::defun::{lower_all, parse_header, split_doc};
 use super::generic::{Base, Requests};
 use super::lower::Lowering;
 use super::define::{Definer, Kind};
-use super::registry::{Doc, Field, FnDef, MethodDef, Registry, Template, TypeDef, TypeEntry};
+use super::registry::{Definition, Field, FnDef, MethodDef, Registry, Template, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::tree::{Node, Typed};
@@ -63,9 +63,7 @@ pub(crate) fn check_defstruct(
     let name = d.ownable(heap, name, "defstruct")?;
     d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Type(path), doc);
-    }
+    d.record(reg, Definition::Type(path), doc);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defstruct {}: type parameter `{}` is declared twice", path, twice.0.name()))

@@ -96,6 +96,7 @@ pub(crate) mod modify;
 pub(crate) mod module;
 pub(crate) mod path_call;
 pub(crate) mod pattern;
+pub(crate) mod pprint;
 pub(crate) mod quote;
 pub(crate) mod registry;
 pub(crate) mod resolve;

@@ -15,7 +15,7 @@ use typelisp_mem::symbols::member_symbol;
 
 use super::defun::{parse_header, split_doc};
 use super::define::{Definer, Kind};
-use super::registry::{Doc, Registry, TypeDef, TypeEntry};
+use super::registry::{Definition, Registry, TypeDef, TypeEntry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
 
@@ -33,9 +33,7 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
     let name = d.ownable(heap, name, "defenum")?;
     d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Type(path), doc);
-    }
+    d.record(reg, Definition::Type(path), doc);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defenum {}: type parameter `{}` is declared twice", path, twice.0.name()))

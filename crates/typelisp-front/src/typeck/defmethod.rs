@@ -23,7 +23,7 @@ use super::block::check_named_body;
 use super::locals::Locals;
 use super::lower::Lowering;
 use super::define::Definer;
-use super::registry::{Doc, FnDef, MethodDef, Registry, Template, TypeEntry};
+use super::registry::{Definition, FnDef, MethodDef, Registry, Template, TypeEntry};
 use super::resolve::find_named;
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -64,9 +64,7 @@ pub(crate) fn check_defmethod(
     }
     let owner = receiver_type_path(heap, reg, ns, receiver[1])?;
     let method = member_symbol(name.name());
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Method(owner, method), doc);
-    }
+    d.record(reg, Definition::Method(owner, method), doc);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Method(owner, method), &type_names).map_err(|twice| {
         Error::TypeError(format!("defmethod {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))

@@ -100,6 +100,11 @@ pub(crate) enum Node {
     /// The function `path` as a value; `params` are the types of the
     /// parameters it really takes, a `&rest` one as a list.
     FnRef { path: Path, params: Vec<Type> },
+    /// The method `method` of `owner` as a value, `targs` its type
+    /// arguments (none for a builtin, whose one entry serves them all);
+    /// `params` are the types of the parameters it really takes, a `&rest`
+    /// one as a list, and `ret` what it answers.
+    MethodRef { owner: Path, #[serde(with = "crate::owned_form::sym_serde")] method: SymRef, targs: Vec<Type>, params: Vec<Type>, ret: Type },
     /// A call of the function value `callee`, its `&rest` arguments as one
     /// list.
     Apply { callee: Box<Typed>, args: Vec<Typed> },
@@ -113,6 +118,8 @@ pub(crate) enum Node {
     Select { arms: Vec<SelectArm> },
     /// `(panic message)`: stop with `message`.
     Panic { message: Box<Typed> },
+    /// `(step form)`: `form`, run one step at a time.
+    Step { inner: Box<Typed> },
     /// `(unwind-protect protected cleanup)`: `protected`'s value, `cleanup`
     /// run after it however it leaves.
     UnwindProtect { protected: Box<Typed>, cleanup: Box<Typed> },
@@ -305,6 +312,7 @@ impl Typed {
             | Node::Break
             | Node::Default { .. }
             | Node::FnRef { .. }
+            | Node::MethodRef { .. }
             | Node::TypeValue { .. }
             | Node::Tool { .. } => {
                 Vec::new()
@@ -329,7 +337,8 @@ impl Typed {
             | Node::Throw { value: obj, .. }
             | Node::UntagInt { value: obj }
             | Node::FormatCalls { control: obj, .. }
-            | Node::Panic { message: obj } => {
+            | Node::Panic { message: obj }
+            | Node::Step { inner: obj } => {
                 vec![&**obj]
             }
             Node::FieldSet { obj, value, .. } | Node::UnwindProtect { protected: obj, cleanup: value } => vec![&**obj, &**value],
@@ -350,6 +359,7 @@ impl Typed {
             | Node::Break
             | Node::Default { .. }
             | Node::FnRef { .. }
+            | Node::MethodRef { .. }
             | Node::TypeValue { .. }
             | Node::Tool { .. } => {
                 Vec::new()
@@ -374,7 +384,8 @@ impl Typed {
             | Node::Throw { value: obj, .. }
             | Node::UntagInt { value: obj }
             | Node::FormatCalls { control: obj, .. }
-            | Node::Panic { message: obj } => {
+            | Node::Panic { message: obj }
+            | Node::Step { inner: obj } => {
                 vec![&mut **obj]
             }
             Node::FieldSet { obj, value, .. } | Node::UnwindProtect { protected: obj, cleanup: value } => vec![&mut **obj, &mut **value],
@@ -415,6 +426,10 @@ impl Typed {
                     *ret = f(ret);
                 }
                 Node::FnRef { params, .. } => params.iter_mut().for_each(|ty| *ty = f(ty)),
+                Node::MethodRef { targs, params, ret, .. } => {
+                    targs.iter_mut().chain(params.iter_mut()).for_each(|ty| *ty = f(ty));
+                    *ret = f(ret);
+                }
                 Node::Labels { defs, .. } => defs.iter_mut().for_each(|d| {
                     d.params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
                     d.ret = f(&d.ret);
@@ -443,6 +458,7 @@ impl Typed {
                 | Node::FormatCalls { .. }
                 | Node::UnwindProtect { .. }
                 | Node::Panic { .. }
+                | Node::Step { .. }
                 | Node::Default { .. }
                 | Node::Apply { .. }
                 | Node::Tool { .. }

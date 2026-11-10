@@ -20,7 +20,7 @@ use super::block::check_named_body;
 use super::locals::Locals;
 use super::defun::{parse_header, split_doc};
 use super::impl_block::method_params;
-use super::registry::{Doc, FnDef, Registry, Template, TraitDef, TypeEntry};
+use super::registry::{Definition, FnDef, Registry, Template, TraitDef};
 use super::resolve::trait_named;
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
@@ -43,9 +43,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     d.type_name(reg, Kind::Trait, name)?;
     let ns = d.site.ns;
     let path = Path::of_symbol(ns, name);
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Trait(path), doc);
-    }
+    d.record(reg, Definition::Trait(path), doc);
     let mut names = vec![well_known_symbol(wk::SELF_TYPE)];
     let mut methods: Vec<Written> = Vec::new();
     for (item, _) in items {
@@ -71,7 +69,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     // Registered before the signatures are read, so a signature can name the
     // trait (`:dyn Name`).
     let mut def = TraitDef { params: params.clone(), methods: Vec::new(), defaults: Vec::new(), supertraits, public: d.public };
-    reg.types.insert(path, TypeEntry::Trait(def.clone()));
+    reg.define_trait(path, def.clone());
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let self_ty = Type::Param(params[0]);
     let mut bodies = Vec::new();
@@ -93,10 +91,10 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     // be inherited twice, or declared again.
     let own: Vec<SymRef> = def.methods.iter().map(|(m, _)| *m).collect();
     super::dyn_trait::linearize(reg, &spelling, path, &def.supertraits, &own)?;
-    reg.types.insert(path, TypeEntry::Trait(def));
+    reg.define_trait(path, def);
     for w in &methods {
         if let Some(doc) = &w.doc {
-            reg.docs.insert(Doc::TraitMethod(path, member_symbol(w.name.name())), doc.clone());
+            reg.docs.insert(Definition::TraitMethod(path, member_symbol(w.name.name())), doc.clone());
         }
     }
     for m in bodyless {

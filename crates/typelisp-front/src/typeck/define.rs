@@ -16,7 +16,7 @@ use crate::{Error, Heap};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
-use super::registry::{Registry, TypeEntry, ValueDef};
+use super::registry::{Definition, Registry, TypeEntry, ValueDef};
 use super::use_form::Site;
 
 /// What a definition defines, as its messages call it.
@@ -56,9 +56,22 @@ pub(crate) struct Definer<'w> {
     pub(crate) expander: &'w dyn MacroExpander,
     /// The definition was written `(pub ...)`: visible outside its module.
     pub(crate) public: bool,
+    /// Where the definition form was written.
+    pub(crate) loc: Option<crate::Loc>,
 }
 
 impl Definer<'_> {
+    /// The definition `def` kept with the documentation string `doc` it was
+    /// written with, and the place of its form.
+    pub(crate) fn record(&self, reg: &mut Registry, def: Definition, doc: Option<String>) {
+        if let Some(doc) = doc {
+            reg.docs.insert(def, doc);
+        }
+        if let Some(loc) = &self.loc {
+            reg.locs.insert(def, loc.clone());
+        }
+    }
+
     /// The symbol `name`, written by the definition form `who`, defines here:
     /// the module's own symbol of its spelling, which is `name` itself unless
     /// a macro of another module wrote it. Refused for a reserved word, and

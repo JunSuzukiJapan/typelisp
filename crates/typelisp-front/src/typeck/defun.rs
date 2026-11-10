@@ -20,7 +20,7 @@ use super::block::check_named_body;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
 use super::define::{Definer, Kind};
-use super::registry::{Doc, FnDef, Registry, Template};
+use super::registry::{Definition, FnDef, Registry, Template};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::tree::Typed;
@@ -60,9 +60,7 @@ pub(crate) fn check_defun(
     };
     let (clause, body) = split_where(heap, body)?;
     let (doc, body) = split_doc(heap, body);
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Fn(path), doc);
-    }
+    d.record(reg, Definition::Fn(path), doc);
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Def(path), &type_names).map_err(|twice| {
         Error::TypeError(format!("defun {}: type parameter `{}` is declared twice", path, twice.0.name()))

@@ -390,7 +390,7 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             let form = locals.symbol_macro(id).expect("checked above");
             check_expr(cx, heap, locals, form, expected, loc)
         }
-        Value::Symbol(id) => check_symbol(cx, heap, locals, id, loc),
+        Value::Symbol(id) => check_symbol(cx, heap, locals, id, expected, loc),
         Value::Path(id) => path_call::check_path_value(cx, heap, id, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
         // Where an `Option` is expected, the empty list is its `none`.
@@ -470,12 +470,32 @@ fn number_kind(heap: &Heap, v: Value) -> Option<Kind> {
     }
 }
 
-/// A bare name's value: a local, or what the module-level name holds. A
-/// variant or a static method a `use` brought in is called, never a value:
-/// `(none)`, not `none`.
-fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
+/// A bare name's value: a local; where a function is expected whose first
+/// parameter's type has the name as a method, that method, as a call's first
+/// argument picks it; or what the module-level name holds. A variant or a
+/// static method a `use` brought in is called, never a value: `(none)`, not
+/// `none`.
+fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     if let Some(ty) = locals.lookup(id)? {
         return Ok(Typed { node: Node::Local { name: id }, ty: ty.clone(), loc });
+    }
+    if let Some(expected) = expected {
+        if let Type::Fn(params, _, _) = cx.resolve(expected) {
+            if let Some(receiver) = params.first() {
+                let member = member_symbol(heap.symbol_spelling(id));
+                if let Some((owner, def)) = cx.receiver_method(receiver, member).filter(|(_, d)| d.instance) {
+                    return lambda::method_value(cx, owner, member, def, expected, loc);
+                }
+                if let Type::Param(p) = cx.resolve(receiver) {
+                    if bound_method(cx.reg, cx.scope, p, member).is_some() {
+                        return Err(Error::TypeError(format!(
+                            "`{}` is here a trait method of the receiver, which cannot be taken as a value",
+                            heap.symbol_spelling(id)
+                        )));
+                    }
+                }
+            }
+        }
     }
     let value = value_named(cx.reg, cx.ns, id);
     if let Some((_, ValueDef::Macro { .. })) = value {
@@ -535,6 +555,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::DOCUMENTATION => return super::documentation::check_documentation(cx, heap, locals, args, loc),
         wk::TRACE | wk::UNTRACE => return tools::check_trace(cx, heap, head, args, loc),
         wk::DISASSEMBLE => return tools::check_disassemble(cx, heap, args, loc),
+        wk::ED => return tools::check_ed(cx, heap, locals, args, loc),
         wk::LABELS => return lambda::check_labels(cx, heap, locals, args, expected, loc),
         wk::LAMBDA => return lambda::check_lambda(cx, heap, locals, args, loc),
         wk::SELECT => return select::check_select(cx, heap, locals, args, expected, loc),
@@ -546,6 +567,27 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::MATCH => return matching::check_match(cx, heap, locals, args, expected, loc),
         wk::FORMAT => return format::check_format(cx, heap, locals, args, loc),
         wk::PRINT | wk::PRINTLN => return format::check_print(cx, heap, locals, head.well_known(), args, loc),
+        wk::EPRINT | wk::EPRINTLN => return format::check_eprint(cx, heap, locals, head.well_known(), args, loc),
+        wk::PPRINT | wk::PPRINT_FILL | wk::PPRINT_LINEAR | wk::PPRINT_TABULAR => return super::pprint::check_pprint(cx, heap, locals, head, args, loc),
+        wk::PPRINT_LOGICAL_BLOCK => return super::pprint::check_logical_block(cx, heap, locals, args, loc),
+        wk::STEP => {
+            let [(form, form_loc)] = args else {
+                return Err(Error::TypeError("step: (step form) — expected exactly 1 form".into()));
+            };
+            let inner = check_expr(cx, heap, locals, *form, expected, form_loc.clone())?;
+            let ty = inner.ty.clone();
+            return Ok(Typed { node: Node::Step { inner: Box::new(inner) }, ty, loc });
+        }
+        wk::SOURCE_FILE => {
+            if !args.is_empty() {
+                return Err(Error::TypeError("source-file: (source-file) takes no arguments".into()));
+            }
+            // A form a macro built may have no position, and so no file.
+            let file = loc.as_ref().map_or_else(|| "<unknown>".to_string(), |l| l.file.to_string());
+            let file = heap.alloc_string(file);
+            heap.push_root(file);
+            return check_expr(cx, heap, locals, file, Some(&Type::Str), loc);
+        }
         wk::LOOP => return looping::check_loop(cx, heap, locals, args, expected, loc),
         wk::BLOCK => return block::check_block(cx, heap, locals, args, expected, loc),
         wk::UNSAFE => return check_unsafe(cx, heap, locals, args, expected, loc),
@@ -604,6 +646,14 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     let Some(((first, first_loc), rest)) = args.split_first() else {
         return call_function(cx, heap, locals, value, spelling, None, args, expected, loc);
     };
+    // When the call's name is a function, the first argument is its first
+    // argument, checked with the parameter's type expected, if no type or
+    // trait has a method of the name, or if it is a bare name that holds no
+    // value here and so has no type to pick a method by: a method taken as a
+    // value, the parameter saying which (`(apply2 + 1.5 2.5)`).
+    if value.is_some() && (!cx.reg.is_method_name(member_symbol(spelling)) || names_no_value(cx, locals, *first)) {
+        return call_function(cx, heap, locals, value, spelling, None, args, expected, loc);
+    }
     // The first argument is checked once, with nothing expected of it. Its
     // type says whose method the call is; when it is no method's, the same
     // checked argument is the function's first. A number literal no type
@@ -663,6 +713,17 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         }
     }
     call_function(cx, heap, locals, value, spelling, Some(First { checked: first, written }), rest, expected, loc)
+}
+
+/// Whether `v` is a bare name that names no value here without a type
+/// expected of it: no local, symbol macro or module-level definition.
+fn names_no_value(cx: &Cx, locals: &Locals, v: Value) -> bool {
+    let Value::Symbol(id) = v else { return false };
+    matches!(locals.lookup(id), Ok(None))
+        && locals.symbol_macro(id).is_none()
+        && value_named(cx.reg, cx.ns, id).is_none()
+        && ctor_named(cx.reg, cx.ns, id).is_none()
+        && static_use_named(cx.reg, cx.ns, id).is_none()
 }
 
 /// A call to what the module-level name `spelling` holds, `value`: its

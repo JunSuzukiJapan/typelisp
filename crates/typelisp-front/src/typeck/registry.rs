@@ -273,6 +273,9 @@ pub(crate) struct Registry {
     /// Methods written for one instantiation of a generic type, by the type,
     /// the member symbol and the instantiation's type arguments.
     inst_methods: Table<(Path, SymRef), Vec<(Vec<Type>, MethodDef)>>,
+    /// The name of every instance method a type has and of every trait's
+    /// method: what a call's first argument may be the receiver of.
+    method_names: Table<SymRef, ()>,
     /// What a `use` brought into a module: the module and the name it is
     /// brought in under, and the definition.
     pub(crate) imports: Table<(NsId, SymRef), Path>,
@@ -298,7 +301,9 @@ pub(crate) struct Registry {
     /// parameters there, written in the method's type parameters.
     defaulted: Table<(Path, SymRef), (Path, Vec<Type>)>,
     /// The documentation strings definitions wrote.
-    pub(crate) docs: Table<Doc, String>,
+    pub(crate) docs: Table<Definition, String>,
+    /// Where each definition written in a source was written: its form.
+    pub(crate) locs: Table<Definition, crate::Loc>,
     /// The functions a `defsignature` declared whose `defun` has not come
     /// yet.
     pub(crate) predeclared: Table<Path, ()>,
@@ -310,11 +315,12 @@ pub(crate) struct Registry {
     callbacks_lifted: std::cell::Cell<u64>,
 }
 
-/// A definition a documentation string is kept for: a function, a macro, a
+/// A definition, as its documentation string and its place are kept by:
+/// a function, a macro, a
 /// global variable, a type or a trait by its path, a type's method or a
 /// trait's own method by the type or the trait and the member symbol.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Doc {
+pub(crate) enum Definition {
     Fn(Path),
     Macro(Path),
     Var(Path),
@@ -428,10 +434,27 @@ impl Registry {
         self.inst_methods.get(&(*owner, name)).map_or(&[], Vec::as_slice)
     }
 
+    /// Define (or redefine) the trait `path`.
+    pub(crate) fn define_trait(&mut self, path: Path, def: TraitDef) {
+        for (name, _) in &def.methods {
+            self.method_names.insert(*name, ());
+        }
+        self.types.insert(path, TypeEntry::Trait(def));
+    }
+
+    /// Whether some type has an instance method `name`, or some trait a
+    /// method `name`: whether a call of `name` may be a method call.
+    pub(crate) fn is_method_name(&self, name: SymRef) -> bool {
+        self.method_names.get(&name).is_some()
+    }
+
     /// Define (or redefine) the method `name` of `owner`.
     pub(crate) fn define_method(&mut self, owner: Path, name: SymRef, def: MethodDef) {
         if self.defaulted.get(&(owner, name)).is_some() {
             self.defaulted.remove(&(owner, name));
+        }
+        if def.instance {
+            self.method_names.insert(name, ());
         }
         self.methods.insert((owner, name), def);
     }
@@ -452,6 +475,9 @@ impl Registry {
     /// Define (or redefine) the method `name` of `owner` for the
     /// instantiation `args`.
     pub(crate) fn define_inst_method(&mut self, owner: Path, name: SymRef, args: Vec<Type>, def: MethodDef) {
+        if def.instance {
+            self.method_names.insert(name, ());
+        }
         let mut insts = self.inst_methods.get(&(owner, name)).cloned().unwrap_or_default();
         insts.retain(|(a, _)| *a != args);
         insts.push((args, def));
@@ -500,6 +526,7 @@ impl Registry {
         self.types.commit();
         self.methods.commit();
         self.inst_methods.commit();
+        self.method_names.commit();
         self.imports.commit();
         self.reexports.commit();
         self.ctors.commit();
@@ -510,6 +537,7 @@ impl Registry {
         self.blanket_impls.commit();
         self.defaulted.commit();
         self.docs.commit();
+        self.locs.commit();
         self.predeclared.commit();
         self.throw_tags.get_mut().commit();
     }
@@ -520,6 +548,7 @@ impl Registry {
         self.types.rollback();
         self.methods.rollback();
         self.inst_methods.rollback();
+        self.method_names.rollback();
         self.imports.rollback();
         self.reexports.rollback();
         self.ctors.rollback();
@@ -530,6 +559,7 @@ impl Registry {
         self.blanket_impls.rollback();
         self.defaulted.rollback();
         self.docs.rollback();
+        self.locs.rollback();
         self.predeclared.rollback();
         self.throw_tags.get_mut().rollback();
     }

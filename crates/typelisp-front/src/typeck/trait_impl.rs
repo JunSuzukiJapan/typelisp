@@ -26,7 +26,7 @@ use super::bounds::parse_where;
 use super::defun::by_param;
 use super::impl_block::method_params;
 use super::lambda_list::LambdaList;
-use super::registry::{Doc, FnDef, MethodDef, Registry, Template, TraitDef, TraitImpl, TypeEntry};
+use super::registry::{Definition, FnDef, MethodDef, Registry, Template, TraitDef, TraitImpl, TypeEntry};
 use super::defun::{lower_template, split_doc};
 use super::generic::Base;
 use super::lower::Lowering;
@@ -427,10 +427,8 @@ fn check_method(
     };
     let (doc, body) = split_doc(heap, body);
     // One instantiation's method is documented under its code's name.
-    if let Some(doc) = doc {
-        let key = of.inst.map_or(method, |args| super::generic::method_specialization(&of.owner, method, args));
-        reg.docs.insert(Doc::Method(of.owner, key), doc);
-    }
+    let key = of.inst.as_ref().map_or(method, |args| super::generic::method_specialization(&of.owner, method, args));
+    d.record(reg, Definition::Method(of.owner, key), doc);
     if let Some((first, _)) = body.first() {
         if crate::check::analyze::is_where_clause(heap, *first)? {
             unimplemented!("typeck: a method of a trait's `impl` with a `(:where ...)` clause of its own")

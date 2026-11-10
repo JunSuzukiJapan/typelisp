@@ -20,7 +20,7 @@ use super::defun::{parse_header, parse_param, split_doc, split_where};
 use super::lambda_list::{parse_lambda_list, Written};
 use super::generic::Requests;
 use super::define::Definer;
-use super::registry::{Doc, Registry};
+use super::registry::{Definition, Registry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
 
@@ -138,10 +138,8 @@ fn check_item(
         _ => None,
     };
     // One instantiation's method is documented under its code's name.
-    if let Some(doc) = doc {
-        let key = inst.as_ref().map_or(method, |args| super::generic::method_specialization(&owner, method, args));
-        reg.docs.insert(Doc::Method(owner, key), doc);
-    }
+    let key = inst.as_ref().map_or(method, |args| super::generic::method_specialization(&owner, method, args));
+    d.record(reg, Definition::Method(owner, key), doc);
     let def = Method { owner, method, name, instance: receiver.is_some(), public, home: None, params: list, ret, bounds, inst };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }

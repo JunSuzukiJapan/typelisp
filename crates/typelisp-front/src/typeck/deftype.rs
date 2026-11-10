@@ -9,7 +9,7 @@ use typelisp_mem::SymRef;
 
 use super::define::{Definer, Kind};
 use super::defun::parse_header;
-use super::registry::{Doc, Registry, TypeEntry};
+use super::registry::{Definition, Registry, TypeEntry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
 
@@ -50,9 +50,7 @@ pub(crate) fn check_deftype(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
     let ty: Type = parse_type(heap, &tcx, *body)?;
     let params = scope.params().to_vec();
     reg.types.insert(path, TypeEntry::Alias { public: d.public, params, body: ty });
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Type(path), doc);
-    }
+    d.record(reg, Definition::Type(path), doc);
     crate::check::forms::module_form(heap, &path, &[])
 }
 

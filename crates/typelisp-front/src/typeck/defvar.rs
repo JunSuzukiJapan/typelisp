@@ -17,7 +17,7 @@ use super::expr::{check_expr, Cx};
 use super::generic::Requests;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
-use super::registry::{Doc, Registry, ValueDef, VarDef};
+use super::registry::{Definition, Registry, ValueDef, VarDef};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::type_syntax::parse_type;
@@ -67,9 +67,7 @@ pub(crate) fn check_defvar(
         )));
     }
     let name = d.ownable(heap, name, "defvar")?;
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Var(Path::of_symbol(d.site.ns, name)), doc);
-    }
+    d.record(reg, Definition::Var(Path::of_symbol(d.site.ns, name)), doc);
     let scope = TypeScope::empty();
     let ty = parse_type(heap, &super::type_syntax::TypeCx { reg, ns: d.site.ns, scope: &scope, self_type: None }, ty)?;
     Checker::reject_raw_word_storage(&ty, "the global", &heap.symbol_spelling(name))?;

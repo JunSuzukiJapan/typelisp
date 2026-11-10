@@ -95,8 +95,9 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                 }
             }
             // Out of a `Sexpr`, a struct's or a variant's name is a value
-            // of that type.
-            if is_sexpr_expectation(&ty) {
+            // of that type; `some` and `none` against an `Option<Sexpr>`
+            // are its own variants.
+            if is_sexpr_expectation(&ty) && !head.is_some_and(|h| option_variant(cx, &ty, h)) {
                 if let Some(pat) = downcast(cx, heap, locals, &ty, &parts, binds)? {
                     return Ok(pat);
                 }

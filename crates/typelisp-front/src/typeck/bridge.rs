@@ -21,7 +21,7 @@ use crate::types::{ParamOwner, Path, Type, TypeParam};
 use typelisp_mem::symbols::intern;
 use typelisp_mem::SymRef;
 
-use super::registry::{Doc, Field, FnDef, MethodDef, Registry, TraitDef, TraitImpl, TypeDef, TypeEntry, ValueDef, VarDef};
+use super::registry::{Definition, Field, FnDef, MethodDef, Registry, TraitDef, TraitImpl, TypeDef, TypeEntry, ValueDef, VarDef};
 
 /// Copy everything `old` defines into `new`.
 pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
@@ -56,7 +56,7 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
         }
         for sym in m.traits.symbols() {
             let def = m.traits.get_sym(sym).expect("a key of the table");
-            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Trait(import_trait(def)));
+            new.define_trait(Path::of_symbol(ns, sym), import_trait(def));
         }
         for b in &m.blanket_impls {
             new.blanket_impls.insert(b.trait_path, ());
@@ -82,17 +82,27 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
         }
     }
     let docs = &old.docs;
-    let paths = [(&docs.fns, Doc::Fn as fn(Path) -> Doc), (&docs.types, Doc::Type), (&docs.vars, Doc::Var), (&docs.traits, Doc::Trait), (&docs.macros, Doc::Macro)];
+    let paths = [(&docs.fns, Definition::Fn as fn(Path) -> Definition), (&docs.types, Definition::Type), (&docs.vars, Definition::Var), (&docs.traits, Definition::Trait), (&docs.macros, Definition::Macro)];
     for (table, doc) in paths {
         for (path, text) in table {
             new.docs.insert(doc(*path), text.clone());
         }
     }
-    let members = [(&docs.methods, Doc::Method as fn(Path, SymRef) -> Doc), (&docs.trait_methods, Doc::TraitMethod)];
+    let members = [(&docs.methods, Definition::Method as fn(Path, SymRef) -> Definition), (&docs.trait_methods, Definition::TraitMethod)];
     for (table, doc) in members {
         for ((owner, member), text) in table {
             new.docs.insert(doc(*owner, *member), text.clone());
         }
+    }
+    let locs = &old.def_locs;
+    let paths = [(&locs.fns, Definition::Fn as fn(Path) -> Definition), (&locs.types, Definition::Type), (&locs.vars, Definition::Var), (&locs.traits, Definition::Trait), (&locs.macros, Definition::Macro)];
+    for (table, def) in paths {
+        for (path, loc) in table {
+            new.locs.insert(def(*path), loc.clone());
+        }
+    }
+    for ((owner, member), loc) in &locs.methods {
+        new.locs.insert(Definition::Method(*owner, *member), loc.clone());
     }
 }
 

@@ -12,11 +12,11 @@ use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
-use super::expr::{check_body, check_expr, Cx};
+use super::expr::{agree, check_body, check_expr, Cx};
 use super::format::sexpr_list;
 use super::block::check_named_body;
 use super::locals::{LabelsCallback, Locals};
-use super::registry::FnDef;
+use super::registry::{FnDef, MethodDef};
 use super::tree::{Node, Typed};
 use super::type_syntax::parse_type;
 
@@ -164,6 +164,45 @@ pub(crate) fn fn_value(path: Path, def: &FnDef, loc: Option<Loc>) -> Result<Type
     let mut params = def.params.clone();
     params.extend(def.rest.as_ref().map(|_| option_of_sexpr()));
     Ok(Typed { node: Node::FnRef { path, params }, ty, loc })
+}
+
+/// The method `method` of `owner`, defined as `def`, taken as a value: what
+/// a bare name is where a function is expected, `expected`, whose first
+/// parameter, the receiver, has the method. Its type arguments are what the
+/// expected function's type says.
+pub(crate) fn method_value(cx: &Cx, owner: Path, method: SymRef, def: &MethodDef, expected: &Type, loc: Option<Loc>) -> Result<Typed, Error> {
+    let sig = &def.sig;
+    if !sig.optionals.is_empty() || !sig.keys.is_empty() {
+        unimplemented!("typeck: the method `{}::{}`, which takes &optional or &key parameters, as a value", owner, method.name())
+    }
+    let subst = cx.holes.borrow_mut().instantiate(&sig.type_params);
+    let params: Vec<Type> = sig.params.iter().map(|p| subst.apply(p)).collect();
+    let rest = sig.rest.as_ref().map(|r| subst.apply(r));
+    let ret = subst.apply(&sig.ret);
+    let ty = Type::Fn(params.clone(), rest.clone().map(Box::new), Box::new(ret.clone()));
+    agree(cx, &ty, Some(expected))?;
+    let what = format!("{}::{}", owner, method.name());
+    for (p, bounds) in &sig.bounds {
+        for b in bounds {
+            cx.require_bound(subst.apply(&Type::Param(*p)), b.at(&subst), what.clone(), p.name.name().to_string(), loc.clone())?;
+        }
+    }
+    // A Rust builtin has one entry point for every instantiation.
+    let targs: Vec<Type> = match sig.builtin {
+        true => Vec::new(),
+        false => sig.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect(),
+    };
+    for (p, t) in sig.type_params.iter().zip(&targs) {
+        cx.must_decide(t.clone(), format!("generic method `{}` used as a value needs its type parameter `{}` decided", what, p.name.name()), loc.clone());
+    }
+    // A method written for one instantiation has code under its name.
+    let code = match &def.inst_args {
+        Some(inst) => super::generic::method_specialization(&owner, method, inst),
+        None => method,
+    };
+    let mut taken = params;
+    taken.extend(rest.map(|_| option_of_sexpr()));
+    Ok(Typed { node: Node::MethodRef { owner, method: code, targs, params: taken, ret }, ty, loc })
 }
 
 /// A `labels` function passed to C, and the top-level function `path` C is

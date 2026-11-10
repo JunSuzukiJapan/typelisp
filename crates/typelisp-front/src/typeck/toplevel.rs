@@ -326,7 +326,7 @@ fn check_primary(
         publish_name_view(reg, ns);
         return Ok((crate::check::forms::module_form(heap, &path, &body)?, None));
     }
-    let d = &mut Definer { site, warnings, expander, public: false };
+    let d = &mut Definer { site, warnings, expander, public: false, loc: loc.clone() };
     if let Value::Cons(_) = v {
         let all = heap.list_to_vec_locs(v)?;
         // `(pub definition)`: the definition, visible outside its module.

@@ -319,6 +319,19 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let call = Node::Call { path: Path::internal_builtin(crate::ffi_callback::ADDRESS_BUILTIN), targs: Vec::new(), args: vec![function, ty] };
             lower(heap, lw, &Typed { node: call, ty: Type::Ptr, loc: None })
         }
+        Node::MethodRef { owner, method, targs, params, ret } => {
+            let method = if targs.is_empty() {
+                *method
+            } else {
+                let targs = targs.iter().map(|t| lw.settle(t)).collect();
+                lw.requests.ask_method(owner, *method, targs)
+            };
+            let params: Vec<Type> = params.iter().map(|ty| lw.settle(ty)).collect();
+            let ret = lw.settle(ret);
+            // Called through the value, a builtin still builds its box.
+            request_print_object(lw, &ret);
+            lw.reg.methodref_form(heap, owner, method, &params, &ret)
+        }
         Node::FnRef { path, params } => {
             let params: Vec<Type> = params.iter().map(|ty| lw.settle(ty)).collect();
             lw.reg.fnref_form(heap, path, &params)
@@ -342,6 +355,10 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         Node::Panic { message } => {
             let message = lower_rooted(heap, lw, message)?;
             forms::panic_form(heap, message)
+        }
+        Node::Step { inner } => {
+            let inner = lower_rooted(heap, lw, inner)?;
+            crate::check::core::tagged(heap, wk::STEP, &[inner])
         }
         Node::UnwindProtect { protected, cleanup } => {
             let protected = lower_rooted(heap, lw, protected)?;

@@ -96,6 +96,51 @@ pub(crate) fn check_print(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, 
     Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: vec![control, list] }, ty: Type::Unit, loc })
 }
 
+/// `(eprint control arg...)` or `(eprintln control arg...)`, `head` saying
+/// which — `args` without the head: `(format *error-output* control
+/// arg...)`, `eprintln`'s control ending in `~%`. A release build checks it
+/// and answers `()` instead, so a debugging line costs nothing there.
+pub(crate) fn check_eprint(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    let what = if head == wk::EPRINTLN { "eprintln" } else { "eprint" };
+    let [(control, control_loc), items @ ..] = args else {
+        return Err(Error::TypeError(format!("{}: expected at least a control string", what)));
+    };
+    let mut text = control_text(heap, what, *control)?;
+    if head == wk::EPRINTLN {
+        text.push_str("~%");
+    }
+    let control = heap.alloc_string(text);
+    heap.push_root(control);
+    let (format, error_output) = {
+        let names = heap.names();
+        (names.read(typelisp_mem::NsId::STD, "format"), names.read(typelisp_mem::NsId::STD, "*error-output*"))
+    };
+    let mut written = vec![(Value::Symbol(format), None), (Value::Symbol(error_output), None), (control, control_loc.clone())];
+    written.extend(items.iter().cloned());
+    let form = crate::check::forms::list_from_vec_locs(heap, &written)?;
+    heap.push_root(form);
+    let checked = check_expr(cx, heap, locals, form, None, loc.clone())?;
+    if crate::release::is_release() {
+        return check_expr(cx, heap, locals, Value::Empty, Some(&Type::Unit), loc);
+    }
+    Ok(checked)
+}
+
+/// The text of `control`, the control string the form `what` is given,
+/// which must be a literal.
+fn control_text(heap: &Heap, what: &str, control: Value) -> Result<String, Error> {
+    match control {
+        Value::Str(id) => Ok(heap.string(id).to_string()),
+        _ => Err(Error::TypeError(format!(
+            "{}: the control string must be a literal — the directives in it decide what \
+             `~/name/` calls and which arguments they take, and a string built at run time \
+             cannot be read at compile time. Build the text with `format` and print that \
+             instead.",
+            what
+        ))),
+    }
+}
+
 /// The literal control string `control` and the arguments `items` it is
 /// given, checked: the string, and the arguments as one `Sexpr` list.
 fn check_control(
@@ -107,16 +152,7 @@ fn check_control(
     items: &[(Value, Option<Loc>)],
     loc: Option<Loc>,
 ) -> Result<(Typed, Typed), Error> {
-    let Value::Str(id) = control else {
-        return Err(Error::TypeError(format!(
-            "{}: the control string must be a literal — the directives in it decide what \
-             `~/name/` calls and which arguments they take, and a string built at run time \
-             cannot be read at compile time. Build the text with `format` and print that \
-             instead.",
-            what
-        )));
-    };
-    let text = heap.string(id).to_string();
+    let text = control_text(heap, what, control)?;
     let mut checked = Vec::with_capacity(items.len());
     for (i, (item, item_loc)) in items.iter().enumerate() {
         let item = check_expr(cx, heap, locals, *item, None, item_loc.clone())?;

@@ -23,7 +23,7 @@ use typelisp_rt::c_mem;
 use super::define::{Definer, Kind};
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
-use super::registry::{Doc, Registry, TypeEntry};
+use super::registry::{Definition, Registry, TypeEntry};
 use super::resolve::{find_named, sees};
 use super::tree::{Node, Typed};
 use super::type_syntax::{parse_raw, TypeCx};
@@ -172,9 +172,7 @@ fn check_def_c_struct(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, part
     reg.types.insert(path, TypeEntry::CStruct(CStructDef { name: path, fields: Vec::new(), size: 0, align: 1, public }));
     let (fields, size, align) = c_struct_fields(reg, heap, d.site.ns, name, &path, specs)?;
     reg.types.insert(path, TypeEntry::CStruct(CStructDef { name: path, fields, size, align, public }));
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Type(path), doc);
-    }
+    d.record(reg, Definition::Type(path), doc);
     Ok(path)
 }
 

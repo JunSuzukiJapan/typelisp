@@ -1,5 +1,6 @@
 //! The forms that name one function's body for a tool: `(compile name)`,
-//! `(trace name...)`, `(untrace name...)` and `(disassemble name)`.
+//! `(trace name...)`, `(untrace name...)` and `(disassemble name)`; and
+//! `(ed name)`, which names the place a definition was written.
 //!
 //! The name is not evaluated: it is a symbol or a `::` path naming a
 //! function, a macro or a type's method. A generic definition has no single
@@ -13,7 +14,8 @@ use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
-use super::expr::Cx;
+use super::expr::{check_expr, Cx};
+use super::locals::Locals;
 use super::generic::method_specialization;
 use super::registry::{MethodDef, TypeEntry, ValueDef};
 use super::resolve::{ctor_named, sees, static_use_named, value_named};
@@ -53,6 +55,47 @@ pub(crate) fn check_disassemble(cx: &Cx, heap: &Heap, args: &[(Value, Option<Loc
     let message = "disassemble: expected a symbol or path naming a function, e.g. (disassemble foo) or (disassemble point::x) — not a string";
     let target = target(cx, heap, name, "disassemble", message)?;
     Ok(Typed { node: Node::Tool { tag: wk::DISASSEMBLE, targets: vec![target], llvm_ir }, ty: Type::Unit, loc })
+}
+
+/// `(ed)`, `(ed "file")` or `(ed name)` — `args` without the `ed`: the
+/// editor opened on nothing, on the file, or on the file and the line the
+/// definition `name` was written at. Which place is decided here; what runs
+/// is a call of the `ed-open` builtin with the two.
+pub(crate) fn check_ed(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    let (file, line) = match args {
+        [] => (String::new(), 0),
+        [(Value::Str(id), _)] => (heap.string(*id).to_string(), 0),
+        [(name, _)] => {
+            let message = "ed: expected a symbol or path naming a definition, or a string naming a file, e.g. (ed foo) or (ed \"x.typl\")";
+            let def = super::documentation::definition(cx, heap, *name, "ed", message)?;
+            match cx.reg.locs.get(&def) {
+                Some(at) => (at.file.to_string(), at.line as i64),
+                None => {
+                    let written = match *name {
+                        Value::Symbol(sym) => sym.name().to_string(),
+                        Value::Path(id) => path_spelling(heap, id),
+                        // `Type<args>::member`, which `definition` read.
+                        member => match heap.list_to_vec(member)?.as_slice() {
+                            [_, ty, Value::Symbol(m)] => format!("{}::{}", super::type_syntax::parse_type(heap, &cx.types(), *ty)?, m.name()),
+                            _ => unreachable!("`definition` names a definition only for a name"),
+                        },
+                    };
+                    return Err(Error::TypeError(format!("ed: `{}` has no source location — it is built in, so there is no file to open", written)));
+                }
+            }
+        }
+        _ => return Err(Error::TypeError("ed: (ed [name-or-path]) — expected at most 1 argument".into())),
+    };
+    let path = Path::internal_builtin(wk::F_ED_OPEN);
+    let Some(ValueDef::Fn(open)) = cx.reg.values.get(&path) else {
+        return Err(Error::TypeError("ed: the `ed-open` builtin is not registered".into()));
+    };
+    let ret = open.ret.clone();
+    let file = heap.alloc_string(file);
+    heap.push_root(file);
+    let file = check_expr(cx, heap, locals, file, Some(&Type::Str), None)?;
+    let line = check_expr(cx, heap, locals, Value::Int(line), Some(&Type::Int), None)?;
+    Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: vec![file, line] }, ty: ret, loc })
 }
 
 /// The body the name `v`, written for the tool `who`, names; `message` is

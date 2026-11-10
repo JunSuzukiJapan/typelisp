@@ -21,7 +21,7 @@ use super::expr::{check_body, check_expr, Cx};
 use super::generic::Requests;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
-use super::registry::{Doc, Registry, ValueDef};
+use super::registry::{Definition, Registry, ValueDef};
 use super::scope::TypeScope;
 use super::subst::Subst;
 
@@ -56,9 +56,7 @@ pub(crate) fn check_defmacro(
     };
     let path = Path::of_symbol(d.site.ns, name);
     reg.values.insert(path, ValueDef::Macro { public: d.public, shape: MacroShape::of(&def) });
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Macro(path), doc);
-    }
+    d.record(reg, Definition::Macro(path), doc);
 
     // Each default sees the parameters before it.
     let sexpr = option_of_sexpr();
