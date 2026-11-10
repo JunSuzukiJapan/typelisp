@@ -42,8 +42,20 @@ pub(crate) fn check_call(
         let rest: Vec<(Value, Option<Loc>)> = rest.iter().cloned().chain([(module, None)]).collect();
         return check_call(cx, heap, locals, path, def, first, &rest, expected, loc);
     }
-    if def.ffi {
-        unimplemented!("typeck: calling the C function {} (unsafe is not checked yet)", path)
+    // Whether the declared signature is the C function's own is not
+    // something the checker can know: `unsafe` is where that is taken on.
+    // Said before anything about the arguments.
+    if def.ffi && !cx.in_unsafe() {
+        return Err(Error::TypeError(format!(
+            "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`. \
+             Whether its declared signature is the one the C function really has is not \
+             something this compiler can check — `unsafe` is where that is taken on. Wrap the \
+             call, or wrap it once inside a `defun` that offers a checked signature.",
+            path.last_segment()
+        )));
+    }
+    if def.ffi && def.params.iter().any(|t| matches!(t, Type::Fn(..))) {
+        unimplemented!("typeck: passing a callback to the C function `{}`", path)
     }
     let required = def.params.len();
     if has_tail(def) && given < required {

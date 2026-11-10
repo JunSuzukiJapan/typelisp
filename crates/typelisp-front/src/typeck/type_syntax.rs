@@ -26,10 +26,47 @@ pub(crate) struct TypeCx<'a> {
 /// (`docs/dev/checker-rebuild-plan.md` 7.5). `Name<A, B>` reads as
 /// `(%type-apply Name A B)`, and `(Name A B)` is the same type. A `::` path
 /// names a type in a module. `(fn (A B &rest C) R)` is a function's type
-/// and `#{A B}` a tuple's. So far a type alias, a trait object, a C pointer
-/// and the C words are not read: they are read when the checker can check
-/// what they are used for.
+/// and `#{A B}` a tuple's. A C word (`ptr`, `c-long`, `c-ulong`) is the
+/// whole type or nothing: every slot inside another type tags what it holds,
+/// which would drop the word's top three bits. A C pointer `(ptr T)` is not
+/// read so far.
 pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
+    let ty = parse_raw(heap, cx, v)?;
+    no_nested_raw_word(&ty)?;
+    Ok(ty)
+}
+
+/// Refuse a C word inside `ty` (it may be `ty` itself).
+pub(crate) fn no_nested_raw_word(ty: &Type) -> Result<(), Error> {
+    let nested = match ty {
+        Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(mentions_raw_word),
+        Type::Fn(ps, rest, ret) => ps.iter().chain(rest.as_deref()).any(mentions_raw_word) || mentions_raw_word(ret),
+        _ => false,
+    };
+    if nested {
+        return Err(Error::TypeError(format!(
+            "`{}` puts a raw C word inside another type, and every such slot tags what it \
+             holds — which would drop the word's top three bits. A `ptr`/`c-long`/`c-ulong` \
+             can be a parameter or a return type, and nothing else.",
+            ty
+        )));
+    }
+    Ok(())
+}
+
+/// Whether `ty` is, or holds, a C word or a C pointer.
+pub(crate) fn mentions_raw_word(ty: &Type) -> bool {
+    match ty {
+        Type::Ptr | Type::CLong | Type::CULong | Type::PtrTo(_) => true,
+        Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(mentions_raw_word),
+        Type::Fn(ps, rest, ret) => ps.iter().chain(rest.as_deref()).any(mentions_raw_word) || mentions_raw_word(ret),
+        _ => false,
+    }
+}
+
+/// [`parse_type`] without its rule for the C words: a `defffi` callback's
+/// type may take and answer them.
+pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
     match v {
         Value::Empty => Ok(Type::Unit),
         Value::Symbol(id) => {
@@ -43,9 +80,6 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
                 };
             }
             match scalar_of_symbol(id) {
-                Some(Type::Ptr | Type::CLong | Type::CULong) => {
-                    unimplemented!("typeck: the C word type `{}`", heap.symbol_spelling(id))
-                }
                 Some(t) => Ok(t),
                 None => named(heap, cx, id, Vec::new()),
             }
@@ -70,7 +104,7 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
             if args.is_empty() {
                 return Err(Error::TypeError("a type application must be (Name Arg...), with at least one argument".to_string()));
             }
-            let args = args.iter().map(|a| parse_type(heap, cx, *a)).collect::<Result<Vec<_>, _>>()?;
+            let args = args.iter().map(|a| parse_raw(heap, cx, *a)).collect::<Result<Vec<_>, _>>()?;
             match head {
                 Value::Symbol(name) => named(heap, cx, name, args),
                 Value::Path(_) => at_path(cx, written_path(heap, cx.ns, head)?, args),
@@ -80,7 +114,7 @@ pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Err
         // `#{A B}`, written the way its values are.
         Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
             let n = heap.struct_field_count(id);
-            let args = (0..n).map(|i| parse_type(heap, cx, heap.struct_field(id, i))).collect::<Result<Vec<_>, _>>()?;
+            let args = (0..n).map(|i| parse_raw(heap, cx, heap.struct_field(id, i))).collect::<Result<Vec<_>, _>>()?;
             Ok(Type::Named(tuple_path(n), args))
         }
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
@@ -99,7 +133,7 @@ fn fn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
         _ => return Err(Error::TypeError("fn parameter list must be a list".to_string())),
     };
     let (fixed, rest) = match ps.iter().position(|p| matches!(p, Value::Symbol(id) if id.is(wk::REST))) {
-        Some(i) if i + 2 == ps.len() => (&ps[..i], Some(Box::new(parse_type(heap, cx, ps[i + 1])?))),
+        Some(i) if i + 2 == ps.len() => (&ps[..i], Some(Box::new(parse_raw(heap, cx, ps[i + 1])?))),
         Some(_) => {
             return Err(Error::TypeError(
                 "fn type: &rest must be followed by exactly one type, as the last item in the parameter list".to_string(),
@@ -107,8 +141,8 @@ fn fn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
         }
         None => (&ps[..], None),
     };
-    let fixed = fixed.iter().map(|p| parse_type(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
-    Ok(Type::Fn(fixed, rest, Box::new(parse_type(heap, cx, *ret)?)))
+    let fixed = fixed.iter().map(|p| parse_raw(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
+    Ok(Type::Fn(fixed, rest, Box::new(parse_raw(heap, cx, *ret)?)))
 }
 
 /// The type the path `path` names, applied to `args`. One its module does
@@ -152,7 +186,7 @@ fn dyn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
     if !public && !sees(cx.ns, path.ns()) {
         return Err(unknown_type(&path.to_string()));
     }
-    let pins = pins.iter().map(|p| parse_type(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
+    let pins = pins.iter().map(|p| parse_raw(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
     Ok(Type::Dyn(path, pins))
 }
 

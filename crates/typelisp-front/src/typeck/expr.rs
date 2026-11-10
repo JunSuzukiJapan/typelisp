@@ -25,6 +25,7 @@ use crate::check::bound_message;
 use crate::check::registry::TraitBound;
 use super::{binding, block, call, catch, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
+use super::type_syntax::mentions_raw_word;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -56,6 +57,8 @@ pub(crate) struct Cx<'a> {
     pub(crate) blocks: RefCell<Vec<super::block::BlockExit>>,
     /// The blocks the form has made, to name the next one.
     block_labels: Cell<u32>,
+    /// How many `(unsafe ...)` forms the expression being checked is in.
+    unsafe_depth: Cell<u32>,
     /// The control strings to check against their arguments' settled types.
     directives: RefCell<Vec<Directives>>,
     /// The bounds the form's calls require of their type arguments.
@@ -66,7 +69,7 @@ pub(crate) struct Cx<'a> {
 
 impl<'a> Cx<'a> {
     pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -80,6 +83,19 @@ impl<'a> Cx<'a> {
         let n = self.temps.get();
         self.temps.set(n + 1);
         typelisp_mem::symbols::intern(&format!("%place-tmp-{}", n))
+    }
+
+    /// Whether the expression being checked is inside an `(unsafe ...)`.
+    pub(crate) fn in_unsafe(&self) -> bool {
+        self.unsafe_depth.get() > 0
+    }
+
+    /// `f`, checked inside one more `(unsafe ...)`.
+    pub(crate) fn within_unsafe<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.unsafe_depth.set(self.unsafe_depth.get() + 1);
+        let r = f();
+        self.unsafe_depth.set(self.unsafe_depth.get() - 1);
+        r
     }
 
     /// The name in the core IR of a new block named `name`, unique in the
@@ -279,6 +295,20 @@ pub(crate) fn check_expr(
 ) -> Result<Typed, Error> {
     let loc = heap.cons_loc(v).or(loc);
     let typed = typelisp_mem::grow_stack(|| check_form(cx, heap, locals, v, expected, loc.clone())).and_then(|t| conform(cx, t, expected));
+    // A C word is a value only inside `(unsafe ...)`: nothing can check that
+    // it points at anything. The `unsafe` form's own value is one, so that a
+    // function can answer one; whoever uses it is inside an `unsafe` too.
+    let typed = typed.and_then(|t| {
+        let ty = cx.resolve(&t.ty);
+        if !cx.in_unsafe() && mentions_raw_word(&ty) && !is_unsafe_form(heap, v) {
+            return Err(Error::TypeError(format!(
+                "a `{}` is a raw machine word from the C FFI and can only be a value \
+                 inside `(unsafe ...)` — nothing here can check that it points at anything",
+                ty
+            )));
+        }
+        Ok(t)
+    });
     typed.map_err(|e| match &loc {
         Some(l) => e.at(l.clone()),
         None => e,
@@ -331,6 +361,18 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
 /// `(symbol-macrolet ((name form)...) body...)`: the body, in which each
 /// `name` stands for its `form`, checked where the name is written. A
 /// binding inside the body hides it as it hides a variable.
+/// `(unsafe body...)`: `body` in order, where a C function may be called
+/// and a C word be a value. Its value is the last form's.
+fn check_unsafe(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
+    let (body, ty) = cx.within_unsafe(|| check_body(cx, heap, locals, args, expected))?;
+    Ok(Typed { node: Node::Let { binds: Vec::new(), body }, ty, loc })
+}
+
+/// Whether `v` is an `(unsafe ...)` form.
+fn is_unsafe_form(heap: &Heap, v: Value) -> bool {
+    matches!(v, Value::Cons(_)) && matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::UNSAFE))
+}
+
 fn check_symbol_macrolet(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let Some(((bindings, _), body)) = args.split_first() else {
         return Err(Error::TypeError("symbol-macrolet: (symbol-macrolet ((name form)...) body...)".into()));
@@ -442,6 +484,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::PRINT | wk::PRINTLN => return format::check_print(cx, heap, locals, head.well_known(), args, loc),
         wk::LOOP => return looping::check_loop(cx, heap, locals, args, expected, loc),
         wk::BLOCK => return block::check_block(cx, heap, locals, args, expected, loc),
+        wk::UNSAFE => return check_unsafe(cx, heap, locals, args, expected, loc),
         wk::CATCH => return catch::check_catch(cx, heap, locals, args, expected, loc),
         wk::THROW => return catch::check_throw(cx, heap, locals, args, loc),
         wk::RETURN_FROM => return block::check_return_from(cx, heap, locals, args, loc),

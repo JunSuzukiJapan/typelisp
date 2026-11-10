@@ -265,6 +265,7 @@ fn check_primary(
                 wk::DEFTRAIT => return Ok((check_deftrait(reg, d, heap, args)?, None)),
                 wk::DEFTYPE => return Ok((super::deftype::check_deftype(reg, d, heap, args)?, None)),
                 wk::DEFSIGNATURE => return Ok((super::defsignature::check_defsignature(reg, d, heap, args)?, None)),
+                wk::DEFFFI => return Ok((super::defffi::check_defffi(reg, d, heap, args)?, None)),
                 wk::DEFMACRO => return Ok((super::defmacro::check_defmacro(reg, d, heap, requests, args)?, None)),
                 wk::DEFMETHOD => return Ok((check_defmethod(reg, d, heap, requests, args)?, None)),
                 wk::DEFVAR => return Ok((check_defvar(reg, d, heap, requests, Which::Defvar, args)?, None)),
@@ -304,8 +305,7 @@ fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc
         return Err(Error::TypeError("pub: expected a definition form".into()));
     };
     match head.well_known() {
-        wk::DEFUN | wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT | wk::DEFMETHOD | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::DEFTYPE | wk::DEFSIGNATURE | wk::USE | wk::DEFMACRO => Ok(inner),
-        wk::DEFFFI => unimplemented!("typeck: the form `pub {}`", head.name()),
+        wk::DEFUN | wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT | wk::DEFMETHOD | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::DEFTYPE | wk::DEFSIGNATURE | wk::DEFFFI | wk::USE | wk::DEFMACRO => Ok(inner),
         _ if head.is(wk::DEF_C_STRUCT) => Err(Error::TypeError(
             "def-c-struct is written at top level, inside `(unsafe ...)`: (unsafe (def-c-struct name (field type)...))".into(),
         )),
