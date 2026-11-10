@@ -14,7 +14,8 @@ use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
 use super::expr::Cx;
-use super::registry::{TypeEntry, ValueDef};
+use super::generic::method_specialization;
+use super::registry::{MethodDef, TypeEntry, ValueDef};
 use super::resolve::{ctor_named, sees, static_use_named, value_named};
 use super::tree::{Node, Typed};
 
@@ -93,19 +94,20 @@ fn target(cx: &Cx, heap: &Heap, v: Value, who: &str, message: &str) -> Result<Co
                     if def.variant_index(method).is_some() {
                         return Err(Error::TypeError(format!("{}: `{}` is a constructor, not a function", who, name)));
                     }
-                    match cx.reg.method(&owner, method) {
-                        Some(m) if !m.sig.builtin && !m.sig.type_params.is_empty() => Err(generic(&name)),
-                        Some(_) => Ok(CompileTarget::Method(owner, method)),
-                        None if cx.reg.has_inst_method(&owner, method) => {
-                            unimplemented!("typeck: `{}` of `{}`, a method written for one instantiation", who, name)
-                        }
+                    match member_code(cx, owner, method, &name, who)? {
+                        Some((_, m)) if !m.sig.builtin && !m.sig.type_params.is_empty() => Err(generic(&name)),
+                        Some((code, _)) => Ok(CompileTarget::Method(owner, code)),
                         None => Err(Error::TypeError(format!("{}: type `{}` has no associated function or method `{}`", who, owner, member.name()))),
                     }
                 }
             }
         }
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
-            unimplemented!("typeck: `{}` of a method of one instantiation (`Type<args>::member`)", who)
+            let (owner, code, m) = instantiation_member(cx, heap, v, who)?;
+            if !m.sig.builtin && !m.sig.type_params.is_empty() {
+                return Err(generic(&format!("{}::{}", owner, code.name())));
+            }
+            Ok(CompileTarget::Method(owner, code))
         }
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::VALUE_MEMBER)) => {
             let parts = heap.list_to_vec(v)?;
@@ -131,5 +133,46 @@ fn value_target(path: Path, def: &ValueDef, who: &str, name: &str) -> Result<Com
         ValueDef::Fn(f) if !f.builtin && !f.type_params.is_empty() => Err(None),
         ValueDef::Fn(_) | ValueDef::Macro { .. } => Ok(CompileTarget::Fn(path)),
         ValueDef::Var(_) => Err(Some(Error::TypeError(format!("{}: `{}` is a variable, not a function", who, name)))),
+    }
+}
+
+/// The method `method` of `owner`, which the path `spelling` names for the
+/// form `who`, with the name its code has: the one for every instantiation,
+/// or the one instantiation's when only one has it. `None` when `owner` has
+/// no such method.
+pub(crate) fn member_code<'r>(cx: &Cx<'r>, owner: Path, method: SymRef, spelling: &str, who: &str) -> Result<Option<(SymRef, &'r MethodDef)>, Error> {
+    if let Some(m) = cx.reg.method(&owner, method) {
+        return Ok(Some((method, m)));
+    }
+    match cx.reg.inst_methods(&owner, method) {
+        [] => Ok(None),
+        [(args, m)] => Ok(Some((method_specialization(&owner, method, args), m))),
+        many => {
+            let names: Vec<String> = many.iter().map(|(a, _)| format!("`{}::{}`", Type::Named(owner, a.clone()), method.name())).collect();
+            Err(Error::TypeError(format!("{}: `{}` is written for more than one instantiation — name one: {}", who, spelling, names.join(", "))))
+        }
+    }
+}
+
+/// The method `Type<args>::member` (`v`, read as `(%type-member Type
+/// member)`) names for the form `who`: its type, the name its code has, and
+/// its definition — the instantiation's own, or the one for every
+/// instantiation.
+pub(crate) fn instantiation_member<'r>(cx: &Cx<'r>, heap: &Heap, v: Value, who: &str) -> Result<(Path, SymRef, &'r MethodDef), Error> {
+    let parts = heap.list_to_vec(v)?;
+    let [_, ty, Value::Symbol(member)] = parts.as_slice() else {
+        return Err(Error::TypeError(format!("{}: expected `Type<args>::member`", who)));
+    };
+    let ty = super::type_syntax::parse_type(heap, &cx.types(), *ty)?;
+    let Type::Named(owner, args) = &ty else {
+        return Err(Error::TypeError(format!("{}: `{}` has no methods of its own", who, ty)));
+    };
+    let method = member_symbol(member.name());
+    match cx.reg.method_at(owner, method, args) {
+        Some(m) => {
+            let code = m.inst_args.as_ref().map_or(method, |a| method_specialization(owner, method, a));
+            Ok((*owner, code, m))
+        }
+        None => Err(Error::TypeError(format!("{}: `{}` has no method `{}` of its own", who, ty, member.name()))),
     }
 }

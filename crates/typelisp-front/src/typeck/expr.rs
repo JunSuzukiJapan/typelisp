@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use crate::types::Type;
+use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 
@@ -12,7 +12,7 @@ use super::widen::conform;
 use super::literal::literal;
 use super::sexpr_value::{encodable, no_encoding};
 use super::locals::Locals;
-use super::registry::{Registry, ValueDef};
+use super::registry::{MethodDef, Registry, ValueDef};
 use super::resolve::{ctor_named, receiver_method, static_use_named, value_named};
 use super::tree::{Node, Typed};
 use super::scope::TypeScope;
@@ -148,6 +148,33 @@ impl<'a> Cx<'a> {
             Some(t) => t,
             None => holes.resolve(ty),
         }
+    }
+
+    /// Decide every number literal's hole in `ty` nothing has decided yet
+    /// as its default type: what picks a definition by the type's arguments
+    /// needs them.
+    pub(crate) fn decide_all(&self, ty: &Type) {
+        let mut holes = Vec::new();
+        super::unify::walk(&self.resolve(ty), &mut |t| {
+            if let Type::Infer(_) = t {
+                holes.push(t.clone());
+            }
+        });
+        holes.iter().for_each(|h| self.decide(h));
+    }
+
+    /// The instance method `name` a receiver of type `ty` answers to, as
+    /// [`receiver_method`] says. When the type has a method of that name
+    /// for one instantiation, which one is picked by its type arguments, so
+    /// a number literal's hole in them is decided first.
+    pub(crate) fn receiver_method(&self, ty: &Type, name: SymRef) -> Option<(Path, &'a MethodDef)> {
+        let ty = self.with_default(ty);
+        if let Some(owner) = crate::types::nominal_path(&ty) {
+            if self.reg.has_inst_method(&owner, name) {
+                self.decide_all(&ty);
+            }
+        }
+        receiver_method(self.reg, self.ns, &self.resolve(&ty), name)
     }
 
     /// Decide `ty`, when it is a number literal's hole nothing has decided
@@ -605,13 +632,36 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             )));
         }
     }
-    if let Some((owner, def)) = receiver_method(cx.reg, cx.ns, &cx.with_default(&first.ty), member) {
+    if let Some((owner, def)) = cx.receiver_method(&first.ty, member) {
         cx.decide(&first.ty);
         return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), rest, expected, loc);
     }
     if let Type::Param(p) = cx.resolve(&first.ty) {
         if let Some(bound) = bound_method(cx.reg, cx.scope, p, member) {
             return method::check_trait_call(cx, heap, locals, bound, member, first, rest, expected, loc);
+        }
+    }
+    // A name that is a method of other types is no missing function: the
+    // first argument's type picked the method, and it has none by this name.
+    if value.is_none() {
+        let owners = cx.reg.types_with_instance_method(member);
+        if !owners.is_empty() {
+            let recv_ty = cx.resolve(&first.ty);
+            if let Type::Param(_) = recv_ty {
+                return Err(Error::TypeError(format!(
+                    "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",
+                    member, recv_ty, member
+                )));
+            }
+            const SHOWN: usize = 8;
+            let mut list = owners.iter().take(SHOWN).map(|t| format!("`{}`", t)).collect::<Vec<_>>().join(", ");
+            if owners.len() > SHOWN {
+                list.push_str(&format!(" and {} more", owners.len() - SHOWN));
+            }
+            return Err(Error::TypeError(format!(
+                "no method `{}` for type `{}` (the type of the first argument, which selects the method); `{}` is a method of {}",
+                member, recv_ty, member, list
+            )));
         }
     }
     call_function(cx, heap, locals, value, spelling, Some(First { checked: first, written }), rest, expected, loc)

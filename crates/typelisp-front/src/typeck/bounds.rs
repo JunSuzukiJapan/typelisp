@@ -170,6 +170,13 @@ pub(crate) enum Meets {
 /// associated type to, which may decide the pin's holes. A type parameter
 /// meets a bound by a bound of its own in `cx`'s scope.
 pub(crate) fn meets(cx: &Cx, ty: &Type, b: &TraitBound) -> Meets {
+    // Which `impl` applies may be picked by the type's arguments, so a
+    // number literal's hole in them is decided first.
+    if let Some(path) = crate::types::nominal_path(&cx.resolve(ty)) {
+        if cx.reg.trait_impls.get(&(b.trait_path, path)).is_some_and(|all| all.iter().any(|i| i.args.is_some())) {
+            cx.decide_all(ty);
+        }
+    }
     meets_at(Asker::Checking(cx), &cx.resolve(ty), b, 0)
 }
 

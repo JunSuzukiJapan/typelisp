@@ -77,7 +77,7 @@ pub(crate) fn check_defmethod(
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let ret = parse_type(heap, &tcx, *ret)?;
     let bounds = clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
-    let def = Method { owner, method, name, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret, bounds };
+    let def = Method { owner, method, name, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret, bounds, inst: None };
     let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;
     let forms: Vec<Value> = form.into_iter().collect();
     crate::check::forms::module_form(heap, &owner, &forms)
@@ -98,6 +98,10 @@ pub(crate) struct Method {
     pub(crate) ret: Type,
     /// The `:where` bounds on its type parameters.
     pub(crate) bounds: Vec<(TypeParam, TraitBound)>,
+    /// The instantiation of `owner` it is written for, when its `impl` is
+    /// for one. Otherwise a receiver that names every type argument
+    /// outright says it.
+    pub(crate) inst: Option<Vec<Type>>,
 }
 
 /// Register `def` with the type parameters `scope` declares, check `body`,
@@ -118,15 +122,15 @@ pub(crate) fn define_method(
     def: Method,
     body: &[(Value, Option<Loc>)],
 ) -> Result<Option<Value>, Error> {
-    let Method { owner, method, name, instance, public, home, params: list, ret, bounds } = def;
+    let Method { owner, method, name, instance, public, home, params: list, ret, bounds, inst } = def;
     let bounded = scope.bound(bounds.clone());
     let type_params = scope.params().to_vec();
     // A receiver that names every type argument outright makes the method
     // that instantiation's own, its code named for the instantiation.
-    let inst = match &list.required.first() {
+    let inst = inst.or_else(|| match &list.required.first() {
         Some((_, Type::Named(_, args))) if instance && type_params.is_empty() && !args.is_empty() => Some(args.clone()),
         _ => None,
-    };
+    });
     let LambdaList { required, optionals, rest, keys, bound: params } = list;
     let sig = FnDef {
         public,

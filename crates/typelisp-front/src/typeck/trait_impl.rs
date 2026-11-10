@@ -9,6 +9,9 @@
 //!
 //! The `<T...>` after `impl` declares the type parameters `Type` is written
 //! in. So far they are the type's own, in order: `(impl<T> Show Box<T> ...)`.
+//! With none, `Type` may name every type argument outright, `(impl Show
+//! Box<int> ...)`: the `impl` is that instantiation's, and so are its
+//! methods, their code named for it.
 
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
@@ -72,12 +75,14 @@ pub(crate) fn check_trait_impl(
     })?;
     let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, *target)?;
     let own: Vec<Type> = head.params().iter().map(|p| Type::Param(*p)).collect();
-    match &target_ty {
-        Type::Named(_, args) if *args == own => {}
-        Type::Named(..) => unimplemented!("typeck: an `impl` of a trait for one instantiation, or whose type parameters are not the type's in order"),
-        _ if own.is_empty() => {}
+    let inst = match &target_ty {
+        Type::Named(_, args) if *args == own => None,
+        // Every type argument written outright: one instantiation's.
+        Type::Named(_, args) if own.is_empty() => Some(args.clone()),
+        Type::Named(..) => unimplemented!("typeck: an `impl` of a trait whose type parameters are not the type's in order"),
+        _ if own.is_empty() => None,
         _ => unimplemented!("typeck: an `impl<...>` of a trait for a type without parameters"),
-    }
+    };
     let shown = format!("impl {} {}", trait_path, owner);
     let impl_bounds = match clause {
         Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, c)?,
@@ -98,14 +103,18 @@ pub(crate) fn check_trait_impl(
             }
             // A method the type already has is the trait's, when it has the
             // signature the trait gives it.
-            let Some(existing) = reg.method(&owner, *m) else {
+            let existing = match &inst {
+                Some(args) => reg.method_at(&owner, *m, args),
+                None => reg.method(&owner, *m),
+            };
+            let Some(existing) = existing else {
                 return Err(Error::TypeError(format!("{}: missing method `{}` (`{}` declares no default body for it)", shown, m, trait_path)));
             };
             adopt(&tdef, existing, &target_ty, &assoc, head.params(), &shown, &trait_path, *m)?;
         }
     }
     for sup in &tdef.supertraits {
-        if !implements_every(reg, &sup.trait_path, &owner) {
+        if !implements(reg, &sup.trait_path, &owner, inst.as_deref()) {
             return Err(Error::TypeError(format!(
                 "{}: `{}` requires `{}`, but `{}` has no `impl {}` — write it before this one",
                 shown, trait_path, sup.trait_path, owner, sup.trait_path
@@ -115,7 +124,7 @@ pub(crate) fn check_trait_impl(
         // what the supertrait's `impl` binds. A type with a parameter left in
         // it is the current checker's to leave unchecked, and is left so.
         let to_impl = Subst::positional(&tdef.params, &std::iter::once(target_ty.clone()).chain(assoc.iter().cloned()).collect::<Vec<_>>());
-        let sup_impl = reg.trait_impls.get(&(sup.trait_path, owner)).and_then(|all| all.iter().find(|i| i.args.is_none())).expect("checked above");
+        let sup_impl = reg.trait_impls.get(&(sup.trait_path, owner)).and_then(|all| impl_at(all, inst.as_deref())).expect("checked above");
         let open = |t: &Type| {
             let mut found = false;
             super::unify::walk(t, &mut |u| found |= matches!(u, Type::Param(_)));
@@ -140,7 +149,7 @@ pub(crate) fn check_trait_impl(
             }
         }
     }
-    let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc, clause };
+    let of = Of { trait_path, owner, type_names, target: &target_ty, assoc: &assoc, clause, inst: inst.as_deref() };
     // The methods left out are defined first, so a written one can call
     // them, and lowered last, once every method they may call is defined.
     let mut defaulted = Vec::new();
@@ -160,22 +169,37 @@ pub(crate) fn check_trait_impl(
         let (template, subst) = default_body(reg, &trait_path, method, &at);
         let mut lw = Lowering { reg, subst: &subst, requests };
         let (params, ret, body) = lower_template(heap, &mut lw, &template)?;
-        let instance = reg.method(&owner, method).expect("defined above").instance;
-        let form = reg.defmethod_form(heap, &owner, method, instance, &params, &ret, &body)?;
+        let (instance, code_name) = match &inst {
+            Some(args) => (reg.method_at(&owner, method, args).expect("defined above").instance, super::generic::method_specialization(&owner, method, args)),
+            None => (reg.method(&owner, method).expect("defined above").instance, method),
+        };
+        let form = reg.defmethod_form(heap, &owner, code_name, instance, &params, &ret, &body)?;
         heap.push_root(form);
         forms.push(form);
     }
     let mut all = reg.trait_impls.get(&(trait_path, owner)).cloned().unwrap_or_default();
-    all.retain(|i| i.args.is_some());
+    all.retain(|i| i.args != inst);
     let assoc = tdef.params[1..].iter().map(|a| a.name.name().to_string()).zip(assoc).collect();
-    all.push(TraitImpl { args: None, assoc, bounds: by_param(impl_bounds) });
+    all.push(TraitImpl { args: inst, assoc, bounds: by_param(impl_bounds) });
     reg.trait_impls.insert((trait_path, owner), all);
     crate::check::forms::module_form(heap, &owner, &forms)
 }
 
-/// Whether `ty` implements `trait_path` for every instantiation.
-fn implements_every(reg: &Registry, trait_path: &Path, ty: &Path) -> bool {
-    reg.trait_impls.get(&(*trait_path, *ty)).is_some_and(|all| all.iter().any(|i| i.args.is_none()))
+/// Whether `ty` implements `trait_path` at the instantiation `inst`, or for
+/// every instantiation when `inst` is `None`.
+fn implements(reg: &Registry, trait_path: &Path, ty: &Path, inst: Option<&[Type]>) -> bool {
+    reg.trait_impls.get(&(*trait_path, *ty)).is_some_and(|all| impl_at(all, inst).is_some())
+}
+
+/// Of the `impl`s `all` of one trait for one type, the one that applies at
+/// the instantiation `inst` (the instantiation's own, or the one for every
+/// instantiation), or the one for every instantiation when `inst` is `None`.
+fn impl_at<'a>(all: &'a [TraitImpl], inst: Option<&[Type]>) -> Option<&'a TraitImpl> {
+    let every = all.iter().find(|i| i.args.is_none());
+    match inst {
+        Some(args) => all.iter().find(|i| i.args.as_deref() == Some(args)).or(every),
+        None => every,
+    }
 }
 
 /// The `impl`'s items: the types it binds the trait's associated types to,
@@ -259,6 +283,8 @@ struct Of<'a> {
     assoc: &'a [Type],
     /// The `impl`'s `(:where ...)`, which bounds each method's parameters.
     clause: Option<Value>,
+    /// The instantiation the `impl` is for, when it is for one.
+    inst: Option<&'a [Type]>,
 }
 
 /// Whether `existing`, the method `method` the type already has, is the
@@ -322,9 +348,7 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
     let scope = root.declare(ParamOwner::Method(owner, method), of.type_names).map_err(|twice| {
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
-    let type_params = reg.type_def(&owner).map(|t| t.params.clone()).unwrap_or_default();
-    let own: Vec<Type> = scope.params().iter().map(|p| Type::Param(*p)).collect();
-    let reown = Subst::positional(&type_params, &own);
+    let reown = reown(reg, &owner, &scope, of);
     let at: Vec<Type> = std::iter::once(reown.apply(of.target)).chain(of.assoc.iter().map(|t| reown.apply(t))).collect();
     let to_impl = Subst::positional(&tdef.params, &at);
     let want = tdef.method(method).expect("a default is of the trait's own method");
@@ -336,10 +360,31 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
         bounds: by_param(bounds),
         ..FnDef::plain(scope.params().to_vec(), want.params.iter().map(|t| to_impl.apply(t)).collect(), to_impl.apply(&want.ret))
     };
-    d.method(reg, &owner, method)?;
     let generic = !scope.params().is_empty();
-    reg.define_defaulted_method(owner, method, MethodDef { sig, instance, home: None, inst_args: None }, of.trait_path, at.clone());
+    match of.inst {
+        // Lowered at once, the instantiation's own: no body to specialize.
+        Some(args) => {
+            d.inst_method(reg, &owner, method, args)?;
+            reg.define_inst_method(owner, method, args.to_vec(), MethodDef { sig, instance, home: None, inst_args: Some(args.to_vec()) });
+        }
+        None => {
+            d.method(reg, &owner, method)?;
+            reg.define_defaulted_method(owner, method, MethodDef { sig, instance, home: None, inst_args: None }, of.trait_path, at.clone());
+        }
+    }
     Ok((!generic).then_some(at))
+}
+
+/// What puts the `impl`'s types, written in `owner`'s parameters, in a
+/// method's, which `scope` declares: nothing, for an `impl` of one
+/// instantiation, whose types have none.
+fn reown(reg: &Registry, owner: &Path, scope: &TypeScope, of: &Of) -> Subst {
+    if of.inst.is_some() {
+        return Subst::default();
+    }
+    let type_params = reg.type_def(owner).map(|t| t.params.clone()).unwrap_or_default();
+    let own: Vec<Type> = scope.params().iter().map(|p| Type::Param(*p)).collect();
+    Subst::positional(&type_params, &own)
 }
 
 /// The trait `trait_path`'s default body of `method`, and the substitution
@@ -381,8 +426,10 @@ fn check_method(
         return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
     };
     let (doc, body) = split_doc(heap, body);
+    // One instantiation's method is documented under its code's name.
     if let Some(doc) = doc {
-        reg.docs.insert(Doc::Method(of.owner, method), doc);
+        let key = of.inst.map_or(method, |args| super::generic::method_specialization(&of.owner, method, args));
+        reg.docs.insert(Doc::Method(of.owner, key), doc);
     }
     if let Some((first, _)) = body.first() {
         if crate::check::analyze::is_where_clause(heap, *first)? {
@@ -396,9 +443,7 @@ fn check_method(
     let scope = root.declare(ParamOwner::Method(owner, method), of.type_names).map_err(|twice| {
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
-    let type_params = reg.type_def(&owner).map(|t| t.params.clone()).unwrap_or_default();
-    let own: Vec<Type> = scope.params().iter().map(|p| Type::Param(*p)).collect();
-    let reown = Subst::positional(&type_params, &own);
+    let reown = reown(reg, &owner, &scope, of);
     let target_ty = reown.apply(of.target);
     let assoc: Vec<Type> = of.assoc.iter().map(|t| reown.apply(t)).collect();
     let named: Vec<(SymRef, Type)> = tdef.params[1..].iter().map(|p| p.name).zip(assoc.iter().cloned()).collect();
@@ -443,6 +488,6 @@ fn check_method(
         )));
     }
     let bounds = of.clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
-    let def = Method { owner, method, name, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds };
+    let def = Method { owner, method, name, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds, inst: of.inst.map(<[Type]>::to_vec) };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }

@@ -10,7 +10,7 @@ use super::widen::expect;
 use super::locals::Locals;
 use super::registry::{TypeDef, TypeEntry, ValueDef};
 use super::method::check_method_call;
-use super::resolve::{find_named, receiver_method, sees, value_named};
+use super::resolve::{find_named, sees, value_named};
 use super::subst::Subst;
 use super::tree::{Node, Typed};
 use super::type_syntax::parse_type;
@@ -212,7 +212,7 @@ pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRe
     if let Some((index, ty)) = field {
         return Ok(Typed { node: Node::FieldGet { obj: Box::new(obj), index }, ty, loc });
     }
-    match receiver_method(cx.reg, cx.ns, &recv_ty, name) {
+    match cx.receiver_method(&recv_ty, name) {
         Some((owner, def)) if def.instance => check_method_call(cx, heap, locals, owner, name, def, Some(obj), &[], None, loc),
         _ if cx.reg.has_inst_method(path, name) => {
             unimplemented!("typeck: `{}::{}`, a method `{}` has for one instantiation", recv.name(), member.name(), path)

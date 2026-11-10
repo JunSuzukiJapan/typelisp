@@ -77,11 +77,8 @@ fn definition(cx: &Cx, heap: &Heap, v: Value) -> Result<Doc, Error> {
                     let method = member_symbol(member.name());
                     match cx.reg.types.get(&owner) {
                         Some(TypeEntry::Type(def)) if def.variant_index(method).is_some() => Err(constructor(&name)),
-                        Some(TypeEntry::Type(_)) => match cx.reg.method(&owner, method) {
-                            Some(_) => Ok(Doc::Method(owner, method)),
-                            None if cx.reg.has_inst_method(&owner, method) => {
-                                unimplemented!("typeck: `documentation` of `{}`, a method written for one instantiation", name)
-                            }
+                        Some(TypeEntry::Type(_)) => match super::tools::member_code(cx, owner, method, &name, "documentation")? {
+                            Some((code, _)) => Ok(Doc::Method(owner, code)),
                             None => Err(Error::TypeError(format!("documentation: type `{}` has no associated function or method `{}`", owner, member.name()))),
                         },
                         Some(TypeEntry::Trait(def)) => match def.method(method) {
@@ -94,7 +91,8 @@ fn definition(cx: &Cx, heap: &Heap, v: Value) -> Result<Doc, Error> {
             }
         }
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
-            unimplemented!("typeck: `documentation` of a method of one instantiation (`Type<args>::member`)")
+            let (owner, code, _) = super::tools::instantiation_member(cx, heap, v, "documentation")?;
+            Ok(Doc::Method(owner, code))
         }
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::VALUE_MEMBER)) => {
             let parts = heap.list_to_vec(v)?;

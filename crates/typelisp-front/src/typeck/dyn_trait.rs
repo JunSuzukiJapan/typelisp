@@ -153,7 +153,8 @@ fn at_in(reg: &Registry, path: &Path, at: &[Option<Type>], target: &Path) -> Opt
 pub(crate) fn coerce(cx: &Cx, t: Typed, to: &Path, pins: &[Type]) -> Result<Typed, Error> {
     let to_ty = Type::Dyn(*to, pins.to_vec());
     let found = cx.with_default(&t.ty);
-    let refused = |why: NotDyn| Error::TypeError(not_dyn(&found, to, pins, &why));
+    // Said of the type as checking it decided it.
+    let refused = |why: NotDyn| Error::TypeError(not_dyn(&cx.holes.borrow().shown(&found), to, pins, &why));
     match &found {
         Type::Dyn(from, from_pins) => {
             let (fdef, from_slots) = object_safe(cx.reg, from)?;
@@ -215,6 +216,8 @@ fn admit(cx: &Cx, ty: &Type, path: &Path, tdef: &TraitDef, pins: &[Type]) -> Res
         Meets::NotYet => unimplemented!("typeck: whether `{}`, not decided yet, implements `{}`", ty, path),
     }
     storable(cx.reg, ty)?;
+    // As `meets` decided it: an `impl` may be one instantiation's.
+    let ty = &cx.resolve(ty);
     let args: &[Type] = match ty {
         Type::Named(_, args) => args,
         _ => &[],

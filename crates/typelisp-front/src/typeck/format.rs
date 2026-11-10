@@ -141,7 +141,7 @@ fn check_control(
 fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &str, items: &[Typed], loc: Option<Loc>) -> Result<Typed, Error> {
     let mut types = Vec::with_capacity(items.len());
     for (i, item) in items.iter().enumerate() {
-        cx.decide(&item.ty);
+        cx.decide_all(&item.ty);
         let ty = cx.resolve(&item.ty);
         if cx.holes.borrow().unsolved(&ty).is_some() {
             return Err(Error::TypeError(format!("{}: the type of argument {} is not decided, and a `~/name/` directive calls what its type says", what, i + 1)));

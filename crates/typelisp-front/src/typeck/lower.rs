@@ -107,17 +107,17 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                     None => unimplemented!("typeck: `{}::{}` on a `{}`, which names no type", trait_path, method, other),
                 },
             };
-            let Some(def) = lw.reg.method(&owner, *method) else {
-                if lw.reg.has_inst_method(&owner, *method) {
-                    unimplemented!("typeck: `{}::{}` on a `{}`, whose `impl` is for one instantiation", trait_path, method, recv)
-                }
+            let Some(def) = lw.reg.method_at(&owner, *method, &type_args) else {
                 if lw.reg.blanket_impls.get(trait_path).is_some() {
                     unimplemented!("typeck: `{}::{}` on a `{}`, through a blanket `impl`", trait_path, method, recv)
                 }
                 unreachable!("`{}` meets the bound on `{}`, so it has `{}`", recv, trait_path, method)
             };
-            // An `impl`'s methods have the type's parameters, in order.
-            let method = if def.sig.builtin || def.sig.type_params.is_empty() {
+            // An `impl`'s methods have the type's parameters, in order; one
+            // for one instantiation has code under that instantiation's name.
+            let method = if let Some(inst) = &def.inst_args {
+                super::generic::method_specialization(&owner, *method, inst)
+            } else if def.sig.builtin || def.sig.type_params.is_empty() {
                 *method
             } else if def.sig.type_params.len() == type_args.len() {
                 lw.requests.ask_method(&owner, *method, type_args)

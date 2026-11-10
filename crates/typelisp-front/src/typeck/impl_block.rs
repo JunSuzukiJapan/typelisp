@@ -105,9 +105,6 @@ fn check_item(
     let (own_where, body) = split_where(heap, body)?;
     let (doc, body) = split_doc(heap, body);
     let method = member_symbol(name.name());
-    if let Some(doc) = doc {
-        reg.docs.insert(Doc::Method(owner, method), doc);
-    }
     let names: Vec<SymRef> = impl_names.iter().chain(&own_names).copied().collect();
     let root = TypeScope::empty();
     let scope = root.declare(ParamOwner::Method(owner, method), &names).map_err(|twice| {
@@ -129,7 +126,23 @@ fn check_item(
     for clause in impl_where.into_iter().chain(own_where) {
         bounds.extend(parse_where(heap, &tcx, clause)?);
     }
-    let def = Method { owner, method, name, instance: receiver.is_some(), public, home: None, params: list, ret, bounds };
+    // A target that names every type argument outright makes the method
+    // that instantiation's own.
+    let inst = match &target_ty {
+        Type::Named(_, args) if impl_names.is_empty() && !args.is_empty() => {
+            if !own_names.is_empty() {
+                unimplemented!("typeck: `{}`, a method with type parameters of its own in an `impl` for one instantiation", method)
+            }
+            Some(args.clone())
+        }
+        _ => None,
+    };
+    // One instantiation's method is documented under its code's name.
+    if let Some(doc) = doc {
+        let key = inst.as_ref().map_or(method, |args| super::generic::method_specialization(&owner, method, args));
+        reg.docs.insert(Doc::Method(owner, key), doc);
+    }
+    let def = Method { owner, method, name, instance: receiver.is_some(), public, home: None, params: list, ret, bounds, inst };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }
 

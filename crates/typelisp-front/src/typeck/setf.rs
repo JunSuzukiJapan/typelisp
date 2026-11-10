@@ -9,7 +9,7 @@
 //! what the setter returns.
 
 use crate::check::bound_name;
-use crate::types::{path_spelling, Path, Type};
+use crate::types::{path_spelling, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -17,8 +17,8 @@ use typelisp_mem::SymRef;
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
 use super::method::check_method_call;
-use super::registry::{MethodDef, ValueDef};
-use super::resolve::{sees, value_named};
+use super::registry::ValueDef;
+use super::resolve::value_named;
 use super::tree::{Node, Typed};
 
 /// `(setf place value)` — `args` without the `setf`.
@@ -97,7 +97,7 @@ fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: Sym
         None => field.name().to_string(),
     };
     let setter = member_symbol(&format!("set-{}", field));
-    let Some(def) = setter_of(cx, &owner, setter) else {
+    let Some((owner, def)) = cx.receiver_method(&obj.ty, setter) else {
         return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", owner, field)));
     };
     check_method_call(cx, heap, locals, owner, setter, def, Some(obj), std::slice::from_ref(&value), None, loc)
@@ -134,21 +134,10 @@ fn set_call_place(
     if spelling == "get" {
         candidates.push(member_symbol("set"));
     }
-    let Some((setter, def)) = candidates.iter().find_map(|name| setter_of(cx, &owner, *name).map(|def| (*name, def))) else {
+    let Some((setter, (owner, def))) = candidates.iter().find_map(|name| cx.receiver_method(&recv.ty, *name).map(|found| (*name, found))) else {
         let tried = candidates.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(" or ");
         return Err(Error::TypeError(format!("setf: `{}` has no setter for `{}` (looked for {})", owner, spelling, tried)));
     };
     let args: Vec<(Value, Option<Loc>)> = keys.iter().cloned().chain([value]).collect();
     check_method_call(cx, heap, locals, owner, setter, def, Some(recv), &args, None, loc)
-}
-
-/// The instance method `name` of `owner`, when it is one this module sees.
-fn setter_of<'r>(cx: &Cx<'r>, owner: &Path, name: SymRef) -> Option<&'r MethodDef> {
-    let def = match cx.reg.method(owner, name) {
-        Some(def) => def,
-        None if cx.reg.has_inst_method(owner, name) => unimplemented!("typeck: `setf` through `{}::{}`, a method written for one instantiation", owner, name),
-        None => return None,
-    };
-    let home = def.home.map_or(owner.ns(), |h| h.ns());
-    (def.instance && (def.sig.public || sees(cx.ns, home))).then_some(def)
 }

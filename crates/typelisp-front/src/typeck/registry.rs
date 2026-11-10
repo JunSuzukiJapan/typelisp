@@ -422,6 +422,12 @@ impl Registry {
         self.inst_methods.get(&(*owner, name)).is_some()
     }
 
+    /// The methods `name` of `owner` written for one instantiation each,
+    /// with the instantiations' type arguments.
+    pub(crate) fn inst_methods(&self, owner: &Path, name: SymRef) -> &[(Vec<Type>, MethodDef)] {
+        self.inst_methods.get(&(*owner, name)).map_or(&[], Vec::as_slice)
+    }
+
     /// Define (or redefine) the method `name` of `owner`.
     pub(crate) fn define_method(&mut self, owner: Path, name: SymRef, def: MethodDef) {
         if self.defaulted.get(&(owner, name)).is_some() {
@@ -452,7 +458,29 @@ impl Registry {
         self.inst_methods.insert((owner, name), insts);
     }
 
-    /// The methods defined since the last commit.
+    /// Every type with an instance method `name`, written as a message names
+    /// it: the type itself for a method of every instantiation, the
+    /// instantiation for one of one. Sorted, so a message is the same from
+    /// run to run.
+    pub(crate) fn types_with_instance_method(&self, name: SymRef) -> Vec<String> {
+        let view = typelisp_print::shared::name_view();
+        let mut out: Vec<String> = self
+            .methods
+            .iter()
+            .filter(|((_, m), def)| *m == name && def.instance)
+            .map(|((owner, _), _)| view.definition(owner.ns(), owner.name_symbol()))
+            .collect();
+        for ((owner, m), insts) in self.inst_methods.iter() {
+            if *m == name {
+                out.extend(insts.iter().filter(|(_, def)| def.instance).map(|(args, _)| Type::Named(*owner, args.clone()).to_string()));
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+        /// The methods defined since the last commit.
     pub(crate) fn methods_written(&self) -> impl Iterator<Item = &(Path, SymRef)> {
         self.methods.written().chain(self.inst_methods.written())
     }
