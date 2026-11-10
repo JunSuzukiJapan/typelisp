@@ -62,7 +62,8 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
             new.blanket_impls.insert(b.trait_path, ());
         }
         for sym in m.c_structs.symbols() {
-            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::CStruct);
+            let def = m.c_structs.get_sym(sym).expect("a key of the table");
+            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::CStruct(def.clone()));
         }
         for sym in m.mod_aliases.symbols() {
             new.module_aliases.insert((ns, sym), *m.mod_aliases.get_sym(sym).expect("a key of the table"));

@@ -226,7 +226,7 @@ fn target_at(reg: &Registry, here: NsId, p: &Path) -> Option<UseTarget> {
         TypeEntry::Type(def) => Some((def.public, 0)),
         TypeEntry::Trait(def) => Some((def.public, 1)),
         TypeEntry::Alias { public, .. } => Some((*public, 2)),
-        TypeEntry::CStruct => None,
+        TypeEntry::CStruct(_) => None,
     };
     match written(reg, here, p, entry)? {
         (path, 0) => Some(UseTarget::Type(path)),

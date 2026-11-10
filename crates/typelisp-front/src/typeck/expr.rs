@@ -59,6 +59,9 @@ pub(crate) struct Cx<'a> {
     block_labels: Cell<u32>,
     /// How many `(unsafe ...)` forms the expression being checked is in.
     unsafe_depth: Cell<u32>,
+    /// The arena of the `unsafe` that owns the expression's allocations:
+    /// none outside one, and whether a `c-alloc` has used it.
+    c_arena: Cell<Option<bool>>,
     /// The control strings to check against their arguments' settled types.
     directives: RefCell<Vec<Directives>>,
     /// The bounds the form's calls require of their type arguments.
@@ -69,7 +72,7 @@ pub(crate) struct Cx<'a> {
 
 impl<'a> Cx<'a> {
     pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), c_arena: Cell::new(None), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -95,6 +98,25 @@ impl<'a> Cx<'a> {
         self.unsafe_depth.set(self.unsafe_depth.get() + 1);
         let r = f();
         self.unsafe_depth.set(self.unsafe_depth.get() - 1);
+        r
+    }
+
+    /// Whether an `unsafe` owns the allocations made here.
+    pub(crate) fn c_arena_open(&self) -> bool {
+        self.c_arena.get().is_some()
+    }
+
+    /// A `c-alloc` uses the arena of the `unsafe` around it.
+    pub(crate) fn c_arena_used(&self) {
+        self.c_arena.set(Some(true));
+    }
+
+    /// `f`, checked as a function of its own, whose allocations need an
+    /// `unsafe` of its own.
+    pub(crate) fn own_arena<R>(&self, f: impl FnOnce() -> R) -> R {
+        let outer = self.c_arena.replace(None);
+        let r = f();
+        self.c_arena.set(outer);
         r
     }
 
@@ -363,9 +385,23 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
 /// binding inside the body hides it as it hides a variable.
 /// `(unsafe body...)`: `body` in order, where a C function may be called
 /// and a C word be a value. Its value is the last form's.
+/// The outermost `unsafe` of a function owns the allocations in it
+/// (`super::c_memory`).
 fn check_unsafe(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
-    let (body, ty) = cx.within_unsafe(|| check_body(cx, heap, locals, args, expected))?;
-    Ok(Typed { node: Node::Let { binds: Vec::new(), body }, ty, loc })
+    let owner = !cx.c_arena_open();
+    if owner {
+        cx.c_arena.set(Some(false));
+    }
+    let checked = cx.within_unsafe(|| check_body(cx, heap, locals, args, expected));
+    let allocates = owner && cx.c_arena.get() == Some(true);
+    if owner {
+        cx.c_arena.set(None);
+    }
+    let (body, ty) = checked?;
+    let body = Typed { node: Node::Let { binds: Vec::new(), body }, ty: ty.clone(), loc: None };
+    let mut owned = super::c_memory::owned(cx, body, &ty, owner, allocates)?;
+    owned.loc = loc;
+    Ok(owned)
 }
 
 /// Whether `v` is an `(unsafe ...)` form.
@@ -485,6 +521,12 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::LOOP => return looping::check_loop(cx, heap, locals, args, expected, loc),
         wk::BLOCK => return block::check_block(cx, heap, locals, args, expected, loc),
         wk::UNSAFE => return check_unsafe(cx, heap, locals, args, expected, loc),
+        wk::DEF_C_STRUCT => {
+            return Err(Error::TypeError("def-c-struct is written at top level, inside `(unsafe ...)`: (unsafe (def-c-struct name (field type)...))".into()))
+        }
+        wk::C_ALLOC => return super::c_memory::check_c_alloc(cx, heap, locals, args, loc),
+        wk::C_REF => return super::c_memory::check_c_ref(cx, heap, locals, args, loc),
+        wk::C_DEREF => return super::c_memory::check_c_deref(cx, heap, locals, args, loc),
         wk::CATCH => return catch::check_catch(cx, heap, locals, args, expected, loc),
         wk::THROW => return catch::check_throw(cx, heap, locals, args, loc),
         wk::RETURN_FROM => return block::check_return_from(cx, heap, locals, args, loc),
@@ -502,7 +544,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
                 return Err(Error::TypeError("a member of a value is written `value::member`".into()));
             };
-            return instance::check_field(cx, locals, *recv, *member, loc);
+            return instance::check_field(cx, heap, locals, *recv, *member, loc);
         }
         _ => {}
     }

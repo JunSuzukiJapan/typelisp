@@ -37,6 +37,19 @@ pub(crate) fn check_spawn(cx: &Cx, heap: &mut Heap, locals: &Locals, tag: u32, a
         }
     }
     let call = check_expr(cx, heap, locals, *call, None, call_loc.clone())?;
+    // The task can outlive the `unsafe` that owns the memory.
+    let passed: Vec<&Typed> = match &call.node {
+        Node::Call { args, .. } | Node::MethodCall { args, .. } | Node::TraitCall { args, .. } | Node::DynCall { args, .. } => args.iter().collect(),
+        Node::Apply { callee, args } => std::iter::once(&**callee).chain(args).collect(),
+        _ => Vec::new(),
+    };
+    if passed.iter().any(|a| super::c_memory::mentions_typed_ptr(&cx.resolve(&a.ty))) {
+        return Err(Error::TypeError(format!(
+            "a typed pointer cannot be passed to `{}`: the task can run after the `unsafe` that \
+             allocated the memory is left and has freed it",
+            form_name(tag)
+        )));
+    }
     let ty = if tag == wk::TASK { task_of(call.ty.clone()) } else { thread_of(call.ty.clone()) };
     Ok(Typed { node: Node::Spawn { tag, call: Box::new(call) }, ty, loc })
 }

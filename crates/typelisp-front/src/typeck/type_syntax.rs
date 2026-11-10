@@ -92,7 +92,13 @@ pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Erro
             }
         }
         Value::Cons(_) if is_dyn_form(heap, v) => dyn_type(heap, cx, v),
-        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR)) => unimplemented!("typeck: the C pointer type `(ptr ...)`"),
+        // `(ptr T)`: a typed pointer.
+        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR)) => {
+            let [_, pointee] = heap.list_to_vec(v)?[..] else {
+                return Err(Error::TypeError("a typed pointer is written (ptr T)".into()));
+            };
+            Ok(Type::PtrTo(Box::new(super::c_memory::pointee(heap, cx, pointee)?)))
+        }
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::FN)) => fn_type(heap, cx, v),
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
             Err(Error::TypeError("`Name<Args>::member` names a member of a type, not a type".to_string()))
@@ -153,7 +159,7 @@ fn at_path(cx: &TypeCx, path: Path, args: Vec<Type>) -> Result<Type, Error> {
         Some(entry @ TypeEntry::Type(TypeDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
         Some(entry @ TypeEntry::Alias { public, .. }) if visible(*public) => entry_type(path, entry, args),
         Some(entry @ TypeEntry::Trait(TraitDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
-        Some(entry @ TypeEntry::CStruct) => entry_type(path, entry, args),
+        Some(entry @ TypeEntry::CStruct(_)) => entry_type(path, entry, args),
         _ => Err(unknown_type(&path.to_string())),
     }
 }
@@ -243,6 +249,7 @@ fn entry_type(path: Path, entry: &TypeEntry, args: Vec<Type>) -> Result<Type, Er
             Ok(Subst::positional(params, &args).apply(body))
         }
         TypeEntry::Trait(_) => unimplemented!("typeck: the trait `{}` written where a type is", path),
-        TypeEntry::CStruct => unimplemented!("typeck: the C struct `{}` written where a type is", path),
+        // A C struct is no value's type: only a typed pointer points at one.
+        TypeEntry::CStruct(_) => Err(unknown_type(path.last_segment())),
     }
 }

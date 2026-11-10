@@ -261,6 +261,15 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             heap.push_root(tag);
             forms::throw_form(heap, tag, value, repr)
         }
+        Node::TypeValue { ty } => {
+            let form = core::type_form(heap, &lw.settle(ty), &[])?;
+            heap.push_root(form);
+            core::tagged(heap, wk::TYPE_VALUE, &[form])
+        }
+        Node::UntagInt { value } => {
+            let value = lower_rooted(heap, lw, value)?;
+            crate::check::analyze::untag_int_form(heap, value)
+        }
         Node::Break => forms::break_form(heap),
         Node::Return { value } => {
             let value = value.as_deref().map(|v| lower_rooted(heap, lw, v)).transpose()?;

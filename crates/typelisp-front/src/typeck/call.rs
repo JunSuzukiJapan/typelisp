@@ -97,5 +97,11 @@ pub(crate) fn check_call(
             cx.require_bound(subst.apply(&Type::Param(*p)), b.at(&subst), path.to_string(), p.name.name().to_string(), loc.clone())?;
         }
     }
-    Ok(Typed { node: Node::Call { path, targs: call_targs, args: checked }, ty: ret, loc })
+    let call = Typed { node: Node::Call { path, targs: call_targs, args: checked }, ty: ret, loc };
+    // A typed pointer a C function answers has to point into memory an
+    // `unsafe` here allocated.
+    match &def.ret {
+        Type::PtrTo(pointee) if def.ffi => Ok(super::c_memory::checked_from_c(call, pointee)),
+        _ => Ok(call),
+    }
 }

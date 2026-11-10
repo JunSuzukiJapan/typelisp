@@ -279,6 +279,9 @@ fn check_primary(
                 // The reader made each name the module's own; nothing is left
                 // to run.
                 wk::SHADOW => return Ok((crate::check::forms::module_form(heap, &Path::in_ns(ns, "nothing"), &[])?, None)),
+                wk::UNSAFE if super::c_memory::declares_c_structs(heap, args)? => {
+                    return Ok((super::c_memory::check_c_struct_block(reg, d, heap, args)?, None));
+                }
                 _ => {}
             }
         }

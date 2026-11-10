@@ -87,7 +87,7 @@ impl Checker {
     /// (possibly `pub`): `Some(true)`. One that holds none: `Some(false)`, an
     /// ordinary expression. A mixture is refused — the declarations and the
     /// expression would be checked by two different rules.
-    pub(super) fn unsafe_declares_c_structs(heap: &Heap, forms: &[Value]) -> Result<bool, Error> {
+    pub(crate) fn unsafe_declares_c_structs(heap: &Heap, forms: &[Value]) -> Result<bool, Error> {
         let is_decl = |v: &Value| -> bool {
             let Ok(items) = heap.list_to_vec(*v) else { return false };
             let head = |i: usize, konst: u32| matches!(items.get(i), Some(Value::Symbol(id)) if id.is(konst));

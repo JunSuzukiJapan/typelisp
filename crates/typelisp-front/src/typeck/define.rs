@@ -27,6 +27,7 @@ pub(crate) enum Kind {
     Type,
     Trait,
     Alias,
+    CStruct,
     Method,
     Macro,
 }
@@ -39,6 +40,7 @@ impl Kind {
             Kind::Type => "type",
             Kind::Trait => "trait",
             Kind::Alias => "type alias",
+            Kind::CStruct => "C struct",
             Kind::Method => "method",
             Kind::Macro => "macro",
         }
@@ -110,6 +112,7 @@ impl Definer<'_> {
             (Some(TypeEntry::Type(def)), Kind::Type) => Some(def.builtin),
             (Some(TypeEntry::Trait(_)), Kind::Trait) => Some(false),
             (Some(TypeEntry::Alias { .. }), Kind::Alias) => Some(false),
+            (Some(TypeEntry::CStruct(_)), Kind::CStruct) => Some(false),
             (Some(TypeEntry::Type(_)), _) => return Err(clash("type")),
             (Some(TypeEntry::Trait(_)), _) => return Err(clash("trait")),
             (Some(TypeEntry::Alias { .. }), _) => {
@@ -119,7 +122,7 @@ impl Definer<'_> {
                     name.name()
                 )))
             }
-            (Some(TypeEntry::CStruct), _) => {
+            (Some(TypeEntry::CStruct(_)), _) => {
                 return Err(Error::TypeError(format!(
                     "cannot define {} `{}`: a `def-c-struct` of that name already exists here",
                     kind.word(),

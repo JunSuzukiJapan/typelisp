@@ -15,6 +15,7 @@ use typelisp_mem::SymRef;
 use super::expr::{check_body, check_expr, Cx};
 use super::format::sexpr_list;
 use super::block::check_named_body;
+use super::c_memory::mentions_typed_ptr;
 use super::locals::Locals;
 use super::registry::FnDef;
 use super::tree::{Node, Typed};
@@ -53,7 +54,7 @@ pub(crate) fn check_lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(V
     // A loop or a block around the `lambda` is not one its body can leave.
     let outer = cx.loops.replace(Vec::new());
     let outer_blocks = cx.blocks.replace(Vec::new());
-    let checked = locals.bind(params.clone()).and_then(|inner| check_body(cx, heap, &inner, body, Some(&ret)));
+    let checked = cx.own_arena(|| locals.bind(params.clone()).and_then(|inner| check_body(cx, heap, &inner, body, Some(&ret))));
     cx.loops.replace(outer);
     cx.blocks.replace(outer_blocks);
     let (body, _) = checked?;
@@ -67,13 +68,6 @@ fn param(heap: &Heap, tcx: &super::type_syntax::TypeCx, p: Value) -> Result<(Sym
         return Err(Error::TypeError("parameter must be (name type)".into()));
     };
     Ok((*name, parse_type(heap, tcx, *ty)?))
-}
-
-/// Whether `ty` is or holds a typed pointer.
-fn mentions_typed_ptr(ty: &Type) -> bool {
-    let mut found = false;
-    super::unify::walk(ty, &mut |t| found |= matches!(t, Type::PtrTo(_)));
-    found
 }
 
 /// `callee`, a value, called with `args`.
@@ -224,7 +218,7 @@ pub(crate) fn check_labels(
         // block named after itself.
         let outer = cx.loops.replace(Vec::new());
         let outer_blocks = cx.blocks.replace(Vec::new());
-        let checked = scope.bind(params.clone()).and_then(|inner| check_named_body(cx, heap, &inner, name, &def_body, &ret));
+        let checked = cx.own_arena(|| scope.bind(params.clone()).and_then(|inner| check_named_body(cx, heap, &inner, name, &def_body, &ret)));
         cx.loops.replace(outer);
         cx.blocks.replace(outer_blocks);
         let body = checked?;

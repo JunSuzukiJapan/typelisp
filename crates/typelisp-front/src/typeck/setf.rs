@@ -81,7 +81,13 @@ fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: Sym
         },
     };
     let owner = match &obj.ty {
-        Type::PtrTo(_) => unimplemented!("typeck: `setf` of a C struct's field through a pointer"),
+        Type::PtrTo(inner) if matches!(**inner, Type::CStruct(_)) => {
+            let set = super::c_memory::field_set(cx, heap, locals, obj, field, value).expect("a typed pointer to a C struct");
+            return set.map(|mut t| {
+                t.loc = loc;
+                t
+            });
+        }
         Type::Named(p, _) if tuple_arity(p).is_some() => unimplemented!("typeck: `setf` of a tuple's element"),
         Type::Named(p, _) => *p,
         _ => return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv.name(), field.name()))),
@@ -105,7 +111,10 @@ fn set_call_place(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     let spelling = heap.symbol_spelling(accessor).to_string();
-    if spelling == "c-deref" || spelling == "aref" {
+    if spelling == "c-deref" {
+        return super::c_memory::set_c_deref(cx, heap, locals, rest, value, loc);
+    }
+    if spelling == "aref" {
         unimplemented!("typeck: `setf` of a `({} ...)` place", spelling)
     }
     let Some(((recv, recv_loc), keys)) = rest.split_first() else {

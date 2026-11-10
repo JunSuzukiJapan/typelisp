@@ -807,7 +807,7 @@ pub(super) fn string_list(heap: &mut Heap, items: &[String]) -> Result<Value, Er
 }
 
 /// `(untag-int E)` — see [`int_boundary_raw`].
-pub(super) fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
+pub(crate) fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::UNTAG_INT, &[e])
 }
 

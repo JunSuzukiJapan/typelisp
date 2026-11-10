@@ -166,7 +166,7 @@ fn slot_shape(tname: &str, def: &TypeDef) -> Error {
 
 /// `recv::member` (read as `(%value-member recv member)`), where `recv` is a
 /// local of a struct type: that field.
-pub(crate) fn check_field(cx: &Cx, locals: &Locals, recv: SymRef, member: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
+pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, member: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
     let Some(recv_ty) = locals.lookup(recv) else {
         if let Some((_, ValueDef::Var(_))) = value_named(cx.reg, cx.ns, recv) {
             unimplemented!("typeck: `{}::{}`, a member of the global `{}`", recv.name(), member.name(), recv.name())
@@ -181,6 +181,14 @@ pub(crate) fn check_field(cx: &Cx, locals: &Locals, recv: SymRef, member: SymRef
     };
     let recv_ty = cx.resolve(recv_ty);
     let obj = Typed { node: Node::Local { name: recv }, ty: recv_ty.clone(), loc: loc.clone() };
+    // A field of the C struct a typed pointer points at.
+    if matches!(&recv_ty, Type::PtrTo(inner) if matches!(**inner, Type::CStruct(_))) {
+        let read = super::c_memory::field_get(cx, heap, obj, member).expect("a typed pointer to a C struct");
+        return read.map(|mut t| {
+            t.loc = loc;
+            t
+        });
+    }
     let field = match &recv_ty {
         Type::Named(path, args) => cx.reg.type_def(path).and_then(|def| {
             let name = member_symbol(member.name());

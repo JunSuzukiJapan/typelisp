@@ -70,6 +70,15 @@ fn note(cx: &Cx, tag: SymRef, ty: &Type, who: &str) -> Result<(), Error> {
     if cx.resolve(ty) == Type::Never {
         return Ok(());
     }
+    if super::c_memory::mentions_typed_ptr(&cx.resolve(ty)) {
+        return Err(Error::TypeError(format!(
+            "{}: `{}` would carry `{}`, and a typed pointer cannot leave the `unsafe` that \
+             allocated its memory — a `catch` outside it would receive freed memory",
+            who,
+            tag.name(),
+            cx.resolve(ty)
+        )));
+    }
     match carried(cx, tag) {
         Some(known) => {
             let unified = cx.holes.borrow_mut().unify(&known, ty);

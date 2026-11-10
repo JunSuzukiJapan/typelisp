@@ -80,6 +80,11 @@ pub(crate) enum Node {
     /// `(throw 'tag value)`: leave for the nearest `catch` of `tag` around
     /// it at run time, with `value`.
     Throw { #[serde(with = "crate::owned_form::sym_serde")] tag: SymRef, value: Box<Typed> },
+    /// The type `ty` as a value, for an internal builtin that reads a C
+    /// object's layout.
+    TypeValue { ty: Type },
+    /// The `int` `value` as the raw word an internal builtin reads.
+    UntagInt { value: Box<Typed> },
     /// `(lambda (params) ret body...)`: a function value.
     Lambda { #[serde(with = "super::wire::sym_pairs")] params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Typed> },
     /// `(labels (def...) body...)`: local functions, which see each other.
@@ -266,6 +271,7 @@ impl Typed {
             | Node::Break
             | Node::Default { .. }
             | Node::FnRef { .. }
+            | Node::TypeValue { .. }
             | Node::Tool { .. } => {
                 Vec::new()
             }
@@ -286,6 +292,7 @@ impl Typed {
             | Node::Block { body: obj, .. }
             | Node::Catch { body: obj, .. }
             | Node::Throw { value: obj, .. }
+            | Node::UntagInt { value: obj }
             | Node::Panic { message: obj } => {
                 vec![&**obj]
             }
@@ -307,6 +314,7 @@ impl Typed {
             | Node::Break
             | Node::Default { .. }
             | Node::FnRef { .. }
+            | Node::TypeValue { .. }
             | Node::Tool { .. } => {
                 Vec::new()
             }
@@ -327,6 +335,7 @@ impl Typed {
             | Node::Block { body: obj, .. }
             | Node::Catch { body: obj, .. }
             | Node::Throw { value: obj, .. }
+            | Node::UntagInt { value: obj }
             | Node::Panic { message: obj } => {
                 vec![&mut **obj]
             }
@@ -362,7 +371,7 @@ impl Typed {
             match &mut t.node {
                 Node::Call { targs, .. } | Node::MethodCall { targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
-                Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } => *field_ty = f(field_ty),
+                Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } | Node::TypeValue { ty: field_ty } => *field_ty = f(field_ty),
                 Node::Lambda { params, ret, .. } => {
                     params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
                     *ret = f(ret);
@@ -392,6 +401,7 @@ impl Typed {
                 | Node::Block { .. }
                 | Node::ReturnFrom { .. }
                 | Node::Throw { .. }
+                | Node::UntagInt { .. }
                 | Node::UnwindProtect { .. }
                 | Node::Panic { .. }
                 | Node::Default { .. }
