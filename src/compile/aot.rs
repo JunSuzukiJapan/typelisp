@@ -617,10 +617,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // What `main` answers with decides how the exit code is read off it: an
     // `int` is a tagged word (a fixnum's payload is the code; a bignum has
     // none), a fixed-width integer the raw word.
-    let main_returns_int = chk
-        .registry()
-        .fn_sig(&entry_path)
-        .is_some_and(|sig| sig.ret == crate::Type::Int);
+    let main_returns_int = chk.fn_ret(&entry_path).is_some_and(|ret| ret == crate::Type::Int);
     // The namespace an eval'd form is checked in: the entry file's module, as
     // `typl file.typl` places it (`run_file`), so a bare name in it resolves
     // to the program's own definition.

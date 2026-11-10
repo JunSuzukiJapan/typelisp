@@ -2440,6 +2440,22 @@ impl Checker {
         }
     }
 
+    /// What the module-level function `path` returns, when there is one.
+    pub fn fn_ret(&self, path: &Path) -> Option<Type> {
+        match &self.rebuilt {
+            Some(rebuilt) => rebuilt.fn_ret(path),
+            None => self.info.reg.fn_sig(path).map(|sig| sig.ret.clone()),
+        }
+    }
+
+    /// The kind of the data type `path`, when there is one.
+    pub fn type_kind(&self, path: &Path) -> Option<AdtKind> {
+        match &self.rebuilt {
+            Some(rebuilt) => rebuilt.type_kind(path),
+            None => self.info.reg.type_def(path).map(|def| def.kind),
+        }
+    }
+
     /// The type/constructor registry — exposed so a caller (e.g. the REPL)
     /// can resolve an ADT variant's constructor name when printing an enum
     /// result (the box stores the variant index, not its name).

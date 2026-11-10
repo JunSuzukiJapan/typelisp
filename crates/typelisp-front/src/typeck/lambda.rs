@@ -226,8 +226,9 @@ pub(crate) fn method_value(cx: &Cx, owner: Path, method: SymRef, def: &MethodDef
             cx.require_bound(subst.apply(&Type::Param(*p)), b.at(&subst), what.clone(), p.name.name().to_string(), loc.clone())?;
         }
     }
-    // A Rust builtin has one entry point for every instantiation.
-    let targs: Vec<Type> = match sig.builtin {
+    // A Rust builtin has one entry point for every instantiation; one of a
+    // generic type is named by a method of its own that calls it.
+    let targs: Vec<Type> = match sig.builtin && !super::toplevel::builtin_needs_specialization(cx.reg, &owner, def) {
         true => Vec::new(),
         false => sig.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect(),
     };

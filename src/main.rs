@@ -711,8 +711,7 @@ fn try_run_pending(
                     // prints — the word alone cannot say it is one.
                     let repr = {
                         let chk = checker.borrow();
-                        let reg = chk.registry();
-                        chk.expr_type().map(|ty| check::repr::Repr::of_by(ty, &|p| reg.type_def(p).map(|d| d.kind)))
+                        chk.expr_type().map(|ty| check::repr::Repr::of_by(ty, &|p| chk.type_kind(p)))
                     };
                     heap.push_root(v);
                     let rendered = interp.render_readably(heap, v, repr.as_ref());

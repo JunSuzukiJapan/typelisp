@@ -24,7 +24,8 @@ use super::expr::{check_expr, Cx};
 use super::generic::{Base, Name, Request, Requests};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
-use super::registry::{Registry, TypeEntry};
+use super::registry::{MethodDef, Registry, TypeEntry};
+use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::wire::{Bodies, RebuiltBodies};
@@ -183,6 +184,17 @@ impl TypeChecker {
         reg.commit();
         paths.sort_by_key(|p| p.to_string());
         paths
+    }
+
+    /// What the function `path` returns, when it is a module-level
+    /// function.
+    pub(crate) fn fn_ret(&self, path: &Path) -> Option<Type> {
+        self.reg.get()?.fn_def(path).map(|def| def.ret.clone())
+    }
+
+    /// The kind of the type `path`, when it is a data type.
+    pub(crate) fn type_kind(&self, path: &Path) -> Option<crate::check::registry::AdtKind> {
+        self.reg.get()?.type_def(path).map(|def| def.kind)
     }
 
     /// The type of the last form [`Self::check_form`] checked, when it was an
@@ -472,6 +484,12 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
         Base::Fn(p) => &reg.fn_def(&p).expect("a specialization is asked for only of a defined function").type_params,
         Base::Method(owner, m) => &reg.method(&owner, m).expect("a specialization is asked for only of a defined method").sig.type_params,
     };
+    if let (Base::Method(owner, m), Name::Method(name)) = (req.base, req.name) {
+        let def = reg.method(&owner, m).expect("checked above");
+        if def.sig.builtin {
+            return builtin_specialization(heap, reg, requests, owner, m, def, &req.args, name);
+        }
+    }
     let (template, subst) = match (reg.template(&req.base), req.base) {
         (Some(template), _) => (template, Subst::positional(type_params, &req.args)),
         // A method an `impl` took from the trait's default body is that
@@ -496,6 +514,37 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
         }
         _ => unreachable!("a specialization is named as what it specializes"),
     }
+}
+
+/// The builtin method `method` of `owner`, `def`, at the type's arguments
+/// `args`, as a method named `name` of its own: one that calls it. A Rust
+/// builtin has one entry for every instantiation; this one is the code a
+/// trait object's table or a function value of it names.
+#[allow(clippy::too_many_arguments)]
+fn builtin_specialization(heap: &mut Heap, reg: &Registry, requests: &mut Requests, owner: Path, method: SymRef, def: &MethodDef, args: &[Type], name: SymRef) -> Result<Value, Error> {
+    let subst = Subst::positional(&def.sig.type_params, args);
+    let params: Vec<(SymRef, Type)> = def
+        .sig
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (typelisp_mem::symbols::intern(&format!("%builtin-arg-{}", i)), subst.apply(t)))
+        .collect();
+    let ret = subst.apply(&def.sig.ret);
+    let call_args = params.iter().map(|(n, t)| Typed { node: Node::Local { name: *n }, ty: t.clone(), loc: None }).collect();
+    let call = Typed { node: Node::MethodCall { owner, method, instance: def.instance, targs: Vec::new(), args: call_args }, ty: ret.clone(), loc: None };
+    let none = Subst::default();
+    let mut lw = Lowering { reg, subst: &none, requests };
+    let body = vec![lower_rooted(heap, &mut lw, &call)?];
+    reg.defmethod_form(heap, &owner, name, def.instance, &params, &ret, &body)
+}
+
+/// Whether the builtin method `def` is code a trait object's table or a
+/// function value can name only once specialized: an instance method of a
+/// generic type, with no type parameters of its own and no `&rest`.
+pub(crate) fn builtin_needs_specialization(reg: &Registry, owner: &Path, def: &MethodDef) -> bool {
+    let owner_params = reg.type_def(owner).map_or(0, |d| d.params.len());
+    def.sig.builtin && def.instance && owner_params > 0 && def.sig.type_params.len() == owner_params && def.sig.rest.is_none()
 }
 
 #[cfg(test)]

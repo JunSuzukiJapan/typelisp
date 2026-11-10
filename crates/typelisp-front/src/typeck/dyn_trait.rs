@@ -327,6 +327,7 @@ pub(crate) fn tables(lw: &mut Lowering, concrete: &Type, trait_path: &Path) -> R
     for (m, decl) in &order {
         let name = match lw.reg.method_at(&owner, *m, &targs) {
             Some(def) if def.inst_args.is_some() => method_specialization(&owner, *m, &targs),
+            Some(def) if super::toplevel::builtin_needs_specialization(lw.reg, &owner, def) => lw.requests.ask_method(&owner, *m, targs.clone()),
             Some(def) if def.sig.builtin || def.sig.type_params.is_empty() => *m,
             Some(def) if def.sig.type_params.len() == targs.len() => lw.requests.ask_method(&owner, *m, targs.clone()),
             Some(_) => unimplemented!("typeck: `{}::{}`, with type parameters of its own, in the table of `{}`", owner, m, to),
