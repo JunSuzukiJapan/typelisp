@@ -79,6 +79,9 @@ impl TraitBound {
 /// signature, and what the trait's parameters are at the bound.
 pub(crate) struct BoundMethod<'r> {
     pub(crate) trait_path: Path,
+    /// The trait's name of the method: an operator's is the trait method it
+    /// spells (`/` is `Div`'s `div`).
+    pub(crate) method: typelisp_mem::SymRef,
     pub(crate) sig: &'r FnDef,
     /// The trait's `Self` and associated types at the bound; `None` for an
     /// associated type the bound does not pin.
@@ -87,13 +90,17 @@ pub(crate) struct BoundMethod<'r> {
 
 /// The method `name` the type parameter `p` has by its bounds in `scope`.
 pub(crate) fn bound_method<'r>(reg: &'r Registry, scope: &TypeScope, p: TypeParam, name: typelisp_mem::SymRef) -> Option<BoundMethod<'r>> {
-    for b in scope.bounds_of(p) {
-        let at = bound_at(reg, Type::Param(p), b)?;
-        if let Some(found) = find_method(reg, b.trait_path, at, name, 0) {
-            return Some(found);
+    let find = |name| {
+        for b in scope.bounds_of(p) {
+            let at = bound_at(reg, Type::Param(p), b)?;
+            if let Some(found) = find_method(reg, b.trait_path, at, name, 0) {
+                return Some(found);
+            }
         }
-    }
-    None
+        None
+    };
+    // An operator no bound declares is the trait method it spells.
+    find(name).or_else(|| crate::check::analyze::trait_operator_method(name).and_then(find))
 }
 
 /// The trait `trait_path`'s parameters, `Self` being `self_ty`, at the
@@ -110,7 +117,7 @@ fn find_method(reg: &Registry, trait_path: Path, at: Vec<Option<Type>>, name: ty
     assert!(depth < 64, "the supertraits of `{}` do not end", trait_path);
     let tdef = trait_def(reg, &trait_path)?;
     if let Some(sig) = tdef.method(name) {
-        return Some(BoundMethod { trait_path, sig, at });
+        return Some(BoundMethod { trait_path, method: name, sig, at });
     }
     for sup in &tdef.supertraits {
         let sup_at = supertrait_at(reg, tdef, &at, sup)?;

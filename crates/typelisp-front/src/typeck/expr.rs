@@ -202,7 +202,7 @@ impl<'a> Cx<'a> {
         let r = Required { ty, bound, of, param, loc };
         match meets(self, &r.ty, &r.bound) {
             Meets::Yes => Ok(()),
-            Meets::No(why) => Err(r.error(&why)),
+            Meets::No(why) => Err(r.error(self.reg, &why)),
             Meets::NotYet => {
                 self.required.borrow_mut().push(r);
                 Ok(())
@@ -237,7 +237,7 @@ impl<'a> Cx<'a> {
             for r in pending {
                 match meets(self, &r.ty, &r.bound) {
                     Meets::Yes => {}
-                    Meets::No(why) => return Err(r.error(&why)),
+                    Meets::No(why) => return Err(r.error(self.reg, &why)),
                     Meets::NotYet => left.push(r),
                 }
             }
@@ -288,10 +288,41 @@ struct Required {
 
 impl Required {
     /// The error for the type argument not meeting the bound, as `why`
-    /// says.
-    fn error(&self, why: &crate::check::core::Unmet) -> Error {
-        at(Error::TypeError(bound_message(&self.of, &self.param, why)), &self.loc)
+    /// says: with a method of the type that answers a value that does, when
+    /// it has one.
+    fn error(&self, reg: &Registry, why: &crate::check::core::Unmet) -> Error {
+        let why = match why {
+            crate::check::core::Unmet::Unimplemented { ty, trait_path, via: None } => {
+                crate::check::core::Unmet::Unimplemented { ty: ty.clone(), trait_path: *trait_path, via: method_yielding(reg, ty, *trait_path) }
+            }
+            other => other.clone(),
+        };
+        at(Error::TypeError(bound_message(&self.of, &self.param, &why)), &self.loc)
     }
+}
+
+/// A method of `ty` taking only the receiver whose value implements
+/// `trait_path`, the first by name when there are several.
+fn method_yielding(reg: &Registry, ty: &Type, trait_path: crate::types::Path) -> Option<SymRef> {
+    let owner = crate::types::nominal_path(ty)?;
+    let args = match ty {
+        Type::Named(_, args) => args.as_slice(),
+        _ => &[],
+    };
+    let owner_params = reg.type_def(&owner).map_or(0, |d| d.params.len());
+    let bare = TraitBound { trait_path, assoc: Default::default() };
+    let mut found: Vec<SymRef> = reg
+        .methods_of(owner)
+        .filter(|(_, m)| {
+            let sig = &m.sig;
+            // The type's parameters, and none of its own.
+            m.instance && sig.params.len() == 1 && !super::args::has_tail(sig) && sig.type_params.len() == owner_params
+        })
+        .filter(|(_, m)| super::bounds::settled_meets(reg, &super::subst::Subst::positional(&m.sig.type_params, args).apply(&m.sig.ret), &bare))
+        .map(|(name, _)| name)
+        .collect();
+    found.sort_by_key(|n| n.name().to_string());
+    found.first().copied()
 }
 
 /// `e` at `loc`, when it is known.
@@ -511,7 +542,15 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected:
         Some((path, ValueDef::Fn(def))) => lambda::fn_value(cx, path, def, expected, loc),
         Some((path, ValueDef::Var(var))) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
         Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched above"),
-        None => Err(Error::TypeError(format!("unbound variable: {}", heap.symbol_spelling(id)))),
+        None => {
+            // A method of other types than the expected function's receiver.
+            if let Some(Type::Fn(params, _, _)) = expected.map(|e| cx.resolve(e)) {
+                if let Some(e) = params.first().and_then(|receiver| no_method(cx, receiver, member_symbol(heap.symbol_spelling(id)))) {
+                    return Err(e);
+                }
+            }
+            Err(Error::TypeError(format!("unbound variable: {}", heap.symbol_spelling(id))))
+        }
     }
 }
 
@@ -696,33 +735,43 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     if let Type::Param(p) = cx.resolve(&first.ty) {
         if let Some(bound) = bound_method(cx.reg, cx.scope, p, member) {
-            return method::check_trait_call(cx, heap, locals, bound, member, first, rest, expected, loc);
+            let method = bound.method;
+            return method::check_trait_call(cx, heap, locals, bound, method, first, rest, expected, loc);
         }
     }
     // A name that is a method of other types is no missing function: the
     // first argument's type picked the method, and it has none by this name.
     if value.is_none() {
-        let owners = cx.reg.types_with_instance_method(member);
-        if !owners.is_empty() {
-            let recv_ty = cx.resolve(&first.ty);
-            if let Type::Param(_) = recv_ty {
-                return Err(Error::TypeError(format!(
-                    "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",
-                    member, recv_ty, member
-                )));
-            }
-            const SHOWN: usize = 8;
-            let mut list = owners.iter().take(SHOWN).map(|t| format!("`{}`", t)).collect::<Vec<_>>().join(", ");
-            if owners.len() > SHOWN {
-                list.push_str(&format!(" and {} more", owners.len() - SHOWN));
-            }
-            return Err(Error::TypeError(format!(
-                "no method `{}` for type `{}` (the type of the first argument, which selects the method); `{}` is a method of {}",
-                member, recv_ty, member, list
-            )));
+        if let Some(e) = no_method(cx, &first.ty, member) {
+            return Err(e);
         }
     }
     call_function(cx, heap, locals, value, spelling, Some(First { checked: first, written }), rest, expected, loc)
+}
+
+/// The error for a receiver of type `recv` that has no method `member`,
+/// when other types have one: the name is no missing function.
+fn no_method(cx: &Cx, recv: &Type, member: SymRef) -> Option<Error> {
+    let owners = cx.reg.types_with_instance_method(member);
+    if owners.is_empty() {
+        return None;
+    }
+    let recv_ty = cx.resolve(recv);
+    if let Type::Param(_) = recv_ty {
+        return Some(Error::TypeError(format!(
+            "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",
+            member, recv_ty, member
+        )));
+    }
+    const SHOWN: usize = 8;
+    let mut list = owners.iter().take(SHOWN).map(|t| format!("`{}`", t)).collect::<Vec<_>>().join(", ");
+    if owners.len() > SHOWN {
+        list.push_str(&format!(" and {} more", owners.len() - SHOWN));
+    }
+    Some(Error::TypeError(format!(
+        "no method `{}` for type `{}` (the type of the first argument, which selects the method); `{}` is a method of {}",
+        member, recv_ty, member, list
+    )))
 }
 
 /// Whether `v` is a bare name that names no value here without a type

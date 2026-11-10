@@ -10,12 +10,12 @@ use crate::check::analyze::{call_sugar, CallSugar};
 use crate::check::forms::{list_from_vec_locs, numeric_identity_literal, wrap_let_star};
 use crate::types::Type;
 use crate::{wk, Error, Heap, Loc, Value};
-use typelisp_mem::symbols::NsId;
+use typelisp_mem::symbols::{well_known_symbol, NsId};
 use typelisp_mem::SymRef;
 
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
-use super::tree::Typed;
+use super::tree::{Node, Typed};
 
 /// The call `(head arg...)` when it is call sugar: the form it is, checked.
 /// `head_is_fn` says whether `head` names a function here.
@@ -37,8 +37,8 @@ pub(crate) fn check_sugar(
         CallSugar::NullaryOrUnary => nullary_or_unary(cx, heap, head, &op, &raw, expected),
         CallSugar::VariadicArith => fold(heap, Value::Symbol(head), &raw),
         CallSugar::VariadicCmp => adjacent(cx, heap, head, &raw),
-        CallSugar::VariadicAppend => unimplemented!("typeck: `append` of more than two sequences"),
-        CallSugar::Concatenate => unimplemented!("typeck: `concatenate`"),
+        CallSugar::VariadicAppend => return Some(variadic_append(cx, heap, locals, args, expected, loc)),
+        CallSugar::Concatenate => concatenate(heap, &raw),
         CallSugar::Aref => return Some(super::aref::check_aref(cx, heap, locals, &args[0], &args[1..], None, expected, loc)),
         CallSugar::LogWithBase => log_with_base(heap, &raw),
         CallSugar::Atan2 => {
@@ -124,6 +124,80 @@ fn nullary_or_unary(cx: &Cx, heap: &mut Heap, op: SymRef, spelling: &str, args: 
             form(heap, &[progn, x, Value::Bool(true)])
         }
         _ => unreachable!("`call_sugar` names no other operator"),
+    }
+}
+
+/// `(append a b c ...)`: the left fold of the two-operand `append`s. Of
+/// strings, `(append (append a b) c)`; of sequences, each result passed on
+/// as `(iter acc)`, the `Vector` the prelude's `append` answers being no
+/// `Iter` itself. Which is the first operand's type: it is checked first
+/// and bound to a temporary, which the fold starts from.
+fn variadic_append(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
+    let (first, first_loc) = &args[0];
+    let first = check_expr(cx, heap, locals, *first, None, first_loc.clone())?;
+    let strings = cx.with_default(&first.ty) == Type::Str;
+    let t = cx.temp();
+    let raw: Vec<Value> = std::iter::once(Value::Symbol(t)).chain(args[1..].iter().map(|(v, _)| *v)).collect();
+    let roots = heap.root_count();
+    let checked = append_fold(heap, &raw, strings).and_then(|fold| locals.bind(vec![(t, first.ty.clone())]).and_then(|l| check_expr(cx, heap, &l, fold, expected, loc.clone())));
+    heap.truncate_roots(roots);
+    let checked = checked?;
+    let ty = checked.ty.clone();
+    Ok(Typed { node: Node::Let { binds: vec![(t, first)], body: vec![checked] }, ty, loc })
+}
+
+/// The fold [`variadic_append`] says, of the operands `args`.
+fn append_fold(heap: &mut Heap, args: &[Value], strings: bool) -> Result<Value, Error> {
+    let append = std_symbol(heap, "append");
+    let iter = std_symbol(heap, "iter");
+    let mut acc = args[0];
+    for (i, next) in args[1..].iter().enumerate() {
+        if i > 0 && !strings {
+            acc = form(heap, &[iter, acc])?;
+        }
+        acc = form(heap, &[append, acc, *next])?;
+    }
+    Ok(acc)
+}
+
+/// CL's `concatenate`: `(concatenate 'string s ...)` joins strings into a
+/// string, `(concatenate 'Vector seq ...)` sequences into a `Vector`. The
+/// result type is a quoted symbol, read here.
+fn concatenate(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
+    let usage = "concatenate: (concatenate 'string s ...) or (concatenate 'Vector seq ...)";
+    let result_type = args
+        .first()
+        .and_then(|&f| heap.list_to_vec(f).ok())
+        .filter(|elems| elems.len() == 2 && matches!(elems[0], Value::Symbol(id) if id.is(wk::QUOTE)))
+        .and_then(|elems| match elems[1] {
+            Value::Symbol(id) => Some(id),
+            _ => None,
+        })
+        .ok_or_else(|| Error::TypeError(format!("{} — the result type must be a quoted symbol", usage)))?;
+    let seqs = &args[1..];
+    match (result_type.well_known(), seqs.len()) {
+        (wk::STRING, 0) => {
+            let empty = heap.alloc_string(String::new());
+            heap.push_root(empty);
+            Ok(empty)
+        }
+        (wk::STRING, 1) => {
+            let the = Value::Symbol(well_known_symbol(wk::THE));
+            let string = std_symbol(heap, "string");
+            form(heap, &[the, string, seqs[0]])
+        }
+        (wk::STRING, _) => append_fold(heap, seqs, true),
+        (wk::VECTOR, 0) => Err(Error::TypeError(format!("{} — `(concatenate 'Vector)` needs at least one sequence to take the element type from", usage))),
+        (wk::VECTOR, 1) => {
+            let copy = std_symbol(heap, "copy-seq");
+            form(heap, &[copy, seqs[0]])
+        }
+        (wk::VECTOR, _) => append_fold(heap, seqs, false),
+        _ => Err(Error::TypeError(format!(
+            "{} — unknown result type `{}` (a `Sexpr` list is joined with `sexpr-append`)",
+            usage,
+            heap.symbol_spelling(result_type)
+        ))),
     }
 }
 

@@ -59,7 +59,7 @@ fn literal_value(heap: &Heap, form: Value) -> Option<Value> {
 }
 
 /// The `bool` a checked form is, if it is a `(bool B)` node.
-pub(super) fn literal_bool(heap: &Heap, form: Value) -> Option<bool> {
+pub(crate) fn literal_bool(heap: &Heap, form: Value) -> Option<bool> {
     match (core::op_wk(heap, form)?, core::field(heap, form, 0)?) {
         (wk::BOOL, Value::Bool(b)) => Some(b),
         _ => None,
@@ -93,7 +93,7 @@ fn foldable_receiver(type_name: &Path) -> bool {
 /// (`AssocFn::builtin`), so the evaluator's dispatch is guaranteed to have an
 /// arm for it: reaching `None` from it here is a hole between the registry
 /// and the evaluator, not a call that merely cannot be folded.
-pub(super) fn fold_builtin_method(
+pub(crate) fn fold_builtin_method(
     heap: &mut Heap,
     type_name: &Path,
     method: SymRef,

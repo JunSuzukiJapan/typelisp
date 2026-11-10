@@ -100,6 +100,12 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 Some(_) => crate::types::nominal_path(&lw.settle(&targs[0])).expect("a blanket `impl` covers only a type with a name"),
                 None => *owner,
             };
+            // A scalar builtin of literal arguments has one value.
+            if lw.reg.method(&owner, method).is_some_and(|m| m.sig.builtin) {
+                if let Some(folded) = crate::check::fold::fold_builtin_method(heap, &owner, method, &lowered, &ret)? {
+                    return Ok(folded);
+                }
+            }
             lw.reg.assoc_form(heap, &owner, method, *instance, &ret, &lowered)
         }
         Node::TraitCall { trait_path, method, args } => {
@@ -411,9 +417,16 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         }
         Node::If { cond, then, els } => {
             let cond = lower_rooted(heap, lw, cond)?;
-            let then = lower_rooted(heap, lw, then)?;
-            let els = lower_rooted(heap, lw, els)?;
-            forms::if_form(heap, cond, then, els)
+            // A literal condition picks its branch now; both were checked.
+            match crate::check::fold::literal_bool(heap, cond) {
+                Some(true) => lower(heap, lw, then),
+                Some(false) => lower(heap, lw, els),
+                None => {
+                    let then = lower_rooted(heap, lw, then)?;
+                    let els = lower_rooted(heap, lw, els)?;
+                    forms::if_form(heap, cond, then, els)
+                }
+            }
         }
         Node::Match { scrut, arms } => {
             let scrut_ty = lw.settle(&scrut.ty);

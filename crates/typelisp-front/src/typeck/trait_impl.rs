@@ -57,7 +57,13 @@ pub(crate) fn check_trait_impl(
             Some((p, def)) => (p, def.clone()),
             None => return Err(Error::TypeError(format!("impl: unknown trait `{}`", heap.symbol_spelling(sym)))),
         },
-        Value::Path(_) => unimplemented!("typeck: an `impl` of a trait named by a path"),
+        Value::Path(id) => {
+            let path = crate::types::written_path(heap, ns, *trait_v)?;
+            match reg.types.get(&path) {
+                Some(TypeEntry::Trait(def)) if def.public || super::resolve::sees(ns, path.ns()) => (path, def.clone()),
+                _ => return Err(Error::TypeError(format!("impl: unknown trait `{}`", crate::types::path_spelling(heap, id)))),
+            }
+        }
         _ => return Err(Error::TypeError("impl: trait name must be a name or `::` path".into())),
     };
     // `(:where ...)` bounds the type's parameters: the type implements the
@@ -97,7 +103,7 @@ pub(crate) fn check_trait_impl(
     let (assoc, methods) = items_of(heap, reg, ns, &head, &target_ty, &tdef, &shown, items)?;
     for (written, _) in &methods {
         if tdef.method(*written).is_none() {
-            return Err(Error::TypeError(format!("{}: `{}` is not a method of `{}`", shown, written, trait_path)));
+            return Err(not_a_method(reg, &shown, *written, &trait_path));
         }
     }
     let mut left = Vec::new();
@@ -195,6 +201,14 @@ pub(crate) fn check_trait_impl(
     all.push(TraitImpl { args: inst, assoc, bounds: by_param(impl_bounds) });
     reg.trait_impls.insert((trait_path, owner), all);
     crate::check::forms::module_form(heap, &owner, &forms)
+}
+
+/// The error for the `impl` `shown` writing `written`, which is not a method
+/// of `trait_path`'s own: it may be one a supertrait declares.
+fn not_a_method(reg: &Registry, shown: &str, written: SymRef, trait_path: &Path) -> Error {
+    let inherited = super::dyn_trait::vtable(reg, trait_path).is_ok_and(|slots| slots.iter().any(|(m, _)| *m == written));
+    let hint = if inherited { " — it is inherited, so it belongs to the supertrait's own `impl`" } else { "" };
+    Error::TypeError(format!("{}: `{}` is not a method of `{}`{}", shown, written, trait_path, hint))
 }
 
 /// Whether `ty` implements `trait_path` at the instantiation `inst`, or for
@@ -487,7 +501,7 @@ fn check_blanket_impl(
     let (assoc, methods) = items_of(heap, reg, ns, &head, &target_ty, tdef, &shown, items)?;
     for (written, _) in &methods {
         if tdef.method(*written).is_none() {
-            return Err(Error::TypeError(format!("{}: `{}` is not a method of `{}`", shown, written, trait_path)));
+            return Err(not_a_method(reg, &shown, *written, &trait_path));
         }
     }
     let mut left = Vec::new();

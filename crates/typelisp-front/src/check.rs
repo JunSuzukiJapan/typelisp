@@ -16,7 +16,7 @@ mod info;
 pub(crate) mod lower;
 pub(crate) mod verify;
 pub mod analyze;
-mod fold;
+pub(crate) mod fold;
 pub mod loop_dsl;
 pub mod locate;
 pub mod semantic;

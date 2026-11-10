@@ -51,7 +51,7 @@ pub(crate) fn check_method_call(
         if !sexpr_receiver {
             agree(cx, &receiver.ty, Some(&subst.apply(&sig.params[0])))?;
         }
-        rational_op = is_rational_operator(method, &receiver, rest);
+        rational_op = is_rational_operator(cx, method, &receiver, rest);
         args.push(receiver);
     }
     let (fixed, tail) = rest.split_at(required - args.len());
@@ -66,8 +66,10 @@ pub(crate) fn check_method_call(
         // contagion makes `(+ 1/2 1)` `rational`'s operator, `3/2`.
         let other = check_expr(cx, heap, locals, *arg, None, arg_loc.clone())?;
         let seen = cx.with_default(&other.ty);
-        if matches!(seen, Type::Int | Type::Ratio | Type::Rational) && seen != args[0].ty {
-            unimplemented!("typeck: an operator mixing an `int` and a `ratio` (CL's contagion)")
+        if matches!(seen, Type::Int | Type::Ratio | Type::Rational) && seen != cx.with_default(&args[0].ty) {
+            // An `int` and a `ratio`: `rational`'s operator, both widened.
+            let receiver = args.pop().expect("the receiver was checked first");
+            return rational_call(cx, method, receiver, other, expected, loc);
         }
         args.push(conform_at(cx, other, &param)?);
     }
@@ -152,10 +154,22 @@ fn mentions(ty: &Type, p: &TypeParam) -> bool {
 
 /// Whether `(op receiver other)` is an operator of `int` or `ratio`, whose
 /// other operand may be the other kind of rational.
-fn is_rational_operator(op: SymRef, receiver: &Typed, rest: &[(Value, Option<Loc>)]) -> bool {
+/// `(op receiver other)`, an operator on an `int` and a `ratio` (CL's
+/// contagion): `rational`'s `op`, each operand widened to a `rational`.
+/// `(+ 1/2 1)` is `3/2`.
+fn rational_call(cx: &Cx, method: SymRef, receiver: Typed, other: Typed, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
+    let owner = crate::types::prim_type_path(&Type::Rational).expect("rational is a primitive type");
+    let def = cx.reg.method(&owner, method).expect("`rational` has every operator an `int` and a `ratio` have");
+    let args = vec![conform_at(cx, receiver, &Type::Rational)?, conform_at(cx, other, &Type::Rational)?];
+    let ret = def.sig.ret.clone();
+    expect(cx, &ret, expected)?;
+    Ok(Typed { node: Node::MethodCall { owner, method, instance: true, targs: Vec::new(), args }, ty: ret, loc })
+}
+
+fn is_rational_operator(cx: &Cx, op: SymRef, receiver: &Typed, rest: &[(Value, Option<Loc>)]) -> bool {
     const OPERATORS: [u32; 12] = [
         wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE,
         wk::RETIRED_EQUALS, wk::M_OP_NE, wk::M_MAX, wk::M_MIN,
     ];
-    rest.len() == 1 && OPERATORS.contains(&op.well_known()) && matches!(receiver.ty, Type::Int | Type::Ratio)
+    rest.len() == 1 && OPERATORS.contains(&op.well_known()) && matches!(cx.with_default(&receiver.ty), Type::Int | Type::Ratio)
 }

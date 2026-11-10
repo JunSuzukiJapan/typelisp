@@ -17597,7 +17597,7 @@ pub(crate) fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
 /// operators), and this is the other half of that choice. A name absent from
 /// the table is passed through unchanged, and so is one a bound declares
 /// itself.
-fn trait_operator_method(op: SymRef) -> Option<SymRef> {
+pub(crate) fn trait_operator_method(op: SymRef) -> Option<SymRef> {
     const TABLE: [(&str, &str); 15] = [
         ("+", "add"),
         ("-", "sub"),
