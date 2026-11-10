@@ -194,8 +194,9 @@ pub(crate) struct VarDef {
 /// its parameters' names and types (a method's receiver first), its result
 /// type, and the body, every type in them settled except for the
 /// definition's own type parameters.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Template {
+    #[serde(with = "super::wire::sym_pairs")]
     pub(crate) params: Vec<(SymRef, Type)>,
     pub(crate) ret: Type,
     pub(crate) body: Vec<Typed>,
@@ -345,19 +346,31 @@ impl Registry {
         }
     }
 
-    /// Take `from`'s generic bodies, and the methods it took from a trait's
-    /// default body, where this registry has none: what a registry copied
-    /// from the current checker's lacks of the prelude.
-    pub(crate) fn adopt_bodies(&mut self, from: &Registry) {
-        for (base, template) in from.templates.iter() {
-            if self.templates.get(base).is_none() {
-                self.templates.insert(*base, template.clone());
-            }
+    /// Every generic body kept.
+    pub(crate) fn templates(&self) -> impl Iterator<Item = (&Base, &Rc<Template>)> {
+        self.templates.iter()
+    }
+
+    /// Every method an `impl` took from its trait's default body, with the
+    /// trait and its arguments.
+    pub(crate) fn all_defaulted(&self) -> impl Iterator<Item = (&(Path, SymRef), &(Path, Vec<Type>))> {
+        self.defaulted.iter()
+    }
+
+    /// Keep the generic body `template` a dump wrote, where this registry
+    /// has none: what a registry copied from the current checker's lacks of
+    /// the prelude (`wire::RebuiltBodies::restore`).
+    pub(crate) fn adopt_template(&mut self, base: Base, template: Rc<Template>) {
+        if self.templates.get(&base).is_none() {
+            self.templates.insert(base, template);
         }
-        for (key, defaulted) in from.defaulted.iter() {
-            if self.defaulted.get(key).is_none() {
-                self.defaulted.insert(*key, defaulted.clone());
-            }
+    }
+
+    /// Record the method a dump wrote that an `impl` took from its trait's
+    /// default body, where this registry records none.
+    pub(crate) fn adopt_defaulted(&mut self, key: (Path, SymRef), defaulted: (Path, Vec<Type>)) {
+        if self.defaulted.get(&key).is_none() {
+            self.defaulted.insert(key, defaulted);
         }
     }
 

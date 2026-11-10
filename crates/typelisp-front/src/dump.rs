@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 31;
+pub const FORMAT_VERSION: u32 = 32;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -663,6 +663,11 @@ pub struct UnitState {
     /// full recompilation of the prelude or the island.
     pub forms_digest: Option<u64>,
     pub checker: CheckerDelta,
+    /// The generic bodies the rebuilt checker checked
+    /// ([`rebuilt_prelude_bodies`]); empty for a unit that has none written
+    /// down. Bytes, so that a session with the rebuilt checker off does not
+    /// read them.
+    pub rebuilt: Vec<u8>,
     /// Every checked top-level core form this unit defines, in declaration
     /// order. Re-executed on load, which is what fills the interpreter's
     /// function/type/macro tables.
@@ -781,6 +786,7 @@ pub fn capture_types_with_abi(
         body_layout,
         emits_layout,
         checker,
+        rebuilt: Vec::new(),
         forms: forms
             .iter()
             .map(|v| crate::owned_form::value_to_owned(heap, *v).map_err(|e| e.to_string()))
@@ -817,6 +823,7 @@ pub fn apply_types(
     unit: UnitState,
 ) -> Result<(), String> {
     chk.apply_delta(unit.checker, heap)?;
+    chk.apply_rebuilt_bodies(&unit.rebuilt, heap)?;
     for f in &unit.forms {
         let tl = crate::owned_form::owned_to_value(heap, f).map_err(|e| e.to_string())?;
         heap.push_root(tl);
@@ -826,6 +833,15 @@ pub fn apply_types(
         r.map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// The prelude's generic bodies as the rebuilt checker checks them, for
+/// [`UnitState::rebuilt`]: the core macro layer and the prelude checked by a
+/// checker of its own, nothing run. `expander` has run the prelude, so it
+/// holds its macros.
+pub fn rebuilt_prelude_bodies(heap: &mut crate::Heap, expander: &dyn crate::check::MacroExpander) -> Result<Vec<u8>, String> {
+    let bodies = crate::typeck::toplevel::prelude_bodies(heap, expander).map_err(|e| format!("prelude: the rebuilt checker refuses it: {}", e))?;
+    bincode::serialize(&bodies).map_err(|e| format!("prelude: writing the rebuilt checker's bodies failed: {}", e))
 }
 
 /// Records that these globals already have storage, made by somebody else.

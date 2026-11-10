@@ -251,7 +251,7 @@ mod num_str {
     }
 }
 
-mod loc_serde {
+pub(crate) mod loc_serde {
     use std::sync::Arc;
 
     use super::Loc;

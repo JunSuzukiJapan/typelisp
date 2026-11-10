@@ -27,6 +27,7 @@ use super::lower::{lower_rooted, Lowering};
 use super::registry::Registry;
 use super::scope::TypeScope;
 use super::subst::Subst;
+use super::wire::{Bodies, RebuiltBodies};
 
 /// The rebuilt checker, as the current one hands it each top-level form
 /// while the switch `TYPELISP_TYPECK` is on (`docs/dev/checker-rebuild-plan.md` 6).
@@ -40,9 +41,9 @@ pub(crate) struct TypeChecker {
     expr_ty: Option<Type>,
     /// The warnings checking has given and no one has taken yet.
     warnings: RefCell<Vec<String>>,
-    /// Whether it was decided where the prelude's generic bodies come from
-    /// ([`Self::prelude_bodies`]).
-    bodies_decided: bool,
+    /// The generic bodies dumps wrote, read before the registry was made,
+    /// for it to take when it is ([`Self::take_bodies`]).
+    pending: RefCell<Vec<Bodies>>,
 }
 
 impl TypeChecker {
@@ -58,6 +59,7 @@ impl TypeChecker {
         self.reg.get_or_init(|| {
             let mut reg = Registry::default();
             super::bridge::import(old, &mut reg);
+            self.pending.take().into_iter().for_each(|b| b.adopt(&mut reg));
             reg.commit();
             reg
         })
@@ -77,10 +79,6 @@ impl TypeChecker {
         loc: Option<Loc>,
     ) -> Result<Value, Error> {
         self.registry(old);
-        if !self.bodies_decided {
-            self.bodies_decided = true;
-            self.prelude_bodies(heap, old, expander);
-        }
         let reg = self.reg.get_mut().expect("the registry was just made");
         self.expr_ty = None;
         // Every value the tree holds is rooted from here until it is lowered
@@ -112,39 +110,17 @@ impl TypeChecker {
         }
     }
 
-    /// The prelude's generic bodies, which the current checker's registry
-    /// does not have: the core macro layer and the prelude checked by a
-    /// checker of their own, its bodies and the methods it took from a
-    /// trait's default body taken into this one's registry
-    /// (`docs/dev/checker-rebuild-plan.md` 8.3). Only when `old` holds the
-    /// prelude, as its first definition, `sexpr-append`, says; nothing
-    /// is run, since the session has run it already.
-    ///
-    /// The source is fixed: a form the checker refuses is a bug of the
-    /// checker, not the program's.
-    fn prelude_bodies(&mut self, heap: &mut Heap, old: &crate::check::Registry, expander: &dyn MacroExpander) {
-        if old.module_at(typelisp_mem::NsId::STD).and_then(|m| m.fns.get("sexpr-append")).is_none() {
-            return;
-        }
-        let base = crate::check::Registry::with_builtins();
-        let mut scratch = TypeChecker { bodies_decided: true, ..TypeChecker::default() };
-        let site = Site { ns: typelisp_mem::NsId::STD, file: None, policy: crate::check::RedefPolicy::Error };
-        let reader = crate::Reader::new();
-        for src in [crate::core_macros::SOURCE, crate::prelude::SOURCE.as_str()] {
-            let mut forms = reader.forms_within(crate::LIBRARY_FILE, src, typelisp_mem::NsId::STD);
-            while let Some((v, loc)) = forms.next_form(heap).expect("the prelude reads") {
-                let base_roots = heap.root_count();
-                heap.push_root(v);
-                if let Err(e) = scratch.check_form(heap, &base, expander, site, v, Some(loc)) {
-                    panic!("the rebuilt checker refuses the prelude: {:?}", e)
-                }
-                heap.truncate_roots(base_roots);
+    /// The generic bodies a dump wrote (`docs/dev/checker-rebuild-plan.md`
+    /// 8.3): what a registry copied from the current checker's lacks of the
+    /// prelude.
+    pub(crate) fn take_bodies(&mut self, bodies: Bodies) {
+        match self.reg.get_mut() {
+            Some(reg) => {
+                bodies.adopt(reg);
+                reg.commit();
             }
+            None => self.pending.get_mut().push(bodies),
         }
-        let checked = scratch.reg.take().expect("checking made it");
-        let reg = self.reg.get_mut().expect("made before");
-        reg.adopt_bodies(&checked);
-        reg.commit();
     }
 
     /// What `(use path)` written at `site` brings in, registered for reading
@@ -163,6 +139,31 @@ impl TypeChecker {
     pub(crate) fn take_warnings(&self) -> Vec<String> {
         std::mem::take(&mut *self.warnings.borrow_mut())
     }
+}
+
+/// The core macro layer and the prelude checked by a checker of their own,
+/// their generic bodies, and the methods their `impl`s took from a trait's
+/// default body, written down for the prelude's dump. Nothing is run:
+/// `expander`, which expands the macro calls, has run the prelude already.
+///
+/// The source is fixed: a form the checker refuses is a bug of the checker,
+/// not the program's.
+pub(crate) fn prelude_bodies(heap: &mut Heap, expander: &dyn MacroExpander) -> Result<RebuiltBodies, Error> {
+    let base = crate::check::Registry::with_builtins();
+    let mut checker = TypeChecker::default();
+    let site = Site { ns: typelisp_mem::NsId::STD, file: None, policy: crate::check::RedefPolicy::Error };
+    let reader = crate::Reader::new();
+    for src in [crate::core_macros::SOURCE, crate::prelude::SOURCE.as_str()] {
+        let mut forms = reader.forms_within(crate::LIBRARY_FILE, src, typelisp_mem::NsId::STD);
+        while let Some((v, loc)) = forms.next_form(heap)? {
+            let base_roots = heap.root_count();
+            heap.push_root(v);
+            let checked = checker.check_form(heap, &base, expander, site, v, Some(loc));
+            heap.truncate_roots(base_roots);
+            checked?;
+        }
+    }
+    RebuiltBodies::of(heap, checker.reg.get().expect("checking made it"))
 }
 
 /// `v`'s core form, and its type when it is an expression. The
@@ -1253,8 +1254,8 @@ mod tests {
     }
 
     /// The rebuilt checker checks the core macro layer and the prelude, and
-    /// what it makes of them runs: what it takes the prelude's generic
-    /// bodies from (`TypeChecker::prelude_bodies`).
+    /// what it makes of them runs: what the prelude's dump takes its generic
+    /// bodies from (`prelude_bodies`).
     #[test]
     fn the_prelude_checks_and_runs() {
         let mut heap = Heap::with_capacity(1 << 20);
@@ -1273,5 +1274,14 @@ mod tests {
                 interp.exec(&mut heap, form).unwrap_or_else(|e| panic!("{:?}: {:?}", loc, e));
             }
         }
+        // Its bodies, written down and read back, are all there.
+        let reg = checker.reg.get().expect("made by the checks");
+        let written = bincode::serialize(&RebuiltBodies::of(&heap, reg).expect("the bodies are written")).expect("the bodies serialize");
+        let read: RebuiltBodies = bincode::deserialize(&written).expect("the bodies deserialize");
+        let mut fresh = Registry::default();
+        read.restore(&mut heap).expect("the bodies are read").adopt(&mut fresh);
+        assert!(reg.templates().count() > 0);
+        assert_eq!(fresh.templates().count(), reg.templates().count());
+        assert_eq!(fresh.all_defaulted().count(), reg.all_defaulted().count());
     }
 }

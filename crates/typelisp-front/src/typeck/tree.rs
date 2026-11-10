@@ -12,26 +12,27 @@ use crate::{Loc, Value};
 use typelisp_mem::SymRef;
 
 /// A checked expression: what it does, its type, and where it was written.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Typed {
     pub(crate) node: Node,
     pub(crate) ty: Type,
+    #[serde(with = "crate::owned_form::loc_serde::opt")]
     pub(crate) loc: Option<Loc>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Node {
     /// A literal: its core tag and its value (none for the unit value).
-    Literal { tag: u32, value: Option<Value> },
+    Literal { tag: u32, #[serde(with = "super::wire::slot::opt")] value: Option<Value> },
     /// `(quote datum)`: the datum as it was read.
-    Quote { datum: Value },
+    Quote { #[serde(with = "super::wire::slot")] datum: Value },
     /// A number literal whose type was not known where it was written: an
     /// integer or a float type the rest of the form decides. It becomes a
     /// [`Node::Literal`] when the form is settled (`Cx::settle`), so
     /// lowering never sees one.
-    Number { value: Value },
+    Number { #[serde(with = "super::wire::slot")] value: Value },
     /// A local variable's value.
-    Local { name: SymRef },
+    Local { #[serde(with = "crate::owned_form::sym_serde")] name: SymRef },
     /// The global variable `path`'s value.
     Global { path: Path },
     /// A call to the function `path`, at the type arguments `targs` when it
@@ -40,12 +41,12 @@ pub(crate) enum Node {
     /// A call to the method `method` of the type `owner`, at the type
     /// arguments `targs` when it is generic. An instance method's receiver is
     /// the first argument.
-    MethodCall { owner: Path, method: SymRef, instance: bool, targs: Vec<Type>, args: Vec<Typed> },
+    MethodCall { owner: Path, #[serde(with = "crate::owned_form::sym_serde")] method: SymRef, instance: bool, targs: Vec<Type>, args: Vec<Typed> },
     /// A call of the method `method` of the trait `trait_path`, on a
     /// receiver whose type is a type parameter the trait bounds. Once the
     /// tree is specialized, the receiver's type is one with an `impl` of the
     /// trait, whose method the call is.
-    TraitCall { trait_path: Path, method: SymRef, args: Vec<Typed> },
+    TraitCall { trait_path: Path, #[serde(with = "crate::owned_form::sym_serde")] method: SymRef, args: Vec<Typed> },
     /// A new value of the type `owner<targs>`: its variant `variant`'s fields,
     /// whose declared types at these arguments are `field_tys`. A struct's is
     /// mutable.
@@ -56,7 +57,7 @@ pub(crate) enum Node {
     /// of the struct `obj` to `value`.
     FieldSet { obj: Box<Typed>, index: usize, field_ty: Type, value: Box<Typed> },
     /// `(setf name value)` of the local `name`.
-    Set { name: SymRef, value: Box<Typed> },
+    Set { #[serde(with = "crate::owned_form::sym_serde")] name: SymRef, value: Box<Typed> },
     /// `(setf name value)` of the global variable `path`.
     SetGlobal { path: Path, value: Box<Typed> },
     /// `(loop body...)`: the body run again and again, until a `return` or
@@ -68,7 +69,7 @@ pub(crate) enum Node {
     /// none).
     Return { value: Option<Box<Typed>> },
     /// `(lambda (params) ret body...)`: a function value.
-    Lambda { params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Typed> },
+    Lambda { #[serde(with = "super::wire::sym_pairs")] params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Typed> },
     /// `(labels (def...) body...)`: local functions, which see each other.
     Labels { defs: Vec<super::lambda::Label>, body: Vec<Typed> },
     /// The function `path` as a value; `params` are the types of the
@@ -92,7 +93,7 @@ pub(crate) enum Node {
     UnwindProtect { protected: Box<Typed>, cleanup: Box<Typed> },
     /// `let`: the bindings, each checked outside all of them, then the body
     /// in order. With no bindings it is `progn`.
-    Let { binds: Vec<(SymRef, Typed)>, body: Vec<Typed> },
+    Let { #[serde(with = "super::wire::sym_pairs")] binds: Vec<(SymRef, Typed)>, body: Vec<Typed> },
     If { cond: Box<Typed>, then: Box<Typed>, els: Box<Typed> },
     /// `match`: the first arm whose pattern matches the scrutinee's value is
     /// run, the names its pattern binds bound.
@@ -106,7 +107,7 @@ pub(crate) enum Node {
     DynNew { trait_path: Path, value: Box<Typed> },
     /// A call of the method `method`, the slot `slot` of the trait
     /// `trait_path`'s table, on the trait object `args[0]`.
-    DynCall { trait_path: Path, method: SymRef, slot: usize, args: Vec<Typed> },
+    DynCall { trait_path: Path, #[serde(with = "crate::owned_form::sym_serde")] method: SymRef, slot: usize, args: Vec<Typed> },
     /// The trait object `value` given the table of its trait's supertrait
     /// `to`, which the box carries.
     DynUpcast { to: Path, value: Box<Typed> },
@@ -117,11 +118,11 @@ pub(crate) enum Node {
 
 /// One arm of a `select`. Its channel and value are locals the `let`
 /// around the `select` binds; its body is a `let` with no bindings.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum SelectArm {
     /// `((var (recv chan)) body...)`; `var` is bound to `bound`, the
     /// `Option` of the channel's element.
-    Recv { var: SymRef, bound: Type, chan: Typed, body: Typed },
+    Recv { #[serde(with = "crate::owned_form::sym_serde")] var: SymRef, bound: Type, chan: Typed, body: Typed },
     /// `((send chan value) body...)`, `elem` the channel's element type.
     Send { elem: Type, chan: Typed, value: Typed, body: Typed },
     /// `(:else body...)`.
@@ -147,22 +148,22 @@ impl SelectArm {
 }
 
 /// A checked pattern.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Pat {
     /// `_`: matches anything.
     Wild,
     /// A name: matches anything, and binds the name to it.
-    Bind(SymRef),
+    Bind(#[serde(with = "crate::owned_form::sym_serde")] SymRef),
     /// The variant `variant` of `owner<targs>`, its fields (declared
     /// `field_tys` at these arguments) matched by `subs`. A `downcast` one
     /// matches a `Sexpr` holding such a value.
     Ctor { owner: Path, targs: Vec<Type>, variant: usize, downcast: bool, field_tys: Vec<Type>, subs: Vec<Pat> },
     /// An integer, a `bool` or a `char` literal of the value's own type
     /// (`tag` its core tag): matches the value with that word.
-    Lit { tag: u32, value: Value },
+    Lit { tag: u32, #[serde(with = "super::wire::slot")] value: Value },
     /// Matches a value for which `test` is true, the value bound to `name`
     /// while it runs.
-    Guard { name: SymRef, test: Box<Typed> },
+    Guard { #[serde(with = "crate::owned_form::sym_serde")] name: SymRef, test: Box<Typed> },
 }
 
 impl Pat {
@@ -181,6 +182,24 @@ impl Pat {
             Pat::Guard { test, .. } => vec![&mut **test],
             Pat::Ctor { subs, .. } => subs.iter_mut().flat_map(Pat::tests_mut).collect(),
             Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } => Vec::new(),
+        }
+    }
+
+    /// The literals' values in this pattern and the patterns inside it.
+    fn each_value(&self, f: &mut dyn FnMut(Value)) {
+        match self {
+            Pat::Lit { value, .. } => f(*value),
+            Pat::Ctor { subs, .. } => subs.iter().for_each(|p| p.each_value(f)),
+            Pat::Wild | Pat::Bind(_) | Pat::Guard { .. } => {}
+        }
+    }
+
+    /// [`Self::each_value`], to change.
+    fn values_mut(&mut self, f: &mut dyn FnMut(&mut Value)) {
+        match self {
+            Pat::Lit { value, .. } => f(value),
+            Pat::Ctor { subs, .. } => subs.iter_mut().for_each(|p| p.values_mut(f)),
+            Pat::Wild | Pat::Bind(_) | Pat::Guard { .. } => {}
         }
     }
 
@@ -373,12 +392,30 @@ impl Typed {
         }
     }
 
-    /// Call `f` on every value this tree holds.
+    /// Call `f` on every value this tree holds, a pattern's too, outside
+    /// first: the order [`Self::values_mut`] visits them in.
     pub(crate) fn each_value(&self, f: &mut impl FnMut(Value)) {
         self.walk(&mut |t| match &t.node {
             Node::Literal { value: Some(v), .. } | Node::Number { value: v } | Node::Quote { datum: v } => f(*v),
+            Node::Match { arms, .. } => arms.iter().for_each(|(pat, _)| pat.each_value(&mut |v| f(v))),
             _ => {}
         });
+    }
+
+    /// [`Self::each_value`], to change.
+    pub(crate) fn values_mut(&mut self, f: &mut impl FnMut(&mut Value)) {
+        let walked = self.walk_mut(&mut |t| {
+            match &mut t.node {
+                Node::Literal { value: Some(v), .. } | Node::Number { value: v } | Node::Quote { datum: v } => f(v),
+                Node::Match { arms, .. } => arms.iter_mut().for_each(|(pat, _)| pat.values_mut(&mut |v| f(v))),
+                _ => {}
+            }
+            Ok::<(), std::convert::Infallible>(())
+        });
+        match walked {
+            Ok(()) => {}
+            Err(never) => match never {},
+        }
     }
 }
 

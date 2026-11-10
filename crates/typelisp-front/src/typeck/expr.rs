@@ -23,7 +23,7 @@ use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::check::registry::TraitBound;
-use super::{binding, call, cast, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, path_call, list_form, quote, setf, sugar, tools, the, variant};
+use super::{binding, call, cast, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -407,6 +407,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::QUASIQUOTE => return quote::check_quasiquote(cx, heap, locals, args, loc),
         wk::LIST => return list_form::check_list(cx, heap, locals, args, loc),
         wk::SETF => return setf::check_setf(cx, heap, locals, args, loc),
+        wk::INCF | wk::DECF => return modify::check_incf_decf(cx, heap, locals, head.well_known(), args, loc),
+        wk::ROTATEF | wk::SHIFTF => return modify::check_rotatef_shiftf(cx, heap, locals, head.well_known(), args, loc),
         wk::THE => return the::check_the(cx, heap, locals, args),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
         wk::VALUE_MEMBER => {

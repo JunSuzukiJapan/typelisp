@@ -1402,6 +1402,22 @@ impl Checker {
     /// what the definition-checking path does for a template it retains: a
     /// template must outlive any number of collections between here and its
     /// last instantiation, and nothing else refers to it.
+    /// The generic bodies the rebuilt checker checked, as a dump wrote them
+    /// (`crate::dump::rebuilt_prelude_bodies`), taken in when it is on and
+    /// not read when it is off.
+    pub fn apply_rebuilt_bodies(&mut self, bytes: &[u8], heap: &mut Heap) -> Result<(), String> {
+        let Some(rebuilt) = &mut self.rebuilt else {
+            return Ok(());
+        };
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let written: crate::typeck::wire::RebuiltBodies =
+            bincode::deserialize(bytes).map_err(|e| format!("reading the rebuilt checker's bodies failed: {}", e))?;
+        rebuilt.take_bodies(written.restore(heap).map_err(|e| e.to_string())?);
+        Ok(())
+    }
+
     pub fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
         let mut predeclared = std::mem::take(&mut self.predeclared);
         crate::dump::apply_entries(

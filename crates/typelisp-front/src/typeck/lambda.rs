@@ -164,9 +164,11 @@ pub(crate) fn fn_value(path: Path, def: &FnDef, loc: Option<Loc>) -> Result<Type
 }
 
 /// One function of a `labels`.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Label {
+    #[serde(with = "crate::owned_form::sym_serde")]
     pub(crate) name: SymRef,
+    #[serde(with = "super::wire::sym_pairs")]
     pub(crate) params: Vec<(SymRef, Type)>,
     pub(crate) ret: Type,
     pub(crate) body: Vec<Typed>,

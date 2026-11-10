@@ -38,10 +38,10 @@ pub(crate) fn method_specialization(owner: &Path, method: SymRef, args: &[Type])
 }
 
 /// What is specialized: a function, or a type's method.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Base {
     Fn(Path),
-    Method(Path, SymRef),
+    Method(Path, #[serde(with = "crate::owned_form::sym_serde")] SymRef),
 }
 
 /// The name a specialization has: a function's path, or a method's member
