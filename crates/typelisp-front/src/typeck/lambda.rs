@@ -14,6 +14,7 @@ use typelisp_mem::SymRef;
 
 use super::expr::{check_body, check_expr, Cx};
 use super::format::sexpr_list;
+use super::block::check_named_body;
 use super::locals::Locals;
 use super::registry::FnDef;
 use super::tree::{Node, Typed};
@@ -49,10 +50,12 @@ pub(crate) fn check_lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(V
     let ty = Type::Fn(required.iter().map(|(_, t)| t.clone()).collect(), rest.as_ref().map(|(_, t)| Box::new(t.clone())), Box::new(ret.clone()));
     let mut params = required;
     params.extend(rest.map(|(n, _)| (n, option_of_sexpr())));
-    // A loop around the `lambda` is not one its body can leave.
+    // A loop or a block around the `lambda` is not one its body can leave.
     let outer = cx.loops.replace(Vec::new());
+    let outer_blocks = cx.blocks.replace(Vec::new());
     let checked = locals.bind(params.clone()).and_then(|inner| check_body(cx, heap, &inner, body, Some(&ret)));
     cx.loops.replace(outer);
+    cx.blocks.replace(outer_blocks);
     let (body, _) = checked?;
     Ok(Typed { node: Node::Lambda { params, ret, body }, ty, loc })
 }
@@ -217,11 +220,14 @@ pub(crate) fn check_labels(
     let scope = locals.bind(names)?;
     let mut defs = Vec::with_capacity(parsed.len());
     for (name, params, ret, def_body) in parsed {
-        // Each function is a function of its own, as a `lambda` is.
+        // Each function is a function of its own, as a `lambda` is, with a
+        // block named after itself.
         let outer = cx.loops.replace(Vec::new());
-        let checked = scope.bind(params.clone()).and_then(|inner| check_body(cx, heap, &inner, &def_body, Some(&ret)));
+        let outer_blocks = cx.blocks.replace(Vec::new());
+        let checked = scope.bind(params.clone()).and_then(|inner| check_named_body(cx, heap, &inner, name, &def_body, &ret));
         cx.loops.replace(outer);
-        let (body, _) = checked?;
+        cx.blocks.replace(outer_blocks);
+        let body = checked?;
         defs.push(Label { name, params, ret, body });
     }
     let (body, ty) = check_body(cx, heap, &scope, body, expected)?;

@@ -178,7 +178,7 @@ pub(crate) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value
 /// against live `catch` frames while unwinding, so it has to survive as a
 /// value. Written as a string for the same reason `lambda`'s parameter names
 /// are: the island reads it to label a basic block, and never as a datum.
-pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) -> Result<Value, Error> {
+pub(crate) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) -> Result<Value, Error> {
     // One body form, not a sequence: the checker wraps the body in a
     // binding-less `let` first, so every consumer — the evaluator, the bridge,
     // the island — has one form to run and none of them re-implements
@@ -332,7 +332,7 @@ pub(crate) fn select_else_arm(heap: &mut Heap, body: Value) -> Result<Value, Err
 
 /// `(return-from NAME)` / `(return-from NAME FORM)` — leave the enclosing
 /// [`block_form`] of that name.
-pub(super) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>) -> Result<Value, Error> {
+pub(crate) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>) -> Result<Value, Error> {
     let name = str_lit_form(heap, name)?;
     match value {
         Some(v) => core::tagged(heap, wk::RETURN_FROM, &[name, v]),
@@ -353,7 +353,7 @@ pub(super) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>
 /// machine word and comes back out of `rt_throw_take_value` as another, and
 /// only the repr says whether that word is a tagged `Sexpr` or a raw one.
 /// The interpreter ignores the field.
-pub(super) fn catch_form(heap: &mut Heap, tag: Value, body: Value, repr: Value) -> Result<Value, Error> {
+pub(crate) fn catch_form(heap: &mut Heap, tag: Value, body: Value, repr: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::CATCH, &[tag, body, repr])
 }
 
@@ -361,7 +361,7 @@ pub(super) fn catch_form(heap: &mut Heap, tag: Value, body: Value, repr: Value) 
 /// `catch` on `SYMBOL`, delivering `FORM`'s value as its result. `REPR` is the
 /// thrown value's representation, for the reason [`catch_form`]'s doc comment
 /// gives.
-pub(super) fn throw_form(heap: &mut Heap, tag: Value, value: Value, repr: Value) -> Result<Value, Error> {
+pub(crate) fn throw_form(heap: &mut Heap, tag: Value, value: Value, repr: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::THROW, &[tag, value, repr])
 }
 

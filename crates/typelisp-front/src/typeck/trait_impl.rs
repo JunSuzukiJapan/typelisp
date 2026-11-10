@@ -443,6 +443,6 @@ fn check_method(
         )));
     }
     let bounds = of.clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
-    let def = Method { owner, method, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds };
+    let def = Method { owner, method, name, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }

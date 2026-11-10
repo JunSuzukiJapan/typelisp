@@ -12,10 +12,11 @@ use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
 
-use super::expr::{check_body, Cx};
+use super::expr::Cx;
 use super::bounds::parse_where;
 use super::generic::{Base, Requests};
 use super::lambda_list::{parse_lambda_list, LambdaList, Written};
+use super::block::check_named_body;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
 use super::define::{Definer, Kind};
@@ -82,7 +83,7 @@ pub(crate) fn check_defun(
         let cx = Cx::new(reg, d.expander, ns, &bounded, None);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
-        let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
+        let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
         cx.settle(heap, &mut body)?;
         body
     };

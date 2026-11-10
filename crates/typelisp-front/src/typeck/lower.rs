@@ -235,6 +235,32 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             heap.push_root(repr);
             forms::loop_form(heap, repr, &body)
         }
+        Node::Block { label, body } => {
+            let body = lower_rooted(heap, lw, body)?;
+            let repr = lw.reg.repr_form(heap, &lw.settle(&t.ty))?;
+            heap.push_root(repr);
+            forms::block_form(heap, label, body, repr)
+        }
+        Node::ReturnFrom { label, value } => {
+            let value = value.as_deref().map(|v| lower_rooted(heap, lw, v)).transpose()?;
+            forms::return_from_form(heap, label, value)
+        }
+        Node::Catch { tag, carried, body } => {
+            let body = lower_rooted(heap, lw, body)?;
+            let tag = forms::quote_form(heap, Value::Symbol(*tag))?;
+            heap.push_root(tag);
+            let repr = lw.reg.repr_form(heap, &lw.settle(carried))?;
+            heap.push_root(repr);
+            forms::catch_form(heap, tag, body, repr)
+        }
+        Node::Throw { tag, value } => {
+            let repr = lw.reg.repr_form(heap, &lw.settle(&value.ty))?;
+            heap.push_root(repr);
+            let value = lower_rooted(heap, lw, value)?;
+            let tag = forms::quote_form(heap, Value::Symbol(*tag))?;
+            heap.push_root(tag);
+            forms::throw_form(heap, tag, value, repr)
+        }
         Node::Break => forms::break_form(heap),
         Node::Return { value } => {
             let value = value.as_deref().map(|v| lower_rooted(heap, lw, v)).transpose()?;

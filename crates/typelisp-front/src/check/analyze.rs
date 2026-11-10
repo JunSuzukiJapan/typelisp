@@ -1420,7 +1420,12 @@ impl Checker {
             return Ok(());
         }
         let written: crate::typeck::wire::RebuiltBodies =
-            bincode::deserialize(bytes).map_err(|e| format!("reading the rebuilt checker's bodies failed: {}", e))?;
+            bincode::deserialize(bytes).map_err(|e| {
+                format!(
+                    "reading the rebuilt checker's bodies failed: {} — its typed tree has changed since the dump was made; run scripts/regen-prelude-bitcode.sh",
+                    e
+                )
+            })?;
         rebuilt.take_bodies(written.restore(heap).map_err(|e| e.to_string())?);
         Ok(())
     }

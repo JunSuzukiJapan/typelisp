@@ -17,8 +17,9 @@ use typelisp_mem::SymRef;
 use super::bounds::parse_where;
 use super::defun::{by_param, lower_all, parse_header, split_doc, split_where};
 use super::lambda_list::{parse_lambda_list, LambdaList, Written};
-use super::expr::{check_body, Cx};
+use super::expr::Cx;
 use super::generic::{method_specialization, Base, Requests};
+use super::block::check_named_body;
 use super::locals::Locals;
 use super::lower::Lowering;
 use super::define::Definer;
@@ -76,7 +77,7 @@ pub(crate) fn check_defmethod(
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
     let ret = parse_type(heap, &tcx, *ret)?;
     let bounds = clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
-    let def = Method { owner, method, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret, bounds };
+    let def = Method { owner, method, name, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret, bounds };
     let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;
     let forms: Vec<Value> = form.into_iter().collect();
     crate::check::forms::module_form(heap, &owner, &forms)
@@ -87,6 +88,8 @@ pub(crate) fn check_defmethod(
 pub(crate) struct Method {
     pub(crate) owner: Path,
     pub(crate) method: SymRef,
+    /// Its name as written, which names its block.
+    pub(crate) name: SymRef,
     pub(crate) instance: bool,
     pub(crate) public: bool,
     /// The module a `defmethod` outside an `impl` was written in.
@@ -115,7 +118,7 @@ pub(crate) fn define_method(
     def: Method,
     body: &[(Value, Option<Loc>)],
 ) -> Result<Option<Value>, Error> {
-    let Method { owner, method, instance, public, home, params: list, ret, bounds } = def;
+    let Method { owner, method, name, instance, public, home, params: list, ret, bounds } = def;
     let bounded = scope.bound(bounds.clone());
     let type_params = scope.params().to_vec();
     // A receiver that names every type argument outright makes the method
@@ -151,7 +154,7 @@ pub(crate) fn define_method(
         let cx = Cx::new(reg, d.expander, ns, &bounded, self_type);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
-        let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
+        let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
         cx.settle(heap, &mut body)?;
         body
     };

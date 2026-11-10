@@ -68,6 +68,18 @@ pub(crate) enum Node {
     /// `(return value?)`: leave the nearest loop with `value` (`()` when
     /// none).
     Return { value: Option<Box<Typed>> },
+    /// `(block name body...)`, or a definition's own block: `body` (a `let`
+    /// with no bindings), left early by a `return-from` naming `label`.
+    Block { label: Box<str>, body: Box<Typed> },
+    /// `(return-from name value?)`: leave the block `label` with `value`
+    /// (`()` when none).
+    ReturnFrom { label: Box<str>, value: Option<Box<Typed>> },
+    /// `(catch 'tag body)`: `body`'s value, or what a `throw` of `tag` in
+    /// it gave, which is a `carried`.
+    Catch { #[serde(with = "crate::owned_form::sym_serde")] tag: SymRef, carried: Type, body: Box<Typed> },
+    /// `(throw 'tag value)`: leave for the nearest `catch` of `tag` around
+    /// it at run time, with `value`.
+    Throw { #[serde(with = "crate::owned_form::sym_serde")] tag: SymRef, value: Box<Typed> },
     /// `(lambda (params) ret body...)`: a function value.
     Lambda { #[serde(with = "super::wire::sym_pairs")] params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Typed> },
     /// `(labels (def...) body...)`: local functions, which see each other.
@@ -263,7 +275,7 @@ impl Typed {
             Node::Apply { callee, args } => std::iter::once(&**callee).chain(args).collect(),
             Node::Select { arms } => arms.iter().flat_map(SelectArm::parts).collect(),
             Node::Labels { defs, body } => defs.iter().flat_map(|d| &d.body).chain(body).collect(),
-            Node::Return { value } => value.iter().map(|v| &**v).collect(),
+            Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter().map(|v| &**v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
             | Node::DynNew { value: obj, .. }
@@ -271,6 +283,9 @@ impl Typed {
             | Node::Spawn { call: obj, .. }
             | Node::Set { value: obj, .. }
             | Node::SetGlobal { value: obj, .. }
+            | Node::Block { body: obj, .. }
+            | Node::Catch { body: obj, .. }
+            | Node::Throw { value: obj, .. }
             | Node::Panic { message: obj } => {
                 vec![&**obj]
             }
@@ -301,7 +316,7 @@ impl Typed {
             Node::Apply { callee, args } => std::iter::once(&mut **callee).chain(args.iter_mut()).collect(),
             Node::Select { arms } => arms.iter_mut().flat_map(SelectArm::parts_mut).collect(),
             Node::Labels { defs, body } => defs.iter_mut().flat_map(|d| d.body.iter_mut()).chain(body.iter_mut()).collect(),
-            Node::Return { value } => value.iter_mut().map(|v| &mut **v).collect(),
+            Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter_mut().map(|v| &mut **v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
             | Node::DynNew { value: obj, .. }
@@ -309,6 +324,9 @@ impl Typed {
             | Node::Spawn { call: obj, .. }
             | Node::Set { value: obj, .. }
             | Node::SetGlobal { value: obj, .. }
+            | Node::Block { body: obj, .. }
+            | Node::Catch { body: obj, .. }
+            | Node::Throw { value: obj, .. }
             | Node::Panic { message: obj } => {
                 vec![&mut **obj]
             }
@@ -344,7 +362,7 @@ impl Typed {
             match &mut t.node {
                 Node::Call { targs, .. } | Node::MethodCall { targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
-                Node::FieldSet { field_ty, .. } => *field_ty = f(field_ty),
+                Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } => *field_ty = f(field_ty),
                 Node::Lambda { params, ret, .. } => {
                     params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
                     *ret = f(ret);
@@ -371,6 +389,9 @@ impl Typed {
                 | Node::Loop { .. }
                 | Node::Break
                 | Node::Return { .. }
+                | Node::Block { .. }
+                | Node::ReturnFrom { .. }
+                | Node::Throw { .. }
                 | Node::UnwindProtect { .. }
                 | Node::Panic { .. }
                 | Node::Default { .. }

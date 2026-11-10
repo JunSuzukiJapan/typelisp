@@ -14,8 +14,9 @@ use typelisp_mem::symbols::{member_symbol, well_known_symbol};
 use typelisp_mem::SymRef;
 
 use super::define::{Definer, Kind};
-use super::expr::{check_body, Cx};
+use super::expr::Cx;
 use super::generic::Base;
+use super::block::check_named_body;
 use super::locals::Locals;
 use super::defun::{parse_header, split_doc};
 use super::impl_block::method_params;
@@ -85,7 +86,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
             bodyless.push(m);
         } else {
             def.defaults.push(m);
-            bodies.push((m, ps, ret, &w.body));
+            bodies.push((m, w.name, ps, ret, &w.body));
         }
     }
     // The vtable a trait object of it is called through: a method may not
@@ -106,12 +107,12 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     // types the trait's other parameters.
     let assoc = params[1..].iter().map(|a| (a.name.name().to_string(), Type::Param(*a))).collect();
     let bounded = scope.bound(vec![(params[0], TraitBound { trait_path: path, assoc })]);
-    for (m, ps, ret, body) in bodies {
+    for (m, name, ps, ret, body) in bodies {
         let mut body = {
             let cx = Cx::new(reg, d.expander, ns, &bounded, Some(&self_ty));
             let locals_root = Locals::empty();
             let locals = locals_root.bind(ps.clone())?;
-            let (mut body, _) = check_body(&cx, heap, &locals, body, Some(&ret))?;
+            let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
             cx.settle(heap, &mut body)?;
             body
         };

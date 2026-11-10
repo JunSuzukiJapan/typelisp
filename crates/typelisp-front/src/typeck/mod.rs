@@ -51,10 +51,12 @@
 
 pub(crate) mod args;
 pub(crate) mod binding;
+pub(crate) mod block;
 pub(crate) mod bounds;
 pub(crate) mod bridge;
 pub(crate) mod call;
 pub(crate) mod cast;
+pub(crate) mod catch;
 pub(crate) mod collection_literal;
 pub(crate) mod control;
 pub(crate) mod define;

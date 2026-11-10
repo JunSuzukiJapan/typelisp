@@ -129,7 +129,7 @@ fn check_item(
     for clause in impl_where.into_iter().chain(own_where) {
         bounds.extend(parse_where(heap, &tcx, clause)?);
     }
-    let def = Method { owner, method, instance: receiver.is_some(), public, home: None, params: list, ret, bounds };
+    let def = Method { owner, method, name, instance: receiver.is_some(), public, home: None, params: list, ret, bounds };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }
 

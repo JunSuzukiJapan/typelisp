@@ -23,7 +23,7 @@ use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::check::registry::TraitBound;
-use super::{binding, call, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
+use super::{binding, block, call, catch, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
 use typelisp_mem::symbols::member_symbol;
@@ -49,6 +49,13 @@ pub(crate) struct Cx<'a> {
     numbers: RefCell<Vec<Type>>,
     /// The loops being checked, innermost last: what leaving each gives.
     pub(crate) loops: RefCell<Vec<LoopExit>>,
+    /// The tags the form's `catch`es and `throw`s have said a type for,
+    /// recorded in the registry when it is settled.
+    pub(crate) tags: RefCell<Vec<(SymRef, Type)>>,
+    /// The blocks being checked, innermost last.
+    pub(crate) blocks: RefCell<Vec<super::block::BlockExit>>,
+    /// The blocks the form has made, to name the next one.
+    block_labels: Cell<u32>,
     /// The control strings to check against their arguments' settled types.
     directives: RefCell<Vec<Directives>>,
     /// The bounds the form's calls require of their type arguments.
@@ -59,7 +66,7 @@ pub(crate) struct Cx<'a> {
 
 impl<'a> Cx<'a> {
     pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
     }
 
     /// Where a type written in this form is read.
@@ -73,6 +80,14 @@ impl<'a> Cx<'a> {
         let n = self.temps.get();
         self.temps.set(n + 1);
         typelisp_mem::symbols::intern(&format!("%place-tmp-{}", n))
+    }
+
+    /// The name in the core IR of a new block named `name`, unique in the
+    /// form.
+    pub(crate) fn block_label(&self, name: SymRef) -> Box<str> {
+        let n = self.block_labels.get();
+        self.block_labels.set(n + 1);
+        format!("{}'{}", name.name(), n).into_boxed_str()
     }
 
     /// `ty` with every hole solved so far filled in.
@@ -186,6 +201,9 @@ impl<'a> Cx<'a> {
         }
         for d in self.directives.borrow().iter() {
             check_directives(d, |ty| self.resolve(ty))?;
+        }
+        for (tag, ty) in self.tags.borrow().iter() {
+            super::catch::record(self, *tag, ty)?;
         }
         if let Some(r) = self.required.borrow().first() {
             unimplemented!("typeck: the `:where` bound on `{}` of `{}`, whose type argument nothing decided", r.param, r.of)
@@ -413,6 +431,10 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::FORMAT => return format::check_format(cx, heap, locals, args, loc),
         wk::PRINT | wk::PRINTLN => return format::check_print(cx, heap, locals, head.well_known(), args, loc),
         wk::LOOP => return looping::check_loop(cx, heap, locals, args, loc),
+        wk::BLOCK => return block::check_block(cx, heap, locals, args, expected, loc),
+        wk::CATCH => return catch::check_catch(cx, heap, locals, args, expected, loc),
+        wk::THROW => return catch::check_throw(cx, heap, locals, args, loc),
+        wk::RETURN_FROM => return block::check_return_from(cx, heap, locals, args, loc),
         wk::BREAK => return looping::check_break(cx, args, loc),
         wk::RETURN => return looping::check_return(cx, heap, locals, args, loc),
         wk::QUOTE => return quote::check_quote(heap, args, loc),

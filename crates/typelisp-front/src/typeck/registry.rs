@@ -7,6 +7,7 @@
 //! ([`Registry::rollback`]) and those of one that succeeds kept
 //! ([`Registry::commit`]).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
@@ -295,6 +296,10 @@ pub(crate) struct Registry {
     defaulted: Table<(Path, SymRef), (Path, Vec<Type>)>,
     /// The documentation strings definitions wrote.
     pub(crate) docs: Table<Doc, String>,
+    /// The type each `catch` and `throw` tag carries, by the tag's symbol.
+    /// Written when a form is settled (`Cx::settle`), which holds the
+    /// registry to read only.
+    throw_tags: RefCell<Table<SymRef, Type>>,
 }
 
 /// A definition a documentation string is kept for: a function, a macro, a
@@ -344,6 +349,16 @@ impl Registry {
             Some(t) => self.templates.insert(base, Rc::new(t)),
             None => self.templates.remove(&base),
         }
+    }
+
+    /// The type the tag `tag` carries, once a form has said.
+    pub(crate) fn throw_tag(&self, tag: SymRef) -> Option<Type> {
+        self.throw_tags.borrow().get(&tag).cloned()
+    }
+
+    /// Record that the tag `tag` carries `ty`.
+    pub(crate) fn record_throw_tag(&self, tag: SymRef, ty: Type) {
+        self.throw_tags.borrow_mut().insert(tag, ty);
     }
 
     /// Every generic body kept.
@@ -452,6 +467,7 @@ impl Registry {
         self.blanket_impls.commit();
         self.defaulted.commit();
         self.docs.commit();
+        self.throw_tags.get_mut().commit();
     }
 
     /// Undo every write since the last commit.
@@ -470,6 +486,7 @@ impl Registry {
         self.blanket_impls.rollback();
         self.defaulted.rollback();
         self.docs.rollback();
+        self.throw_tags.get_mut().rollback();
     }
 }
 
