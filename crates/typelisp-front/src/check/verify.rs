@@ -270,7 +270,7 @@ pub(super) fn bound_symbol(id: typelisp_mem::SymRef, who: &str) -> Result<typeli
 
 /// Refuses `head` as the head of a form in expression position when it is
 /// one of `top_level`, the heads written only at top level.
-pub(super) fn expression_head(head: typelisp_mem::SymRef, top_level: &[u32]) -> Result<(), Error> {
+pub(crate) fn expression_head(head: typelisp_mem::SymRef, top_level: &[u32]) -> Result<(), Error> {
     let k = head.well_known();
     if !top_level.contains(&k) {
         return Ok(());

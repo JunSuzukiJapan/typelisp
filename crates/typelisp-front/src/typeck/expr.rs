@@ -579,9 +579,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     if SPECIAL_FORM_HEADS.contains(&head.well_known()) {
         unimplemented!("typeck: the special form `{}`", heap.symbol_spelling(head))
     }
-    if TOPLEVEL_FORM_HEADS.contains(&head.well_known()) {
-        unimplemented!("typeck: the form `{}`", heap.symbol_spelling(head))
-    }
+    crate::check::verify::expression_head(head, TOPLEVEL_FORM_HEADS)?;
     let spelling = heap.symbol_spelling(head);
     if let Some(ty) = locals.lookup(head)? {
         let callee = Typed { node: Node::Local { name: head }, ty: ty.clone(), loc: elems[0].1.clone() };

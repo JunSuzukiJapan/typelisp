@@ -1785,7 +1785,12 @@ impl Checker {
             true => {
                 let rebuilt = self.rebuilt.as_mut().expect("seen above");
                 let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
-                rebuilt.check_form(heap, &self.info.reg, interp, site, v, heap.cons_loc(v).or(loc_hint))
+                let form = rebuilt.check_form(heap, &self.info.reg, interp, site, v, heap.cons_loc(v).or(loc_hint));
+                if let Some(ns) = rebuilt.take_entered() {
+                    self.info.ns = ns;
+                    self.info.reg.module_mut(ns);
+                }
+                form
             }
             false => self.check_one_form(heap, interp, v, loc_hint),
         };
@@ -2629,6 +2634,9 @@ impl Checker {
         interp: &dyn MacroExpander,
         v: Value,
     ) -> Result<Option<Value>, Error> {
+        if let Some(rebuilt) = &self.rebuilt {
+            return rebuilt.expand_toplevel_macro(heap, &self.info.reg, interp, self.info.ns, v);
+        }
         if !matches!(v, Value::Cons(_)) {
             return Ok(None);
         }

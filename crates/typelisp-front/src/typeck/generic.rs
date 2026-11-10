@@ -104,11 +104,14 @@ impl Requests {
         }
     }
 
-    /// The lifted definitions, and what the form's code asks to be reached
-    /// from outside it.
-    pub(crate) fn take_lifted(&mut self) -> (Vec<Value>, Reached) {
-        let reached = Reached { callbacks: std::mem::take(&mut self.callbacks), format_calls: std::mem::take(&mut self.format_calls) };
-        (std::mem::take(&mut self.lifted), reached)
+    /// The lifted definitions not taken yet.
+    pub(crate) fn take_lifted(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.lifted)
+    }
+
+    /// What the form's code asks to be reached from outside it.
+    pub(crate) fn take_reached(&mut self) -> Reached {
+        Reached { callbacks: std::mem::take(&mut self.callbacks), format_calls: std::mem::take(&mut self.format_calls) }
     }
 
     /// The name the function `base` has specialized at `args`; asked for

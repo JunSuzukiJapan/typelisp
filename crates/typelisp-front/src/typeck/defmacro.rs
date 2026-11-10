@@ -41,7 +41,7 @@ pub(crate) fn check_defmacro(
     let Value::Symbol(name) = *name else {
         return Err(Error::TypeError("defmacro: name must be a symbol".into()));
     };
-    d.ownable(heap, name, "defmacro")?;
+    let name = d.ownable(heap, name, "defmacro")?;
     bound_name(name, "defmacro")?;
     d.value(reg, Kind::Macro, name)?;
     let (doc, body) = split_doc(heap, body);

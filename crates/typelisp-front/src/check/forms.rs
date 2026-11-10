@@ -508,7 +508,7 @@ pub(crate) fn defsignature_form(heap: &mut Heap) -> Result<Value, Error> {
 
 /// `(load "PATH")` — recorded, not performed: the checker cannot do file
 /// I/O, so the driver reads this and loads the file before checking on.
-pub(super) fn load_form(heap: &mut Heap, path: &str) -> Result<Value, Error> {
+pub(crate) fn load_form(heap: &mut Heap, path: &str) -> Result<Value, Error> {
     let s = heap.alloc_string(path.to_string());
     core::tagged(heap, wk::LOAD, &[s])
 }

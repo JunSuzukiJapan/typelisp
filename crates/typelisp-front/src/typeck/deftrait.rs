@@ -39,7 +39,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     };
     let spelling = bound_name(name, "deftrait")?;
     let (doc, items) = split_doc(heap, items);
-    d.ownable(heap, name, "deftrait")?;
+    let name = d.ownable(heap, name, "deftrait")?;
     d.type_name(reg, Kind::Trait, name)?;
     let ns = d.site.ns;
     let path = Path::of_symbol(ns, name);

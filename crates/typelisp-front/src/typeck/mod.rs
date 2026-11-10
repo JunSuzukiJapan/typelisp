@@ -49,6 +49,7 @@
 //! - [`tree`]: the typed tree checking produces.
 //! - [`lower`]: the typed tree to core IR.
 
+pub(crate) mod aref;
 pub(crate) mod args;
 pub(crate) mod binding;
 pub(crate) mod block;

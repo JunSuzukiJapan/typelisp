@@ -25,7 +25,7 @@ pub(crate) fn check_defffi(reg: &mut Registry, d: &mut Definer, heap: &mut Heap,
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, c_symbol) = names(heap, *header)?;
-    d.ownable(heap, name, "defffi")?;
+    let name = d.ownable(heap, name, "defffi")?;
     let root = TypeScope::empty();
     let tcx = TypeCx { reg, ns: d.site.ns, scope: &root, self_type: None };
     let written = heap.list_to_vec(*params)?;

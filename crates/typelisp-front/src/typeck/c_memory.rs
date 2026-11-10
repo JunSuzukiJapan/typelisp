@@ -156,7 +156,7 @@ fn check_def_c_struct(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, part
         return Err(Error::TypeError(usage.into()));
     };
     let name = *name;
-    d.ownable(heap, name, "def-c-struct")?;
+    let name = d.ownable(heap, name, "def-c-struct")?;
     let (doc, specs) = match rest.split_first() {
         Some(((Value::Str(id), _), specs)) => (Some(heap.string(*id).to_string()), specs),
         _ => (None, rest),

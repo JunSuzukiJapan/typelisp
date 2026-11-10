@@ -30,7 +30,7 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
     let (doc, items) = split_doc(heap, items);
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
-    d.ownable(heap, name, "defenum")?;
+    let name = d.ownable(heap, name, "defenum")?;
     d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
     if let Some(doc) = doc {

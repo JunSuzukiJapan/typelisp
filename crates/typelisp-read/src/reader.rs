@@ -874,6 +874,25 @@ fn module_body_ns(heap: &Heap, ns: NsId, head: Value, path: Value) -> Option<NsI
     if !matches!(head, Value::Symbol(s) if s.is(wk::MODULE)) {
         return None;
     }
+    named_module(heap, ns, path)
+}
+
+/// The namespace the rest of a `(module PATH body...)` body read in `ns` is
+/// read in after its element `form`, when that is `(in-module PATH)`: the
+/// module `PATH` names under `ns`, as the checker enters it.
+fn in_module_ns(heap: &Heap, ns: NsId, form: Value) -> Option<NsId> {
+    let Value::Cons(_) = form else { return None };
+    if !matches!(heap.car(form), Ok(Value::Symbol(s)) if s.is(wk::IN_MODULE)) {
+        return None;
+    }
+    match heap.list_to_vec(form).ok()?.as_slice() {
+        [_, path] => named_module(heap, ns, *path),
+        _ => None,
+    }
+}
+
+/// The module the name or path `path` names under `ns`, declared.
+fn named_module(heap: &Heap, ns: NsId, path: Value) -> Option<NsId> {
     let segs: Vec<&str> = match path {
         Value::Symbol(s) => vec![s.name()],
         Value::Path(id) => heap.path_segments(id).iter().map(|s| s.name()).collect(),
@@ -1196,6 +1215,10 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
                     if let Some(inner) = module_body_ns(heap, ctx.ns, elems[0], elems[1]) {
                         body_ns = inner;
                         module_body = true;
+                    }
+                } else if module_body {
+                    if let Some(inner) = in_module_ns(heap, body_ns, e) {
+                        body_ns = inner;
                     }
                 }
                 if ctx.toplevel {

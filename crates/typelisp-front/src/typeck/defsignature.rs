@@ -26,7 +26,7 @@ pub(crate) fn check_defsignature(reg: &mut Registry, d: &mut Definer, heap: &mut
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
-    d.ownable(heap, name, "defsignature")?;
+    let name = d.ownable(heap, name, "defsignature")?;
     if !type_names.is_empty() {
         return Err(Error::TypeError(format!(
             "defsignature: `{}` takes type parameters, and a generic function cannot be forward-declared — \

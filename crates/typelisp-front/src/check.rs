@@ -14,7 +14,7 @@ pub mod registry;
 pub mod members;
 mod info;
 pub(crate) mod lower;
-mod verify;
+pub(crate) mod verify;
 pub mod analyze;
 mod fold;
 pub mod loop_dsl;

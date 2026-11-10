@@ -45,7 +45,7 @@ pub(crate) fn check_defun(
     };
     let (name, type_names) = parse_header(heap, *header)?;
     let ns = d.site.ns;
-    d.ownable(heap, name, "defun")?;
+    let name = d.ownable(heap, name, "defun")?;
     let path = Path::of_symbol(ns, name);
     // The definition a `defsignature` announced is not a redefinition.
     let declared = match reg.predeclared.get(&path) {

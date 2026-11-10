@@ -119,7 +119,10 @@ fn set_call_place(
         return super::c_memory::set_c_deref(cx, heap, locals, rest, value, loc);
     }
     if spelling == "aref" {
-        unimplemented!("typeck: `setf` of a `({} ...)` place", spelling)
+        let Some((array, subs)) = rest.split_first() else {
+            return Err(Error::TypeError("setf: `(aref ...)` place needs an array argument".into()));
+        };
+        return super::aref::check_aref(cx, heap, locals, array, subs, Some(&value), None, loc);
     }
     let Some(((recv, recv_loc), keys)) = rest.split_first() else {
         return Err(Error::TypeError(format!("setf: `({} ...)` place needs a receiver argument", spelling)));

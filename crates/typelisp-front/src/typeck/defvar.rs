@@ -66,7 +66,7 @@ pub(crate) fn check_defvar(
             name.spelling()
         )));
     }
-    d.ownable(heap, name, "defvar")?;
+    let name = d.ownable(heap, name, "defvar")?;
     if let Some(doc) = doc {
         reg.docs.insert(Doc::Var(Path::of_symbol(d.site.ns, name)), doc);
     }

@@ -49,6 +49,9 @@ pub(crate) struct TypeChecker {
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
     /// Every definition a `~/name/` directive calls.
     format_calls: std::collections::BTreeSet<crate::CompileTarget>,
+    /// The module the last form, an `(in-module path)`, made the current
+    /// one, for the driver, which keeps the current module, to take.
+    entered: Option<typelisp_mem::NsId>,
 }
 
 impl TypeChecker {
@@ -87,6 +90,14 @@ impl TypeChecker {
         let reg = self.reg.get_mut().expect("the registry was just made");
         publish_name_view(reg, site.ns);
         self.expr_ty = None;
+        let entered = in_module(heap, site, v).map_err(|e| match &loc {
+            Some(l) => e.at(l.clone()),
+            None => e,
+        })?;
+        if let Some(inner) = entered {
+            self.entered = Some(inner.ns);
+            return crate::check::forms::module_form(heap, &Path::of_module(inner.ns), &[]);
+        }
         // Every value the tree holds is rooted from here until it is lowered
         // into the form, which is then reachable from nothing but the caller.
         // Nothing allocates between releasing them and the caller rooting it.
@@ -154,6 +165,13 @@ impl TypeChecker {
         register_for_reading(self.registry(old), heap, site, path);
     }
 
+    /// `v`, written in the module `ns`, expanded once when it is a call of a
+    /// macro, for a driver that reads what the expansion `use`s before the
+    /// form is checked.
+    pub(crate) fn expand_toplevel_macro(&self, heap: &mut Heap, old: &crate::check::Registry, expander: &dyn MacroExpander, ns: typelisp_mem::NsId, v: Value) -> Result<Option<Value>, Error> {
+        super::macros::expand_toplevel(self.registry(old), expander, heap, ns, v)
+    }
+
     /// The functions a `defsignature` declared that no `defun` has defined,
     /// forgotten: what finishing a unit reports.
     pub(crate) fn take_predeclared(&mut self) -> Vec<Path> {
@@ -171,6 +189,12 @@ impl TypeChecker {
     /// expression.
     pub(crate) fn expr_type(&self) -> Option<&Type> {
         self.expr_ty.as_ref()
+    }
+
+    /// The module the last form made the current one, when it was an
+    /// `(in-module path)`.
+    pub(crate) fn take_entered(&mut self) -> Option<typelisp_mem::NsId> {
+        self.entered.take()
     }
 
     /// The warnings given since they were last taken.
@@ -218,20 +242,41 @@ fn check_toplevel(
 ) -> Result<(Value, Option<Type>, super::generic::Reached), Error> {
     let mut requests = Requests::default();
     let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings)?;
+    let form = bundled(heap, reg, &mut requests, form)?;
+    Ok((form, ty, requests.take_reached()))
+}
+
+/// `form`, rooted, after what it needs made first: the specializations
+/// asked for and the functions lifted since the last bundle, in one bundle
+/// with it.
+fn bundled(heap: &mut Heap, reg: &Registry, requests: &mut Requests, form: Value) -> Result<Value, Error> {
     heap.push_root(form);
     let mut forms = Vec::new();
     while let Some(req) = requests.next()? {
-        let spec = specialize(heap, reg, &mut requests, &req)?;
+        let spec = specialize(heap, reg, requests, &req)?;
         heap.push_root(spec);
         forms.push(spec);
     }
-    let (lifted, reached) = requests.take_lifted();
-    forms.extend(lifted);
+    forms.extend(requests.take_lifted());
     if forms.is_empty() {
-        return Ok((form, ty, reached));
+        return Ok(form);
     }
     forms.push(form);
-    Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty, reached))
+    let bundle = crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?;
+    heap.push_root(bundle);
+    Ok(bundle)
+}
+
+/// The site the form `v` written at `site` makes current, when it is an
+/// `(in-module path)`: the module `path` names under `site`'s.
+fn in_module(heap: &Heap, site: Site, v: Value) -> Result<Option<Site>, Error> {
+    if !matches!(heap.car(v), Ok(Value::Symbol(h)) if h.is(wk::IN_MODULE)) {
+        return Ok(None);
+    }
+    match heap.list_to_vec_locs(v)?.as_slice() {
+        [_, path] => Ok(Some(super::module::module_site(heap, site, std::slice::from_ref(path))?.0)),
+        _ => Err(Error::TypeError("in-module: (in-module path)".into())),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -256,12 +301,26 @@ fn check_primary(
         // Types in messages are written as the module being checked reads
         // them.
         publish_name_view(reg, inner.ns);
+        let mut inner = inner;
         for (form, form_loc) in &elems[2..] {
+            // `(in-module path)` in the body checks the rest of the body in
+            // the module `path` names under the one it is written in.
+            if let Some(entered) = in_module(heap, inner, *form)? {
+                inner = entered;
+                publish_name_view(reg, inner.ns);
+                continue;
+            }
             let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings)?;
             heap.push_root(checked);
-            if crate::project::needs_immediate_exec(heap, checked) {
-                expander.install(heap, checked).map_err(Error::TypeError)?;
-            }
+            // Run now, it runs with what it needs made.
+            let checked = match crate::project::needs_immediate_exec(heap, checked) {
+                true => {
+                    let checked = bundled(heap, reg, requests, checked)?;
+                    expander.install(heap, checked).map_err(Error::TypeError)?;
+                    checked
+                }
+                false => checked,
+            };
             body.push(checked);
         }
         publish_name_view(reg, ns);
@@ -306,6 +365,16 @@ fn check_primary(
                 wk::USE | wk::IMPORT => {
                     let public = d.public;
                     return Ok((check_use(reg, heap, site, args, false, public, d.warnings)?, None));
+                }
+                wk::LOAD => {
+                    return match args {
+                        [(Value::Str(id), _)] => {
+                            let path = heap.string(*id).to_string();
+                            Ok((crate::check::forms::load_form(heap, &path)?, None))
+                        }
+                        [_] => Err(Error::TypeError("load: expected a string-literal path".into())),
+                        _ => Err(Error::TypeError("load: (load \"path\")".into())),
+                    };
                 }
                 wk::SHADOWING_IMPORT => return Ok((check_use(reg, heap, site, args, true, false, d.warnings)?, None)),
                 // The reader made each name the module's own; nothing is left

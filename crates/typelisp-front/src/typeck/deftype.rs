@@ -30,7 +30,7 @@ pub(crate) fn check_deftype(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
     let [(body, _)] = rest else {
         return Err(Error::TypeError("deftype: (deftype Name Type) — exactly one type follows the name".into()));
     };
-    d.ownable(heap, name, "deftype")?;
+    let name = d.ownable(heap, name, "deftype")?;
     d.type_name(reg, Kind::Alias, name)?;
     let ns = d.site.ns;
     let path = Path::of_symbol(ns, name);

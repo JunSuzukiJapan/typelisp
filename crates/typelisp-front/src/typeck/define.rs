@@ -59,15 +59,17 @@ pub(crate) struct Definer<'w> {
 }
 
 impl Definer<'_> {
-    /// Whether `name`, written by the definition form `who`, may be defined at
-    /// all here: not a reserved word, and not a name the standard library
-    /// offers every module unless it was shadowed.
-    pub(crate) fn ownable(&self, heap: &Heap, name: SymRef, who: &str) -> Result<(), Error> {
+    /// The symbol `name`, written by the definition form `who`, defines here:
+    /// the module's own symbol of its spelling, which is `name` itself unless
+    /// a macro of another module wrote it. Refused for a reserved word, and
+    /// for a name the standard library offers every module unless it was
+    /// shadowed.
+    pub(crate) fn ownable(&self, heap: &Heap, name: SymRef, who: &str) -> Result<SymRef, Error> {
         if name.home() == typelisp_mem::NsId::SYSTEM {
             return Err(Error::TypeError(format!("{}: `{}` is a reserved word, which no module can define", who, name.name())));
         }
         if in_std(self.site.ns) || !heap.names().offers(name) {
-            return Ok(());
+            return Ok(typelisp_mem::symbols::intern_in(self.site.ns, name.name()));
         }
         Err(Error::TypeError(format!(
             "{}: `{}` is a name the standard library offers every module; write `(shadow {})` before defining it here",

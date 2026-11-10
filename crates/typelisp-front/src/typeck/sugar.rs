@@ -39,7 +39,7 @@ pub(crate) fn check_sugar(
         CallSugar::VariadicCmp => adjacent(cx, heap, head, &raw),
         CallSugar::VariadicAppend => unimplemented!("typeck: `append` of more than two sequences"),
         CallSugar::Concatenate => unimplemented!("typeck: `concatenate`"),
-        CallSugar::Aref => unimplemented!("typeck: the call sugar `(aref ...)`"),
+        CallSugar::Aref => return Some(super::aref::check_aref(cx, heap, locals, &args[0], &args[1..], None, expected, loc)),
         CallSugar::LogWithBase => log_with_base(heap, &raw),
         CallSugar::Atan2 => {
             let atan2 = std_symbol(heap, "atan2");

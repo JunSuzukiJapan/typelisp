@@ -60,7 +60,7 @@ pub(crate) fn check_defstruct(
     let (doc, fields) = split_doc(heap, fields);
     let (name, type_names) = parse_header(heap, header)?;
     let ns = d.site.ns;
-    d.ownable(heap, name, "defstruct")?;
+    let name = d.ownable(heap, name, "defstruct")?;
     d.type_name(reg, Kind::Type, name)?;
     let path = Path::of_symbol(ns, name);
     if let Some(doc) = doc {
