@@ -24,7 +24,7 @@ use super::registry::{Doc, Registry};
 use super::scope::TypeScope;
 use super::type_syntax::{parse_type, TypeCx};
 
-const ITEM_SHAPE: &str = "impl: an item is (pub? defmethod name<T...>? (params...) ReturnType body...)";
+const ITEM_SHAPE: &str = "impl: an item is (pub? defmethod name (params...) ReturnType body...), the name `name<T...>` when the method has type parameters of its own";
 
 /// `(impl ...)` — `parts` without the head — and its core form, unrooted.
 /// `type_names` are what `impl<...>` declares. The caller undoes the

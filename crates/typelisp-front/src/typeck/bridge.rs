@@ -110,6 +110,7 @@ fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
                 name: *name,
                 ty: convert(ty, &by_name, &|| format!("a field of {}", path)),
                 public: def.assoc.get(*name).is_some_and(|af| af.sig.public),
+                default: false,
             })
             .collect(),
         _ => Vec::new(),
@@ -125,7 +126,11 @@ fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
             .collect(),
         AdtKind::Struct => Vec::new(),
     };
-    let has_defaults = old.struct_defaults.contains_key(&path);
+    // A default is checked as the body of a method this checker makes,
+    // which copying the definition does not give.
+    if old.struct_defaults.contains_key(&path) {
+        unimplemented!("typeck: copying `{}`, a struct whose fields have defaults, from the current checker", path)
+    }
     new.types.insert(
         path,
         TypeEntry::Type(TypeDef {
@@ -135,7 +140,6 @@ fn import_type(old: &OldRegistry, def: &AdtDef, new: &mut Registry) {
             builtin: def.builtin,
             stdlib: def.stdlib,
             fields,
-            has_defaults,
             variants,
         }),
     );

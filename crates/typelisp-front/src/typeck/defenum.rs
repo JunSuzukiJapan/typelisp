@@ -49,7 +49,6 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
         builtin: false,
         stdlib: crate::types::in_std(ns),
         fields: Vec::new(),
-        has_defaults: false,
         variants: Vec::new(),
     };
     reg.types.insert(path, TypeEntry::Type(stub.clone()));

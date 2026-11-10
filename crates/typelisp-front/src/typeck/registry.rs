@@ -92,8 +92,6 @@ pub(crate) struct TypeDef {
     /// A struct's fields, in order. Their types are written in this type's
     /// own parameters.
     pub(crate) fields: Vec<Field>,
-    /// Some field has a default (`(name Type default)`).
-    pub(crate) has_defaults: bool,
     /// A sum type's variants, in order: a variant is its index here. Their
     /// field types are written in this type's own parameters.
     pub(crate) variants: Vec<Variant>,
@@ -106,12 +104,16 @@ impl TypeDef {
     }
 }
 
-/// A struct's field: its member symbol, its type, and whether it is `pub`.
+/// A struct's field: its member symbol, its type, whether it is `pub`, and
+/// whether it has a default.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Field {
     pub(crate) name: SymRef,
     pub(crate) ty: Type,
     pub(crate) public: bool,
+    /// Written with a default, which `make-instance` gives the slot when
+    /// it is not given ([`super::defstruct::default_method`]).
+    pub(crate) default: bool,
 }
 
 /// What a module-level name in the type name space is: a type, a type
