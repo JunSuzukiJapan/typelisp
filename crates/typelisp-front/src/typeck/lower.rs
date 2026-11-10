@@ -100,6 +100,19 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         Node::TraitCall { trait_path, method, args } => {
             // The receiver's type is the specialization's.
             let recv = lw.settle(&args[0].ty);
+            // A trait object, which meets the bound by its trait: the call is
+            // through its table.
+            if let Type::Dyn(dyn_trait, _) = &recv {
+                let slots = super::dyn_trait::vtable(lw.reg, dyn_trait)?;
+                let slot = slots.iter().position(|(m, _)| m == method).expect("a trait object meets a bound of its own trait or a supertrait, whose methods are in its table");
+                let mut lowered = Vec::with_capacity(args.len());
+                for a in args {
+                    lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
+                }
+                let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
+                let targets = super::dyn_trait::targets(lw.reg, dyn_trait, *method);
+                return lw.reg.dyn_call_form(heap, dyn_trait, *method, slot, &targets, &lowered);
+            }
             let (owner, type_args) = match &recv {
                 Type::Named(path, type_args) => (*path, type_args.clone()),
                 other => match prim_type_path(other) {
@@ -409,6 +422,10 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 }
             }
             lw.reg.match_form(heap, scrut, &scrut_ty, &lowered)
+        }
+        Node::DynValue { value } => {
+            let value = lower_rooted(heap, lw, value)?;
+            crate::check::forms::dyn_value_form(heap, value)
         }
         Node::AsSexpr { value } => {
             let ty = lw.settle(&value.ty);

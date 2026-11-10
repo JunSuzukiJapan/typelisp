@@ -146,6 +146,9 @@ pub(crate) enum Node {
     /// `value`, of its own type, held as a `Sexpr`. How is chosen when the
     /// tree is lowered, from the settled type ([`super::sexpr_value`]).
     AsSexpr { value: Box<Typed> },
+    /// The value the trait object `value` holds, as a `Sexpr`: what a
+    /// `match` takes it apart as, and what it is put into a `Sexpr` as.
+    DynValue { value: Box<Typed> },
 }
 
 /// One arm of a `select`. Its channel and value are locals the `let`
@@ -327,6 +330,7 @@ impl Typed {
             Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter().map(|v| &**v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
+            | Node::DynValue { value: obj }
             | Node::DynNew { value: obj, .. }
             | Node::DynUpcast { value: obj, .. }
             | Node::Spawn { call: obj, .. }
@@ -374,6 +378,7 @@ impl Typed {
             Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter_mut().map(|v| &mut **v).collect(),
             Node::FieldGet { obj, .. }
             | Node::AsSexpr { value: obj }
+            | Node::DynValue { value: obj }
             | Node::DynNew { value: obj, .. }
             | Node::DynUpcast { value: obj, .. }
             | Node::Spawn { call: obj, .. }
@@ -446,6 +451,7 @@ impl Typed {
                 | Node::Global { .. }
                 | Node::FieldGet { .. }
                 | Node::AsSexpr { .. }
+                | Node::DynValue { .. }
                 | Node::Set { .. }
                 | Node::SetGlobal { .. }
                 | Node::Loop { .. }

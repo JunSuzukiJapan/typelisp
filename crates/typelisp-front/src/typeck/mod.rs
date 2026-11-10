@@ -89,6 +89,7 @@ pub(crate) mod literal;
 pub(crate) mod locals;
 pub(crate) mod looping;
 pub(crate) mod lower;
+pub(crate) mod macrolet;
 pub(crate) mod macros;
 pub(crate) mod matching;
 pub(crate) mod method;

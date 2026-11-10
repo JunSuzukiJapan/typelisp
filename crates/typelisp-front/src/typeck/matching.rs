@@ -30,6 +30,16 @@ pub(crate) fn check_match(
         return Err(Error::TypeError("match: no arms".into()));
     }
     let scrut = check_expr(cx, heap, locals, *scrut, None, scrut_loc.clone())?;
+    // A trait object is matched as the value it holds, by the `Sexpr`
+    // downcast patterns: its implementing types are open, so a catch-all
+    // arm is needed, as for a `Sexpr`.
+    let scrut = match cx.resolve(&scrut.ty) {
+        Type::Dyn(..) => {
+            let loc = scrut.loc.clone();
+            Typed { node: Node::DynValue { value: Box::new(scrut) }, ty: crate::check::analyze::sexpr_ty(), loc }
+        }
+        _ => scrut,
+    };
     let scrut_ty = cx.resolve(&scrut.ty);
     let result = match expected {
         Some(e) => e.clone(),

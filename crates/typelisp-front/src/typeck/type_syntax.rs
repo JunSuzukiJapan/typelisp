@@ -187,6 +187,13 @@ fn dyn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
         _ => None,
     };
     let Some((path, TypeEntry::Trait(TraitDef { public, .. }))) = found else {
+        if found.is_none() {
+            return Err(Error::TypeError(format!(
+                "unknown trait `{}`: no trait of that name is visible here (a `:dyn` names a trait \
+                 defined before it, in this module, or brought in by a `use`)",
+                crate::check::core::print(heap, head)
+            )));
+        }
         return Err(Error::TypeError(format!("`:dyn` must be followed by a trait name, found `{}`", crate::check::core::print(heap, *inner))));
     };
     if !public && !sees(cx.ns, path.ns()) {

@@ -80,8 +80,10 @@ fn widen(cx: &Cx, t: Typed, wanted: &Type) -> Result<Typed, Typed> {
     if !is_sexpr_expectation(wanted) {
         return Err(t);
     }
+    // A trait object goes in as the value it holds.
     if let Type::Dyn(..) = found {
-        unimplemented!("typeck: the trait object `{}` put into a `Sexpr`", found)
+        let loc = t.loc.clone();
+        return Ok(Typed { node: Node::DynValue { value: Box::new(t) }, ty: wanted.clone(), loc });
     }
     // Narrowing, not widening: an `Option<Sexpr>` may be the empty list.
     if found == option_of_sexpr() {

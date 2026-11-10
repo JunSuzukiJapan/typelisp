@@ -313,6 +313,8 @@ pub(crate) struct Registry {
     throw_tags: RefCell<Table<SymRef, Type>>,
     /// The functions lifted for C callbacks so far, to name the next one.
     callbacks_lifted: std::cell::Cell<u64>,
+    /// The macros `macrolet` has bound so far, to name the next one.
+    local_macros: std::cell::Cell<u64>,
 }
 
 /// A definition, as its documentation string and its place are kept by:
@@ -363,6 +365,13 @@ impl Registry {
             Some(t) => self.templates.insert(base, Rc::new(t)),
             None => self.templates.remove(&base),
         }
+    }
+
+    /// A number no macro `macrolet` bound has had.
+    pub(crate) fn next_local_macro(&self) -> u64 {
+        let n = self.local_macros.get();
+        self.local_macros.set(n + 1);
+        n
     }
 
     /// A number no lifted callback's name has had.

@@ -230,11 +230,12 @@ fn meets_at(q: Asker, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
             Asker::Checking(cx) => return param_meets(cx, *p, b),
             Asker::Settled(_) => unreachable!("a settled type has no type parameter, but `{}` is one", p.name.name()),
         },
-        Type::Dyn(..) => unimplemented!("typeck: whether a trait object meets a `:where` bound"),
+        Type::Dyn(trait_path, pins) => return dyn_meets(q.reg(), ty, *trait_path, pins, b),
         Type::Named(path, _) => *path,
         other => match prim_type_path(other) {
             Some(path) => path,
-            None => return Meets::No(Unmet::NoImpls { ty: ty.clone() }),
+            // A type with no name, as `()`, has no `impl`s.
+            None => return Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None }),
         },
     };
     let args: &[Type] = match ty {
@@ -290,6 +291,24 @@ fn param_meets(cx: &Cx, p: TypeParam, b: &TraitBound) -> Meets {
         }
     }
     undeclared()
+}
+
+/// Whether the trait object `ty`, of the trait `trait_path` pinned to
+/// `pins`, meets `b`: its trait is `b`'s or has it among its supertraits,
+/// pinning what `b` pins to the same types. Nothing else is known of the
+/// value inside.
+fn dyn_meets(reg: &Registry, ty: &Type, trait_path: Path, pins: &[Type], b: &TraitBound) -> Meets {
+    let unimplemented = || Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None });
+    let Some(tdef) = trait_def(reg, &b.trait_path) else { return unimplemented() };
+    let at = pins.iter().cloned().map(Some).collect();
+    let Some(at) = trait_at(reg, trait_path, at, &b.trait_path, 0) else { return unimplemented() };
+    for (name, required) in &b.assoc {
+        let i = tdef.params.iter().position(|a| a.name.name() == name).expect("a bound pins an associated type of its trait");
+        if at[i].as_ref() != Some(required) {
+            return Meets::No(Unmet::Assoc { ty: ty.clone(), assoc: name.clone(), actual: at[i].clone(), required: required.clone() });
+        }
+    }
+    Meets::Yes
 }
 
 /// The parameters of the trait `want` at the trait `from`'s parameters

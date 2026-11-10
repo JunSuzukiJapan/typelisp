@@ -7,7 +7,7 @@
 //! fields matched by the patterns; the variant is named bare, since the
 //! type is the one being matched.
 
-use crate::check::analyze::{is_option_of_sexpr, is_sexpr_expectation, sexpr_variant_for_literal, BIGNUM_IS_GONE, NIL_IS_GONE};
+use crate::check::analyze::{is_option_of_sexpr, is_sexpr_expectation, sexpr_ty, sexpr_variant_for_literal, BIGNUM_IS_GONE, NIL_IS_GONE};
 use crate::sexpr_variant::{self, is_ctor_name};
 use crate::check::registry::AdtKind;
 use crate::types::{path_is_builtin, Path, Type};
@@ -169,10 +169,6 @@ fn option_variant(cx: &Cx, ty: &Type, id: SymRef) -> bool {
     is_option_of_sexpr(ty) && cx.reg.type_def(&Path::builtin(wk::OPTION)).is_some_and(|d| d.variant_index(member_symbol(id.name())).is_some())
 }
 
-/// `Sexpr`.
-fn sexpr_ty() -> Type {
-    Type::Named(Path::builtin(wk::SEXPR), Vec::new())
-}
 
 /// The sum type a pattern `what` (for the message) matches a value of, with
 /// its type arguments and definition.

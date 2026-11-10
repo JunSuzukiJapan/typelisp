@@ -249,7 +249,7 @@ fn check_toplevel(
 /// `form`, rooted, after what it needs made first: the specializations
 /// asked for and the functions lifted since the last bundle, in one bundle
 /// with it.
-fn bundled(heap: &mut Heap, reg: &Registry, requests: &mut Requests, form: Value) -> Result<Value, Error> {
+pub(crate) fn bundled(heap: &mut Heap, reg: &Registry, requests: &mut Requests, form: Value) -> Result<Value, Error> {
     heap.push_root(form);
     let mut forms = Vec::new();
     while let Some(req) = requests.next()? {

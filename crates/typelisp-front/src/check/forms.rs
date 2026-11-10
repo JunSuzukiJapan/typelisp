@@ -419,7 +419,7 @@ pub(crate) fn box_option_form(heap: &mut Heap, option: &Type, value: Value) -> R
 /// `(dyn-value FORM)` — the concrete value inside a trait object, typed as
 /// `sexpr` so `match`ing a trait object back down reuses the existing
 /// downcast patterns.
-pub(super) fn dyn_value_form(heap: &mut Heap, value: Value) -> Result<Value, Error> {
+pub(crate) fn dyn_value_form(heap: &mut Heap, value: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::DYN_VALUE, &[value])
 }
 

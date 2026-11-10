@@ -64,7 +64,7 @@ pub(crate) fn linearize(reg: &Registry, name: &str, path: Path, supertraits: &[T
 }
 
 /// The vtable of the trait `path`, which its `deftrait` laid out.
-fn vtable(reg: &Registry, path: &Path) -> Result<Vec<(SymRef, Path)>, Error> {
+pub(crate) fn vtable(reg: &Registry, path: &Path) -> Result<Vec<(SymRef, Path)>, Error> {
     let Some(tdef) = trait_def(reg, path) else {
         return Err(Error::TypeError(format!("dyn: unknown trait `{}`", path)));
     };

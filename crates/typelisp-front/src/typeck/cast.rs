@@ -54,8 +54,13 @@ pub(crate) fn check_as(
         return width_cast(cx, heap, locals, src, &target, try_variant, loc);
     }
     if let Type::Dyn(to, pins) = &target {
+        // Whether a type implements a trait is known statically, so the
+        // conversion always succeeds or is a type error.
         if try_variant {
-            unimplemented!("typeck: `{}` to the trait object `{}`", what, target)
+            return Err(Error::TypeError(format!(
+                "try-as: `{}` either always succeeds or is a type error (a type's trait impls are known statically) — use `as`",
+                target
+            )));
         }
         let mut boxed = super::dyn_trait::coerce(cx, src, to, pins)?;
         boxed.loc = loc;

@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 
+use crate::check::analyze::MacroShape;
 use crate::types::{Path, Type};
 use crate::{Error, Loc, Value};
 use typelisp_mem::SymRef;
@@ -19,6 +20,9 @@ pub(crate) struct Locals<'p> {
     /// Names that stand for a form, written where the name is
     /// (`symbol-macrolet`).
     macros: Vec<(SymRef, Value)>,
+    /// Names of macros, which the evaluator holds under the path
+    /// (`macrolet`).
+    local_macros: Vec<(SymRef, Path, MacroShape)>,
     /// Set on a function's parameters: the frames around it are what the
     /// function captures.
     fence: Option<Fence>,
@@ -51,7 +55,7 @@ pub(crate) struct LabelsCallback {
 impl Locals<'static> {
     /// Where no local is bound: a top-level expression.
     pub(crate) fn empty() -> Locals<'static> {
-        Locals { parent: None, binds: Vec::new(), macros: Vec::new(), fence: None, callbacks: None }
+        Locals { parent: None, binds: Vec::new(), macros: Vec::new(), local_macros: Vec::new(), fence: None, callbacks: None }
     }
 }
 
@@ -63,7 +67,7 @@ impl<'p> Locals<'p> {
         if let Some((name, _)) = binds.iter().find(|(n, _)| is_reserved_name(*n)) {
             return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
         }
-        Ok(Locals { parent: Some(self), binds, macros: Vec::new(), fence: None, callbacks: None })
+        Ok(Locals { parent: Some(self), binds, macros: Vec::new(), local_macros: Vec::new(), fence: None, callbacks: None })
     }
 
     /// The parameters `binds` of the function `what` ("a `lambda`"), whose
@@ -115,7 +119,32 @@ impl<'p> Locals<'p> {
         if let Some((name, _)) = macros.iter().find(|(n, _)| is_reserved_name(*n)) {
             return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
         }
-        Ok(Locals { parent: Some(self), binds: Vec::new(), macros, fence: None, callbacks: None })
+        Ok(Locals { parent: Some(self), binds: Vec::new(), macros, local_macros: Vec::new(), fence: None, callbacks: None })
+    }
+
+    /// A frame inside `self` in which each name of `macros` is the macro the
+    /// evaluator holds under its path.
+    pub(crate) fn bind_local_macros<'s>(&'s self, macros: Vec<(SymRef, Path, MacroShape)>) -> Result<Locals<'s>, Error> {
+        if let Some((name, _, _)) = macros.iter().find(|(n, _, _)| is_reserved_name(*n)) {
+            return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
+        }
+        Ok(Locals { parent: Some(self), binds: Vec::new(), macros: Vec::new(), local_macros: macros, fence: None, callbacks: None })
+    }
+
+    /// The macro `macrolet` bound to `name` here, when the nearest binding
+    /// of `name` is one: its path and how many arguments it takes.
+    pub(crate) fn local_macro(&self, name: SymRef) -> Option<(Path, MacroShape)> {
+        let mut frame = Some(self);
+        while let Some(f) = frame {
+            if f.binds.iter().any(|(n, _)| *n == name) || f.macros.iter().any(|(n, _)| *n == name) {
+                return None;
+            }
+            if let Some((_, path, shape)) = f.local_macros.iter().rev().find(|(n, _, _)| *n == name) {
+                return Some((*path, *shape));
+            }
+            frame = f.parent;
+        }
+        None
     }
 
     /// The form the symbol macro `name` stands for here, when the nearest

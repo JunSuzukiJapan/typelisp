@@ -560,6 +560,10 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::LAMBDA => return lambda::check_lambda(cx, heap, locals, args, loc),
         wk::SELECT => return select::check_select(cx, heap, locals, args, expected, loc),
         wk::SYMBOL_MACROLET => return check_symbol_macrolet(cx, heap, locals, args, expected, loc),
+        wk::MACROLET => return super::macrolet::check_macrolet(cx, heap, locals, args, expected, loc),
+        wk::DYN => {
+            return Err(Error::TypeError("`:dyn` may only appear in a type position (a parameter/field/return type, or a type argument)".into()));
+        }
         wk::TASK | wk::THREAD => return spawn::check_spawn(cx, heap, locals, head.well_known(), args, loc),
         wk::APPLY => return lambda::check_apply_form(cx, heap, locals, args, loc),
         wk::PANIC => return control::check_panic(cx, heap, locals, args, loc),
@@ -623,6 +627,10 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     crate::check::verify::expression_head(head, TOPLEVEL_FORM_HEADS)?;
     let spelling = heap.symbol_spelling(head);
+    if let Some((path, shape)) = locals.local_macro(head) {
+        let expanded = macros::expand(cx.expander, heap, &path, shape, spelling, args)?;
+        return check_expr(cx, heap, locals, expanded, expected, loc);
+    }
     if let Some(ty) = locals.lookup(head)? {
         let callee = Typed { node: Node::Local { name: head }, ty: ty.clone(), loc: elems[0].1.clone() };
         return lambda::check_apply(cx, heap, locals, callee, args, expected, loc);
@@ -668,8 +676,10 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         }
         // A trait object answers to `Sexpr`'s methods as the value inside it.
         let sexpr = crate::types::Path::builtin(wk::SEXPR);
-        if cx.reg.method(&sexpr, member).is_some_and(|m| m.instance) {
-            unimplemented!("typeck: `Sexpr`'s method `{}` on the trait object `{}`", spelling, cx.resolve(&first.ty))
+        if let Some(def) = cx.reg.method(&sexpr, member).filter(|m| m.instance) {
+            let loc_first = first.loc.clone();
+            let held = Typed { node: Node::DynValue { value: Box::new(first) }, ty: crate::check::analyze::option_of_sexpr(), loc: loc_first };
+            return method::check_method_call(cx, heap, locals, sexpr, member, def, Some(held), rest, expected, loc);
         }
         // Neither a function nor the trait's method: the name may be a
         // function of the library this module has not brought in.

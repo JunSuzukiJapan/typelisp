@@ -12,7 +12,9 @@ use crate::check::analyze::{option_of_sexpr, parse_macro_lambda_list, MacroLambd
 use crate::check::bound_name;
 use crate::check::registry::MacroDef;
 use crate::types::{Path, Type};
+use crate::check::MacroExpander;
 use crate::{Error, Heap, Loc, Value};
+use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
 use super::define::{Definer, Kind};
@@ -57,24 +59,49 @@ pub(crate) fn check_defmacro(
     let path = Path::of_symbol(d.site.ns, name);
     reg.values.insert(path, ValueDef::Macro { public: d.public, shape: MacroShape::of(&def) });
     d.record(reg, Definition::Macro(path), doc);
+    let site = MacroSite { reg, expander: d.expander, ns: d.site.ns };
+    macro_form(&site, heap, requests, &path, (required, optionals, rest, keys), body)
+}
 
+/// Where a macro's body is checked: what is defined there, what expands
+/// the macro calls it makes, and its module.
+pub(crate) struct MacroSite<'a> {
+    pub(crate) reg: &'a Registry,
+    pub(crate) expander: &'a dyn MacroExpander,
+    pub(crate) ns: NsId,
+}
+
+/// A macro's parameter list as `parse_macro_lambda_list` reads it.
+pub(crate) type MacroParams = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
+
+/// The macro `path` with the parameters `params` and the body `body`,
+/// checked at `site`: its definition's core form, unrooted.
+pub(crate) fn macro_form(
+    site: &MacroSite,
+    heap: &mut Heap,
+    requests: &mut Requests,
+    path: &Path,
+    (required, optionals, rest, keys): MacroParams,
+    body: &[(Value, Option<Loc>)],
+) -> Result<Value, Error> {
     // Each default sees the parameters before it.
     let sexpr = option_of_sexpr();
     let mut bound: Vec<SymRef> = required.clone();
     let mut opt_defaults = Vec::with_capacity(optionals.len());
     for (n, default) in &optionals {
-        opt_defaults.push(check_default(reg, d, heap, requests, &bound, *default)?);
+        opt_defaults.push(check_default(site, heap, requests, &bound, *default)?);
         bound.push(*n);
     }
     bound.extend(rest);
     let mut key_defaults = Vec::with_capacity(keys.len());
     for (n, default) in &keys {
-        key_defaults.push((n.name().to_string(), check_default(reg, d, heap, requests, &bound, *default)?));
+        key_defaults.push((n.name().to_string(), check_default(site, heap, requests, &bound, *default)?));
         bound.push(*n);
     }
+    let reg = site.reg;
     let scope = TypeScope::empty();
     let mut checked = {
-        let cx = Cx::new(reg, d.expander, d.site.ns, &scope, None);
+        let cx = Cx::new(reg, site.expander, site.ns, &scope, None);
         let root = Locals::empty();
         let locals = root.bind(bound.iter().map(|n| (*n, sexpr.clone())).collect())?;
         let (mut checked, _) = check_body(&cx, heap, &locals, body, Some(&sexpr))?;
@@ -86,14 +113,13 @@ pub(crate) fn check_defmacro(
     let lowered = checked.iter().map(|t| lower_rooted(heap, &mut lw, t)).collect::<Result<Vec<_>, _>>()?;
     checked.clear();
     let lambda = MacroLambda { required: required.len(), optionals: opt_defaults, keys: key_defaults };
-    crate::check::forms::defmacro_form(heap, &path, &bound, rest.is_some(), &lambda, &lowered)
+    crate::check::forms::defmacro_form(heap, path, &bound, rest.is_some(), &lambda, &lowered)
 }
 
 /// The default form of an `&optional` or `&key` parameter, checked where the
 /// parameters `bound` are: its core form, or none when it has no default.
 fn check_default(
-    reg: &Registry,
-    d: &Definer,
+    site: &MacroSite,
     heap: &mut Heap,
     requests: &mut Requests,
     bound: &[SymRef],
@@ -101,9 +127,10 @@ fn check_default(
 ) -> Result<Vec<Value>, Error> {
     let Some(form) = default else { return Ok(Vec::new()) };
     let sexpr: Type = option_of_sexpr();
+    let reg = site.reg;
     let scope = TypeScope::empty();
     let mut tree = {
-        let cx = Cx::new(reg, d.expander, d.site.ns, &scope, None);
+        let cx = Cx::new(reg, site.expander, site.ns, &scope, None);
         let root = Locals::empty();
         let locals = root.bind(bound.iter().map(|n| (*n, sexpr.clone())).collect())?;
         let t = check_expr(&cx, heap, &locals, form, Some(&sexpr), None)?;
