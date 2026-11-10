@@ -170,16 +170,59 @@ pub(crate) enum Meets {
 /// associated type to, which may decide the pin's holes. A type parameter
 /// meets a bound by a bound of its own in `cx`'s scope.
 pub(crate) fn meets(cx: &Cx, ty: &Type, b: &TraitBound) -> Meets {
-    meets_at(cx, &cx.resolve(ty), b, 0)
+    meets_at(Asker::Checking(cx), &cx.resolve(ty), b, 0)
 }
 
-fn meets_at(cx: &Cx, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
+/// [`meets`] of a settled type, which has no hole and no type parameter:
+/// what lowering asks.
+pub(crate) fn settled_meets(reg: &Registry, ty: &Type, b: &TraitBound) -> bool {
+    matches!(meets_at(Asker::Settled(reg), ty, b, 0), Meets::Yes)
+}
+
+/// Who asks whether a type meets a bound: a form being checked, whose
+/// types may hold holes and its scope's type parameters, or lowering, whose
+/// types are settled.
+#[derive(Clone, Copy)]
+enum Asker<'c, 'a> {
+    Checking(&'c Cx<'a>),
+    Settled(&'c Registry),
+}
+
+impl Asker<'_, '_> {
+    fn reg(&self) -> &Registry {
+        match self {
+            Asker::Checking(cx) => cx.reg,
+            Asker::Settled(reg) => reg,
+        }
+    }
+
+    fn resolve(&self, ty: &Type) -> Type {
+        match self {
+            Asker::Checking(cx) => cx.resolve(ty),
+            Asker::Settled(_) => ty.clone(),
+        }
+    }
+
+    /// Whether the type a bound pins, `required`, agrees with the one the
+    /// `impl` binds, `actual`, deciding `required`'s holes.
+    fn agrees(&self, required: &Type, actual: &Type) -> bool {
+        match self {
+            Asker::Checking(cx) => cx.holes.borrow_mut().unify(required, actual).is_ok(),
+            Asker::Settled(_) => required == actual,
+        }
+    }
+}
+
+fn meets_at(q: Asker, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
     assert!(depth < 64, "the bounds of `impl`s of `{}` do not end", b.trait_path);
     let path = match ty {
         Type::Infer(_) => return Meets::NotYet,
         // It has no values: nothing can be asked of one.
         Type::Never => return Meets::Yes,
-        Type::Param(p) => return param_meets(cx, *p, b),
+        Type::Param(p) => match q {
+            Asker::Checking(cx) => return param_meets(cx, *p, b),
+            Asker::Settled(_) => unreachable!("a settled type has no type parameter, but `{}` is one", p.name.name()),
+        },
         Type::Dyn(..) => unimplemented!("typeck: whether a trait object meets a `:where` bound"),
         Type::Named(path, _) => *path,
         other => match prim_type_path(other) {
@@ -191,21 +234,22 @@ fn meets_at(cx: &Cx, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
         Type::Named(_, args) => args,
         _ => &[],
     };
-    let found = cx.reg.trait_impls.get(&(b.trait_path, path)).and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)));
+    let reg = q.reg();
+    let found = reg.trait_impls.get(&(b.trait_path, path)).and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)));
     let Some(imp) = found else {
-        if cx.reg.blanket_impls.get(&b.trait_path).is_some() {
+        if reg.blanket_impls.get(&b.trait_path).is_some() {
             unimplemented!("typeck: whether a blanket `impl` of `{}` covers `{}`", b.trait_path, ty)
         }
         return Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None });
     };
     // The `impl`'s types are written in the type's parameters.
-    let type_params = cx.reg.type_def(&path).map(|d| d.params.clone()).unwrap_or_default();
+    let type_params = reg.type_def(&path).map(|d| d.params.clone()).unwrap_or_default();
     // One written for one instantiation binds concrete types.
     let at = if imp.args.is_none() { Subst::positional(&type_params, args) } else { Subst::default() };
     for (p, bounds) in &imp.bounds {
         let arg = at.apply(&Type::Param(*p));
         for inner in bounds {
-            match meets_at(cx, &cx.resolve(&arg), &inner.at(&at), depth + 1) {
+            match meets_at(q, &q.resolve(&arg), &inner.at(&at), depth + 1) {
                 Meets::Yes => {}
                 Meets::No(_) => return Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None }),
                 Meets::NotYet => return Meets::NotYet,
@@ -214,9 +258,8 @@ fn meets_at(cx: &Cx, ty: &Type, b: &TraitBound, depth: usize) -> Meets {
     }
     for (name, required) in &b.assoc {
         let actual = imp.assoc.get(name).map(|t| at.apply(t));
-        let agreed = actual.as_ref().is_some_and(|actual| cx.holes.borrow_mut().unify(required, actual).is_ok());
-        if !agreed {
-            return Meets::No(Unmet::Assoc { ty: ty.clone(), assoc: name.clone(), actual, required: cx.resolve(required) });
+        if !actual.as_ref().is_some_and(|actual| q.agrees(required, actual)) {
+            return Meets::No(Unmet::Assoc { ty: ty.clone(), assoc: name.clone(), actual, required: q.resolve(required) });
         }
     }
     Meets::Yes

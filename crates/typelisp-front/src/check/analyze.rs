@@ -1349,6 +1349,9 @@ impl Checker {
     /// turns each into a startup registration so the directive works in a
     /// standalone executable.
     pub fn format_call_targets(&self) -> Vec<crate::CompileTarget> {
+        if let Some(rebuilt) = &self.rebuilt {
+            return rebuilt.format_call_targets();
+        }
         self.format_calls.borrow().iter().cloned().collect()
     }
 
@@ -1780,9 +1783,6 @@ impl Checker {
         let ns = self.current_module();
         let r = match self.rebuilt.is_some() {
             true => {
-                // Types in its messages are written for this module, as this
-                // checker's are.
-                self.publish_name_view();
                 let rebuilt = self.rebuilt.as_mut().expect("seen above");
                 let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
                 rebuilt.check_form(heap, &self.info.reg, interp, site, v, heap.cons_loc(v).or(loc_hint))

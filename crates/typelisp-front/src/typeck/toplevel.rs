@@ -24,7 +24,7 @@ use super::expr::{check_expr, Cx};
 use super::generic::{Base, Name, Request, Requests};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
-use super::registry::Registry;
+use super::registry::{Registry, TypeEntry};
 use super::scope::TypeScope;
 use super::subst::Subst;
 use super::wire::{Bodies, RebuiltBodies};
@@ -47,6 +47,8 @@ pub(crate) struct TypeChecker {
     /// Every C callback entry the checked code asks for, in the order first
     /// asked.
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
+    /// Every definition a `~/name/` directive calls.
+    format_calls: std::collections::BTreeSet<crate::CompileTarget>,
 }
 
 impl TypeChecker {
@@ -83,6 +85,7 @@ impl TypeChecker {
     ) -> Result<Value, Error> {
         self.registry(old);
         let reg = self.reg.get_mut().expect("the registry was just made");
+        publish_name_view(reg, site.ns);
         self.expr_ty = None;
         // Every value the tree holds is rooted from here until it is lowered
         // into the form, which is then reachable from nothing but the caller.
@@ -91,8 +94,9 @@ impl TypeChecker {
         let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut());
         heap.truncate_roots(roots_base);
         match result {
-            Ok((form, ty, callbacks)) => {
-                for sig in callbacks {
+            Ok((form, ty, reached)) => {
+                self.format_calls.extend(reached.format_calls);
+                for sig in reached.callbacks {
                     if !self.callbacks.contains(&sig) {
                         self.callbacks.push(sig);
                     }
@@ -105,6 +109,7 @@ impl TypeChecker {
                 let methods: Vec<(Path, SymRef)> = reg.methods_written().copied().collect();
                 reg.commit();
                 publish(reg, heap, &types, &methods);
+                publish_name_view(reg, site.ns);
                 self.expr_ty = ty;
                 Ok(form)
             }
@@ -125,6 +130,12 @@ impl TypeChecker {
     /// to emit.
     pub(crate) fn ffi_callbacks(&self) -> Vec<crate::ffi_callback::CallbackSig> {
         self.callbacks.clone()
+    }
+
+    /// Every definition a `~/name/` directive calls, for an executable to
+    /// register.
+    pub(crate) fn format_call_targets(&self) -> Vec<crate::CompileTarget> {
+        self.format_calls.iter().cloned().collect()
     }
 
     pub(crate) fn take_bodies(&mut self, bodies: Bodies) {
@@ -193,8 +204,8 @@ pub(crate) fn prelude_bodies(heap: &mut Heap, expander: &dyn MacroExpander) -> R
     RebuiltBodies::of(heap, checker.reg.get().expect("checking made it"))
 }
 
-/// `v`'s core form, its type when it is an expression, and the C callback
-/// entries it asks for. The specializations the form asks for come first,
+/// `v`'s core form, its type when it is an expression, and what its code
+/// asks to be reached from outside it. The specializations the form asks for come first,
 /// then the functions lifted for its callbacks, in one bundle with it.
 fn check_toplevel(
     reg: &mut Registry,
@@ -204,7 +215,7 @@ fn check_toplevel(
     v: Value,
     loc: Option<Loc>,
     warnings: &mut Vec<String>,
-) -> Result<(Value, Option<Type>, Vec<crate::ffi_callback::CallbackSig>), Error> {
+) -> Result<(Value, Option<Type>, super::generic::Reached), Error> {
     let mut requests = Requests::default();
     let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings)?;
     heap.push_root(form);
@@ -214,13 +225,13 @@ fn check_toplevel(
         heap.push_root(spec);
         forms.push(spec);
     }
-    let (lifted, callbacks) = requests.take_lifted();
+    let (lifted, reached) = requests.take_lifted();
     forms.extend(lifted);
     if forms.is_empty() {
-        return Ok((form, ty, callbacks));
+        return Ok((form, ty, reached));
     }
     forms.push(form);
-    Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty, callbacks))
+    Ok((crate::check::forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &forms)?, ty, reached))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -242,6 +253,9 @@ fn check_primary(
         let elems = heap.list_to_vec_locs(v)?;
         let (inner, path) = module_site(heap, site, &elems[1..])?;
         let mut body = Vec::new();
+        // Types in messages are written as the module being checked reads
+        // them.
+        publish_name_view(reg, inner.ns);
         for (form, form_loc) in &elems[2..] {
             let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings)?;
             heap.push_root(checked);
@@ -250,6 +264,7 @@ fn check_primary(
             }
             body.push(checked);
         }
+        publish_name_view(reg, ns);
         return Ok((crate::check::forms::module_form(heap, &path, &body)?, None));
     }
     let d = &mut Definer { site, warnings, expander, public: false };
@@ -333,6 +348,31 @@ fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc
             "pub: expected defun/defsignature/defffi/defmacro/defstruct/defenum/deftrait/deftype/defvar/defparameter/defconstant/use".into(),
         )),
     }
+}
+
+/// Makes the printer write types as the module `ns` reads them
+/// (`typelisp_mem::NameView`): those it brought in, and those `std::prelude`
+/// re-exports that no type of its own or brought in takes the name of, by
+/// their last segment.
+fn publish_name_view(reg: &Registry, ns: typelisp_mem::NsId) {
+    let is_type = |p: &Path| matches!(reg.types.get(p), Some(TypeEntry::Type(_) | TypeEntry::Trait(_)));
+    let mut imports = std::collections::HashMap::new();
+    let mut taken = std::collections::HashSet::new();
+    for ((at, bare), target) in reg.imports.iter() {
+        if *at == ns && is_type(target) {
+            imports.insert((target.ns(), target.name_symbol()), bare.name());
+            taken.insert(bare.name());
+        }
+    }
+    let prelude = crate::types::prelude_ns();
+    for ((at, bare), ()) in reg.reexports.iter() {
+        let Some(target) = reg.imports.get(&(*at, *bare)) else { continue };
+        if *at != prelude || !is_type(target) || taken.contains(bare.name()) || is_type(&Path::in_ns(ns, bare.name())) {
+            continue;
+        }
+        imports.entry((target.ns(), target.name_symbol())).or_insert(bare.name());
+    }
+    typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(ns, imports));
 }
 
 /// Tells the session's table of what names mean (`Heap::names`) about the

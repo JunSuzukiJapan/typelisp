@@ -15,7 +15,8 @@ use crate::check::analyze::{option_of_sexpr, sexpr_ty};
 use crate::check::registry::TraitBound;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
-use typelisp_print::format::{call_sites, ArgKind, ArgType};
+use crate::CompileTarget;
+use typelisp_print::format::{call_sites, ArgKind, ArgType, CallArg, CallSite};
 
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
@@ -116,19 +117,144 @@ fn check_control(
         )));
     };
     let text = heap.string(id).to_string();
-    let unknown: Vec<ArgType> = items.iter().map(|_| ArgType { kind: ArgKind::Unknown, shown: String::new() }).collect();
-    if !call_sites(&text, &unknown).map_err(Error::TypeError)?.is_empty() {
-        unimplemented!("typeck: a `~/name/` directive")
-    }
-    let control = check_expr(cx, heap, locals, control, Some(&Type::Str), control_loc)?;
     let mut checked = Vec::with_capacity(items.len());
     for (i, (item, item_loc)) in items.iter().enumerate() {
         let item = check_expr(cx, heap, locals, *item, None, item_loc.clone())?;
         cx.must_decide(item.ty.clone(), format!("{}: the type of argument {} is not decided", what, i + 1), item.loc.clone());
         checked.push(item);
     }
+    let unknown: Vec<ArgType> = items.iter().map(|_| ArgType { kind: ArgKind::Unknown, shown: String::new() }).collect();
+    let control = if call_sites(&text, &unknown).map_err(Error::TypeError)?.is_empty() {
+        check_expr(cx, heap, locals, control, Some(&Type::Str), control_loc)?
+    } else {
+        resolve_calls(cx, heap, locals, what, &text, &checked, control_loc)?
+    };
     cx.check_directives_later(Directives { control: text, args: checked.iter().map(|t| t.ty.clone()).collect(), loc });
     Ok((control, sexpr_list(checked)))
+}
+
+/// The control string `text`, which has `~/name/` directives, with each name
+/// replaced by what it calls given the arguments `items` it can be handed
+/// ([`call_target`]): the engine fetches that definition rather than look a
+/// name up. The arguments' types are needed here, so a number literal no
+/// type has decided is its default.
+fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &str, items: &[Typed], loc: Option<Loc>) -> Result<Typed, Error> {
+    let mut types = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        cx.decide(&item.ty);
+        let ty = cx.resolve(&item.ty);
+        if cx.holes.borrow().unsolved(&ty).is_some() {
+            return Err(Error::TypeError(format!("{}: the type of argument {} is not decided, and a `~/name/` directive calls what its type says", what, i + 1)));
+        }
+        types.push(ty);
+    }
+    let args: Vec<ArgType> = types.iter().map(|ty| ArgType { kind: arg_kind(ty), shown: ty.to_string() }).collect();
+    let sites = call_sites(text, &args).map_err(Error::TypeError)?;
+    let mut names = Vec::with_capacity(sites.len());
+    let mut targets: Vec<CompileTarget> = Vec::new();
+    for site in &sites {
+        if site.args.contains(&CallArg::Element) {
+            return Err(Error::TypeError(format!(
+                "{}: ~/{}/ can be handed an element of a list argument, whose type is only `Sexpr` — \
+                 ~/name/ calls what `({} arg colon at)` would call here, which needs the argument's type",
+                what, site.name, site.name
+            )));
+        }
+        let mut found: Option<(CompileTarget, &Type)> = None;
+        for arg in &site.args {
+            let CallArg::Arg(i) = *arg else { unreachable!("elements were refused above") };
+            let target = call_target(cx, heap, locals, what, site, &types[i])?;
+            match &found {
+                None => found = Some((target, &types[i])),
+                Some((first, first_ty)) if *first != target => {
+                    return Err(Error::TypeError(format!(
+                        "{}: ~/{}/ can be handed a `{}` or a `{}` here, which call different definitions \
+                         (`{}` and `{}`) — a directive calls one",
+                        what,
+                        site.name,
+                        first_ty,
+                        types[i],
+                        first.written_name(),
+                        target.written_name()
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
+        names.push(match found {
+            Some((target, _)) => {
+                let name = target.link_name();
+                if !targets.contains(&target) {
+                    targets.push(target);
+                }
+                name
+            }
+            // No path through the control string reaches it.
+            None => site.name.clone(),
+        });
+    }
+    let renamed = typelisp_print::format::rename_calls(text, &names).map_err(Error::TypeError)?;
+    let renamed = heap.alloc_string(renamed);
+    heap.push_root(renamed);
+    let control = check_expr(cx, heap, locals, renamed, Some(&Type::Str), loc.clone())?;
+    Ok(Typed { node: Node::FormatCalls { control: Box::new(control), targets }, ty: Type::Str, loc })
+}
+
+/// What `(name arg colon at)` calls here, `arg` being of the type `ty`:
+/// checked as that very call, so the name means what it means anywhere
+/// else. It has to be a function or a method written in typelisp that takes
+/// `arg` as it is: the engine hands the value over and nothing else.
+fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &CallSite, ty: &Type) -> Result<CompileTarget, Error> {
+    // A name no source can bind: `'` ends a symbol.
+    let arg = typelisp_mem::symbols::intern("format''arg");
+    let shown = format!("~/{}/", site.name);
+    let as_call = format!("({} arg colon at) with arg a `{}`", site.name, ty);
+    let head = if site.name.contains("::") {
+        let parts: Vec<&str> = site.name.split("::").collect();
+        let syms = heap.names().read_path(cx.ns, &parts).map_err(|e| Error::TypeError(format!("{}: {}: {}", what, shown, e)))?;
+        heap.intern_path(&syms)
+    } else {
+        Value::Symbol(heap.names().read(cx.ns, &site.name))
+    };
+    let call = crate::check::forms::list_from_vec_locs(heap, &[(head, None), (Value::Symbol(arg), None), (Value::Bool(site.colon), None), (Value::Bool(site.at), None)])?;
+    heap.push_root(call);
+    let checked = locals.bind(vec![(arg, ty.clone())]).and_then(|inner| check_expr(cx, heap, &inner, call, Some(&Type::Str), None));
+    heap.pop_root();
+    let checked = checked.map_err(|e| {
+        let inner = match e.kind() {
+            Error::TypeError(m) => m.clone(),
+            other => other.to_string(),
+        };
+        Error::TypeError(format!("{}: {} calls what {} would: {}", what, shown, as_call, inner))
+    })?;
+    let not_a_definition = || {
+        Error::TypeError(format!(
+            "{}: {} must call a function or a method written in typelisp that takes the argument as it is, and {} does not",
+            what, shown, as_call
+        ))
+    };
+    let (target, first, generic) = match &checked.node {
+        Node::Call { path, targs, args } => {
+            if cx.reg.fn_def(path).is_some_and(|d| d.builtin) {
+                return Err(not_a_definition());
+            }
+            (CompileTarget::Fn(*path), args.first(), !targs.is_empty())
+        }
+        Node::MethodCall { owner, method, targs, args, .. } => {
+            if cx.reg.method(owner, *method).is_some_and(|d| d.sig.builtin) {
+                return Err(not_a_definition());
+            }
+            (CompileTarget::Method(*owner, *method), args.first(), !targs.is_empty())
+        }
+        _ => return Err(not_a_definition()),
+    };
+    if !first.is_some_and(|a| matches!(a.node, Node::Local { name } if name == arg)) {
+        return Err(not_a_definition());
+    }
+    if generic {
+        unimplemented!("typeck: {} calling `{}`, a generic definition", shown, target.written_name())
+    }
+    Ok(target)
 }
 
 /// `items` as one `Sexpr` list, each held as a `Sexpr` by its own type.

@@ -78,6 +78,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
             }
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
+            request_print_object(lw, &lw.settle(&t.ty));
             lw.reg.call_form(heap, &path, &lowered)
         }
         Node::MethodCall { owner, method, instance, targs, args } => {
@@ -93,6 +94,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             }
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             let ret = lw.settle(&t.ty);
+            request_print_object(lw, &ret);
             lw.reg.assoc_form(heap, owner, method, *instance, &ret, &lowered)
         }
         Node::TraitCall { trait_path, method, args } => {
@@ -207,6 +209,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                     }
                 };
             }
+            request_print_object(lw, &Type::Named(*owner, targs.clone()));
             lw.reg.construct_form(heap, owner, &targs, *variant, *mutable, &field_tys, &args)
         }
         Node::FieldGet { obj, index } => {
@@ -288,6 +291,10 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 lift_label(heap, lw, defs, l)?;
             }
             lw.reg.labels_core_form(heap, &lowered, &body)
+        }
+        Node::FormatCalls { control, targets } => {
+            targets.iter().for_each(|t| lw.requests.format_call(t.clone()));
+            lower(heap, lw, control)
         }
         Node::Callback { target, fn_ty, lifted } => {
             if let Some(lambda) = lifted {
@@ -470,4 +477,30 @@ fn lift_label(heap: &mut Heap, lw: &mut Lowering, defs: &[super::lambda::Label],
     heap.push_root(form);
     lw.requests.lift(form);
     Ok(())
+}
+
+/// Asks for the `print-object` specialization of `ty`, a box a node makes,
+/// when `ty` is an instantiation of a generic type whose `print-object`
+/// applies to it.
+///
+/// Every other specialization is asked for because some call names it. The
+/// printer never does: it picks the method at run time, off the value's
+/// type, so without this a generic value would print the built-in way. The
+/// place to ask is where a box of the type is made, the one place that has
+/// the instantiation.
+fn request_print_object(lw: &mut Lowering, ty: &Type) {
+    let Type::Named(owner, args) = ty else { return };
+    if args.is_empty() {
+        return;
+    }
+    let method = typelisp_mem::symbols::member_symbol("print-object");
+    if lw.reg.template(&super::generic::Base::Method(*owner, method)).is_none() {
+        return;
+    }
+    // Not a call anyone wrote: an instantiation the `impl`'s `:where` does
+    // not take prints the built-in way, which is no error.
+    let bound = crate::check::registry::TraitBound { trait_path: Path::in_ns(crate::types::std_module("fmt"), "print-object"), assoc: Default::default() };
+    if super::bounds::settled_meets(lw.reg, ty, &bound) {
+        lw.requests.ask_method(owner, method, args.clone());
+    }
 }

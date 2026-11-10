@@ -94,6 +94,9 @@ pub(crate) enum Node {
     /// address of an entry that calls the top-level function `target`.
     /// `lifted` is the `lambda` `target` is made of, when it is one.
     Callback { target: Path, fn_ty: Type, lifted: Option<Box<Typed>> },
+    /// A control string whose `~/name/` directives were renamed to the
+    /// definitions `targets` they call, which an executable registers.
+    FormatCalls { control: Box<Typed>, targets: Vec<crate::check::resolved::CompileTarget> },
     /// The function `path` as a value; `params` are the types of the
     /// parameters it really takes, a `&rest` one as a list.
     FnRef { path: Path, params: Vec<Type> },
@@ -299,6 +302,7 @@ impl Typed {
             | Node::Catch { body: obj, .. }
             | Node::Throw { value: obj, .. }
             | Node::UntagInt { value: obj }
+            | Node::FormatCalls { control: obj, .. }
             | Node::Panic { message: obj } => {
                 vec![&**obj]
             }
@@ -343,6 +347,7 @@ impl Typed {
             | Node::Catch { body: obj, .. }
             | Node::Throw { value: obj, .. }
             | Node::UntagInt { value: obj }
+            | Node::FormatCalls { control: obj, .. }
             | Node::Panic { message: obj } => {
                 vec![&mut **obj]
             }
@@ -409,6 +414,7 @@ impl Typed {
                 | Node::ReturnFrom { .. }
                 | Node::Throw { .. }
                 | Node::UntagInt { .. }
+                | Node::FormatCalls { .. }
                 | Node::UnwindProtect { .. }
                 | Node::Panic { .. }
                 | Node::Default { .. }

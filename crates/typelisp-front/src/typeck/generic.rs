@@ -60,6 +60,15 @@ pub(crate) struct Request {
     pub(crate) name: Name,
 }
 
+/// What a form's code asks to be reached from outside it: the C callback
+/// entries, and the definitions `~/name/` directives call, which an
+/// executable registers at startup.
+#[derive(Debug, Default)]
+pub(crate) struct Reached {
+    pub(crate) callbacks: Vec<crate::ffi_callback::CallbackSig>,
+    pub(crate) format_calls: Vec<crate::CompileTarget>,
+}
+
 /// What one top-level form asks to be made besides itself: the
 /// specializations, each once, the functions lifted for C callbacks, and the
 /// callback entries.
@@ -71,6 +80,8 @@ pub(crate) struct Requests {
     /// The lifted functions' definitions, rooted.
     lifted: Vec<Value>,
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
+    /// What the form's `~/name/` directives call.
+    format_calls: Vec<crate::CompileTarget>,
 }
 
 impl Requests {
@@ -86,9 +97,18 @@ impl Requests {
         }
     }
 
-    /// The lifted definitions and the callback entries asked for.
-    pub(crate) fn take_lifted(&mut self) -> (Vec<Value>, Vec<crate::ffi_callback::CallbackSig>) {
-        (std::mem::take(&mut self.lifted), std::mem::take(&mut self.callbacks))
+    /// The definition `target`, which a `~/name/` directive calls.
+    pub(crate) fn format_call(&mut self, target: crate::CompileTarget) {
+        if !self.format_calls.contains(&target) {
+            self.format_calls.push(target);
+        }
+    }
+
+    /// The lifted definitions, and what the form's code asks to be reached
+    /// from outside it.
+    pub(crate) fn take_lifted(&mut self) -> (Vec<Value>, Reached) {
+        let reached = Reached { callbacks: std::mem::take(&mut self.callbacks), format_calls: std::mem::take(&mut self.format_calls) };
+        (std::mem::take(&mut self.lifted), reached)
     }
 
     /// The name the function `base` has specialized at `args`; asked for
