@@ -505,6 +505,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::AS => return cast::check_as(cx, heap, locals, args, false, loc),
         wk::TRY_AS => return cast::check_as(cx, heap, locals, args, true, loc),
         wk::COMPILE => return tools::check_compile(cx, heap, args, loc),
+        wk::DOCUMENTATION => return super::documentation::check_documentation(cx, heap, locals, args, loc),
         wk::TRACE | wk::UNTRACE => return tools::check_trace(cx, heap, head, args, loc),
         wk::DISASSEMBLE => return tools::check_disassemble(cx, heap, args, loc),
         wk::LABELS => return lambda::check_labels(cx, heap, locals, args, expected, loc),

@@ -80,10 +80,21 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                 Value::Symbol(h) if h.is_keyword() || h.is(wk::QUOTE) || h.is(wk::THE) => {
                     unimplemented!("typeck: the pattern `({} ...)`", heap.symbol_spelling(h))
                 }
-                Value::Symbol(h) => h,
+                Value::Symbol(h) => Some(h),
+                Value::Path(_) => None,
                 _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
             };
             let ty = cx.resolve(expected);
+            // A struct's value is matched by its slots.
+            if let Type::Named(owner, targs) = &ty {
+                if let Some(def) = cx.reg.type_def(owner).filter(|d| d.kind == AdtKind::Struct && !d.builtin) {
+                    let def = def.clone();
+                    return struct_pattern(cx, heap, locals, *owner, targs.clone(), &def, &parts, binds);
+                }
+            }
+            let Some(head) = head else {
+                return Err(Error::TypeError("pattern: constructor must be a symbol".into()));
+            };
             if is_sexpr_expectation(&ty) && !option_variant(cx, &ty, head) {
                 if !is_ctor_name(head.name()) && names_type(cx, head) {
                     unimplemented!("typeck: a downcast pattern")
@@ -173,7 +184,7 @@ fn sum_type<'r>(cx: &Cx<'r>, expected: &Type, what: impl Fn() -> String) -> Resu
         if let Some(def) = cx.reg.type_def(p) {
             return match def.kind {
                 AdtKind::Sum => Ok((*p, args.clone(), def)),
-                AdtKind::Struct => unimplemented!("typeck: a struct pattern"),
+                AdtKind::Struct => Err(Error::TypeError(format!("pattern `{}` does not match a value of type `{}`, which is matched by its slots", what(), ty))),
             };
         }
     }
@@ -230,6 +241,64 @@ fn fields_pattern(
     }
     let subs = checked;
     Ok(Pat::Ctor { owner, targs, variant, downcast, field_tys, subs })
+}
+
+/// `(Type :slot pattern... :slot...)`, matching a value of the struct
+/// `owner<targs>`: each slot written is matched by its pattern, a slot
+/// written with no pattern binds a variable of its own name, and a slot not
+/// written is not matched.
+#[allow(clippy::too_many_arguments)]
+fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs: Vec<Type>, def: &TypeDef, parts: &[Value], binds: &mut Binds) -> Result<Pat, Error> {
+    let short = owner.last_segment();
+    let first = def.fields.first().map_or("slot", |f| f.name.name());
+    let head = super::type_syntax::type_path(heap, &cx.types(), parts[0]).ok();
+    if head != Some(owner) {
+        return Err(Error::TypeError(format!(
+            "pattern: a `{}` value is matched as ({} :slot pattern...), not `{}`",
+            owner,
+            short,
+            crate::check::core::print(heap, parts[0])
+        )));
+    }
+    let shape = |got: String| {
+        Error::TypeError(format!(
+            "pattern `{}`: a struct pattern names its slots, ({} :{} pattern...) or ({} :{}) to bind `{}`, but {}",
+            owner, short, first, short, first, first, got
+        ))
+    };
+    let keyword = |v: Value| match v {
+        Value::Symbol(id) if id.is_keyword() => Some(id),
+        _ => None,
+    };
+    let wild = Value::Symbol(heap.names().read(NsId::STD, "_"));
+    let mut slots: Vec<Option<Value>> = vec![None; def.fields.len()];
+    let rest = &parts[1..];
+    let mut k = 0;
+    while k < rest.len() {
+        let Some(slot) = keyword(rest[k]) else {
+            return Err(shape(format!("`{}` is not a slot keyword", crate::check::core::print(heap, rest[k]))));
+        };
+        let Some(i) = def.fields.iter().position(|f| f.name == member_symbol(slot.name())) else {
+            let all: Vec<String> = def.fields.iter().map(|f| format!("`{}`", f.name)).collect();
+            return Err(Error::TypeError(format!("pattern `{}`: no slot `{}` (its slots are {})", owner, slot.name(), all.join(", "))));
+        };
+        if slots[i].is_some() {
+            return Err(Error::TypeError(format!("pattern `{}`: slot `{}` is written twice", owner, slot.name())));
+        }
+        slots[i] = Some(match rest.get(k + 1) {
+            Some(next) if keyword(*next).is_none() => {
+                k += 2;
+                *next
+            }
+            // The slot's own name, read as this module reads a name.
+            _ => {
+                k += 1;
+                Value::Symbol(heap.names().read(cx.ns, slot.name()))
+            }
+        });
+    }
+    let subs: Vec<Value> = slots.into_iter().map(|s| s.unwrap_or(wild)).collect();
+    fields_pattern(cx, heap, locals, owner, targs, def, 0, false, &subs, binds)
 }
 
 /// `#{p0 p1 ...}`: a tuple's elements, each matched by its own pattern.

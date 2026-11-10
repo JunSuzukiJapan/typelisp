@@ -8,7 +8,7 @@
 //! what is expected (`Option<Sexpr>` where data is), or else what the
 //! elements make it.
 
-use crate::check::analyze::{is_sexpr_expectation, option_of_sexpr, literal_element_form, literal_element_type, vector_literal_form, STRUCT_CTOR};
+use crate::check::analyze::{is_sexpr_expectation, option_of_sexpr, literal_element_form, literal_element_type, vector_literal_form};
 use crate::check::forms::{list_from_vec_locs, member_form, name_form};
 use crate::mem::BoxId;
 use crate::types::{tuple_path, Path, Type};
@@ -80,11 +80,11 @@ fn array(heap: &mut Heap, id: BoxId, expected: Option<&Type>) -> Result<Value, E
     rooted(heap, |h| list_from_vec_locs(h, &[(make, None), (dims_form, None), (data_form, None)]))
 }
 
-/// `#{..}`: the tuple type's constructor of the elements, each one quoted
-/// when they are `data`.
+/// `#{..}`: the tuple type's `new` of the elements, each one quoted when
+/// they are `data`.
 fn tuple(heap: &mut Heap, id: BoxId, data: bool) -> Result<Value, Error> {
     let elems = elements(heap, id);
-    let new = rooted(heap, |h| member_form(h, &tuple_path(elems.len()), STRUCT_CTOR))?;
+    let new = rooted(heap, |h| member_form(h, &tuple_path(elems.len()), "new"))?;
     let mut items: Vec<(Value, Option<Loc>)> = vec![(new, None)];
     for e in elems {
         items.push((rooted(heap, |h| literal_element_form(h, e, data))?, None));

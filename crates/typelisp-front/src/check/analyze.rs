@@ -17135,7 +17135,7 @@ fn is_symbol(v: Value, konst: u32) -> bool {
 /// `t::0` on a tuple: the field that holds element `0`, or an error naming
 /// the tuple's arity when there is no such element. `None` when `ty` is not
 /// a tuple or `name` is not an index, so the name is looked up as written.
-fn tuple_element_field(ty: &Type, name: &str) -> Result<Option<String>, Error> {
+pub(crate) fn tuple_element_field(ty: &Type, name: &str) -> Result<Option<String>, Error> {
     let Type::Named(path, _) = ty else { return Ok(None) };
     let Some(arity) = crate::types::tuple_arity(path) else { return Ok(None) };
     if name.is_empty() || !name.bytes().all(|b| b.is_ascii_digit()) {

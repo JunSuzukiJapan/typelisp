@@ -9,7 +9,7 @@
 //! what the setter returns.
 
 use crate::check::bound_name;
-use crate::types::{path_spelling, tuple_arity, Path, Type};
+use crate::types::{path_spelling, Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
@@ -88,13 +88,17 @@ fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: Sym
                 t
             });
         }
-        Type::Named(p, _) if tuple_arity(p).is_some() => unimplemented!("typeck: `setf` of a tuple's element"),
         Type::Named(p, _) => *p,
         _ => return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv.name(), field.name()))),
     };
-    let setter = member_symbol(&format!("set-{}", field.name()));
+    // A tuple's element `t::1` is its field of that number.
+    let field = match crate::check::analyze::tuple_element_field(&cx.holes.borrow().shown(&obj.ty), field.name())? {
+        Some(name) => name,
+        None => field.name().to_string(),
+    };
+    let setter = member_symbol(&format!("set-{}", field));
     let Some(def) = setter_of(cx, &owner, setter) else {
-        return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", owner, field.name())));
+        return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", owner, field)));
     };
     check_method_call(cx, heap, locals, owner, setter, def, Some(obj), std::slice::from_ref(&value), None, loc)
 }

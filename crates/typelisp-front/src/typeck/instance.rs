@@ -9,7 +9,8 @@ use super::expr::{check_expr, Cx};
 use super::widen::expect;
 use super::locals::Locals;
 use super::registry::{TypeDef, TypeEntry, ValueDef};
-use super::resolve::{find_named, sees, value_named};
+use super::method::check_method_call;
+use super::resolve::{find_named, receiver_method, sees, value_named};
 use super::subst::Subst;
 use super::tree::{Node, Typed};
 use super::type_syntax::parse_type;
@@ -165,22 +166,27 @@ fn slot_shape(tname: &str, def: &TypeDef) -> Error {
 }
 
 /// `recv::member` (read as `(%value-member recv member)`), where `recv` is a
-/// local of a struct type: that field.
+/// local or a global variable: the field `member` of its value, the element
+/// `member` (a number) of a tuple, or the call `(member recv)` of an
+/// instance method of its type that takes nothing else.
 pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, member: SymRef, loc: Option<Loc>) -> Result<Typed, Error> {
-    let Some(recv_ty) = locals.lookup(recv)? else {
-        if let Some((_, ValueDef::Var(_))) = value_named(cx.reg, cx.ns, recv) {
-            unimplemented!("typeck: `{}::{}`, a member of the global `{}`", recv.name(), member.name(), recv.name())
-        }
-        return Err(Error::TypeError(format!(
-            "unresolved path: {}::{} (`{}` is not a variable, and no module or type `{}` is visible here)",
-            recv.name(),
-            member.name(),
-            recv.name(),
-            recv.name()
-        )));
+    let unresolved = || Error::TypeError(format!("unresolved path: {}::{}", recv.name(), member.name()));
+    let obj = match locals.lookup(recv)? {
+        Some(ty) => Typed { node: Node::Local { name: recv }, ty: cx.resolve(ty), loc: loc.clone() },
+        None => match value_named(cx.reg, cx.ns, recv) {
+            Some((path, ValueDef::Var(var))) => Typed { node: Node::Global { path }, ty: var.ty.clone(), loc: loc.clone() },
+            _ => {
+                return Err(Error::TypeError(format!(
+                    "unresolved path: {}::{} (`{}` is not a variable, and no module or type `{}` is visible here)",
+                    recv.name(),
+                    member.name(),
+                    recv.name(),
+                    recv.name()
+                )))
+            }
+        },
     };
-    let recv_ty = cx.resolve(recv_ty);
-    let obj = Typed { node: Node::Local { name: recv }, ty: recv_ty.clone(), loc: loc.clone() };
+    let recv_ty = obj.ty.clone();
     // A field of the C struct a typed pointer points at.
     if matches!(&recv_ty, Type::PtrTo(inner) if matches!(**inner, Type::CStruct(_))) {
         let read = super::c_memory::field_get(cx, heap, obj, member).expect("a typed pointer to a C struct");
@@ -189,17 +195,25 @@ pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRe
             t
         });
     }
-    let field = match &recv_ty {
-        Type::Named(path, args) => cx.reg.type_def(path).and_then(|def| {
-            let name = member_symbol(member.name());
-            let i = def.fields.iter().position(|f| f.name == name)?;
-            let f = &def.fields[i];
-            (f.public || sees(cx.ns, path.ns())).then(|| (i, Subst::positional(&def.params, args).apply(&f.ty)))
-        }),
-        _ => None,
+    let Type::Named(path, args) = &recv_ty else { return Err(unresolved()) };
+    // A tuple's element `t::1` is its field of that number.
+    let name = match crate::check::analyze::tuple_element_field(&cx.holes.borrow().shown(&recv_ty), member.name())? {
+        Some(field) => member_symbol(&field),
+        None => member_symbol(member.name()),
     };
-    let Some((index, ty)) = field else {
-        unimplemented!("typeck: `{}::{}` on a `{}`, which is no field of it", recv.name(), member.name(), recv_ty)
-    };
-    Ok(Typed { node: Node::FieldGet { obj: Box::new(obj), index }, ty, loc })
+    let field = cx.reg.type_def(path).and_then(|def| {
+        let i = def.fields.iter().position(|f| f.name == name)?;
+        let f = &def.fields[i];
+        (f.public || sees(cx.ns, path.ns())).then(|| (i, Subst::positional(&def.params, args).apply(&f.ty)))
+    });
+    if let Some((index, ty)) = field {
+        return Ok(Typed { node: Node::FieldGet { obj: Box::new(obj), index }, ty, loc });
+    }
+    match receiver_method(cx.reg, cx.ns, &recv_ty, name) {
+        Some((owner, def)) if def.instance => check_method_call(cx, heap, locals, owner, name, def, Some(obj), &[], None, loc),
+        _ if cx.reg.has_inst_method(path, name) => {
+            unimplemented!("typeck: `{}::{}`, a method `{}` has for one instantiation", recv.name(), member.name(), path)
+        }
+        _ => Err(unresolved()),
+    }
 }
