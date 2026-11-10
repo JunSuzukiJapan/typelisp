@@ -1778,12 +1778,16 @@ impl Checker {
         self.publish_names(heap);
         heap.names().enter_module(self.current_module());
         let ns = self.current_module();
-        let r = match &mut self.rebuilt {
-            Some(rebuilt) => {
+        let r = match self.rebuilt.is_some() {
+            true => {
+                // Types in its messages are written for this module, as this
+                // checker's are.
+                self.publish_name_view();
+                let rebuilt = self.rebuilt.as_mut().expect("seen above");
                 let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
                 rebuilt.check_form(heap, &self.info.reg, interp, site, v, heap.cons_loc(v).or(loc_hint))
             }
-            None => self.check_one_form(heap, interp, v, loc_hint),
+            false => self.check_one_form(heap, interp, v, loc_hint),
         };
         self.info.reg.reexport_std_in_prelude();
         self.publish_names(heap);

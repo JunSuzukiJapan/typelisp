@@ -47,8 +47,12 @@ pub(crate) fn import(old: &OldRegistry, new: &mut Registry) {
             import_type(old, def, new);
         }
         for sym in m.type_aliases.symbols() {
-            let public = m.type_aliases.get_sym(sym).expect("a key of the table").public;
-            new.types.insert(Path::of_symbol(ns, sym), TypeEntry::Alias { public });
+            let alias = m.type_aliases.get_sym(sym).expect("a key of the table");
+            let path = Path::of_symbol(ns, sym);
+            let params = type_params(ParamOwner::Def(path), &alias.params);
+            let by_name: HashMap<String, Type> = alias.params.iter().cloned().zip(params.iter().map(|p| Type::Param(*p))).collect();
+            let body = convert(&alias.body, &by_name, &|| format!("the type alias {}", path));
+            new.types.insert(path, TypeEntry::Alias { public: alias.public, params, body });
         }
         for sym in m.traits.symbols() {
             let def = m.traits.get_sym(sym).expect("a key of the table");

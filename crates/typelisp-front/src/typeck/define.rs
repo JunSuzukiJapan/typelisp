@@ -26,6 +26,7 @@ pub(crate) enum Kind {
     Variable,
     Type,
     Trait,
+    Alias,
     Method,
     Macro,
 }
@@ -37,6 +38,7 @@ impl Kind {
             Kind::Variable => "variable",
             Kind::Type => "type",
             Kind::Trait => "trait",
+            Kind::Alias => "type alias",
             Kind::Method => "method",
             Kind::Macro => "macro",
         }
@@ -107,6 +109,7 @@ impl Definer<'_> {
             (None, _) => None,
             (Some(TypeEntry::Type(def)), Kind::Type) => Some(def.builtin),
             (Some(TypeEntry::Trait(_)), Kind::Trait) => Some(false),
+            (Some(TypeEntry::Alias { .. }), Kind::Alias) => Some(false),
             (Some(TypeEntry::Type(_)), _) => return Err(clash("type")),
             (Some(TypeEntry::Trait(_)), _) => return Err(clash("trait")),
             (Some(TypeEntry::Alias { .. }), _) => {

@@ -115,12 +115,13 @@ pub(crate) struct Field {
 }
 
 /// What a module-level name in the type name space is: a type, a type
-/// alias, a trait or a C struct, never two of them. Of an alias only
-/// whether it is `pub` is known so far, and of a C struct nothing.
+/// alias, a trait or a C struct, never two of them. Of a C struct nothing is
+/// known so far.
 #[derive(Clone, Debug)]
 pub(crate) enum TypeEntry {
     Type(TypeDef),
-    Alias { public: bool },
+    /// A `deftype`: the type `body` stands for, written in its `params`.
+    Alias { public: bool, params: Vec<TypeParam>, body: Type },
     Trait(TraitDef),
     CStruct,
 }

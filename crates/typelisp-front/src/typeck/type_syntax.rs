@@ -8,6 +8,7 @@ use typelisp_mem::SymRef;
 use super::registry::{Registry, TraitDef, TypeDef, TypeEntry};
 use super::resolve::{find_named, sees};
 use super::scope::TypeScope;
+use super::subst::Subst;
 
 /// Where a type is read: the definitions, the module, the type parameters
 /// declared there, and inside an `impl`, the type `Self` stands for.
@@ -116,7 +117,7 @@ fn at_path(cx: &TypeCx, path: Path, args: Vec<Type>) -> Result<Type, Error> {
     let visible = |public: bool| public || sees(cx.ns, path.ns());
     match cx.reg.types.get(&path) {
         Some(entry @ TypeEntry::Type(TypeDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
-        Some(entry @ TypeEntry::Alias { public }) if visible(*public) => entry_type(path, entry, args),
+        Some(entry @ TypeEntry::Alias { public, .. }) if visible(*public) => entry_type(path, entry, args),
         Some(entry @ TypeEntry::Trait(TraitDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
         Some(entry @ TypeEntry::CStruct) => entry_type(path, entry, args),
         _ => Err(unknown_type(&path.to_string())),
@@ -200,7 +201,13 @@ fn entry_type(path: Path, entry: &TypeEntry, args: Vec<Type>) -> Result<Type, Er
             }
             Ok(Type::Named(path, args))
         }
-        TypeEntry::Alias { .. } => unimplemented!("typeck: the type alias `{}`", path),
+        // A spelling of `body`, which is written where it is used.
+        TypeEntry::Alias { params, body, .. } => {
+            if params.len() != args.len() {
+                return Err(Error::TypeError(format!("`{}` takes {} type argument(s), got {}", path, params.len(), args.len())));
+            }
+            Ok(Subst::positional(params, &args).apply(body))
+        }
         TypeEntry::Trait(_) => unimplemented!("typeck: the trait `{}` written where a type is", path),
         TypeEntry::CStruct => unimplemented!("typeck: the C struct `{}` written where a type is", path),
     }

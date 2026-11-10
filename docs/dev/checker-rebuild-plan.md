@@ -345,6 +345,8 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - 1 つの具体化のための `impl`（`(impl cons-cell<int,int> ...)`）。メソッドはその具体化のもので、コードは具体化の名前で作る。型引数がまだ決まっていない受け手での呼び出しは、まだ扱わない。
 - `use`（`import`・`shadowing-import`・`pub use` を含む）。値・型・トレイト・別名・型の変種と静的メソッド・モジュールを名指しできる。
 - `defvar`・`defparameter`・`defconstant`（型の宣言が必須）とグローバル変数の読み出し。`the`。
+- `deftype`（`typeck::deftype`、`pub` を含む）。型の別名で、使うところで本体（型パラメータを使う位置の引数で置き換えたもの）になる。別名が自分を名指すことは、今のチェッカーと同じ文で断る。
+- メッセージの型は、今のチェッカーと同じく、フォームのモジュールから見た書き方で書く（フォームの前に今のチェッカーが名前の見え方を公開する。表は今のチェッカーの登録表から作るので、切り替えのときに新しいチェッカーの登録表から作る）。
 - `format`・`print`・`println`。宛先がストリームの `format` は、チェックしたストリームを一時変数に束縛し、`(write-string tmp (format false ...))` をチェックしたものにする（値は `()`）。`CharOutput` を実装しない具体的な型の宛先は、今のチェッカーと同じ文で断る。引数は、それぞれの型のまま `Sexpr` のリストにして渡す。どう `Sexpr` にするかは lower で、決まった型から選ぶ（`typeck::sexpr_value`）。制御文字列の指令と引数の型は、フォームをチェックし終えたところで照らし合わせる。
 - `module`（`typeck::module`）と `pub`。`module` の本文の各フォームは子のモジュールで最上位のフォームとしてチェックし、すぐ効く必要のあるもの（`defmacro` など）はその場で評価器に入れる。`pub` は定義の印（`Definer::public`）。ほかのモジュールの `pub` でない関数・変数・マクロは、パスからは無いものとして扱う（「unresolved path」）。パスでグローバル変数を読める。
 - 型の書き方：関数の型 `(fn (A &rest B) R)`、`::` のパス、リストの形 `(Name A)`、タプルの型 `#{A B}`。
@@ -380,8 +382,8 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 
 新しいチェッカーがこれらに出会うと `unimplemented!()` で止まる。切り替えまでに、すべてを扱えるようにする。
 
-- 名前と型：`deftype`、`defstruct` の既定値と付属、トレイトオブジェクトの `match` と `Sexpr` に入れること・トレイトオブジェクトでの `Sexpr` のメソッド・`try-as :dyn`、C のポインタ `(ptr ...)` と C のワード（`ptr`・`c-long`・`c-ulong`）と `unsafe`。
-- 定義：prelude のトレイトの既定の本体（チェック済みの木が無い）、トレイトのメソッドの `:where`・`:where` を付けた `impl`・1 つの具体化のための `impl`・ブランケット `impl`・`:where` の境界のある呼び出しとジェネリックな本体での境界のメソッド・`:dyn`、`defsignature`、`defffi`、`def-c-struct`、`pub` を付けた `defsignature`・`defffi`・`deftype`。
+- 名前と型：`defstruct` の既定値と付属、トレイトオブジェクトの `match` と `Sexpr` に入れること・トレイトオブジェクトでの `Sexpr` のメソッド・`try-as :dyn`、C のポインタ `(ptr ...)` と C のワード（`ptr`・`c-long`・`c-ulong`）と `unsafe`。
+- 定義：prelude のトレイトの既定の本体（チェック済みの木が無い）、トレイトのメソッドの `:where`・`:where` を付けた `impl`・1 つの具体化のための `impl`・ブランケット `impl`・`:where` の境界のある呼び出しとジェネリックな本体での境界のメソッド・`:dyn`、`defsignature`、`defffi`、`def-c-struct`、`pub` を付けた `defsignature`・`defffi`。
 - `match`：`Sexpr` からのダウンキャストと `(the T x)`、`:when`、`:or`、`Sexpr` の形とダウンキャスト、構造体のパターン、トレイトオブジェクトの match。
 - 式：拡張した `loop`（`:for`・`:collect` など）、`setf` の C のポインタ越しのフィールド・タプルの要素・`aref`・`c-deref`、関数を値として使うこと、ローカルな関数値の呼び出し、式の値を関数として呼ぶこと、`macrolet`、メソッド呼び出し、組み込みの関数とメソッド（8.3 の写しが要る）、残りの特殊形（3.2 の一覧）。
 - `format` の `~/name/` 指令、`eprint`・`eprintln`。

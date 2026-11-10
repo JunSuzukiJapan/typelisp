@@ -65,6 +65,7 @@ pub(crate) mod defmacro;
 pub(crate) mod defmethod;
 pub(crate) mod defstruct;
 pub(crate) mod deftrait;
+pub(crate) mod deftype;
 pub(crate) mod defun;
 pub(crate) mod defvar;
 pub(crate) mod dyn_trait;
