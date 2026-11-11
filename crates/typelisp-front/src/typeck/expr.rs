@@ -68,11 +68,46 @@ pub(crate) struct Cx<'a> {
     required: RefCell<Vec<Required>>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
+    /// In recover mode, where an error is recorded so that the rest of the
+    /// form is still checked (`Checker::set_recover`); none otherwise.
+    recovery: Recovery<'a>,
 }
 
+/// Where recover mode records the errors it checks past: none outside it.
+pub(crate) type Recovery<'a> = Option<&'a RefCell<Vec<Error>>>;
+
 impl<'a> Cx<'a> {
-    pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), c_arena: Cell::new(None), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
+    pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>, recovery: Recovery<'a>) -> Cx<'a> {
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), c_arena: Cell::new(None), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0), recovery }
+    }
+
+    /// Where recover mode records errors, for a form checked on its own
+    /// inside this one.
+    pub(crate) fn recovery(&self) -> Recovery<'a> {
+        self.recovery
+    }
+
+    /// In recover mode, `e` recorded, at `loc` when it carries no place of
+    /// its own, for checking to go on past it; outside it, `e`.
+    pub(crate) fn recover(&self, e: Error, loc: Option<Loc>) -> Result<(), Error> {
+        let Some(errors) = self.recovery else { return Err(e) };
+        errors.borrow_mut().push(match loc {
+            Some(l) => e.at(l),
+            None => e,
+        });
+        Ok(())
+    }
+
+    /// `r`, or in recover mode a hole where it failed: an expression of type
+    /// `!`, which fits wherever it is.
+    pub(crate) fn recovered(&self, r: Result<Typed, Error>, loc: Option<Loc>) -> Result<Typed, Error> {
+        match r {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                self.recover(e, loc.clone())?;
+                Ok(Typed { node: Node::Hole, ty: Type::Never, loc })
+            }
+        }
     }
 
     /// Where a type written in this form is read.
@@ -861,7 +896,8 @@ pub(crate) fn check_body(
     let mut out = Vec::with_capacity(forms.len());
     for (i, (v, loc)) in forms.iter().enumerate() {
         let last = i + 1 == forms.len();
-        out.push(check_expr(cx, heap, locals, *v, if last { expected } else { None }, loc.clone())?);
+        let checked = check_expr(cx, heap, locals, *v, if last { expected } else { None }, loc.clone());
+        out.push(cx.recovered(checked, loc.clone())?);
     }
     let ty = match out.last() {
         Some(t) => t.ty.clone(),

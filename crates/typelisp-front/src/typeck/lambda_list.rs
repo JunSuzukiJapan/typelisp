@@ -218,7 +218,7 @@ fn check_default(
     decl_ty: &Type,
 ) -> Result<crate::owned_form::OwnedForm, Error> {
     let mut tree = {
-        let cx = Cx::new(reg, d.expander, d.site.ns, scope, self_type);
+        let cx = Cx::new(reg, d.expander, d.site.ns, scope, self_type, d.recovery);
         let t = check_expr(&cx, heap, &Locals::empty(), form, Some(decl_ty), loc)?;
         let mut tree = vec![t];
         cx.settle(heap, &mut tree)?;

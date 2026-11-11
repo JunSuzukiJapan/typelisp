@@ -28,7 +28,7 @@
 //! descent is uniform and both tables are gone. The one thing a walk must
 //! still know is where data stops being program: [`is_opaque`].
 
-use typelisp_mem::{symbols, wk, Heap, NsId, Value};
+use typelisp_mem::{wk, Heap, NsId, Value};
 
 use crate::check::core;
 use crate::{DefLocs, Docs, Loc, Path, Registry, SymRef, TopLevelForm};
@@ -228,7 +228,7 @@ pub fn hover_text(heap: &Heap, node: Value, def_locs: &DefLocs, docs: &Docs) -> 
 /// Every local (`let`/`lambda`/`labels` binding, or a `defun`/`defmethod`/
 /// `defmacro`'s own parameter) in lexical scope at `(line, col)` in `file` —
 /// for the LSP's completion (`src/bin/lsp.rs`) to offer alongside
-/// [`completion_candidates`]'s `Registry`-derived names.
+/// `Checker::completion_candidates`'s module-level names.
 ///
 /// First finds the cursor's smallest enclosing node with [`locate_node`], then
 /// re-walks `body` from the top, pushing each binding name it encounters as it
@@ -505,15 +505,15 @@ pub struct CompletionCandidate {
     pub detail: String,
 }
 
-/// Every bare name visible for completion while checking module
-/// `module_path`, as `Checker::find_named` reaches one: that module's own
+/// Every bare name visible for completion while checking the module
+/// `here`, as `Checker::find_named` reaches one: that module's own
 /// definitions and what its `use`s brought in, then what every module reads
 /// without a `use`, the definitions `std::prelude` re-exports.
 /// An ancestor's definitions are not visible without a `use`, so none are
 /// offered.
-pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
+pub(crate) fn completion_candidates(reg: &Registry, here: NsId) -> Vec<CompletionCandidate> {
     let mut out = Vec::new();
-    let Some(here) = symbols::find_ns(module_path).and_then(|ns| reg.module_at(ns)) else {
+    let Some(here) = reg.module_at(here) else {
         return out;
     };
     push_namespace(reg, here, &mut out);

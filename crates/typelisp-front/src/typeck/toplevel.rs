@@ -22,7 +22,7 @@ use super::defun::{check_defun, parse_header};
 use super::defvar::{check_defvar, Which};
 use super::impl_block::check_impl;
 use super::use_form::{check_use, register_for_reading, Site};
-use super::expr::{check_expr, Cx};
+use super::expr::{check_expr, Cx, Recovery};
 use super::generic::{Base, Name, Request, Requests};
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
@@ -57,6 +57,11 @@ pub(crate) struct TypeChecker {
     entered: Option<typelisp_mem::NsId>,
     /// What a `#[test]` definition is checked into, and the tests found.
     tests: Tests,
+    /// Recover mode (`Checker::set_recover`): a form's errors are recorded
+    /// here and checking goes on past them.
+    recover: bool,
+    /// The errors recover mode has checked past and no one has taken yet.
+    errors: RefCell<Vec<Error>>,
 }
 
 impl TypeChecker {
@@ -108,7 +113,8 @@ impl TypeChecker {
         // into the form, which is then reachable from nothing but the caller.
         // Nothing allocates between releasing them and the caller rooting it.
         let roots_base = heap.root_count();
-        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &mut self.tests);
+        let recovery = self.recover.then_some(&self.errors);
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), recovery, &mut self.tests);
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty, reached)) => {
@@ -132,12 +138,30 @@ impl TypeChecker {
             }
             Err(e) => {
                 reg.rollback();
-                Err(match loc {
-                    Some(l) => e.at(l),
+                let e = match &loc {
+                    Some(l) => e.at(l.clone()),
                     None => e,
-                })
+                };
+                // In recover mode the form is a hole, and what follows it
+                // is still checked.
+                if !self.recover {
+                    return Err(e);
+                }
+                self.errors.borrow_mut().push(e);
+                let hole = crate::check::forms::hole_form(heap, loc)?;
+                crate::check::forms::expr_form(heap, hole)
             }
         }
+    }
+
+    /// Turn recover mode on or off.
+    pub(crate) fn set_recover(&mut self, on: bool) {
+        self.recover = on;
+    }
+
+    /// The errors recover mode has checked past since they were last taken.
+    pub(crate) fn take_errors(&self) -> Vec<Error> {
+        std::mem::take(&mut *self.errors.borrow_mut())
     }
 
     /// The generic bodies a dump wrote (`docs/dev/checker-rebuild-plan.md`
@@ -225,6 +249,11 @@ impl TypeChecker {
         paths
     }
 
+    /// Every bare name visible for completion in `here`.
+    pub(crate) fn completion_candidates(&self, old: &crate::check::Registry, here: typelisp_mem::NsId) -> Vec<crate::check::CompletionCandidate> {
+        super::completion::candidates(self.registry(old), here)
+    }
+
     /// What the function `path` returns, when it is a module-level
     /// function.
     pub(crate) fn fn_ret(&self, path: &Path) -> Option<Type> {
@@ -305,10 +334,11 @@ fn check_toplevel(
     v: Value,
     loc: Option<Loc>,
     warnings: &mut Vec<String>,
+    recovery: Recovery,
     tests: &mut Tests,
 ) -> Result<(Value, Option<Type>, super::generic::Reached), Error> {
     let mut requests = Requests::default();
-    let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings, tests)?;
+    let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings, recovery, tests)?;
     // Collecting tests, the program's own work is checked and left out: a
     // test run does not do it. A readtable registration still runs, since
     // the rest of the file cannot be read without it.
@@ -366,11 +396,12 @@ fn check_primary(
     loc: Option<Loc>,
     requests: &mut Requests,
     warnings: &mut Vec<String>,
+    recovery: Recovery,
     tests: &mut Tests,
 ) -> Result<(Value, Option<Type>), Error> {
     let ns = site.ns;
     if let Some(expanded) = expand_toplevel(reg, expander, heap, ns, v)? {
-        return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings, tests);
+        return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings, recovery, tests);
     }
     if matches!(heap.car(v), Ok(Value::Symbol(h)) if h.is(wk::MODULE)) {
         let elems = heap.list_to_vec_locs(v)?;
@@ -388,7 +419,7 @@ fn check_primary(
                 publish_name_view(reg, inner.ns);
                 continue;
             }
-            let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings, tests)?;
+            let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings, recovery, tests)?;
             heap.push_root(checked);
             // Run now, it runs with what it needs made.
             let checked = match crate::project::needs_immediate_exec(heap, checked) {
@@ -404,7 +435,7 @@ fn check_primary(
         publish_name_view(reg, ns);
         return Ok((crate::check::forms::module_form(heap, &path, &body)?, None));
     }
-    let d = &mut Definer { site, warnings, expander, public: false, loc: loc.clone() };
+    let d = &mut Definer { site, warnings, expander, public: false, loc: loc.clone(), recovery };
     if let Value::Cons(_) = v {
         let all = heap.list_to_vec_locs(v)?;
         // `(pub definition)`: the definition, visible outside its module.
@@ -470,7 +501,7 @@ fn check_primary(
     }
     let mut typed = {
         let scope = TypeScope::empty();
-        let cx = Cx::new(reg, expander, ns, &scope, None);
+        let cx = Cx::new(reg, expander, ns, &scope, None, recovery);
         let mut typed = check_expr(&cx, heap, &Locals::empty(), v, None, loc)?;
         cx.settle(heap, std::slice::from_mut(&mut typed))?;
         typed

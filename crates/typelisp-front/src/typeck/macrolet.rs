@@ -48,7 +48,7 @@ pub(crate) fn check_macrolet(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[
         // A leading space is unwritable in source, and the number keeps two
         // bindings of one name apart.
         let path = Path::root(&format!(" macrolet {} {}", cx.reg.next_local_macro(), name.name()));
-        let site = MacroSite { reg: cx.reg, expander: cx.expander, ns: cx.ns };
+        let site = MacroSite { reg: cx.reg, expander: cx.expander, ns: cx.ns, recovery: cx.recovery() };
         let mut requests = Requests::default();
         let form = macro_form(&site, heap, &mut requests, &path, params, rest)?;
         let form = super::toplevel::bundled(heap, cx.reg, &mut requests, form)?;

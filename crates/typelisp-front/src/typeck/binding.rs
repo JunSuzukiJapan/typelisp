@@ -29,7 +29,8 @@ pub(crate) fn check_let(
         let Value::Symbol(name) = *name else {
             return Err(Error::TypeError("let: binding name must be a symbol".into()));
         };
-        binds.push((name, check_expr(cx, heap, locals, *value, None, value_loc.clone())?));
+        let checked = check_expr(cx, heap, locals, *value, None, value_loc.clone());
+        binds.push((name, cx.recovered(checked, value_loc.clone())?));
     }
     let inner = locals.bind(binds.iter().map(|(n, t)| (*n, t.ty.clone())).collect())?;
     let (body, ty) = check_body(cx, heap, &inner, &args[1..], expected)?;
@@ -74,7 +75,8 @@ fn let_star(
     let Value::Symbol(name) = *name else {
         return Err(Error::TypeError("let*: binding name must be a symbol".into()));
     };
-    let value = check_expr(cx, heap, locals, *value, None, value_loc.clone())?;
+    let value = check_expr(cx, heap, locals, *value, None, value_loc.clone());
+    let value = cx.recovered(value, value_loc.clone())?;
     let inner_locals = locals.bind(vec![(name, value.ty.clone())])?;
     let inner = typelisp_mem::grow_stack(|| let_star(cx, heap, &inner_locals, later, body, expected, None))?;
     let ty = inner.ty.clone();

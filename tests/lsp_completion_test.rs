@@ -1,4 +1,4 @@
-//! Tests for `check::locate::completion_candidates` — the name-enumeration
+//! Tests for `Checker::completion_candidates` — the name-enumeration
 //! logic behind the LSP's `textDocument/completion` (`src/bin/lsp.rs`).
 //! Drives `Checker::check_form` directly, the same core pipeline
 //! `lsp_locate_test.rs` uses for hover/goto-definition, rather than the
@@ -13,7 +13,7 @@
 //! alongside user code.
 
 extern crate typelisp;
-use typelisp::{completion_candidates, completion_locals, Checker, CompletionCandidate, CompletionKind, Error, Heap, Interp, Reader, TopLevelForm};
+use typelisp::{completion_locals, Checker, CompletionCandidate, CompletionKind, Error, Heap, Interp, Reader, TopLevelForm};
 
 const FILE: &str = "test.typl";
 
@@ -76,14 +76,14 @@ fn has(kind: CompletionKind, candidates: &[CompletionCandidate], name: &str) -> 
 #[test]
 fn lists_a_top_level_defun() {
     let chk = check("(defun add ((x int) (y int)) int (+ x y))\n");
-    let candidates = completion_candidates(chk.registry(), &[]);
+    let candidates = chk.completion_candidates(&[]);
     assert!(has(CompletionKind::Function, &candidates, "add"));
 }
 
 #[test]
 fn lists_a_top_level_defvar_and_defstruct() {
     let chk = check("(defvar (count int) 0)\n(defstruct point (x int) (y int))\n");
-    let candidates = completion_candidates(chk.registry(), &[]);
+    let candidates = chk.completion_candidates(&[]);
     assert!(has(CompletionKind::Variable, &candidates, "count"));
     assert!(has(CompletionKind::Type, &candidates, "point"));
 }
@@ -91,9 +91,9 @@ fn lists_a_top_level_defvar_and_defstruct() {
 #[test]
 fn a_submodules_own_definition_is_visible_from_inside_it_but_not_from_root() {
     let chk = check("(module m (defun helper () int 1))\n");
-    let inside = completion_candidates(chk.registry(), &["m".to_string()]);
+    let inside = chk.completion_candidates(&["m".to_string()]);
     assert!(has(CompletionKind::Function, &inside, "helper"));
-    let at_root = completion_candidates(chk.registry(), &[]);
+    let at_root = chk.completion_candidates(&[]);
     assert!(!has(CompletionKind::Function, &at_root, "helper"));
 }
 
@@ -103,7 +103,7 @@ fn a_root_function_is_not_offered_inside_a_submodule() {
     // `use`, so a root-level function is not a bare name inside `m`.
     for src in ["(pub defun helper () int 1)\n(module m (defun main () int 1))\n", "(defun helper () int 1)\n(module m (defun main () int 1))\n"] {
         let chk = check(src);
-        let inside = completion_candidates(chk.registry(), &["m".to_string()]);
+        let inside = chk.completion_candidates(&["m".to_string()]);
         assert!(!has(CompletionKind::Function, &inside, "helper"), "{}", src);
         assert!(has(CompletionKind::Function, &inside, "main"), "{}", src);
     }
@@ -113,7 +113,7 @@ fn a_root_function_is_not_offered_inside_a_submodule() {
 fn the_standard_librarys_functions_are_offered_in_every_module() {
     let chk = check("(module m (defun main () int 1))\n");
     for path in [vec![], vec!["m".to_string()]] {
-        let candidates = completion_candidates(chk.registry(), &path);
+        let candidates = chk.completion_candidates(&path);
         assert!(has(CompletionKind::Function, &candidates, "sexpr-cons"), "{:?}", path);
     }
 }

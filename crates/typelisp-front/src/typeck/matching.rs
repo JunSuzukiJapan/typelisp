@@ -47,63 +47,81 @@ pub(crate) fn check_match(
     };
     let mut checked = Vec::with_capacity(arms.len());
     let mut returns = false;
-    for (arm, _) in arms {
-        let parts = heap.list_to_vec_locs(*arm).ok().filter(|p| !p.is_empty());
-        let Some(parts) = parts else {
-            return Err(Error::TypeError("match: arm must be (pattern body...)".into()));
-        };
-        // `(pattern :when test body...)`: the condition sits between the
-        // pattern and the body.
-        let guard = match parts.get(1) {
-            Some((Value::Symbol(k), _)) if k.is(wk::KW_WHEN) => match parts.get(2) {
-                Some(test) => Some(test.clone()),
-                None => return Err(Error::TypeError("match: `:when` needs a condition: (pattern :when test body...)".into())),
-            },
-            _ => None,
-        };
-        let body_start = if guard.is_some() { 3 } else { 1 };
-        let (pat, pat_loc) = &parts[0];
-        let where_ = heap.cons_loc(*pat).or(pat_loc.clone());
-        let at = |e: Error| match &where_ {
-            Some(l) => e.at(l.clone()),
-            None => e,
-        };
-        // `(:or p1 p2 ...)`, anywhere in the pattern, is the whole patterns
-        // it stands for, which one body reads the names of.
-        let alternatives = crate::check::analyze::expand_or_patterns(heap, *pat).map_err(at)?;
-        let mut pats = Vec::with_capacity(alternatives.len());
-        let mut first: Option<Binds> = None;
-        for alt in alternatives {
-            let mut binds = Vec::new();
-            pats.push(check_arm_pattern(cx, heap, locals, &scrut_ty, alt, &mut binds).map_err(at)?);
-            match &first {
-                None => first = Some(binds),
-                Some(first) => same_binds(cx, first, &binds).map_err(at)?,
+    // In recover mode an arm that fails is left out, and with it the check
+    // that the arms cover every value, which would only repeat the error.
+    let mut skipped = false;
+    for (arm, arm_loc) in arms {
+        match check_arm(cx, heap, locals, &scrut_ty, &result, *arm) {
+            Ok((pat, body, ty)) => {
+                returns |= cx.resolve(&ty) != Type::Never;
+                checked.push((pat, body));
+            }
+            Err(e) => {
+                cx.recover(e, heap.cons_loc(*arm).or(arm_loc.clone()))?;
+                skipped = true;
             }
         }
-        let arm_locals = locals.bind(first.expect("a pattern has an alternative"))?;
-        let pat = if pats.len() == 1 { pats.remove(0) } else { Pat::Or(pats) };
-        let pat = match guard {
-            Some((test, test_loc)) => {
-                let test = check_expr(cx, heap, &arm_locals, test, Some(&Type::Bool), test_loc)?;
-                Pat::When { pat: Box::new(pat), test: Box::new(test) }
-            }
-            None => pat,
-        };
-        let (body, ty) = check_body(cx, heap, &arm_locals, &parts[body_start..], Some(&result))?;
-        returns |= cx.resolve(&ty) != Type::Never;
-        checked.push((pat, body));
     }
     let pats: Vec<_> = checked.iter().map(|(p, _)| p).collect();
-    if let Some(missed) = uncovered(cx.reg, &scrut_ty, &pats) {
-        return Err(Error::TypeError(format!(
+    if let Some(missed) = uncovered(cx.reg, &scrut_ty, &pats).filter(|_| !skipped) {
+        let e = Error::TypeError(format!(
             "non-exhaustive match on `{}`: `{}` is not covered — write an arm for it or a `_` arm",
             scrut_ty, missed
-        )));
+        ));
+        cx.recover(e, loc.clone())?;
     }
     // Arms that all never return leave nothing to decide the type by.
     let ty = if returns { cx.resolve(&result) } else { Type::Never };
     Ok(Typed { node: Node::Match { scrut: Box::new(scrut), arms: checked }, ty, loc })
+}
+
+/// The arm `arm` of a `match` on a `scrut_ty`, whose body is to have the
+/// type `result`: its pattern, its body and the body's type.
+fn check_arm(cx: &Cx, heap: &mut Heap, locals: &Locals, scrut_ty: &Type, result: &Type, arm: Value) -> Result<(Pat, Vec<Typed>, Type), Error> {
+    let parts = heap.list_to_vec_locs(arm).ok().filter(|p| !p.is_empty());
+    let Some(parts) = parts else {
+        return Err(Error::TypeError("match: arm must be (pattern body...)".into()));
+    };
+    // `(pattern :when test body...)`: the condition sits between the
+    // pattern and the body.
+    let guard = match parts.get(1) {
+        Some((Value::Symbol(k), _)) if k.is(wk::KW_WHEN) => match parts.get(2) {
+            Some(test) => Some(test.clone()),
+            None => return Err(Error::TypeError("match: `:when` needs a condition: (pattern :when test body...)".into())),
+        },
+        _ => None,
+    };
+    let body_start = if guard.is_some() { 3 } else { 1 };
+    let (pat, pat_loc) = &parts[0];
+    let where_ = heap.cons_loc(*pat).or(pat_loc.clone());
+    let at = |e: Error| match &where_ {
+        Some(l) => e.at(l.clone()),
+        None => e,
+    };
+    // `(:or p1 p2 ...)`, anywhere in the pattern, is the whole patterns
+    // it stands for, which one body reads the names of.
+    let alternatives = crate::check::analyze::expand_or_patterns(heap, *pat).map_err(at)?;
+    let mut pats = Vec::with_capacity(alternatives.len());
+    let mut first: Option<Binds> = None;
+    for alt in alternatives {
+        let mut binds = Vec::new();
+        pats.push(check_arm_pattern(cx, heap, locals, scrut_ty, alt, &mut binds).map_err(at)?);
+        match &first {
+            None => first = Some(binds),
+            Some(first) => same_binds(cx, first, &binds).map_err(at)?,
+        }
+    }
+    let arm_locals = locals.bind(first.expect("a pattern has an alternative"))?;
+    let pat = if pats.len() == 1 { pats.remove(0) } else { Pat::Or(pats) };
+    let pat = match guard {
+        Some((test, test_loc)) => {
+            let test = check_expr(cx, heap, &arm_locals, test, Some(&Type::Bool), test_loc)?;
+            Pat::When { pat: Box::new(pat), test: Box::new(test) }
+        }
+        None => pat,
+    };
+    let (body, ty) = check_body(cx, heap, &arm_locals, &parts[body_start..], Some(result))?;
+    Ok((pat, body, ty))
 }
 
 /// That two `:or` alternatives bind the same names at the same types.

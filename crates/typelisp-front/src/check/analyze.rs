@@ -1570,6 +1570,9 @@ impl Checker {
     /// and keeps the strict "abort on first error" behaviour.
     pub fn set_recover(&mut self, on: bool) {
         self.recover = on;
+        if let Some(rebuilt) = &mut self.rebuilt {
+            rebuilt.set_recover(on);
+        }
     }
 
     /// Set the namespace that subsequent `check_form`/`check_form_at` calls
@@ -1587,7 +1590,11 @@ impl Checker {
     /// `recover` was set (see [`Self::errors`]). Each already carries its own
     /// source location. Empty unless `recover` is enabled.
     pub fn take_errors(&self) -> Vec<Error> {
-        std::mem::take(&mut *self.errors.borrow_mut())
+        let mut out = std::mem::take(&mut *self.errors.borrow_mut());
+        if let Some(rebuilt) = &self.rebuilt {
+            out.extend(rebuilt.take_errors());
+        }
+        out
     }
 
     /// Drains and returns every user-defined type/trait name occurrence
@@ -2453,6 +2460,18 @@ impl Checker {
         match &self.rebuilt {
             Some(rebuilt) => rebuilt.expr_type(),
             None => self.expr_ty.as_ref(),
+        }
+    }
+
+    /// Every bare name visible for completion while checking the module
+    /// `module_path`; none for a module the session does not have.
+    pub fn completion_candidates(&self, module_path: &[String]) -> Vec<super::CompletionCandidate> {
+        let Some(here) = typelisp_mem::symbols::find_ns(module_path) else {
+            return Vec::new();
+        };
+        match &self.rebuilt {
+            Some(rebuilt) => rebuilt.completion_candidates(&self.info.reg, here),
+            None => super::locate::completion_candidates(&self.info.reg, here),
         }
     }
 

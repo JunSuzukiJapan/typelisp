@@ -150,6 +150,9 @@ pub(crate) enum Node {
     /// The value the trait object `value` holds, as a `Sexpr`: what a
     /// `match` takes it apart as, and what it is put into a `Sexpr` as.
     DynValue { value: Box<Typed> },
+    /// Where recover mode checked past an error (`Cx::recovered`): an
+    /// expression of type `!`.
+    Hole,
 }
 
 /// One arm of a `select`. Its channel and value are locals the `let`
@@ -311,6 +314,7 @@ impl Typed {
             Node::Literal { .. }
             | Node::Number { .. }
             | Node::Quote { .. }
+            | Node::Hole
             | Node::Local { .. }
             | Node::Global { .. }
             | Node::Break
@@ -359,6 +363,7 @@ impl Typed {
             Node::Literal { .. }
             | Node::Number { .. }
             | Node::Quote { .. }
+            | Node::Hole
             | Node::Local { .. }
             | Node::Global { .. }
             | Node::Break
@@ -448,6 +453,7 @@ impl Typed {
                 Node::Literal { .. }
                 | Node::Number { .. }
                 | Node::Quote { .. }
+                | Node::Hole
                 | Node::Local { .. }
                 | Node::Global { .. }
                 | Node::FieldGet { .. }

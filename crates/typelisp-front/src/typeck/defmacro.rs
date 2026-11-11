@@ -59,7 +59,7 @@ pub(crate) fn check_defmacro(
     let path = Path::of_symbol(d.site.ns, name);
     reg.values.insert(path, ValueDef::Macro { public: d.public, shape: MacroShape::of(&def) });
     d.record(reg, Definition::Macro(path), doc);
-    let site = MacroSite { reg, expander: d.expander, ns: d.site.ns };
+    let site = MacroSite { reg, expander: d.expander, ns: d.site.ns, recovery: d.recovery };
     macro_form(&site, heap, requests, &path, (required, optionals, rest, keys), body)
 }
 
@@ -69,6 +69,7 @@ pub(crate) struct MacroSite<'a> {
     pub(crate) reg: &'a Registry,
     pub(crate) expander: &'a dyn MacroExpander,
     pub(crate) ns: NsId,
+    pub(crate) recovery: super::expr::Recovery<'a>,
 }
 
 /// A macro's parameter list as `parse_macro_lambda_list` reads it.
@@ -101,7 +102,7 @@ pub(crate) fn macro_form(
     let reg = site.reg;
     let scope = TypeScope::empty();
     let mut checked = {
-        let cx = Cx::new(reg, site.expander, site.ns, &scope, None);
+        let cx = Cx::new(reg, site.expander, site.ns, &scope, None, site.recovery);
         let root = Locals::empty();
         let locals = root.bind(bound.iter().map(|n| (*n, sexpr.clone())).collect())?;
         let (mut checked, _) = check_body(&cx, heap, &locals, body, Some(&sexpr))?;
@@ -130,7 +131,7 @@ fn check_default(
     let reg = site.reg;
     let scope = TypeScope::empty();
     let mut tree = {
-        let cx = Cx::new(reg, site.expander, site.ns, &scope, None);
+        let cx = Cx::new(reg, site.expander, site.ns, &scope, None, site.recovery);
         let root = Locals::empty();
         let locals = root.bind(bound.iter().map(|n| (*n, sexpr.clone())).collect())?;
         let t = check_expr(&cx, heap, &locals, form, Some(&sexpr), None)?;

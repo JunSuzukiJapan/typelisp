@@ -107,7 +107,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     let bounded = scope.bound(vec![(params[0], TraitBound { trait_path: path, assoc })]);
     for (m, name, ps, ret, body) in bodies {
         let mut body = {
-            let cx = Cx::new(reg, d.expander, ns, &bounded, Some(&self_ty));
+            let cx = Cx::new(reg, d.expander, ns, &bounded, Some(&self_ty), d.recovery);
             let locals_root = Locals::empty();
             let locals = locals_root.bind(ps.clone())?;
             let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;

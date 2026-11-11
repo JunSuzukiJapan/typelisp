@@ -42,7 +42,7 @@
 //! `MethodRef`/`Construct` — not a local variable). A document with a
 //! current type error keeps serving its last-good `Analysis` rather than
 //! going blank. Completion is served from the same `Analysis` plus
-//! `check::locate::completion_candidates`/`completion_locals` (globals and
+//! `Checker::completion_candidates` and `completion_locals` (globals and
 //! local bindings, including inside non-catchall `match` arms via the
 //! checker's error-recovery mode — see `Checker::set_recover`).
 //!
@@ -611,7 +611,7 @@ fn handle_completion(
 }
 
 /// Re-checks `patched_text` as the content of `file` (see [`handle_completion`])
-/// and returns every name reachable at `(line, col)`: [`completion_candidates`]
+/// and returns every name reachable at `(line, col)`: `Checker::completion_candidates`
 /// (module/`Registry`-level names) plus [`completion_locals`]
 /// (`let`/`lambda`/`labels`/parameter and `match`-pattern names in lexical
 /// scope there) — offered as [`CompletionKind::Variable`], matching how a
@@ -636,7 +636,7 @@ fn candidates_for(
 ) -> Vec<CompletionCandidate> {
     let CheckedDocument { heap, checker, mut loader, src_root, .. } = check_document(file, patched_text, overlay);
     let module_path = module_segs_for(FsPath::new(file), &src_root).unwrap_or_default();
-    let mut candidates = completion_candidates(checker.registry(), &module_path);
+    let mut candidates = checker.completion_candidates(&module_path);
     // Same extraction `diagnostics_for` uses for `Analysis.body`. Unlike there,
     // this heap is dropped at the end of the call — `completion_locals` returns
     // owned names, so nothing outlives it.

@@ -91,7 +91,7 @@ pub(crate) fn check_defun(
     reg.define_fn(path, def);
 
     let mut body = {
-        let cx = Cx::new(reg, d.expander, ns, &bounded, None);
+        let cx = Cx::new(reg, d.expander, ns, &bounded, None, d.recovery);
         let locals_root = Locals::empty();
         let locals = locals_root.bind(params.clone())?;
         let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;

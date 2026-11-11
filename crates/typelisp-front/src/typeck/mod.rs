@@ -62,6 +62,7 @@ pub(crate) mod callback;
 pub(crate) mod cast;
 pub(crate) mod catch;
 pub(crate) mod collection_literal;
+pub(crate) mod completion;
 pub(crate) mod control;
 pub(crate) mod define;
 pub(crate) mod defenum;

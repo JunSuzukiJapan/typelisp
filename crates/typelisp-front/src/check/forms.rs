@@ -514,7 +514,7 @@ pub(crate) fn load_form(heap: &mut Heap, path: &str) -> Result<Value, Error> {
 }
 
 /// `(expr FORM)` — a bare top-level expression, to be evaluated.
-pub(super) fn expr_form(heap: &mut Heap, form: Value) -> Result<Value, Error> {
+pub(crate) fn expr_form(heap: &mut Heap, form: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::EXPR, &[form])
 }
 
@@ -571,7 +571,7 @@ fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Val
 /// expected type, so a hole flowing into a typed position never produces a
 /// cascade of follow-on errors. `loc` is recorded on the node so
 /// `locate_node` can still land the cursor on it for completion/hover.
-pub(super) fn hole_form(heap: &mut Heap, loc: Option<Loc>) -> Result<Value, Error> {
+pub(crate) fn hole_form(heap: &mut Heap, loc: Option<Loc>) -> Result<Value, Error> {
     let msg = heap.alloc_string("<check-error>".to_string());
     let mut f = Items::new(heap);
     let text = core::tagged(f.heap(), wk::STR, &[msg])?;
