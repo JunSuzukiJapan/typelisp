@@ -103,9 +103,9 @@ fn a_call_directive_finds_each_instantiations_method() {
 /// Written for every instantiation and for one, in either order.
 #[test]
 fn a_method_for_every_instantiation_and_for_one_is_refused() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (pub defmethod m (self) int 1))\n(impl Box<int> (pub defmethod m (self) int 2))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl<T> Box<T> (pub defmethod m (self) int 1))\n(impl Box<int> (pub defmethod m (self) int 2))");
     assert!(msg.contains("has a `m` for every instantiation already"), "{}", msg);
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod m (self) int 2))\n(impl Box<T> (pub defmethod m (self) int 1))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod m (self) int 2))\n(impl<T> Box<T> (pub defmethod m (self) int 1))");
     assert!(msg.contains("`m` is written for `Box<int>` already"), "{}", msg);
     // A field's accessor is a method for every instantiation too.
     let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<int> (pub defmethod v (self) int 2))");
@@ -176,7 +176,7 @@ fn a_supertrait_is_needed_at_the_instantiation() {
         "3",
     );
     both(
-        &format!("{}(impl A Box<T> (defmethod a (self) int 1))\n(impl B Box<int> (defmethod b (self) int 2))\n", base),
+        &format!("{}(impl<T> A Box<T> (defmethod a (self) int 1))\n(impl B Box<int> (defmethod b (self) int 2))\n", base),
         r##"(format false "~a" (b (make-instance 'Box :v 0)))"##,
         "2",
     );
@@ -188,12 +188,12 @@ fn a_supertrait_is_needed_at_the_instantiation() {
 fn a_trait_for_every_instantiation_and_for_one_is_refused() {
     let base = "(deftrait Show () (defmethod show (self) string))\n(defstruct Box<T> (v T))\n";
     let msg = check_err(&format!(
-        "{}(impl Show Box<T> (defmethod show (self) string \"any\"))\n(impl Show Box<int> (defmethod show (self) string \"int\"))",
+        "{}(impl<T> Show Box<T> (defmethod show (self) string \"any\"))\n(impl Show Box<int> (defmethod show (self) string \"int\"))",
         base
     ));
     assert!(msg.contains("implements `Show` for every instantiation already"), "{}", msg);
     let msg = check_err(&format!(
-        "{}(impl Show Box<int> (defmethod show (self) string \"int\"))\n(impl Show Box<T> (defmethod show (self) string \"any\"))",
+        "{}(impl Show Box<int> (defmethod show (self) string \"int\"))\n(impl<T> Show Box<T> (defmethod show (self) string \"any\"))",
         base
     ));
     assert!(msg.contains("`Show` is implemented for `Box<int>` already"), "{}", msg);

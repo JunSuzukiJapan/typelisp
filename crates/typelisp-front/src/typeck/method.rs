@@ -78,7 +78,11 @@ pub(crate) fn check_method_call(
     expect(cx, &ret, expected)?;
     let targs: Vec<Type> = sig.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();
     // The type's parameters come first, then the method's own.
-    let owner_params = cx.reg.type_def(&owner).map_or(0, |d| d.params.len());
+    // One instantiation's method has its own alone.
+    let owner_params = match def.inst_args {
+        Some(_) => 0,
+        None => cx.reg.type_def(&owner).map_or(0, |d| d.params.len()),
+    };
     for (i, (p, t)) in sig.type_params.iter().zip(&targs).enumerate() {
         // A builtin whose signature never mentions `p` is not affected by
         // it: it has no body, and nothing it is passed or returns carries

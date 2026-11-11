@@ -512,10 +512,10 @@ fn publish(reg: &Registry, heap: &Heap, types: &[Path], methods: &[(Path, SymRef
 fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Request) -> Result<Value, Error> {
     let type_params = match req.base {
         Base::Fn(p) => &reg.fn_def(&p).expect("a specialization is asked for only of a defined function").type_params,
-        Base::Method(owner, m) => &reg.method(&owner, m).expect("a specialization is asked for only of a defined method").sig.type_params,
+        Base::Method(owner, m) => &reg.method_by_code(&owner, m).expect("a specialization is asked for only of a defined method").sig.type_params,
     };
     if let (Base::Method(owner, m), Name::Method(name)) = (req.base, req.name) {
-        let def = reg.method(&owner, m).expect("checked above");
+        let def = reg.method_by_code(&owner, m).expect("checked above");
         if def.sig.builtin {
             return builtin_specialization(heap, reg, requests, owner, m, def, &req.args, name);
         }
@@ -539,7 +539,7 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
     match (req.base, req.name) {
         (Base::Fn(_), Name::Fn(name)) => reg.defun_form(heap, &name, &params, &ret, &body),
         (Base::Method(owner, m), Name::Method(name)) => {
-            let instance = reg.method(&owner, m).expect("checked above").instance;
+            let instance = reg.method_by_code(&owner, m).expect("checked above").instance;
             // A blanket `impl`'s method is its type's.
             let owner = match reg.blanket_trait(&owner) {
                 Some(_) => crate::types::nominal_path(&req.args[0]).expect("a blanket `impl` covers only a type with a name"),

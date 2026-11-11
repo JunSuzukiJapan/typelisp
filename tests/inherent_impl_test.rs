@@ -14,7 +14,7 @@ const DEFS: &str = r##"
   (pub defmethod scaled (self (k f64) &optional (dk f64 0.0)) Point
     (make-instance 'Point :x (* self::x (+ k dk)) :y (* self::y k))))
 (defstruct Box<T> (v T))
-(impl Box<T> (:where (print-object T))
+(impl<T> Box<T> (:where (print-object T))
   (pub defmethod show (self) string (format false "box:~a" (print-object self::v false)))
   (pub defmethod map<U> (self (f (fn (T) U))) Box<U> (make-instance 'Box :v (f self::v))))
 "##;
@@ -144,6 +144,6 @@ fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
 /// the check and fail at run time.
 #[test]
 fn a_target_with_some_variables_and_some_types_is_refused() {
-    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (pub defmethod sb (self) int self::b))");
+    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl<T> Pair<T,int> (pub defmethod sb (self) int self::b))");
     assert!(msg.contains("names every type parameter of `Pair` as a distinct variable"), "{}", msg);
 }

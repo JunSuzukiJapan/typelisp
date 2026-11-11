@@ -111,6 +111,9 @@ fn check_item(
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
     let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, target)?;
+    if !all_or_none(&target_ty, &scope.params()[..impl_names.len()]) {
+        return Err(not_all_or_none(&format!("method {}::{}", owner, method), &owner, &target_ty));
+    }
     let (receiver, written) = split_receiver(heap, name, *params)?;
     let what = format!("impl: method `{}`", method);
     let named = format!("method {}::{}", owner, method);
@@ -129,12 +132,7 @@ fn check_item(
     // A target that names every type argument outright makes the method
     // that instantiation's own.
     let inst = match &target_ty {
-        Type::Named(_, args) if impl_names.is_empty() && !args.is_empty() => {
-            if !own_names.is_empty() {
-                unimplemented!("typeck: `{}`, a method with type parameters of its own in an `impl` for one instantiation", method)
-            }
-            Some(args.clone())
-        }
+        Type::Named(_, args) if impl_names.is_empty() && !args.is_empty() => Some(args.clone()),
         _ => None,
     };
     // One instantiation's method is documented under its code's name.
@@ -142,6 +140,35 @@ fn check_item(
     d.record(reg, Definition::Method(owner, key), doc);
     let def = Method { owner, method, name, instance: receiver.is_some(), public, home: None, params: list, ret, bounds, inst };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
+}
+
+/// Whether the target `target` of an `impl` declaring `declared` writes
+/// every type argument outright, or each as a distinct declared parameter.
+/// Specialization binds the parameters from the type's arguments, so a
+/// target with some of each would leave a parameter nothing binds.
+pub(crate) fn all_or_none(target: &Type, declared: &[crate::types::TypeParam]) -> bool {
+    let Type::Named(_, args) = target else {
+        return true;
+    };
+    if declared.is_empty() {
+        return true;
+    }
+    let mut seen = Vec::new();
+    for a in args {
+        match a {
+            Type::Param(p) if declared.contains(p) && !seen.contains(p) => seen.push(*p),
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// The error for a target [`all_or_none`] refuses, `who` naming the item.
+pub(crate) fn not_all_or_none(who: &str, owner: &Path, target: &Type) -> Error {
+    Error::TypeError(format!(
+        "{}: an `impl` of `{}` names every type parameter of `{}` as a distinct variable, or none of them",
+        who, target, owner
+    ))
 }
 
 /// The parameters `params` of the method `name` of an `impl` or a

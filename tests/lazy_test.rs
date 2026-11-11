@@ -112,7 +112,7 @@ fn nothing_is_computed_ahead() {
 fn an_impl_where_pin_types_the_source() {
     let src = r##"
 (defstruct every-other-iter<I,A> (src I))
-(impl Iter every-other-iter<I,A> (:where (Iter I (Item A)))
+(impl<I,A> Iter every-other-iter<I,A> (:where (Iter I (Item A)))
   (:type Item A)
   (defmethod next (self) Option<A>
     (next self::src)

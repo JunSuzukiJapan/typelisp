@@ -166,11 +166,14 @@ impl<'a> Cx<'a> {
     /// The instance method `name` a receiver of type `ty` answers to, as
     /// [`receiver_method`] says. When the type has a method of that name
     /// for one instantiation, which one is picked by its type arguments, so
-    /// a number literal's hole in them is decided first.
+    /// a number literal's hole in them is decided first. So it is when the
+    /// method can only be a blanket `impl`'s, whose bounds the type's
+    /// arguments may decide.
     pub(crate) fn receiver_method(&self, ty: &Type, name: SymRef) -> Option<(Path, &'a MethodDef)> {
         let ty = self.with_default(ty);
         if let Some(owner) = crate::types::nominal_path(&ty) {
-            if self.reg.has_inst_method(&owner, name) {
+            let blanket = self.reg.method(&owner, name).is_none() && self.reg.blanket_with_method(name).is_some();
+            if self.reg.has_inst_method(&owner, name) || blanket {
                 self.decide_all(&ty);
             }
         }

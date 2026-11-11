@@ -248,7 +248,7 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
 fn a_method_on_a_generic_type_specializes_at_the_call_site() {
     let (h, tls) = check_all(
         "(defstruct box<T> (v T)) \
-         (impl box<T> (defmethod get-v (self) T self::v)) \
+         (impl<T> box<T> (defmethod get-v (self) T self::v)) \
          (get-v (make-instance 'box :v 42))",
     )
     .unwrap();
@@ -264,7 +264,7 @@ fn a_method_on_a_generic_type_specializes_at_the_call_site() {
 fn a_generic_method_call_evaluates_through_its_specialization() {
     let src = r#"
         (defstruct box<T> (v T))
-        (impl box<T>
+        (impl<T> box<T>
   (defmethod get-v (self) T self::v))
         (get-v (make-instance 'box :v 42))
     "#;
@@ -275,7 +275,7 @@ fn a_generic_method_call_evaluates_through_its_specialization() {
 fn a_generic_method_with_a_match_body_specializes() {
     let src = r#"
         (defstruct cell<T> (o Option<T>))
-        (impl cell<T>
+        (impl<T> cell<T>
           (defmethod unwrap2 (self) T
             (match self::o ((some x) x) ((none) (panic "none")))))
         (unwrap2 (make-instance 'cell :o (Option::some 9)))
@@ -298,7 +298,7 @@ fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
 fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
     let src = r#"
         (defstruct box<T> (v T))
-        (impl box<T>
+        (impl<T> box<T>
   (defmethod get-v (self) T self::v))
         (let ((a (make-instance 'box :v 1)) (b (make-instance 'box :v true)))
           (if (get-v b) (get-v a) 0))
@@ -371,7 +371,7 @@ fn a_generic_function_annotated_with_the_specializes() {
 fn a_generic_method_passed_as_an_argument_specializes() {
     let src = r#"
         (defstruct box<T> (v T))
-        (impl box<T>
+        (impl<T> box<T>
   (defmethod get-v (self) T self::v))
         (defun call-it ((f (fn (box<int>) int)) (b box<int>)) int (f b))
         (call-it get-v (make-instance 'box :v 7))

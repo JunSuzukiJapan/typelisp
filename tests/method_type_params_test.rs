@@ -1,4 +1,4 @@
-//! A method with type parameters of its own: `(impl Box<T> (map<U> (self
+//! A method with type parameters of its own: `(impl<T> Box<T> (map<U> (self
 //! (f (fn (T) U))) Box<U> ...))`.
 //!
 //! The receiver supplies the owner's type arguments; the method's own are
@@ -12,7 +12,7 @@ use common::{check_err, eval_string, eval_string_compiled};
 
 const DEFS: &str = r##"
 (defstruct Box<T> (v T))
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v)))
   (defmethod zip-with<U,R> (self (other Box<U>) (f (fn (T U) R))) Box<R>
@@ -23,7 +23,7 @@ const DEFS: &str = r##"
 (impl Meter
   (defmethod scale<N> (self (k N) (conv (fn (N) f64))) Meter
     (make-instance 'Meter :m (* self::m (conv k)))))
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod twice<U> (self (f (fn (T) U)) (g (fn (U) U))) Box<U>
     (fmap (fmap self f) g))
   (defmethod same<U> (self (a U) (b U)) bool (:where (Eq U))
@@ -110,7 +110,7 @@ fn as_a_function_value() {
 #[test]
 fn a_parameter_nothing_decides_is_an_error() {
     let msg = check_err(&format!(
-        "{}\n(impl Box<T> (defmethod make<U> (self) Option<U> (Option::none)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
+        "{}\n(impl<T> Box<T> (defmethod make<U> (self) Option<U> (Option::none)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
         DEFS
     ));
     assert!(msg.contains("cannot infer type parameter `U`"), "{}", msg);
@@ -118,17 +118,17 @@ fn a_parameter_nothing_decides_is_an_error() {
 
 #[test]
 fn an_own_parameter_may_not_reuse_the_owners_name() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (defmethod bad<T> (self (x T)) T x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl<T> Box<T> (defmethod bad<T> (self (x T)) T x))");
     assert!(msg.contains("the method's own type parameter `T` has the name of a type parameter of `Box`"), "{}", msg);
     // The declared name counts too, though this receiver spells it `A`: the
     // registered signature is written in the declared names.
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<A> (defmethod bad<T> (self (x T)) T x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl<A> Box<A> (defmethod bad<T> (self (x T)) T x))");
     assert!(msg.contains("the method's own type parameter `T`"), "{}", msg);
 }
 
 #[test]
 fn an_own_parameter_may_not_be_declared_twice() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (defmethod bad<U,U> (self (x U)) U x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl<T> Box<T> (defmethod bad<U,U> (self (x U)) U x))");
     assert!(msg.contains("type parameter `U` is declared twice"), "{}", msg);
 }
 
@@ -136,7 +136,7 @@ fn an_own_parameter_may_not_be_declared_twice() {
 /// nothing to bind it with.
 #[test]
 fn a_partly_generic_receiver_is_refused() {
-    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (defmethod bad<U> (self (x U)) U x))");
+    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl<T> Pair<T,int> (defmethod bad<U> (self (x U)) U x))");
     assert!(msg.contains("names every type parameter of `Pair` as a distinct variable"), "{}", msg);
 }
 

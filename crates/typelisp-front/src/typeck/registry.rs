@@ -445,6 +445,20 @@ impl Registry {
         every.chain(one)
     }
 
+    /// The method of `owner` whose code is named `code`: the method of that
+    /// name for every instantiation, or the one written for an
+    /// instantiation whose code has that name.
+    pub(crate) fn method_by_code(&self, owner: &Path, code: SymRef) -> Option<&MethodDef> {
+        self.method(owner, code).or_else(|| {
+            self.inst_methods
+                .iter()
+                .filter(|((o, _), _)| o == owner)
+                .flat_map(|((_, n), insts)| insts.iter().map(move |(args, m)| (*n, args, m)))
+                .find(|(n, args, _)| super::generic::method_specialization(owner, *n, args) == code)
+                .map(|(_, _, m)| m)
+        })
+    }
+
     /// Whether `owner` has a method `name` written for one instantiation.
     pub(crate) fn has_inst_method(&self, owner: &Path, name: SymRef) -> bool {
         self.inst_methods.get(&(*owner, name)).is_some()

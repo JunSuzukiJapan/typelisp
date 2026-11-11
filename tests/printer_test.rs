@@ -368,13 +368,13 @@ fn a_call_directive_works_through_a_stream_destination() {
 fn print_object_reaches_a_generic_type() {
     is_true(
         r#"(defstruct gen<T> (v T))
-           (impl print-object gen<T> (defmethod print-object (self (escape bool)) string "GEN"))
+           (impl<T> print-object gen<T> (defmethod print-object (self (escape bool)) string "GEN"))
            (equal (format false "~a" (make-instance 'gen :v 1)) "GEN")"#,
     );
     // Still reachable by name, as it always was.
     is_true(
         r#"(defstruct gen<T> (v T))
-           (impl print-object gen<T> (defmethod print-object (self (escape bool)) string "GEN"))
+           (impl<T> print-object gen<T> (defmethod print-object (self (escape bool)) string "GEN"))
            (equal (print-object (make-instance 'gen :v 1) true) "GEN")"#,
     );
 }
@@ -390,7 +390,7 @@ fn each_instantiation_reaches_its_own_print_object() {
            (defstruct ws (s string))
            (impl print-object ws (defmethod print-object (self (escape bool)) string "STR"))
            (defstruct gen<T> (v T))
-           (impl print-object gen<T>
+           (impl<T> print-object gen<T>
              (:where (print-object T))
              (defmethod print-object (self (escape bool)) string
                (append "gen-of-" (print-object (v self) escape))))
@@ -408,7 +408,7 @@ fn print_object_reaches_a_builtin_generic_type() {
     is_true(
         r#"(defstruct point (x int) (y int))
            (impl print-object point (defmethod print-object (self (escape bool)) string "P"))
-           (impl print-object Vector<T> (:where (print-object T))
+           (impl<T> print-object Vector<T> (:where (print-object T))
              (defmethod print-object (self (escape bool)) string "V"))
            (equal (format false "~a" (the Vector<point> (Vector::new))) "V")"#,
     );
@@ -437,7 +437,7 @@ fn an_enum_variant_name_survives_an_instantiated_key() {
 //
 // The remainder of Phase 8a, deferred until a generic type's `print-object`
 // could be reached at all. What makes an array printable in generic code is
-// the trait used as a *bound*: `(impl print-object Array<T> (:where
+// the trait used as a *bound*: `(impl<T> print-object Array<T> (:where
 // (print-object T)))` needs its elements renderable, so the scalar types
 // implement the trait for that purpose alone (the printer never consults it
 // for them — a scalar carries no type key).

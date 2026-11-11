@@ -27,7 +27,7 @@ use super::defun::by_param;
 use super::impl_block::method_params;
 use super::lambda_list::LambdaList;
 use super::registry::{Definition, FnDef, MethodDef, Registry, Template, TraitDef, TraitImpl, TypeEntry};
-use super::defun::{lower_template, split_doc};
+use super::defun::{lower_template, split_doc, split_where};
 use super::generic::Base;
 use super::lower::Lowering;
 use crate::check::lower::CoreForms;
@@ -86,6 +86,9 @@ pub(crate) fn check_trait_impl(
         Error::TypeError(format!("impl {} {}: type parameter `{}` is declared twice", trait_path, owner, twice.0.name()))
     })?;
     let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, *target)?;
+    if !super::impl_block::all_or_none(&target_ty, head.params()) {
+        return Err(super::impl_block::not_all_or_none(&format!("impl {} {}", trait_path, owner), &owner, &target_ty));
+    }
     let own: Vec<Type> = head.params().iter().map(|p| Type::Param(*p)).collect();
     let inst = match &target_ty {
         Type::Named(_, args) if *args == own => None,
@@ -95,6 +98,35 @@ pub(crate) fn check_trait_impl(
         _ if own.is_empty() => None,
         _ => unimplemented!("typeck: an `impl<...>` of a trait for a type without parameters"),
     };
+    // A trait is implemented either for every instantiation of a type or for
+    // each one it applies to.
+    let all = reg.trait_impls.get(&(trait_path, owner)).map_or(&[][..], Vec::as_slice);
+    match &inst {
+        Some(_) if all.iter().any(|i| i.args.is_none()) => {
+            return Err(Error::TypeError(format!(
+                "impl {} {}: `{}` implements `{}` for every instantiation already, so `{}` cannot have \
+                 its own `impl` (a trait is implemented either for every instantiation of a type or for \
+                 each one it applies to)",
+                trait_path, target_ty, owner, trait_path, target_ty
+            )));
+        }
+        None if all.iter().any(|i| i.args.is_some()) => {
+            let mut written_for: Vec<String> =
+                all.iter().filter_map(|i| i.args.as_ref()).map(|args| format!("`{}`", Type::Named(owner, args.clone()))).collect();
+            written_for.sort();
+            return Err(Error::TypeError(format!(
+                "impl {} {}: `{}` is implemented for {} already, so it cannot also be implemented for \
+                 every instantiation of `{}` (a trait is implemented either for every instantiation of \
+                 a type or for each one it applies to)",
+                trait_path,
+                target_ty,
+                trait_path,
+                written_for.join(", "),
+                owner
+            )));
+        }
+        _ => {}
+    }
     let shown = format!("impl {} {}", trait_path, owner);
     let impl_bounds = match clause {
         Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, c)?,
@@ -175,11 +207,12 @@ pub(crate) fn check_trait_impl(
         defaulted.push((method, define_defaulted(reg, d, heap, &tdef, &of, method)?));
     }
     let mut forms = Vec::new();
+    let mut impl_bounds = impl_bounds;
     for (method, item) in methods {
         let want = tdef.method(method).expect("checked above").clone();
-        if let Some(form) = check_method(reg, d, heap, requests, &tdef, &of, method, &want, &shown, item)? {
-            forms.push(form);
-        }
+        let (form, own) = check_method(reg, d, heap, requests, &tdef, &of, method, &want, &shown, item)?;
+        forms.extend(form);
+        impl_bounds.extend(own);
     }
     for (method, at) in defaulted {
         // A generic one is specialized where it is called.
@@ -517,9 +550,11 @@ fn check_blanket_impl(
     for method in left {
         define_defaulted(reg, d, heap, tdef, &of, method)?;
     }
+    let mut impl_bounds = impl_bounds;
     for (method, item) in methods {
         let want = tdef.method(method).expect("checked above").clone();
-        check_method(reg, d, heap, requests, tdef, &of, method, &want, &shown, item)?;
+        let (_, own) = check_method(reg, d, heap, requests, tdef, &of, method, &want, &shown, item)?;
+        impl_bounds.extend(own);
     }
     let bounds = impl_bounds.into_iter().map(|(_, b)| b).collect();
     reg.define_blanket(trait_path, super::registry::BlanketImpl { owner, param, bounds });
@@ -541,7 +576,9 @@ pub(crate) fn default_body(reg: &Registry, trait_path: &Path, method: SymRef, at
 }
 
 /// One method of the `impl`, `want` its signature in the trait: checked to
-/// be that signature, and defined.
+/// be that signature, and defined. Its code, and the bounds its own
+/// `(:where ...)` writes, on the `impl`'s parameters: the `impl` applies
+/// only where they hold, since a call through the trait cannot see them.
 #[allow(clippy::too_many_arguments)]
 fn check_method(
     reg: &mut Registry,
@@ -554,7 +591,7 @@ fn check_method(
     want: &super::registry::FnDef,
     shown: &str,
     item: Value,
-) -> Result<Option<Value>, Error> {
+) -> Result<(Option<Value>, Vec<(TypeParam, crate::check::registry::TraitBound)>), Error> {
     let elems = heap.list_to_vec_locs(item)?;
     let rest = match elems.split_first() {
         Some(((Value::Symbol(p), _), rest)) if p.is(wk::PUB) => &rest[1..],
@@ -565,14 +602,10 @@ fn check_method(
         return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
     };
     let (doc, body) = split_doc(heap, body);
+    let (own_where, body) = split_where(heap, body)?;
     // One instantiation's method is documented under its code's name.
     let key = of.inst.as_ref().map_or(method, |args| super::generic::method_specialization(&of.owner, method, args));
     d.record(reg, Definition::Method(of.owner, key), doc);
-    if let Some((first, _)) = body.first() {
-        if crate::check::analyze::is_where_clause(heap, *first)? {
-            unimplemented!("typeck: a method of a trait's `impl` with a `(:where ...)` clause of its own")
-        }
-    }
     let (name, _) = parse_header(heap, *header)?;
     let (ns, owner) = (d.site.ns, of.owner);
     // The method owns the `impl`'s parameters, as an inherent `impl`'s does.
@@ -624,7 +657,18 @@ fn check_method(
             describe(&want_params, &want_ret)
         )));
     }
-    let bounds = method_bounds(heap, &tcx, &scope, of)?;
+    let mut bounds = method_bounds(heap, &tcx, &scope, of)?;
+    let own = own_where.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
+    bounds.extend(own.iter().cloned());
+    // The method's parameters are the `impl`'s, by position.
+    let to_head = Subst::positional(scope.params(), &of.head.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
+    let own = own
+        .into_iter()
+        .map(|(p, b)| {
+            let i = scope.params().iter().position(|q| *q == p).expect("a bound is on a declared parameter");
+            (of.head[i], b.at(&to_head))
+        })
+        .collect();
     let def = Method { owner, method, name, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds, inst: of.inst.map(<[Type]>::to_vec) };
-    define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
+    Ok((define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)?, own))
 }

@@ -405,7 +405,7 @@ fn a_defaulted_method_parameter_may_not_mention_the_owners_type_parameter() {
     // not still name an abstract variable.
     let src = "
         (defstruct cell<T> (v T))
-        (impl cell<T>
+        (impl<T> cell<T>
   (defmethod pick (self &optional (alt T self::v)) T alt))
     ";
     assert!(check_err(src).contains("may not default"), "{}", check_err(src));

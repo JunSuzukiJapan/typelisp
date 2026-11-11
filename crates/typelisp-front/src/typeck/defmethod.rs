@@ -50,6 +50,13 @@ pub(crate) fn check_defmethod(
     let written: Vec<Value> = heap.list_to_vec(*params)?;
     let receiver = written.first().and_then(|r| heap.list_to_vec(*r).ok()).filter(|r| r.len() == 2 && matches!(r[0], Value::Symbol(_)));
     let Some(receiver) = receiver.filter(|_| !is_type_application(heap, written[0])) else {
+        if matches!(written.first(), Some(Value::Symbol(id)) if id.is(crate::wk::SELF)) {
+            return Err(Error::TypeError(format!(
+                "defmethod `{}`: `self` is written only inside an `impl`, which names the receiver's type; \
+                 outside one, the first parameter is named and typed: ((x Type) ...)",
+                name.name()
+            )));
+        }
         return Err(Error::TypeError(format!(
             "defmethod `{}`: the first parameter is the receiver, written (name Type): {}",
             name.name(),
@@ -141,11 +148,34 @@ pub(crate) fn define_method(
     let ns = d.site.ns;
     let code_name = match &inst {
         Some(args) => {
+            if reg.method(&owner, method).is_some() {
+                return Err(Error::TypeError(format!(
+                    "method {}::{}: `{}` has a `{}` for every instantiation already, so an `impl` of `{}` \
+                     cannot define its own (a method is written either for every instantiation of a type \
+                     or for each one it applies to)",
+                    owner, method, owner, method, Type::Named(owner, args.clone())
+                )));
+            }
             d.inst_method(reg, &owner, method, args)?;
             reg.define_inst_method(owner, method, args.clone(), MethodDef { sig, instance, home, inst_args: Some(args.clone()) });
             method_specialization(&owner, method, args)
         }
         None => {
+            let written = reg.inst_methods(&owner, method);
+            if !written.is_empty() {
+                let mut written_for: Vec<String> = written.iter().map(|(args, _)| format!("`{}`", Type::Named(owner, args.clone()))).collect();
+                written_for.sort();
+                return Err(Error::TypeError(format!(
+                    "method {}::{}: `{}` is written for {} already, so it cannot also be written \
+                     for every instantiation of `{}` (a method is written either for every \
+                     instantiation of a type or for each one it applies to)",
+                    owner,
+                    method,
+                    method,
+                    written_for.join(", "),
+                    owner
+                )));
+            }
             d.method(reg, &owner, method)?;
             reg.define_method(owner, method, MethodDef { sig, instance, home, inst_args: None });
             method
@@ -164,10 +194,10 @@ pub(crate) fn define_method(
         for t in &body {
             t.each_value(&mut |v| heap.push_permanent_root(v));
         }
-        reg.set_template(Base::Method(owner, method), Some(Template { params, ret, body: std::mem::take(&mut body) }));
+        reg.set_template(Base::Method(owner, code_name), Some(Template { params, ret, body: std::mem::take(&mut body) }));
         return Ok(None);
     }
-    reg.set_template(Base::Method(owner, method), None);
+    reg.set_template(Base::Method(owner, code_name), None);
     let subst = Subst::default();
     let mut lw = Lowering { reg, subst: &subst, requests };
     let forms = lower_all(heap, &mut lw, &body)?;

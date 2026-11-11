@@ -65,7 +65,7 @@ fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
     assert_unknown("(defstruct box<T> (v T)) (impl box<T>
   (defmethod mk ((x U)) box<T> (make-instance 'box :v x)))", "U");
     let src = "(defstruct box<T> (v T))
-               (impl box<T>
+               (impl<T> box<T>
   (defmethod get-v (self) T self::v)
   (defmethod wrap ((x T)) box<T> (make-instance 'box :v x)))
                (get-v (box::wrap 7))";
@@ -75,11 +75,11 @@ fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
 #[test]
 fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
     let defs = "(defstruct box<T> (v T)) (deftrait Show () (defmethod show (self) string))";
-    assert_unknown(&format!("{defs} (impl Show box<T> (defmethod show (self) string (let ((y (the U 1))) \"b\")))"), "U");
+    assert_unknown(&format!("{defs} (impl<T> Show box<T> (defmethod show (self) string (let ((y (the U 1))) \"b\")))"), "U");
     assert_unknown(&format!("{defs} (impl<T> Show Vector<T> (defmethod show (self) string (let ((y (the U 1))) \"v\")))"), "U");
     let src = format!(
         "{defs}
-         (impl Show box<T> (defmethod show (self) string (let ((x (the T self::v))) \"b\")))
+         (impl<T> Show box<T> (defmethod show (self) string (let ((x (the T self::v))) \"b\")))
          (deftrait Clamp (Ord) (defmethod clamp (self (lo Self) (hi Self)) Self
            (if (less self lo) lo (if (less hi self) hi self))))
          (impl<T> Clamp T (:where (Ord T)))

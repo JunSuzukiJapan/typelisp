@@ -166,7 +166,7 @@ fn a_method_on_a_generic_owner_can_carry_a_where_clause() {
     // re-checks with `A = box` concrete.
     let src = format!(
         "{} (defstruct pair<A> (x A) (y A))
-            (impl pair<A>
+            (impl<A> pair<A>
               (defmethod count-both (self) int (:where (Counted A))
                 (+ (count self::x) (count self::y))))
             (count-both (make-instance 'pair :x (make-instance 'box :n 20) :y (make-instance 'box :n 22)))",
@@ -184,7 +184,7 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
         (deftrait Eq2 () (defmethod same (self (other Self)) bool))
         (impl Eq2 int (defmethod same (self (other Self)) bool (= self other)))
         (defstruct pr<A,B> (a A) (b B))
-        (impl Eq2 pr<A,B>
+        (impl<A,B> Eq2 pr<A,B>
           (defmethod same (self (other Self)) bool (:where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
         (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3))
@@ -204,7 +204,7 @@ fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
         (impl Eq2 int (defmethod same (self (other Self)) bool (= self other)))
         (defstruct no-eq (n int))
         (defstruct pr<A,B> (a A) (b B))
-        (impl Eq2 pr<A,B>
+        (impl<A,B> Eq2 pr<A,B>
           (defmethod same (self (other Self)) bool (:where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
         (same (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2) (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2))";
@@ -283,7 +283,7 @@ const BOXED_PRELUDE: &str = "
   (:type Item)
   (defmethod unbox (self) Item))
 (defstruct wrap<T> (v T))
-(impl Boxed wrap<T>
+(impl<T> Boxed wrap<T>
   (:type Item T)
   (defmethod unbox (self) T self::v))
 (defun get-int<T> ((b T)) int (:where (Boxed T (Item int))) (unbox b))

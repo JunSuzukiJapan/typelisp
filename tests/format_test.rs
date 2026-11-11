@@ -539,7 +539,7 @@ fn a_type_variable_argument_in_a_generic_body() {
     let defs = r#"
 (defun show<T> ((x T)) string (format false "<~a>" x))
 (defstruct Pair<T, U> (first T) (second U))
-(impl Pair<T,U> (defmethod describe (self) string (format false "~a/~a" self::first self::second)))
+(impl<T,U> Pair<T,U> (defmethod describe (self) string (format false "~a/~a" self::first self::second)))
 "#;
     let body = r#"(format false "~a ~a ~a ~a" (show 1) (show 2.5) (show (Option::some 3))
                           (describe (make-instance 'Pair :first 1.5 :second "a")))"#;
