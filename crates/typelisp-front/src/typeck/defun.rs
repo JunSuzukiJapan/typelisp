@@ -192,3 +192,43 @@ pub(crate) fn parse_param(heap: &Heap, cx: &TypeCx, p: Value) -> Result<(SymRef,
     };
     Ok((*name, parse_type(heap, cx, *ty, ty_at.as_ref())?))
 }
+
+#[cfg(test)]
+mod header_tests {
+    use super::parse_header;
+    use crate::{Heap, Reader};
+
+    fn header(src: &str) -> Result<(String, Vec<String>), crate::Error> {
+        let mut h = Heap::with_capacity(4096);
+        let v = Reader::new().read_all(&mut h, src).expect("reads")[0];
+        let (name, params) = parse_header(&h, v)?;
+        Ok((name.name().to_string(), params.iter().map(|p| p.name().to_string()).collect()))
+    }
+
+    #[test]
+    fn a_plain_name_has_no_type_parameters() {
+        assert_eq!(header("identity").unwrap(), ("identity".to_string(), vec![]));
+        // Hyphens are ordinary name characters, not token boundaries.
+        assert_eq!(header("cons-cell").unwrap(), ("cons-cell".to_string(), vec![]));
+    }
+
+    #[test]
+    fn an_angle_bracket_header_splits_into_name_and_params() {
+        assert_eq!(header("pair<a,b>").unwrap(), ("pair".to_string(), vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(header("identity<t>").unwrap(), ("identity".to_string(), vec!["t".to_string()]));
+    }
+
+    #[test]
+    fn every_cl_comparison_operator_is_a_plain_name() {
+        // `char<`/`string<=`/...: a `<` with no type after it is part of the
+        // name.
+        for op in ["<", ">", "<=", ">=", "char<", "char>", "char<=", "char>=", "string<", "string>", "string<=", "string>=", "->", "+"] {
+            assert_eq!(header(&format!("{} ", op)).unwrap(), (op.to_string(), vec![]), "operator {:?}", op);
+        }
+    }
+
+    #[test]
+    fn a_type_parameter_must_be_a_plain_name() {
+        assert!(header("pair<Vector<t>>").is_err());
+    }
+}

@@ -104,30 +104,6 @@ pub(crate) fn panic_form(heap: &mut Heap, msg: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::PANIC, &[msg])
 }
 
-/// The node a *never-executed* position in an erased generic body lowers
-/// to: `(panic (str "..."))`.
-///
-/// The old AST's `TraitCall` node filled this slot. It was diagnostics-only —
-/// the evaluator answered it with an internal error and the bridge with
-/// `(unsupported "TraitCall")` — because the checker only builds it where a
-/// `where`-bounded *type variable* is the receiver, and each specialization
-/// re-checks the same site with the type concrete (resolving it to a real
-/// `assoc`/`dyn-new`). Since a generic definition emits no body at all
-/// (`(module PATH)` and nothing else), this node is discarded rather than
-/// run; giving it the vocabulary's own diverging node keeps the "cannot be
-/// reached" property expressible without a tag whose only meaning is
-/// "unreachable", and preserves today's behavior — an abort naming the
-/// method — if the property is ever violated.
-pub(super) fn erased_generic_form(heap: &mut Heap, what: &str) -> Result<Value, Error> {
-    let msg = str_lit_form(
-        heap,
-        &format!("`{}` reached the evaluator — an erased generic body executed", what),
-    )?;
-    let mut s = RootScope::new(heap);
-    s.push_root(msg);
-    panic_form(&mut s, msg)
-}
-
 /// `(loop REPR BODY...)` — loop forever, exited by `break`/`return`.
 ///
 /// `REPR` is the representation of the loop's *own* value — whatever a
@@ -727,18 +703,6 @@ pub(crate) fn numeric_identity_literal(heap: &mut Heap, expected: Option<&Type>,
         Some(Type::Ratio) => heap.alloc_ratio(num_rational::BigRational::from_integer(num_bigint::BigInt::from(value))),
         _ => Value::Int(value),
     }
-}
-
-/// `recv::member` as the reader writes it, `(%value-member recv member)`:
-/// the member of a value, which the checker resolves by the value's type.
-pub(super) fn value_member_form(heap: &mut Heap, recv: &str, member: &str) -> Result<Value, Error> {
-    let mut items = Items::new(heap);
-    items.push(Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::VALUE_MEMBER)));
-    let r = items.heap().intern_symbol(recv);
-    items.push(r);
-    let m = items.heap().intern_symbol(member);
-    items.push(m);
-    items.finish_list()
 }
 
 /// The name the reader reads for the definition `p` from any module, for a

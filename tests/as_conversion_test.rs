@@ -1,13 +1,13 @@
-//! Tests for `as`/`try-as` (`Checker::check_as`) — a Rust-`as`-flavored
+//! Tests for `as`/`try-as` (`typeck::cast::check_as`) — a Rust-`as`-flavored
 //! primitive cast between the numeric/`char` types, unrelated to `Sexpr`
 //! (that's `match`'s job, see `tests/match_sexpr_test.rs`). `as` panics on a
 //! partial conversion's failure; `try-as` returns `Option<Type>` instead.
 //!
 //! Both desugar to an existing `registry.rs` instance method
 //! (`int_assoc`/`float_assoc`/`bignum_assoc`/`ratio_assoc`/`char_assoc`) —
-//! see `as_conversion`'s doc comment in `src/check/analyze.rs` for the exact
-//! table, and `Checker::width_cast` for the same-family width casts it
-//! chains onto the result.
+//! see `as_conversion`'s doc comment for the exact table, and
+//! `typeck::cast`'s `width_cast` for the same-family width casts it chains
+//! onto the result.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};

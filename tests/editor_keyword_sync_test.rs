@@ -20,7 +20,7 @@
 //! of the walk: an editor must not paint them as builtins, which the last test
 //! here checks the other way round.
 //!
-//! Special forms live in `Checker::check_list`'s dispatch, which has no runtime
+//! Special forms live in the checker's `check_list` dispatch, which has no runtime
 //! representation to enumerate, so those are read out of the source between two
 //! sentinel comments (see [`special_forms_from_checker`]).
 //!
@@ -277,13 +277,13 @@ fn alternation_words(regex: &str) -> Vec<String> {
         .collect()
 }
 
-/// The special forms `Checker::check_list` dispatches on, read from the source
+/// The special forms the checker's `check_list` dispatches on, read from the source
 /// between the sentinel comments that bracket the dispatch.
 ///
 /// Panics when the sentinels are missing, so a refactor that moves the dispatch
 /// makes this test fail loudly rather than silently checking nothing.
 fn special_forms_from_checker() -> BTreeSet<String> {
-    let path = repo_root().join("crates/typelisp-front/src/check/analyze.rs");
+    let path = repo_root().join("crates/typelisp-front/src/typeck/expr.rs");
     let src = std::fs::read_to_string(&path).expect("checker is readable");
     let begin = src
         .find("// SPECIAL-FORM DISPATCH BEGIN")
@@ -467,7 +467,7 @@ fn both_editors_know_every_special_form() {
     }
     assert!(
         missing.is_empty(),
-        "special forms dispatched by Checker::check_list but unknown to an editor:\n  {}",
+        "special forms dispatched by the checker's check_list but unknown to an editor:\n  {}",
         missing.join("\n  ")
     );
 }
@@ -629,7 +629,7 @@ fn the_special_form_list_is_the_dispatch() {
     let listed: BTreeSet<String> = SPECIAL_FORM_HEADS.iter().map(|&i| BUILTIN_SYMBOLS[i as usize].to_string()).collect();
     assert_eq!(
         listed, dispatched,
-        "SPECIAL_FORM_HEADS and Checker::check_list's dispatch differ: missing {:?}, extra {:?}",
+        "SPECIAL_FORM_HEADS and the checker's check_list dispatch differ: missing {:?}, extra {:?}",
         dispatched.difference(&listed).collect::<Vec<_>>(),
         listed.difference(&dispatched).collect::<Vec<_>>()
     );

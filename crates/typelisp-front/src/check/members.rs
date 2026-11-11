@@ -69,9 +69,6 @@ impl<T> Members<T> {
         self.map.remove(&ByName(member))
     }
 
-    pub fn entry_or_insert_with(&mut self, member: SymRef, make: impl FnOnce() -> T) -> &mut T {
-        self.map.entry(ByName(member)).or_insert_with(make)
-    }
 
     pub fn len(&self) -> usize {
         self.map.len()

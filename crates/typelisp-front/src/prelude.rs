@@ -7737,7 +7737,6 @@ pub fn load_interpreted_with(
     // compiler island needs the same macros without taking the prelude with
     // them — see `crate::core_macros`'s module comment.
     // Both are written in, and define into, the standard library's module.
-    chk.set_stdlib(true);
     let std_segments = vec![crate::types::STD_MODULE.to_string()];
     chk.enter_file_module(&std_segments).expect("prelude: the standard library's module");
     crate::core_macros::load_with(heap, chk, interp, on_checked);
@@ -7754,5 +7753,4 @@ pub fn load_interpreted_with(
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
     chk.exit_file_module();
-    chk.set_stdlib(false);
 }

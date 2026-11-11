@@ -347,21 +347,7 @@ impl AdtDef {
         }
     }
 
-    /// Every definition of `name`: the one covering every instantiation, or
-    /// each instantiation's own (with that instantiation).
-    pub fn method_defs<'a>(&'a self, name: SymRef) -> impl Iterator<Item = (&'a AssocFn, Option<&'a InstImpls>)> + 'a {
-        self.assoc
-            .get(name)
-            .map(|af| (af, None))
-            .into_iter()
-            .chain(self.insts.values().filter_map(move |i| i.assoc.get(name).map(|af| (af, Some(i)))))
-    }
 
-    /// Whether an `impl` of `trait_path` covers the instantiation `args`.
-    pub fn implements_at(&self, trait_path: &Path, args: &[Type]) -> bool {
-        self.impls.contains(trait_path)
-            || self.insts.get(&ConcreteNames::type_args(args)).is_some_and(|i| i.impls.contains(trait_path))
-    }
 }
 
 /// A `deftrait` definition (`Checker::check_deftrait`): a trait name, its
@@ -1354,31 +1340,6 @@ impl Registry {
         }
     }
 
-    /// The definition of `name` that a definition of it in the module `ns`
-    /// would make [`Self::reexport_std_in_prelude`] find twice: when `ns` is
-    /// `std` or one of [`PRELUDE_MODULES`], another of them defining `name`; when `ns` is in the standard library, another of its modules
-    /// defining a type, trait or C struct `name`.
-    pub fn std_definition_elsewhere(&self, ns: NsId, name: &str) -> Option<Path> {
-        if !crate::types::in_std(ns) {
-            return None;
-        }
-        let library = |m: NsId| m == NsId::STD || PRELUDE_MODULES.iter().any(|seg| crate::types::std_module(seg) == m);
-        if library(ns) {
-            let elsewhere = self
-                .modules
-                .values()
-                .filter(|m| m.ns != ns && library(m.ns))
-                .find(|m| m.defined_symbols().any(|sym| sym.name() == name));
-            if let Some(m) = elsewhere {
-                return Some(Path::in_ns(m.ns, name));
-            }
-        }
-        self.modules
-            .values()
-            .filter(|m| m.ns != ns && crate::types::in_std(m.ns))
-            .find(|m| m.types.contains_key(name) || m.traits.contains_key(name) || m.c_structs.contains_key(name))
-            .map(|m| Path::in_ns(m.ns, name))
-    }
 
     /// The root module's definitions.
     pub fn root(&self) -> &Namespace {
@@ -1403,9 +1364,6 @@ impl Registry {
         self.modules.get_mut(&ns).expect("just added")
     }
 
-    pub fn module_at_mut(&mut self, ns: NsId) -> Option<&mut Namespace> {
-        self.modules.get_mut(&ns)
-    }
 
     /// The child modules of `ns` the session has, by the name of each.
     pub fn children(&self, ns: NsId) -> Vec<(&'static str, &Namespace)> {
@@ -1422,10 +1380,6 @@ impl Registry {
         self.module_at(path.ns())?.types.get_sym(path.name_symbol())
     }
 
-    /// Mutable lookup of a type by its fully-qualified [`Path`].
-    pub fn type_def_mut(&mut self, path: &Path) -> Option<&mut AdtDef> {
-        self.module_at_mut(path.ns())?.types.map.get_mut(&path.name_symbol())
-    }
 
     /// Look up a free function by its fully-qualified [`Path`].
     pub fn fn_sig(&self, path: &Path) -> Option<&FnSig> {
@@ -1437,38 +1391,7 @@ impl Registry {
         self.module_at(path.ns())?.traits.get_sym(path.name_symbol())
     }
 
-    /// Resolve `method` against `tdef` *including inherited methods*,
-    /// returning the trait that declares it and its signature template.
-    ///
-    /// `TraitDef::methods` holds a trait's own methods only, so a bare
-    /// `tdef.methods.get(m)` silently misses everything a supertrait
-    /// contributes. Every consult point wants the inherited view, so they all
-    /// go through here: the answer is read off [`TraitDef::vtable_owner`],
-    /// which `Checker::check_deftrait` already computed, rather than
-    /// re-walking the supertrait graph.
-    pub fn trait_method<'a>(
-        &'a self,
-        tdef: &'a TraitDef,
-        method: SymRef,
-    ) -> Option<(&'a TraitDef, &'a FnSig)> {
-        let slot = tdef.vtable_order.iter().position(|m| *m == method)?;
-        let owner = &tdef.vtable_owner[slot];
-        // Own methods dominate: skip the second lookup (and work even while
-        // `check_deftrait`'s self-referential stub is the registered entry).
-        if owner == &tdef.name {
-            return Some((tdef, tdef.methods.get(method)?));
-        }
-        let odef = self.trait_def(owner)?;
-        Some((odef, odef.methods.get(method)?))
-    }
 
-    /// The blanket `impl` covering `trait_path`, if one is declared anywhere
-    /// in the loaded tree. At most one may exist per trait
-    /// (`Checker::check_impl` rejects a second), which is what makes this
-    /// answer independent of module walk order.
-    pub fn blanket_impl(&self, trait_path: &Path) -> Option<&BlanketImpl> {
-        self.namespaces().find_map(|ns| ns.blanket_impls.iter().find(|b| b.trait_path == *trait_path))
-    }
 
     /// Every type that has an `impl` for `trait_path` — the reverse of
     /// [`AdtDef::impls`], which only answers the forward question ("does

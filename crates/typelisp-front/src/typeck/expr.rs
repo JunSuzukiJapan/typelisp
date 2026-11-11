@@ -655,6 +655,17 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             return lambda::check_apply(cx, heap, locals, callee, None, args, expected, loc);
         }
     };
+    // `p::x`, read as `(%value-member p x)`: the member `x` of `p`'s type.
+    if head.is(wk::VALUE_MEMBER) {
+        let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
+            return Err(Error::TypeError("a member of a value is written `value::member`".into()));
+        };
+        return instance::check_field(cx, heap, locals, *recv, *member, loc);
+    }
+    // SPECIAL-FORM DISPATCH BEGIN
+    // The arms below are the authoritative list of special forms. They have
+    // no runtime representation to enumerate, so `tests/editor_keyword_sync_test.rs`
+    // reads them out of this file between these two sentinels.
     match head.well_known() {
         wk::LET => return binding::check_let(cx, heap, locals, args, expected, loc),
         wk::LET_STAR => return binding::check_let_star(cx, heap, locals, args, expected, loc),
@@ -725,14 +736,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::ROTATEF | wk::SHIFTF => return modify::check_rotatef_shiftf(cx, heap, locals, head.well_known(), args, loc),
         wk::THE => return the::check_the(cx, heap, locals, args),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
-        wk::VALUE_MEMBER => {
-            let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
-                return Err(Error::TypeError("a member of a value is written `value::member`".into()));
-            };
-            return instance::check_field(cx, heap, locals, *recv, *member, loc);
-        }
         _ => {}
     }
+    // SPECIAL-FORM DISPATCH END
     if SPECIAL_FORM_HEADS.contains(&head.well_known()) {
         unimplemented!("typeck: the special form `{}`", heap.symbol_spelling(head))
     }
