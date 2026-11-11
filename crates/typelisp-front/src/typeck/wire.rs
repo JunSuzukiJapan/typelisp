@@ -128,6 +128,7 @@ pub(crate) struct RegistryDelta {
     pub(crate) ctors: Vec<((Ns, Sym), Option<(Path, usize)>)>,
     pub(crate) static_uses: Vec<((Ns, Sym), Option<(Path, Sym)>)>,
     pub(crate) module_aliases: Vec<((Ns, Sym), Option<Ns>)>,
+    pub(crate) modules: Vec<(Ns, Option<()>)>,
     pub(crate) trait_impls: Vec<((Path, Path), Option<Vec<TraitImpl>>)>,
     pub(crate) blanket_impls: Vec<(Path, Option<BlanketImpl>)>,
     pub(crate) blanket_owners: Vec<(Path, Option<Path>)>,
@@ -143,10 +144,11 @@ impl RegistryDelta {
     fn is_empty(&self) -> bool {
         let RegistryDelta {
             values, types, methods, inst_methods, method_names, imports, reexports, ctors, static_uses, module_aliases,
-            trait_impls, blanket_impls, blanket_owners, docs, predeclared, throw_tags, callbacks_lifted: _, local_macros: _,
+            modules, trait_impls, blanket_impls, blanket_owners, docs, predeclared, throw_tags, callbacks_lifted: _, local_macros: _,
         } = self;
         values.is_empty() && types.is_empty() && methods.is_empty() && inst_methods.is_empty() && method_names.is_empty()
             && imports.is_empty() && reexports.is_empty() && ctors.is_empty() && static_uses.is_empty() && module_aliases.is_empty()
+            && modules.is_empty()
             && trait_impls.is_empty() && blanket_impls.is_empty() && blanket_owners.is_empty() && docs.is_empty()
             && predeclared.is_empty() && throw_tags.is_empty()
     }
@@ -165,13 +167,6 @@ impl RebuiltUnit {
     /// out of `heap`.
     pub(crate) fn of(heap: &Heap, reg: &Registry, since: u64) -> Result<RebuiltUnit, Error> {
         Ok(RebuiltUnit { registry: reg.changed_since(since), bodies: RebuiltBodies::of(heap, reg, since)? })
-    }
-
-    /// [`Self::of`] without the registry's entries: the prelude's generic
-    /// bodies, while its entries are copied from the current checker's
-    /// registry (`typeck::bridge`).
-    pub(crate) fn bodies_of(heap: &Heap, reg: &Registry, since: u64) -> Result<RebuiltUnit, Error> {
-        Ok(RebuiltUnit { registry: RegistryDelta::default(), bodies: RebuiltBodies::of(heap, reg, since)? })
     }
 
     /// The unit, its bodies' values allocated on `heap` and rooted for good.
@@ -209,11 +204,13 @@ impl Unit {
         self.bodies.apply(reg);
     }
 
-    /// The types and the methods the unit wrote, for the session's names.
-    pub(crate) fn written(&self) -> (Vec<Path>, Vec<(Path, SymRef)>) {
+    /// The modules, the types and the methods the unit wrote, for the
+    /// session's names.
+    pub(crate) fn written(&self) -> (Vec<NsId>, Vec<Path>, Vec<(Path, SymRef)>) {
+        let modules = self.registry.modules.iter().filter(|(_, e)| e.is_some()).map(|(n, _)| n.0).collect();
         let types = self.registry.types.iter().filter(|(_, e)| e.is_some()).map(|(p, _)| *p).collect();
         let methods = self.registry.methods.iter().filter(|(_, d)| d.is_some()).map(|((p, m), _)| (*p, m.0)).collect();
-        (types, methods)
+        (modules, types, methods)
     }
 }
 

@@ -521,10 +521,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         bitcode?
     };
 
-    // The prelude's generic bodies as the rebuilt checker has them, checked
-    // here once rather than by every session.
-    let rebuilt = typelisp_front::dump::rebuilt_prelude_bodies(&mut heap, &interp)?;
-    let mut state = typelisp_front::dump::capture_types_with_abi(
+    let state = typelisp_front::dump::capture_types_with_abi(
         &heap,
         delta,
         "prelude",
@@ -553,7 +550,6 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         crate::compile::EMITTED_LAYOUT,
         crate::compile::EMITTED_LAYOUT,
     )?;
-    state.checker.rebuilt = rebuilt;
     let types = typelisp_front::dump::write_state(&state)?;
     Ok(typelisp_front::dump::write(&[(types, bitcode)]))
 }

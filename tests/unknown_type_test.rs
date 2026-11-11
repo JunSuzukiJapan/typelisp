@@ -56,13 +56,13 @@ fn type_variables_declared_in_the_name_are_not_unknown() {
 
 #[test]
 fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
-    assert_unknown("(defstruct box<T> (v T)) (impl box<T>
+    assert_unknown("(defstruct box<T> (v T)) (impl<T> box<T>
   (defmethod bad (self (x U)) T self::v))", "U");
     assert_unknown("(defstruct pt (x int)) (impl pt
   (defmethod m (self (y nosuch)) int 1))", "nosuch");
     assert_unknown("(defstruct pt (x int)) (impl pt
   (defmethod m (self) int (the nosuch 1)))", "nosuch");
-    assert_unknown("(defstruct box<T> (v T)) (impl box<T>
+    assert_unknown("(defstruct box<T> (v T)) (impl<T> box<T>
   (defmethod mk ((x U)) box<T> (make-instance 'box :v x)))", "U");
     let src = "(defstruct box<T> (v T))
                (impl<T> box<T>

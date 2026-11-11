@@ -27,5 +27,5 @@ pub use registry::{AdtDef, AdtKind, AssocFn, CField, CStructDef, DefLocs, Docs, 
 pub use analyze::{Checker, MacroExpander, MacroLambda, RedefPolicy, TestCase, TestForms, TestReturn, TopLevelForm, MONO_BUNDLE_MODULE, SPECIAL_FORM_HEADS};
 pub use locate::{
     completion_locals, definition_target, doc_for, hover_text, locate_node, CompletionCandidate,
-    CompletionKind,
+    CompletionKind, Defined, DefinedKind, Imported,
 };

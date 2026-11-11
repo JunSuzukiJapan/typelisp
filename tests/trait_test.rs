@@ -290,49 +290,15 @@ const BOXED_PRELUDE: &str = "
 ";
 
 /// A type parameter *wrapped* in a concrete generic type (not bare) forwarded
-/// to a bounded call whose pin requirement is itself concrete but whose
-/// *actual* associated-type resolution still mentions the open variable:
-/// `get-int`'s `(Item int)` pin can't be verified against `wrap<U>`'s own
-/// `Item` (symbolically `U`, since `U` isn't resolved during `outer`'s own
-/// body-check) — must not be rejected outright (the bug this fixes), but
-/// isn't fully verified here either; real verification happens when `outer`
-/// is specialized at a concrete `U` and this same call is re-checked with
-/// `Item` fully resolved.
+/// to a bounded call whose pin is concrete: `get-int`'s `(Item int)` pin
+/// against `wrap<U>`'s `Item`, which is `U`. A generic body is checked once,
+/// for every `U`, and `U` is not always `int`, so the definition is refused
+/// where it is written rather than at a specialization.
 #[test]
-fn forwarding_a_wrapped_open_type_variable_to_a_pinned_bound_does_not_reject_at_definition_time() {
+fn forwarding_a_wrapped_open_type_variable_to_a_pinned_bound_is_refused_at_definition_time() {
     let src = format!("{} (defun outer<U> ((w wrap<U>)) int (get-int w))", BOXED_PRELUDE);
-    assert!(check(&src).is_ok(), "must not reject a still-open Item pin at definition time");
-}
-
-/// The above, specialized and actually run at `U = int` (a type that really
-/// does satisfy `Item int`) — the deferred validation this relies on
-/// (`Self::specialize_defun_body`'s own re-check of `outer`'s body with `U`
-/// concrete) must still catch a genuine mismatch, so this also proves the
-/// skip isn't a silent hole: specializing at a non-`int` element type is
-/// exercised by the next test.
-#[test]
-fn forwarding_a_wrapped_open_type_variable_specializes_and_runs_at_a_satisfying_type() {
-    let src = format!(
-        "{} (defun outer<U> ((w wrap<U>)) int (get-int w))
-            (outer (make-instance 'wrap :v 42))",
-        BOXED_PRELUDE
-    );
-    assert_eq!(eval_ok(&src), Value::Int(42));
-}
-
-/// The deferred-validation side of the same mechanism: `outer` itself never
-/// pins `U`, so it happily *defines*, but specializing it at a `wrap<T>`
-/// whose `Item` is not `int` must still fail once `U` is concrete —
-/// `get-int`'s own pin requirement doesn't disappear just because the
-/// outer wrapper's definition-time check couldn't see it yet.
-#[test]
-fn forwarding_a_wrapped_open_type_variable_rejects_at_specialization_when_the_pin_fails() {
-    let src = format!(
-        "{} (defun outer<U> ((w wrap<U>)) int (get-int w))
-            (outer (make-instance 'wrap :v true))",
-        BOXED_PRELUDE
-    );
-    assert!(check(&src).is_err(), "Item bool must still fail the Item int pin once U is concrete");
+    let msg = check_err(&src);
+    assert!(msg.contains("associated type `Item` is `U`") && msg.contains("requires `int`"), "{}", msg);
 }
 
 // ---- supertraits ---------------------------------------------------------

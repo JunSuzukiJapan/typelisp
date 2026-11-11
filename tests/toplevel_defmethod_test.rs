@@ -32,7 +32,7 @@ fn on_a_user_type_and_a_generic_type() {
     let defs = r##"
 (defstruct dog (pub name string))
 (defmethod hello ((d dog) (to string)) string (append d::name " greets " to))
-(defmethod second-elem ((v Vector<T>)) T (get v 1))
+(defmethod second-elem<T> ((v Vector<T>)) T (get v 1))
 "##;
     both(
         defs,

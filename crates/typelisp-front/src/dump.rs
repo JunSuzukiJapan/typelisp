@@ -301,10 +301,8 @@ pub struct CheckerDelta {
     /// instantiation's own method is named by a specialization), and it.
     pub method_templates: Vec<(Path, crate::owned_form::OwnedSym, WireMethodTemplate)>,
     /// What the unit wrote of the rebuilt checker's registry
-    /// (`typeck::wire::RebuiltUnit`): the prelude's generic bodies
-    /// ([`rebuilt_prelude_bodies`]), or what a unit checked with it on
-    /// defined; empty for a unit that has none written down. Bytes, so that
-    /// a session with the rebuilt checker off does not read them.
+    /// (`typeck::wire::RebuiltUnit`): what the unit defined, and its generic
+    /// bodies; empty for a unit that has none written down.
     pub rebuilt: Vec<u8>,
 }
 
@@ -842,15 +840,6 @@ pub fn apply_types(
         r.map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-/// The prelude's generic bodies as the rebuilt checker checks them, for
-/// [`CheckerDelta::rebuilt`]: the core macro layer and the prelude checked by a
-/// checker of its own, nothing run. `expander` has run the prelude, so it
-/// holds its macros.
-pub fn rebuilt_prelude_bodies(heap: &mut crate::Heap, expander: &dyn crate::check::MacroExpander) -> Result<Vec<u8>, String> {
-    let unit = crate::typeck::toplevel::prelude_bodies(heap, expander).map_err(|e| format!("prelude: the rebuilt checker refuses it: {}", e))?;
-    bincode::serialize(&unit).map_err(|e| format!("prelude: writing the rebuilt checker's bodies failed: {}", e))
 }
 
 /// Records that these globals already have storage, made by somebody else.

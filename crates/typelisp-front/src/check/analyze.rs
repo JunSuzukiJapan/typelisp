@@ -1217,7 +1217,6 @@ pub struct Checker {
     /// own holes without forcing the outer arm to be re-checked as well.
     probe_holes: Cell<u32>,
     /// The rebuilt checker, which checks every form instead of this one
-    /// while the switch `TYPELISP_TYPECK` is on
     /// (`docs/dev/checker-rebuild-plan.md` 6). Removed with this checker.
     rebuilt: Option<crate::typeck::toplevel::TypeChecker>,
 }
@@ -1340,7 +1339,7 @@ impl Checker {
             callback_seq: Cell::new(0),
             c_arena: Cell::new(None),
             tree_roots: Cell::new(None),
-            rebuilt: crate::typeck::toplevel::TypeChecker::from_switch(),
+            rebuilt: Some(crate::typeck::toplevel::TypeChecker::default()),
         }
     }
 
@@ -2495,6 +2494,16 @@ impl Checker {
             Some(rebuilt) => rebuilt.docs(&self.info.reg),
             None => self.info.reg.docs.clone(),
         }
+    }
+
+    /// Every definition the session holds, the library's and the program's.
+    pub fn definitions(&self) -> Vec<super::Defined> {
+        self.rebuilt.as_ref().expect("the rebuilt checker checks every form").definitions(&self.info.reg)
+    }
+
+    /// Every name a `use` brought into a module.
+    pub fn imports(&self) -> Vec<super::Imported> {
+        self.rebuilt.as_ref().expect("the rebuilt checker checks every form").imports(&self.info.reg)
     }
 
     /// What the module-level function `path` returns, when there is one.

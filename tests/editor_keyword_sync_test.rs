@@ -10,7 +10,7 @@
 //! never had.
 //!
 //! This test closes that loop. It loads the prelude for real, walks the
-//! resulting [`Registry`] — the same environment the checker uses — and reports
+//! resulting definitions (`Checker::definitions`) — the same environment the checker uses — and reports
 //! any user-facing name that neither editor knows about. Deriving the truth
 //! from the registry rather than by grepping source means a new builtin is
 //! caught the moment it is registered, whichever layer defines it.
@@ -34,8 +34,7 @@ use common::{repo_root};
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 
-use typelisp::check::registry::{Namespace, Registry};
-use typelisp::{load_prelude, Checker, Heap, Interp, BUILTIN_SYMBOLS, INTERNAL_MODULE, SPECIAL_FORM_HEADS};
+use typelisp::{internal_ns, load_prelude, Checker, DefinedKind, Heap, Interp, BUILTIN_SYMBOLS, INTERNAL_MODULE, SPECIAL_FORM_HEADS};
 
 // ---------------------------------------------------------------- the truth
 
@@ -84,46 +83,36 @@ fn build_collected() -> Collected {
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
 
-    let reg = chk.registry();
-    let mut names = BTreeSet::new();
-    let mut fields = BTreeSet::new();
-    collect_namespace(reg, reg.root(), &mut names, &mut fields);
-    let internal_ns = reg.module_at(typelisp::internal_ns()).expect("the library's internal module");
-    let internal = internal_ns
-        .fns
-        .keys()
-        .chain(internal_ns.macros.keys())
-        .chain(internal_ns.vars.keys())
-        .map(str::to_string)
-        .collect();
-    Collected { names, fields, internal }
-}
-
-fn collect_namespace(reg: &Registry, ns: &Namespace, out: &mut BTreeSet<String>, fields: &mut BTreeSet<String>) {
     // Everything, without filtering on `public`. That flag answers "is this
     // visible by its path outside its defining module", which is a different
     // question: the standard library offers its names to every module whether
     // or not they are marked `pub`.
-    out.extend(ns.fns.keys().map(str::to_string));
-    out.extend(ns.macros.keys().map(str::to_string));
-    out.extend(ns.vars.keys().map(str::to_string));
-    for (name, def) in &ns.types {
-        out.insert(name.to_string());
-        out.extend(def.assoc.keys().map(|m| m.name().to_string()));
-        for field in &def.field_names {
-            fields.insert(field.name().to_string());
-            fields.insert(format!("set-{field}"));
+    let mut names = BTreeSet::new();
+    let mut fields = BTreeSet::new();
+    let mut internal = BTreeSet::new();
+    for d in chk.definitions() {
+        let name = d.path.name_symbol().name().to_string();
+        let in_internal = typelisp::mem::symbols::ns_path(d.path.ns()).iter().any(|s| s == INTERNAL_MODULE);
+        match d.kind {
+            DefinedKind::Function | DefinedKind::Macro | DefinedKind::Variable => {
+                if d.path.ns() == internal_ns() {
+                    internal.insert(name);
+                } else if !in_internal {
+                    names.insert(name);
+                }
+            }
+            DefinedKind::Type | DefinedKind::Trait if !in_internal => {
+                names.insert(name);
+                names.extend(d.methods.iter().map(|m| m.name().to_string()));
+                for field in &d.fields {
+                    fields.insert(field.name().to_string());
+                    fields.insert(format!("set-{}", field.name()));
+                }
+            }
+            _ => {}
         }
     }
-    for (name, def) in &ns.traits {
-        out.insert(name.to_string());
-        out.extend(def.methods.keys().map(|m| m.name().to_string()));
-    }
-    for (name, child) in reg.children(ns.ns) {
-        if name != INTERNAL_MODULE {
-            collect_namespace(reg, child, out, fields);
-        }
-    }
+    Collected { names, fields, internal }
 }
 
 /// Names an editor is not expected to list, by category rather than one by one

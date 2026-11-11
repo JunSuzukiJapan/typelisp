@@ -505,6 +505,40 @@ pub struct CompletionCandidate {
     pub detail: String,
 }
 
+/// A definition the session holds, the library's and the program's: what
+/// a tool that lists them (a reference's or an editor's catalog) reads.
+#[derive(Clone, Debug)]
+pub struct Defined {
+    pub path: Path,
+    pub kind: DefinedKind,
+    /// A type's or a trait's methods.
+    pub methods: Vec<SymRef>,
+    /// A struct's fields.
+    pub fields: Vec<SymRef>,
+}
+
+/// What kind of definition a [`Defined`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefinedKind {
+    Function,
+    Variable,
+    Macro,
+    Type,
+    TypeAlias,
+    Trait,
+    CStruct,
+}
+
+/// A name a `use` brought into a module: the module, the name it reads
+/// there, what it names, and whether the module re-exports it.
+#[derive(Clone, Debug)]
+pub struct Imported {
+    pub module: NsId,
+    pub name: SymRef,
+    pub target: Path,
+    pub reexported: bool,
+}
+
 /// Every bare name visible for completion while checking the module
 /// `here`, as `Checker::find_named` reaches one: that module's own
 /// definitions and what its `use`s brought in, then what every module reads

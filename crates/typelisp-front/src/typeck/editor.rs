@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 
-use crate::check::{CompletionCandidate, CompletionKind, DefLocs, Docs};
+use crate::check::{CompletionCandidate, CompletionKind, DefLocs, Defined, DefinedKind, Docs, Imported};
 use crate::types::{prelude_ns, Path};
 use typelisp_mem::symbols::{ns_children, NsId};
 
@@ -111,5 +111,41 @@ pub(crate) fn docs(reg: &Registry) -> Docs {
             Definition::TraitMethod(p, m) => out.trait_methods.insert((p, m), text),
         };
     }
+    out
+}
+
+/// Every definition `reg` holds, ordered by path.
+pub(crate) fn definitions(reg: &Registry) -> Vec<Defined> {
+    let mut out = Vec::new();
+    for (path, def) in reg.values.iter() {
+        let kind = match def {
+            ValueDef::Fn(_) => DefinedKind::Function,
+            ValueDef::Var(_) => DefinedKind::Variable,
+            ValueDef::Macro { .. } => DefinedKind::Macro,
+        };
+        out.push(Defined { path: *path, kind, methods: Vec::new(), fields: Vec::new() });
+    }
+    for (path, entry) in reg.types.iter() {
+        let methods = reg.methods_of(*path).map(|(m, _)| m);
+        let (kind, methods, fields) = match entry {
+            TypeEntry::Type(def) => (DefinedKind::Type, methods.collect(), def.fields.iter().map(|f| f.name).collect()),
+            TypeEntry::Alias { .. } => (DefinedKind::TypeAlias, Vec::new(), Vec::new()),
+            TypeEntry::Trait(def) => (DefinedKind::Trait, def.methods.iter().map(|(m, _)| *m).collect(), Vec::new()),
+            TypeEntry::CStruct(_) => (DefinedKind::CStruct, Vec::new(), Vec::new()),
+        };
+        out.push(Defined { path: *path, kind, methods, fields });
+    }
+    out.sort_by_key(|d| d.path.to_string());
+    out
+}
+
+/// Every name a `use` brought into a module, ordered by module and name.
+pub(crate) fn imports(reg: &Registry) -> Vec<Imported> {
+    let mut out: Vec<Imported> = reg
+        .imports
+        .iter()
+        .map(|(&(module, name), target)| Imported { module, name, target: *target, reexported: reg.reexports.get(&(module, name)).is_some() })
+        .collect();
+    out.sort_by_key(|i| (typelisp_mem::symbols::ns_path(i.module).join("::"), i.name.name().to_string()));
     out
 }

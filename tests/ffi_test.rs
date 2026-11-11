@@ -335,7 +335,7 @@ fn a_pointer_cannot_be_a_global() {
 
 #[test]
 fn a_pointer_cannot_be_a_type_argument() {
-    let e = err("(defffi (c-nope \"abs\") ((vector ptr)) i32)");
+    let e = err("(defffi (c-nope \"abs\") (Vector<ptr>) i32)");
     assert!(e.contains("inside another type"), "unexpected error: {}", e);
 }
 

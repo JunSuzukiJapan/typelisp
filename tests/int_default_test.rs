@@ -30,7 +30,9 @@ fn an_unannotated_literal_is_an_int() {
     // `(the int ..)` is a no-op on an `int`; on anything else it is a type
     // error, so this is the literal's type being asked directly.
     assert_eq!(eval_ok("(the int 42)"), Value::Int(42));
-    let msg = check_err("(the i32 (let ((x 42)) x))");
+    // Nothing decides `x` where it is bound, so the rest of the form does.
+    assert_eq!(eval_ok("(the i32 (let ((x 42)) x))"), Value::Int(42));
+    let msg = check_err("(let ((x 42)) (the i32 x) (the int x))");
     assert!(msg.contains("`int`") && msg.contains("`i32`"), "{}", msg);
     // Past `i32`, past `i64`: still one type, and the reader made the datum
     // in the shape its size demands.

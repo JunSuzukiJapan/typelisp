@@ -252,12 +252,12 @@ fn a_method_on_a_generic_type_specializes_at_the_call_site() {
          (get-v (make-instance 'box :v 42))",
     )
     .unwrap();
-    // The call bundles the specialized `get-v` — and, transitively, the
-    // specialized `v` field getter its body's `self::v` needs.
+    // The call bundles the specialized `get-v`. Its body's `self::v` reads
+    // the field directly, so no getter is specialized for it.
     let specs = bundled_specs(&h, tls[2]);
     let methods: Vec<String> = specs.iter().filter_map(|tl| defmethod_name(&h, *tl)).collect();
     assert!(methods.iter().any(|m| m.starts_with("get-v <")), "specialized get-v in {:?}", methods);
-    assert!(methods.iter().any(|m| m.starts_with("v <")), "transitively specialized getter in {:?}", methods);
+    assert!(!methods.iter().any(|m| m.starts_with("v <")), "no specialized getter in {:?}", methods);
 }
 
 #[test]

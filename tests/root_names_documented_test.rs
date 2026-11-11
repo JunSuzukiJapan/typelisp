@@ -14,7 +14,7 @@ use common::repo_root;
 use std::collections::BTreeSet;
 use std::path::Path as FsPath;
 
-use typelisp::{load_prelude, Checker, Heap, Interp};
+use typelisp::{load_prelude, Checker, DefinedKind, Heap, Interp};
 
 /// The free functions, macros and globals of `std` and its modules but the
 /// internal one, once the prelude is in.
@@ -23,11 +23,11 @@ fn root_names() -> BTreeSet<String> {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
-    chk.registry()
-        .namespaces()
-        .filter(|m| typelisp::in_std(m.ns) && m.ns != typelisp::internal_ns())
-        .flat_map(|m| m.fns.keys().chain(m.macros.keys()).chain(m.vars.keys()))
-        .map(str::to_string)
+    chk.definitions()
+        .into_iter()
+        .filter(|d| typelisp::in_std(d.path.ns()) && d.path.ns() != typelisp::internal_ns())
+        .filter(|d| matches!(d.kind, DefinedKind::Function | DefinedKind::Macro | DefinedKind::Variable))
+        .map(|d| d.path.name_symbol().name().to_string())
         .collect()
 }
 
@@ -111,15 +111,13 @@ fn not_offered() -> std::collections::BTreeMap<String, BTreeSet<String>> {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
-    let reg = chk.registry();
-    let prelude = reg.module_at(typelisp::types::prelude_ns()).expect("the registry always has `std::prelude`");
-    let library = reg.module_at(typelisp::NsId::STD).expect("the registry always has `std`");
+    let imports = chk.imports();
+    let prelude = typelisp::types::prelude_ns();
+    let offered: BTreeSet<&str> = imports.iter().filter(|i| i.module == prelude).map(|i| i.name.name()).collect();
     let mut out = std::collections::BTreeMap::<String, BTreeSet<String>>::new();
-    for (name, path) in library.aliases.iter() {
-        if prelude.aliases.get(name).is_none() {
-            let module = typelisp::mem::symbols::ns_path(path.ns()).into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("::");
-            out.entry(module).or_default().insert(name.to_string());
-        }
+    for i in imports.iter().filter(|i| i.module == typelisp::NsId::STD && !offered.contains(i.name.name())) {
+        let module = typelisp::mem::symbols::ns_path(i.target.ns()).into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("::");
+        out.entry(module).or_default().insert(i.name.name().to_string());
     }
     out
 }

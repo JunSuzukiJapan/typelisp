@@ -331,6 +331,9 @@ pub(crate) struct Registry {
     /// The modules a `use` brought in under a short name (`(use std::math)`
     /// makes `math` one).
     pub(crate) module_aliases: Table<(NsId, SymRef), NsId>,
+    /// The modules a `module` or an `in-module` made, for a path to step
+    /// into.
+    pub(crate) modules: Table<NsId, ()>,
     templates: Table<Base, Rc<Template>>,
     /// The `impl`s of a trait for a type, by the trait and the type.
     pub(crate) trait_impls: Table<(Path, Path), Vec<TraitImpl>>,
@@ -608,6 +611,7 @@ impl Registry {
         self.ctors.commit(g);
         self.static_uses.commit(g);
         self.module_aliases.commit(g);
+        self.modules.commit(g);
         self.templates.commit(g);
         self.trait_impls.commit(g);
         self.blanket_impls.commit(g);
@@ -642,6 +646,7 @@ impl Registry {
             ctors: sorted(self.ctors.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v)).collect()),
             static_uses: sorted(self.static_uses.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v.map(|(p, m)| (p, sym(m))))).collect()),
             module_aliases: sorted(self.module_aliases.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v.map(Ns))).collect()),
+            modules: sorted(self.modules.changed_since(since).into_iter().map(|(k, v)| (Ns(k), v)).collect()),
             trait_impls: sorted(self.trait_impls.changed_since(since)),
             blanket_impls: sorted(self.blanket_impls.changed_since(since)),
             blanket_owners: sorted(self.blanket_owners.changed_since(since)),
@@ -665,6 +670,7 @@ impl Registry {
         d.ctors.into_iter().for_each(|((n, s), v)| self.ctors.put((n.0, s.0), v));
         d.static_uses.into_iter().for_each(|((n, s), v)| self.static_uses.put((n.0, s.0), v.map(|(p, m)| (p, m.0))));
         d.module_aliases.into_iter().for_each(|((n, s), v)| self.module_aliases.put((n.0, s.0), v.map(|m| m.0)));
+        d.modules.into_iter().for_each(|(n, v)| self.modules.put(n.0, v));
         d.trait_impls.into_iter().for_each(|(k, v)| self.trait_impls.put(k, v));
         d.blanket_impls.into_iter().for_each(|(k, v)| self.blanket_impls.put(k, v));
         d.blanket_owners.into_iter().for_each(|(k, v)| self.blanket_owners.put(k, v));
@@ -700,6 +706,7 @@ impl Registry {
         self.ctors.rollback();
         self.static_uses.rollback();
         self.module_aliases.rollback();
+        self.modules.rollback();
         self.templates.rollback();
         self.trait_impls.rollback();
         self.blanket_impls.rollback();

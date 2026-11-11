@@ -59,13 +59,13 @@ fn a_mismatch_between_branches_is_reported() {
 #[test]
 fn incompatible_block_exits_are_reported() {
     let e = mismatch(r#"(block b (if true (return-from b 1) 2) "no")"#);
-    assert!(e.contains("branches have incompatible types"), "{}", e);
+    assert!(e.contains(":1:40: type error: type mismatch: expected `int`, found `string`"), "{}", e);
 }
 
 #[test]
 fn an_argument_that_does_not_fit_a_generic_parameter_is_reported() {
     let e = mismatch(r#"(defun first<T> ((v Vector<T>)) i32 1) (first 5)"#);
-    assert!(e.contains("type mismatch: expected `Vector<T>`, found `int`"), "{}", e);
+    assert!(e.contains("type mismatch: expected `Vector<_>`, found `int`"), "{}", e);
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn an_undecided_type_parameter_stops_before_its_use_complains() {
 #[test]
 fn the_argument_that_decided_nothing_is_reported_before_its_use() {
     let e = mismatch(r#"(defun first<T> ((v Vector<T>)) T (get v 0)) (let ((x (first 5))) (+ x 1))"#);
-    assert!(e.contains("type mismatch: expected `Vector<T>`, found `int`"), "{}", e);
+    assert!(e.contains("type mismatch: expected `Vector<_>`, found `int`"), "{}", e);
     assert!(e.contains(":1:62:"), "{}", e);
 }
 
@@ -100,7 +100,7 @@ fn an_unmet_where_bound_is_reported() {
 #[test]
 fn a_non_exhaustive_match_is_reported() {
     let e = mismatch(r#"(match true (true 1))"#);
-    assert!(e.contains("non-exhaustive match on Bool: `false` is not covered"), "{}", e);
+    assert!(e.contains("non-exhaustive match on `bool`: `false` is not covered"), "{}", e);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn an_assignment_to_a_struct_held_by_value_is_reported() {
 #[test]
 fn an_empty_body_where_a_value_is_expected_is_reported() {
     let e = mismatch(r#"(defun f () i32)"#);
-    assert!(e.contains("empty body has type Unit, expected `i32`"), "{}", e);
+    assert!(e.contains("empty body has type `()`, expected `i32`"), "{}", e);
 }
 
 #[test]

@@ -33,7 +33,7 @@ use super::subst::Subst;
 use super::wire::{RebuiltUnit, Unit};
 
 /// The rebuilt checker, as the current one hands it each top-level form
-/// while the switch `TYPELISP_TYPECK` is on (`docs/dev/checker-rebuild-plan.md` 6).
+/// (`docs/dev/checker-rebuild-plan.md` 6).
 #[derive(Debug, Default)]
 pub(crate) struct TypeChecker {
     /// What the program has defined, the current checker's registry copied
@@ -62,11 +62,6 @@ pub(crate) struct TypeChecker {
 }
 
 impl TypeChecker {
-    /// The rebuilt checker when the switch is on, `None` otherwise.
-    pub(crate) fn from_switch() -> Option<TypeChecker> {
-        std::env::var_os("TYPELISP_TYPECK").is_some_and(|v| !v.is_empty()).then(TypeChecker::default)
-    }
-
     /// The registry, `old` (the current checker's registry, which holds the
     /// built-in definitions and the prelude) copied in when it is first
     /// needed.
@@ -104,6 +99,9 @@ impl TypeChecker {
         })?;
         if let Some(inner) = entered {
             self.entered = Some(inner.ns);
+            reg.modules.insert(inner.ns, ());
+            reg.commit();
+            publish(reg, heap, &[inner.ns], &[], &[]);
             return crate::check::forms::module_form(heap, &Path::of_module(inner.ns), &[]);
         }
         // Every value the tree holds is rooted from here until it is lowered
@@ -124,10 +122,11 @@ impl TypeChecker {
                     super::library::reexport(reg);
                     super::library::publish(reg, &mut heap.names());
                 }
+                let modules: Vec<typelisp_mem::NsId> = reg.modules.written().copied().collect();
                 let types: Vec<Path> = reg.types.written().copied().collect();
                 let methods: Vec<(Path, SymRef)> = reg.methods_written().copied().collect();
                 reg.commit();
-                publish(reg, heap, &types, &methods);
+                publish(reg, heap, &modules, &types, &methods);
                 publish_name_view(reg, site.ns);
                 self.expr_ty = ty;
                 Ok(form)
@@ -195,11 +194,11 @@ impl TypeChecker {
             self.pending.get_mut().push(unit);
             return;
         };
-        let (types, methods) = unit.written();
+        let (modules, types, methods) = unit.written();
         unit.apply(reg);
         publish_uses(reg, heap);
         reg.commit();
-        publish(reg, heap, &types, &methods);
+        publish(reg, heap, &modules, &types, &methods);
     }
 
     /// Whether the registry has been made: a unit loaded after then whose
@@ -262,6 +261,16 @@ impl TypeChecker {
         super::editor::def_locs(self.registry(old), &self.notes)
     }
 
+    /// Every definition the registry holds.
+    pub(crate) fn definitions(&self, old: &crate::check::Registry) -> Vec<crate::check::Defined> {
+        super::editor::definitions(self.registry(old))
+    }
+
+    /// Every name a `use` brought into a module.
+    pub(crate) fn imports(&self, old: &crate::check::Registry) -> Vec<crate::check::Imported> {
+        super::editor::imports(self.registry(old))
+    }
+
     /// The documentation of each definition.
     pub(crate) fn docs(&self, old: &crate::check::Registry) -> crate::check::Docs {
         super::editor::docs(self.registry(old))
@@ -305,31 +314,6 @@ impl TypeChecker {
     pub(crate) fn take_warnings(&self) -> Vec<String> {
         std::mem::take(&mut *self.warnings.borrow_mut())
     }
-}
-
-/// The core macro layer and the prelude checked by a checker of their own,
-/// their generic bodies, and the methods their `impl`s took from a trait's
-/// default body, written down for the prelude's dump. Nothing is run:
-/// `expander`, which expands the macro calls, has run the prelude already.
-///
-/// The source is fixed: a form the checker refuses is a bug of the checker,
-/// not the program's.
-pub(crate) fn prelude_bodies(heap: &mut Heap, expander: &dyn MacroExpander) -> Result<RebuiltUnit, Error> {
-    let base = crate::check::Registry::with_builtins();
-    let mut checker = TypeChecker::default();
-    let site = Site { ns: typelisp_mem::NsId::STD, file: None, policy: crate::check::RedefPolicy::Error };
-    let reader = crate::Reader::new();
-    for src in [crate::core_macros::SOURCE, crate::prelude::SOURCE.as_str()] {
-        let mut forms = reader.forms_within(crate::LIBRARY_FILE, src, typelisp_mem::NsId::STD);
-        while let Some((v, loc)) = forms.next_form(heap)? {
-            let base_roots = heap.root_count();
-            heap.push_root(v);
-            let checked = checker.check_form(heap, &base, expander, site, v, Some(loc));
-            heap.truncate_roots(base_roots);
-            checked?;
-        }
-    }
-    RebuiltUnit::bodies_of(heap, checker.reg.get().expect("checking made it"), 0)
 }
 
 /// The generation of a registry just made: its copy of the current
@@ -419,6 +403,7 @@ fn check_primary(
     if matches!(heap.car(v), Ok(Value::Symbol(h)) if h.is(wk::MODULE)) {
         let elems = heap.list_to_vec_locs(v)?;
         let (inner, path) = module_site(heap, site, &elems[1..])?;
+        reg.modules.insert(inner.ns, ());
         let mut body = Vec::new();
         // Types in messages are written as the module being checked reads
         // them.
@@ -428,6 +413,7 @@ fn check_primary(
             // `(in-module path)` in the body checks the rest of the body in
             // the module `path` names under the one it is written in.
             if let Some(entered) = in_module(heap, inner, *form)? {
+                reg.modules.insert(entered.ns, ());
                 inner = entered;
                 publish_name_view(reg, inner.ns);
                 continue;
@@ -594,12 +580,16 @@ fn publish_uses(reg: &Registry, heap: &Heap) {
 }
 
 /// Tells the session's table of what names mean (`Heap::names`) about the
-/// types `types` and the methods `methods` a form defined, so a path read in
-/// a later form can step into the type (`Shape::circle`, `Pair::new`). A
-/// type's members are its variants, its fields and its methods, read as in
-/// the type's own module.
-fn publish(reg: &Registry, heap: &Heap, types: &[Path], methods: &[(Path, SymRef)]) {
+/// modules `modules`, the types `types` and the methods `methods` a form
+/// defined, so a path read in a later form can step into the module
+/// (`geo::area`) or the type (`Shape::circle`, `Pair::new`). A type's
+/// members are its variants, its fields and its methods, read as in the
+/// type's own module.
+fn publish(reg: &Registry, heap: &Heap, modules: &[typelisp_mem::NsId], types: &[Path], methods: &[(Path, SymRef)]) {
     let mut names = heap.names();
+    for ns in modules {
+        names.declare_module(*ns);
+    }
     for path in types {
         let Some(def) = reg.type_def(path) else { continue };
         let (home, ty) = (path.ns(), path.name_symbol());
@@ -1589,8 +1579,7 @@ mod tests {
     }
 
     /// The rebuilt checker checks the core macro layer and the prelude, and
-    /// what it makes of them runs: what the prelude's dump takes its generic
-    /// bodies from (`prelude_bodies`).
+    /// what it makes of them runs; the unit it writes of them reads back.
     #[test]
     fn the_prelude_checks_and_runs() {
         let mut heap = Heap::with_capacity(1 << 20);
