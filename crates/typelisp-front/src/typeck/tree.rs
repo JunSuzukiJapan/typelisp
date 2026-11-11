@@ -417,7 +417,7 @@ impl Typed {
     }
 
     /// [`Self::walk_mut`] without changing anything.
-    fn walk(&self, f: &mut impl FnMut(&Typed)) {
+    pub(crate) fn walk(&self, f: &mut impl FnMut(&Typed)) {
         typelisp_mem::grow_stack(|| {
             f(self);
             self.children().into_iter().for_each(|c| c.walk(f));

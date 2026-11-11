@@ -103,9 +103,13 @@ fn check_arm(cx: &Cx, heap: &mut Heap, locals: &Locals, scrut_ty: &Type, result:
     let alternatives = crate::check::analyze::expand_or_patterns(heap, *pat).map_err(at)?;
     let mut pats = Vec::with_capacity(alternatives.len());
     let mut first: Option<Binds> = None;
+    // The alternatives `(:or ...)` stands for are made from it; only one
+    // that is the pattern as written is where it was written.
+    let one = alternatives.len() == 1;
     for alt in alternatives {
         let mut binds = Vec::new();
-        pats.push(check_arm_pattern(cx, heap, locals, scrut_ty, alt, &mut binds).map_err(at)?);
+        let alt_at = if one { where_.clone() } else { heap.cons_loc(alt) };
+        pats.push(check_arm_pattern(cx, heap, locals, scrut_ty, alt, alt_at, &mut binds).map_err(at)?);
         match &first {
             None => first = Some(binds),
             Some(first) => same_binds(cx, first, &binds).map_err(at)?,
@@ -127,7 +131,7 @@ fn check_arm(cx: &Cx, heap: &mut Heap, locals: &Locals, scrut_ty: &Type, result:
 /// That two `:or` alternatives bind the same names at the same types.
 fn same_binds(cx: &Cx, first: &Binds, other: &Binds) -> Result<(), Error> {
     let key = |b: &Binds| {
-        let mut v: Vec<(String, Type)> = b.iter().map(|(n, t)| (n.name().to_string(), cx.resolve(t))).collect();
+        let mut v: Vec<(String, Type)> = b.iter().map(|(n, t, _)| (n.name().to_string(), cx.resolve(t))).collect();
         v.sort_by(|a, b| a.0.cmp(&b.0));
         v
     };

@@ -58,8 +58,8 @@ pub(crate) struct Definer<'w> {
     pub(crate) public: bool,
     /// Where the definition form was written.
     pub(crate) loc: Option<crate::Loc>,
-    /// Where recover mode records the errors it checks past.
-    pub(crate) recovery: super::expr::Recovery<'w>,
+    /// What checking writes down beside the tree.
+    pub(crate) notes: &'w super::expr::Notes,
 }
 
 impl Definer<'_> {

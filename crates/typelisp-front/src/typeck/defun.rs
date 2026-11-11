@@ -15,7 +15,7 @@ use typelisp_mem::SymRef;
 use super::expr::Cx;
 use super::bounds::parse_where;
 use super::generic::{Base, Requests};
-use super::lambda_list::{parse_lambda_list, LambdaList, Written};
+use super::lambda_list::{bindings, parse_lambda_list, LambdaList, Written};
 use super::block::check_named_body;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
@@ -76,7 +76,7 @@ pub(crate) fn check_defun(
     };
     let bounded = scope.bound(bounds.clone());
     let type_params = scope.params().to_vec();
-    let LambdaList { required, optionals, rest, keys, bound: params } = list;
+    let LambdaList { required, optionals, rest, keys, bound: params, locs } = list;
     let def = FnDef {
         public: d.public,
         rest: rest.map(|(_, t)| t),
@@ -91,9 +91,9 @@ pub(crate) fn check_defun(
     reg.define_fn(path, def);
 
     let mut body = {
-        let cx = Cx::new(reg, d.expander, ns, &bounded, None, d.recovery);
+        let cx = Cx::new(reg, d.expander, ns, &bounded, None, d.notes);
         let locals_root = Locals::empty();
-        let locals = locals_root.bind(params.clone())?;
+        let locals = locals_root.bind(bindings(&params, &locs))?;
         let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
         cx.settle(heap, &mut body)?;
         body

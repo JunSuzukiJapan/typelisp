@@ -77,7 +77,7 @@ fn to_stream(cx: &Cx, heap: &mut Heap, locals: &Locals, dest: Typed, rest: &[(Va
     heap.pop_root();
     let form = form?;
     heap.push_root(form);
-    let written = locals.bind(vec![(tmp, dest.ty.clone())]).and_then(|l| check_expr(cx, heap, &l, form, None, loc.clone()));
+    let written = locals.bind(vec![(tmp, dest.ty.clone(), None)]).and_then(|l| check_expr(cx, heap, &l, form, None, loc.clone()));
     heap.pop_root();
     let written = written?;
     let ty = written.ty.clone();
@@ -254,7 +254,7 @@ fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &Cal
     };
     let call = crate::check::forms::list_from_vec_locs(heap, &[(head, None), (Value::Symbol(arg), None), (Value::Bool(site.colon), None), (Value::Bool(site.at), None)])?;
     heap.push_root(call);
-    let checked = locals.bind(vec![(arg, ty.clone())]).and_then(|inner| check_expr(cx, heap, &inner, call, Some(&Type::Str), None));
+    let checked = locals.bind(vec![(arg, ty.clone(), None)]).and_then(|inner| check_expr(cx, heap, &inner, call, Some(&Type::Str), None));
     heap.pop_root();
     let checked = checked.map_err(|e| {
         let inner = match e.kind() {

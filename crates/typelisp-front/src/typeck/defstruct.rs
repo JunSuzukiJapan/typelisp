@@ -355,7 +355,7 @@ fn define_default(
     let reown = Subst::positional(&struct_params, &own.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
     let mut body = match default {
         Default::Written(form) => {
-            let cx = super::expr::Cx::new(reg, d.expander, d.site.ns, scope, None, d.recovery);
+            let cx = super::expr::Cx::new(reg, d.expander, d.site.ns, scope, None, d.notes);
             let mut body = super::expr::check_expr(&cx, heap, &super::locals::Locals::empty(), *form, Some(&field.ty), heap.cons_loc(*form))
                 .map_err(|e| Error::TypeError(format!("defstruct {}: the default of `{}`: {}", path, field.name, message(e))))?;
             cx.settle(heap, std::slice::from_mut(&mut body))?;

@@ -25,7 +25,7 @@ use typelisp_mem::SymRef;
 use super::define::Definer;
 use super::expr::{check_expr, Cx};
 use super::generic::Requests;
-use super::locals::Locals;
+use super::locals::{Bound, Locals};
 use super::lower::{lower_rooted, Lowering};
 use super::registry::Registry;
 use super::scope::TypeScope;
@@ -42,6 +42,8 @@ pub(crate) struct LambdaList {
     /// Every parameter as the body binds it, in the order a call gives
     /// them: required, `&optional`, `&rest`, `&key`.
     pub(crate) bound: Vec<(SymRef, Type)>,
+    /// Where each of [`Self::bound`]'s names was written.
+    pub(crate) locs: Vec<Option<Loc>>,
 }
 
 /// An `&optional` or `&key` parameter as written: its name, its type, and
@@ -72,6 +74,8 @@ pub(crate) fn parse_lambda_list(
     items: &[Value],
 ) -> Result<LambdaList, Error> {
     let [required, optionals, rest, keys] = sections(items, at.what)?;
+    // The order `bound` is in.
+    let locs = required.iter().chain(&optionals).chain(&rest).chain(&keys).map(|p| name_loc(heap, *p)).collect();
     let tcx = TypeCx { reg, ns: d.site.ns, scope, self_type };
     let required = required.iter().map(|p| required_param(heap, &tcx, *p, at.what)).collect::<Result<Vec<_>, _>>()?;
     let rest = match rest.as_slice() {
@@ -114,21 +118,35 @@ pub(crate) fn parse_lambda_list(
     bound.extend(optional_names.iter().zip(&optionals).map(|(n, o)| (*n, effective(o))));
     bound.extend(rest.iter().map(|(n, _)| (*n, option_of_sexpr())));
     bound.extend(key_names.iter().zip(&keys).map(|(n, k)| (*n, effective(k))));
-    Ok(LambdaList { required, optionals, rest, keys, bound })
+    Ok(LambdaList { required, optionals, rest, keys, bound, locs })
 }
 
 impl LambdaList {
     /// Required parameters alone.
-    pub(crate) fn plain(params: Vec<(SymRef, Type)>) -> LambdaList {
-        LambdaList { required: params.clone(), optionals: Vec::new(), rest: None, keys: Vec::new(), bound: params }
+    pub(crate) fn plain(params: Vec<Bound>) -> LambdaList {
+        let bound: Vec<(SymRef, Type)> = params.iter().map(|(n, t, _)| (*n, t.clone())).collect();
+        let locs = params.into_iter().map(|(_, _, l)| l).collect();
+        LambdaList { required: bound.clone(), optionals: Vec::new(), rest: None, keys: Vec::new(), bound, locs }
     }
 
-    /// This list after the receiver `receiver`, the first parameter.
-    pub(crate) fn after(mut self, receiver: (SymRef, Type)) -> LambdaList {
+    /// This list after the receiver `receiver`, the first parameter,
+    /// written at `loc`.
+    pub(crate) fn after(mut self, receiver: (SymRef, Type), loc: Option<Loc>) -> LambdaList {
         self.required.insert(0, receiver.clone());
         self.bound.insert(0, receiver);
+        self.locs.insert(0, loc);
         self
     }
+}
+
+/// The parameters `bound`, written at `locs`, as a body binds them.
+pub(crate) fn bindings(bound: &[(SymRef, Type)], locs: &[Option<Loc>]) -> Vec<Bound> {
+    bound.iter().zip(locs).map(|((n, t), l)| (*n, t.clone(), l.clone())).collect()
+}
+
+/// Where the name of the parameter `p`, `(name ...)`, was written.
+pub(crate) fn name_loc(heap: &Heap, p: Value) -> Option<Loc> {
+    heap.list_to_vec_locs(p).ok()?.into_iter().next()?.1
 }
 
 /// The type `p` is bound at in the body.
@@ -218,7 +236,7 @@ fn check_default(
     decl_ty: &Type,
 ) -> Result<crate::owned_form::OwnedForm, Error> {
     let mut tree = {
-        let cx = Cx::new(reg, d.expander, d.site.ns, scope, self_type, d.recovery);
+        let cx = Cx::new(reg, d.expander, d.site.ns, scope, self_type, d.notes);
         let t = check_expr(&cx, heap, &Locals::empty(), form, Some(decl_ty), loc)?;
         let mut tree = vec![t];
         cx.settle(heap, &mut tree)?;

@@ -17,7 +17,8 @@ use typelisp_mem::SymRef;
 use super::defmethod::{define_method, receiver_type_path, Method};
 use super::bounds::parse_where;
 use super::defun::{parse_header, parse_param, split_doc, split_where};
-use super::lambda_list::{parse_lambda_list, Written};
+use super::lambda_list::{name_loc, parse_lambda_list, Written};
+use super::locals::Bound;
 use super::generic::Requests;
 use super::define::Definer;
 use super::registry::{Definition, Registry};
@@ -119,8 +120,9 @@ fn check_item(
     let named = format!("method {}::{}", owner, method);
     let at = Written { what: &what, named: &named, owner: ParamOwner::Method(owner, method) };
     let list = parse_lambda_list(reg, d, heap, requests, &scope, Some(&target_ty), &at, &written)?;
+    let instance = receiver.is_some();
     let list = match receiver {
-        Some(s) => list.after((s, target_ty.clone())),
+        Some((s, at)) => list.after((s, target_ty.clone()), at),
         None => list,
     };
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty) };
@@ -138,7 +140,7 @@ fn check_item(
     // One instantiation's method is documented under its code's name.
     let key = inst.as_ref().map_or(method, |args| super::generic::method_specialization(&owner, method, args));
     d.record(reg, Definition::Method(owner, key), doc);
-    let def = Method { owner, method, name, instance: receiver.is_some(), public, home: None, params: list, ret, bounds, inst };
+    let def = Method { owner, method, name, instance, public, home: None, params: list, ret, bounds, inst };
     define_method(reg, d, heap, requests, &scope, Some(&target_ty), def, body)
 }
 
@@ -173,23 +175,26 @@ pub(crate) fn not_all_or_none(who: &str, owner: &Path, target: &Type) -> Error {
 
 /// The parameters `params` of the method `name` of an `impl` or a
 /// `deftrait`, read in `tcx`: whether it is an instance method, and each
-/// parameter's name and type. `self` alone, first, is the receiver, of type
-/// `self_ty`; the rest are ordinary parameters.
-pub(crate) fn method_params(heap: &Heap, tcx: &TypeCx, name: SymRef, params: Value, self_ty: &Type) -> Result<(bool, Vec<(SymRef, Type)>), Error> {
+/// parameter's name, type and where its name was written. `self` alone,
+/// first, is the receiver, of type `self_ty`; the rest are ordinary
+/// parameters.
+pub(crate) fn method_params(heap: &Heap, tcx: &TypeCx, name: SymRef, params: Value, self_ty: &Type) -> Result<(bool, Vec<Bound>), Error> {
     let (receiver, written) = split_receiver(heap, name, params)?;
     let mut all = Vec::new();
-    if let Some(s) = receiver {
-        all.push((s, self_ty.clone()));
+    if let Some((s, at)) = &receiver {
+        all.push((*s, self_ty.clone(), at.clone()));
     }
     for p in written {
-        all.push(parse_param(heap, tcx, p)?);
+        let (n, t) = parse_param(heap, tcx, p)?;
+        all.push((n, t, name_loc(heap, p)));
     }
     Ok((receiver.is_some(), all))
 }
 
 /// The parameters `params` of the method `name`: the receiver `self`, when
-/// it is written first, and the others.
-pub(crate) fn split_receiver(heap: &Heap, name: SymRef, params: Value) -> Result<(Option<SymRef>, Vec<Value>), Error> {
+/// it is written first, with where, and the others.
+pub(crate) fn split_receiver(heap: &Heap, name: SymRef, params: Value) -> Result<(Option<(SymRef, Option<Loc>)>, Vec<Value>), Error> {
+    let at = heap.list_to_vec_locs(params)?.into_iter().next().and_then(|(_, l)| l);
     let mut written = heap.list_to_vec(params)?;
     for p in &written {
         if matches!(heap.car(*p), Ok(Value::Symbol(s)) if s.is(wk::SELF)) {
@@ -203,7 +208,7 @@ pub(crate) fn split_receiver(heap: &Heap, name: SymRef, params: Value) -> Result
         Some(Value::Symbol(s)) if s.is(wk::SELF) => {
             let s = *s;
             written.remove(0);
-            Ok((Some(s), written))
+            Ok((Some((s, at)), written))
         }
         _ => Ok((None, written)),
     }

@@ -645,7 +645,7 @@ fn check_method(
             kind(want_instance)
         )));
     }
-    let written: Vec<Type> = ps.iter().map(|(_, t)| t.clone()).collect();
+    let written: Vec<Type> = ps.iter().map(|(_, t, _)| t.clone()).collect();
     if written != want_params || ret != want_ret {
         let describe = |params: &[Type], ret: &Type| format!("({}) {}", params.iter().map(Type::to_string).collect::<Vec<_>>().join(" "), ret);
         return Err(Error::TypeError(format!(

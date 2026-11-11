@@ -72,7 +72,7 @@ pub(crate) fn check_defvar(
     let ty = parse_type(heap, &super::type_syntax::TypeCx { reg, ns: d.site.ns, scope: &scope, self_type: None }, ty)?;
     Checker::reject_raw_word_storage(&ty, "the global", &heap.symbol_spelling(name))?;
     let value = {
-        let cx = Cx::new(reg, d.expander, d.site.ns, &scope, None, d.recovery);
+        let cx = Cx::new(reg, d.expander, d.site.ns, &scope, None, d.notes);
         let mut value = check_expr(&cx, heap, &Locals::empty(), value.0, Some(&ty), value.1.clone())?;
         cx.settle(heap, std::slice::from_mut(&mut value))?;
         value

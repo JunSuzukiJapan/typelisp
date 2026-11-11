@@ -78,7 +78,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
         let (_, ps) = method_params(heap, &tcx, w.name, w.params, &self_ty)?;
         let ret = parse_type(heap, &tcx, w.ret)?;
         let m = member_symbol(w.name.name());
-        let sig = FnDef { public: true, ..FnDef::plain(params.clone(), ps.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
+        let sig = FnDef { public: true, ..FnDef::plain(params.clone(), ps.iter().map(|(_, t, _)| t.clone()).collect(), ret.clone()) };
         def.methods.push((m, sig));
         if w.body.is_empty() {
             bodyless.push(m);
@@ -107,7 +107,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     let bounded = scope.bound(vec![(params[0], TraitBound { trait_path: path, assoc })]);
     for (m, name, ps, ret, body) in bodies {
         let mut body = {
-            let cx = Cx::new(reg, d.expander, ns, &bounded, Some(&self_ty), d.recovery);
+            let cx = Cx::new(reg, d.expander, ns, &bounded, Some(&self_ty), d.notes);
             let locals_root = Locals::empty();
             let locals = locals_root.bind(ps.clone())?;
             let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
@@ -117,7 +117,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
         for t in &body {
             t.each_value(&mut |v| heap.push_permanent_root(v));
         }
-        reg.set_template(Base::Method(path, m), Some(Template { params: ps, ret, body: std::mem::take(&mut body) }));
+        reg.set_template(Base::Method(path, m), Some(Template { params: ps.into_iter().map(|(n, t, _)| (n, t)).collect(), ret, body: std::mem::take(&mut body) }));
     }
     crate::check::forms::module_form(heap, &path, &[])
 }

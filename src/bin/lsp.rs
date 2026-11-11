@@ -33,7 +33,7 @@
 //! no waiting for the dependent's own `didChange`.
 //!
 //! Hover and goto-definition are served from a per-document `Analysis`
-//! (the last *successfully* checked top-level body plus `Registry::
+//! (the last *successfully* checked top-level body plus `Checker::
 //! def_locs`, see `check::locate`) cached alongside `docs`/`deps`. Both are
 //! best-effort: `check::locate::locate_node` only finds nodes with a
 //! recorded start location (list forms — see its doc comment for why bare
@@ -361,8 +361,8 @@ fn diagnostics_for(
         // In recover mode this tree is present even when the document has
         // type errors — see [`module_body`].
         let body = module_body(&heap, loader.take_pending().pop());
-        let def_locs = checker.registry().def_locs.clone();
-        let docs = checker.registry().docs.clone();
+        let def_locs = checker.def_locs();
+        let docs = checker.docs();
         let tokens = file_type_tokens(&checker.take_type_uses(), file);
         // The tree is heap cells, so the `Analysis` takes the `Heap` with it —
         // see its doc comment.
@@ -414,7 +414,7 @@ fn check_document(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> 
 
 /// One open document's last check that produced a tree (in recover mode, any
 /// check that got past the reader — type errors don't prevent it): the entry
-/// file's own checked top-level forms, and a snapshot of `Registry::def_locs`
+/// file's own checked top-level forms, and a snapshot of `Checker::def_locs`
 /// (the
 /// definition-site locations `check::locate::definition_target` resolves a
 /// reference against) as of that check.

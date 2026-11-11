@@ -49,7 +49,7 @@ pub(crate) fn check_aref(
     let idx = Value::Symbol(cx.temp());
     let roots = heap.root_count();
     let form = expansion(heap, Value::Symbol(a), idx, subs, value);
-    let checked = form.and_then(|form| locals.bind(vec![(a, array.ty.clone())]).and_then(|l| check_expr(cx, heap, &l, form, expected, loc.clone())));
+    let checked = form.and_then(|form| locals.bind(vec![(a, array.ty.clone(), None)]).and_then(|l| check_expr(cx, heap, &l, form, expected, loc.clone())));
     heap.truncate_roots(roots);
     let checked = checked?;
     let ty = checked.ty.clone();

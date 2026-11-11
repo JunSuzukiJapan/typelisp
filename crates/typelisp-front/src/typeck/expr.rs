@@ -68,34 +68,56 @@ pub(crate) struct Cx<'a> {
     required: RefCell<Vec<Required>>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
-    /// In recover mode, where an error is recorded so that the rest of the
-    /// form is still checked (`Checker::set_recover`); none otherwise.
-    recovery: Recovery<'a>,
+    /// What checking writes down beside the tree.
+    notes: &'a Notes,
 }
 
-/// Where recover mode records the errors it checks past: none outside it.
-pub(crate) type Recovery<'a> = Option<&'a RefCell<Vec<Error>>>;
+/// What checking writes down beside the tree, for the tools that read a
+/// program without running it (the LSP): in recover mode
+/// (`Checker::set_recover`) the errors checked past, and always the binding
+/// each local variable reference was resolved to and the type of each
+/// expression, by where they were written.
+#[derive(Debug, Default)]
+pub(crate) struct Notes {
+    pub(crate) recover: bool,
+    pub(crate) errors: RefCell<Vec<Error>>,
+    /// The line and column of a local variable reference, and where the
+    /// binding it names was written.
+    pub(crate) local_refs: RefCell<std::collections::HashMap<(u32, u32), Loc>>,
+    /// The line and column of an expression, and its type.
+    pub(crate) node_types: RefCell<std::collections::HashMap<(u32, u32), Type>>,
+}
 
 impl<'a> Cx<'a> {
-    pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>, recovery: Recovery<'a>) -> Cx<'a> {
-        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), c_arena: Cell::new(None), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0), recovery }
+    pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>, notes: &'a Notes) -> Cx<'a> {
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), c_arena: Cell::new(None), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0), notes }
     }
 
-    /// Where recover mode records errors, for a form checked on its own
-    /// inside this one.
-    pub(crate) fn recovery(&self) -> Recovery<'a> {
-        self.recovery
+    /// What checking writes down beside the tree, for a form checked on
+    /// its own inside this one.
+    pub(crate) fn notes(&self) -> &'a Notes {
+        self.notes
     }
 
     /// In recover mode, `e` recorded, at `loc` when it carries no place of
     /// its own, for checking to go on past it; outside it, `e`.
     pub(crate) fn recover(&self, e: Error, loc: Option<Loc>) -> Result<(), Error> {
-        let Some(errors) = self.recovery else { return Err(e) };
-        errors.borrow_mut().push(match loc {
+        if !self.notes.recover {
+            return Err(e);
+        }
+        self.notes.errors.borrow_mut().push(match loc {
             Some(l) => e.at(l),
             None => e,
         });
         Ok(())
+    }
+
+    /// That the local variable reference written at `at` names the binding
+    /// written at `bound`.
+    pub(crate) fn note_local_ref(&self, at: Option<&Loc>, bound: Option<&Loc>) {
+        if let (Some(at), Some(bound)) = (at, bound) {
+            self.notes.local_refs.borrow_mut().insert((at.line, at.col), bound.clone());
+        }
     }
 
     /// `r`, or in recover mode a hole where it failed: an expression of type
@@ -296,6 +318,15 @@ impl<'a> Cx<'a> {
         }
         for t in trees.iter_mut() {
             t.map_types(&|ty| self.resolve(ty));
+            // Where one expression is written over another (a conversion
+            // around a value), the outer one's type is the one shown.
+            let mut types = std::collections::HashMap::new();
+            t.walk(&mut |t| {
+                if let Some(l) = &t.loc {
+                    types.entry((l.line, l.col)).or_insert_with(|| t.ty.clone());
+                }
+            });
+            self.notes.node_types.borrow_mut().extend(types);
             t.walk_mut(&mut |t| settle_number(heap, t))?;
             t.walk_mut(&mut |t| match &t.node {
                 Node::AsSexpr { value } if !encodable(self.reg, &value.ty) => Err(at(no_encoding(&value.ty), &t.loc)),
@@ -545,7 +576,8 @@ fn number_kind(heap: &Heap, v: Value) -> Option<Kind> {
 /// static method a `use` brought in is called, never a value: `(none)`, not
 /// `none`.
 fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
-    if let Some(ty) = locals.lookup(id)? {
+    if let Some((ty, bound)) = locals.lookup_bound(id)? {
+        cx.note_local_ref(loc.as_ref(), bound);
         return Ok(Typed { node: Node::Local { name: id }, ty: ty.clone(), loc });
     }
     if let Some(expected) = expected {
@@ -708,7 +740,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         let expanded = macros::expand(cx.expander, heap, &path, shape, spelling, args)?;
         return check_expr(cx, heap, locals, expanded, expected, loc);
     }
-    if let Some(ty) = locals.lookup(head)? {
+    if let Some((ty, bound)) = locals.lookup_bound(head)? {
+        cx.note_local_ref(elems[0].1.as_ref(), bound);
         let callee = Typed { node: Node::Local { name: head }, ty: ty.clone(), loc: elems[0].1.clone() };
         return lambda::check_apply(cx, heap, locals, callee, None, args, expected, loc);
     }

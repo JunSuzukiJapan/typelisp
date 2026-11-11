@@ -11,20 +11,23 @@ use crate::check::analyze::{is_option_of_sexpr, is_sexpr_expectation, sexpr_ty, 
 use crate::sexpr_variant::{self, is_ctor_name};
 use crate::check::registry::AdtKind;
 use crate::types::{path_is_builtin, Path, Type};
-use crate::{wk, Error, Heap, Value};
+use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{intern, member_symbol, NsId};
 use typelisp_mem::SymRef;
 
 use super::bounds::bound_method;
 use super::expr::{check_expr, Cx};
-use super::locals::Locals;
+use super::locals::{Bound, Locals};
 use super::registry::TypeDef;
 use super::resolve::{ctor_named, find_named};
 use super::subst::Subst;
 use super::tree::Pat;
 
 /// The names a pattern binds, with their types, in the order written.
-pub(crate) type Binds = Vec<(SymRef, Type)>;
+pub(crate) type Binds = Vec<Bound>;
+
+/// A pattern inside another's, and where it was written.
+type Part = (Value, Option<Loc>);
 
 /// An arm's whole pattern, matching a value of type `expected`.
 ///
@@ -32,7 +35,7 @@ pub(crate) type Binds = Vec<(SymRef, Type)>;
 /// matches every value, so a misspelled variant is an error rather than an
 /// arm that binds a variable, matches everything and leaves the arms after
 /// it unreachable.
-pub(crate) fn check_arm_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: Value, binds: &mut Binds) -> Result<Pat, Error> {
+pub(crate) fn check_arm_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: Value, at: Option<Loc>, binds: &mut Binds) -> Result<Pat, Error> {
     if let Value::Symbol(id) = v {
         if !id.is(wk::UNDERSCORE) && !id.is_keyword() {
             return match bare_variant(cx, heap, locals, expected, id, binds)? {
@@ -45,11 +48,11 @@ pub(crate) fn check_arm_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expec
             };
         }
     }
-    check_pattern(cx, heap, locals, expected, v, binds)
+    check_pattern(cx, heap, locals, expected, v, at, binds)
 }
 
 /// A pattern inside an arm's, matching a value of type `expected`.
-fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: Value, binds: &mut Binds) -> Result<Pat, Error> {
+fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: Value, at: Option<Loc>, binds: &mut Binds) -> Result<Pat, Error> {
     match v {
         Value::Symbol(id) if id.is(wk::UNDERSCORE) => Ok(Pat::Wild),
         // A keyword names itself: as a pattern it is that symbol.
@@ -58,14 +61,15 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
             if let Some(pat) = bare_variant(cx, heap, locals, expected, id, binds)? {
                 return Ok(pat);
             }
-            if binds.iter().any(|(n, _)| *n == id) {
+            if binds.iter().any(|(n, _, _)| *n == id) {
                 return Err(Error::TypeError(format!("pattern: `{}` is bound twice", heap.symbol_spelling(id))));
             }
-            binds.push((id, expected.clone()));
+            binds.push((id, expected.clone(), at));
             Ok(Pat::Bind(id))
         }
         Value::Cons(_) => {
-            let parts = heap.list_to_vec(v)?;
+            let written = heap.list_to_vec_locs(v)?;
+            let parts: Vec<Value> = written.iter().map(|(p, _)| *p).collect();
             let head = match parts[0] {
                 // `(:= expr)`: equal to the value of `expr`.
                 Value::Symbol(h) if h.is(wk::COLON_EQUALS) => {
@@ -78,7 +82,7 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                     return symbol_pattern(cx, heap, locals, expected, sym);
                 }
                 // `(the Type pattern)`: out of a `Sexpr`, a value of `Type`.
-                Value::Symbol(h) if h.is(wk::THE) => return type_test(cx, heap, locals, expected, &parts, binds),
+                Value::Symbol(h) if h.is(wk::THE) => return type_test(cx, heap, locals, expected, &written, binds),
                 Value::Symbol(h) if h.is_keyword() || h.is(wk::QUOTE) => {
                     unimplemented!("typeck: the pattern `({} ...)`", heap.symbol_spelling(h))
                 }
@@ -91,14 +95,14 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
             if let Type::Named(owner, targs) = &ty {
                 if let Some(def) = cx.reg.type_def(owner).filter(|d| d.kind == AdtKind::Struct && !d.builtin) {
                     let def = def.clone();
-                    return struct_pattern(cx, heap, locals, *owner, targs.clone(), &def, &parts, false, binds);
+                    return struct_pattern(cx, heap, locals, *owner, targs.clone(), &def, &written, false, binds);
                 }
             }
             // Out of a `Sexpr`, a struct's or a variant's name is a value
             // of that type; `some` and `none` against an `Option<Sexpr>`
             // are its own variants.
             if is_sexpr_expectation(&ty) && !head.is_some_and(|h| option_variant(cx, &ty, h)) {
-                if let Some(pat) = downcast(cx, heap, locals, &ty, &parts, binds)? {
+                if let Some(pat) = downcast(cx, heap, locals, &ty, &written, binds)? {
                     return Ok(pat);
                 }
             }
@@ -109,7 +113,7 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                 // An `Option<Sexpr>` is matched by `Sexpr`'s variants as if
                 // its `some` were peeled, beside `none` in the same arms.
                 if is_option_of_sexpr(&ty) && is_ctor_name(head.name()) {
-                    return check_pattern(cx, heap, locals, &sexpr_ty(), v, binds);
+                    return check_pattern(cx, heap, locals, &sexpr_ty(), v, at, binds);
                 }
             }
             let (owner, targs, def) = sum_type(cx, expected, || format!("({} ...)", heap.symbol_spelling(head)))?;
@@ -124,7 +128,7 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                 }
             }
             let def = def.clone();
-            variant_pattern(cx, heap, locals, owner, targs, &def, variant, &parts[1..], binds)
+            variant_pattern(cx, heap, locals, owner, targs, &def, variant, &written[1..], binds)
         }
         // The immediate literals of the scrutinee's own type are matched by
         // their word.
@@ -155,7 +159,7 @@ fn bare_variant(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, id: 
     let Type::Named(owner, targs) = &ty else { return Ok(None) };
     if is_sexpr_expectation(&ty) && !option_variant(cx, &ty, id) {
         // Against a `Sexpr`, a type's or a variant's name is a downcast.
-        return downcast(cx, heap, locals, &ty, &[Value::Symbol(id)], binds);
+        return downcast(cx, heap, locals, &ty, &[(Value::Symbol(id), None)], binds);
     }
     let Some(def) = cx.reg.type_def(owner).filter(|d| d.kind == AdtKind::Sum) else { return Ok(None) };
     let Some(variant) = def.variant_index(member_symbol(id.name())) else { return Ok(None) };
@@ -198,7 +202,7 @@ fn variant_pattern(
     targs: Vec<Type>,
     def: &TypeDef,
     variant: usize,
-    subs: &[Value],
+    subs: &[Part],
     binds: &mut Binds,
 ) -> Result<Pat, Error> {
     fields_pattern(cx, heap, locals, owner, targs, def, variant, false, subs, binds)
@@ -216,7 +220,7 @@ fn fields_pattern(
     def: &TypeDef,
     variant: usize,
     downcast: bool,
-    subs: &[Value],
+    subs: &[Part],
     binds: &mut Binds,
 ) -> Result<Pat, Error> {
     // A struct's one shape is its fields.
@@ -230,8 +234,8 @@ fn fields_pattern(
     let subst = Subst::positional(&def.params, &targs);
     let field_tys: Vec<Type> = fields.iter().map(|f| subst.apply(f)).collect();
     let mut checked = Vec::with_capacity(subs.len());
-    for (s, t) in subs.iter().zip(&field_tys) {
-        checked.push(check_pattern(cx, heap, locals, t, *s, binds)?);
+    for ((s, at), t) in subs.iter().zip(&field_tys) {
+        checked.push(check_pattern(cx, heap, locals, t, *s, at.clone(), binds)?);
     }
     let subs = checked;
     Ok(Pat::Ctor { owner, targs, variant, downcast, field_tys, subs })
@@ -242,16 +246,16 @@ fn fields_pattern(
 /// written with no pattern binds a variable of its own name, and a slot not
 /// written is not matched.
 #[allow(clippy::too_many_arguments)]
-fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs: Vec<Type>, def: &TypeDef, parts: &[Value], downcast: bool, binds: &mut Binds) -> Result<Pat, Error> {
+fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs: Vec<Type>, def: &TypeDef, parts: &[Part], downcast: bool, binds: &mut Binds) -> Result<Pat, Error> {
     let short = owner.last_segment();
     let first = def.fields.first().map_or("slot", |f| f.name.name());
-    let head = super::type_syntax::type_path(heap, &cx.types(), parts[0]).ok();
+    let head = super::type_syntax::type_path(heap, &cx.types(), parts[0].0).ok();
     if head != Some(owner) {
         return Err(Error::TypeError(format!(
             "pattern: a `{}` value is matched as ({} :slot pattern...), not `{}`",
             owner,
             short,
-            crate::check::core::print(heap, parts[0])
+            crate::check::core::print(heap, parts[0].0)
         )));
     }
     let shape = |got: String| {
@@ -264,13 +268,13 @@ fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs:
         Value::Symbol(id) if id.is_keyword() => Some(id),
         _ => None,
     };
-    let wild = Value::Symbol(heap.names().read(NsId::STD, "_"));
-    let mut slots: Vec<Option<Value>> = vec![None; def.fields.len()];
+    let wild = (Value::Symbol(heap.names().read(NsId::STD, "_")), None);
+    let mut slots: Vec<Option<Part>> = vec![None; def.fields.len()];
     let rest = &parts[1..];
     let mut k = 0;
     while k < rest.len() {
-        let Some(slot) = keyword(rest[k]) else {
-            return Err(shape(format!("`{}` is not a slot keyword", crate::check::core::print(heap, rest[k]))));
+        let Some(slot) = keyword(rest[k].0) else {
+            return Err(shape(format!("`{}` is not a slot keyword", crate::check::core::print(heap, rest[k].0))));
         };
         let Some(i) = def.fields.iter().position(|f| f.name == member_symbol(slot.name())) else {
             let all: Vec<String> = def.fields.iter().map(|f| format!("`{}`", f.name)).collect();
@@ -280,18 +284,19 @@ fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs:
             return Err(Error::TypeError(format!("pattern `{}`: slot `{}` is written twice", owner, slot.name())));
         }
         slots[i] = Some(match rest.get(k + 1) {
-            Some(next) if keyword(*next).is_none() => {
+            Some(next) if keyword(next.0).is_none() => {
                 k += 2;
-                *next
+                next.clone()
             }
-            // The slot's own name, read as this module reads a name.
+            // The slot's own name, read as this module reads a name,
+            // written where the slot is.
             _ => {
                 k += 1;
-                Value::Symbol(heap.names().read(cx.ns, slot.name()))
+                (Value::Symbol(heap.names().read(cx.ns, slot.name())), rest[k - 1].1.clone())
             }
         });
     }
-    let subs: Vec<Value> = slots.into_iter().map(|s| s.unwrap_or(wild)).collect();
+    let subs: Vec<Part> = slots.into_iter().map(|s| s.unwrap_or_else(|| wild.clone())).collect();
     fields_pattern(cx, heap, locals, owner, targs, def, 0, downcast, &subs, binds)
 }
 
@@ -300,14 +305,14 @@ fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs:
 /// variant: a value of that type held as the `Sexpr`, its fields matched as
 /// a pattern of that type matches them. `None` when `Head` names neither,
 /// or is one of the `Sexpr`'s (or the `Option`'s) own variants.
-fn downcast(cx: &Cx, heap: &mut Heap, locals: &Locals, ty: &Type, parts: &[Value], binds: &mut Binds) -> Result<Option<Pat>, Error> {
+fn downcast(cx: &Cx, heap: &mut Heap, locals: &Locals, ty: &Type, parts: &[Part], binds: &mut Binds) -> Result<Option<Pat>, Error> {
     let generic = |path: &Path| {
         Error::TypeError(format!(
             "pattern: `{}` is generic — a downcast pattern can't infer its type arguments; use `(the {}<...> p)` for a whole-value bind instead",
             path, path
         ))
     };
-    let (owner, variant) = match parts[0] {
+    let (owner, variant) = match parts[0].0 {
         Value::Symbol(id) => {
             if is_ctor_name(id.name()) || option_variant(cx, ty, id) {
                 return Ok(None);
@@ -347,8 +352,8 @@ fn downcast(cx: &Cx, heap: &mut Heap, locals: &Locals, ty: &Type, parts: &[Value
 /// a value of `Type` held as the `Sexpr`, matched by `pattern` as a value of
 /// `Type` — the whole value, with a mutable struct's identity, and the one
 /// way a `Vector<T>` or a `HashTable<K,V>` comes back out of a `Sexpr`.
-fn type_test(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, parts: &[Value], binds: &mut Binds) -> Result<Pat, Error> {
-    let [_, ty, sub] = parts else {
+fn type_test(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, parts: &[Part], binds: &mut Binds) -> Result<Pat, Error> {
+    let [_, (ty, _), (sub, sub_at)] = parts else {
         return Err(Error::TypeError("pattern: (the Type pattern)".into()));
     };
     if !is_sexpr_expectation(&cx.resolve(expected)) {
@@ -368,15 +373,15 @@ fn type_test(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, parts: 
                 ty, ty, ty
             ))
         };
-        let inner = heap.list_to_vec(*sub).map_err(|_| must_name())?;
-        let Some(Value::Symbol(head)) = inner.first() else { return Err(must_name()) };
+        let inner = heap.list_to_vec_locs(*sub).map_err(|_| must_name())?;
+        let Some((Value::Symbol(head), _)) = inner.first() else { return Err(must_name()) };
         let Type::Named(owner, targs) = &ty else { unreachable!("an `Option` is a named type") };
         let def = cx.reg.type_def(owner).expect("`Option` is defined").clone();
         let variant = def.variant_index(member_symbol(head.name())).ok_or_else(must_name)?;
         let sub = fields_pattern(cx, heap, locals, *owner, targs.clone(), &def, variant, true, &inner[1..], binds)?;
         return Ok(Pat::TypeTest { ty, sub: Box::new(sub) });
     }
-    let sub = check_pattern(cx, heap, locals, &ty, *sub, binds)?;
+    let sub = check_pattern(cx, heap, locals, &ty, *sub, sub_at.clone(), binds)?;
     Ok(Pat::TypeTest { ty, sub: Box::new(sub) })
 }
 
@@ -398,7 +403,8 @@ fn tuple_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, id:
             )))
         }
     };
-    let subs: Vec<Value> = (0..n).map(|i| heap.struct_field(id, i)).collect();
+    // The elements of a tuple read as a datum carry no place of their own.
+    let subs: Vec<Part> = (0..n).map(|i| (heap.struct_field(id, i), None)).collect();
     let def = cx.reg.type_def(&path).expect("every tuple arity is defined").clone();
     fields_pattern(cx, heap, locals, path, targs, &def, 0, downcast, &subs, binds)
 }
@@ -445,7 +451,7 @@ fn value_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, exp
     heap.pop_root();
     let form = form?;
     heap.push_root(form);
-    let guard_locals = locals.bind(vec![(scrut, expected.clone())]);
+    let guard_locals = locals.bind(vec![(scrut, expected.clone(), None)]);
     let test = guard_locals.and_then(|l| check_expr(cx, heap, &l, form, Some(&Type::Bool), heap.cons_loc(expr)));
     heap.pop_root();
     Ok(Pat::Guard { name: scrut, test: Box::new(test?) })

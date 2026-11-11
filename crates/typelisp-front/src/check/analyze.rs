@@ -2475,6 +2475,24 @@ impl Checker {
         }
     }
 
+    /// Where each definition, and each local variable a reference names,
+    /// was written, and the type of each expression: what the LSP's
+    /// goto-definition and hover read.
+    pub fn def_locs(&self) -> super::DefLocs {
+        match &self.rebuilt {
+            Some(rebuilt) => rebuilt.def_locs(&self.info.reg),
+            None => self.info.reg.def_locs.clone(),
+        }
+    }
+
+    /// The documentation of each definition.
+    pub fn docs(&self) -> super::Docs {
+        match &self.rebuilt {
+            Some(rebuilt) => rebuilt.docs(&self.info.reg),
+            None => self.info.reg.docs.clone(),
+        }
+    }
+
     /// What the module-level function `path` returns, when there is one.
     pub fn fn_ret(&self, path: &Path) -> Option<Type> {
         match &self.rebuilt {

@@ -21,9 +21,10 @@ pub(crate) fn check_let(
         return Err(Error::TypeError("let: (let ((name val)...) body...)".into()));
     };
     let mut binds = Vec::new();
+    let mut written = Vec::new();
     for (binding, _) in heap.list_to_vec_locs(*bindings)? {
         let pair = heap.list_to_vec_locs(binding)?;
-        let [(name, _), (value, value_loc)] = pair.as_slice() else {
+        let [(name, name_loc), (value, value_loc)] = pair.as_slice() else {
             return Err(Error::TypeError("let: binding must be (name val)".into()));
         };
         let Value::Symbol(name) = *name else {
@@ -31,8 +32,9 @@ pub(crate) fn check_let(
         };
         let checked = check_expr(cx, heap, locals, *value, None, value_loc.clone());
         binds.push((name, cx.recovered(checked, value_loc.clone())?));
+        written.push(name_loc.clone());
     }
-    let inner = locals.bind(binds.iter().map(|(n, t)| (*n, t.ty.clone())).collect())?;
+    let inner = locals.bind(binds.iter().zip(written).map(|((n, t), at)| (*n, t.ty.clone(), at)).collect())?;
     let (body, ty) = check_body(cx, heap, &inner, &args[1..], expected)?;
     Ok(Typed { node: Node::Let { binds, body }, ty, loc })
 }
@@ -69,7 +71,7 @@ fn let_star(
         return Ok(Typed { node: Node::Let { binds: Vec::new(), body }, ty, loc });
     };
     let pair = heap.list_to_vec_locs(*binding)?;
-    let [(name, _), (value, value_loc)] = pair.as_slice() else {
+    let [(name, name_loc), (value, value_loc)] = pair.as_slice() else {
         return Err(Error::TypeError("let*: binding must be (name val)".into()));
     };
     let Value::Symbol(name) = *name else {
@@ -77,7 +79,7 @@ fn let_star(
     };
     let value = check_expr(cx, heap, locals, *value, None, value_loc.clone());
     let value = cx.recovered(value, value_loc.clone())?;
-    let inner_locals = locals.bind(vec![(name, value.ty.clone())])?;
+    let inner_locals = locals.bind(vec![(name, value.ty.clone(), name_loc.clone())])?;
     let inner = typelisp_mem::grow_stack(|| let_star(cx, heap, &inner_locals, later, body, expected, None))?;
     let ty = inner.ty.clone();
     Ok(Typed { node: Node::Let { binds: vec![(name, value)], body: vec![inner] }, ty, loc })

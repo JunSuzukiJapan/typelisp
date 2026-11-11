@@ -16,7 +16,7 @@ use typelisp_mem::SymRef;
 
 use super::bounds::parse_where;
 use super::defun::{by_param, lower_all, parse_header, split_doc, split_where};
-use super::lambda_list::{parse_lambda_list, LambdaList, Written};
+use super::lambda_list::{bindings, parse_lambda_list, LambdaList, Written};
 use super::expr::Cx;
 use super::generic::{method_specialization, Base, Requests};
 use super::block::check_named_body;
@@ -136,7 +136,7 @@ pub(crate) fn define_method(
         Some((_, Type::Named(_, args))) if instance && type_params.is_empty() && !args.is_empty() => Some(args.clone()),
         _ => None,
     });
-    let LambdaList { required, optionals, rest, keys, bound: params } = list;
+    let LambdaList { required, optionals, rest, keys, bound: params, locs } = list;
     let sig = FnDef {
         public,
         rest: rest.map(|(_, t)| t),
@@ -183,9 +183,9 @@ pub(crate) fn define_method(
     };
 
     let mut body = {
-        let cx = Cx::new(reg, d.expander, ns, &bounded, self_type, d.recovery);
+        let cx = Cx::new(reg, d.expander, ns, &bounded, self_type, d.notes);
         let locals_root = Locals::empty();
-        let locals = locals_root.bind(params.clone())?;
+        let locals = locals_root.bind(bindings(&params, &locs))?;
         let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
         cx.settle(heap, &mut body)?;
         body
