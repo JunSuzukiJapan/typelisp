@@ -1,7 +1,9 @@
 //! Reading a written type.
 
-use crate::types::{is_dyn_form, is_type_application, scalar_of_symbol, scalar_type, tuple_path, written_path, Path, Type};
-use crate::{wk, Error, Heap, Value};
+use crate::check::registry::AdtKind;
+use crate::check::semantic::{TypeKind, TypeUse};
+use crate::types::{is_dyn_form, is_type_application, last_segment_span, scalar_of_symbol, scalar_type, tuple_path, written_path, Path, Type};
+use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
@@ -17,6 +19,8 @@ pub(crate) struct TypeCx<'a> {
     pub(crate) ns: NsId,
     pub(crate) scope: &'a TypeScope<'a>,
     pub(crate) self_type: Option<&'a Type>,
+    /// Where the type names read are written down, for an editor.
+    pub(crate) notes: &'a super::expr::Notes,
 }
 
 /// The type `v` writes.
@@ -30,8 +34,11 @@ pub(crate) struct TypeCx<'a> {
 /// whole type or nothing: every slot inside another type tags what it holds,
 /// which would drop the word's top three bits. A C pointer `(ptr T)` is not
 /// read so far.
-pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
-    let ty = parse_raw(heap, cx, v)?;
+///
+/// `at` is where `v` is written, when it is: each type it names is noted
+/// there for an editor.
+pub(crate) fn parse_type(heap: &Heap, cx: &TypeCx, v: Value, at: Option<&Loc>) -> Result<Type, Error> {
+    let ty = parse_raw(heap, cx, v, at)?;
     no_nested_raw_word(&ty)?;
     Ok(ty)
 }
@@ -66,7 +73,7 @@ pub(crate) fn mentions_raw_word(ty: &Type) -> bool {
 
 /// [`parse_type`] without its rule for the C words: a `defffi` callback's
 /// type may take and answer them.
-pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
+pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value, at: Option<&Loc>) -> Result<Type, Error> {
     match v {
         Value::Empty => Ok(Type::Unit),
         Value::Symbol(id) => {
@@ -81,23 +88,23 @@ pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Erro
             }
             match scalar_of_symbol(id) {
                 Some(t) => Ok(t),
-                None => named(heap, cx, id, Vec::new()),
+                None => named(heap, cx, id, Vec::new(), at),
             }
         }
         Value::Path(_) => {
             let path = written_path(heap, cx.ns, v)?;
             match scalar_type(&path) {
                 Some(t) => Ok(t),
-                None => at_path(cx, path, Vec::new()),
+                None => at_path(cx, path, Vec::new(), at),
             }
         }
         Value::Cons(_) if is_dyn_form(heap, v) => dyn_type(heap, cx, v),
         // `(ptr T)`: a typed pointer.
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR)) => {
-            let [_, pointee] = heap.list_to_vec(v)?[..] else {
+            let [_, (pointee, pointee_at)] = &heap.list_to_vec_locs(v)?[..] else {
                 return Err(Error::TypeError("a typed pointer is written (ptr T)".into()));
             };
-            Ok(Type::PtrTo(Box::new(super::c_memory::pointee(heap, cx, pointee)?)))
+            Ok(Type::PtrTo(Box::new(super::c_memory::pointee(heap, cx, *pointee, pointee_at.as_ref())?)))
         }
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::FN)) => fn_type(heap, cx, v),
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
@@ -105,22 +112,24 @@ pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Erro
         }
         Value::Cons(_) => {
             // `(%type-apply Name A B)`, or the list spelling `(Name A B)`.
-            let parts = heap.list_to_vec(v)?;
-            let (head, args) = if is_type_application(heap, v) { (parts[1], &parts[2..]) } else { (parts[0], &parts[1..]) };
+            let parts = heap.list_to_vec_locs(v)?;
+            let ((head, head_at), args) = if is_type_application(heap, v) { (&parts[1], &parts[2..]) } else { (&parts[0], &parts[1..]) };
             if args.is_empty() {
                 return Err(Error::TypeError("a type application must be (Name Arg...), with at least one argument".to_string()));
             }
-            let args = args.iter().map(|a| parse_raw(heap, cx, *a)).collect::<Result<Vec<_>, _>>()?;
-            match head {
-                Value::Symbol(name) => named(heap, cx, name, args),
-                Value::Path(_) => at_path(cx, written_path(heap, cx.ns, head)?, args),
+            let args = args.iter().map(|(a, a_at)| parse_raw(heap, cx, *a, a_at.as_ref())).collect::<Result<Vec<_>, _>>()?;
+            let head_at = head_at.as_ref();
+            match *head {
+                Value::Symbol(name) => named(heap, cx, name, args, head_at),
+                Value::Path(_) => at_path(cx, written_path(heap, cx.ns, *head)?, args, head_at),
                 other => Err(Error::TypeError(format!("a type application's head must be a plain type name, found `{:?}`", other))),
             }
         }
         // `#{A B}`, written the way its values are.
         Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
             let n = heap.struct_field_count(id);
-            let args = (0..n).map(|i| parse_raw(heap, cx, heap.struct_field(id, i))).collect::<Result<Vec<_>, _>>()?;
+            // The elements of a `#{..}` datum carry no place of their own.
+            let args = (0..n).map(|i| parse_raw(heap, cx, heap.struct_field(id, i), None)).collect::<Result<Vec<_>, _>>()?;
             Ok(Type::Named(tuple_path(n), args))
         }
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
@@ -129,17 +138,17 @@ pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Erro
 
 /// `(fn (A B &rest C) R)`: a function's type.
 fn fn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
-    let elems = heap.list_to_vec(v)?;
-    let [_, params, ret] = elems.as_slice() else {
+    let elems = heap.list_to_vec_locs(v)?;
+    let [_, (params, _), (ret, ret_at)] = elems.as_slice() else {
         return Err(Error::TypeError("fn type must be (fn (params) ret)".to_string()));
     };
     let ps = match params {
         Value::Empty => Vec::new(),
-        Value::Cons(_) => heap.list_to_vec(*params)?,
+        Value::Cons(_) => heap.list_to_vec_locs(*params)?,
         _ => return Err(Error::TypeError("fn parameter list must be a list".to_string())),
     };
-    let (fixed, rest) = match ps.iter().position(|p| matches!(p, Value::Symbol(id) if id.is(wk::REST))) {
-        Some(i) if i + 2 == ps.len() => (&ps[..i], Some(Box::new(parse_raw(heap, cx, ps[i + 1])?))),
+    let (fixed, rest) = match ps.iter().position(|(p, _)| matches!(p, Value::Symbol(id) if id.is(wk::REST))) {
+        Some(i) if i + 2 == ps.len() => (&ps[..i], Some(Box::new(parse_raw(heap, cx, ps[i + 1].0, ps[i + 1].1.as_ref())?))),
         Some(_) => {
             return Err(Error::TypeError(
                 "fn type: &rest must be followed by exactly one type, as the last item in the parameter list".to_string(),
@@ -147,37 +156,91 @@ fn fn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
         }
         None => (&ps[..], None),
     };
-    let fixed = fixed.iter().map(|p| parse_raw(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
-    Ok(Type::Fn(fixed, rest, Box::new(parse_raw(heap, cx, *ret)?)))
+    let fixed = fixed.iter().map(|(p, at)| parse_raw(heap, cx, *p, at.as_ref())).collect::<Result<Vec<_>, _>>()?;
+    Ok(Type::Fn(fixed, rest, Box::new(parse_raw(heap, cx, *ret, ret_at.as_ref())?)))
 }
 
 /// The type the path `path` names, applied to `args`. One its module does
 /// not make `pub` is not seen from another.
-fn at_path(cx: &TypeCx, path: Path, args: Vec<Type>) -> Result<Type, Error> {
+fn at_path(cx: &TypeCx, path: Path, args: Vec<Type>, at: Option<&Loc>) -> Result<Type, Error> {
     let path = super::resolve::reexported(cx.reg, path);
     let visible = |public: bool| public || sees(cx.ns, path.ns());
-    match cx.reg.types.get(&path) {
-        Some(entry @ TypeEntry::Type(TypeDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
-        Some(entry @ TypeEntry::Alias { public, .. }) if visible(*public) => entry_type(path, entry, args),
-        Some(entry @ TypeEntry::Trait(TraitDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
-        Some(entry @ TypeEntry::CStruct(_)) => entry_type(path, entry, args),
-        _ => Err(unknown_type(&path.to_string())),
+    let entry = match cx.reg.types.get(&path) {
+        Some(entry @ TypeEntry::Type(TypeDef { public, .. })) if visible(*public) => entry,
+        Some(entry @ TypeEntry::Alias { public, .. }) if visible(*public) => entry,
+        Some(entry @ TypeEntry::Trait(TraitDef { public, .. })) if visible(*public) => entry,
+        Some(entry @ TypeEntry::CStruct(_)) => entry,
+        _ => return Err(unknown_type(&path.to_string())),
+    };
+    note_use(cx, path, entry, at);
+    entry_type(path, entry, args)
+}
+
+/// That the name written at `at`, which ends with `path`'s last segment,
+/// names `path`, defined as `entry`: an editor shows a type the program
+/// defines there, and leaves a built-in one to its own grammar.
+pub(crate) fn note_use(cx: &TypeCx, path: Path, entry: &TypeEntry, at: Option<&Loc>) {
+    note(cx.notes, path, entry, at);
+}
+
+/// [`note_use`], into `notes`.
+pub(crate) fn note(notes: &super::expr::Notes, path: Path, entry: &TypeEntry, at: Option<&Loc>) {
+    if let Some(loc) = at.and_then(|l| last_segment_span(&path, l)) {
+        note_exactly(notes, path, entry, loc);
     }
+}
+
+/// That the header written at `at`, which starts with `path`'s last
+/// segment (`name<T>` goes on with the type parameters), defines `path`.
+pub(crate) fn note_definition(notes: &super::expr::Notes, path: Path, entry: &TypeEntry, at: Option<&Loc>) {
+    let Some(at) = at else { return };
+    let len = path.last_segment().chars().count() as u32;
+    if at.end_line == at.line && at.col + len <= at.end_col {
+        note_exactly(notes, path, entry, Loc::new(std::sync::Arc::clone(&at.file), at.line, at.col).with_end(at.line, at.col + len));
+    }
+}
+
+/// That the path written `spelling` at `at`, `...::type::member`, names a
+/// member of the type `path`, its second segment from the end.
+pub(crate) fn note_path_head(notes: &super::expr::Notes, path: Path, entry: &TypeEntry, spelling: &str, at: Option<&Loc>) {
+    let Some(at) = at else { return };
+    let segs: Vec<&str> = spelling.split("::").collect();
+    let width = |s: &str| s.chars().count() as u32;
+    // Only a token that is the path and nothing else is measured.
+    if segs.len() < 2 || at.end_line != at.line || width(spelling) != at.end_col.saturating_sub(at.col) {
+        return;
+    }
+    let col = at.col + segs[..segs.len() - 2].iter().map(|s| width(s) + 2).sum::<u32>();
+    let end = col + width(segs[segs.len() - 2]);
+    note_exactly(notes, path, entry, Loc::new(std::sync::Arc::clone(&at.file), at.line, col).with_end(at.line, end));
+}
+
+/// That the name at exactly `loc` names `path`, defined as `entry`.
+fn note_exactly(notes: &super::expr::Notes, path: Path, entry: &TypeEntry, loc: Loc) {
+    let kind = match entry {
+        TypeEntry::Type(def) if !def.builtin => match def.kind {
+            AdtKind::Struct => TypeKind::Struct,
+            AdtKind::Sum => TypeKind::Enum,
+        },
+        TypeEntry::Trait(_) => TypeKind::Trait,
+        _ => return,
+    };
+    notes.type_uses.borrow_mut().push(TypeUse { path, kind, loc });
 }
 
 /// `(:dyn Trait)` or `(:dyn Trait<pins...>)`: a trait object of the trait,
 /// its associated types pinned.
 fn dyn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
-    let elems = heap.list_to_vec(v)?;
-    let [_, inner] = elems.as_slice() else {
+    let elems = heap.list_to_vec_locs(v)?;
+    let [_, (inner, inner_at)] = elems.as_slice() else {
         return Err(Error::TypeError("`:dyn` must be followed by exactly one trait name".to_string()));
     };
-    let (head, pins) = match inner {
+    let (head, head_at, pins) = match inner {
         Value::Cons(_) if is_type_application(heap, *inner) => {
-            let parts = heap.list_to_vec(*inner)?;
-            (parts[1], parts[2..].to_vec())
+            let parts = heap.list_to_vec_locs(*inner)?;
+            (parts[1].0, parts[1].1.clone(), parts[2..].to_vec())
         }
-        _ => (*inner, Vec::new()),
+        _ => (*inner, inner_at.clone(), Vec::new()),
     };
     let found = match head {
         Value::Symbol(id) => find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))).map(|(p, e)| (p, e.clone())),
@@ -200,7 +263,10 @@ fn dyn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
     if !public && !sees(cx.ns, path.ns()) {
         return Err(unknown_type(&path.to_string()));
     }
-    let pins = pins.iter().map(|p| parse_raw(heap, cx, *p)).collect::<Result<Vec<_>, _>>()?;
+    if let Some(entry) = cx.reg.types.get(&path) {
+        note_use(cx, path, entry, head_at.as_ref());
+    }
+    let pins = pins.iter().map(|(p, p_at)| parse_raw(heap, cx, *p, p_at.as_ref())).collect::<Result<Vec<_>, _>>()?;
     Ok(Type::Dyn(path, pins))
 }
 
@@ -216,9 +282,12 @@ pub(crate) fn type_path(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Path, Erro
     }
 }
 
-fn named(heap: &Heap, cx: &TypeCx, id: SymRef, args: Vec<Type>) -> Result<Type, Error> {
+fn named(heap: &Heap, cx: &TypeCx, id: SymRef, args: Vec<Type>, at: Option<&Loc>) -> Result<Type, Error> {
     match find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))) {
-        Some((path, entry)) => entry_type(path, entry, args),
+        Some((path, entry)) => {
+            note_use(cx, path, entry, at);
+            entry_type(path, entry, args)
+        }
         None => Err(unknown_type(&heap.symbol_spelling(id))),
     }
 }

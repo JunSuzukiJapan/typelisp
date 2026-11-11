@@ -32,11 +32,11 @@ pub(crate) fn check_make_instance(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     let Some((quoted, _)) = args.first() else { return Err(Error::TypeError(SHAPE.into())) };
-    let written = match heap.list_to_vec(*quoted).ok().as_deref() {
-        Some([Value::Symbol(q), name]) if q.is(wk::QUOTE) => *name,
+    let (written, written_at) = match heap.list_to_vec_locs(*quoted).ok().as_deref() {
+        Some([(Value::Symbol(q), _), (name, at)]) if q.is(wk::QUOTE) => (*name, at.clone()),
         _ => return Err(Error::TypeError(SHAPE.into())),
     };
-    let (path, def, targs) = instance_type(cx, heap, written)?;
+    let (path, def, targs) = instance_type(cx, heap, written, written_at.as_ref())?;
     let tname = path.to_string();
     if def.kind != crate::check::registry::AdtKind::Struct || def.builtin {
         return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", crate::check::core::print(heap, written))));
@@ -130,13 +130,16 @@ pub(crate) fn check_make_instance(
 
 /// The struct `make-instance` names: its path, definition and type
 /// arguments, each a fresh hole when the name is written bare.
-fn instance_type(cx: &Cx, heap: &Heap, written: Value) -> Result<(Path, TypeDef, Vec<Type>), Error> {
+fn instance_type(cx: &Cx, heap: &Heap, written: Value, at: Option<&Loc>) -> Result<(Path, TypeDef, Vec<Type>), Error> {
     if let Value::Symbol(id) = written {
         let found = find_named(cx.reg, cx.ns, id, |ns, key| match cx.reg.types.get(&Path::of_symbol(ns, key)) {
             Some(TypeEntry::Type(def)) => Some(def.clone()),
             _ => None,
         });
         if let Some((path, def)) = found {
+            if let Some(entry) = cx.reg.types.get(&path) {
+                super::type_syntax::note_use(&cx.types(), path, entry, at);
+            }
             let targs = def.params.iter().map(|_| cx.holes.borrow_mut().fresh()).collect();
             return Ok((path, def, targs));
         }
@@ -144,15 +147,16 @@ fn instance_type(cx: &Cx, heap: &Heap, written: Value) -> Result<(Path, TypeDef,
     // A path to the type, its arguments left to be inferred too.
     if let Value::Path(_) = written {
         let path = crate::types::written_path(heap, cx.ns, written)?;
-        if let Some(TypeEntry::Type(def)) = cx.reg.types.get(&path) {
+        if let Some(entry @ TypeEntry::Type(def)) = cx.reg.types.get(&path) {
             if !def.public && !super::resolve::sees(cx.ns, path.ns()) {
                 return Err(Error::TypeError(format!("make-instance: `{}` is not `pub`, so it is not visible outside its module", path)));
             }
+            super::type_syntax::note_use(&cx.types(), path, entry, at);
             let targs = def.params.iter().map(|_| cx.holes.borrow_mut().fresh()).collect();
             return Ok((path, def.clone(), targs));
         }
     }
-    let ty = parse_type(heap, &cx.types(), written)?;
+    let ty = parse_type(heap, &cx.types(), written, at)?;
     let Type::Named(path, targs) = &ty else {
         return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", ty)));
     };

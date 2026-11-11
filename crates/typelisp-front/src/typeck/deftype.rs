@@ -27,7 +27,7 @@ pub(crate) fn check_deftype(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
         Some(((Value::Str(id), _), body)) => (Some(heap.string(*id).to_string()), body),
         _ => (None, rest),
     };
-    let [(body, _)] = rest else {
+    let [(body, body_at)] = rest else {
         return Err(Error::TypeError("deftype: (deftype Name Type) — exactly one type follows the name".into()));
     };
     let name = d.ownable(heap, name, "deftype")?;
@@ -46,8 +46,8 @@ pub(crate) fn check_deftype(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
             name.name()
         )));
     }
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
-    let ty: Type = parse_type(heap, &tcx, *body)?;
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
+    let ty: Type = parse_type(heap, &tcx, *body, body_at.as_ref())?;
     let params = scope.params().to_vec();
     reg.types.insert(path, TypeEntry::Alias { public: d.public, params, body: ty });
     d.record(reg, Definition::Type(path), doc);

@@ -16,9 +16,9 @@ pub(crate) fn check_the(
     locals: &Locals,
     args: &[(Value, Option<Loc>)],
 ) -> Result<Typed, Error> {
-    let [(ty, _), (expr, expr_loc)] = args else {
+    let [(ty, ty_at), (expr, expr_loc)] = args else {
         return Err(Error::TypeError("the: (the Type expr)".into()));
     };
-    let ty = parse_type(heap, &cx.types(), *ty)?;
+    let ty = parse_type(heap, &cx.types(), *ty, ty_at.as_ref())?;
     check_expr(cx, heap, locals, *expr, Some(&ty), expr_loc.clone())
 }

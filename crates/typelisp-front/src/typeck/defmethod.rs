@@ -40,7 +40,7 @@ pub(crate) fn check_defmethod(
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
-    let [(header, _), (params, _), (ret, _), body @ ..] = parts else {
+    let [(header, _), (params, _), (ret, ret_at), body @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
@@ -79,8 +79,8 @@ pub(crate) fn check_defmethod(
     let named = format!("method {}::{}", owner, method);
     let at = Written { what: "defmethod", named: &named, owner: ParamOwner::Method(owner, method) };
     let params = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &written)?;
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let bounds = clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
     let def = Method { owner, method, name, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret, bounds, inst: None };
     let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;

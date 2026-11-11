@@ -54,8 +54,8 @@ pub(crate) fn check_defvar(
                 heap.symbol_spelling(id)
             )))
         }
-        _ => match heap.list_to_vec(head).ok().as_deref() {
-            Some([Value::Symbol(name), ty]) => (*name, *ty),
+        _ => match heap.list_to_vec_locs(head).ok().as_deref() {
+            Some([(Value::Symbol(name), _), (ty, ty_at)]) => (*name, (*ty, ty_at.clone())),
             Some([_, _]) => return Err(Error::TypeError("defvar: name must be a symbol".into())),
             _ => return Err(Error::TypeError("defvar: name must be (name Type)".into())),
         },
@@ -69,7 +69,7 @@ pub(crate) fn check_defvar(
     let name = d.ownable(heap, name, "defvar")?;
     d.record(reg, Definition::Var(Path::of_symbol(d.site.ns, name)), doc);
     let scope = TypeScope::empty();
-    let ty = parse_type(heap, &super::type_syntax::TypeCx { reg, ns: d.site.ns, scope: &scope, self_type: None }, ty)?;
+    let ty = parse_type(heap, &super::type_syntax::TypeCx { reg, ns: d.site.ns, scope: &scope, self_type: None, notes: d.notes }, ty.0, ty.1.as_ref())?;
     Checker::reject_raw_word_storage(&ty, "the global", &heap.symbol_spelling(name))?;
     let value = {
         let cx = Cx::new(reg, d.expander, d.site.ns, &scope, None, d.notes);

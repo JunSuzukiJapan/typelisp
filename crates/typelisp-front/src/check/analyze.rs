@@ -1601,7 +1601,11 @@ impl Checker {
     /// recorded so far (see [`Self::type_uses`]) — the LSP turns these into
     /// `textDocument/semanticTokens` (`crate::check::semantic`).
     pub fn take_type_uses(&self) -> Vec<TypeUse> {
-        std::mem::take(&mut *self.type_uses.borrow_mut())
+        let mut out = std::mem::take(&mut *self.type_uses.borrow_mut());
+        if let Some(rebuilt) = &self.rebuilt {
+            out.extend(rebuilt.take_type_uses());
+        }
+        out
     }
 
     /// The single catch helper used at expression-level recovery boundaries: a

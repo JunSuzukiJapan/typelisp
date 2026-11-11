@@ -155,6 +155,12 @@ impl TypeChecker {
         self.notes.recover = on;
     }
 
+    /// Each place a type or a trait the program defines was named, since
+    /// they were last taken.
+    pub(crate) fn take_type_uses(&self) -> Vec<crate::check::semantic::TypeUse> {
+        std::mem::take(&mut *self.notes.type_uses.borrow_mut())
+    }
+
     /// The errors recover mode has checked past since they were last taken.
     pub(crate) fn take_errors(&self) -> Vec<Error> {
         std::mem::take(&mut *self.notes.errors.borrow_mut())

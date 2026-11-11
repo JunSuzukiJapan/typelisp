@@ -86,6 +86,8 @@ pub(crate) struct Notes {
     pub(crate) local_refs: RefCell<std::collections::HashMap<(u32, u32), Loc>>,
     /// The line and column of an expression, and its type.
     pub(crate) node_types: RefCell<std::collections::HashMap<(u32, u32), Type>>,
+    /// Each place a type or a trait the program defines is named.
+    pub(crate) type_uses: RefCell<Vec<crate::check::semantic::TypeUse>>,
 }
 
 impl<'a> Cx<'a> {
@@ -134,7 +136,7 @@ impl<'a> Cx<'a> {
 
     /// Where a type written in this form is read.
     pub(crate) fn types(&self) -> TypeCx<'_> {
-        TypeCx { reg: self.reg, ns: self.ns, scope: self.scope, self_type: self.self_type }
+        TypeCx { reg: self.reg, ns: self.ns, scope: self.scope, self_type: self.self_type, notes: self.notes }
     }
 
     /// A local variable no program can name, for a value the checker holds
@@ -635,7 +637,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     let args = &elems[1..];
     let head = match elems[0].0 {
         Value::Symbol(head) => head,
-        Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, args, expected, loc),
+        Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, elems[0].1.as_ref(), args, expected, loc),
         // `(%type-member Type member)`: a member of a type, as a form the
         // checker writes (`forms::member_form`) or `Type<args>::member`.
         Value::Cons(_) if matches!(heap.car(elems[0].0), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {

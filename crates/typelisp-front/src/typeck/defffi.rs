@@ -21,13 +21,13 @@ const SHAPE: &str = "defffi: (defffi name (param-type...) return-type [:library 
 
 /// `(defffi ...)` — `parts` without the `defffi` — and its core form.
 pub(crate) fn check_defffi(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, parts: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
-    let [(header, _), (params, _), (ret, _), options @ ..] = parts else {
+    let [(header, _), (params, _), (ret, ret_at), options @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, c_symbol) = names(heap, *header)?;
     let name = d.ownable(heap, name, "defffi")?;
     let root = TypeScope::empty();
-    let tcx = TypeCx { reg, ns: d.site.ns, scope: &root, self_type: None };
+    let tcx = TypeCx { reg, ns: d.site.ns, scope: &root, self_type: None, notes: d.notes };
     let written = heap.list_to_vec(*params)?;
     if written.iter().any(|p| matches!(p, Value::Symbol(s) if s.is(wk::REST))) {
         return Err(Error::TypeError(
@@ -38,8 +38,8 @@ pub(crate) fn check_defffi(reg: &mut Registry, d: &mut Definer, heap: &mut Heap,
                 .into(),
         ));
     }
-    let params = written.iter().map(|p| param_type(heap, &tcx, *p)).collect::<Result<Vec<_>, _>>()?;
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let params = heap.list_to_vec_locs(*params)?.iter().map(|(p, at)| param_type(heap, &tcx, *p, at.as_ref())).collect::<Result<Vec<_>, _>>()?;
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let library = library(heap, options)?;
     let path = Path::of_symbol(d.site.ns, name);
     match reg.values.get(&path) {
@@ -85,8 +85,8 @@ fn names(heap: &Heap, v: Value) -> Result<(SymRef, String), Error> {
 
 /// A parameter's type. A function type is a callback C calls, which crosses
 /// as an entry's address, so it may take and answer C words.
-fn param_type(heap: &Heap, tcx: &TypeCx, v: Value) -> Result<Type, Error> {
-    let ty = parse_raw(heap, tcx, v)?;
+fn param_type(heap: &Heap, tcx: &TypeCx, v: Value, at: Option<&Loc>) -> Result<Type, Error> {
+    let ty = parse_raw(heap, tcx, v, at)?;
     let Type::Fn(params, rest, ret) = &ty else {
         no_nested_raw_word(&ty)?;
         return Ok(ty);

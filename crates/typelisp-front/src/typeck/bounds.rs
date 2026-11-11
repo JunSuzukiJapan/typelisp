@@ -26,7 +26,9 @@ pub(crate) fn parse_where(heap: &Heap, tcx: &TypeCx, clause: Value) -> Result<Ve
     let elems = heap.list_to_vec(clause)?;
     let mut out = Vec::new();
     for bound in &elems[1..] {
-        let parts = heap.list_to_vec(*bound)?;
+        let written = heap.list_to_vec_locs(*bound)?;
+        let head_at = written.first().and_then(|(_, l)| l.clone());
+        let parts: Vec<Value> = written.iter().map(|(p, _)| *p).collect();
         let [head, param, pins @ ..] = parts.as_slice() else {
             return Err(Error::TypeError(":where: each bound must be (Trait type-param (AssocName Type)...)".into()));
         };
@@ -36,6 +38,9 @@ pub(crate) fn parse_where(heap: &Heap, tcx: &TypeCx, clause: Value) -> Result<Ve
         let Some((trait_path, tdef)) = trait_named(tcx.reg, tcx.ns, name) else {
             return Err(Error::TypeError(format!("impl: unknown trait `{}`", heap.symbol_spelling(name))));
         };
+        if let Some(entry) = tcx.reg.types.get(&trait_path) {
+            super::type_syntax::note_use(tcx, trait_path, entry, head_at.as_ref());
+        }
         let Value::Symbol(param_name) = *param else {
             return Err(Error::TypeError(":where: type parameter must be a symbol".into()));
         };
@@ -56,14 +61,14 @@ pub(crate) fn parse_where(heap: &Heap, tcx: &TypeCx, clause: Value) -> Result<Ve
 pub(crate) fn parse_pins(heap: &Heap, tcx: &TypeCx, what: &str, trait_path: Path, tdef: &TraitDef, pins: &[Value]) -> Result<BTreeMap<String, Type>, Error> {
     let mut assoc = BTreeMap::new();
     for pin in pins {
-        let pair = heap.list_to_vec(*pin)?;
-        let [Value::Symbol(assoc_name), ty] = pair.as_slice() else {
+        let pair = heap.list_to_vec_locs(*pin)?;
+        let [(Value::Symbol(assoc_name), _), (ty, ty_at)] = pair.as_slice() else {
             return Err(Error::TypeError(format!("{}: associated-type pin must be (AssocName Type)", what)));
         };
         if !tdef.params[1..].iter().any(|a| a.name.name() == assoc_name.name()) {
             return Err(Error::TypeError(format!("{}: trait `{}` has no associated type `{}`", what, trait_path, heap.symbol_spelling(*assoc_name))));
         }
-        assoc.insert(assoc_name.name().to_string(), parse_type(heap, tcx, *ty)?);
+        assoc.insert(assoc_name.name().to_string(), parse_type(heap, tcx, *ty, ty_at.as_ref())?);
     }
     Ok(assoc)
 }

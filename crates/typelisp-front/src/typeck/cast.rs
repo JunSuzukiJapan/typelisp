@@ -31,10 +31,10 @@ pub(crate) fn check_as(
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     let what = if try_variant { "try-as" } else { "as" };
-    let [(target, _), (src, src_loc)] = args else {
+    let [(target, target_at), (src, src_loc)] = args else {
         return Err(Error::TypeError(format!("{}: ({} Type expr)", what, what)));
     };
-    let target = parse_type(heap, &cx.types(), *target)?;
+    let target = parse_type(heap, &cx.types(), *target, target_at.as_ref())?;
     let mut src = check_expr(cx, heap, locals, *src, None, src_loc.clone())?;
     // A number literal no type decided is converted from its default type.
     cx.decide(&src.ty);

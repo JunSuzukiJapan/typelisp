@@ -250,6 +250,9 @@ fn struct_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, owner: Path, targs:
     let short = owner.last_segment();
     let first = def.fields.first().map_or("slot", |f| f.name.name());
     let head = super::type_syntax::type_path(heap, &cx.types(), parts[0].0).ok();
+    if let (Some(h), Some(entry)) = (head.filter(|h| *h == owner), cx.reg.types.get(&owner)) {
+        super::type_syntax::note_use(&cx.types(), h, entry, parts[0].1.as_ref());
+    }
     if head != Some(owner) {
         return Err(Error::TypeError(format!(
             "pattern: a `{}` value is matched as ({} :slot pattern...), not `{}`",
@@ -353,13 +356,13 @@ fn downcast(cx: &Cx, heap: &mut Heap, locals: &Locals, ty: &Type, parts: &[Part]
 /// `Type` — the whole value, with a mutable struct's identity, and the one
 /// way a `Vector<T>` or a `HashTable<K,V>` comes back out of a `Sexpr`.
 fn type_test(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, parts: &[Part], binds: &mut Binds) -> Result<Pat, Error> {
-    let [_, (ty, _), (sub, sub_at)] = parts else {
+    let [_, (ty, ty_at), (sub, sub_at)] = parts else {
         return Err(Error::TypeError("pattern: (the Type pattern)".into()));
     };
     if !is_sexpr_expectation(&cx.resolve(expected)) {
         return Err(Error::TypeError(format!("pattern: `(the Type pattern)` takes a value out of a `Sexpr`, and this one matches a `{}`", cx.resolve(expected))));
     }
-    let ty = super::type_syntax::parse_type(heap, &cx.types(), *ty)?;
+    let ty = super::type_syntax::parse_type(heap, &cx.types(), *ty, ty_at.as_ref())?;
     if !super::sexpr_value::heap_value(cx.reg, &ty) {
         return Err(Error::TypeError(format!("pattern: `{}` has no Sexpr representation, cannot downcast with `the`", ty)));
     }

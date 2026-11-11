@@ -27,12 +27,19 @@ pub(crate) fn check_path_call(
     heap: &mut Heap,
     locals: &Locals,
     id: PathId,
+    at: Option<&Loc>,
     args: &[(Value, Option<Loc>)],
     expected: Option<&Type>,
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
     match path_target(heap, cx.ns, id)? {
-        PathTarget::Member(owner, member) => check_member_call(cx, heap, locals, owner, member, &path_spelling(heap, id), args, expected, loc),
+        PathTarget::Member(owner, member) => {
+            let spelling = path_spelling(heap, id);
+            if let Some(entry) = cx.reg.types.get(&owner) {
+                super::type_syntax::note_path_head(cx.notes(), owner, entry, &spelling, at);
+            }
+            check_member_call(cx, heap, locals, owner, member, &spelling, args, expected, loc)
+        }
         // A definition another module does not make `pub` is not there for
         // this one.
         PathTarget::In(path) => {

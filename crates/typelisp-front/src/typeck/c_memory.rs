@@ -75,11 +75,11 @@ fn c_struct_named<'r>(heap: &Heap, reg: &'r Registry, ns: typelisp_mem::NsId, v:
 }
 
 /// `(ptr T)`'s `T`: a `def-c-struct` by name, or a C type.
-pub(crate) fn pointee(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
+pub(crate) fn pointee(heap: &Heap, cx: &TypeCx, v: Value, at: Option<&Loc>) -> Result<Type, Error> {
     if let Some(def) = c_struct_named(heap, cx.reg, cx.ns, v) {
         return Ok(Type::CStruct(def.name));
     }
-    let ty = parse_raw(heap, cx, v)?;
+    let ty = parse_raw(heap, cx, v, at)?;
     match &ty {
         t if c_kind(t).is_some() => Ok(ty),
         t => Err(Error::TypeError(format!("`(ptr {})`: a typed pointer points at {} — `{}` is none of these", t, C_TYPES, t))),
@@ -170,7 +170,7 @@ fn check_def_c_struct(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, part
     // can point at the struct being defined (`(next (ptr node))`).
     let public = d.public;
     reg.types.insert(path, TypeEntry::CStruct(CStructDef { name: path, fields: Vec::new(), size: 0, align: 1, public }));
-    let (fields, size, align) = c_struct_fields(reg, heap, d.site.ns, name, &path, specs)?;
+    let (fields, size, align) = c_struct_fields(reg, heap, d.site.ns, d.notes, name, &path, specs)?;
     reg.types.insert(path, TypeEntry::CStruct(CStructDef { name: path, fields, size, align, public }));
     d.record(reg, Definition::Type(path), doc);
     Ok(path)
@@ -179,15 +179,15 @@ fn check_def_c_struct(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, part
 /// The fields of the C struct `name` (at `path`), laid out by C's rules:
 /// each field at the next multiple of its alignment, the struct as aligned
 /// as its most aligned field, its size rounded up to that.
-fn c_struct_fields(reg: &Registry, heap: &Heap, ns: typelisp_mem::NsId, name: SymRef, path: &Path, specs: &[(Value, Option<Loc>)]) -> Result<(Vec<CField>, u64, u64), Error> {
+fn c_struct_fields(reg: &Registry, heap: &Heap, ns: typelisp_mem::NsId, notes: &super::expr::Notes, name: SymRef, path: &Path, specs: &[(Value, Option<Loc>)]) -> Result<(Vec<CField>, u64, u64), Error> {
     let mut fields: Vec<CField> = Vec::new();
     let (mut offset, mut align) = (0u64, 1u64);
     let root = super::scope::TypeScope::empty();
-    let tcx = TypeCx { reg, ns, scope: &root, self_type: None };
+    let tcx = TypeCx { reg, ns, scope: &root, self_type: None, notes };
     let shape = || Error::TypeError(format!("def-c-struct {}: each field is (name type)", name.name()));
     for (spec, _) in specs {
-        let items = heap.list_to_vec(*spec).map_err(|_| shape())?;
-        let [Value::Symbol(fid), tv] = items[..] else { return Err(shape()) };
+        let items = heap.list_to_vec_locs(*spec).map_err(|_| shape())?;
+        let [(Value::Symbol(fid), _), (tv, ref tv_at)] = items[..] else { return Err(shape()) };
         let fname = member_symbol(fid.name());
         if fields.iter().any(|f| f.name == fname) {
             return Err(Error::TypeError(format!("def-c-struct {}: field `{}` is declared twice", name.name(), fname)));
@@ -195,7 +195,7 @@ fn c_struct_fields(reg: &Registry, heap: &Heap, ns: typelisp_mem::NsId, name: Sy
         let ty = match c_struct_named(heap, reg, ns, tv) {
             Some(def) => Type::CStruct(def.name),
             None => {
-                let ty = parse_raw(heap, &tcx, tv)?;
+                let ty = parse_raw(heap, &tcx, tv, tv_at.as_ref())?;
                 if c_kind(&ty).is_none() {
                     return Err(Error::TypeError(format!("a C struct field cannot be `{}` — it must be one of {}", ty, C_TYPES)));
                 }
@@ -311,7 +311,7 @@ pub(crate) fn check_c_alloc(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(
                 .into(),
         ));
     }
-    let elem = pointee(heap, &cx.types(), args[0].0)?;
+    let elem = pointee(heap, &cx.types(), args[0].0, args[0].1.as_ref())?;
     let count = match args.get(1) {
         Some(n) => int_arg(cx, heap, locals, n)?,
         None => word(heap, 1)?,

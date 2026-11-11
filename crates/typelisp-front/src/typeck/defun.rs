@@ -40,7 +40,7 @@ pub(crate) fn check_defun(
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
-    let [(header, _), (params, _), (ret, _), body @ ..] = parts else {
+    let [(header, _), (params, _), (ret, ret_at), body @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
@@ -68,8 +68,8 @@ pub(crate) fn check_defun(
     let named = format!("defun {}", path.last_segment());
     let at = Written { what: "defun", named: &named, owner: ParamOwner::Def(path) };
     let list = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &heap.list_to_vec(*params)?)?;
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let bounds = match clause {
         Some(clause) => parse_where(heap, &tcx, clause)?,
         None => Vec::new(),
@@ -186,9 +186,9 @@ pub(crate) fn parse_param(heap: &Heap, cx: &TypeCx, p: Value) -> Result<(SymRef,
             unimplemented!("typeck: the `{}` parameter marker", id.name())
         }
     }
-    let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError(SHAPE.into()))?;
-    let [Value::Symbol(name), ty] = pair.as_slice() else {
+    let pair = heap.list_to_vec_locs(p).map_err(|_| Error::TypeError(SHAPE.into()))?;
+    let [(Value::Symbol(name), _), (ty, ty_at)] = pair.as_slice() else {
         return Err(Error::TypeError(format!("defun: a parameter is (name Type): {}", SHAPE)));
     };
-    Ok((*name, parse_type(heap, cx, *ty)?))
+    Ok((*name, parse_type(heap, cx, *ty, ty_at.as_ref())?))
 }

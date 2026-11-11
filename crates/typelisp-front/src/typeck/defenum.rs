@@ -24,7 +24,7 @@ const SHAPE: &str = "defenum: (defenum Name<T...>? (Variant Type...) Variant...)
 /// `(defenum ...)` — `parts` without the `defenum` — and its core form,
 /// unrooted. The caller undoes the definition if checking fails.
 pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, parts: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
-    let [(header, _), items @ ..] = parts else {
+    let [(header, header_at), items @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (doc, items) = split_doc(heap, items);
@@ -50,7 +50,8 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
         variants: Vec::new(),
     };
     reg.types.insert(path, TypeEntry::Type(stub.clone()));
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
+    super::type_syntax::note_definition(d.notes, path, &TypeEntry::Type(stub.clone()), header_at.as_ref());
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
     let mut variants: Vec<Variant> = Vec::new();
     for (item, _) in items {
         let variant = parse_variant(heap, &tcx, *item)?;
@@ -70,13 +71,13 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
 fn parse_variant(heap: &Heap, cx: &TypeCx, item: Value) -> Result<Variant, Error> {
     let (name, fields) = match item {
         Value::Symbol(id) => (id, Vec::new()),
-        Value::Cons(_) => match heap.list_to_vec(item)?.split_first() {
-            Some((Value::Symbol(id), fields)) => (*id, fields.to_vec()),
+        Value::Cons(_) => match heap.list_to_vec_locs(item)?.split_first() {
+            Some(((Value::Symbol(id), _), fields)) => (*id, fields.to_vec()),
             _ => return Err(Error::TypeError("defenum: variant name must be a symbol".into())),
         },
         _ => return Err(Error::TypeError("defenum: variant must be (Name Type...) or a bare Name".into())),
     };
-    let fields = fields.iter().map(|t| parse_type(heap, cx, *t)).collect::<Result<Vec<_>, _>>()?;
+    let fields = fields.iter().map(|(t, at)| parse_type(heap, cx, *t, at.as_ref())).collect::<Result<Vec<_>, _>>()?;
     for f in &fields {
         crate::check::Checker::reject_raw_word_storage(f, "the variant", name.name())?;
     }

@@ -31,7 +31,7 @@ const SHAPE: &str = "deftrait: (deftrait Name (Super...) (:type AssocName)... (d
 /// `(deftrait ...)` — `parts` without the `deftrait` — and its core form,
 /// unrooted. The caller undoes the definition if checking fails.
 pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, parts: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
-    let [(name, _), (supers, _), items @ ..] = parts else {
+    let [(name, name_at), (supers, _), items @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let Value::Symbol(name) = *name else {
@@ -65,18 +65,19 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     let params = scope.params().to_vec();
     // Read before the trait is registered, so a trait cannot list itself. A
     // pin may name the trait's own associated types.
-    let supertraits = supertraits(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, &spelling, *supers)?;
+    let supertraits = supertraits(heap, &TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes }, &spelling, *supers)?;
     // Registered before the signatures are read, so a signature can name the
     // trait (`:dyn Name`).
     let mut def = TraitDef { params: params.clone(), methods: Vec::new(), defaults: Vec::new(), supertraits, public: d.public };
     reg.define_trait(path, def.clone());
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
+    super::type_syntax::note_definition(d.notes, path, &super::registry::TypeEntry::Trait(def.clone()), name_at.as_ref());
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
     let self_ty = Type::Param(params[0]);
     let mut bodies = Vec::new();
     let mut bodyless = Vec::new();
     for w in &methods {
         let (_, ps) = method_params(heap, &tcx, w.name, w.params, &self_ty)?;
-        let ret = parse_type(heap, &tcx, w.ret)?;
+        let ret = parse_type(heap, &tcx, w.ret, w.ret_at.as_ref())?;
         let m = member_symbol(w.name.name());
         let sig = FnDef { public: true, ..FnDef::plain(params.clone(), ps.iter().map(|(_, t, _)| t.clone()).collect(), ret.clone()) };
         def.methods.push((m, sig));
@@ -128,6 +129,7 @@ struct Written {
     name: SymRef,
     params: Value,
     ret: Value,
+    ret_at: Option<Loc>,
     /// Only a method with a default body has one: in a signature alone, a
     /// string at the end is the result type's place.
     doc: Option<String>,
@@ -160,7 +162,7 @@ fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
             ))
         }
     };
-    let [(header, _), (params, _), (ret, _), body @ ..] = elems else {
+    let [(header, _), (params, _), (ret, ret_at), body @ ..] = elems else {
         return Err(Error::TypeError(
             "deftrait: method must be (defmethod name (params...) ret) or (defmethod name (params...) ret body...)".into(),
         ));
@@ -175,24 +177,24 @@ fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
             unimplemented!("typeck: a trait method with a `(:where ...)` clause")
         }
     }
-    Ok(Item::Method(Written { name, params: *params, ret: *ret, doc, body: body.to_vec() }))
+    Ok(Item::Method(Written { name, params: *params, ret: *ret, ret_at: ret_at.clone(), doc, body: body.to_vec() }))
 }
 
 /// The supertrait list `v` of the trait `name`.
 fn supertraits(heap: &Heap, tcx: &TypeCx, name: &str, v: Value) -> Result<Vec<TraitBound>, Error> {
     let (reg, ns) = (tcx.reg, tcx.ns);
     let elems = heap
-        .list_to_vec(v)
+        .list_to_vec_locs(v)
         .map_err(|_| Error::TypeError(format!("deftrait {}: the supertrait list must be a list — write `()` for none", name)))?;
     let mut out: Vec<TraitBound> = Vec::new();
-    for elem in elems {
+    for (elem, elem_at) in elems {
         // A bare name, or `(Trait (Assoc Type)...)`.
-        let (head, pins) = match elem {
+        let (head, head_at, pins) = match elem {
             Value::Cons(_) => {
-                let parts = heap.list_to_vec(elem)?;
-                (parts[0], parts[1..].to_vec())
+                let parts = heap.list_to_vec_locs(elem)?;
+                (parts[0].0, parts[0].1.clone(), parts[1..].iter().map(|(p, _)| *p).collect())
             }
-            _ => (elem, Vec::new()),
+            _ => (elem, elem_at, Vec::new()),
         };
         let Value::Symbol(sym) = head else {
             return Err(Error::TypeError(format!("deftrait {}: supertrait name must be a symbol", name)));
@@ -205,6 +207,9 @@ fn supertraits(heap: &Heap, tcx: &TypeCx, name: &str, v: Value) -> Result<Vec<Tr
                 heap.symbol_spelling(sym)
             )));
         };
+        if let Some(entry) = reg.types.get(&trait_path) {
+            super::type_syntax::note_use(tcx, trait_path, entry, head_at.as_ref());
+        }
         let assoc = super::bounds::parse_pins(heap, tcx, "deftrait", trait_path, sdef, &pins)?;
         if let Some(a) = sdef.params[1..].iter().find(|a| !assoc.contains_key(a.name.name())) {
             return Err(Error::TypeError(format!(

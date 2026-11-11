@@ -38,7 +38,7 @@ pub(crate) fn check_callback_lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, a
 }
 
 fn lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>, callback: bool) -> Result<Typed, Error> {
-    let [(params, _), (ret, _), body @ ..] = args else {
+    let [(params, _), (ret, ret_at), body @ ..] = args else {
         return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
     };
     let written = heap.list_to_vec(*params)?;
@@ -54,7 +54,7 @@ fn lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>
         None => (&written[..], None),
     };
     let required = required.iter().map(|p| param(heap, &tcx, *p)).collect::<Result<Vec<_>, _>>()?;
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let ty = Type::Fn(required.iter().map(|(_, t, _)| t.clone()).collect(), rest.as_ref().map(|(_, t, _)| Box::new(t.clone())), Box::new(ret.clone()));
     let mut params = required;
     params.extend(rest.map(|(n, _, at)| (n, option_of_sexpr(), at)));
@@ -72,10 +72,10 @@ fn lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>
 /// A `lambda`'s parameter `(name Type)`.
 fn param(heap: &Heap, tcx: &super::type_syntax::TypeCx, p: Value) -> Result<Bound, Error> {
     let pair = heap.list_to_vec_locs(p).map_err(|_| Error::TypeError("parameter must be (name type)".into()))?;
-    let [(Value::Symbol(name), at), (ty, _)] = pair.as_slice() else {
+    let [(Value::Symbol(name), at), (ty, ty_at)] = pair.as_slice() else {
         return Err(Error::TypeError("parameter must be (name type)".into()));
     };
-    Ok((*name, parse_type(heap, tcx, *ty)?, at.clone()))
+    Ok((*name, parse_type(heap, tcx, *ty, ty_at.as_ref())?, at.clone()))
 }
 
 /// `callee`, a value, called with `first`, when it is already checked, and
@@ -287,7 +287,7 @@ pub(crate) fn check_labels(
     let mut parsed = Vec::new();
     for spec in heap.list_to_vec(*specs)? {
         let parts = heap.list_to_vec_locs(spec)?;
-        let [(name, name_at), (params, _), (ret, _), def_body @ ..] = parts.as_slice() else {
+        let [(name, name_at), (params, _), (ret, ret_at), def_body @ ..] = parts.as_slice() else {
             return Err(Error::TypeError("labels: binding must be (name (params) ret body...)".into()));
         };
         let Value::Symbol(name) = *name else {
@@ -299,7 +299,7 @@ pub(crate) fn check_labels(
             return Err(Error::TypeError(OPT_KEY_NEEDS_A_NAME.replace("{}", "labels")));
         }
         let params = written.iter().map(|p| param(heap, &tcx, *p)).collect::<Result<Vec<_>, _>>()?;
-        let ret = parse_type(heap, &tcx, *ret)?;
+        let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
         parsed.push((name, name_at.clone(), params, ret, def_body.to_vec()));
     }
     let names: Vec<Bound> = parsed

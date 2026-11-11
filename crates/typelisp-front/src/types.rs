@@ -1124,17 +1124,18 @@ pub fn written_path(heap: &Heap, ns: NsId, v: Value) -> Result<Path, Error> {
 /// gives the path back. `loc` is the whole name's span; the last segment is
 /// its tail on the same line.
 fn record_name(path: Path, loc: Option<&Loc>, dyn_head: bool, out: &mut Vec<TypeNameSpan>) -> Path {
-    if let Some(l) = loc {
-        let last = path.last_segment().chars().count() as u32;
-        if l.end_line == l.line && l.end_col >= l.col + last {
-            out.push(TypeNameSpan {
-                path,
-                dyn_head,
-                loc: Loc::new(std::sync::Arc::clone(&l.file), l.line, l.end_col - last).with_end(l.line, l.end_col),
-            });
-        }
+    if let Some(loc) = loc.and_then(|l| last_segment_span(&path, l)) {
+        out.push(TypeNameSpan { path, dyn_head, loc });
     }
     path
+}
+
+/// Where the last segment of `path` is, in a name written at `l` that ends
+/// with it: none when `l` is not one line long enough to hold it.
+pub(crate) fn last_segment_span(path: &Path, l: &Loc) -> Option<Loc> {
+    let last = path.last_segment().chars().count() as u32;
+    (l.end_line == l.line && l.end_col >= l.col + last)
+        .then(|| Loc::new(std::sync::Arc::clone(&l.file), l.line, l.end_col - last).with_end(l.line, l.end_col))
 }
 
 /// Whether `v` is the reader's `(%type-apply Name Arg...)` — what

@@ -39,7 +39,7 @@ pub(crate) fn check_impl(
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
     let ns = d.site.ns;
-    let Some((target, _)) = parts.first() else {
+    let Some((target, target_at)) = parts.first() else {
         return Err(Error::TypeError("impl: (impl<T...>? Type (defmethod ...)...)".into()));
     };
     // `(impl Trait Type ...)` names a type second; an inherent `impl` has an
@@ -67,7 +67,7 @@ pub(crate) fn check_impl(
     }
     let mut forms = Vec::new();
     for (item, _) in items {
-        if let Some(form) = check_item(reg, d, heap, requests, owner, type_names, clause, *target, *item)? {
+        if let Some(form) = check_item(reg, d, heap, requests, owner, type_names, clause, *target, target_at.as_ref(), *item)? {
             forms.push(form);
         }
     }
@@ -86,6 +86,7 @@ fn check_item(
     impl_names: &[SymRef],
     impl_where: Option<Value>,
     target: Value,
+    target_at: Option<&Loc>,
     item: Value,
 ) -> Result<Option<Value>, Error> {
     let elems = heap.list_to_vec_locs(item).map_err(|_| Error::TypeError(ITEM_SHAPE.into()))?;
@@ -93,7 +94,7 @@ fn check_item(
         Some(((Value::Symbol(p), _), rest)) if p.is(wk::PUB) => (true, rest),
         _ => (false, &elems[..]),
     };
-    let [(Value::Symbol(head), _), (header, _), (params, _), (ret, _), body @ ..] = elems else {
+    let [(Value::Symbol(head), _), (header, _), (params, _), (ret, ret_at), body @ ..] = elems else {
         return Err(Error::TypeError(ITEM_SHAPE.into()));
     };
     if !head.is(wk::DEFMETHOD) {
@@ -111,7 +112,7 @@ fn check_item(
     let scope = root.declare(ParamOwner::Method(owner, method), &names).map_err(|twice| {
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
-    let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None }, target)?;
+    let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes }, target, target_at)?;
     if !all_or_none(&target_ty, &scope.params()[..impl_names.len()]) {
         return Err(not_all_or_none(&format!("method {}::{}", owner, method), &owner, &target_ty));
     }
@@ -125,8 +126,8 @@ fn check_item(
         Some((s, at)) => list.after((s, target_ty.clone()), at),
         None => list,
     };
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty) };
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&target_ty), notes: d.notes };
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let mut bounds = Vec::new();
     for clause in impl_where.into_iter().chain(own_where) {
         bounds.extend(parse_where(heap, &tcx, clause)?);

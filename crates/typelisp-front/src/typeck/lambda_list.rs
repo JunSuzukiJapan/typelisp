@@ -76,7 +76,7 @@ pub(crate) fn parse_lambda_list(
     let [required, optionals, rest, keys] = sections(items, at.what)?;
     // The order `bound` is in.
     let locs = required.iter().chain(&optionals).chain(&rest).chain(&keys).map(|p| name_loc(heap, *p)).collect();
-    let tcx = TypeCx { reg, ns: d.site.ns, scope, self_type };
+    let tcx = TypeCx { reg, ns: d.site.ns, scope, self_type, notes: d.notes };
     let required = required.iter().map(|p| required_param(heap, &tcx, *p, at.what)).collect::<Result<Vec<_>, _>>()?;
     let rest = match rest.as_slice() {
         [] => None,
@@ -200,11 +200,11 @@ fn sections(items: &[Value], what: &str) -> Result<[Vec<Value>; 4], Error> {
 
 /// A required or `&rest` parameter, `(name Type)`.
 fn required_param(heap: &Heap, tcx: &TypeCx, p: Value, what: &str) -> Result<(SymRef, Type), Error> {
-    let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError(format!("{}: a parameter is (name Type)", what)))?;
-    let [Value::Symbol(name), ty] = pair.as_slice() else {
+    let pair = heap.list_to_vec_locs(p).map_err(|_| Error::TypeError(format!("{}: a parameter is (name Type)", what)))?;
+    let [(Value::Symbol(name), _), (ty, ty_at)] = pair.as_slice() else {
         return Err(Error::TypeError(format!("{}: a parameter is (name Type)", what)));
     };
-    Ok((*name, parse_type(heap, tcx, *ty)?))
+    Ok((*name, parse_type(heap, tcx, *ty, ty_at.as_ref())?))
 }
 
 /// An `&optional` or `&key` parameter, `(name Type)` or `(name Type
@@ -217,7 +217,7 @@ fn written(heap: &Heap, tcx: &TypeCx, p: Value, what: &str, section: &str) -> Re
     let Value::Symbol(name) = items[0].0 else {
         return Err(Error::TypeError(format!("{}: {} parameter name must be a symbol", what, section)));
     };
-    let ty = parse_type(heap, tcx, items[1].0)?;
+    let ty = parse_type(heap, tcx, items[1].0, items[1].1.as_ref())?;
     Ok((name, ty, items.get(2).cloned()))
 }
 
