@@ -64,11 +64,17 @@ impl Checker {
     /// into — see [`TestForms`].
     pub fn set_test_forms(&mut self, forms: TestForms) {
         self.test_forms = forms;
+        if let Some(rebuilt) = &mut self.rebuilt {
+            rebuilt.set_test_forms(forms);
+        }
     }
 
     /// The tests recorded under [`TestForms::Collect`] since the last call,
     /// in the order they were defined.
     pub fn take_tests(&mut self) -> Vec<TestCase> {
+        if let Some(rebuilt) = &mut self.rebuilt {
+            return rebuilt.take_tests();
+        }
         std::mem::take(&mut self.tests)
     }
 

@@ -51,6 +51,7 @@
 
 pub(crate) mod aref;
 pub(crate) mod args;
+pub(crate) mod attribute;
 pub(crate) mod binding;
 pub(crate) mod block;
 pub(crate) mod bounds;

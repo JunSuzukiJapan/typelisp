@@ -9,7 +9,9 @@ use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::intern_in;
 use typelisp_mem::SymRef;
 
+use super::attribute::{check_attribute, is_attribute, Tests};
 use super::define::Definer;
+use crate::check::TestForms;
 use super::macros::expand_toplevel;
 use super::module::module_site;
 use super::defenum::check_defenum;
@@ -53,6 +55,8 @@ pub(crate) struct TypeChecker {
     /// The module the last form, an `(in-module path)`, made the current
     /// one, for the driver, which keeps the current module, to take.
     entered: Option<typelisp_mem::NsId>,
+    /// What a `#[test]` definition is checked into, and the tests found.
+    tests: Tests,
 }
 
 impl TypeChecker {
@@ -103,7 +107,7 @@ impl TypeChecker {
         // into the form, which is then reachable from nothing but the caller.
         // Nothing allocates between releasing them and the caller rooting it.
         let roots_base = heap.root_count();
-        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut());
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &mut self.tests);
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty, reached)) => {
@@ -205,6 +209,17 @@ impl TypeChecker {
 
     /// The module the last form made the current one, when it was an
     /// `(in-module path)`.
+    /// What a `#[test]` definition and a top-level expression are checked
+    /// into.
+    pub(crate) fn set_test_forms(&mut self, forms: crate::check::TestForms) {
+        self.tests.forms = forms;
+    }
+
+    /// The tests found since the last call, in the order they were defined.
+    pub(crate) fn take_tests(&mut self) -> Vec<crate::check::TestCase> {
+        std::mem::take(&mut self.tests.found)
+    }
+
     pub(crate) fn take_entered(&mut self) -> Option<typelisp_mem::NsId> {
         self.entered.take()
     }
@@ -251,9 +266,20 @@ fn check_toplevel(
     v: Value,
     loc: Option<Loc>,
     warnings: &mut Vec<String>,
+    tests: &mut Tests,
 ) -> Result<(Value, Option<Type>, super::generic::Reached), Error> {
     let mut requests = Requests::default();
-    let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings)?;
+    let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings, tests)?;
+    // Collecting tests, the program's own work is checked and left out: a
+    // test run does not do it. A readtable registration still runs, since
+    // the rest of the file cannot be read without it.
+    let form = match tests.forms == TestForms::Collect
+        && crate::check::core::op_is(heap, form, wk::EXPR)
+        && !crate::project::needs_immediate_exec(heap, form)
+    {
+        true => crate::check::forms::module_form(heap, &Path::in_ns(site.ns, "nothing"), &[])?,
+        false => form,
+    };
     let form = bundled(heap, reg, &mut requests, form)?;
     Ok((form, ty, requests.take_reached()))
 }
@@ -301,10 +327,11 @@ fn check_primary(
     loc: Option<Loc>,
     requests: &mut Requests,
     warnings: &mut Vec<String>,
+    tests: &mut Tests,
 ) -> Result<(Value, Option<Type>), Error> {
     let ns = site.ns;
     if let Some(expanded) = expand_toplevel(reg, expander, heap, ns, v)? {
-        return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings);
+        return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings, tests);
     }
     if matches!(heap.car(v), Ok(Value::Symbol(h)) if h.is(wk::MODULE)) {
         let elems = heap.list_to_vec_locs(v)?;
@@ -322,7 +349,7 @@ fn check_primary(
                 publish_name_view(reg, inner.ns);
                 continue;
             }
-            let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings)?;
+            let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings, tests)?;
             heap.push_root(checked);
             // Run now, it runs with what it needs made.
             let checked = match crate::project::needs_immediate_exec(heap, checked) {
@@ -349,6 +376,9 @@ fn check_primary(
             }
             _ => &all[..],
         };
+        if is_attribute(heap, elems[0].0) {
+            return Ok((check_attribute(reg, d, heap, requests, tests, &elems[1..])?, None));
+        }
         // `impl<T, U>` reads as `(%type-apply impl T U)`.
         if crate::types::is_type_application(heap, elems[0].0) {
             let (head, names) = parse_header(heap, elems[0].0)?;
