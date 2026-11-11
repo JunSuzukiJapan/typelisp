@@ -16,7 +16,7 @@ use super::macros::expand;
 use super::locals::Locals;
 use super::method::check_method_call;
 use super::registry::{TypeEntry, ValueDef};
-use super::resolve::sees;
+use super::resolve::{reexported, sees};
 use super::tree::{Node, Typed};
 use super::variant::check_variant;
 
@@ -35,16 +35,19 @@ pub(crate) fn check_path_call(
         PathTarget::Member(owner, member) => check_member_call(cx, heap, locals, owner, member, &path_spelling(heap, id), args, expected, loc),
         // A definition another module does not make `pub` is not there for
         // this one.
-        PathTarget::In(path) => match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
-            Some(ValueDef::Fn(def)) => check_call(cx, heap, locals, path, def, None, args, expected, loc),
-            Some(ValueDef::Var(_)) => unimplemented!("typeck: calling the function the global `{}` holds", path_spelling(heap, id)),
-            Some(ValueDef::Macro { shape, .. }) => {
-                let spelling = path_spelling(heap, id);
-                let expanded = expand(cx.expander, heap, &path, *shape, &spelling, args)?;
-                check_expr(cx, heap, locals, expanded, expected, loc)
+        PathTarget::In(path) => {
+            let path = reexported(cx.reg, path);
+            match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
+                Some(ValueDef::Fn(def)) => check_call(cx, heap, locals, path, def, None, args, expected, loc),
+                Some(ValueDef::Var(_)) => unimplemented!("typeck: calling the function the global `{}` holds", path_spelling(heap, id)),
+                Some(ValueDef::Macro { shape, .. }) => {
+                    let spelling = path_spelling(heap, id);
+                    let expanded = expand(cx.expander, heap, &path, *shape, &spelling, args)?;
+                    check_expr(cx, heap, locals, expanded, expected, loc)
+                }
+                None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
             }
-            None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
-        },
+        }
     }
 }
 
@@ -138,12 +141,15 @@ fn inst_static<'r>(cx: &Cx<'r>, owner: Path, name: SymRef, spelling: &str, expec
 /// The value the path `id` names: a global variable of a module.
 pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     match path_target(heap, cx.ns, id)? {
-        PathTarget::In(path) => match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
-            Some(ValueDef::Var(var)) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
-            Some(ValueDef::Fn(def)) => super::lambda::fn_value(cx, path, def, expected, loc),
-            Some(ValueDef::Macro { .. }) => Err(Error::TypeError(format!("`{}` is a macro, which has no value", path_spelling(heap, id)))),
-            None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
-        },
+        PathTarget::In(path) => {
+            let path = reexported(cx.reg, path);
+            match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
+                Some(ValueDef::Var(var)) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
+                Some(ValueDef::Fn(def)) => super::lambda::fn_value(cx, path, def, expected, loc),
+                Some(ValueDef::Macro { .. }) => Err(Error::TypeError(format!("`{}` is a macro, which has no value", path_spelling(heap, id)))),
+                None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
+            }
+        }
         PathTarget::Member(..) => unimplemented!("typeck: the member `{}` of a type as a value", path_spelling(heap, id)),
     }
 }

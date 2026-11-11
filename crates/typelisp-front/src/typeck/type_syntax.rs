@@ -154,6 +154,7 @@ fn fn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
 /// The type the path `path` names, applied to `args`. One its module does
 /// not make `pub` is not seen from another.
 fn at_path(cx: &TypeCx, path: Path, args: Vec<Type>) -> Result<Type, Error> {
+    let path = super::resolve::reexported(cx.reg, path);
     let visible = |public: bool| public || sees(cx.ns, path.ns());
     match cx.reg.types.get(&path) {
         Some(entry @ TypeEntry::Type(TypeDef { public, .. })) if visible(*public) => entry_type(path, entry, args),
@@ -255,7 +256,12 @@ fn entry_type(path: Path, entry: &TypeEntry, args: Vec<Type>) -> Result<Type, Er
             }
             Ok(Subst::positional(params, &args).apply(body))
         }
-        TypeEntry::Trait(_) => unimplemented!("typeck: the trait `{}` written where a type is", path),
+        // A trait object is written `(:dyn Trait)`.
+        TypeEntry::Trait(_) => Err(Error::TypeError(format!(
+            "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
+            path.last_segment(),
+            path.last_segment()
+        ))),
         // A C struct is no value's type: only a typed pointer points at one.
         TypeEntry::CStruct(_) => Err(unknown_type(path.last_segment())),
     }

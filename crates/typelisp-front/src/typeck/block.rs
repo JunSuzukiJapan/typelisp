@@ -63,7 +63,12 @@ fn within(cx: &Cx, heap: &mut Heap, locals: &Locals, name: SymRef, seed: Option<
             // The body's end is one of the block's exits.
             if cx.resolve(&body_ty) != Type::Never && cx.holes.borrow_mut().unify(&t, &body_ty).is_err() {
                 let holes = cx.holes.borrow();
-                return Err(Error::TypeError(format!("branches have incompatible types: `{}` vs `{}`", holes.shown(&t), holes.shown(&body_ty))));
+                let (want, found) = (holes.shown(&t), holes.shown(&body_ty));
+                return Err(Error::TypeError(match (forms.is_empty(), exit.used) {
+                    (true, _) => format!("empty body has type `{}`, expected `{}`", found, want),
+                    (false, true) => format!("branches have incompatible types: `{}` vs `{}`", want, found),
+                    (false, false) => format!("type mismatch: expected `{}`, found `{}`", want, found),
+                }));
             }
             t
         }

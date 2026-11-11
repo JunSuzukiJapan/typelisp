@@ -67,6 +67,9 @@ impl<'p> Locals<'p> {
         if let Some((name, _)) = binds.iter().find(|(n, _)| is_reserved_name(*n)) {
             return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
         }
+        for (name, _) in &binds {
+            crate::check::verify::bound_name(*name, "a binding")?;
+        }
         Ok(Locals { parent: Some(self), binds, macros: Vec::new(), local_macros: Vec::new(), fence: None, callbacks: None })
     }
 

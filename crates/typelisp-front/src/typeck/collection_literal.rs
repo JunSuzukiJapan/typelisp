@@ -47,6 +47,17 @@ fn elements(heap: &Heap, id: BoxId) -> Vec<Value> {
     (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect()
 }
 
+/// The expected element type `ty`, when nothing in it is still to be
+/// decided: a type written into the form names no hole, so the elements
+/// decide one.
+fn decided(ty: Option<Type>) -> Option<Type> {
+    let mut open = false;
+    if let Some(t) = &ty {
+        super::unify::walk(t, &mut |t| open |= matches!(t, Type::Infer(_)));
+    }
+    ty.filter(|_| !open)
+}
+
 /// `elem_ty`, or the elements' when it is `None`: refused when there are
 /// none, with the spelling that gives it.
 fn element_type(elem_ty: Option<Type>, elems: &[Value], written: &str, annotated: &str) -> Result<Option<Type>, Error> {
@@ -59,7 +70,7 @@ fn element_type(elem_ty: Option<Type>, elems: &[Value], written: &str, annotated
 /// `#(..)`: a vector, each element pushed onto it.
 fn vector(heap: &mut Heap, id: BoxId, expected: Option<&Type>) -> Result<Value, Error> {
     let elems = elements(heap, id);
-    let elem_ty = element_type(literal_element_type(expected, &Path::builtin(typelisp_mem::wk::VECTOR)), &elems, "#(..)", "Vector<T>")?;
+    let elem_ty = element_type(decided(literal_element_type(expected, &Path::builtin(typelisp_mem::wk::VECTOR))), &elems, "#(..)", "Vector<T>")?;
     rooted(heap, |h| vector_literal_form(h, elem_ty.as_ref(), &elems))
 }
 
@@ -73,7 +84,7 @@ fn array(heap: &mut Heap, id: BoxId, expected: Option<&Type>) -> Result<Value, E
     let dims = elements(heap, dims_id);
     let data = elements(heap, data_id);
     let array = Path::in_ns(crate::types::std_module("array"), "Array");
-    let elem_ty = element_type(literal_element_type(expected, &array), &data, "#nA(..)", "Array<T>")?;
+    let elem_ty = element_type(decided(literal_element_type(expected, &array)), &data, "#nA(..)", "Array<T>")?;
     let dims_form = rooted(heap, |h| vector_literal_form(h, Some(&Type::Int), &dims))?;
     let data_form = rooted(heap, |h| vector_literal_form(h, elem_ty.as_ref(), &data))?;
     let make = name_form(heap, &Path::internal("array-from-row-major"));

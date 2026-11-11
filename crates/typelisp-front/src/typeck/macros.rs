@@ -52,12 +52,15 @@ pub(crate) fn expand_toplevel(reg: &Registry, expander: &dyn MacroExpander, heap
         // The reader's head for `#[ATTR...] FORM`, which names nothing.
         Value::Path(_) if super::attribute::is_attribute(heap, elems[0].0) => return Ok(None),
         Value::Path(id) => match path_target(heap, ns, id)? {
-            PathTarget::In(path) => match reg.values.get(&path) {
-                Some(ValueDef::Macro { public, shape }) if *public || sees(ns, path.ns()) => {
-                    (path, *shape, crate::types::path_spelling(heap, id))
+            PathTarget::In(path) => {
+                let path = super::resolve::reexported(reg, path);
+                match reg.values.get(&path) {
+                    Some(ValueDef::Macro { public, shape }) if *public || sees(ns, path.ns()) => {
+                        (path, *shape, crate::types::path_spelling(heap, id))
+                    }
+                    _ => return Ok(None),
                 }
-                _ => return Ok(None),
-            },
+            }
             PathTarget::Member(..) => return Ok(None),
         },
         _ => return Ok(None),

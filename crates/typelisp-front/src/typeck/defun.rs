@@ -175,7 +175,7 @@ pub(crate) fn parse_header(heap: &Heap, v: Value) -> Result<(SymRef, Vec<SymRef>
                 _ => Err(Error::TypeError("defun: a function's name is a plain name, with its type parameters after it: name<T, U>".into())),
             }
         }
-        _ => Err(Error::TypeError(SHAPE.into())),
+        _ => Err(Error::TypeError("a definition name must be a symbol (write `name<T>` for type parameters)".into())),
     }
 }
 

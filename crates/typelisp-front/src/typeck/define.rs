@@ -78,6 +78,7 @@ impl Definer<'_> {
     /// for a name the standard library offers every module unless it was
     /// shadowed.
     pub(crate) fn ownable(&self, heap: &Heap, name: SymRef, who: &str) -> Result<SymRef, Error> {
+        crate::check::verify::bound_name(name, who)?;
         if name.home() == typelisp_mem::NsId::SYSTEM {
             return Err(Error::TypeError(format!("{}: `{}` is a reserved word, which no module can define", who, name.name())));
         }

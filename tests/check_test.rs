@@ -113,11 +113,7 @@ fn ret_of(src: &str, name: &str) -> Type {
     while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         chk.check_form(&mut h, &interp, v).expect("check failed");
     }
-    chk.registry()
-        .fn_sig(&Path::root(name))
-        .unwrap_or_else(|| panic!("`{}` was not registered", name))
-        .ret
-        .clone()
+    chk.fn_ret(&Path::root(name)).unwrap_or_else(|| panic!("`{}` was not registered", name))
 }
 
 /// The synthesized type of a single expression form.

@@ -45,6 +45,17 @@ pub(crate) fn find_named<T>(reg: &Registry, here: NsId, sym: SymRef, lookup: imp
     through(prelude, sym)
 }
 
+/// What the path `p` names: `p` itself, or, when `p`'s module re-exports
+/// the name (`(pub use ...)`), what the re-export names, followed to the
+/// definition.
+pub(crate) fn reexported(reg: &Registry, p: Path) -> Path {
+    let key = (p.ns(), p.name_symbol());
+    match (reg.reexports.get(&key), reg.imports.get(&key)) {
+        (Some(()), Some(target)) => reexported(reg, *target),
+        _ => p,
+    }
+}
+
 /// The trait the bare name `sym` names in `here`.
 pub(crate) fn trait_named(reg: &Registry, here: NsId, sym: SymRef) -> Option<(Path, &TraitDef)> {
     let (path, entry) = find_named(reg, here, sym, |ns, key| reg.types.get(&Path::of_symbol(ns, key)))?;

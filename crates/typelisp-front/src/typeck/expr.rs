@@ -759,7 +759,9 @@ fn no_method(cx: &Cx, recv: &Type, member: SymRef) -> Option<Error> {
     if owners.is_empty() {
         return None;
     }
-    let recv_ty = cx.resolve(recv);
+    // A number literal nothing decided is the type its methods are looked
+    // up in.
+    let recv_ty = cx.with_default(recv);
     if let Type::Param(_) = recv_ty {
         return Some(Error::TypeError(format!(
             "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",

@@ -494,7 +494,8 @@ fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value,
                 lowered.push(one);
             }
             // A niched `Option<T>`'s two shapes, as `Construct` builds them.
-            if let Some(payload) = option_niche(lw, owner, &targs) {
+            // Out of a `Sexpr` it is a box of its own, read as any other.
+            if let Some(payload) = option_niche(lw, owner, &targs).filter(|_| !*downcast) {
                 return match lowered[..] {
                     [sub] => lw.reg.pat_some_form(heap, &payload, sub),
                     _ => core::tagged(heap, wk::PAT_EMPTY, &[]),
