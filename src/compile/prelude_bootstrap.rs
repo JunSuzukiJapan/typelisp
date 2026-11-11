@@ -553,7 +553,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         crate::compile::EMITTED_LAYOUT,
         crate::compile::EMITTED_LAYOUT,
     )?;
-    state.rebuilt = rebuilt;
+    state.checker.rebuilt = rebuilt;
     let types = typelisp_front::dump::write_state(&state)?;
     Ok(typelisp_front::dump::write(&[(types, bitcode)]))
 }

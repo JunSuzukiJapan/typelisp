@@ -902,6 +902,13 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// A registry with no module at all: what a dump's unit alone defines
+    /// is applied to one to be handed to the rebuilt checker
+    /// (`typeck::wire::Unit::bridged`).
+    pub(crate) fn empty() -> Registry {
+        Registry { modules: HashMap::new(), def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
+    }
+
     /// A registry whose standard library module holds the built-in types
     /// (`Option`/`Result`/the concrete error types/`Sexpr`/the primitives ...),
     /// functions and globals, with an empty root.

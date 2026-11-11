@@ -23,10 +23,11 @@ use typelisp_mem::SymRef;
 
 use super::generic::Base;
 use super::tree::Typed;
+use super::wire::{sorted, Ns, RegistryDelta, Sym};
 
 /// A function: its type parameters, its parameter types and its result
 /// type. The types may mention the type parameters.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FnDef {
     pub(crate) type_params: Vec<TypeParam>,
     pub(crate) params: Vec<Type>,
@@ -64,7 +65,7 @@ impl FnDef {
 
 /// A method of a type. Its type parameters are the type's, in order, then
 /// the method's own (`docs/dev/checker-rebuild-plan.md` 7.3).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct MethodDef {
     pub(crate) sig: FnDef,
     /// The first parameter is the receiver.
@@ -79,7 +80,7 @@ pub(crate) struct MethodDef {
 
 /// A type: its kind, its type parameters, and a struct's fields or a sum
 /// type's variants.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TypeDef {
     pub(crate) kind: AdtKind,
     pub(crate) params: Vec<TypeParam>,
@@ -106,8 +107,9 @@ impl TypeDef {
 
 /// A struct's field: its member symbol, its type, whether it is `pub`, and
 /// whether it has a default.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Field {
+    #[serde(with = "crate::owned_form::sym_serde")]
     pub(crate) name: SymRef,
     pub(crate) ty: Type,
     pub(crate) public: bool,
@@ -118,7 +120,7 @@ pub(crate) struct Field {
 
 /// What a module-level name in the type name space is: a type, a type
 /// alias, a trait or a C struct, never two of them.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum TypeEntry {
     Type(TypeDef),
     /// A `deftype`: the type `body` stands for, written in its `params`.
@@ -131,13 +133,15 @@ pub(crate) enum TypeEntry {
 /// A trait: its type parameters, `Self` first and then its associated
 /// types (`docs/dev/checker-rebuild-plan.md` 7.4), and its own methods'
 /// signatures, written in them.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TraitDef {
     pub(crate) params: Vec<TypeParam>,
     /// The trait's own methods, in the order the `deftrait` wrote them. A
     /// method's type parameters are the trait's.
+    #[serde(with = "super::wire::sym_pairs")]
     pub(crate) methods: Vec<(SymRef, FnDef)>,
     /// The methods the `deftrait` gave a body, which an `impl` may leave out.
+    #[serde(with = "super::wire::syms")]
     pub(crate) defaults: Vec<SymRef>,
     /// The traits a type implementing this one implements too, written in
     /// this one's parameters.
@@ -155,7 +159,7 @@ impl TraitDef {
 /// A blanket `impl`, `(impl<T> Trait T ...)`: the owner its methods are
 /// defined under, which no program can name; its type parameter; and the
 /// bounds a type meets to be covered, written in that parameter.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct BlanketImpl {
     pub(crate) owner: Path,
     pub(crate) param: TypeParam,
@@ -166,7 +170,7 @@ pub(crate) struct BlanketImpl {
 /// the one `args` names. The associated types it binds, by name, and the
 /// bounds its `(:where ...)` puts on the type's parameters are written in
 /// the type's parameters.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TraitImpl {
     pub(crate) args: Option<Vec<Type>>,
     pub(crate) assoc: BTreeMap<String, Type>,
@@ -177,7 +181,7 @@ pub(crate) struct TraitImpl {
 /// two of them (`docs/dev/name-resolution.md` 1). Of a macro, whether it is
 /// `pub` and how many arguments a call of it may have; its body is the
 /// evaluator's, which expands it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ValueDef {
     Fn(FnDef),
     Var(VarDef),
@@ -196,7 +200,7 @@ impl ValueDef {
 }
 
 /// A global variable: its type, and whether it is `pub`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct VarDef {
     pub(crate) ty: Type,
     pub(crate) public: bool,
@@ -222,11 +226,16 @@ pub(crate) struct Template {
 pub(crate) struct Table<K, V> {
     map: HashMap<K, V>,
     undo: Vec<(K, Option<V>)>,
+    /// The generation each key was last written at, removed ones included:
+    /// what a dump's unit asks for ([`Self::changed_since`]).
+    stamps: HashMap<K, u64>,
+    /// The generation of the writes being made: the number of commits.
+    generation: u64,
 }
 
 impl<K, V> Default for Table<K, V> {
     fn default() -> Self {
-        Table { map: HashMap::new(), undo: Vec::new() }
+        Table { map: HashMap::new(), undo: Vec::new(), stamps: HashMap::new(), generation: 0 }
     }
 }
 
@@ -236,13 +245,33 @@ impl<K: Hash + Eq + Clone, V> Table<K, V> {
     }
 
     pub(crate) fn insert(&mut self, k: K, v: V) {
+        self.stamps.insert(k.clone(), self.generation);
         let replaced = self.map.insert(k.clone(), v);
         self.undo.push((k, replaced));
     }
 
     pub(crate) fn remove(&mut self, k: &K) {
+        self.stamps.insert(k.clone(), self.generation);
         let replaced = self.map.remove(k);
         self.undo.push((k.clone(), replaced));
+    }
+
+    /// Write what a dump's unit says `k` holds: `None` is removed.
+    pub(crate) fn put(&mut self, k: K, v: Option<V>) {
+        match v {
+            Some(v) => self.insert(k, v),
+            None => self.remove(&k),
+        }
+    }
+
+    /// Every key written at the generation `since` or later, with what it
+    /// holds now (`None`: removed). A write a rollback undid is among them,
+    /// with what the key held before it, which writing again changes nothing.
+    pub(crate) fn changed_since(&self, since: u64) -> Vec<(K, Option<V>)>
+    where
+        V: Clone,
+    {
+        self.stamps.iter().filter(|(_, g)| **g >= since).map(|(k, _)| (k.clone(), self.map.get(k).cloned())).collect()
     }
 
     /// Every key and value.
@@ -255,8 +284,9 @@ impl<K: Hash + Eq + Clone, V> Table<K, V> {
         self.undo.iter().map(|(k, _)| k)
     }
 
-    fn commit(&mut self) {
+    fn commit(&mut self, generation: u64) {
         self.undo.clear();
+        self.generation = generation;
     }
 
     fn rollback(&mut self) {
@@ -328,21 +358,23 @@ pub(crate) struct Registry {
     callbacks_lifted: std::cell::Cell<u64>,
     /// The macros `macrolet` has bound so far, to name the next one.
     local_macros: std::cell::Cell<u64>,
+    /// The number of commits: the generation of the writes being made.
+    generation: u64,
 }
 
 /// A definition, as its documentation string and its place are kept by:
 /// a function, a macro, a
 /// global variable, a type or a trait by its path, a type's method or a
 /// trait's own method by the type or the trait and the member symbol.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Definition {
     Fn(Path),
     Macro(Path),
     Var(Path),
     Type(Path),
     Trait(Path),
-    Method(Path, SymRef),
-    TraitMethod(Path, SymRef),
+    Method(Path, #[serde(with = "crate::owned_form::sym_serde")] SymRef),
+    TraitMethod(Path, #[serde(with = "crate::owned_form::sym_serde")] SymRef),
 }
 
 impl Registry {
@@ -404,32 +436,15 @@ impl Registry {
         self.throw_tags.borrow_mut().insert(tag, ty);
     }
 
-    /// Every generic body kept.
-    pub(crate) fn templates(&self) -> impl Iterator<Item = (&Base, &Rc<Template>)> {
-        self.templates.iter()
+    /// Write the generic body a dump's unit says `base` has (`None`: none).
+    pub(crate) fn put_template(&mut self, base: Base, template: Option<Rc<Template>>) {
+        self.templates.put(base, template);
     }
 
-    /// Every method an `impl` took from its trait's default body, with the
-    /// trait and its arguments.
-    pub(crate) fn all_defaulted(&self) -> impl Iterator<Item = (&(Path, SymRef), &(Path, Vec<Type>))> {
-        self.defaulted.iter()
-    }
-
-    /// Keep the generic body `template` a dump wrote, where this registry
-    /// has none: what a registry copied from the current checker's lacks of
-    /// the prelude (`wire::RebuiltBodies::restore`).
-    pub(crate) fn adopt_template(&mut self, base: Base, template: Rc<Template>) {
-        if self.templates.get(&base).is_none() {
-            self.templates.insert(base, template);
-        }
-    }
-
-    /// Record the method a dump wrote that an `impl` took from its trait's
-    /// default body, where this registry records none.
-    pub(crate) fn adopt_defaulted(&mut self, key: (Path, SymRef), defaulted: (Path, Vec<Type>)) {
-        if self.defaulted.get(&key).is_none() {
-            self.defaulted.insert(key, defaulted);
-        }
+    /// Write the method a dump's unit says an `impl` took from its trait's
+    /// default body (`None`: none).
+    pub(crate) fn put_defaulted(&mut self, key: (Path, SymRef), defaulted: Option<(Path, Vec<Type>)>) {
+        self.defaulted.put(key, defaulted);
     }
 
     /// The method `name` of the type `owner` written for every instantiation.
@@ -581,25 +596,96 @@ impl Registry {
 
     /// Keep every write since the last commit.
     pub(crate) fn commit(&mut self) {
-        self.values.commit();
-        self.types.commit();
-        self.methods.commit();
-        self.inst_methods.commit();
-        self.method_names.commit();
-        self.imports.commit();
-        self.reexports.commit();
-        self.ctors.commit();
-        self.static_uses.commit();
-        self.module_aliases.commit();
-        self.templates.commit();
-        self.trait_impls.commit();
-        self.blanket_impls.commit();
-        self.blanket_owners.commit();
-        self.defaulted.commit();
-        self.docs.commit();
-        self.locs.commit();
-        self.predeclared.commit();
-        self.throw_tags.get_mut().commit();
+        self.generation += 1;
+        let g = self.generation;
+        self.values.commit(g);
+        self.types.commit(g);
+        self.methods.commit(g);
+        self.inst_methods.commit(g);
+        self.method_names.commit(g);
+        self.imports.commit(g);
+        self.reexports.commit(g);
+        self.ctors.commit(g);
+        self.static_uses.commit(g);
+        self.module_aliases.commit(g);
+        self.templates.commit(g);
+        self.trait_impls.commit(g);
+        self.blanket_impls.commit(g);
+        self.blanket_owners.commit(g);
+        self.defaulted.commit(g);
+        self.docs.commit(g);
+        self.locs.commit(g);
+        self.predeclared.commit(g);
+        self.throw_tags.get_mut().commit(g);
+    }
+
+    /// The generation of the writes being made: what a dump's unit is
+    /// taken since ([`Self::changed_since`]).
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Every entry written at the generation `since` or later, but the
+    /// generic bodies ([`super::wire::RebuiltBodies`]) and the places
+    /// definitions were written, which only the language server reads.
+    pub(crate) fn changed_since(&self, since: u64) -> RegistryDelta {
+        let sym = |s: SymRef| Sym(s);
+        let ns_sym = |(n, s): (NsId, SymRef)| (Ns(n), Sym(s));
+        RegistryDelta {
+            values: sorted(self.values.changed_since(since)),
+            types: sorted(self.types.changed_since(since)),
+            methods: sorted(self.methods.changed_since(since).into_iter().map(|((p, m), v)| ((p, sym(m)), v)).collect()),
+            inst_methods: sorted(self.inst_methods.changed_since(since).into_iter().map(|((p, m), v)| ((p, sym(m)), v)).collect()),
+            method_names: sorted(self.method_names.changed_since(since).into_iter().map(|(m, v)| (sym(m), v)).collect()),
+            imports: sorted(self.imports.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v)).collect()),
+            reexports: sorted(self.reexports.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v)).collect()),
+            ctors: sorted(self.ctors.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v)).collect()),
+            static_uses: sorted(self.static_uses.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v.map(|(p, m)| (p, sym(m))))).collect()),
+            module_aliases: sorted(self.module_aliases.changed_since(since).into_iter().map(|(k, v)| (ns_sym(k), v.map(Ns))).collect()),
+            trait_impls: sorted(self.trait_impls.changed_since(since)),
+            blanket_impls: sorted(self.blanket_impls.changed_since(since)),
+            blanket_owners: sorted(self.blanket_owners.changed_since(since)),
+            docs: sorted(self.docs.changed_since(since)),
+            predeclared: sorted(self.predeclared.changed_since(since)),
+            throw_tags: sorted(self.throw_tags.borrow().changed_since(since).into_iter().map(|(t, v)| (sym(t), v)).collect()),
+            callbacks_lifted: self.callbacks_lifted.get(),
+            local_macros: self.local_macros.get(),
+        }
+    }
+
+    /// Write what a dump's unit says changed, uncommitted.
+    pub(crate) fn apply(&mut self, d: RegistryDelta) {
+        d.values.into_iter().for_each(|(k, v)| self.values.put(k, v));
+        d.types.into_iter().for_each(|(k, v)| self.types.put(k, v));
+        d.methods.into_iter().for_each(|((p, m), v)| self.methods.put((p, m.0), v));
+        d.inst_methods.into_iter().for_each(|((p, m), v)| self.inst_methods.put((p, m.0), v));
+        d.method_names.into_iter().for_each(|(m, v)| self.method_names.put(m.0, v));
+        d.imports.into_iter().for_each(|((n, s), v)| self.imports.put((n.0, s.0), v));
+        d.reexports.into_iter().for_each(|((n, s), v)| self.reexports.put((n.0, s.0), v));
+        d.ctors.into_iter().for_each(|((n, s), v)| self.ctors.put((n.0, s.0), v));
+        d.static_uses.into_iter().for_each(|((n, s), v)| self.static_uses.put((n.0, s.0), v.map(|(p, m)| (p, m.0))));
+        d.module_aliases.into_iter().for_each(|((n, s), v)| self.module_aliases.put((n.0, s.0), v.map(|m| m.0)));
+        d.trait_impls.into_iter().for_each(|(k, v)| self.trait_impls.put(k, v));
+        d.blanket_impls.into_iter().for_each(|(k, v)| self.blanket_impls.put(k, v));
+        d.blanket_owners.into_iter().for_each(|(k, v)| self.blanket_owners.put(k, v));
+        d.docs.into_iter().for_each(|(k, v)| self.docs.put(k, v));
+        d.predeclared.into_iter().for_each(|(k, v)| self.predeclared.put(k, v));
+        d.throw_tags.into_iter().for_each(|(t, v)| self.throw_tags.get_mut().put(t.0, v));
+        // A name a later unit gives is none an earlier one gave.
+        self.callbacks_lifted.set(self.callbacks_lifted.get().max(d.callbacks_lifted));
+        self.local_macros.set(self.local_macros.get().max(d.local_macros));
+    }
+
+    /// The generic bodies written at the generation `since` or later
+    /// (`None`: forgotten).
+    pub(crate) fn templates_since(&self, since: u64) -> Vec<(Base, Option<Rc<Template>>)> {
+        self.templates.changed_since(since)
+    }
+
+    /// The methods an `impl` took from its trait's default body, recorded
+    /// or forgotten at the generation `since` or later.
+    pub(crate) fn defaulted_since(&self, since: u64) -> Vec<((Path, SymRef), Option<(Path, Vec<Type>)>)> {
+        self.defaulted.changed_since(since)
     }
 
     /// Undo every write since the last commit.

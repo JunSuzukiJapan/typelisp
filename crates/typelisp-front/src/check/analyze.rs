@@ -206,7 +206,7 @@ type ParamsFull = (Vec<(SymRef, Type)>, Vec<Option<Loc>>, Vec<OptKeySpec>, Optio
 /// and consumed by [`MacroShape::check_arity`]. Carries only what a raw
 /// argument *count* can be judged against — the `&key` names themselves aren't
 /// needed here (keyword validation happens in `Interp::expand_macro`).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct MacroShape {
     required: usize,
     optional: usize,
@@ -1373,6 +1373,7 @@ impl Checker {
             sig.record(cat, key, hash);
             Ok(())
         })?;
+        sig.set_rebuilt(self.rebuilt.as_ref().and_then(|r| r.generation()));
         Ok(sig)
     }
 
@@ -1403,7 +1404,14 @@ impl Checker {
             }
             Ok(())
         })?;
-        Ok(CheckerDelta { entries, fn_templates, method_templates })
+        let rebuilt = match &self.rebuilt {
+            Some(r) => {
+                let unit = r.capture(heap, before.rebuilt()).map_err(|e| format!("writing the rebuilt checker's registry failed: {}", e))?;
+                bincode::serialize(&unit).map_err(|e| format!("writing the rebuilt checker's registry failed: {}", e))?
+            }
+            None => Vec::new(),
+        };
+        Ok(CheckerDelta { entries, fn_templates, method_templates, rebuilt })
     }
 
     /// Reinstates a unit's checker additions in `self`.
@@ -1412,28 +1420,18 @@ impl Checker {
     /// what the definition-checking path does for a template it retains: a
     /// template must outlive any number of collections between here and its
     /// last instantiation, and nothing else refers to it.
-    /// The generic bodies the rebuilt checker checked, as a dump wrote them
-    /// (`crate::dump::rebuilt_prelude_bodies`), taken in when it is on and
-    /// not read when it is off.
-    pub fn apply_rebuilt_bodies(&mut self, bytes: &[u8], heap: &mut Heap) -> Result<(), String> {
-        let Some(rebuilt) = &mut self.rebuilt else {
-            return Ok(());
+    pub fn apply_delta(&mut self, mut delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
+        let rebuilt = std::mem::take(&mut delta.rebuilt);
+        // A unit with nothing for the rebuilt checker, loaded after its
+        // registry was made: what the unit alone defines, for the bridge.
+        let bridged = match &self.rebuilt {
+            Some(r) if rebuilt.is_empty() && !delta.entries.is_empty() && r.has_registry() => {
+                let mut only = crate::check::Registry::empty();
+                crate::dump::apply_entries(&mut only, &mut crate::dump::ThrowTags::new(), &mut |_| {}, delta.entries.clone())?;
+                Some(crate::typeck::wire::Unit::bridged(&only))
+            }
+            _ => None,
         };
-        if bytes.is_empty() {
-            return Ok(());
-        }
-        let written: crate::typeck::wire::RebuiltBodies =
-            bincode::deserialize(bytes).map_err(|e| {
-                format!(
-                    "reading the rebuilt checker's bodies failed: {} — its typed tree has changed since the dump was made; run scripts/regen-prelude-bitcode.sh",
-                    e
-                )
-            })?;
-        rebuilt.take_bodies(written.restore(heap).map_err(|e| e.to_string())?);
-        Ok(())
-    }
-
-    pub fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
         let mut predeclared = std::mem::take(&mut self.predeclared);
         crate::dump::apply_entries(
             &mut self.info.reg,
@@ -1469,6 +1467,24 @@ impl Checker {
                 crate::dump::WireMethodTemplate::Setter { index } => MethodTemplate::Setter { index },
             };
             self.generic_method_templates.insert(key, restored);
+        }
+        // The rebuilt checker's part, taken in when it is on and not read
+        // when it is off.
+        if let Some(r) = &mut self.rebuilt {
+            let unit = match (bridged, rebuilt.is_empty()) {
+                (Some(unit), _) => unit,
+                (None, true) => crate::typeck::wire::Unit::default(),
+                (None, false) => {
+                    let written: crate::typeck::wire::RebuiltUnit = bincode::deserialize(&rebuilt).map_err(|e| {
+                        format!(
+                            "reading the rebuilt checker's part of the dump failed: {} — its shape has changed since the dump was made; run scripts/regen-prelude-bitcode.sh",
+                            e
+                        )
+                    })?;
+                    written.restore(heap).map_err(|e| e.to_string())?
+                }
+            };
+            r.take_unit(heap, &self.info.reg, unit);
         }
         Ok(())
     }

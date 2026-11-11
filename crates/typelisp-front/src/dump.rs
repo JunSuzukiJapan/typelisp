@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 32;
+pub const FORMAT_VERSION: u32 = 33;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -88,7 +88,7 @@ pub mod cat {
 /// hash it for [`RegistrySignature`]), and a `Vec<u8>` it already has costs
 /// nothing to keep. `apply` reads `cat` to know what to deserialize it back
 /// into.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Entry {
     cat: u8,
     /// The module path the entry lives in — `[]` for the root, and for the
@@ -109,9 +109,19 @@ pub struct Entry {
 /// not just added — an `impl` block grows an existing `AdtDef`'s `assoc` table,
 /// and a redefinition replaces a `FnSig` in place.
 #[derive(Default)]
-pub struct RegistrySignature(BTreeMap<(u8, String), u64>);
+pub struct RegistrySignature(BTreeMap<(u8, String), u64>, Option<u64>);
 
 impl RegistrySignature {
+    /// The generation of the rebuilt checker's registry as of now, for its
+    /// part of the delta; `None` when it is off or has made no registry yet.
+    pub(crate) fn set_rebuilt(&mut self, generation: Option<u64>) {
+        self.1 = generation;
+    }
+
+    pub(crate) fn rebuilt(&self) -> Option<u64> {
+        self.1
+    }
+
     pub(crate) fn record(&mut self, cat: u8, key: String, hash: u64) {
         self.0.insert((cat, key), hash);
     }
@@ -290,6 +300,12 @@ pub struct CheckerDelta {
     /// The template's owner, its name (written down, since an
     /// instantiation's own method is named by a specialization), and it.
     pub method_templates: Vec<(Path, crate::owned_form::OwnedSym, WireMethodTemplate)>,
+    /// What the unit wrote of the rebuilt checker's registry
+    /// (`typeck::wire::RebuiltUnit`): the prelude's generic bodies
+    /// ([`rebuilt_prelude_bodies`]), or what a unit checked with it on
+    /// defined; empty for a unit that has none written down. Bytes, so that
+    /// a session with the rebuilt checker off does not read them.
+    pub rebuilt: Vec<u8>,
 }
 
 /// Serializes `value` and returns the bytes together with their hash.
@@ -663,11 +679,6 @@ pub struct UnitState {
     /// full recompilation of the prelude or the island.
     pub forms_digest: Option<u64>,
     pub checker: CheckerDelta,
-    /// The generic bodies the rebuilt checker checked
-    /// ([`rebuilt_prelude_bodies`]); empty for a unit that has none written
-    /// down. Bytes, so that a session with the rebuilt checker off does not
-    /// read them.
-    pub rebuilt: Vec<u8>,
     /// Every checked top-level core form this unit defines, in declaration
     /// order. Re-executed on load, which is what fills the interpreter's
     /// function/type/macro tables.
@@ -786,7 +797,6 @@ pub fn capture_types_with_abi(
         body_layout,
         emits_layout,
         checker,
-        rebuilt: Vec::new(),
         forms: forms
             .iter()
             .map(|v| crate::owned_form::value_to_owned(heap, *v).map_err(|e| e.to_string()))
@@ -823,7 +833,6 @@ pub fn apply_types(
     unit: UnitState,
 ) -> Result<(), String> {
     chk.apply_delta(unit.checker, heap)?;
-    chk.apply_rebuilt_bodies(&unit.rebuilt, heap)?;
     for f in &unit.forms {
         let tl = crate::owned_form::owned_to_value(heap, f).map_err(|e| e.to_string())?;
         heap.push_root(tl);
@@ -836,12 +845,12 @@ pub fn apply_types(
 }
 
 /// The prelude's generic bodies as the rebuilt checker checks them, for
-/// [`UnitState::rebuilt`]: the core macro layer and the prelude checked by a
+/// [`CheckerDelta::rebuilt`]: the core macro layer and the prelude checked by a
 /// checker of its own, nothing run. `expander` has run the prelude, so it
 /// holds its macros.
 pub fn rebuilt_prelude_bodies(heap: &mut crate::Heap, expander: &dyn crate::check::MacroExpander) -> Result<Vec<u8>, String> {
-    let bodies = crate::typeck::toplevel::prelude_bodies(heap, expander).map_err(|e| format!("prelude: the rebuilt checker refuses it: {}", e))?;
-    bincode::serialize(&bodies).map_err(|e| format!("prelude: writing the rebuilt checker's bodies failed: {}", e))
+    let unit = crate::typeck::toplevel::prelude_bodies(heap, expander).map_err(|e| format!("prelude: the rebuilt checker refuses it: {}", e))?;
+    bincode::serialize(&unit).map_err(|e| format!("prelude: writing the rebuilt checker's bodies failed: {}", e))
 }
 
 /// Records that these globals already have storage, made by somebody else.

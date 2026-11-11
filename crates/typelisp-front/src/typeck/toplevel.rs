@@ -30,7 +30,7 @@ use super::registry::{MethodDef, Registry, TypeEntry};
 use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::subst::Subst;
-use super::wire::{Bodies, RebuiltBodies};
+use super::wire::{RebuiltUnit, Unit};
 
 /// The rebuilt checker, as the current one hands it each top-level form
 /// while the switch `TYPELISP_TYPECK` is on (`docs/dev/checker-rebuild-plan.md` 6).
@@ -44,9 +44,9 @@ pub(crate) struct TypeChecker {
     expr_ty: Option<Type>,
     /// The warnings checking has given and no one has taken yet.
     warnings: RefCell<Vec<String>>,
-    /// The generic bodies dumps wrote, read before the registry was made,
-    /// for it to take when it is ([`Self::take_bodies`]).
-    pending: RefCell<Vec<Bodies>>,
+    /// The units dumps wrote that hold generic bodies only, read before the
+    /// registry was made, for it to take when it is ([`Self::take_unit`]).
+    pending: RefCell<Vec<Unit>>,
     /// Every C callback entry the checked code asks for, in the order first
     /// asked.
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
@@ -72,8 +72,9 @@ impl TypeChecker {
         self.reg.get_or_init(|| {
             let mut reg = Registry::default();
             super::bridge::import(old, &mut reg);
-            self.pending.take().into_iter().for_each(|b| b.adopt(&mut reg));
+            self.pending.take().into_iter().for_each(|u| u.apply(&mut reg));
             reg.commit();
+            debug_assert_eq!(reg.generation(), CREATED);
             reg
         })
     }
@@ -154,13 +155,47 @@ impl TypeChecker {
         self.format_calls.iter().cloned().collect()
     }
 
-    pub(crate) fn take_bodies(&mut self, bodies: Bodies) {
-        match self.reg.get_mut() {
-            Some(reg) => {
-                bodies.adopt(reg);
-                reg.commit();
-            }
-            None => self.pending.get_mut().push(bodies),
+    /// A unit a dump wrote, `old` being the current checker's registry with
+    /// the unit's part of it in. One that holds registry entries is taken in
+    /// at once, the registry made for it, and what it defined told to the
+    /// session's names; one that holds generic bodies only waits for the
+    /// registry to be made, so that the units loaded before then are in
+    /// `old` when it is copied.
+    pub(crate) fn take_unit(&mut self, heap: &Heap, old: &crate::check::Registry, unit: Unit) {
+        if unit.has_entries() {
+            self.registry(old);
+        }
+        let Some(reg) = self.reg.get_mut() else {
+            self.pending.get_mut().push(unit);
+            return;
+        };
+        let (types, methods) = unit.written();
+        unit.apply(reg);
+        publish_uses(reg, heap);
+        reg.commit();
+        publish(reg, heap, &types, &methods);
+    }
+
+    /// Whether the registry has been made: a unit loaded after then whose
+    /// entries are in the current checker's registry only is in no registry
+    /// of this checker's.
+    pub(crate) fn has_registry(&self) -> bool {
+        self.reg.get().is_some()
+    }
+
+    /// The generation of the registry's writes, for a dump's unit to be
+    /// taken since; `None` before it is made.
+    pub(crate) fn generation(&self) -> Option<u64> {
+        self.reg.get().map(Registry::generation)
+    }
+
+    /// What the registry was written since the generation `since`, for a
+    /// dump's unit. `None` is from before the registry was made: what was
+    /// written after it was.
+    pub(crate) fn capture(&self, heap: &Heap, since: Option<u64>) -> Result<RebuiltUnit, Error> {
+        match self.reg.get() {
+            Some(reg) => RebuiltUnit::of(heap, reg, since.unwrap_or(CREATED)),
+            None => Ok(RebuiltUnit::default()),
         }
     }
 
@@ -237,7 +272,7 @@ impl TypeChecker {
 ///
 /// The source is fixed: a form the checker refuses is a bug of the checker,
 /// not the program's.
-pub(crate) fn prelude_bodies(heap: &mut Heap, expander: &dyn MacroExpander) -> Result<RebuiltBodies, Error> {
+pub(crate) fn prelude_bodies(heap: &mut Heap, expander: &dyn MacroExpander) -> Result<RebuiltUnit, Error> {
     let base = crate::check::Registry::with_builtins();
     let mut checker = TypeChecker::default();
     let site = Site { ns: typelisp_mem::NsId::STD, file: None, policy: crate::check::RedefPolicy::Error };
@@ -252,8 +287,12 @@ pub(crate) fn prelude_bodies(heap: &mut Heap, expander: &dyn MacroExpander) -> R
             checked?;
         }
     }
-    RebuiltBodies::of(heap, checker.reg.get().expect("checking made it"))
+    RebuiltUnit::bodies_of(heap, checker.reg.get().expect("checking made it"), 0)
 }
+
+/// The generation of a registry just made: its copy of the current
+/// checker's registry and the units that waited for it are written before.
+const CREATED: u64 = 1;
 
 /// `v`'s core form, its type when it is an expression, and what its code
 /// asks to be reached from outside it. The specializations the form asks for come first,
@@ -484,6 +523,30 @@ fn publish_name_view(reg: &Registry, ns: typelisp_mem::NsId) {
         imports.entry((target.ns(), target.name_symbol())).or_insert(bare.name());
     }
     typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(ns, imports));
+}
+
+/// Tells the session's table of what names mean (`Heap::names`) about what
+/// the `use`s written since the last commit brought in: an import as what
+/// it names, a module brought in under a short name, and a type's variants
+/// and static methods brought in bare.
+fn publish_uses(reg: &Registry, heap: &Heap) {
+    super::library::publish(reg, &mut heap.names());
+    let mut names = heap.names();
+    for key in reg.module_aliases.written() {
+        if let Some(m) = reg.module_aliases.get(key) {
+            names.import_name(key.0, key.1, typelisp_mem::symbols::Import::Module(*m));
+        }
+    }
+    for key in reg.ctors.written() {
+        if let Some((ty, _)) = reg.ctors.get(key) {
+            names.import_name(key.0, key.1, typelisp_mem::symbols::Import::Member(ty.name_symbol()));
+        }
+    }
+    for key in reg.static_uses.written() {
+        if let Some((ty, _)) = reg.static_uses.get(key) {
+            names.import_name(key.0, key.1, typelisp_mem::symbols::Import::Member(ty.name_symbol()));
+        }
+    }
 }
 
 /// Tells the session's table of what names mean (`Heap::names`) about the
@@ -1504,12 +1567,13 @@ mod tests {
         }
         // Its bodies, written down and read back, are all there.
         let reg = checker.reg.get().expect("made by the checks");
-        let written = bincode::serialize(&RebuiltBodies::of(&heap, reg).expect("the bodies are written")).expect("the bodies serialize");
-        let read: RebuiltBodies = bincode::deserialize(&written).expect("the bodies deserialize");
+        let written = bincode::serialize(&RebuiltUnit::of(&heap, reg, 0).expect("the unit is written")).expect("the unit serializes");
+        let read: RebuiltUnit = bincode::deserialize(&written).expect("the unit deserializes");
         let mut fresh = Registry::default();
-        read.restore(&mut heap).expect("the bodies are read").adopt(&mut fresh);
-        assert!(reg.templates().count() > 0);
-        assert_eq!(fresh.templates().count(), reg.templates().count());
-        assert_eq!(fresh.all_defaulted().count(), reg.all_defaulted().count());
+        read.restore(&mut heap).expect("the unit is read").apply(&mut fresh);
+        assert!(!reg.templates_since(0).is_empty());
+        assert_eq!(fresh.templates_since(0).len(), reg.templates_since(0).len());
+        assert_eq!(fresh.defaulted_since(0).len(), reg.defaulted_since(0).len());
+        assert_eq!(fresh.changed_since(0).values.len(), reg.changed_since(0).values.len());
     }
 }
