@@ -119,6 +119,7 @@ impl Holes {
                 Type::Fn(each(params), rest.as_ref().map(|t| Box::new(self.resolve(t))), Box::new(self.resolve(ret)))
             }
             Type::PtrTo(t) => Type::PtrTo(Box::new(self.resolve(t))),
+            Type::Proj(trait_path, t, assoc) => Type::Proj(*trait_path, Box::new(self.resolve(t)), assoc.clone()),
             other => other.clone(),
         }
     }
@@ -133,6 +134,7 @@ impl Holes {
             Type::Dyn(path, pins) => Type::Dyn(path, each(&pins)),
             Type::Fn(params, rest, ret) => Type::Fn(each(&params), rest.map(|t| Box::new(self.shown(&t))), Box::new(self.shown(&ret))),
             Type::PtrTo(t) => Type::PtrTo(Box::new(self.shown(&t))),
+            Type::Proj(trait_path, t, assoc) => Type::Proj(trait_path, Box::new(self.shown(&t)), assoc),
             other => other,
         }
     }
@@ -201,6 +203,14 @@ impl Holes {
                 }
                 Ok(())
             }
+            // Nothing is known of one but which trait's associated type
+            // of which type it is.
+            (Type::Proj(p, a, x), Type::Proj(q, b, y)) if p == q && x == y => {
+                if self.unify(a, b).is_err() {
+                    return mismatch(self);
+                }
+                Ok(())
+            }
             (Type::PtrTo(a), Type::PtrTo(b)) => {
                 if self.unify(a, b).is_err() {
                     return mismatch(self);
@@ -232,7 +242,7 @@ pub(crate) fn walk(ty: &Type, f: &mut impl FnMut(&Type)) {
             }
             walk(ret, f);
         }
-        Type::PtrTo(t) => walk(t, f),
+        Type::PtrTo(t) | Type::Proj(_, t, _) => walk(t, f),
         _ => {}
     }
 }

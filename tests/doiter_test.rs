@@ -113,6 +113,30 @@ fn doiter_works_inside_a_where_bounded_generic_function() {
 }
 
 #[test]
+fn an_unpinned_item_is_not_known_to_be_an_int() {
+    // Nothing says what `T`'s `Item` is, so it is no number, even though
+    // the one call passes an iterator of `int`s.
+    let src = "(defun sum-iter<T> ((it T)) int (:where (Iter T))
+                 (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))";
+    assert!(check(src).is_err());
+}
+
+#[test]
+fn an_unpinned_item_goes_through_a_generic_function_at_each_iterator() {
+    // `x`'s type is `T`'s `Item` inside the body; each specialization makes
+    // it the type the iterator's `impl` binds: an `int`, then a `string`.
+    let src = "(defun keep<U> ((u U)) U u)
+               (defun count-kept<T> ((it T)) int (:where (Iter T))
+                 (let ((n 0)) (doiter (x it) (let ((y (keep x))) y (setf n (+ n 1)))) n))
+               (defun ints () Vector<int> (Vector::new))
+               (defun strings () Vector<string> (Vector::new))
+               (let ((v (ints)) (w (strings)))
+                 (push v 1) (push v 2) (push w \"a\")
+                 (+ (* 10 (count-kept (iter v))) (count-kept (iter w))))";
+    assert_eq!(eval_ok(src), Value::Int(21));
+}
+
+#[test]
 fn doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item() {
     // Sibling of `doiter_works_inside_a_where_bounded_generic_function`, now
     // pinning `Item` to `int` via `(:where (Iter T (Item int)))` — `x`'s type

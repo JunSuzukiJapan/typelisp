@@ -128,10 +128,16 @@ pub(crate) fn check_trait_call(
 ) -> Result<Typed, Error> {
     let sig = bound.sig;
     let what = format!("{}::{}", bound.trait_path, method.name());
-    let at = |ty: &Type| match in_params(&sig.type_params, &bound.at, ty) {
-        Some(t) => t,
-        None => unimplemented!("typeck: `{}`, whose type has an associated type its bound does not pin", what),
-    };
+    // An associated type the bound does not pin is the one of the bounded
+    // type, which nothing here knows more of.
+    let self_ty = bound.at[0].clone().expect("a bound says what its `Self` is");
+    let filled: Vec<Option<Type>> = bound
+        .at
+        .iter()
+        .zip(&sig.type_params)
+        .map(|(t, p)| Some(t.clone().unwrap_or_else(|| Type::Proj(bound.trait_path, Box::new(self_ty.clone()), p.name.name().to_string()))))
+        .collect();
+    let at = |ty: &Type| in_params(&sig.type_params, &filled, ty).expect("every parameter of the trait is filled");
     if super::args::has_tail(sig) {
         unimplemented!("typeck: the trait method `{}` with &optional, &rest or &key parameters", what)
     }

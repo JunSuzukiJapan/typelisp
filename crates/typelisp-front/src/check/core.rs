@@ -698,6 +698,7 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
             wk::TYPE_PARAM
         }
         Type::Infer(_) => unreachable!("type_form: an inference hole left the checker"),
+        Type::Proj(..) => unreachable!("type_form: a specialization writes the type an associated type is, not `{}`", ty),
         Type::Unit => wk::TYPE_UNIT,
         Type::Never => wk::TYPE_NEVER,
         Type::Ptr

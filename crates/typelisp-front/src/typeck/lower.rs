@@ -31,7 +31,7 @@ pub(crate) struct Lowering<'a> {
 impl Lowering<'_> {
     /// `ty` as this lowering writes it.
     pub(crate) fn settle(&self, ty: &Type) -> Type {
-        self.subst.apply(ty)
+        super::bounds::projected(self.reg, &self.subst.apply(ty))
     }
 }
 

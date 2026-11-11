@@ -86,6 +86,10 @@ fn mentioned_types(t: &Type, out: &mut Vec<Path>) {
             }
         }
         Type::PtrTo(inner) => mentioned_types(inner, out),
+        Type::Proj(trait_path, inner, _) => {
+            out.push(*trait_path);
+            mentioned_types(inner, out);
+        }
         _ => {}
     }
 }

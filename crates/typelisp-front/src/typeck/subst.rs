@@ -48,6 +48,7 @@ impl Subst {
                 Type::Fn(each(params), rest.as_ref().map(|t| Box::new(self.apply(t))), Box::new(self.apply(ret)))
             }
             Type::PtrTo(t) => Type::PtrTo(Box::new(self.apply(t))),
+            Type::Proj(trait_path, t, assoc) => Type::Proj(*trait_path, Box::new(self.apply(t)), assoc.clone()),
             other => other.clone(),
         }
     }

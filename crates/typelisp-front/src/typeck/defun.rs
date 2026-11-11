@@ -153,8 +153,8 @@ pub(crate) fn split_doc<'a>(heap: &Heap, items: &'a [(Value, Option<Loc>)]) -> (
 /// The generic body `template` at `lw`'s substitution: its parameters and
 /// result type, and its body lowered.
 pub(crate) fn lower_template(heap: &mut Heap, lw: &mut Lowering, template: &Template) -> Result<(Vec<(SymRef, Type)>, Type, Vec<Value>), Error> {
-    let params = template.params.iter().map(|(n, t)| (*n, lw.subst.apply(t))).collect();
-    let ret = lw.subst.apply(&template.ret);
+    let params = template.params.iter().map(|(n, t)| (*n, lw.settle(t))).collect();
+    let ret = lw.settle(&template.ret);
     let body = lower_all(heap, lw, &template.body)?;
     Ok((params, ret, body))
 }

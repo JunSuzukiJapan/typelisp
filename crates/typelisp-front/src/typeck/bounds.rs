@@ -14,7 +14,7 @@ use crate::types::{prim_type_path, Path, Type, TypeParam};
 use crate::{Error, Heap, Value};
 
 use super::expr::Cx;
-use super::registry::{FnDef, Registry, TraitDef, TypeEntry};
+use super::registry::{FnDef, Registry, TraitDef, TraitImpl, TypeEntry};
 use super::resolve::trait_named;
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -266,10 +266,9 @@ fn meets_at(q: Asker, ty: &Type, b: &TraitBound, seen: &[(Path, Type)]) -> Meets
         _ => &[],
     };
     let reg = q.reg();
-    let found = reg.trait_impls.get(&(b.trait_path, path)).and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)));
     let mut next = seen.to_vec();
     next.push((b.trait_path, ty.clone()));
-    let Some(imp) = found else {
+    let Some((imp, at)) = impl_for(reg, b.trait_path, path, args) else {
         let unmet = || Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None });
         let Some(blanket) = reg.blanket_impls.get(&b.trait_path) else { return unmet() };
         // Its bounds asking what is being asked already: they never end,
@@ -290,10 +289,6 @@ fn meets_at(q: Asker, ty: &Type, b: &TraitBound, seen: &[(Path, Type)]) -> Meets
         }
         return Meets::Yes;
     };
-    // The `impl`'s types are written in the type's parameters.
-    let type_params = reg.type_def(&path).map(|d| d.params.clone()).unwrap_or_default();
-    // One written for one instantiation binds concrete types.
-    let at = if imp.args.is_none() { Subst::positional(&type_params, args) } else { Subst::default() };
     for (p, bounds) in &imp.bounds {
         let arg = at.apply(&Type::Param(*p));
         for inner in bounds {
@@ -311,6 +306,57 @@ fn meets_at(q: Asker, ty: &Type, b: &TraitBound, seen: &[(Path, Type)]) -> Meets
         }
     }
     Meets::Yes
+}
+
+/// The `impl` of the trait `trait_path` for the type at `path` whose
+/// arguments are `args`, not a blanket one, and what puts its types, which
+/// are written in the type's parameters, at those arguments.
+fn impl_for<'r>(reg: &'r Registry, trait_path: Path, path: Path, args: &[Type]) -> Option<(&'r TraitImpl, Subst)> {
+    let imp = reg.trait_impls.get(&(trait_path, path))?.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args))?;
+    // One written for one instantiation binds concrete types.
+    let at = match imp.args {
+        Some(_) => Subst::default(),
+        None => Subst::positional(&reg.type_def(&path).map(|d| d.params.clone()).unwrap_or_default(), args),
+    };
+    Some((imp, at))
+}
+
+/// `ty`, which a specialization settled, with each associated type of a
+/// type ([`Type::Proj`]) replaced by the type that type's `impl` binds it to.
+pub(crate) fn projected(reg: &Registry, ty: &Type) -> Type {
+    let each = |ts: &[Type]| ts.iter().map(|t| projected(reg, t)).collect::<Vec<_>>();
+    match ty {
+        Type::Named(path, args) => Type::Named(*path, each(args)),
+        Type::Dyn(path, pins) => Type::Dyn(*path, each(pins)),
+        Type::Fn(params, rest, ret) => {
+            Type::Fn(each(params), rest.as_ref().map(|t| Box::new(projected(reg, t))), Box::new(projected(reg, ret)))
+        }
+        Type::PtrTo(t) => Type::PtrTo(Box::new(projected(reg, t))),
+        Type::Proj(trait_path, self_ty, assoc) => projected(reg, &assoc_of(reg, *trait_path, &projected(reg, self_ty), assoc)),
+        other => other.clone(),
+    }
+}
+
+/// The type that `ty`, a settled type implementing the trait `trait_path`,
+/// binds the trait's associated type `assoc` to.
+fn assoc_of(reg: &Registry, trait_path: Path, ty: &Type, assoc: &str) -> Type {
+    let (path, args): (Path, &[Type]) = match ty {
+        Type::Dyn(dyn_trait, pins) if *dyn_trait == trait_path => {
+            let tdef = trait_def(reg, &trait_path).expect("a trait object's trait is defined");
+            let i = tdef.params[1..].iter().position(|a| a.name.name() == assoc).expect("the associated type is its trait's");
+            return pins[i].clone();
+        }
+        Type::Dyn(..) => unimplemented!("typeck: the associated type `{}` of `{}` that `{}`, a supertrait's object, binds", assoc, trait_path, ty),
+        Type::Named(path, args) => (*path, args),
+        other => (prim_type_path(other).unwrap_or_else(|| panic!("`{}` implements `{}`, but has no `impl`s", other, trait_path)), &[]),
+    };
+    match impl_for(reg, trait_path, path, args) {
+        Some((imp, at)) => at.apply(imp.assoc.get(assoc).expect("an `impl` binds each associated type of its trait")),
+        None if reg.blanket_impls.get(&trait_path).is_some() => {
+            unimplemented!("typeck: the associated type `{}` of `{}` that a blanket `impl` gives `{}`", assoc, trait_path, ty)
+        }
+        None => panic!("`{}` meets the bound on `{}`, but has no `impl` of it", ty, trait_path),
+    }
 }
 
 /// Whether the type parameter `p` meets `b` by its own bounds: one on `b`'s

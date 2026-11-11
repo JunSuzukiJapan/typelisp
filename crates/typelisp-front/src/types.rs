@@ -560,6 +560,14 @@ pub enum Type {
     /// arguments (`docs/dev/checker-rebuild-plan.md` 7.2). It never leaves
     /// the checker: no registry entry or output holds one.
     Infer(u32),
+    /// The associated type, by its name, of the trait at the [`Path`] that
+    /// the type in the box implements: Rust's `<T as Iter>::Item`. The
+    /// rebuilt checker writes it for an associated type a bound does not
+    /// pin, inside the bounded definition, where it is a type nothing is
+    /// known of; a specialization replaces it with the type the `impl`
+    /// binds. No source writes one, so no signature or registry entry
+    /// holds one.
+    Proj(Path, Box<Type>, String),
 }
 
 /// The type as a program would write it — `Vector<int>`, `Option<Sexpr>`,
@@ -606,6 +614,9 @@ impl fmt::Display for Type {
             Type::Var(name) => write!(f, "{}", name),
             Type::Param(p) => write!(f, "{}", p.name.name()),
             Type::Infer(_) => write!(f, "_"),
+            Type::Proj(trait_path, self_ty, assoc) => {
+                write!(f, "<{} as {}>::{}", self_ty, view.definition(trait_path.ns(), trait_path.name_symbol()), assoc)
+            }
             Type::Dyn(p, pins) => {
                 write!(f, ":dyn {}", view.definition(p.ns(), p.name_symbol()))?;
                 if pins.is_empty() { Ok(()) } else { args(f, pins) }
@@ -692,7 +703,7 @@ impl Type {
             Type::Char => "char",
             Type::Str => "string",
             Type::Symbol => "symbol",
-            Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Param(_) | Type::Infer(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
+            Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Param(_) | Type::Infer(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) | Type::Proj(..) => {
                 return None
             }
         })
