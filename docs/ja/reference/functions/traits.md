@@ -54,7 +54,9 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 
 `Eq` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）と `bool` `char`
 `string` `symbol` `complex`、`Sexpr`（`eq`、つまり同一性。`match` の値パターンが使う）、
-および `cons-cell<A,B>`（要素が `Eq` なら再帰的に）。`Ord` 実装済み: 全数値型と `char` `string`、
+`cons-cell<A,B>`（要素が `Eq` なら再帰的に）、`Option<T>` と `Result<T,E>`（同じ変種で、中身が
+`Eq` で等しいとき。リストは `Option<Sexpr>` なので、セルは `Sexpr` の同一性で比べる。中身で
+比べるなら `equal`）。`Ord` 実装済み: 全数値型と `char` `string`、
 および `cons-cell<A,B>`（辞書順、要素が `Ord` なら）。
 
 メソッド名が組み込みの演算子（`= /= < <= > >=`）や `eq`/`lt` と重ならないのは、組み込みは

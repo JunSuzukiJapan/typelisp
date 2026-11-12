@@ -3532,6 +3532,26 @@ fn compile_dispatches_string_equals_and_less() {
     assert_eq!(v, Value::Int(90));
 }
 
+/// `Option<T>`'s `equals`, compiled at `Option<int>` and at a list.
+#[test]
+fn compile_dispatches_option_equals() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun same ((a Option<int>) (b Option<int>)) bool (equals a b))
+        (compile same)
+        (defun same-list ((a Option<Sexpr>) (b Option<Sexpr>)) bool (equals a b))
+        (compile same-list)
+        (let ((l '(1 2)))
+          (+ (if (same (Option::some 3) (Option::some 3)) 1 0)
+             (+ (if (same (Option::some 3) (Option::none)) 10 0)
+                (+ (if (same-list l l) 100 0)
+                   (if (same-list '() '()) 1000 0)))))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, Value::Int(1101));
+}
+
 /// And `char`: a compiled `char` is a raw `i64` code point, so
 /// `char::equals` (body `(equal self other)`) and `char::less` (body
 /// `(lt self other)`) lower to plain integer `icmp`s via the char-native

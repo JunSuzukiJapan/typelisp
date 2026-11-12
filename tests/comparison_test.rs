@@ -89,6 +89,26 @@ fn not_equals_negates_equality_per_type() {
     assert!(b(r#"(not-equals "x" "y")"#));
 }
 
+/// `Option<T>` and `Result<T,E>` compare as Rust's `PartialEq` does: the
+/// same variant, and contents `equals` by their own type. A list is an
+/// `Option<Sexpr>`: `Option`'s `equals` takes it, and its cells compare by
+/// `Sexpr`'s identity.
+#[test]
+fn option_and_result_compare_their_variant_and_contents() {
+    assert!(b("(equals (Option::some 1) (Option::some 1))"));
+    assert!(!b("(equals (Option::some 1) (Option::some 2))"));
+    assert!(!b("(equals (Option::some 1) (Option::none))"));
+    assert!(b("(equals (the Option<int> (Option::none)) (Option::none))"));
+    assert!(b(r#"(not-equals (Option::some "a") (Option::some "b"))"#));
+    assert!(b("(equals (the Result<int,string> (Result::ok 1)) (Result::ok 1))"));
+    assert!(b(r#"(equals (the Result<int,string> (Result::err "e")) (Result::err "e"))"#));
+    assert!(!b(r#"(equals (the Result<int,string> (Result::ok 1)) (Result::err "e"))"#));
+    assert!(b("(let ((l '(1 2))) (equals l l))"));
+    assert!(!b("(equals '(1 2) '(1 2))"));
+    assert!(b("(equals '() '())"));
+    assert!(!b("(equals '() '(1))"));
+}
+
 // ---- expanded Ord trait (less-equal / greater / greater-equal) --------------
 
 #[test]

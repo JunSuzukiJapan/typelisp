@@ -2106,6 +2106,20 @@ user-visible capacity."
 ;; bridges the two, and it is free: under the niche `(Option::some x)` is `x`.
 (impl Eq Sexpr  (defmethod equals (self (other Self)) bool (eq (Option::some self) (Option::some other))))
 
+;; Rust's `PartialEq` for `Option<T>`/`Result<T,E>`: the same variant, and
+;; contents that are `equals` by their own type's `Eq`. A list is an
+;; `Option<Sexpr>`, so two lists compare their first cells by `Sexpr`'s `eq`.
+(impl<T> Eq Option<T> (:where (Eq T))
+  (defmethod equals (self (other Self)) bool
+    (match self
+      ((some x) (match other ((some y) (equals x y)) ((none) false)))
+      ((none) (is-none other)))))
+(impl<T,E> Eq Result<T,E> (:where (Eq T) (Eq E))
+  (defmethod equals (self (other Self)) bool
+    (match self
+      ((ok x) (match other ((ok y) (equals x y)) ((err _) false)))
+      ((err e) (match other ((ok _) false) ((err f) (equals e f)))))))
+
 ;; Scalar `Ord` impls — only the core `less`; the other three come from `Ord`'s
 ;; default bodies. Every scalar here has the overloaded `<` builtin (numbers
 ;; always had it; `char`/`string` gained one alongside these expanded traits —

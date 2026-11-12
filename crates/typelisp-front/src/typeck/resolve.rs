@@ -87,16 +87,10 @@ pub(crate) fn static_use_named(reg: &Registry, here: NsId, sym: SymRef) -> Optio
 /// A method without `pub` is seen as [`sees`] says, from the module it was
 /// written in.
 ///
-/// An `Option<Sexpr>` is the type an S-expression has, so it answers to
-/// `Sexpr`'s instance methods too, whose signatures take it; what `Sexpr`
-/// does not have is `Option`'s.
+/// An `Option<Sexpr>` is the type an S-expression has, so what `Option`
+/// does not have it finds among `Sexpr`'s instance methods, whose
+/// signatures take it.
 pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name: SymRef) -> Result<Option<(Path, &'r MethodDef)>, Error> {
-    if is_option_of_sexpr(ty) {
-        let sexpr = Path::builtin(typelisp_mem::wk::SEXPR);
-        if let Some(m) = reg.method(&sexpr, name).filter(|m| m.instance) {
-            return Ok(Some((sexpr, m)));
-        }
-    }
     let Some(owner) = nominal_path(ty) else { return Ok(None) };
     let args = match ty {
         Type::Named(_, args) => args.as_slice(),
@@ -116,6 +110,12 @@ pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name
         )));
     }
     let Some(m) = reg.method_at(&owner, name, args) else {
+        if is_option_of_sexpr(ty) {
+            let sexpr = Path::builtin(typelisp_mem::wk::SEXPR);
+            if let Some(m) = reg.method(&sexpr, name).filter(|m| m.instance) {
+                return Ok(Some((sexpr, m)));
+            }
+        }
         return blanket_method(reg, ty, name);
     };
     let home = m.home.map_or(owner.ns(), |h| h.ns());
