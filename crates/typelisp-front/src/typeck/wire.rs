@@ -134,7 +134,6 @@ pub(crate) struct RegistryDelta {
     pub(crate) blanket_owners: Vec<(Path, Option<Path>)>,
     pub(crate) docs: Vec<(Definition, Option<String>)>,
     pub(crate) predeclared: Vec<(Path, Option<()>)>,
-    pub(crate) throw_tags: Vec<(Sym, Option<Type>)>,
     pub(crate) callbacks_lifted: u64,
     pub(crate) local_macros: u64,
 }

@@ -1709,9 +1709,12 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 ```
 
 - **タグはリテラルシンボルのみ**（`'done`）。CL と違い評価されない。
-- **タグが型を運ぶ。** `'tag` が最初に使われたときに型が決まり、以降の同じシンボルの
-  `throw`/`catch` は全部それに突き合わされる。別の型で使うと型エラー。
-- `throw` の型は `!`（発散）。`(catch 'tag expr)` の型は `expr` の型とタグの型の合流型。
+- **`catch` と、そこに届く `throw` は同じ型を運ぶ。** `catch` の中に字句的に書いた同じタグの
+  `throw` は、型が合わなければ型エラー。別の関数から届いた `throw` は、届いた `catch` と型が
+  違えば実行時のエラー（`panic`）になる。違うタグの `catch` は、型を問わず素通りする。
+- 型は使う場所ごとに決まる。ジェネリックな本体の中のタグは、具体化ごとの型を運ぶ。
+- `throw` の型は `!`（発散）。`(catch 'tag expr)` の型は `expr` の型で、`catch` が受け取る値も
+  この型。`expr` が `!` で、中の `throw` も型を決めないときは `!`。
 - `unwind-protect` の値は `protected` の値。`cleanup` の値は捨てられる。
   `cleanup` は `protected` をどう抜けても走る——正常終了・`throw`・`panic` に加えて、
   `break`/`return`/`return-from` で抜けた場合も走る。`cleanup` 自身の非局所脱出は、

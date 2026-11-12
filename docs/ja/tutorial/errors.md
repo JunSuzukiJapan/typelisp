@@ -160,14 +160,32 @@ error: main.typl:4:7: panic: index 3 out of range
 `catch` まで抜けて `"negative: -7"` を返します。
 
 - タグは `'bad-input` のようにシンボルをそのまま書きます。
-- **タグごとに、投げる値の型は 1 つに決まります。** 上の例で `'bad-input` は `string` を運ぶので、
-  同じタグで `int` を投げると型エラーになります。`catch` の本体の型も、タグの型と合わなければ
-  なりません。
+- `catch` の本体の値と、その `catch` が受け取る値は、同じ型です。上の例の `catch` は `string` を
+  運ぶので、`'bad-input` で `int` を投げてはいけません。`catch` の中に書いた `throw` なら、型エラーに
+  なります。
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; 型エラー: catch は string を運ぶ
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  `check-all` のように別の関数の中から投げたなら、どの `catch` に届くかは実行時に決まるので、
+  届いたときにエラーになります。
+
+  ```
+  error: panic: throw: `bad-input` carries `std::primitive::int`, but the nearest (catch 'bad-input) carries `std::primitive::string`
+  ```
+
+- ジェネリックな関数の中のタグは、具体化ごとの型を運びます。
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` は、`(pass 1)` では `int` を、
+  `(pass "a")` では `string` を運びます。
 - `throw` の先に同じタグの `catch` が無ければ、エラーになります。
 
 関数の中で途中から戻るだけなら、`catch` / `throw` ではなく `return-from` を使います。

@@ -2986,6 +2986,10 @@ pub unsafe extern "C-unwind" fn rt_throw(args: *const i64, argc: u32) -> i64 {
 /// `CompiledPanic`/`InterpretedUnwind`: those belong to no tag, so every
 /// `catch` declines them and only `unwind-protect` cleanups see them pass.
 ///
+/// A throw of this `catch`'s symbol carrying another type
+/// (`throw_tag_mismatch`) is an error: the throw in flight is replaced by a
+/// panic saying so, and the answer is false.
+///
 /// # Safety
 ///
 /// `argc` must be `>= 1` and `args[0]` must decode to a `Value::Symbol`; a
@@ -2999,7 +3003,21 @@ pub unsafe extern "C" fn rt_throw_matches(args: *const i64, argc: u32) -> i64 {
         Value::Symbol(id) => id,
         _ => fatal("rt_throw_matches: tag is not a symbol"),
     };
-    IN_FLIGHT_TAG.with(|cell| i64::from(*cell.borrow() == Some(tag)))
+    let thrown = IN_FLIGHT_TAG.with(|cell| *cell.borrow());
+    match thrown {
+        Some(t) if t == tag => 1,
+        // A throw of this symbol carrying another type: it becomes a panic,
+        // which this `catch` declines like any other.
+        Some(t) => match typelisp_mem::symbols::throw_tag_mismatch(t, tag) {
+            Some(message) => {
+                clear_throw();
+                CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(Box::new(CompiledPanic { message })));
+                0
+            }
+            None => 0,
+        },
+        None => 0,
+    }
 }
 
 /// Consumes the in-flight throw, returning its value in tagged form — the

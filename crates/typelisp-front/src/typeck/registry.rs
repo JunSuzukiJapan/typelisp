@@ -7,7 +7,6 @@
 //! ([`Registry::rollback`]) and those of one that succeeds kept
 //! ([`Registry::commit`]).
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
@@ -507,10 +506,6 @@ pub(crate) struct Registry {
     /// The functions a `defsignature` declared whose `defun` has not come
     /// yet.
     pub(crate) predeclared: Table<Path, ()>,
-    /// The type each `catch` and `throw` tag carries, by the tag's symbol.
-    /// Written when a form is settled (`Cx::settle`), which holds the
-    /// registry to read only.
-    throw_tags: RefCell<Table<SymRef, Type>>,
     /// The functions lifted for C callbacks so far, to name the next one.
     callbacks_lifted: std::cell::Cell<u64>,
     /// The macros `macrolet` has bound so far, to name the next one.
@@ -581,16 +576,6 @@ impl Registry {
         let n = self.callbacks_lifted.get();
         self.callbacks_lifted.set(n + 1);
         n
-    }
-
-    /// The type the tag `tag` carries, once a form has said.
-    pub(crate) fn throw_tag(&self, tag: SymRef) -> Option<Type> {
-        self.throw_tags.borrow().get(&tag).cloned()
-    }
-
-    /// Record that the tag `tag` carries `ty`.
-    pub(crate) fn record_throw_tag(&self, tag: SymRef, ty: Type) {
-        self.throw_tags.borrow_mut().insert(tag, ty);
     }
 
     /// Write the generic body a dump's unit says `base` has (`None`: none).
@@ -777,7 +762,6 @@ impl Registry {
         self.docs.commit(g);
         self.locs.commit(g);
         self.predeclared.commit(g);
-        self.throw_tags.get_mut().commit(g);
     }
 
     /// The generation of the writes being made: what a dump's unit is
@@ -809,7 +793,6 @@ impl Registry {
             blanket_owners: sorted(self.blanket_owners.changed_since(since)),
             docs: sorted(self.docs.changed_since(since)),
             predeclared: sorted(self.predeclared.changed_since(since)),
-            throw_tags: sorted(self.throw_tags.borrow().changed_since(since).into_iter().map(|(t, v)| (sym(t), v)).collect()),
             callbacks_lifted: self.callbacks_lifted.get(),
             local_macros: self.local_macros.get(),
         }
@@ -833,7 +816,6 @@ impl Registry {
         d.blanket_owners.into_iter().for_each(|(k, v)| self.blanket_owners.put(k, v));
         d.docs.into_iter().for_each(|(k, v)| self.docs.put(k, v));
         d.predeclared.into_iter().for_each(|(k, v)| self.predeclared.put(k, v));
-        d.throw_tags.into_iter().for_each(|(t, v)| self.throw_tags.get_mut().put(t.0, v));
         // A name a later unit gives is none an earlier one gave.
         self.callbacks_lifted.set(self.callbacks_lifted.get().max(d.callbacks_lifted));
         self.local_macros.set(self.local_macros.get().max(d.local_macros));
@@ -872,7 +854,6 @@ impl Registry {
         self.docs.rollback();
         self.locs.rollback();
         self.predeclared.rollback();
-        self.throw_tags.get_mut().rollback();
     }
 }
 

@@ -135,22 +135,59 @@ fn an_inner_catch_passes_on_a_tag_that_is_not_its_own() {
 #[test]
 fn an_uncaught_throw_is_an_error() {
     match run("(throw 'nobody 1)") {
-        Err(EvalError::Throw(tag, _)) => assert_eq!(tag, typelisp::mem::symbols::intern("nobody")),
+        Err(EvalError::Throw(tag, _)) => assert_eq!(tag.name(), "nobody"),
         other => panic!("expected an uncaught throw, got {:?}", other),
     }
 }
 
-/// Every symbol carries one type, decided by its first use and checked against
-/// every later one — the tag is the only thing a throw and its catch share, so
-/// it is where the type has to live.
+/// A tag is the pair of its symbol and the type it carries, so a generic
+/// body's tag carries each instantiation's own type.
 #[test]
-fn one_tag_cannot_carry_two_types() {
-    let err = check_err(r#"
-        (defun a () int (throw 'both 1))
-        (defun b () bool (throw 'both true))
-        "#);
-    // The second use is checked *against* what the first established, so the
-    // mismatch is reported at the offending value rather than after the fact.
+fn a_generic_body_s_tag_carries_each_instantiation_s_type() {
+    let src = r#"
+        (defun pass<T> ((x T)) T (catch 'done (throw 'done x)))
+        (defun f () int (+ (pass 40) (length (pass "ab"))))
+        "#;
+    assert_eq!(int(&format!("{} (f)", src)), 42);
+    assert_eq!(int_compiled(&format!("{} (compile f) (f)", src)), 42);
+}
+
+/// A throw that reaches the nearest `catch` of its symbol carrying another
+/// type is an error — which `catch` it reaches is decided at run time, so
+/// that is where it is found.
+#[test]
+fn a_throw_reaching_a_catch_of_its_symbol_and_another_type_is_an_error() {
+    let src = r#"
+        (defun deep () int (throw 'done 7))
+        (defun middle () string (catch 'done (progn (deep) "body")))
+        (defun f () int (catch 'done (progn (middle) 0)))
+        "#;
+    let want = "throw: `done` carries `std::primitive::int`, but the nearest (catch 'done) carries `std::primitive::string`";
+    for r in [run(&format!("{} (f)", src)), run_compiled(&format!("{} (compile f) (f)", src))] {
+        match r {
+            Err(EvalError::Panic(msg)) => assert_eq!(msg, want),
+            other => panic!("expected the mismatch to panic, got {:?}", other),
+        }
+    }
+}
+
+/// A `catch` of another symbol is passed by, whatever type it carries.
+#[test]
+fn a_throw_passes_a_catch_of_another_symbol_by() {
+    let src = r#"
+        (defun deep () int (throw 'done 7))
+        (defun middle () string (catch 'other (progn (deep) "body")))
+        (defun f () int (catch 'done (progn (middle) 0)))
+        "#;
+    assert_eq!(int(&format!("{} (f)", src)), 7);
+    assert_eq!(int_compiled(&format!("{} (compile f) (f)", src)), 7);
+}
+
+/// A throw written inside a `catch` of its symbol is meant for it, so the
+/// two types must agree.
+#[test]
+fn a_throw_inside_a_catch_of_its_tag_carries_the_catch_s_type() {
+    let err = check_err("(defun f () int (catch 'both (progn (throw 'both true) 1)))");
     assert!(err.contains("expected `int`, found `bool`"), "unexpected error: {}", err);
 }
 
@@ -341,7 +378,7 @@ fn an_uncaught_compiled_throw_is_an_error() {
         (thrower)
         "#,
     ) {
-        Err(EvalError::Throw(tag, _)) => assert_eq!(tag, typelisp::mem::symbols::intern("nobody")),
+        Err(EvalError::Throw(tag, _)) => assert_eq!(tag.name(), "nobody"),
         other => panic!("expected an uncaught throw, got {:?}", other),
     }
 }

@@ -1290,6 +1290,10 @@ pub const CORE_VOCABULARY: &[u32] = &[
 /// so its name is read in no module a program is written in.
 pub const MEMBER_MODULE: &str = "%member";
 
+/// The module the run-time tags of `catch` and `throw` are made in, the
+/// root's child `%throw-tag` ([`throw_tag_symbol`]).
+pub const THROW_TAG_MODULE: &str = "%throw-tag";
+
 /// The first member of the vocabulary appended for [`HOMED_VOCABULARY`]:
 /// every member from here on is made in its module. An older member a group
 /// lists is a reserved word, a keyword or a core-IR name the group takes by
@@ -1933,6 +1937,41 @@ pub const KEYWORD_MODULE: &str = "keyword";
 /// building core-IR tags.
 pub fn intern(name: &str) -> SymRef {
     intern_in(NsId::ROOT, name)
+}
+
+/// The symbol a `catch` or `throw` of `tag` carrying the type whose key is
+/// `type_key` is matched by at run time: comparing these symbols by pointer
+/// compares the pairs, and a `catch` of the same symbol carrying another type
+/// is told apart by [`throw_tag_mismatch`].
+///
+/// Made in [`THROW_TAG_MODULE`], under a module for the type key and then
+/// `tag`'s own home path, and named as `tag` is: two symbols of one name in
+/// two modules stay two tags, a message spells the tag as it was written,
+/// and compiled code re-interns it at that home like any quoted symbol.
+pub fn throw_tag_symbol(tag: SymRef, type_key: &str) -> SymRef {
+    static ROOT: OnceLock<NsId> = OnceLock::new();
+    let mut ns = child_ns(*ROOT.get_or_init(|| child_ns(NsId::ROOT, THROW_TAG_MODULE)), type_key);
+    for seg in ns_path(tag.home()) {
+        ns = child_ns(ns, &seg);
+    }
+    intern_at_home(ns, tag.name())
+}
+
+/// When `thrown` and `caught` are [`throw_tag_symbol`]s of one symbol
+/// carrying two types, the error a `throw` that reached a `catch` of its
+/// symbol carrying another type is. `None` when they are one tag, or tags of
+/// two symbols — the `catch` is the throw's, or not its business.
+pub fn throw_tag_mismatch(thrown: SymRef, caught: SymRef) -> Option<String> {
+    if thrown == caught || thrown.name() != caught.name() {
+        return None;
+    }
+    let (t, c) = (ns_path(thrown.home()), ns_path(caught.home()));
+    let parts = |p: &[String]| match p {
+        [module, key, home @ ..] if module == THROW_TAG_MODULE => Some((key.clone(), home.to_vec())),
+        _ => None,
+    };
+    let ((tk, th), (ck, ch)) = (parts(&t)?, parts(&c)?);
+    (th == ch).then(|| format!("throw: `{}` carries `{}`, but the nearest (catch '{}) carries `{}`", thrown.name(), tk, caught.name(), ck))
 }
 
 /// The symbol a member of a type — a method — is named by: made in

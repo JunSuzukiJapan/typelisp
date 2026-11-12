@@ -288,17 +288,19 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         }
         Node::Catch { tag, carried, body } => {
             let body = lower_rooted(heap, lw, body)?;
-            let tag = forms::quote_form(heap, Value::Symbol(*tag))?;
+            let carried = lw.settle(carried);
+            let tag = forms::quote_form(heap, Value::Symbol(run_time_tag(*tag, &carried)))?;
             heap.push_root(tag);
-            let repr = lw.reg.repr_form(heap, &lw.settle(carried))?;
+            let repr = lw.reg.repr_form(heap, &carried)?;
             heap.push_root(repr);
             forms::catch_form(heap, tag, body, repr)
         }
         Node::Throw { tag, value } => {
-            let repr = lw.reg.repr_form(heap, &lw.settle(&value.ty))?;
+            let carried = lw.settle(&value.ty);
+            let repr = lw.reg.repr_form(heap, &carried)?;
             heap.push_root(repr);
             let value = lower_rooted(heap, lw, value)?;
-            let tag = forms::quote_form(heap, Value::Symbol(*tag))?;
+            let tag = forms::quote_form(heap, Value::Symbol(run_time_tag(*tag, &carried)))?;
             heap.push_root(tag);
             forms::throw_form(heap, tag, value, repr)
         }
@@ -521,6 +523,12 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
 }
 
 /// `pat`'s core form, unrooted.
+/// The symbol a `catch` or `throw` of `tag` carrying `carried` is matched by
+/// at run time, which names the pair of the two.
+fn run_time_tag(tag: SymRef, carried: &Type) -> SymRef {
+    typelisp_mem::symbols::throw_tag_symbol(tag, &typelisp_mem::ConcreteNames::type_key(carried))
+}
+
 fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value, Error> {
     match pat {
         Pat::Wild => core::tagged(heap, wk::PAT_WILD, &[]),

@@ -5651,12 +5651,12 @@ const SOURCE_TEMPLATE: &str = r#"
           (build-cond-br builder mine claim onward)))
       (position-at-end builder claim)
       (let ((thrown (build-call builder (get-function m "rt_throw_take_value") (alloca-args builder 0) 0)))
-        ;; `kind = 0` means the checker never pinned a type
-        ;; on this tag — nothing anywhere throws it, so this
-        ;; block is unreachable and there is nothing to
-        ;; decode. `(catch 'unused ...)` and a `catch` whose
-        ;; body only `break`s both land here. Storing the
-        ;; raw word keeps the block well-formed;
+        ;; `kind = 0` means the `catch` carries `!`: its
+        ;; body never returns and nothing inside it throws
+        ;; to it, as when the body only `break`s. No throw
+        ;; carries `!`, so this block is unreachable and
+        ;; there is nothing to decode. Storing the raw word
+        ;; keeps the block well-formed;
         ;; `compile-sexpr-field` would panic on it.
         (if (eq kind #%kind-not-representable)
             (store-arg builder slot 0 thrown)

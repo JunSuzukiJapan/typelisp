@@ -101,6 +101,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | 範囲外の添字。`len` で長さを確かめるか、範囲外で `none` を返す関数（`nth`、`pop` など）を使う |
 | `panic: an integer argument does not fit a fixnum` | 添字や個数を取る引数に、63bit に入らない `int` を渡した |
 | `throw: no enclosing (catch 'oops) for this throw` | 同じタグの `catch` が囲んでいない `throw` を実行した |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` が届いた同じタグの `catch` が、別の型を運んでいた |
 | `panic: <メッセージ>` | プログラムが `(panic "<メッセージ>")` を呼んだ。`assert` の失敗は `assertion failed: ...` |
 
 `panic` はタスクの中で起きてもプロセス全体を止める（[構文リファレンス 12.4](syntax.md#124-ほかの機能との関係)）。

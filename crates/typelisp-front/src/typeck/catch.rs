@@ -1,12 +1,15 @@
 //! `(catch 'tag body)`, and `(throw 'tag value)`, which leaves for the
 //! nearest `catch` of the tag around it at run time.
 //!
-//! Which `catch` a `throw` reaches is decided at run time, so the type a
-//! tag carries is the session's: every `catch` and `throw` of the tag, in
-//! any form, gives it one type. The tag is a literal symbol, so that the
-//! type is known where it is written; two modules' `'done` are two symbols,
-//! and two tags. A form's uses say the type while it is checked, and the
-//! registry keeps it once the form is settled.
+//! The type a tag carries is each use's own, decided where it is checked —
+//! in a generic body, per instantiation — and lowering names the pair of the
+//! symbol and the type (`typelisp_mem::symbols::throw_tag_symbol`). A `throw`
+//! and the `catch` it reaches carry one type: one written inside a `catch`
+//! of its symbol is checked against it here, and one that reaches a `catch`
+//! of its symbol from elsewhere is compared at run time
+//! (`typelisp_mem::symbols::throw_tag_mismatch`). The tag is a literal symbol, so that the
+//! symbol is known where it is written; two modules' `'done` are two
+//! symbols, and two tags.
 
 use crate::types::Type;
 use crate::{wk, Error, Heap, Loc, Value};
@@ -15,25 +18,35 @@ use typelisp_mem::SymRef;
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
 use super::tree::{Node, Typed};
-use super::unify::walk;
+
+/// A `catch` being checked: its tag, the type it carries, and whether a
+/// `throw` inside it has said that type.
+pub(crate) struct Enclosing {
+    tag: SymRef,
+    carried: Type,
+    thrown: bool,
+}
 
 /// `(catch 'tag body)` — `args` without the `catch`. Its value is `body`'s,
-/// or the tag's when `body` never returns, which is what a throw gave.
+/// or what a throw gave, so the two are one type.
 pub(crate) fn check_catch(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let [(tag, _), (body, body_loc)] = args else {
         return Err(Error::TypeError("catch: (catch 'tag body)".into()));
     };
     let tag = tag_of(heap, *tag, "catch")?;
-    let known = carried(cx, tag);
-    let body = check_expr(cx, heap, locals, *body, expected.or(known.as_ref()), body_loc.clone())?;
-    note(cx, tag, &body.ty, "catch")?;
-    let carried = carried(cx, tag);
-    let ty = match (&carried, cx.resolve(&body.ty)) {
-        (Some(c), Type::Never) => c.clone(),
-        _ => body.ty.clone(),
+    let carried = match expected {
+        Some(t) => t.clone(),
+        None => cx.holes.borrow_mut().fresh(),
     };
-    let carried = carried.unwrap_or_else(|| ty.clone());
-    Ok(Typed { node: Node::Catch { tag, carried, body: Box::new(body) }, ty, loc })
+    cx.tags.borrow_mut().push(Enclosing { tag, carried: carried.clone(), thrown: false });
+    let body = check_expr(cx, heap, locals, *body, Some(&carried), body_loc.clone());
+    let thrown = cx.tags.borrow_mut().pop().is_some_and(|c| c.thrown);
+    let body = body?;
+    agree(cx, tag, &carried, &body.ty, "catch")?;
+    // Nothing said the type: no expectation, no `throw` inside, and a body
+    // that never returns. The `catch` gives nothing either, so it carries `!`.
+    let carried = if expected.is_none() && !thrown && cx.resolve(&body.ty) == Type::Never { Type::Never } else { carried };
+    Ok(Typed { node: Node::Catch { tag, carried: carried.clone(), body: Box::new(body) }, ty: carried, loc })
 }
 
 /// `(throw 'tag value)` — `args` without the `throw`. It never returns.
@@ -42,10 +55,17 @@ pub(crate) fn check_throw(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Va
         return Err(Error::TypeError("throw: (throw 'tag value)".into()));
     };
     let tag = tag_of(heap, *tag, "throw")?;
-    // Against the tag's type when it has one, so a mismatch is the value's.
-    let known = carried(cx, tag);
-    let value = check_expr(cx, heap, locals, *value, known.as_ref(), value_loc.clone())?;
-    note(cx, tag, &value.ty, "throw")?;
+    let enclosing = cx.tags.borrow().iter().rev().find(|c| c.tag == tag).map(|c| c.carried.clone());
+    let value = check_expr(cx, heap, locals, *value, enclosing.as_ref(), value_loc.clone())?;
+    match &enclosing {
+        Some(carried) => {
+            agree(cx, tag, carried, &value.ty, "throw")?;
+            if let Some(c) = cx.tags.borrow_mut().iter_mut().rev().find(|c| c.tag == tag) {
+                c.thrown = true;
+            }
+        }
+        None => no_typed_ptr(cx, tag, &value.ty, "throw")?,
+    }
     Ok(Typed { node: Node::Throw { tag, value: Box::new(value) }, ty: Type::Never, loc })
 }
 
@@ -58,18 +78,22 @@ fn tag_of(heap: &Heap, form: Value, who: &str) -> Result<SymRef, Error> {
     }
 }
 
-/// The type `tag` carries, as this form or an earlier one has said.
-fn carried(cx: &Cx, tag: SymRef) -> Option<Type> {
-    let pending = cx.tags.borrow().iter().rev().find(|(t, _)| *t == tag).map(|(_, ty)| ty.clone());
-    pending.or_else(|| cx.reg.throw_tag(tag))
-}
-
-/// A use of `tag` carrying `ty`: the tag's type, or one that agrees with
-/// it. `!` says nothing: a body that only throws has it.
-fn note(cx: &Cx, tag: SymRef, ty: &Type, who: &str) -> Result<(), Error> {
+/// A use inside the `catch` of `tag` carrying `carried`, of type `ty`: the
+/// two agree. `!` says nothing: a body that only throws has it.
+fn agree(cx: &Cx, tag: SymRef, carried: &Type, ty: &Type, who: &str) -> Result<(), Error> {
     if cx.resolve(ty) == Type::Never {
         return Ok(());
     }
+    no_typed_ptr(cx, tag, ty, who)?;
+    let unified = cx.holes.borrow_mut().unify(carried, ty);
+    unified.map_err(|_| {
+        let holes = cx.holes.borrow();
+        Error::TypeError(format!("{}: the `catch` of `{}` around it carries `{}`, but this carries `{}`", who, tag.name(), holes.shown(carried), holes.shown(ty)))
+    })
+}
+
+/// A tag cannot carry a typed pointer out of the `unsafe` that allocated it.
+fn no_typed_ptr(cx: &Cx, tag: SymRef, ty: &Type, who: &str) -> Result<(), Error> {
     if super::c_memory::mentions_typed_ptr(&cx.resolve(ty)) {
         return Err(Error::TypeError(format!(
             "{}: `{}` would carry `{}`, and a typed pointer cannot leave the `unsafe` that \
@@ -79,33 +103,5 @@ fn note(cx: &Cx, tag: SymRef, ty: &Type, who: &str) -> Result<(), Error> {
             cx.resolve(ty)
         )));
     }
-    match carried(cx, tag) {
-        Some(known) => {
-            let unified = cx.holes.borrow_mut().unify(&known, ty);
-            unified.map_err(|_| {
-                let holes = cx.holes.borrow();
-                Error::TypeError(format!("{}: `{}` carries `{}`, but this use carries `{}`", who, tag.name(), holes.shown(&known), holes.shown(ty)))
-            })
-        }
-        None => {
-            cx.tags.borrow_mut().push((tag, ty.clone()));
-            Ok(())
-        }
-    }
-}
-
-/// The type the form said `tag` carries, `ty`, kept for the session's
-/// later forms.
-pub(crate) fn record(cx: &Cx, tag: SymRef, ty: &Type) -> Result<(), Error> {
-    let ty = cx.resolve(ty);
-    if cx.holes.borrow().unsolved(&ty).is_some() {
-        return Err(Error::TypeError(format!("catch/throw: cannot infer the type the tag `{}` carries", tag.name())));
-    }
-    let mut generic = false;
-    walk(&ty, &mut |t| generic |= matches!(t, Type::Param(_)));
-    if generic {
-        unimplemented!("typeck: the tag `{}` carrying `{}`, a type parameter of a generic body", tag.name(), ty)
-    }
-    cx.reg.record_throw_tag(tag, ty);
     Ok(())
 }

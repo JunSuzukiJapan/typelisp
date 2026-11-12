@@ -50,9 +50,8 @@ pub(crate) struct Cx<'a> {
     numbers: RefCell<Vec<Type>>,
     /// The loops being checked, innermost last: what leaving each gives.
     pub(crate) loops: RefCell<Vec<LoopExit>>,
-    /// The tags the form's `catch`es and `throw`s have said a type for,
-    /// recorded in the registry when it is settled.
-    pub(crate) tags: RefCell<Vec<(SymRef, Type)>>,
+    /// The `catch`es being checked, innermost last.
+    pub(crate) tags: RefCell<Vec<super::catch::Enclosing>>,
     /// The blocks being checked, innermost last.
     pub(crate) blocks: RefCell<Vec<super::block::BlockExit>>,
     /// The blocks the form has made, to name the next one.
@@ -337,9 +336,6 @@ impl<'a> Cx<'a> {
         }
         for d in self.directives.borrow().iter() {
             check_directives(d, |ty| self.resolve(ty))?;
-        }
-        for (tag, ty) in self.tags.borrow().iter() {
-            super::catch::record(self, *tag, ty)?;
         }
         if let Some(r) = self.required.borrow().first() {
             let e = Error::TypeError(format!(

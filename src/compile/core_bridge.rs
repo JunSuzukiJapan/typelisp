@@ -612,11 +612,11 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // unconditionally would have the collector invent a reference out of a
         // plain `i32` (see `loop`'s own note).
         //
-        // When nothing throws `TAG` the repr is unpinned, so `KIND` and
+        // A `catch` carrying `!` has an unrepresentable repr, so `KIND` and
         // `BKIND` are both `0` and the slot is unmasked -- exactly what the
-        // `alloca` was. Otherwise the tag pins the thrown type globally and
-        // the catch's own type is the join of it and the body's, so one repr
-        // describes both things the slot can hold.
+        // `alloca` was. Otherwise the body's value and the thrown one are of
+        // the type the catch carries, so one repr describes both things the
+        // slot can hold.
         wk::CATCH => {
             let name = throw_tag_sym(heap, form)?;
             let kind = repr_kind(heap, form, 2)?;

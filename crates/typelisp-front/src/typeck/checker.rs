@@ -353,7 +353,7 @@ impl Checker {
                 $(out.extend(d.$table.iter().map(|e| format!("{}: {:?}", stringify!($table), e)));)*
             };
         }
-        each!(values, types, methods, inst_methods, method_names, imports, reexports, ctors, static_uses, module_aliases, modules, trait_impls, blanket_impls, blanket_owners, docs, predeclared, throw_tags);
+        each!(values, types, methods, inst_methods, method_names, imports, reexports, ctors, static_uses, module_aliases, modules, trait_impls, blanket_impls, blanket_owners, docs, predeclared);
         out.sort();
         out
     }
