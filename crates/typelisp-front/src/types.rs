@@ -127,7 +127,8 @@ impl Path {
     /// Whether this path is inside the standard library — `std` or a module
     /// in it — where the built-in types are defined. A type's name there is
     /// its identity: no two of the library's modules define a type of one
-    /// name ([`crate::check::Registry::reexport_std_in_prelude`] asserts it).
+    /// name (`typeck::define` refuses a second one, and a test of
+    /// `typeck::builtins` holds the built-in definitions to it).
     pub fn is_std(&self) -> bool {
         in_std(self.ns)
     }
@@ -302,8 +303,8 @@ impl fmt::Display for Path {
 /// (`wk::VECTOR`, `wk::INT` ...): compared by symbol, never by spelling.
 ///
 /// Every built-in (`Vector`/`HashTable`/`Option`/`Result`/`llvm-*`/`Scope`/the
-/// primitives) is registered in the standard library
-/// (`Registry::with_builtins`), so a path anywhere else can never be one
+/// primitives) is defined in the standard library
+/// (`typeck::builtins`), so a path anywhere else can never be one
 /// however its name reads — which is the whole point of the `is_std` half: a
 /// `(shadow Vector)` module's own `Vector` is another symbol, and compiled
 /// code that took it for the built-in would lower its methods to
@@ -481,11 +482,6 @@ pub enum Type {
     /// A nominal type with type arguments: `Option<T>`, `Vec<T>`, `Sexpr`,
     /// user structs.
     Named(Path, Vec<Type>),
-    /// A type variable, by the name its declaration wrote: a definition's
-    /// `<T>`, a `defmethod` receiver's or an `impl` target's variables, a
-    /// `deftrait`'s `Self` and `(:type Item)`. Never a definition, so never
-    /// a [`Path`].
-    Var(String),
     /// A trait object `:dyn Trait` / `:dyn Trait<Pin,...>` — a value whose
     /// concrete type is only known at run time, dispatched through a vtable
     /// (`docs/dev/language-design.md` §5.2). The [`Path`] is the *trait*'s
@@ -550,11 +546,10 @@ pub enum Type {
     /// A `def-c-struct`, by its fully-qualified path. Never the type of a
     /// value: it only ever appears as the pointee of a [`Self::PtrTo`].
     CStruct(Path),
-    // Last, so the variants before them keep the numbers a dump writes.
     /// A declared type parameter, identified by the definition that
     /// declares it and its position there (`docs/dev/checker-rebuild-plan.md`
-    /// 7.1). The rebuilt checker writes this; the current one writes
-    /// [`Self::Var`].
+    /// 7.1): a definition's `<T>`, a `defmethod` receiver's or an `impl`
+    /// target's parameters, a `deftrait`'s `Self` and `(:type Item)`.
     Param(TypeParam),
     /// A hole the rebuilt checker solves while it infers one call's type
     /// arguments (`docs/dev/checker-rebuild-plan.md` 7.2). It never leaves
@@ -611,7 +606,6 @@ impl fmt::Display for Type {
                 write!(f, "{}", view.definition(p.ns(), p.name_symbol()))?;
                 if ts.is_empty() { Ok(()) } else { args(f, ts) }
             }
-            Type::Var(name) => write!(f, "{}", name),
             Type::Param(p) => write!(f, "{}", p.name.name()),
             Type::Infer(_) => write!(f, "_"),
             Type::Proj(trait_path, self_ty, assoc) => {
@@ -703,7 +697,7 @@ impl Type {
             Type::Char => "char",
             Type::Str => "string",
             Type::Symbol => "symbol",
-            Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Param(_) | Type::Infer(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) | Type::Proj(..) => {
+            Type::Unit | Type::Never | Type::Named(..) | Type::Param(_) | Type::Infer(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) | Type::Proj(..) => {
                 return None
             }
         })
@@ -805,7 +799,7 @@ pub use typelisp_mem::normalize_int;
 
 /// All primitive value types that can be a `defmethod` receiver (every
 /// variant [`prim_type_path`] maps to a `Path`). Used to pre-register each
-/// one's (empty) method table in [`crate::Registry::with_builtins`].
+/// one's method table in `typeck::builtins`.
 pub fn primitive_types() -> Vec<Type> {
     vec![
         Type::I8, Type::I16, Type::I32,
@@ -1124,17 +1118,18 @@ pub fn written_path(heap: &Heap, ns: NsId, v: Value) -> Result<Path, Error> {
 /// gives the path back. `loc` is the whole name's span; the last segment is
 /// its tail on the same line.
 fn record_name(path: Path, loc: Option<&Loc>, dyn_head: bool, out: &mut Vec<TypeNameSpan>) -> Path {
-    if let Some(l) = loc {
-        let last = path.last_segment().chars().count() as u32;
-        if l.end_line == l.line && l.end_col >= l.col + last {
-            out.push(TypeNameSpan {
-                path,
-                dyn_head,
-                loc: Loc::new(std::sync::Arc::clone(&l.file), l.line, l.end_col - last).with_end(l.line, l.end_col),
-            });
-        }
+    if let Some(loc) = loc.and_then(|l| last_segment_span(&path, l)) {
+        out.push(TypeNameSpan { path, dyn_head, loc });
     }
     path
+}
+
+/// Where the last segment of `path` is, in a name written at `l` that ends
+/// with it: none when `l` is not one line long enough to hold it.
+pub(crate) fn last_segment_span(path: &Path, l: &Loc) -> Option<Loc> {
+    let last = path.last_segment().chars().count() as u32;
+    (l.end_line == l.line && l.end_col >= l.col + last)
+        .then(|| Loc::new(std::sync::Arc::clone(&l.file), l.line, l.end_col - last).with_end(l.line, l.end_col))
 }
 
 /// Whether `v` is the reader's `(%type-apply Name Arg...)` — what

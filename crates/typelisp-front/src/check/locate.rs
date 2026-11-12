@@ -28,10 +28,12 @@
 //! descent is uniform and both tables are gone. The one thing a walk must
 //! still know is where data stops being program: [`is_opaque`].
 
-use typelisp_mem::{symbols, wk, Heap, NsId, Value};
+use typelisp_mem::{wk, Heap, NsId, Value};
 
 use crate::check::core;
-use crate::{DefLocs, Docs, Loc, Path, Registry, SymRef, TopLevelForm};
+use std::collections::HashMap;
+
+use crate::{Loc, Path, SymRef, TopLevelForm};
 
 /// Tags whose fields are *not* sub-expressions, so a walk must not descend
 /// into them.
@@ -228,7 +230,7 @@ pub fn hover_text(heap: &Heap, node: Value, def_locs: &DefLocs, docs: &Docs) -> 
 /// Every local (`let`/`lambda`/`labels` binding, or a `defun`/`defmethod`/
 /// `defmacro`'s own parameter) in lexical scope at `(line, col)` in `file` —
 /// for the LSP's completion (`src/bin/lsp.rs`) to offer alongside
-/// [`completion_candidates`]'s `Registry`-derived names.
+/// `Checker::completion_candidates`'s module-level names.
 ///
 /// First finds the cursor's smallest enclosing node with [`locate_node`], then
 /// re-walks `body` from the top, pushing each binding name it encounters as it
@@ -505,79 +507,79 @@ pub struct CompletionCandidate {
     pub detail: String,
 }
 
-/// Every bare name visible for completion while checking module
-/// `module_path`, as `Checker::find_named` reaches one: that module's own
-/// definitions and what its `use`s brought in, then what every module reads
-/// without a `use`, the definitions `std::prelude` re-exports.
-/// An ancestor's definitions are not visible without a `use`, so none are
-/// offered.
-pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
-    let mut out = Vec::new();
-    let Some(here) = symbols::find_ns(module_path).and_then(|ns| reg.module_at(ns)) else {
-        return out;
-    };
-    push_namespace(reg, here, &mut out);
-    if let Some(prelude) = reg.module_at(crate::types::prelude_ns()) {
-        let offered: std::collections::HashSet<Path> = prelude
-            .reexports
-            .symbols()
-            .map(|local| *prelude.aliases.get_sym(local).expect("a re-export is one of the module's imports"))
-            .collect();
-        let homes: std::collections::HashSet<NsId> = offered.iter().map(Path::ns).collect();
-        // This module's own definitions are pushed above.
-        for home in homes.into_iter().filter(|home| *home != here.ns) {
-            let m = reg.module_at(home).expect("a re-exported definition's module is in the registry");
-            push_definitions(m, |sym| offered.contains(&Path::of_symbol(home, sym)), &mut out);
-        }
-    }
-    out
+/// A definition the session holds, the library's and the program's: what
+/// a tool that lists them (a reference's or an editor's catalog) reads.
+#[derive(Clone, Debug)]
+pub struct Defined {
+    pub path: Path,
+    pub kind: DefinedKind,
+    /// A type's or a trait's methods.
+    pub methods: Vec<SymRef>,
+    /// A struct's fields.
+    pub fields: Vec<SymRef>,
 }
 
-/// Push every name in `ns` into `out`: its definitions, its child modules and
-/// what its `use`s brought in.
-fn push_namespace(reg: &Registry, ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>) {
-    push_definitions(ns, |_| true, out);
-    for (name, _) in reg.children(ns.ns) {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Module, detail: "module".to_string() });
-    }
-    for name in ns.aliases.keys() {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "use".to_string() });
-    }
-    for name in ns.mod_aliases.keys() {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Module, detail: "use".to_string() });
-    }
-    for name in ns.static_uses.keys() {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Method, detail: "use".to_string() });
-    }
+/// What kind of definition a [`Defined`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefinedKind {
+    Function,
+    Variable,
+    Macro,
+    Type,
+    TypeAlias,
+    Trait,
+    CStruct,
 }
 
-/// Push the names of what `ns` defines into `out`, those whose symbol `keep`
-/// accepts.
-fn push_definitions(ns: &crate::Namespace, keep: impl Fn(SymRef) -> bool, out: &mut Vec<CompletionCandidate>) {
-    for (name, sig) in ns.fns.symbols().filter(|s| keep(*s)).map(|s| (s.name(), ns.fns.get_sym(s).expect("a key of the table"))) {
-        out.push(CompletionCandidate {
-            name: name.to_string(),
-            kind: CompletionKind::Function,
-            detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
-        });
-    }
-    for name in ns.macros.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Macro, detail: "macro".to_string() });
-    }
-    for name in ns.types.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Type, detail: "type".to_string() });
-    }
-    for (name, vi) in ns.vars.symbols().filter(|s| keep(*s)).map(|s| (s.name(), ns.vars.get_sym(s).expect("a key of the table"))) {
-        out.push(CompletionCandidate {
-            name: name.to_string(),
-            kind: CompletionKind::Variable,
-            detail: format!("{:?}", vi.ty),
-        });
-    }
-    for name in ns.traits.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Trait, detail: "trait".to_string() });
-    }
-    for name in ns.ctors.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "constructor".to_string() });
-    }
+/// A name a `use` brought into a module: the module, the name it reads
+/// there, what it names, and whether the module re-exports it.
+#[derive(Clone, Debug)]
+pub struct Imported {
+    pub module: NsId,
+    pub name: SymRef,
+    pub target: Path,
+    pub reexported: bool,
+}
+
+/// Where each definition was written, and what the language server reads
+/// beside it: the binding each local variable reference resolves to, and
+/// the type of each expression. Goto-definition and hover
+/// ([`definition_target`], [`hover_text`]) read it; a lookup miss (a
+/// builtin, or anything not yet defined) is "no definition to jump to".
+#[derive(Clone, Default)]
+pub struct DefLocs {
+    pub fns: HashMap<Path, Loc>,
+    pub methods: HashMap<(Path, SymRef), Loc>,
+    pub types: HashMap<Path, Loc>,
+    pub vars: HashMap<Path, Loc>,
+    pub traits: HashMap<Path, Loc>,
+    pub macros: HashMap<Path, Loc>,
+    /// A local variable reference's own source position (`line`, `col`) ->
+    /// the `Loc` of the binding it resolves to. A local binding has no
+    /// stable identity of its own — the same name can be bound many times in
+    /// one file — so this is keyed by the *reference's* position, resolved
+    /// when the reference is checked.
+    pub local_refs: HashMap<(u32, u32), Loc>,
+    /// The type the checker proved for the node at each source position —
+    /// the hover text. A side table because the type stops at the checker:
+    /// it is not written into the lowered form.
+    pub node_types: HashMap<(u32, u32), crate::Type>,
+}
+
+/// Docstrings, keyed the way [`DefLocs`] keys source locations: what the
+/// `documentation` special form and the language server's hover
+/// ([`doc_for`]) read.
+#[derive(Clone, Default)]
+pub struct Docs {
+    pub fns: HashMap<Path, String>,
+    pub methods: HashMap<(Path, SymRef), String>,
+    pub types: HashMap<Path, String>,
+    pub vars: HashMap<Path, String>,
+    pub traits: HashMap<Path, String>,
+    pub macros: HashMap<Path, String>,
+    /// Docstrings on a `deftrait`'s *individual* methods, keyed by (trait
+    /// path, method name). Only a method with a default body can carry one:
+    /// in a bodyless signature a trailing string is the return value, with
+    /// nothing to tell the two apart.
+    pub trait_methods: HashMap<(Path, SymRef), String>,
 }

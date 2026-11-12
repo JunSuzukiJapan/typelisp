@@ -5,10 +5,9 @@
 //! see is a definition that silently stops existing — and the failure surfaces
 //! far away, as an unresolved name in a program that used to compile. These
 //! tests build one environment the slow way and one from a unit, and compare
-//! the checker's whole content-signature: every table, every entry, hashed by
-//! what it would serialize to.
+//! every entry of the checker's registry.
 
-use typelisp::dump::{self, RegistrySignature};
+use typelisp::dump;
 use typelisp::{Checker, Heap, Interp, Value};
 
 /// Loads the prelude the ordinary way, capturing every checked top-level form.
@@ -24,15 +23,17 @@ fn load_recording(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) -> Ve
     forms
 }
 
-fn assert_same(label: &str, a: &RegistrySignature, b: &RegistrySignature) {
-    let diff = a.difference(b);
+fn assert_same(label: &str, expected: &[String], restored: &[String]) {
+    let missing: Vec<&String> = expected.iter().filter(|e| !restored.contains(e)).collect();
+    let extra: Vec<&String> = restored.iter().filter(|e| !expected.contains(e)).collect();
     assert!(
-        diff.is_empty(),
-        "{}: the restored checker differs from the one that ran the source ({} entries):\n  {}",
+        missing.is_empty() && extra.is_empty(),
+        "{}: the restored checker differs from the one that ran the source:\n  only in the source's: {:?}\n  only in the restored: {:?}",
         label,
-        diff.len(),
-        diff.join("\n  ")
+        missing,
+        extra
     );
+    assert!(!expected.is_empty(), "{}: the source defined nothing", label);
 }
 
 #[test]
@@ -40,18 +41,18 @@ fn a_restored_prelude_unit_holds_everything_the_source_defined() {
     let mut heap = Heap::with_capacity(1 << 18);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
-    let before = chk.signature(&heap).expect("signature of a fresh checker");
+    let before = chk.signature();
     let forms = load_recording(&mut heap, &mut chk, &mut interp);
     let delta = chk.capture_delta(&heap, &before).expect("capturing the delta");
     let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new())
         .expect("capturing the prelude unit");
-    let expected = chk.signature(&heap).expect("signature after the slow load");
+    let expected = chk.registry_entries();
 
     let mut heap2 = Heap::with_capacity(1 << 18);
     let mut chk2 = Checker::new();
     let mut interp2 = Interp::new();
     dump::apply_types(&mut heap2, &mut chk2, &mut interp2, unit).expect("applying the prelude unit");
-    let restored = chk2.signature(&heap2).expect("signature after applying the unit");
+    let restored = chk2.registry_entries();
 
     assert_same("prelude", &expected, &restored);
 }
@@ -61,7 +62,7 @@ fn a_restored_prelude_unit_can_check_and_run_a_program() {
     let mut heap = Heap::with_capacity(1 << 18);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
-    let before = chk.signature(&heap).expect("signature of a fresh checker");
+    let before = chk.signature();
     let forms = load_recording(&mut heap, &mut chk, &mut interp);
     let delta = chk.capture_delta(&heap, &before).expect("capturing the delta");
     let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new())
@@ -93,7 +94,7 @@ fn a_prelude_macro_survives_the_round_trip() {
     let mut heap = Heap::with_capacity(1 << 18);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
-    let before = chk.signature(&heap).expect("signature of a fresh checker");
+    let before = chk.signature();
     let forms = load_recording(&mut heap, &mut chk, &mut interp);
     let delta = chk.capture_delta(&heap, &before).expect("capturing the delta");
     let unit = dump::capture_types(&heap, delta, "prelude", None, None, &forms, Vec::new())

@@ -117,13 +117,16 @@ fn a_parameter_nothing_decides_is_an_error() {
 }
 
 #[test]
-fn an_own_parameter_may_not_reuse_the_owners_name() {
+fn an_own_parameter_may_not_reuse_the_impls_name() {
     let msg = check_err("(defstruct Box<T> (v T))\n(impl<T> Box<T> (defmethod bad<T> (self (x T)) T x))");
-    assert!(msg.contains("the method's own type parameter `T` has the name of a type parameter of `Box`"), "{}", msg);
-    // The declared name counts too, though this receiver spells it `A`: the
-    // registered signature is written in the declared names.
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl<A> Box<A> (defmethod bad<T> (self (x T)) T x))");
-    assert!(msg.contains("the method's own type parameter `T`"), "{}", msg);
+    assert!(msg.contains("type parameter `T` is declared twice"), "{}", msg);
+    // The type's own declaration names nothing here: the `impl` spells its
+    // parameter `A`, and the method's `T` is a different one.
+    let src = format!(
+        "{}\n(impl<A> Box<A> (defmethod same-v<T> (self (x T)) T x))\n(format false \"~a\" (same-v (make-instance 'Box :v 0) \"t\"))",
+        DEFS
+    );
+    assert_eq!(eval_string(&src), "t");
 }
 
 #[test]
@@ -143,7 +146,7 @@ fn a_partly_generic_receiver_is_refused() {
 /// A name the header does not declare is still unknown.
 #[test]
 fn an_undeclared_type_variable_is_still_unknown() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (defmethod bad<U> (self (x W)) U x))");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl<T> Box<T> (defmethod bad<U> (self (x W)) U x))");
     assert!(msg.contains("unknown type `W`"), "{}", msg);
 }
 

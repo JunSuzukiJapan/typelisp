@@ -5,313 +5,21 @@
 //! calling the builder for its core form. Lowering decides nothing a check
 //! depends on: the types it reads were all settled by the analysis.
 
-use std::collections::BTreeMap;
 
 use typelisp_mem::{wk, Error, Heap, RootScope, SymRef, Value};
 
-use crate::nominal_path;
 use crate::types::{Path, Type};
 use super::analyze::*;
-use super::core::{self, Checked, Disagreement, Items, Node, SelectArm};
-use super::info::Info;
-use super::registry::{AdtKind, Variant};
+use super::core::{self, Items};
+use crate::typeck::registry::{AdtKind, Variant};
 use super::repr::Repr;
-use super::resolved::Pattern;
-use super::{fold, forms};
+use super::forms;
 
 /// A child already lowered: its type, for the representation a builder
 /// writes beside it, and its form.
 pub(crate) struct Arg<'a> {
     pub(crate) ty: &'a Type,
     pub(crate) form: Value,
-}
-
-/// `c`'s core form, its children lowered first.
-///
-/// The form comes back unrooted; the caller roots it before it allocates
-/// again. A node the analysis gave a position to carries it on its first cell
-/// unless lowering reused a child's form that has one already.
-pub(super) fn lower(heap: &mut Heap, info: &Info, c: &Checked) -> Result<Value, Error> {
-    typelisp_mem::grow_stack(|| {
-        let form = lower_node(heap, info, &c.node)?;
-        if let (Value::Cons(cr), Some(loc)) = (form, &c.loc) {
-            if heap.cons_loc(form).is_none() {
-                heap.set_cons_loc(cr, loc.clone());
-            }
-        }
-        Ok(form)
-    })
-}
-
-/// `cs` lowered in order, each rooted until the end of the top-level form —
-/// for a definition, whose builder takes its body as forms.
-pub(super) fn lower_all(heap: &mut Heap, info: &Info, cs: &[Checked]) -> Result<Vec<Value>, Error> {
-    let mut out = Vec::with_capacity(cs.len());
-    for c in cs {
-        out.push(lower_rooted(heap, info, c)?);
-    }
-    Ok(out)
-}
-
-/// [`lower`], with the form rooted until the end of the top-level form.
-pub(super) fn lower_rooted(heap: &mut Heap, info: &Info, c: &Checked) -> Result<Value, Error> {
-    let form = lower(heap, info, c)?;
-    heap.push_root(form);
-    Ok(form)
-}
-
-/// One child lowered and rooted in `s`.
-fn sub(s: &mut Heap, info: &Info, c: &Checked) -> Result<Value, Error> {
-    let form = lower(s, info, c)?;
-    s.push_root(form);
-    Ok(form)
-}
-
-/// Children lowered in order and rooted in `s`.
-fn subs(s: &mut Heap, info: &Info, cs: &[Checked]) -> Result<Vec<Value>, Error> {
-    cs.iter().map(|c| sub(s, info, c)).collect()
-}
-
-/// Children lowered with their types, for a builder that writes each one's
-/// representation.
-fn args<'a>(s: &mut Heap, info: &Info, cs: &'a [Checked]) -> Result<Vec<Arg<'a>>, Error> {
-    cs.iter().map(|c| Ok(Arg { ty: &c.ty, form: sub(s, info, c)? })).collect()
-}
-
-fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error> {
-    let mut s = RootScope::new(heap);
-    let s = &mut *s;
-    match node {
-        Node::If { cond, then, els } => lower_if(s, info, cond, then, els),
-        Node::Panic { message } => {
-            let message = sub(s, info, message)?;
-            forms::panic_form(s, message)
-        }
-        Node::Literal { tag, value } => match value {
-            Some(v) => core::tagged(s, *tag, &[*v]),
-            None => core::tagged(s, *tag, &[]),
-        },
-        Node::Quote { datum } => forms::quote_form(s, *datum),
-        Node::TypeValue { ty } => {
-            let form = core::type_form(s, ty, &[])?;
-            s.push_root(form);
-            core::tagged(s, wk::TYPE_VALUE, &[form])
-        }
-        Node::Local { name } => forms::var_form(s, *name),
-        Node::Global { path, ty } => info.global_form(s, path, ty),
-        Node::FnRef { path, params } => info.fnref_form(s, path, params),
-        Node::MethodRef { owner, method, params, ret } => info.methodref_form(s, owner, *method, params, ret),
-        Node::Call { path, args: cs } => {
-            let a = args(s, info, cs)?;
-            info.call_form(s, path, &a)
-        }
-        Node::Construct { owner, targs, variant, mutable, field_tys, args: cs } => {
-            let forms = subs(s, info, cs)?;
-            info.construct_form(s, owner, targs, *variant, *mutable, field_tys, &forms)
-        }
-        Node::BoxOption { value: inner } => {
-            let form = sub(s, info, inner)?;
-            forms::box_option_form(s, &inner.ty, form)
-        }
-        Node::DynValue { value } => {
-            let value = sub(s, info, value)?;
-            forms::dyn_value_form(s, value)
-        }
-        Node::Assoc { owner, method, instance, ret, args: cs } => {
-            let a = args(s, info, cs)?;
-            lower_assoc(s, info, owner, *method, *instance, ret, &a)
-        }
-        Node::DynUpcast { to, value } => {
-            let value = sub(s, info, value)?;
-            forms::dyn_upcast_form(s, to, value)
-        }
-        Node::ErasedGeneric { what } => forms::erased_generic_form(s, what),
-        Node::DynNew { trait_path, slots, supers, value } => {
-            let form = sub(s, info, value)?;
-            info.dyn_new_form(s, trait_path, slots, supers, &value.ty, form)
-        }
-        Node::DynCall { trait_path, method, slot, targets, args: cs } => {
-            let a = args(s, info, cs)?;
-            info.dyn_call_form(s, trait_path, *method, *slot, targets, &a)
-        }
-        Node::Let { binds, body } => {
-            let mut lowered = Vec::with_capacity(binds.len());
-            for (n, t, c) in binds {
-                lowered.push((n.clone(), t.clone(), sub(s, info, c)?));
-            }
-            let body = subs(s, info, body)?;
-            info.let_form(s, &lowered, &body)
-        }
-        Node::Set { name, value } => {
-            let value = sub(s, info, value)?;
-            forms::set_form(s, *name, value)
-        }
-        Node::SetGlobal { path, ty, value } => {
-            let value = sub(s, info, value)?;
-            info.set_global_form(s, path, ty, value)
-        }
-        Node::Apply { callee, ret, args: cs } => {
-            let callee = sub(s, info, callee)?;
-            let a = args(s, info, cs)?;
-            info.apply_form(s, callee, ret, &a)
-        }
-        Node::Lambda { params, ret, body } => {
-            let body = subs(s, info, body)?;
-            info.lambda_form(s, params, ret, &body)
-        }
-        Node::Labels { defs, body } => {
-            let body = subs(s, info, body)?;
-            info.labels_form(s, defs, &body)
-        }
-        Node::Loop { ty, body } => {
-            let body = subs(s, info, body)?;
-            let repr = info.repr_form(s, ty)?;
-            s.push_root(repr);
-            forms::loop_form(s, repr, &body)
-        }
-        Node::Break => forms::break_form(s),
-        Node::Return { value } => {
-            let value = value.as_ref().map(|v| sub(s, info, v)).transpose()?;
-            forms::return_form(s, value)
-        }
-        Node::Block { name, ty, body } => {
-            let body = sub(s, info, body)?;
-            let repr = info.repr_form(s, ty)?;
-            s.push_root(repr);
-            forms::block_form(s, name, body, repr)
-        }
-        Node::ReturnFrom { name, value } => {
-            let value = value.as_ref().map(|v| sub(s, info, v)).transpose()?;
-            forms::return_from_form(s, name, value)
-        }
-        Node::Catch { tag, carried, body } => {
-            let body = sub(s, info, body)?;
-            let tag = forms::quote_form(s, *tag)?;
-            s.push_root(tag);
-            let repr = info.repr_form(s, carried)?;
-            s.push_root(repr);
-            forms::catch_form(s, tag, body, repr)
-        }
-        Node::Throw { tag, value } => {
-            let form = sub(s, info, value)?;
-            let tag = forms::quote_form(s, *tag)?;
-            s.push_root(tag);
-            let repr = info.repr_form(s, &value.ty)?;
-            s.push_root(repr);
-            forms::throw_form(s, tag, form, repr)
-        }
-        Node::UntagInt { value } => {
-            let value = sub(s, info, value)?;
-            untag_int_form(s, value)
-        }
-        Node::Match { scrut, arms } => {
-            let scrut_form = sub(s, info, scrut)?;
-            // `pattern_form` roots each node it returns, so the ones built
-            // earlier survive the allocations the later ones make.
-            let mut lowered: Vec<(Value, Vec<Value>)> = Vec::with_capacity(arms.len());
-            for (pat, body) in arms {
-                let pat_form = info.pattern_form(s, pat)?;
-                lowered.push((pat_form, subs(s, info, body)?));
-            }
-            info.match_form(s, scrut_form, &scrut.ty, &lowered)
-        }
-        Node::SomeOf { ty, value } => {
-            let value = sub(s, info, value)?;
-            let repr = info.repr(ty);
-            let payload = repr.niche_payload().expect("a `SomeOf` is built only for a niched `Option`");
-            forms::some_of_form(s, payload, value)
-        }
-        Node::Spawn { tag, handle, call } => {
-            let form = sub(s, info, call)?;
-            let ret = info.repr_form(s, &call.ty)?;
-            s.push_root(ret);
-            forms::spawn_form(s, *tag, ret, handle, form)
-        }
-        Node::Compile { target } => forms::compile_fn_form(s, target),
-        Node::Trace { tag, targets } => forms::trace_form(s, *tag, targets),
-        Node::Disassemble { target, llvm_ir } => forms::disassemble_fn_form(s, target, *llvm_ir),
-        Node::Step { inner } => {
-            let inner = sub(s, info, inner)?;
-            core::tagged(s, wk::STEP, &[inner])
-        }
-        Node::Hole { loc } => forms::hole_form(s, loc.clone()),
-        Node::Default { form } => crate::owned_form::owned_to_value(s, form),
-        // Reported by checking (`check::verify`) before anything is lowered
-        // to run. What recover mode keeps lowered is a hole, except for a
-        // `match` its arms do not cover, which is still a well-typed `match`
-        // whose arms' bindings completion offers.
-        Node::Disagree { what: Disagreement::Uncovered(_), value } => sub(s, info, value),
-        Node::Disagree { .. } => forms::hole_form(s, None),
-        Node::Select { arms } => {
-            let mut forms = Vec::with_capacity(arms.len());
-            for arm in arms {
-                let form = match arm {
-                    SelectArm::Recv { var, bound, chan, body } => {
-                        let chan = sub(s, info, chan)?;
-                        let body = sub(s, info, body)?;
-                        forms::select_recv_arm(s, *var, bound, chan, body)?
-                    }
-                    SelectArm::Send { kind, chan, value, body } => {
-                        let chan = sub(s, info, chan)?;
-                        let value = sub(s, info, value)?;
-                        let body = sub(s, info, body)?;
-                        forms::select_send_arm(s, *kind, chan, value, body)?
-                    }
-                    SelectArm::Else { body } => {
-                        let body = sub(s, info, body)?;
-                        forms::select_else_arm(s, body)?
-                    }
-                };
-                s.push_root(form);
-                forms.push(form);
-            }
-            forms::select_form(s, &forms)
-        }
-        Node::UnwindProtect { protected, cleanup } => {
-            let protected_form = sub(s, info, protected)?;
-            let cleanup = sub(s, info, cleanup)?;
-            let repr = info.repr_form(s, &protected.ty)?;
-            s.push_root(repr);
-            forms::unwind_protect_form(s, protected_form, cleanup, repr)
-        }
-    }
-}
-
-/// A literal condition picks its branch now. Both branches were still
-/// analyzed and checked: a branch that can never run is still a program that
-/// has to be well-typed.
-fn lower_if(s: &mut Heap, info: &Info, cond: &Checked, then: &Checked, els: &Checked) -> Result<Value, Error> {
-    let cond = sub(s, info, cond)?;
-    match fold::literal_bool(s, cond) {
-        Some(true) => lower(s, info, then),
-        Some(false) => lower(s, info, els),
-        None => {
-            let then = sub(s, info, then)?;
-            let els = sub(s, info, els)?;
-            forms::if_form(s, cond, then, els)
-        }
-    }
-}
-
-/// A scalar builtin over literal arguments has one possible value, so the
-/// call lowers to that value's literal node (`fold`'s module doc says why
-/// here, and why the evaluator's own arithmetic computes it).
-fn lower_assoc(
-    heap: &mut Heap,
-    info: &Info,
-    owner: &Path,
-    method: SymRef,
-    instance: bool,
-    ret: &Type,
-    args: &[Arg],
-) -> Result<Value, Error> {
-    let builtin = info.reg.type_def(owner).and_then(|d| d.assoc.get(method)).is_some_and(|af| af.builtin);
-    if builtin {
-        if let Some(folded) = fold::fold_builtin_method(heap, owner, method, args, ret)? {
-            return Ok(folded);
-        }
-    }
-    info.assoc_form(heap, owner, method, instance, ret, args)
 }
 
 /// A `labels` function, its body lowered.
@@ -496,7 +204,7 @@ pub(crate) trait CoreForms {
         // instantiation travels from here, the one place that knows it. The
         // representation above cannot stand in: `Repr::Vector(Int)` is
         // `Vector<i32>` and `Vector<i64>` at once.
-        let key = core::type_form(f.heap(), ret, &[])?;
+        let key = core::type_form(f.heap(), ret)?;
         f.push(key);
         for (i, a) in args.iter().enumerate() {
             let form = if declared_int(i) { untag_int_form(f.heap(), a.form)? } else { a.form };
@@ -547,7 +255,7 @@ pub(crate) trait CoreForms {
         f.push(Value::Symbol(method));
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
-        let key = core::type_form(f.heap(), ret, &[])?;
+        let key = core::type_form(f.heap(), ret)?;
         f.push(key);
         f.finish(wk::METHODREF)
     }
@@ -610,7 +318,7 @@ pub(crate) trait CoreForms {
         // above stays for the questions that are about the *definition*
         // (struct or enum, where it was defined); this is the one about the
         // *value* (which instantiation it is).
-        let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.to_vec()), &[])?;
+        let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.to_vec()))?;
         f.push(key);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(mutable));
@@ -677,7 +385,7 @@ pub(crate) trait CoreForms {
         let mut f = Items::new(heap);
         let tp = core::definition_form(type_name);
         f.push(tp);
-        let key = core::type_form(f.heap(), &Type::Named(*type_name, targs.to_vec()), &[])?;
+        let key = core::type_form(f.heap(), &Type::Named(*type_name, targs.to_vec()))?;
         f.push(key);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(downcast));
@@ -792,7 +500,7 @@ pub(crate) trait CoreForms {
         value: Value,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let key = core::type_form(f.heap(), value_ty, &[])?;
+        let key = core::type_form(f.heap(), value_ty)?;
         f.push(key);
         let tp = core::definition_form(trait_path);
         f.push(tp);
@@ -923,12 +631,12 @@ pub(crate) trait CoreForms {
         f.push(r);
         let mut cs = Items::new(f.heap());
         for t in params {
-            let k = core::type_form(cs.heap(), t, &[])?;
+            let k = core::type_form(cs.heap(), t)?;
             cs.push(k);
         }
         let types = cs.finish_list()?;
         f.push(types);
-        let rk = core::type_form(f.heap(), ret, &[])?;
+        let rk = core::type_form(f.heap(), ret)?;
         f.push(rk);
         f.finish(wk::DEFFFI)
     }
@@ -1008,7 +716,6 @@ pub(crate) trait CoreForms {
         &self,
         heap: &mut Heap,
         name: &Path,
-        params: &[String],
         fields: &[Type],
         names: &[String],
     ) -> Result<Value, Error> {
@@ -1017,7 +724,7 @@ pub(crate) trait CoreForms {
         f.push(path);
         let reprs = self.repr_forms(f.heap(), fields.to_vec())?;
         f.push(reprs);
-        let templates = field_template_list(f.heap(), params, fields)?;
+        let templates = field_template_list(f.heap(), fields)?;
         f.push(templates);
         let names = string_list(f.heap(), names)?;
         f.push(names);
@@ -1027,7 +734,7 @@ pub(crate) trait CoreForms {
     /// `(defenum PATH (SYM...) ((REPR...)...) ((TEMPLATE...)...))` — the
     /// variant names, then each variant's field representations, then each
     /// variant's field key templates (see [`Self::defstruct_form`]).
-    fn defenum_form(&self, heap: &mut Heap, name: &Path, params: &[String], variants: &[Variant]) -> Result<Value, Error> {
+    fn defenum_form(&self, heap: &mut Heap, name: &Path, variants: &[Variant]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = core::definition_form(name);
         f.push(path);
@@ -1044,7 +751,7 @@ pub(crate) trait CoreForms {
         f.push(per_variant);
         let mut ts = Items::new(f.heap());
         for v in variants {
-            let templates = field_template_list(ts.heap(), params, &v.fields)?;
+            let templates = field_template_list(ts.heap(), &v.fields)?;
             ts.push(templates);
         }
         let per_variant_templates = ts.finish_list()?;
@@ -1053,211 +760,3 @@ pub(crate) trait CoreForms {
     }
 }
 
-impl CoreForms for Info {
-    fn type_kind(&self, p: &Path) -> Option<AdtKind> {
-        self.reg.type_def(p).map(|d| d.kind)
-    }
-
-    fn builtin_fn_sig(&self, p: &Path) -> Option<(Vec<Type>, Type)> {
-        self.reg.fn_sig(p).filter(|sig| sig.builtin && !sig.ffi).map(|sig| (sig.params.clone(), sig.ret.clone()))
-    }
-
-    fn builtin_method_sig(&self, owner: &Path, method: SymRef) -> Option<(Vec<Type>, Type)> {
-        self.reg
-            .type_def(owner)
-            .and_then(|d| d.assoc.get(method))
-            .filter(|af| af.builtin)
-            .map(|af| (af.sig.params.clone(), af.sig.ret.clone()))
-    }
-}
-
-/// The builders that are this checker's own: they read its registry's
-/// name-keyed type parameters, or lower its tree's nodes themselves.
-impl Info {
-    /// `(pat-wild)` / `(pat-bind SYM)` / `(pat-lit LITERAL)` /
-    /// `(pat-guard SYM TEST)` /
-    /// `(pat-ctor PATH VARIANT DOWNCAST SUB...)` /
-    /// `(pat-typetest PATH SUB)`.
-    ///
-    /// A constructor pattern carries its type, its variant index and whether it
-    /// is a downcast — and nothing about its fields' representations. The AST's
-    /// `Pattern::Ctor` recorded `sexpr_fields` and `field_types` per pattern
-    /// site; a field's representation is a property of the *type*, so the
-    /// bridge reads it from that type's own `defstruct`/`defenum` form and the
-    /// same fact is recorded once instead of once per site. `Pattern::Bind`'s
-    /// inert `bool` disappears here for the same reason it existed —
-    /// nothing read it.
-    pub(super) fn pattern_form(&self, heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
-        let form = match pat {
-            Pattern::Wildcard => core::tagged(heap, wk::PAT_WILD, &[])?,
-            Pattern::Bind(name) => {
-                core::tagged(heap, wk::PAT_BIND, &[Value::Symbol(*name)])?
-            }
-            Pattern::Int(n) => {
-                let lit = core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(*n)])?;
-                let mut s = RootScope::new(heap);
-                s.push_root(lit);
-                core::tagged(&mut s, wk::PAT_LIT, &[lit])?
-            }
-            Pattern::Bool(b) => {
-                let lit = core::tagged(heap, wk::BOOL, &[Value::Bool(*b)])?;
-                let mut s = RootScope::new(heap);
-                s.push_root(lit);
-                core::tagged(&mut s, wk::PAT_LIT, &[lit])?
-            }
-            Pattern::Char(c) => {
-                let lit = core::tagged(heap, wk::CHAR, &[Value::Char(*c)])?;
-                let mut s = RootScope::new(heap);
-                s.push_root(lit);
-                core::tagged(&mut s, wk::PAT_LIT, &[lit])?
-            }
-            Pattern::Guard { name, form } => {
-                let mut s = RootScope::new(heap);
-                let test = sub(&mut s, self, form)?;
-                core::tagged(&mut s, wk::PAT_GUARD, &[Value::Symbol(*name), test])?
-            }
-            Pattern::When { pat, test } => {
-                let mut s = RootScope::new(heap);
-                let inner = self.pattern_form(&mut s, pat)?;
-                s.push_root(inner);
-                let test = sub(&mut s, self, test)?;
-                core::tagged(&mut s, wk::PAT_WHEN, &[inner, test])?
-            }
-            // A niched `Option<T>`'s two shapes (`check_ctor_pattern_fields`).
-            // `none` is the empty-list word; `(some P)` is any other word,
-            // with `P` applied to the payload read back through `T`'s
-            // representation — which the node carries, since the island has
-            // to untag a narrow payload and open a float box before `P` can
-            // compare or bind it.
-            Pattern::Empty => core::tagged(heap, wk::PAT_EMPTY, &[])?,
-            Pattern::Some(payload, sub) => {
-                let mut s = RootScope::new(heap);
-                let inner = self.pattern_form(&mut s, sub)?;
-                s.push_root(inner);
-                self.pat_some_form(&mut s, payload, inner)?
-            }
-            // The empty list is its own pattern node, not `Sexpr`'s `nil` variant.
-            // Today the two are the same test; they stop being the same when
-            // `nil` leaves `Sexpr` and the empty list becomes `Option<Sexpr>`'s
-            // `none` (docs/dev/null-elimination-plan.md §3.2.1) — at which
-            // point there is no `nil` variant to name, but there is still an empty
-            // list to test for. Splitting the node now is what lets that
-            // change touch only the checker's choice of node, not the two
-            // consumers that compile one.
-            Pattern::Ctor { type_name, variant: 0, args, downcast: false, .. }
-                if args.is_empty() && crate::types::path_is_builtin(type_name, typelisp_mem::wk::SEXPR) =>
-            {
-                core::tagged(heap, wk::PAT_EMPTY, &[])?
-            }
-            Pattern::Ctor { type_name, targs, variant, args, field_types, downcast } => {
-                let mut s = RootScope::new(heap);
-                let mut subs = Vec::with_capacity(args.len());
-                for sub in args {
-                    let one = self.pattern_form(&mut s, sub)?;
-                    s.push_root(one);
-                    subs.push(one);
-                }
-                self.pat_ctor_form(&mut s, type_name, targs, *variant, *downcast, field_types, &subs)?
-            }
-            Pattern::TypeTest(ty, sub) => {
-                let path = nominal_path(ty)
-                    .ok_or_else(|| Error::TypeError(format!("(the `{}` pattern): not a named type", ty)))?;
-                let mut f = Items::new(heap);
-                let tp = core::definition_form(&path);
-                f.push(tp);
-                // The full instantiation, not just the ADT path. The comment
-                // here used to say a heap box's type name never encodes type
-                // arguments — it does now, and this is where that stops being
-                // decoration: `(the gen<i32> x)` no longer accepts a
-                // `gen<string>` and then reads its field as an `i32`.
-                let key = core::type_form(f.heap(), ty, &[])?;
-                f.push(key);
-                let one = self.pattern_form(f.heap(), sub)?;
-                f.push(one);
-                f.finish(wk::PAT_TYPETEST)?
-            }
-        };
-        Ok(forms::rooted(heap, form))
-    }
-
-    /// `(labels ((SYM ((SYM REPR)...) RET-REPR BODY...)...) BODY...)` —
-    /// mutually recursive local functions, each of the same shape a `lambda`
-    /// has plus a name. See [`LabelsDef`] for one definition's four parts.
-    pub(super) fn labels_form(&self, heap: &mut Heap, defs: &[LabelsDef], body: &[Value]) -> Result<Value, Error> {
-        let mut lowered = Vec::with_capacity(defs.len());
-        for (name, params, ret, def_body) in defs {
-            let mut forms = Vec::with_capacity(def_body.len());
-            for c in def_body {
-                let form = lower(heap, self, c)?;
-                heap.push_root(form);
-                forms.push(form);
-            }
-            lowered.push(LoweredLabel { name: *name, params: params.clone(), ret: ret.clone(), body: forms });
-        }
-        self.labels_core_form(heap, &lowered, body)
-    }
-
-    /// The declared field types of `adt`'s variant `variant`, with `args`
-    /// substituted for the definition's own type parameters — the instantiated
-    /// field types [`Self::construct_form`] takes.
-    ///
-    /// For a non-generic type (`Sexpr`, an error type) `args` is empty and this
-    /// is just the declaration. For a generic one it is the substitution that
-    /// makes the answer meaningful at all — see `construct_form`'s doc comment.
-    pub(super) fn variant_field_tys(&self, adt: &Path, variant: usize, args: &[Type]) -> Vec<Type> {
-        let Some(def) = self.reg.type_def(adt) else { return Vec::new() };
-        let Some(v) = def.variants.get(variant) else { return Vec::new() };
-        let subst: BTreeMap<String, Type> =
-            def.params.iter().cloned().zip(args.iter().cloned()).collect();
-        v.fields.iter().map(|t| subst_apply(t, &subst)).collect()
-    }
-
-    /// [`Self::defun_form`] unless this `defun` is *generic*, in which case an
-    /// empty `(module PATH)`.
-    ///
-    /// A generic definition has no core form (see [`TopLevelForm`]): its body
-    /// was checked with the type variables still abstract, for
-    /// definition-time diagnostics only, and every call site was rewritten to
-    /// a monomorphized specialization. Emitting it would leave a silently
-    /// callable stale twin behind — which is why the old evaluator opened with
-    /// a `type_params.is_empty()` guard on both definition arms. Emitting
-    /// nothing instead removes the guard *and* the reason for it: an empty
-    /// `module` is already the "this defined a name, there is nothing to run"
-    /// form (`deftrait`/`impl` produce one), so no new vocabulary is needed and
-    /// nothing downstream has to recognize a body it must refuse to register.
-    pub(super) fn definition_form(
-        &self,
-        heap: &mut Heap,
-        name: &Path,
-        type_params: &[String],
-        params: &[(SymRef, Type)],
-        ret: &Type,
-        body: &[Value],
-    ) -> Result<Value, Error> {
-        if !type_params.is_empty() {
-            return forms::module_form(heap, name, &[]);
-        }
-        self.defun_form(heap, name, params, ret, body)
-    }
-
-    /// [`Self::defmethod_form`]'s counterpart of [`Self::definition_form`] —
-    /// same reasoning, for a generic *owner*'s method.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn method_definition_form(
-        &self,
-        heap: &mut Heap,
-        type_name: &Path,
-        method: SymRef,
-        instance: bool,
-        type_params: &[String],
-        params: &[(SymRef, Type)],
-        ret: &Type,
-        body: &[Value],
-    ) -> Result<Value, Error> {
-        if !type_params.is_empty() {
-            return forms::module_form(heap, type_name, &[]);
-        }
-        self.defmethod_form(heap, type_name, method, instance, params, ret, body)
-    }
-
-}

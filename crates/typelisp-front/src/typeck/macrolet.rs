@@ -6,7 +6,7 @@
 //! body are expanded as a module-level macro's are.
 
 use crate::check::analyze::{parse_macro_lambda_list, MacroShape};
-use crate::check::registry::MacroDef;
+use crate::typeck::registry::MacroDef;
 use crate::check::verify::bound_name;
 use crate::types::{Path, Type};
 use crate::{Error, Heap, Loc, Value};
@@ -48,7 +48,7 @@ pub(crate) fn check_macrolet(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[
         // A leading space is unwritable in source, and the number keeps two
         // bindings of one name apart.
         let path = Path::root(&format!(" macrolet {} {}", cx.reg.next_local_macro(), name.name()));
-        let site = MacroSite { reg: cx.reg, expander: cx.expander, ns: cx.ns };
+        let site = MacroSite { reg: cx.reg, expander: cx.expander, ns: cx.ns, notes: cx.notes() };
         let mut requests = Requests::default();
         let form = macro_form(&site, heap, &mut requests, &path, params, rest)?;
         let form = super::toplevel::bundled(heap, cx.reg, &mut requests, form)?;

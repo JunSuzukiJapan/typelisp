@@ -106,7 +106,6 @@ pub(crate) enum Step {
 #[derive(Debug)]
 pub(crate) struct Var {
     pub name: SymRef,
-    pub loc: Option<Loc>,
     pub kind: VarKind,
 }
 
@@ -148,9 +147,6 @@ pub(crate) struct Plan {
 pub(crate) struct AccVar {
     pub name: SymRef,
     pub acc: Acc,
-    /// The expression whose type decides the accumulator's — kept so
-    /// `Checker::check_loop_dsl` can check it before `build` runs.
-    pub sample: Value,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -295,7 +291,7 @@ pub(crate) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
         match word.well_known() {
             wk::KW_WITH | wk::KW_FOR | wk::KW_AS => {
                 c.i += 1;
-                let (name_v, loc) = c.next_value(heap.symbol_spelling(word))?;
+                let (name_v, _) = c.next_value(heap.symbol_spelling(word))?;
                 let Some(name) = var_name(name_v) else {
                     return Err(err(format!("{} needs a variable name", heap.symbol_spelling(word))));
                 };
@@ -307,7 +303,7 @@ pub(crate) fn parse(heap: &Heap, args: &[Value], locs: &[Option<Loc>]) -> Result
                 } else {
                     VarKind::For(parse_for_iter(heap, &mut c)?)
                 };
-                plan.vars.push(Var { name, loc, kind });
+                plan.vars.push(Var { name, kind });
             }
             wk::KW_REPEAT => {
                 c.i += 1;
@@ -490,7 +486,7 @@ fn accumulate(
             )))
         }
         Some(_) => {}
-        None => plan.accs.push(AccVar { name: into, acc, sample: expr }),
+        None => plan.accs.push(AccVar { name: into, acc }),
     }
     Ok(Step::Accumulate { acc, expr, into })
 }
@@ -942,48 +938,3 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: SymRef) -> Resul
 
 // ------------------------------------------------------------- type probes
 
-/// A form whose type is the type `var` will have — checked, never evaluated,
-/// by `Checker::check_loop_dsl`'s first pass.
-pub(crate) fn var_probe(heap: &mut Heap, var: &Var) -> Result<Value, Error> {
-    let mut scope = crate::RootScope::new(heap);
-    let mut b = Build { s: &mut scope, tmp: 0 };
-    match &var.kind {
-        VarKind::With(init) => Ok(*init),
-        VarKind::For(ForIter::Range { from, .. }) => Ok(*from),
-        VarKind::For(ForIter::Assign { init, .. }) => Ok(*init),
-        VarKind::For(ForIter::Seq(seq)) => {
-            let buf = b.call("copy-seq", &[*seq])?;
-            b.call("get", &[buf, Value::Int(0)])
-        }
-        VarKind::For(ForIter::Suffixes(seq)) => b.call("copy-seq", &[*seq]),
-    }
-}
-
-/// A form whose type is the type `acc` accumulates.
-pub(crate) fn acc_probe(heap: &mut Heap, acc: &AccVar) -> Result<Value, Error> {
-    match acc.acc {
-        // `:append` splices a sequence in, so what it accumulates is that
-        // sequence's element, not the sequence.
-        Acc::Append => {
-            let mut scope = crate::RootScope::new(heap);
-            let mut b = Build { s: &mut scope, tmp: 0 };
-            let buf = b.call("copy-seq", &[acc.sample])?;
-            b.call("get", &[buf, Value::Int(0)])
-        }
-        _ => Ok(acc.sample),
-    }
-}
-
-/// The `:thereis` expression, if the loop has one.
-pub(crate) fn thereis_expr(plan: &Plan) -> Option<Value> {
-    fn walk(step: &Step) -> Option<Value> {
-        match step {
-            Step::Thereis { expr } => Some(*expr),
-            Step::Cond { then, els, .. } => {
-                walk(then).or_else(|| els.as_deref().and_then(walk))
-            }
-            _ => None,
-        }
-    }
-    plan.steps.iter().find_map(walk)
-}

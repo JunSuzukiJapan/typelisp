@@ -29,7 +29,7 @@ fn program(src: &str) -> (Heap, Vec<TopLevelForm>, DefLocs, Docs) {
     let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     let interp = Interp::new();
     let body = vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v).expect("check failed")).collect();
-    (h, body, chk.registry().def_locs.clone(), chk.registry().docs.clone())
+    (h, body, chk.def_locs(), chk.docs())
 }
 
 #[test]

@@ -139,7 +139,7 @@ fn variadic_append(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Op
     let t = cx.temp();
     let raw: Vec<Value> = std::iter::once(Value::Symbol(t)).chain(args[1..].iter().map(|(v, _)| *v)).collect();
     let roots = heap.root_count();
-    let checked = append_fold(heap, &raw, strings).and_then(|fold| locals.bind(vec![(t, first.ty.clone())]).and_then(|l| check_expr(cx, heap, &l, fold, expected, loc.clone())));
+    let checked = append_fold(heap, &raw, strings).and_then(|fold| locals.bind(vec![(t, first.ty.clone(), None)]).and_then(|l| check_expr(cx, heap, &l, fold, expected, loc.clone())));
     heap.truncate_roots(roots);
     let checked = checked?;
     let ty = checked.ty.clone();

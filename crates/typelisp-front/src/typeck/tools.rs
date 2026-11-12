@@ -76,7 +76,8 @@ pub(crate) fn check_ed(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value
                         Value::Path(id) => path_spelling(heap, id),
                         // `Type<args>::member`, which `definition` read.
                         member => match heap.list_to_vec(member)?.as_slice() {
-                            [_, ty, Value::Symbol(m)] => format!("{}::{}", super::type_syntax::parse_type(heap, &cx.types(), *ty)?, m.name()),
+                            // Read once more for the message, after `definition` noted it.
+                            [_, ty, Value::Symbol(m)] => format!("{}::{}", super::type_syntax::parse_type(heap, &cx.types(), *ty, None)?, m.name()),
                             _ => unreachable!("`definition` names a definition only for a name"),
                         },
                     };
@@ -202,11 +203,11 @@ pub(crate) fn member_code<'r>(cx: &Cx<'r>, owner: Path, method: SymRef, spelling
 /// its definition — the instantiation's own, or the one for every
 /// instantiation.
 pub(crate) fn instantiation_member<'r>(cx: &Cx<'r>, heap: &Heap, v: Value, who: &str) -> Result<(Path, SymRef, &'r MethodDef), Error> {
-    let parts = heap.list_to_vec(v)?;
-    let [_, ty, Value::Symbol(member)] = parts.as_slice() else {
+    let parts = heap.list_to_vec_locs(v)?;
+    let [_, (ty, ty_at), (Value::Symbol(member), _)] = parts.as_slice() else {
         return Err(Error::TypeError(format!("{}: expected `Type<args>::member`", who)));
     };
-    let ty = super::type_syntax::parse_type(heap, &cx.types(), *ty)?;
+    let ty = super::type_syntax::parse_type(heap, &cx.types(), *ty, ty_at.as_ref())?;
     let Type::Named(owner, args) = &ty else {
         return Err(Error::TypeError(format!("{}: `{}` has no methods of its own", who, ty)));
     };

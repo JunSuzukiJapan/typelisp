@@ -334,7 +334,7 @@ pub fn llvm_context() -> &'static Context {
 
 /// The fixed C ABI every JIT-compiled function uses, regardless of its
 /// typelisp-level arity: an `i64` argument array (and its length) in, one
-/// `i64` out — see `registry::llvm_module_def`'s doc comment for why
+/// `i64` out — see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`) for why
 /// `compiler.rs`'s `compile-function` always builds LLVM functions under
 /// this exact signature.
 ///

@@ -76,6 +76,7 @@ pub(crate) fn check_select(
             // `((v (recv ch)) body...)`
             Some(Value::Symbol(var)) => {
                 bound_name(*var, "select")?;
+                let var_at = heap.list_to_vec_locs(*head)?.into_iter().next().and_then(|(_, l)| l);
                 let recv = match op[..] {
                     [_, inner] => heap.list_to_vec(inner).map_err(|_| Error::TypeError(SHAPE.to_string()))?,
                     _ => return Err(Error::TypeError(format!("`select`: a receive arm is (v (recv ch)). {}", SHAPE))),
@@ -90,7 +91,7 @@ pub(crate) fn check_select(
                 let elem = element(cx, &chan.ty, "recv")?;
                 let bound = Type::Named(Path::builtin(wk::OPTION), vec![elem]);
                 let chan = operand(&mut binds, chan);
-                let arm_locals = locals.bind(vec![(*var, bound.clone())])?;
+                let arm_locals = locals.bind(vec![(*var, bound.clone(), var_at)])?;
                 arms.push(SelectArm::Recv { var: *var, bound, chan, body: body(cx, heap, &arm_locals)? });
             }
             _ => return Err(Error::TypeError(format!("`select`: an arm is either (v (recv ch)) or (send ch value). {}", SHAPE))),

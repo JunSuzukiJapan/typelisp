@@ -25,29 +25,16 @@ fn every_definition_is_named_by_a_symbol_of_its_module() {
     )
     .expect("the program runs");
     let mut wrong = Vec::new();
-    for m in s.checker.registry().namespaces() {
-        let tables = [
-            ("fn", m.fns.symbols().collect::<Vec<_>>()),
-            ("var", m.vars.symbols().collect()),
-            ("macro", m.macros.symbols().collect()),
-            ("type", m.types.symbols().collect()),
-            ("trait", m.traits.symbols().collect()),
-            ("type alias", m.type_aliases.symbols().collect()),
-            ("C struct", m.c_structs.symbols().collect()),
-            ("constructor", m.ctors.symbols().collect()),
-        ];
-        for (what, syms) in tables {
-            for sym in syms {
-                if sym.home() != m.ns {
-                    wrong.push(format!(
-                        "{} `{}` in `{}` is named by a symbol of `{}`",
-                        what,
-                        sym.name(),
-                        typelisp::mem::symbols::ns_path(m.ns).join("::"),
-                        typelisp::mem::symbols::ns_path(sym.home()).join("::")
-                    ));
-                }
-            }
+    for d in s.checker.definitions() {
+        let sym = d.path.name_symbol();
+        if sym.home() != d.path.ns() {
+            wrong.push(format!(
+                "{:?} `{}` in `{}` is named by a symbol of `{}`",
+                d.kind,
+                sym.name(),
+                typelisp::mem::symbols::ns_path(d.path.ns()).join("::"),
+                typelisp::mem::symbols::ns_path(sym.home()).join("::")
+            ));
         }
     }
     wrong.sort();

@@ -73,7 +73,7 @@ fn check_extended(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Opt
     if zeros.is_empty() {
         return check_expr(cx, heap, locals, built, expected, loc);
     }
-    let inner = locals.bind(zeros.iter().map(|(n, t)| (*n, t.ty.clone())).collect())?;
+    let inner = locals.bind(zeros.iter().map(|(n, t)| (*n, t.ty.clone(), None)).collect())?;
     let body = check_expr(cx, heap, &inner, built, expected, loc.clone())?;
     let ty = body.ty.clone();
     Ok(Typed { node: Node::Let { binds: zeros, body: vec![body] }, ty, loc })

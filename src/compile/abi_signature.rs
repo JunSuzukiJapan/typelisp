@@ -20,11 +20,12 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use typelisp_front::check::registry::{AdtDef, AdtKind, FnSig, Namespace};
+use typelisp_front::builtins::{Builtins, FnDef, MethodDef, TypeDef};
+use typelisp_front::builtins::AdtKind;
 use typelisp_front::check::repr::Repr;
-use typelisp_front::check::Registry;
 use typelisp_front::types::Path;
 use typelisp_front::Type;
+use typelisp_mem::SymRef;
 
 /// `docs/dev/api_version/`, relative to the repository root.
 pub const DOC_DIR: &str = "docs/dev/api_version";
@@ -140,11 +141,8 @@ pub fn describe() -> String {
     let mut out = String::new();
     constants(&mut out);
     vocabulary(&mut out);
-    let reg = Registry::with_builtins();
-    let mut defs = Defs::default();
-    for ns in reg.namespaces() {
-        collect(ns, &mut defs);
-    }
+    let builtins = Builtins::new();
+    let defs = Defs::of(&builtins);
     reprs(&mut out, &defs);
     shims(&mut out);
     types(&mut out, &defs);
@@ -223,21 +221,19 @@ fn vocabulary(out: &mut String) {
     out.push('\n');
 }
 
-/// The built-in definitions, gathered from every namespace of the registry
-/// with their full paths, so each table below can be printed sorted.
-#[derive(Default)]
-struct Defs {
-    types: BTreeMap<String, AdtDef>,
-    fns: BTreeMap<String, (Path, FnSig)>,
+/// The built-in definitions by their full paths' spellings, so each table
+/// below can be printed sorted.
+struct Defs<'b> {
+    types: BTreeMap<String, (&'b TypeDef, Vec<(SymRef, &'b MethodDef)>)>,
+    fns: BTreeMap<String, (Path, &'b FnDef)>,
 }
 
-fn collect(ns: &Namespace, defs: &mut Defs) {
-    for def in ns.types.values().filter(|d| d.builtin) {
-        defs.types.insert(def.name.to_string(), def.clone());
-    }
-    for (name, sig) in ns.fns.iter().filter(|(_, s)| s.builtin) {
-        let path = Path::in_ns(ns.ns, name);
-        defs.fns.insert(path.to_string(), (path, sig.clone()));
+impl<'b> Defs<'b> {
+    fn of(builtins: &'b Builtins) -> Defs<'b> {
+        Defs {
+            types: builtins.types().into_iter().map(|(p, def)| (p.to_string(), (def, builtins.methods(&p)))).collect(),
+            fns: builtins.functions().into_iter().map(|(p, def)| (p.to_string(), (p, def))).collect(),
+        }
     }
 }
 
@@ -245,7 +241,7 @@ fn collect(ns: &Namespace, defs: &mut Defs) {
 /// which `Repr` it gets, and the two numbers the island and the runtime both
 /// read off it.
 fn reprs(out: &mut String, defs: &Defs) {
-    let kinds: BTreeMap<String, AdtKind> = defs.types.iter().map(|(k, d)| (k.clone(), d.kind)).collect();
+    let kinds: BTreeMap<String, AdtKind> = defs.types.iter().map(|(k, (d, _))| (k.clone(), d.kind)).collect();
     let kind_of = |p: &Path| kinds.get(&p.to_string()).copied();
     let mut seen: BTreeMap<String, Type> = BTreeMap::new();
     let mut note = |t: &Type| {
@@ -254,12 +250,12 @@ fn reprs(out: &mut String, defs: &Defs) {
     for (_, sig) in defs.fns.values() {
         sig_types(sig, &mut note);
     }
-    for def in defs.types.values() {
+    for (def, methods) in defs.types.values() {
         for v in &def.variants {
             v.fields.iter().for_each(&mut note);
         }
-        for f in def.assoc.values() {
-            sig_types(&f.sig, &mut note);
+        for (_, m) in methods {
+            sig_types(&m.sig, &mut note);
         }
     }
     out.push_str("## 型ごとの表現 (Repr)\n\n| 型 | 型キー | Repr | field_kind | binding_kind |\n|---|---|---|---|---|\n");
@@ -279,7 +275,7 @@ fn reprs(out: &mut String, defs: &Defs) {
     out.push('\n');
 }
 
-fn sig_types(sig: &FnSig, note: &mut impl FnMut(&Type)) {
+fn sig_types(sig: &FnDef, note: &mut impl FnMut(&Type)) {
     sig.params.iter().for_each(&mut *note);
     note(&sig.ret);
     if let Some(rest) = &sig.rest {
@@ -309,22 +305,25 @@ fn shims(out: &mut String) {
 
 fn types(out: &mut String, defs: &Defs) {
     out.push_str("## 組み込み型\n\n");
-    for (name, def) in &defs.types {
+    for (name, (def, methods)) in &defs.types {
         let kind = match def.kind {
             AdtKind::Sum => "sum",
             AdtKind::Struct => "struct",
         };
-        writeln!(out, "### `{}` ({}, 型引数 [{}])\n", name, kind, def.params.join(", ")).unwrap();
+        let params: Vec<&str> = def.params.iter().map(|p| p.name.name()).collect();
+        writeln!(out, "### `{}` ({}, 型引数 [{}])\n", name, kind, params.join(", ")).unwrap();
         for (i, v) in def.variants.iter().enumerate() {
             let fields: Vec<String> = v.fields.iter().map(|t| format!("`{}`", t)).collect();
             writeln!(out, "- 変種 {} `{}`: {}", i, v.name, fields.join(", ")).unwrap();
         }
-        if !def.field_names.is_empty() {
-            writeln!(out, "- フィールド名: {}", def.field_names.iter().map(|f| format!("`{}`", f)).collect::<Vec<_>>().join(", ")).unwrap();
+        if !def.fields.is_empty() {
+            writeln!(out, "- フィールド名: {}", def.fields.iter().map(|f| format!("`{}`", f.name)).collect::<Vec<_>>().join(", ")).unwrap();
         }
-        for (method, f) in def.assoc.iter().filter(|(_, f)| f.builtin) {
-            let receiver = if f.instance { "インスタンス" } else { "関連関数" };
-            writeln!(out, "- {} `{}`: {}", receiver, method, sig_text(&f.sig)).unwrap();
+        for (method, m) in methods.iter().filter(|(_, m)| m.sig.builtin) {
+            let receiver = if m.instance { "インスタンス" } else { "関連関数" };
+            // A method's type parameters are its type's, then its own; the
+            // type's are written in the heading.
+            writeln!(out, "- {} `{}`: {}", receiver, method, sig_text(&m.sig, def.params.len())).unwrap();
         }
         out.push('\n');
     }
@@ -334,14 +333,14 @@ fn functions(out: &mut String, defs: &Defs) {
     out.push_str("## 組み込み関数\n\n| 関数 | シム | シグネチャ |\n|---|---|---|\n");
     for (name, (path, sig)) in &defs.fns {
         let shim = super::externs::builtin_shim(path).map(|s| format!("`{}`", s)).unwrap_or_default();
-        writeln!(out, "| `{}` | {} | {} |", name, shim, sig_text(sig).replace('|', "\\|")).unwrap();
+        writeln!(out, "| `{}` | {} | {} |", name, shim, sig_text(sig, 0).replace('|', "\\|")).unwrap();
     }
     out.push('\n');
 }
 
 /// `<T, U> (a, b, &optional c, &key d, &rest e) -> r`, with the `where`
-/// bounds after it.
-fn sig_text(sig: &FnSig) -> String {
+/// bounds after it. The first `outer` type parameters are left out.
+fn sig_text(sig: &FnDef, outer: usize) -> String {
     let mut params: Vec<String> = sig.params.iter().map(|t| t.to_string()).collect();
     if !sig.optionals.is_empty() {
         params.push("&optional".to_string());
@@ -354,11 +353,12 @@ fn sig_text(sig: &FnSig) -> String {
     if let Some(rest) = &sig.rest {
         params.push(format!("&rest {}", rest));
     }
-    let generics = if sig.type_params.is_empty() { String::new() } else { format!("<{}> ", sig.type_params.join(", ")) };
+    let own: Vec<&str> = sig.type_params[outer..].iter().map(|p| p.name.name()).collect();
+    let generics = if own.is_empty() { String::new() } else { format!("<{}> ", own.join(", ")) };
     let mut text = format!("`{}({}) -> {}`", generics, params.join(", "), sig.ret);
     for (param, bounds) in &sig.bounds {
         for b in bounds {
-            write!(text, " where `{}: {}`", param, b.trait_path).unwrap();
+            write!(text, " where `{}: {}`", param.name.name(), b.trait_path).unwrap();
             for (assoc, ty) in &b.assoc {
                 write!(text, " (`{}` = `{}`)", assoc, ty).unwrap();
             }

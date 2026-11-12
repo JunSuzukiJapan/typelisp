@@ -1,5 +1,5 @@
 //! A runtime mirror of the checker's modules
-//! ([`crate::check::registry::Namespace`]), holding every top-level
+//! ([`crate::typeck::registry::Namespace`]), holding every top-level
 //! `defun`/`defmethod`/`defvar`/`defstruct`/`defenum`. Each definition is
 //! registered with its own defining module, under the symbol its name reads
 //! as there — so no single table spans the whole program.
@@ -72,8 +72,7 @@ pub(crate) struct ModuleTables {
     /// `defmethod`, by (the owning type's name, the method's member symbol)
     /// — stored with the *type's* defining module, not the method's own
     /// definition site (a `defmethod` always lives alongside its type for
-    /// this purpose, matching how the checker's `AdtDef::assoc` is itself
-    /// part of the type's own definition).
+    /// this purpose, matching how the checker keys a method by its type).
     pub(crate) methods: HashMap<(SymRef, SymRef), Rc<FnDef>>,
     /// `defvar`/`defconstant`, by name.
     pub(crate) globals: HashMap<SymRef, Slot>,
@@ -127,7 +126,7 @@ impl ModuleScope {
     /// inserts one, so an enum's variant names live in exactly one table no
     /// matter where the definition came from. Both a user `defenum`'s exec
     /// (`Interp::exec`'s `TopLevel::Defenum` arm) and `Interp::new`'s seeding
-    /// of the built-in sum types (`crate::check::registry::builtin_sum_defs`
+    /// of the built-in sum types (`crate::typeck::builtins::runtime_types`
     /// — `Option`/`Result`/the error types, which are registered with the
     /// checker but never `exec`'d) call this rather than inserting a
     /// `TypeEntry::Enum` themselves.

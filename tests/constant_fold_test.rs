@@ -221,10 +221,10 @@ fn every_scalar_builtin_with_a_literal_result_folds() {
     let mut unfolded = Vec::new();
     let mut no_literal = Vec::new();
     let mut exercised = 0;
+    let builtins = typelisp::builtins::Builtins::new();
     for recv in receivers {
-        let def = Session::new(Load::Bare).checker.registry().type_def(&Path::primitive(recv)).expect("a primitive is registered").clone();
-        for (name, af) in &def.assoc {
-            if !af.builtin || !af.instance {
+        for (name, af) in builtins.methods(&Path::primitive(recv)) {
+            if !af.sig.builtin || !af.instance {
                 continue;
             }
             let ret = &af.sig.ret;

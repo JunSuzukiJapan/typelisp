@@ -20,7 +20,7 @@
 //! another is not a subtype of it: the field list is all it takes.
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{intern, member_symbol};
@@ -47,7 +47,7 @@ pub(crate) fn check_defstruct(
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
-    let [(header, _), fields @ ..] = parts else {
+    let [(header, header_at), fields @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (header, options) = match *header {
@@ -81,7 +81,8 @@ pub(crate) fn check_defstruct(
         variants: Vec::new(),
     };
     reg.types.insert(path, TypeEntry::Type(stub.clone()));
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
+    super::type_syntax::note_definition(d.notes, path, &TypeEntry::Type(stub.clone()), header_at.as_ref());
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
     let mut all = match options.include {
         Some(parent) => included(heap, &tcx, parent)?,
         None => Vec::new(),
@@ -101,7 +102,7 @@ pub(crate) fn check_defstruct(
     let mut forms = Vec::new();
     let names: Vec<String> = fields.iter().map(|f| f.name.name().to_string()).collect();
     let field_tys: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
-    let def_form = reg.defstruct_form(heap, &path, &[], &field_tys, &names)?;
+    let def_form = reg.defstruct_form(heap, &path, &field_tys, &names)?;
     heap.push_root(def_form);
     forms.push(def_form);
     let mut push = |heap: &mut Heap, form: Option<Value>| {
@@ -192,14 +193,14 @@ fn define_accessor(
 fn parse_fields(heap: &Heap, cx: &TypeCx, items: &[(Value, Option<Loc>)]) -> Result<Vec<(Field, Option<Value>)>, Error> {
     let mut out: Vec<(Field, Option<Value>)> = Vec::new();
     for (item, _) in items {
-        let elems = heap.list_to_vec(*item).map_err(|_| Error::TypeError(SHAPE.into()))?;
+        let elems = heap.list_to_vec_locs(*item).map_err(|_| Error::TypeError(SHAPE.into()))?;
         let (public, rest) = match elems.split_first() {
-            Some((Value::Symbol(id), rest)) if id.is(crate::wk::PUB) => (true, rest),
+            Some(((Value::Symbol(id), _), rest)) if id.is(crate::wk::PUB) => (true, rest),
             _ => (false, &elems[..]),
         };
-        let (name, ty, default) = match rest {
-            [Value::Symbol(name), ty] => (*name, *ty, None),
-            [Value::Symbol(name), ty, default] => (*name, *ty, Some(*default)),
+        let (name, (ty, ty_at), default) = match rest {
+            [(Value::Symbol(name), _), ty] => (*name, ty.clone(), None),
+            [(Value::Symbol(name), _), ty, (default, _)] => (*name, ty.clone(), Some(*default)),
             _ => {
                 return Err(Error::TypeError(
                     "defstruct: field must be (name type), (pub name type), or either with a default".into(),
@@ -210,7 +211,7 @@ fn parse_fields(heap: &Heap, cx: &TypeCx, items: &[(Value, Option<Loc>)]) -> Res
         if out.iter().any(|(f, _)| f.name == name) {
             return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", name)));
         }
-        let ty = parse_type(heap, cx, ty)?;
+        let ty = parse_type(heap, cx, ty, ty_at.as_ref())?;
         crate::check::Checker::reject_raw_word_storage(&ty, "the field", name.name())?;
         out.push((Field { name, ty, public, default: default.is_some() }, default));
     }
@@ -308,7 +309,8 @@ enum Default {
 /// The fields `(:include parent)` gives, in the parent's order, its type
 /// arguments put in.
 fn included(heap: &Heap, cx: &TypeCx, parent: Value) -> Result<Vec<(Field, Option<Default>)>, Error> {
-    let ty = parse_type(heap, cx, parent)?;
+    // The options are read without their places.
+    let ty = parse_type(heap, cx, parent, None)?;
     let Type::Named(parent, args) = &ty else {
         return Err(Error::TypeError(format!("defstruct: (:include `{}`) — a struct is what can be included", ty)));
     };
@@ -355,7 +357,7 @@ fn define_default(
     let reown = Subst::positional(&struct_params, &own.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
     let mut body = match default {
         Default::Written(form) => {
-            let cx = super::expr::Cx::new(reg, d.expander, d.site.ns, scope, None);
+            let cx = super::expr::Cx::new(reg, d.expander, d.site.ns, scope, None, d.notes);
             let mut body = super::expr::check_expr(&cx, heap, &super::locals::Locals::empty(), *form, Some(&field.ty), heap.cons_loc(*form))
                 .map_err(|e| Error::TypeError(format!("defstruct {}: the default of `{}`: {}", path, field.name, message(e))))?;
             cx.settle(heap, std::slice::from_mut(&mut body))?;

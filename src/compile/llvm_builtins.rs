@@ -57,7 +57,7 @@ use crate::types::Path;
 /// The (typelisp-hosted) compiler's view of LLVM — `llvm-module`/
 /// `llvm-function`/`llvm-builder`/`llvm-value` instance and static methods.
 /// Same metadata-only pattern as the rest of `eval_builtin_method` (the
-/// `AdtDef`s in `registry::llvm_module_def` etc. carry no `defmethod` body).
+/// types in `typeck::builtins::llvm` carry no `defmethod` body).
 /// Every arm holds [`crate::compile::COMPILE_LOCK`] for its duration — see
 /// that constant's doc comment for why concurrent access to the one
 /// process-wide LLVM `Context` must never happen — nesting inside the
@@ -255,7 +255,7 @@ fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 
 /// Every compiled function gets the same fixed C ABI — `i64 name(i64* args,
 /// i32 argc)` — regardless of its typelisp-level arity (see
-/// `registry::llvm_module_def`'s doc comment for why); `llvm-builder::load-arg`
+/// the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`) for why); `llvm-builder::load-arg`
 /// reads a logical parameter back out of `args`. LLVM 22 has only opaque
 /// pointers, so the parameter type is `Context::ptr_type`, not
 /// `IntType::ptr_type`.
@@ -374,7 +374,7 @@ pub(crate) fn declare_external_compiled_function(module: &Rc<RefCell<Module<'sta
 /// (`check::freevars::free_vars`) is non-empty, and (labels/closures
 /// Stage 4) for *every* function ever wrapped into a `ClosureBox` via
 /// `build-make-closure`, capturing or not — see that builtin's doc comment
-/// (`registry::llvm_builder_def`) for why unifying on one ABI regardless of
+/// (`llvm-builder`'s definition (`typeck::builtins::llvm`)) for why unifying on one ABI regardless of
 /// whether a given closure actually captures anything is what lets the
 /// driver call through it without first checking which case it's in.
 fn compiled_fn_type_with_env() -> inkwell::types::FunctionType<'static> {
@@ -405,7 +405,7 @@ fn llvm_module_to_string(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalE
 }
 
 /// Looks up an already-`add-function`-declared `llvm-function` by name —
-/// see `registry::llvm_module_def`'s doc comment on `get-function` for why
+/// see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`) on `get-function` for why
 /// this is the core lookup every direct call (self-recursion, `labels`
 /// siblings, top-level `defun`-to-`defun` calls) is built on.
 fn llvm_module_get_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -1702,7 +1702,7 @@ fn set_rooted_table(module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx, nslot
 /// Stage 5): runs `icmp <predicate>` on two `i64` operands, then widens the
 /// resulting `i1` back to `i64` (0/1) via `build_int_z_extend` — every other
 /// builtin here treats a compiled value as a plain `i64` (see
-/// `registry::llvm_module_def`'s doc comment), and a comparison result is no
+/// the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`)), and a comparison result is no
 /// exception, which is exactly what lets `compile-if`'s `build-cond-br` (and
 /// ordinary arithmetic/storage) accept it without caring it came from a
 /// comparison rather than `+`/a literal.
@@ -1743,7 +1743,7 @@ fn llvm_builder_build_br(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-/// See `registry::llvm_builder_def`'s doc comment for `block-terminated?`.
+/// See the doc comment of `llvm-builder`'s definition (`typeck::builtins::llvm`) for `block-terminated?`.
 fn llvm_builder_block_terminated(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let terminated = builder.borrow().get_insert_block().and_then(|bb| bb.get_terminator()).is_some();
@@ -1752,7 +1752,7 @@ fn llvm_builder_block_terminated(args: &[Value]) -> Result<Value, EvalError> {
 
 /// A direct call to an already-declared `target` (typically `get-function`'s
 /// result), passing `args_ptr`/`argc` straight through to its fixed ABI —
-/// see `registry::llvm_module_def`'s doc comment for why every compiled
+/// see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`) for why every compiled
 /// function shares that one signature regardless of arity. This is the one
 /// new primitive that unlocks every statically-resolvable direct call:
 /// self-recursion, `labels`-sibling calls, and top-level `defun`-to-`defun`
@@ -1938,7 +1938,7 @@ fn llvm_builder_build_free(args: &[Value]) -> Result<Value, EvalError> {
 }
 
 /// Reinterprets an `i64`-valued `llvm-value` as a pointer — every compiled
-/// value is a plain `i64` (`registry::llvm_module_def`'s doc comment), so a
+/// value is a plain `i64` (the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`)), so a
 /// general ADT box value read back out of a slot/argument/field needs this
 /// before `load-raw`/`store-arg` (which both expect an already-pointer-typed
 /// `llvm-value`) can dereference it — `compiler.rs`'s `compile-field-get`/
@@ -2309,10 +2309,10 @@ fn llvm_ret_kind(ty: &Type) -> LlvmRetK {
 }
 
 /// The `rt_llvm_call` dispatch table, keyed by [`compile::symbols::llvm_op_id`]'s
-/// stable hash. The `llvm-*` entries are *derived* from the same
-/// `check::registry` `AdtDef`s the checker types these methods with —
-/// table and signatures cannot drift apart. The six `native-scope` entries
-/// are written out by hand because `scope_def`'s signatures are generic
+/// stable hash. The `llvm-*` entries are *derived* from the same built-in
+/// definitions (`typelisp_front::builtins`) the checker types these methods
+/// with — table and signatures cannot drift apart. The six `native-scope`
+/// entries are written out by hand because `Scope<V>`'s signatures are generic
 /// over `V` (here always an LLVM handle — see
 /// `core_bridge::llvm_assoc_key`, which only routes a `Scope<V>` with an
 /// LLVM-handle `V` to this table in the first place).
@@ -2326,14 +2326,11 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
                 panic!("llvm_op_table: op id collision on {}", id);
             }
         };
-        for (ty, type_key, def) in [
-            (wk::LLVM_MODULE, "llvm-module", crate::check::registry::llvm_module_def()),
-            (wk::LLVM_FUNCTION, "llvm-function", crate::check::registry::llvm_function_def()),
-            (wk::LLVM_BUILDER, "llvm-builder", crate::check::registry::llvm_builder_def()),
-        ] {
-            for (method, af) in def.assoc {
-                let args = af.sig.params.iter().map(llvm_arg_kind).collect();
-                let ret = llvm_ret_kind(&af.sig.ret);
+        let builtins = typelisp_front::builtins::Builtins::new();
+        for (ty, type_key) in [(wk::LLVM_MODULE, "llvm-module"), (wk::LLVM_FUNCTION, "llvm-function"), (wk::LLVM_BUILDER, "llvm-builder")] {
+            for (method, m) in builtins.methods(&crate::Path::builtin(ty)) {
+                let args = m.sig.params.iter().map(llvm_arg_kind).collect();
+                let ret = llvm_ret_kind(&m.sig.ret);
                 insert(&mut t, ty, type_key, method, args, ret);
             }
         }

@@ -7,7 +7,7 @@
 //! empty `(module PATH)`, the form that defines a name and runs nothing.
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;
@@ -15,7 +15,7 @@ use typelisp_mem::SymRef;
 use super::expr::Cx;
 use super::bounds::parse_where;
 use super::generic::{Base, Requests};
-use super::lambda_list::{parse_lambda_list, LambdaList, Written};
+use super::lambda_list::{bindings, parse_lambda_list, LambdaList, Written};
 use super::block::check_named_body;
 use super::locals::Locals;
 use super::lower::{lower_rooted, Lowering};
@@ -40,7 +40,7 @@ pub(crate) fn check_defun(
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
-    let [(header, _), (params, _), (ret, _), body @ ..] = parts else {
+    let [(header, _), (params, _), (ret, ret_at), body @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
@@ -68,15 +68,15 @@ pub(crate) fn check_defun(
     let named = format!("defun {}", path.last_segment());
     let at = Written { what: "defun", named: &named, owner: ParamOwner::Def(path) };
     let list = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &heap.list_to_vec(*params)?)?;
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let bounds = match clause {
         Some(clause) => parse_where(heap, &tcx, clause)?,
         None => Vec::new(),
     };
     let bounded = scope.bound(bounds.clone());
     let type_params = scope.params().to_vec();
-    let LambdaList { required, optionals, rest, keys, bound: params } = list;
+    let LambdaList { required, optionals, rest, keys, bound: params, locs } = list;
     let def = FnDef {
         public: d.public,
         rest: rest.map(|(_, t)| t),
@@ -91,9 +91,9 @@ pub(crate) fn check_defun(
     reg.define_fn(path, def);
 
     let mut body = {
-        let cx = Cx::new(reg, d.expander, ns, &bounded, None);
+        let cx = Cx::new(reg, d.expander, ns, &bounded, None, d.notes);
         let locals_root = Locals::empty();
-        let locals = locals_root.bind(params.clone())?;
+        let locals = locals_root.bind(bindings(&params, &locs))?;
         let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
         cx.settle(heap, &mut body)?;
         body
@@ -186,9 +186,49 @@ pub(crate) fn parse_param(heap: &Heap, cx: &TypeCx, p: Value) -> Result<(SymRef,
             unimplemented!("typeck: the `{}` parameter marker", id.name())
         }
     }
-    let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError(SHAPE.into()))?;
-    let [Value::Symbol(name), ty] = pair.as_slice() else {
+    let pair = heap.list_to_vec_locs(p).map_err(|_| Error::TypeError(SHAPE.into()))?;
+    let [(Value::Symbol(name), _), (ty, ty_at)] = pair.as_slice() else {
         return Err(Error::TypeError(format!("defun: a parameter is (name Type): {}", SHAPE)));
     };
-    Ok((*name, parse_type(heap, cx, *ty)?))
+    Ok((*name, parse_type(heap, cx, *ty, ty_at.as_ref())?))
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::parse_header;
+    use crate::{Heap, Reader};
+
+    fn header(src: &str) -> Result<(String, Vec<String>), crate::Error> {
+        let mut h = Heap::with_capacity(4096);
+        let v = Reader::new().read_all(&mut h, src).expect("reads")[0];
+        let (name, params) = parse_header(&h, v)?;
+        Ok((name.name().to_string(), params.iter().map(|p| p.name().to_string()).collect()))
+    }
+
+    #[test]
+    fn a_plain_name_has_no_type_parameters() {
+        assert_eq!(header("identity").unwrap(), ("identity".to_string(), vec![]));
+        // Hyphens are ordinary name characters, not token boundaries.
+        assert_eq!(header("cons-cell").unwrap(), ("cons-cell".to_string(), vec![]));
+    }
+
+    #[test]
+    fn an_angle_bracket_header_splits_into_name_and_params() {
+        assert_eq!(header("pair<a,b>").unwrap(), ("pair".to_string(), vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(header("identity<t>").unwrap(), ("identity".to_string(), vec!["t".to_string()]));
+    }
+
+    #[test]
+    fn every_cl_comparison_operator_is_a_plain_name() {
+        // `char<`/`string<=`/...: a `<` with no type after it is part of the
+        // name.
+        for op in ["<", ">", "<=", ">=", "char<", "char>", "char<=", "char>=", "string<", "string>", "string<=", "string>=", "->", "+"] {
+            assert_eq!(header(&format!("{} ", op)).unwrap(), (op.to_string(), vec![]), "operator {:?}", op);
+        }
+    }
+
+    #[test]
+    fn a_type_parameter_must_be_a_plain_name() {
+        assert!(header("pair<Vector<t>>").is_err());
+    }
 }

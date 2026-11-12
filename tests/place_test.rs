@@ -1,8 +1,6 @@
 //! Tests for the generalized `setf` place mechanism: `incf`/`decf`/
 //! `rotatef`/`shiftf`, and the call-form place `(setf (get recv key...) v)`
-//! (this project's analogue of CL's `(setf (gethash k h) v)`) — see
-//! `Checker::check_setf_call_place`/`Checker::place_dedup` in
-//! `src/check/analyze.rs`. Variable and `var::field` places were already
+//! (this project's analogue of CL's `(setf (gethash k h) v)`). Variable and `var::field` places were already
 //! covered elsewhere (`check_test.rs`'s `setf_*` tests, `struct_test.rs`).
 
 extern crate typelisp;

@@ -280,7 +280,8 @@ fn built_in_enum_values_print_their_variant_names() {
     // rather than by a `defenum` the interpreter exec'd, so their names used
     // to never reach the interpreter's own enum table and printed as
     // `(<unknown-variant> 1)`. `Interp::new` now seeds that table from the
-    // same `registry::builtin_sum_defs` the checker registers from, so the
+    // built-in definitions the checker defines them from
+    // (`typeck::builtins::runtime_types`), so the
     // renderer's lookup finds them without a second table to fall back to.
     assert_eq!(eval_string(r#"(format false "~a" (Option::some 1))"#), "(some 1)");
     assert_eq!(eval_string(r#"(defun no-int () Option<int> (Option::none)) (format false "~a" (no-int))"#), "none");

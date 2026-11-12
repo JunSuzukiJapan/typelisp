@@ -16,7 +16,7 @@ use super::args::First;
 use super::expr::{agree, check_body, check_expr, conform_at, Cx};
 use super::format::sexpr_list;
 use super::block::check_named_body;
-use super::locals::{LabelsCallback, Locals};
+use super::locals::{Bound, LabelsCallback, Locals};
 use super::registry::{FnDef, MethodDef};
 use super::tree::{Node, Typed};
 use super::type_syntax::parse_type;
@@ -38,7 +38,7 @@ pub(crate) fn check_callback_lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, a
 }
 
 fn lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>, callback: bool) -> Result<Typed, Error> {
-    let [(params, _), (ret, _), body @ ..] = args else {
+    let [(params, _), (ret, ret_at), body @ ..] = args else {
         return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
     };
     let written = heap.list_to_vec(*params)?;
@@ -54,10 +54,10 @@ fn lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>
         None => (&written[..], None),
     };
     let required = required.iter().map(|p| param(heap, &tcx, *p)).collect::<Result<Vec<_>, _>>()?;
-    let ret = parse_type(heap, &tcx, *ret)?;
-    let ty = Type::Fn(required.iter().map(|(_, t)| t.clone()).collect(), rest.as_ref().map(|(_, t)| Box::new(t.clone())), Box::new(ret.clone()));
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
+    let ty = Type::Fn(required.iter().map(|(_, t, _)| t.clone()).collect(), rest.as_ref().map(|(_, t, _)| Box::new(t.clone())), Box::new(ret.clone()));
     let mut params = required;
-    params.extend(rest.map(|(n, _)| (n, option_of_sexpr())));
+    params.extend(rest.map(|(n, _, at)| (n, option_of_sexpr(), at)));
     // A loop or a block around the `lambda` is not one its body can leave.
     let outer = cx.loops.replace(Vec::new());
     let outer_blocks = cx.blocks.replace(Vec::new());
@@ -65,16 +65,17 @@ fn lambda(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>
     cx.loops.replace(outer);
     cx.blocks.replace(outer_blocks);
     let (body, _) = checked?;
+    let params = params.into_iter().map(|(n, t, _)| (n, t)).collect();
     Ok(Typed { node: Node::Lambda { params, ret, body }, ty, loc })
 }
 
 /// A `lambda`'s parameter `(name Type)`.
-fn param(heap: &Heap, tcx: &super::type_syntax::TypeCx, p: Value) -> Result<(SymRef, Type), Error> {
-    let pair = heap.list_to_vec(p).map_err(|_| Error::TypeError("parameter must be (name type)".into()))?;
-    let [Value::Symbol(name), ty] = pair.as_slice() else {
+fn param(heap: &Heap, tcx: &super::type_syntax::TypeCx, p: Value) -> Result<Bound, Error> {
+    let pair = heap.list_to_vec_locs(p).map_err(|_| Error::TypeError("parameter must be (name type)".into()))?;
+    let [(Value::Symbol(name), at), (ty, ty_at)] = pair.as_slice() else {
         return Err(Error::TypeError("parameter must be (name type)".into()));
     };
-    Ok((*name, parse_type(heap, tcx, *ty)?))
+    Ok((*name, parse_type(heap, tcx, *ty, ty_at.as_ref())?, at.clone()))
 }
 
 /// `callee`, a value, called with `first`, when it is already checked, and
@@ -286,7 +287,7 @@ pub(crate) fn check_labels(
     let mut parsed = Vec::new();
     for spec in heap.list_to_vec(*specs)? {
         let parts = heap.list_to_vec_locs(spec)?;
-        let [(name, _), (params, _), (ret, _), def_body @ ..] = parts.as_slice() else {
+        let [(name, name_at), (params, _), (ret, ret_at), def_body @ ..] = parts.as_slice() else {
             return Err(Error::TypeError("labels: binding must be (name (params) ret body...)".into()));
         };
         let Value::Symbol(name) = *name else {
@@ -298,17 +299,17 @@ pub(crate) fn check_labels(
             return Err(Error::TypeError(OPT_KEY_NEEDS_A_NAME.replace("{}", "labels")));
         }
         let params = written.iter().map(|p| param(heap, &tcx, *p)).collect::<Result<Vec<_>, _>>()?;
-        let ret = parse_type(heap, &tcx, *ret)?;
-        parsed.push((name, params, ret, def_body.to_vec()));
+        let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
+        parsed.push((name, name_at.clone(), params, ret, def_body.to_vec()));
     }
-    let names: Vec<(SymRef, Type)> = parsed
+    let names: Vec<Bound> = parsed
         .iter()
-        .map(|(name, params, ret, _)| (*name, Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(ret.clone()))))
+        .map(|(name, at, params, ret, _)| (*name, Type::Fn(params.iter().map(|(_, t, _)| t.clone()).collect(), None, Box::new(ret.clone())), at.clone()))
         .collect();
     let scope = locals.bind_labels(names)?;
     let mut defs = Vec::with_capacity(parsed.len());
     let mut captured = Vec::with_capacity(parsed.len());
-    for (name, params, ret, def_body) in parsed {
+    for (name, _, params, ret, def_body) in parsed {
         // Each function is a function of its own, as a `lambda` is, with a
         // block named after itself.
         let inner = scope.bind_function(params.clone(), format!("the `labels` function `{}`", name.name()), false)?;
@@ -319,6 +320,7 @@ pub(crate) fn check_labels(
         cx.blocks.replace(outer_blocks);
         let body = checked?;
         captured.push(inner.captured());
+        let params = params.into_iter().map(|(n, t, _)| (n, t)).collect();
         defs.push(Label { name, params, ret, body });
     }
     let (body, ty) = check_body(cx, heap, &scope, body, expected)?;

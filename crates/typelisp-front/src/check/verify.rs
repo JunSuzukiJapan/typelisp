@@ -13,88 +13,12 @@
 //! them. A form that breaks one is not analyzed on, since what it would have
 //! registered is missing and what follows would complain about that instead.
 
-use typelisp_mem::{Error, Loc};
+use typelisp_mem::Error;
 
 use crate::types::Type;
 use crate::wk;
 
-use super::core::{Checked, Disagreement, Node, NotDyn, Unassignable, Uncovered, Unmet, Unsafe};
-use super::registry::FnSig;
-
-/// The disagreements in `c`, each at the innermost position written for it,
-/// in the order the analysis met them: a subexpression's before the
-/// expression around it, and left to right among siblings.
-pub(super) fn disagreements(c: &Checked) -> Vec<Error> {
-    let mut out = Vec::new();
-    walk(c, None, &mut out);
-    out
-}
-
-fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
-    typelisp_mem::grow_stack(|| {
-        let loc = c.loc.as_ref().or(outer);
-        for child in c.node.children() {
-            walk(child, loc, out);
-        }
-        if let Node::Disagree { what, value } = &c.node {
-            let e = Error::TypeError(match what {
-                Disagreement::Expected(expected) => format!("type mismatch: expected `{}`, found `{}`", expected, value.ty),
-                Disagreement::Branches(a, b) => format!("branches have incompatible types: `{}` vs `{}`", a, b),
-                Disagreement::Mismatch(expected, found) => format!("type mismatch: expected `{}`, found `{}`", expected, found),
-                Disagreement::Conflict(param, a, b) => format!("conflicting types for `{}`: `{}` vs `{}`", param, a, b),
-                Disagreement::EmptyBody(expected) => format!("empty body has type Unit, expected `{}`", expected),
-                Disagreement::Uncovered(Uncovered::Variants { adt, covered, total }) => {
-                    format!("non-exhaustive match on `{}`: {}/{} variants covered", adt, covered, total)
-                }
-                Disagreement::Uncovered(Uncovered::Bool { missing }) => {
-                    format!("non-exhaustive match on Bool: `{}` is not covered — write that arm or a `_` arm", missing)
-                }
-                Disagreement::Uncovered(Uncovered::ByValue { ty }) => format!(
-                    "non-exhaustive match on `{}`: a type with no variants can only be matched \
-                     by value, so a `_` arm is required",
-                    ty
-                ),
-                Disagreement::HiddenSlot { ty, slot, module } => format!(
-                    "make-instance {}: slot `{}` is not `pub`, so it can be given only inside module `{}`",
-                    ty, slot, module
-                ),
-                Disagreement::Unsafe(Unsafe::CCall { name }) => format!(
-                    "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`. \
-                     Whether its declared signature is the one the C function really has is not \
-                     something this compiler can check — `unsafe` is where that is taken on. Wrap the \
-                     call, or wrap it once inside a `defun` that offers a checked signature.",
-                    name
-                ),
-                Disagreement::Unsafe(Unsafe::RawWord { ty }) => format!(
-                    "a `{}` is a raw machine word from the C FFI and can only be a value \
-                     inside `(unsafe ...)` — nothing here can check that it points at anything",
-                    ty
-                ),
-                Disagreement::Unsafe(Unsafe::TypedPtrAnswer { ty }) => format!(
-                    "an `(unsafe ...)` cannot answer `{}`: the memory a typed pointer points at is freed \
-                     when the `unsafe` that allocated it is left. Copy what is needed into ordinary \
-                     values (a `defstruct`, numbers) inside the `unsafe`, and answer those.",
-                    ty
-                ),
-                Disagreement::Unassignable(Unassignable::Constant { name }) => {
-                    format!("setf: cannot assign to constant `{}`", name)
-                }
-                Disagreement::Unassignable(Unassignable::WholeCStruct { ty }) => format!(
-                    "setf: a field holding a struct by value (`{}`) cannot be assigned as a whole — assign its fields",
-                    ty
-                ),
-                Disagreement::NotDyn { ty, trait_path, pins, why } => not_dyn(ty, trait_path, pins, why),
-                Disagreement::Bound { of, param, unmet } => bound_message(of, param, unmet),
-            });
-            // What disagrees is the value, so its own position, when it was
-            // written somewhere, is the innermost one for it.
-            out.push(match value.loc.as_ref().or(loc) {
-                Some(l) => e.at(l.clone()),
-                None => e,
-            });
-        }
-    })
-}
+use super::core::{NotDyn, Unmet};
 
 /// What a call says when the type it decided for `of`'s type parameter
 /// `param` falls short of `param`'s bound as `unmet` says.
@@ -189,62 +113,6 @@ pub(crate) fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &
             converts(format!("`{}`'s `{}` is not pinned by `{}`", trait_path, name, from))
         }
     }
-}
-
-/// Rejects a `defun` that disagrees with the `defsignature` that promised it.
-///
-/// A declaration is only worth writing if it is binding: a call checked
-/// against the declaration and then dispatched to a definition of another
-/// shape is exactly the kind of quiet mismatch static types exist to stop.
-/// The old implicit pre-pass could not do this — it *derived* the signature
-/// from the definition, so the two agreed by construction.
-///
-/// Docstrings, parameter *names* and the body play no part: a signature is
-/// the types, `pub`, and the `&rest` tail.
-pub(super) fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(), Error> {
-    let show_rest = |r: &Option<Type>| match r {
-        Some(t) => format!("`&rest {}`", t),
-        None => "none".to_string(),
-    };
-    let mismatch = |what: &str, decl: String, def: String| {
-        Err(Error::TypeError(format!(
-            "`{}` does not match its `defsignature`: {} declared as {}, defined as {}",
-            name, what, decl, def
-        )))
-    };
-    if declared.params.len() != defined.params.len() {
-        return mismatch(
-            "parameter count",
-            declared.params.len().to_string(),
-            defined.params.len().to_string(),
-        );
-    }
-    for (i, (d, f)) in declared.params.iter().zip(&defined.params).enumerate() {
-        if d != f {
-            return mismatch(&format!("parameter {}", i + 1), format!("`{}`", d), format!("`{}`", f));
-        }
-    }
-    if declared.ret != defined.ret {
-        return mismatch("return type", format!("`{}`", declared.ret), format!("`{}`", defined.ret));
-    }
-    if declared.rest != defined.rest {
-        return mismatch("`&rest`", show_rest(&declared.rest), show_rest(&defined.rest));
-    }
-    if !defined.type_params.is_empty() {
-        return mismatch("type parameters", "none".to_string(), format!("{:?}", defined.type_params));
-    }
-    if !defined.optionals.is_empty() || !defined.keys.is_empty() {
-        return mismatch(
-            "parameter kinds",
-            "required only".to_string(),
-            "`&optional`/`&key`".to_string(),
-        );
-    }
-    if declared.public != defined.public {
-        let vis = |p: bool| if p { "`pub`".to_string() } else { "private".to_string() };
-        return mismatch("visibility", vis(declared.public), vis(defined.public));
-    }
-    Ok(())
 }
 
 /// The name a binding or a definition introduces with the symbol `id`. A

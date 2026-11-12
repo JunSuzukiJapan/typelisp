@@ -33,7 +33,7 @@
 //! no waiting for the dependent's own `didChange`.
 //!
 //! Hover and goto-definition are served from a per-document `Analysis`
-//! (the last *successfully* checked top-level body plus `Registry::
+//! (the last *successfully* checked top-level body plus `Checker::
 //! def_locs`, see `check::locate`) cached alongside `docs`/`deps`. Both are
 //! best-effort: `check::locate::locate_node` only finds nodes with a
 //! recorded start location (list forms — see its doc comment for why bare
@@ -42,7 +42,7 @@
 //! `MethodRef`/`Construct` — not a local variable). A document with a
 //! current type error keeps serving its last-good `Analysis` rather than
 //! going blank. Completion is served from the same `Analysis` plus
-//! `check::locate::completion_candidates`/`completion_locals` (globals and
+//! `Checker::completion_candidates` and `completion_locals` (globals and
 //! local bindings, including inside non-catchall `match` arms via the
 //! checker's error-recovery mode — see `Checker::set_recover`).
 //!
@@ -361,8 +361,8 @@ fn diagnostics_for(
         // In recover mode this tree is present even when the document has
         // type errors — see [`module_body`].
         let body = module_body(&heap, loader.take_pending().pop());
-        let def_locs = checker.registry().def_locs.clone();
-        let docs = checker.registry().docs.clone();
+        let def_locs = checker.def_locs();
+        let docs = checker.docs();
         let tokens = file_type_tokens(&checker.take_type_uses(), file);
         // The tree is heap cells, so the `Analysis` takes the `Heap` with it —
         // see its doc comment.
@@ -414,7 +414,7 @@ fn check_document(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> 
 
 /// One open document's last check that produced a tree (in recover mode, any
 /// check that got past the reader — type errors don't prevent it): the entry
-/// file's own checked top-level forms, and a snapshot of `Registry::def_locs`
+/// file's own checked top-level forms, and a snapshot of `Checker::def_locs`
 /// (the
 /// definition-site locations `check::locate::definition_target` resolves a
 /// reference against) as of that check.
@@ -611,7 +611,7 @@ fn handle_completion(
 }
 
 /// Re-checks `patched_text` as the content of `file` (see [`handle_completion`])
-/// and returns every name reachable at `(line, col)`: [`completion_candidates`]
+/// and returns every name reachable at `(line, col)`: `Checker::completion_candidates`
 /// (module/`Registry`-level names) plus [`completion_locals`]
 /// (`let`/`lambda`/`labels`/parameter and `match`-pattern names in lexical
 /// scope there) — offered as [`CompletionKind::Variable`], matching how a
@@ -636,7 +636,7 @@ fn candidates_for(
 ) -> Vec<CompletionCandidate> {
     let CheckedDocument { heap, checker, mut loader, src_root, .. } = check_document(file, patched_text, overlay);
     let module_path = module_segs_for(FsPath::new(file), &src_root).unwrap_or_default();
-    let mut candidates = completion_candidates(checker.registry(), &module_path);
+    let mut candidates = checker.completion_candidates(&module_path);
     // Same extraction `diagnostics_for` uses for `Analysis.body`. Unlike there,
     // this heap is dropped at the end of the call — `completion_locals` returns
     // owned names, so nothing outlives it.

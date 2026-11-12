@@ -208,8 +208,7 @@ fn a_variable_clause_after_the_body_is_refused_rather_than_reinterpreted() {
 #[test]
 fn thereis_wants_an_option_not_a_bool() {
     let msg = fails("(loop :for i :from 1 :to 3 :thereis (> i 1))");
-    assert!(msg.contains("expected an `Option<T>`"), "{}", msg);
-    assert!(msg.contains(":always"), "{}", msg);
+    assert!(msg.contains("`is-some`") && msg.contains("`bool`"), "{}", msg);
 }
 
 #[test]

@@ -61,6 +61,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         },
         Node::Number { .. } => unreachable!("a number literal is settled with its form (`Cx::settle`)"),
         Node::Quote { datum } => forms::quote_form(heap, *datum),
+        Node::Hole => forms::hole_form(heap, t.loc.clone()),
         Node::Local { name } => forms::var_form(heap, *name),
         Node::Global { path } => {
             let ty = lw.settle(&t.ty);
@@ -298,7 +299,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             forms::throw_form(heap, tag, value, repr)
         }
         Node::TypeValue { ty } => {
-            let form = core::type_form(heap, &lw.settle(ty), &[])?;
+            let form = core::type_form(heap, &lw.settle(ty))?;
             heap.push_root(form);
             core::tagged(heap, wk::TYPE_VALUE, &[form])
         }
@@ -518,7 +519,7 @@ fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value,
             let ty = lw.settle(ty);
             let path = crate::types::nominal_path(&ty).ok_or_else(|| Error::TypeError(format!("(the `{}` pattern): not a named type", ty)))?;
             // The whole instantiation: `(the gen<i32> x)` takes no `gen<string>`.
-            let key = core::type_form(heap, &ty, &[])?;
+            let key = core::type_form(heap, &ty)?;
             heap.push_root(key);
             let sub = lower_pattern(heap, lw, sub)?;
             heap.push_root(sub);
@@ -599,7 +600,7 @@ fn request_print_object(lw: &mut Lowering, ty: &Type) {
     }
     // Not a call anyone wrote: an instantiation the `impl`'s `:where` does
     // not take prints the built-in way, which is no error.
-    let bound = crate::check::registry::TraitBound { trait_path: Path::in_ns(crate::types::std_module("fmt"), "print-object"), assoc: Default::default() };
+    let bound = crate::typeck::registry::TraitBound { trait_path: Path::in_ns(crate::types::std_module("fmt"), "print-object"), assoc: Default::default() };
     if super::bounds::settled_meets(lw.reg, ty, &bound) {
         lw.requests.ask_method(owner, method, args.clone());
     }

@@ -8,7 +8,7 @@
 //! are other parameters, whatever they are called.
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{is_type_application, prim_type_path, scalar_of_symbol, ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{member_symbol, NsId};
@@ -16,7 +16,7 @@ use typelisp_mem::SymRef;
 
 use super::bounds::parse_where;
 use super::defun::{by_param, lower_all, parse_header, split_doc, split_where};
-use super::lambda_list::{parse_lambda_list, LambdaList, Written};
+use super::lambda_list::{bindings, parse_lambda_list, LambdaList, Written};
 use super::expr::Cx;
 use super::generic::{method_specialization, Base, Requests};
 use super::block::check_named_body;
@@ -40,7 +40,7 @@ pub(crate) fn check_defmethod(
     requests: &mut Requests,
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
-    let [(header, _), (params, _), (ret, _), body @ ..] = parts else {
+    let [(header, _), (params, _), (ret, ret_at), body @ ..] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
@@ -79,8 +79,8 @@ pub(crate) fn check_defmethod(
     let named = format!("method {}::{}", owner, method);
     let at = Written { what: "defmethod", named: &named, owner: ParamOwner::Method(owner, method) };
     let params = parse_lambda_list(reg, d, heap, requests, &scope, None, &at, &written)?;
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None };
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let bounds = clause.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
     let def = Method { owner, method, name, instance: true, public: d.public, home: Some(Path::of_symbol(ns, name)), params, ret, bounds, inst: None };
     let form = define_method(reg, d, heap, requests, &scope, None, def, body)?;
@@ -136,7 +136,7 @@ pub(crate) fn define_method(
         Some((_, Type::Named(_, args))) if instance && type_params.is_empty() && !args.is_empty() => Some(args.clone()),
         _ => None,
     });
-    let LambdaList { required, optionals, rest, keys, bound: params } = list;
+    let LambdaList { required, optionals, rest, keys, bound: params, locs } = list;
     let sig = FnDef {
         public,
         rest: rest.map(|(_, t)| t),
@@ -183,9 +183,9 @@ pub(crate) fn define_method(
     };
 
     let mut body = {
-        let cx = Cx::new(reg, d.expander, ns, &bounded, self_type);
+        let cx = Cx::new(reg, d.expander, ns, &bounded, self_type, d.notes);
         let locals_root = Locals::empty();
-        let locals = locals_root.bind(params.clone())?;
+        let locals = locals_root.bind(bindings(&params, &locs))?;
         let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
         cx.settle(heap, &mut body)?;
         body

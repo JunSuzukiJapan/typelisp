@@ -11,7 +11,7 @@
 //! is where the ones both bodies need live, defined once.
 //!
 //! **The discipline this layer keeps, and why it survives its own obsolescence:**
-//! every definition here uses only builtins (`check::registry`) and native
+//! every definition here uses only builtins (`typeck::builtins`) and native
 //! special forms. Nothing here may reference the prelude, because this layer
 //! loads before it. That is the whole invariant; the expander restrictions the
 //! island's `icond` documented (no closure, no `,@`, no self-recursion) turned

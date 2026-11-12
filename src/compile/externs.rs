@@ -345,23 +345,18 @@ pub(crate) fn is_rt_builtin(path: &crate::Path) -> bool {
 /// The module the registry keeps each free builtin in, by the builtin's
 /// vocabulary symbol — the internal module for one the checker lowers to
 /// without a signature
-/// ([`typelisp_front::check::registry::lowered_builtins`]).
+/// ([`typelisp_front::builtins::lowered_builtins`]).
 fn builtin_homes() -> &'static std::collections::HashMap<u32, typelisp_mem::NsId> {
     static HOMES: std::sync::OnceLock<std::collections::HashMap<u32, typelisp_mem::NsId>> = std::sync::OnceLock::new();
     HOMES.get_or_init(|| {
-        let reg = typelisp_front::check::Registry::with_builtins();
-        let mut homes: std::collections::HashMap<u32, typelisp_mem::NsId> = typelisp_front::check::registry::lowered_builtins()
+        let mut homes: std::collections::HashMap<u32, typelisp_mem::NsId> = typelisp_front::builtins::lowered_builtins()
             .map(|k| (k, typelisp_front::types::internal_ns()))
             .collect();
-        for ns in reg.namespaces() {
-            for (name, sig) in ns.fns.iter() {
-                if sig.builtin {
-                    let k = typelisp_front::types::Path::in_ns(ns.ns, name).name_symbol().well_known();
-                    assert!(k != typelisp_mem::NOT_WELL_KNOWN, "builtin `{}` is not in the vocabulary", name);
-                    let prev = homes.insert(k, ns.ns);
-                    assert!(prev.is_none(), "builtin `{}` is registered in two modules", name);
-                }
-            }
+        for (path, _) in typelisp_front::builtins::Builtins::new().functions() {
+            let k = path.name_symbol().well_known();
+            assert!(k != typelisp_mem::NOT_WELL_KNOWN, "builtin `{}` is not in the vocabulary", path);
+            let prev = homes.insert(k, path.ns());
+            assert!(prev.is_none(), "builtin `{}` is defined in two modules", path.last_segment());
         }
         homes
     })
@@ -1266,16 +1261,15 @@ mod native_method_list_tests {
     /// function value (`methodref`), which compiles to a call of the method.
     #[test]
     fn every_registered_builtin_method_on_a_native_receiver_lowers() {
-        let registry = typelisp_front::check::registry::Registry::with_builtins();
+        let builtins = typelisp_front::builtins::Builtins::new();
         let mut gaps: Vec<String> = Vec::new();
         for (_, type_locals) in PRIMITIVES {
             for &ty in *type_locals {
                 let type_local = typelisp_mem::symbols::well_known_symbol(ty).name();
-                let def = registry
-                    .type_def(&crate::Path::builtin(ty))
-                    .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));
-                for (method, f) in def.assoc.iter() {
-                    if !f.builtin {
+                let path = crate::Path::builtin(ty);
+                assert!(builtins.type_def(&path).is_some(), "`{}` is not a built-in type", type_local);
+                for (method, f) in builtins.methods(&path) {
+                    if !f.sig.builtin {
                         continue;
                     }
                     if !native_lowered_primitive_methods(ty).contains(&method.well_known()) {

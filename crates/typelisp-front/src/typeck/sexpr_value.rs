@@ -7,7 +7,7 @@
 
 use crate::check::analyze::{is_sexpr_expectation, sexpr_ctor_for};
 use crate::check::lower::CoreForms;
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::types::{path_is_builtin, Type};
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::wk;

@@ -1812,7 +1812,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `cons-cell<A,B>`'s `car`/`cdr` are the type parameters `A`/`B`, fixed
 ;; once per instantiation — sound to build generically the same way
 ;; `Vector<T>`/`vector-iter<T>` are. `HashTable<K,V>::entries`
-;; (`registry::hashtable_def`) yields a `Vector<cons-cell<K,V>>` of `(key
+;; (`HashTable`'s definition (`typeck::builtins`)) yields a `Vector<cons-cell<K,V>>` of `(key
 ;; . value)` pairs.
 (module sexpr
 (pub defstruct cons-cell<A,B> (pub car A) (pub cdr B)))
@@ -1988,7 +1988,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; with `Hash` — they need the key type's own `sxhash` and `equals`, so they
 ;; cannot be written before the trait that supplies them.)
 ;;
-;; `keys`/`values`/`entries` are Rust builtins (`registry::hashtable_def`,
+;; `keys`/`values`/`entries` are Rust builtins (`HashTable`'s definition (`typeck::builtins`),
 ;; `eval_builtin_method`'s `"hashtable"` arm) — a `HashMap` has no stable,
 ;; resumable cursor the way `Vector<T>`'s index does, so each call snapshots
 ;; the table's current contents into a fresh `Vector`, the same "iterating
@@ -2218,7 +2218,7 @@ user-visible capacity."
 ;; What the layer below answers is the part that needs no opinion about keys:
 ;; `bucket-count`/`bucket-key`/`bucket-value` read the entries that share one
 ;; hash, and `bucket-put`/`bucket-delete` write them
-;; (`registry::hashtable_def`). `Hash`'s contract — `(equals x y)` implies
+;; (`HashTable`'s definition (`typeck::builtins`)). `Hash`'s contract — `(equals x y)` implies
 ;; `(= (sxhash x) (sxhash y))` — is exactly what makes one bucket the right
 ;; and only place to look.
 (module %internal (pub defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h int) (k K)) int
@@ -4338,8 +4338,7 @@ user-visible capacity."
 ;; bit-twiddling (a fixed-width xorshift step) lives in Rust — see
 ;; `typelisp_rt::xorshift64_step` — since typelisp has no bitwise operators
 ;; to write it in directly; `make-random-state-fresh`/`random-state-copy`/
-;; `random-state-next` (registered in `check::registry::Registry::
-;; with_builtins`) are the three native primitives everything below builds on.
+;; `random-state-next` (defined in `typeck::builtins`) are the three native primitives everything below builds on.
 ;;
 ;; `*random-state*` is CL's own special variable holding the "current"
 ;; default stream `random` draws from when no state is given; typelisp has no
@@ -7737,7 +7736,6 @@ pub fn load_interpreted_with(
     // compiler island needs the same macros without taking the prelude with
     // them — see `crate::core_macros`'s module comment.
     // Both are written in, and define into, the standard library's module.
-    chk.set_stdlib(true);
     let std_segments = vec![crate::types::STD_MODULE.to_string()];
     chk.enter_file_module(&std_segments).expect("prelude: the standard library's module");
     crate::core_macros::load_with(heap, chk, interp, on_checked);
@@ -7754,5 +7752,4 @@ pub fn load_interpreted_with(
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
     chk.exit_file_module();
-    chk.set_stdlib(false);
 }

@@ -2,7 +2,7 @@
 //! case: every name a Common Lisp program can use without defining or
 //! importing anything. `std::prelude` offers every module the standard
 //! library's definition of each of these names it has
-//! ([`crate::check::registry::prelude_offers`]), so a Common Lisp user finds
+//! ([`crate::typeck::registry::prelude_offers`]), so a Common Lisp user finds
 //! what they would find there. Taken from SBCL's `(do-external-symbols (s
 //! :cl))`; ANSI fixes the set at 978.
 

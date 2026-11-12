@@ -10,7 +10,7 @@
 //!   definition is never replaced.
 
 use crate::check::{MacroExpander, RedefPolicy};
-use crate::check::registry::PRELUDE_MODULES;
+use crate::typeck::library::PRELUDE_MODULES;
 use crate::types::{in_std, std_module, Path, Type};
 use crate::{Error, Heap};
 use typelisp_mem::symbols::NsId;
@@ -58,6 +58,8 @@ pub(crate) struct Definer<'w> {
     pub(crate) public: bool,
     /// Where the definition form was written.
     pub(crate) loc: Option<crate::Loc>,
+    /// What checking writes down beside the tree.
+    pub(crate) notes: &'w super::expr::Notes,
 }
 
 impl Definer<'_> {

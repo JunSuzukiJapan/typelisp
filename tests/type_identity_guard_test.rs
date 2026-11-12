@@ -267,18 +267,19 @@ fn the_runtimes_fixed_types_are_the_checkers() {
 /// compiled from its own type.
 #[test]
 fn the_runtime_result_types_match_the_registry() {
-    use typelisp::check::Registry;
+    use typelisp::builtins::Builtins;
     use typelisp::TypeSpec;
 
-    let reg = Registry::with_builtins();
-    // A builtin is registered in one of the library's modules, and the shims
+    let builtins = Builtins::new();
+    let functions = builtins.functions();
+    // A builtin is defined in one of the library's modules, and the shims
     // key it by its bare name — so the name has to pick out exactly one.
     let sig_of = |name: &str| {
-        let found: Vec<_> = reg.namespaces().filter_map(|ns| ns.fns.get(name).filter(|sig| sig.builtin)).collect();
+        let found: Vec<_> = functions.iter().filter(|(p, _)| p.last_segment() == name).map(|(_, sig)| *sig).collect();
         match found.as_slice() {
             [sig] => (*sig).clone(),
-            [] => panic!("`{}` has a result-type row but no registry entry", name),
-            _ => panic!("`{}` is registered in more than one module", name),
+            [] => panic!("`{}` has a result-type row but no built-in definition", name),
+            _ => panic!("`{}` is defined in more than one module", name),
         }
     };
     let check = |spec: &TypeSpec, ty: &typelisp::Type, what: &str| {
@@ -336,13 +337,13 @@ fn the_runtime_result_types_match_the_registry() {
 /// is typed by the reader too.
 #[test]
 fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
-    use typelisp::check::Registry;
+    use typelisp::builtins::Builtins;
     use typelisp::sexpr_variant;
     use typelisp::types::Path;
     use typelisp::TypeId;
 
-    let reg = Registry::with_builtins();
-    let sexpr = reg.type_def(&Path::builtin(typelisp::mem::wk::SEXPR)).expect("sexpr is registered");
+    let builtins = Builtins::new();
+    let sexpr = builtins.type_def(&Path::builtin(typelisp::mem::wk::SEXPR)).expect("sexpr is a built-in type");
     let payload = |variant: usize| -> TypeId {
         let fields = &sexpr.variants[variant].fields;
         assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);

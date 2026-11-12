@@ -15,7 +15,7 @@
 
 use crate::check::core::NotDyn;
 use crate::check::not_dyn;
-use crate::check::registry::{AdtKind, TraitBound};
+use crate::typeck::registry::{AdtKind, TraitBound};
 use crate::types::{nominal_path, path_is_builtin, Path, Type};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;

@@ -16,7 +16,7 @@ use typelisp_mem::SymRef;
 #[derive(Debug)]
 pub(crate) struct Locals<'p> {
     parent: Option<&'p Locals<'p>>,
-    binds: Vec<(SymRef, Type)>,
+    binds: Vec<Bound>,
     /// Names that stand for a form, written where the name is
     /// (`symbol-macrolet`).
     macros: Vec<(SymRef, Value)>,
@@ -30,6 +30,10 @@ pub(crate) struct Locals<'p> {
     /// its functions, lifted once every body of the block is checked.
     callbacks: Option<RefCell<Vec<LabelsCallback>>>,
 }
+
+/// A local binding: its name, its type, and where the name was written
+/// (none for a name the checker makes).
+pub(crate) type Bound = (SymRef, Type, Option<Loc>);
 
 /// Where a function's own frames end and those it captures begin.
 #[derive(Debug)]
@@ -63,11 +67,11 @@ impl<'p> Locals<'p> {
     /// A frame inside `self` binding `binds`; a later binding of a name in
     /// the same frame hides an earlier one. Every local binding is made
     /// here, which makes this the one place a reserved word is refused.
-    pub(crate) fn bind<'s>(&'s self, binds: Vec<(SymRef, Type)>) -> Result<Locals<'s>, Error> {
-        if let Some((name, _)) = binds.iter().find(|(n, _)| is_reserved_name(*n)) {
+    pub(crate) fn bind<'s>(&'s self, binds: Vec<Bound>) -> Result<Locals<'s>, Error> {
+        if let Some((name, _, _)) = binds.iter().find(|(n, _, _)| is_reserved_name(*n)) {
             return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name.name())));
         }
-        for (name, _) in &binds {
+        for (name, _, _) in &binds {
             crate::check::verify::bound_name(*name, "a binding")?;
         }
         Ok(Locals { parent: Some(self), binds, macros: Vec::new(), local_macros: Vec::new(), fence: None, callbacks: None })
@@ -77,14 +81,14 @@ impl<'p> Locals<'p> {
     /// body is checked inside `self`: a local of `self` its body names is
     /// one the function captures. `callback`: the function is handed to C,
     /// and may capture nothing.
-    pub(crate) fn bind_function<'s>(&'s self, binds: Vec<(SymRef, Type)>, what: String, callback: bool) -> Result<Locals<'s>, Error> {
+    pub(crate) fn bind_function<'s>(&'s self, binds: Vec<Bound>, what: String, callback: bool) -> Result<Locals<'s>, Error> {
         let mut frame = self.bind(binds)?;
         frame.fence = Some(Fence { what, callback, crossed: RefCell::new(Vec::new()) });
         Ok(frame)
     }
 
     /// The names of a `labels` block, `binds`, bound inside `self`.
-    pub(crate) fn bind_labels<'s>(&'s self, binds: Vec<(SymRef, Type)>) -> Result<Locals<'s>, Error> {
+    pub(crate) fn bind_labels<'s>(&'s self, binds: Vec<Bound>) -> Result<Locals<'s>, Error> {
         let mut frame = self.bind(binds)?;
         frame.callbacks = Some(RefCell::new(Vec::new()));
         Ok(frame)
@@ -103,7 +107,7 @@ impl<'p> Locals<'p> {
     pub(crate) fn labels_callbacks(&self, name: SymRef) -> Option<&RefCell<Vec<LabelsCallback>>> {
         let mut frame = Some(self);
         while let Some(f) = frame {
-            if f.binds.iter().any(|(n, _)| *n == name) {
+            if f.binds.iter().any(|(n, _, _)| *n == name) {
                 return f.callbacks.as_ref();
             }
             frame = f.parent;
@@ -139,7 +143,7 @@ impl<'p> Locals<'p> {
     pub(crate) fn local_macro(&self, name: SymRef) -> Option<(Path, MacroShape)> {
         let mut frame = Some(self);
         while let Some(f) = frame {
-            if f.binds.iter().any(|(n, _)| *n == name) || f.macros.iter().any(|(n, _)| *n == name) {
+            if f.binds.iter().any(|(n, _, _)| *n == name) || f.macros.iter().any(|(n, _)| *n == name) {
                 return None;
             }
             if let Some((_, path, shape)) = f.local_macros.iter().rev().find(|(n, _, _)| *n == name) {
@@ -155,7 +159,7 @@ impl<'p> Locals<'p> {
     pub(crate) fn symbol_macro(&self, name: SymRef) -> Option<Value> {
         let mut frame = Some(self);
         while let Some(f) = frame {
-            if f.binds.iter().any(|(n, _)| *n == name) {
+            if f.binds.iter().any(|(n, _, _)| *n == name) {
                 return None;
             }
             if let Some((_, form)) = f.macros.iter().rev().find(|(n, _)| *n == name) {
@@ -171,10 +175,15 @@ impl<'p> Locals<'p> {
     /// is of a typed pointer: the function can be called after the `unsafe`
     /// that allocated the memory is left.
     pub(crate) fn lookup(&self, name: SymRef) -> Result<Option<&Type>, Error> {
+        Ok(self.lookup_bound(name)?.map(|(t, _)| t))
+    }
+
+    /// [`Self::lookup`], with where the binding's name was written.
+    pub(crate) fn lookup_bound(&self, name: SymRef) -> Result<Option<(&Type, Option<&Loc>)>, Error> {
         let mut frame = Some(self);
         let mut crossed: Vec<&Fence> = Vec::new();
         while let Some(f) = frame {
-            if let Some((_, t)) = f.binds.iter().rev().find(|(n, _)| *n == name) {
+            if let Some((_, t, at)) = f.binds.iter().rev().find(|(n, _, _)| *n == name) {
                 for fence in &crossed {
                     if fence.callback {
                         return Err(Error::TypeError(format!(
@@ -199,7 +208,7 @@ impl<'p> Locals<'p> {
                         names.push(name);
                     }
                 }
-                return Ok(Some(t));
+                return Ok(Some((t, at.as_ref())));
             }
             // A symbol macro hides a variable around it.
             if f.macros.iter().any(|(n, _)| *n == name) {
@@ -230,8 +239,8 @@ mod tests {
     #[test]
     fn an_inner_binding_hides_an_outer_one() {
         let root = Locals::empty();
-        let outer = root.bind(vec![(intern("x"), Type::Int), (intern("y"), Type::Bool)]).unwrap();
-        let inner = outer.bind(vec![(intern("x"), Type::Str)]).unwrap();
+        let outer = root.bind(vec![(intern("x"), Type::Int, None), (intern("y"), Type::Bool, None)]).unwrap();
+        let inner = outer.bind(vec![(intern("x"), Type::Str, None)]).unwrap();
         assert_eq!(inner.lookup(intern("x")).unwrap(), Some(&Type::Str));
         assert_eq!(inner.lookup(intern("y")).unwrap(), Some(&Type::Bool));
         assert_eq!(outer.lookup(intern("x")).unwrap(), Some(&Type::Int));

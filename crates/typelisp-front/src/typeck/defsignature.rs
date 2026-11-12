@@ -22,7 +22,7 @@ const SHAPE: &str = "defsignature: (defsignature name (param-type...) return-typ
 /// `(defsignature ...)` — `parts` without the `defsignature` — and its core
 /// form, which runs nothing.
 pub(crate) fn check_defsignature(reg: &mut Registry, d: &mut Definer, heap: &mut Heap, parts: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
-    let [(header, _), (params, _), (ret, _)] = parts else {
+    let [(header, _), (params, _), (ret, ret_at)] = parts else {
         return Err(Error::TypeError(SHAPE.into()));
     };
     let (name, type_names) = parse_header(heap, *header)?;
@@ -49,9 +49,9 @@ pub(crate) fn check_defsignature(reg: &mut Registry, d: &mut Definer, heap: &mut
         _ => d.value(reg, Kind::Function, name)?,
     }
     let root = TypeScope::empty();
-    let tcx = TypeCx { reg, ns: d.site.ns, scope: &root, self_type: None };
+    let tcx = TypeCx { reg, ns: d.site.ns, scope: &root, self_type: None, notes: d.notes };
     let (params, rest) = signature_params(heap, &tcx, *params)?;
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let def = FnDef { public: d.public, rest, ..FnDef::plain(Vec::new(), params, ret) };
     reg.define_fn(path, def);
     reg.predeclared.insert(path, ());
@@ -60,7 +60,8 @@ pub(crate) fn check_defsignature(reg: &mut Registry, d: &mut Definer, heap: &mut
 
 /// The parameter types of a declaration, and its `&rest` one.
 fn signature_params(heap: &Heap, tcx: &TypeCx, v: Value) -> Result<(Vec<Type>, Option<Type>), Error> {
-    let written = heap.list_to_vec(v)?;
+    let written_at = heap.list_to_vec_locs(v)?;
+    let written: Vec<Value> = written_at.iter().map(|(p, _)| *p).collect();
     if written.iter().any(|p| matches!(p, Value::Symbol(s) if s.is(wk::OPTIONAL) || s.is(wk::KEY))) {
         return Err(Error::TypeError(
             "defsignature: `&optional`/`&key` cannot be forward-declared — a declaration has nowhere to put \
@@ -72,10 +73,10 @@ fn signature_params(heap: &Heap, tcx: &TypeCx, v: Value) -> Result<(Vec<Type>, O
         Some(i) if i + 2 != written.len() => {
             return Err(Error::TypeError("&rest must be followed by exactly one type, as the last item in the parameter list".into()));
         }
-        Some(i) => (&written[..i], Some(parse_type(heap, tcx, written[i + 1])?)),
-        None => (&written[..], None),
+        Some(i) => (&written_at[..i], Some(parse_type(heap, tcx, written[i + 1], written_at[i + 1].1.as_ref())?)),
+        None => (&written_at[..], None),
     };
-    let fixed = fixed.iter().map(|t| parse_type(heap, tcx, *t)).collect::<Result<Vec<_>, _>>()?;
+    let fixed = fixed.iter().map(|(t, at)| parse_type(heap, tcx, *t, at.as_ref())).collect::<Result<Vec<_>, _>>()?;
     Ok((fixed, rest))
 }
 

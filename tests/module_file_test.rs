@@ -373,7 +373,7 @@ fn bare_prelude_fn_and_struct_field_accessor_are_reachable_from_a_wrapped_entry_
 
 #[test]
 fn builtin_option_ctor_and_method_are_reachable_from_a_wrapped_entry_file() {
-    // `Option::some` is a builtin enum constructor (`Registry::with_builtins`,
+    // `Option::some` is a builtin enum constructor (`typeck::builtins`,
     // never `pub`), and `unwrap` is a `defmethod` in the prelude dispatched
     // through the receiver's type — both live at root.
     let result = run_project("prelude-option", &[("main.typl", "(unwrap (Option::some 5))")], "main.typl");

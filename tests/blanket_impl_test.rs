@@ -271,7 +271,7 @@ fn a_method_call_the_bounds_do_not_justify_is_rejected() {
 
 #[test]
 fn an_impl_over_a_type_constructor_is_not_a_blanket_impl() {
-    // `Vector<T>` has a single owning `AdtDef`, so `impl<T>` here takes the
+    // `Vector<T>` has a single owning type, so `impl<T>` here takes the
     // ordinary generic-owner path; the head parameters are documentation.
     let src = "
         (deftrait Sized2 () (defmethod size (self) int))

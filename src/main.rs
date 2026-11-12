@@ -394,7 +394,7 @@ fn load_environment(
             typelisp::load_compiler_aot(heap, checker, interp);
         }
     }
-    interp.start_recording(checker.signature(heap)?);
+    interp.start_recording(checker.signature());
     Ok(())
 }
 

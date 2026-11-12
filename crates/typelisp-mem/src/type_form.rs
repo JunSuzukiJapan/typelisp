@@ -9,8 +9,7 @@
 //! (type-dyn PATH PIN...)         a trait object
 //! (type-ptr T)
 //! (type-cstruct PATH)
-//! (type-param N)                 the owning type's Nth parameter, in a field's template
-//! (type-var "NAME")              a type parameter, in a generic definition's body
+//! (type-param N)                 the Nth type parameter, in a field's template or a generic body
 //! (type-unit)
 //! (type-never)
 //! ```
@@ -25,9 +24,9 @@ use crate::symbols::{ns_names, wk, NsId, SymRef};
 use crate::{Heap, TypeId, TypeShape, Value};
 
 /// The interned identity of the type `form` writes, minting it if it has not
-/// been seen before — or `None` when `form` is not a type form (a `type-var`
-/// names no type by itself). A `type-param` reads as [`TypeShape::Param`],
-/// which a field's template holds.
+/// been seen before — or `None` when `form` is not a type form. A
+/// `type-param` reads as [`TypeShape::Param`], which a field's template
+/// holds.
 pub fn type_of_form(heap: &Heap, form: Value) -> Option<TypeId> {
     match read_type(heap, form, true) {
         Read::Found(id) => Some(id),
@@ -138,7 +137,6 @@ pub fn type_key_of_form(heap: &Heap, form: Value) -> Option<String> {
         (wk::TYPE_PTR, [pointee]) => Some(ConcreteNames::ptr_type(&type_key_of_form(heap, *pointee)?)),
         (wk::TYPE_CSTRUCT, [path]) => path_spelling(*path),
         (wk::TYPE_PARAM, [Value::Int(n)]) => Some(ConcreteNames::template_param(usize::try_from(*n).ok()?)),
-        (wk::TYPE_VAR, [Value::Str(name)]) => Some(heap.string(*name).to_string()),
         (wk::TYPE_UNIT, []) => Some("()".to_string()),
         (wk::TYPE_NEVER, []) => Some("!".to_string()),
         _ => None,

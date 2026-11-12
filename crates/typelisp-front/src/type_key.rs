@@ -68,38 +68,26 @@ fn existing_type_key_id(p: &Path) -> Option<TypeId> {
 /// The interned identity of the type `ty`, minting it if it has not been seen
 /// before. The one place a checker type becomes a runtime one; the shape is
 /// the one `core::type_form` writes for the same type.
+///
+/// A type parameter is a [`TypeShape::Param`], by its position: a field's
+/// type written in its type's parameters is a *template* — `Option<T>` in a
+/// `gen<T>` is `Option<$0>` — which [`typelisp_mem::instantiate`] turns into
+/// the type a particular instantiation's field has, from the value's own
+/// type. That is how the printer, which sees a struct only through its box,
+/// learns that a field is a niche-represented `Option` it must render as
+/// one.
 pub fn type_id(ty: &Type) -> TypeId {
-    type_id_in(ty, &[])
-}
-
-/// A field's declared type as a *template*: its type with each of the owning
-/// type's parameters (`params`, in declaration order) as a
-/// [`TypeShape::Param`] — `Option<T>` in a `gen<T>` is `Option<$0>`.
-/// [`typelisp_mem::instantiate`] gives back the type a particular
-/// instantiation's field has, from the value's own type; that is how the
-/// printer, which sees a struct only through its box, learns that a field is
-/// a niche-represented `Option` it must render as one.
-pub fn field_template(params: &[String], field: &Type) -> TypeId {
-    type_id_in(field, params)
-}
-
-/// [`type_id`], with the type variables `params` names as parameters.
-fn type_id_in(ty: &Type, params: &[String]) -> TypeId {
-    let ids = |tys: &[Type]| tys.iter().map(|t| type_id_in(t, params)).collect::<Vec<_>>();
+    let ids = |tys: &[Type]| tys.iter().map(type_id).collect::<Vec<_>>();
     let shape = match ty {
         Type::Named(p, args) => TypeShape::Named(p.ns(), p.name_symbol(), ids(args)),
         Type::Dyn(p, pins) => TypeShape::Dyn(p.ns(), p.name_symbol(), ids(pins)),
-        Type::Fn(ps, rest, r) => TypeShape::Fn(ids(ps), rest.as_deref().map(|t| type_id_in(t, params)), type_id_in(r, params)),
-        Type::PtrTo(t) => TypeShape::Ptr(type_id_in(t, params)),
+        Type::Fn(ps, rest, r) => TypeShape::Fn(ids(ps), rest.as_deref().map(type_id), type_id(r)),
+        Type::PtrTo(t) => TypeShape::Ptr(type_id(t)),
         Type::CStruct(p) => TypeShape::CStruct(p.ns(), p.name_symbol()),
         Type::Unit => TypeShape::Unit,
         Type::Never => TypeShape::Never,
         Type::Param(p) => TypeShape::Param(p.index),
         Type::Infer(_) => unreachable!("an inference hole left the checker"),
-        Type::Var(name) => match params.iter().position(|p| p == name) {
-            Some(i) => TypeShape::Param(i as u32),
-            None => panic!("the type variable `{}` has no runtime identity (internal error)", name),
-        },
         scalar => TypeShape::named(typelisp_mem::StdModule::PRIMITIVE.ns(), scalar.scalar_name().expect("every other type is matched above"), &[]),
     };
     typelisp_mem::intern_type(shape)
@@ -231,7 +219,6 @@ impl TypeKey for Type {
             Type::PtrTo(t) => ConcreteNames::ptr_type(&**t),
             Type::CStruct(p) => p.to_string(),
             Type::Named(p, args) => ConcreteNames::instantiated_type(&p.to_string(), args),
-            Type::Var(name) => name.clone(),
             Type::Param(p) => p.name.name().to_string(),
             Type::Infer(_) => unreachable!("an inference hole left the checker"),
             Type::Dyn(p, pins) => ConcreteNames::dyn_type(&p.to_string(), pins),

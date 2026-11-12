@@ -120,7 +120,7 @@ pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name
 fn blanket_method<'r>(reg: &'r Registry, ty: &Type, name: SymRef) -> Option<(Path, &'r MethodDef)> {
     let blanket = reg.blanket_with_method(name)?;
     let trait_path = reg.blanket_trait(&blanket.owner).expect("a blanket `impl`'s owner is registered with it");
-    let bound = crate::check::registry::TraitBound { trait_path, assoc: Default::default() };
+    let bound = crate::typeck::registry::TraitBound { trait_path, assoc: Default::default() };
     if !super::bounds::blanket_covers(reg, ty, &bound) {
         return None;
     }

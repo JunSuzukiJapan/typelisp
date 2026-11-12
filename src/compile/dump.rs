@@ -163,7 +163,7 @@ pub fn capture_program_dump(
     // a slot this process never made.
     load_unit_types_only(heap, &mut chk, &mut interp, prelude_state)?;
 
-    let before = chk.signature(heap)?;
+    let before = chk.signature();
     typelisp_front::dump::bind_globals(&interp, globals);
 
     // Collected as they are checked, and each one rooted for the whole of this

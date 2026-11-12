@@ -26,7 +26,7 @@ use std::collections::HashSet;
 
 use typelisp_mem::{wk, Error, Heap, Value};
 
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, Type, LLVM_HANDLE_TYPES};
 
 /// Whether `ty`'s values are LLVM FFI objects held as registry handles — a
@@ -52,7 +52,7 @@ pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> b
     match ty {
         Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::OPTION) && args.len() == 1 => true,
         Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::RESULT) && args.len() == 2 => true,
-        Type::Named(p, _) if crate::check::registry::is_builtin_error_type(p) => true,
+        Type::Named(p, _) if crate::typeck::builtins::is_builtin_error_type(p) => true,
         Type::Named(p, _) => kind_of(p) == Some(AdtKind::Sum),
         _ => false,
     }

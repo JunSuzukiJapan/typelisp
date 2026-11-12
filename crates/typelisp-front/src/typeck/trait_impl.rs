@@ -49,7 +49,7 @@ pub(crate) fn check_trait_impl(
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
     let ns = d.site.ns;
-    let [(trait_v, _), (target, _), items @ ..] = parts else {
+    let [(trait_v, trait_at), (target, target_at), items @ ..] = parts else {
         return Err(Error::TypeError("impl: (impl TraitName TargetType (:type AssocName Type)... (method ...)...)".into()));
     };
     let (trait_path, tdef) = match *trait_v {
@@ -66,6 +66,7 @@ pub(crate) fn check_trait_impl(
         }
         _ => return Err(Error::TypeError("impl: trait name must be a name or `::` path".into())),
     };
+    super::type_syntax::note(d.notes, trait_path, &TypeEntry::Trait(tdef.clone()), trait_at.as_ref());
     // `(:where ...)` bounds the type's parameters: the type implements the
     // trait when its arguments meet them, and every method may use them.
     let (clause, items) = match items.split_first() {
@@ -85,7 +86,7 @@ pub(crate) fn check_trait_impl(
     let head = root.declare(ParamOwner::Def(owner), type_names).map_err(|twice| {
         Error::TypeError(format!("impl {} {}: type parameter `{}` is declared twice", trait_path, owner, twice.0.name()))
     })?;
-    let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, *target)?;
+    let target_ty = parse_type(heap, &TypeCx { reg, ns, scope: &head, self_type: None, notes: d.notes }, *target, target_at.as_ref())?;
     if !super::impl_block::all_or_none(&target_ty, head.params()) {
         return Err(super::impl_block::not_all_or_none(&format!("impl {} {}", trait_path, owner), &owner, &target_ty));
     }
@@ -129,10 +130,10 @@ pub(crate) fn check_trait_impl(
     }
     let shown = format!("impl {} {}", trait_path, owner);
     let impl_bounds = match clause {
-        Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, c)?,
+        Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None, notes: d.notes }, c)?,
         None => Vec::new(),
     };
-    let (assoc, methods) = items_of(heap, reg, ns, &head, &target_ty, &tdef, &shown, items)?;
+    let (assoc, methods) = items_of(heap, reg, ns, d.notes, &head, &target_ty, &tdef, &shown, items)?;
     for (written, _) in &methods {
         if tdef.method(*written).is_none() {
             return Err(not_a_method(reg, &shown, *written, &trait_path));
@@ -269,6 +270,7 @@ fn items_of(
     heap: &Heap,
     reg: &Registry,
     ns: typelisp_mem::symbols::NsId,
+    notes: &super::expr::Notes,
     head: &TypeScope,
     target_ty: &Type,
     tdef: &TraitDef,
@@ -279,9 +281,11 @@ fn items_of(
     let mut bound: Vec<Option<Type>> = vec![None; assoc_names.len()];
     let mut methods: Vec<(SymRef, Value)> = Vec::new();
     for (item, _) in items {
-        let elems = heap.list_to_vec(*item).map_err(|_| Error::TypeError("impl: item must start with a symbol".into()))?;
+        let written = heap.list_to_vec_locs(*item).map_err(|_| Error::TypeError("impl: item must start with a symbol".into()))?;
+        let elems: Vec<Value> = written.iter().map(|(v, _)| *v).collect();
         match elems.as_slice() {
             [Value::Symbol(k), rest @ ..] if k.is(wk::KW_TYPE) => {
+                let ty_at = written.get(2).and_then(|(_, l)| l.clone());
                 let [name, ty] = rest else {
                     return Err(Error::TypeError("impl: (:type AssocName Type)".into()));
                 };
@@ -291,7 +295,7 @@ fn items_of(
                 let Some(i) = assoc_names.iter().position(|a| a.name() == name.name()) else {
                     return Err(Error::TypeError(format!("{}: `{}` is not an associated type of the trait", shown, name.name())));
                 };
-                bound[i] = Some(parse_type(heap, &TypeCx { reg, ns, scope: head, self_type: Some(target_ty) }, *ty)?);
+                bound[i] = Some(parse_type(heap, &TypeCx { reg, ns, scope: head, self_type: Some(target_ty), notes }, *ty, ty_at.as_ref())?);
             }
             [Value::Symbol(d), rest @ ..] | [Value::Symbol(_), Value::Symbol(d), rest @ ..] if d.is(wk::DEFMETHOD) => {
                 let Some(header) = rest.first() else {
@@ -418,7 +422,7 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
     let to_impl = Subst::positional(&tdef.params, &at);
     let want = tdef.method(method).expect("a default is of the trait's own method");
     let instance = want.params.first() == Some(&Type::Param(tdef.params[0]));
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&at[0]) };
+    let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&at[0]), notes: d.notes };
     let bounds = method_bounds(heap, &tcx, &scope, of)?;
     let sig = FnDef {
         public: true,
@@ -450,10 +454,10 @@ fn reown(scope: &TypeScope, of: &Of) -> Subst {
 /// The bounds a method of the `impl` `of` has: its `(:where ...)`, read
 /// where `tcx` says, and for a blanket `impl` the trait itself on its type
 /// parameter.
-fn method_bounds(heap: &Heap, tcx: &TypeCx, scope: &TypeScope, of: &Of) -> Result<Vec<(TypeParam, crate::check::registry::TraitBound)>, Error> {
+fn method_bounds(heap: &Heap, tcx: &TypeCx, scope: &TypeScope, of: &Of) -> Result<Vec<(TypeParam, crate::typeck::registry::TraitBound)>, Error> {
     let mut bounds = of.clause.map(|c| parse_where(heap, tcx, c)).transpose()?.unwrap_or_default();
     if of.blanket {
-        bounds.push((scope.params()[0], crate::check::registry::TraitBound { trait_path: of.trait_path, assoc: Default::default() }));
+        bounds.push((scope.params()[0], crate::typeck::registry::TraitBound { trait_path: of.trait_path, assoc: Default::default() }));
     }
     Ok(bounds)
 }
@@ -514,7 +518,7 @@ fn check_blanket_impl(
     let target_ty = Type::Param(param);
     let shown = format!("impl<{}> {} {}", names, trait_path, var.name());
     let impl_bounds = match clause {
-        Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None }, c)?,
+        Some(c) => parse_where(heap, &TypeCx { reg, ns, scope: &head, self_type: None, notes: d.notes }, c)?,
         None => Vec::new(),
     };
     // A type the `impl` covers has the trait's supertraits: the bounds
@@ -531,7 +535,7 @@ fn check_blanket_impl(
             )));
         }
     }
-    let (assoc, methods) = items_of(heap, reg, ns, &head, &target_ty, tdef, &shown, items)?;
+    let (assoc, methods) = items_of(heap, reg, ns, d.notes, &head, &target_ty, tdef, &shown, items)?;
     for (written, _) in &methods {
         if tdef.method(*written).is_none() {
             return Err(not_a_method(reg, &shown, *written, &trait_path));
@@ -591,14 +595,14 @@ fn check_method(
     want: &super::registry::FnDef,
     shown: &str,
     item: Value,
-) -> Result<(Option<Value>, Vec<(TypeParam, crate::check::registry::TraitBound)>), Error> {
+) -> Result<(Option<Value>, Vec<(TypeParam, crate::typeck::registry::TraitBound)>), Error> {
     let elems = heap.list_to_vec_locs(item)?;
     let rest = match elems.split_first() {
         Some(((Value::Symbol(p), _), rest)) if p.is(wk::PUB) => &rest[1..],
         Some((_, rest)) => rest,
         None => unreachable!("an item was read above"),
     };
-    let [(header, _), (params, _), (ret, _), body @ ..] = rest else {
+    let [(header, _), (params, _), (ret, ret_at), body @ ..] = rest else {
         return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
     };
     let (doc, body) = split_doc(heap, body);
@@ -618,7 +622,7 @@ fn check_method(
     let assoc: Vec<Type> = of.assoc.iter().map(|t| reown.apply(t)).collect();
     let named: Vec<(SymRef, Type)> = tdef.params[1..].iter().map(|p| p.name).zip(assoc.iter().cloned()).collect();
     let inner = scope.name_types(named);
-    let tcx = TypeCx { reg, ns, scope: &inner, self_type: Some(&target_ty) };
+    let tcx = TypeCx { reg, ns, scope: &inner, self_type: Some(&target_ty), notes: d.notes };
     // A trait method's arity is fixed by its vtable slot: a call through a
     // trait object fills its arguments in from the trait's declaration, a
     // call on the type from this method's, and `deftrait` has no sections.
@@ -629,7 +633,7 @@ fn check_method(
         )));
     }
     let (instance, ps) = method_params(heap, &tcx, name, *params, &target_ty)?;
-    let ret = parse_type(heap, &tcx, *ret)?;
+    let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
     let to_impl = Subst::positional(&tdef.params, &std::iter::once(target_ty.clone()).chain(assoc).collect::<Vec<_>>());
     let want_params: Vec<Type> = want.params.iter().map(|t| to_impl.apply(t)).collect();
     let want_ret = to_impl.apply(&want.ret);
@@ -645,7 +649,7 @@ fn check_method(
             kind(want_instance)
         )));
     }
-    let written: Vec<Type> = ps.iter().map(|(_, t)| t.clone()).collect();
+    let written: Vec<Type> = ps.iter().map(|(_, t, _)| t.clone()).collect();
     if written != want_params || ret != want_ret {
         let describe = |params: &[Type], ret: &Type| format!("({}) {}", params.iter().map(Type::to_string).collect::<Vec<_>>().join(" "), ret);
         return Err(Error::TypeError(format!(

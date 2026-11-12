@@ -22,7 +22,7 @@ use super::looping::LoopExit;
 use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use super::{binding, block, call, catch, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use super::type_syntax::mentions_raw_word;
@@ -68,16 +68,75 @@ pub(crate) struct Cx<'a> {
     required: RefCell<Vec<Required>>,
     /// The temporaries the form has made, to name the next one.
     temps: Cell<u32>,
+    /// What checking writes down beside the tree.
+    notes: &'a Notes,
+}
+
+/// What checking writes down beside the tree, for the tools that read a
+/// program without running it (the LSP): in recover mode
+/// (`Checker::set_recover`) the errors checked past, and always the binding
+/// each local variable reference was resolved to and the type of each
+/// expression, by where they were written.
+#[derive(Debug, Default)]
+pub(crate) struct Notes {
+    pub(crate) recover: bool,
+    pub(crate) errors: RefCell<Vec<Error>>,
+    /// The line and column of a local variable reference, and where the
+    /// binding it names was written.
+    pub(crate) local_refs: RefCell<std::collections::HashMap<(u32, u32), Loc>>,
+    /// The line and column of an expression, and its type.
+    pub(crate) node_types: RefCell<std::collections::HashMap<(u32, u32), Type>>,
+    /// Each place a type or a trait the program defines is named.
+    pub(crate) type_uses: RefCell<Vec<crate::check::semantic::TypeUse>>,
 }
 
 impl<'a> Cx<'a> {
-    pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>) -> Cx<'a> {
-        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), c_arena: Cell::new(None), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0) }
+    pub(crate) fn new(reg: &'a Registry, expander: &'a dyn MacroExpander, ns: NsId, scope: &'a TypeScope<'a>, self_type: Option<&'a Type>, notes: &'a Notes) -> Cx<'a> {
+        Cx { reg, expander, ns, scope, self_type, holes: RefCell::new(Holes::new()), undecided: RefCell::new(Vec::new()), numbers: RefCell::new(Vec::new()), loops: RefCell::new(Vec::new()), tags: RefCell::new(Vec::new()), blocks: RefCell::new(Vec::new()), block_labels: Cell::new(0), unsafe_depth: Cell::new(0), c_arena: Cell::new(None), directives: RefCell::new(Vec::new()), required: RefCell::new(Vec::new()), temps: Cell::new(0), notes }
+    }
+
+    /// What checking writes down beside the tree, for a form checked on
+    /// its own inside this one.
+    pub(crate) fn notes(&self) -> &'a Notes {
+        self.notes
+    }
+
+    /// In recover mode, `e` recorded, at `loc` when it carries no place of
+    /// its own, for checking to go on past it; outside it, `e`.
+    pub(crate) fn recover(&self, e: Error, loc: Option<Loc>) -> Result<(), Error> {
+        if !self.notes.recover {
+            return Err(e);
+        }
+        self.notes.errors.borrow_mut().push(match loc {
+            Some(l) => e.at(l),
+            None => e,
+        });
+        Ok(())
+    }
+
+    /// That the local variable reference written at `at` names the binding
+    /// written at `bound`.
+    pub(crate) fn note_local_ref(&self, at: Option<&Loc>, bound: Option<&Loc>) {
+        if let (Some(at), Some(bound)) = (at, bound) {
+            self.notes.local_refs.borrow_mut().insert((at.line, at.col), bound.clone());
+        }
+    }
+
+    /// `r`, or in recover mode a hole where it failed: an expression of type
+    /// `!`, which fits wherever it is.
+    pub(crate) fn recovered(&self, r: Result<Typed, Error>, loc: Option<Loc>) -> Result<Typed, Error> {
+        match r {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                self.recover(e, loc.clone())?;
+                Ok(Typed { node: Node::Hole, ty: Type::Never, loc })
+            }
+        }
     }
 
     /// Where a type written in this form is read.
     pub(crate) fn types(&self) -> TypeCx<'_> {
-        TypeCx { reg: self.reg, ns: self.ns, scope: self.scope, self_type: self.self_type }
+        TypeCx { reg: self.reg, ns: self.ns, scope: self.scope, self_type: self.self_type, notes: self.notes }
     }
 
     /// A local variable no program can name, for a value the checker holds
@@ -261,6 +320,15 @@ impl<'a> Cx<'a> {
         }
         for t in trees.iter_mut() {
             t.map_types(&|ty| self.resolve(ty));
+            // Where one expression is written over another (a conversion
+            // around a value), the outer one's type is the one shown.
+            let mut types = std::collections::HashMap::new();
+            t.walk(&mut |t| {
+                if let Some(l) = &t.loc {
+                    types.entry((l.line, l.col)).or_insert_with(|| t.ty.clone());
+                }
+            });
+            self.notes.node_types.borrow_mut().extend(types);
             t.walk_mut(&mut |t| settle_number(heap, t))?;
             t.walk_mut(&mut |t| match &t.node {
                 Node::AsSexpr { value } if !encodable(self.reg, &value.ty) => Err(at(no_encoding(&value.ty), &t.loc)),
@@ -510,7 +578,8 @@ fn number_kind(heap: &Heap, v: Value) -> Option<Kind> {
 /// static method a `use` brought in is called, never a value: `(none)`, not
 /// `none`.
 fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
-    if let Some(ty) = locals.lookup(id)? {
+    if let Some((ty, bound)) = locals.lookup_bound(id)? {
+        cx.note_local_ref(loc.as_ref(), bound);
         return Ok(Typed { node: Node::Local { name: id }, ty: ty.clone(), loc });
     }
     if let Some(expected) = expected {
@@ -568,7 +637,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     let args = &elems[1..];
     let head = match elems[0].0 {
         Value::Symbol(head) => head,
-        Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, args, expected, loc),
+        Value::Path(id) => return path_call::check_path_call(cx, heap, locals, id, elems[0].1.as_ref(), args, expected, loc),
         // `(%type-member Type member)`: a member of a type, as a form the
         // checker writes (`forms::member_form`) or `Type<args>::member`.
         Value::Cons(_) if matches!(heap.car(elems[0].0), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
@@ -586,6 +655,17 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             return lambda::check_apply(cx, heap, locals, callee, None, args, expected, loc);
         }
     };
+    // `p::x`, read as `(%value-member p x)`: the member `x` of `p`'s type.
+    if head.is(wk::VALUE_MEMBER) {
+        let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
+            return Err(Error::TypeError("a member of a value is written `value::member`".into()));
+        };
+        return instance::check_field(cx, heap, locals, *recv, *member, loc);
+    }
+    // SPECIAL-FORM DISPATCH BEGIN
+    // The arms below are the authoritative list of special forms. They have
+    // no runtime representation to enumerate, so `tests/editor_keyword_sync_test.rs`
+    // reads them out of this file between these two sentinels.
     match head.well_known() {
         wk::LET => return binding::check_let(cx, heap, locals, args, expected, loc),
         wk::LET_STAR => return binding::check_let_star(cx, heap, locals, args, expected, loc),
@@ -656,14 +736,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::ROTATEF | wk::SHIFTF => return modify::check_rotatef_shiftf(cx, heap, locals, head.well_known(), args, loc),
         wk::THE => return the::check_the(cx, heap, locals, args),
         wk::MAKE_INSTANCE => return instance::check_make_instance(cx, heap, locals, args, expected, loc),
-        wk::VALUE_MEMBER => {
-            let [(Value::Symbol(recv), _), (Value::Symbol(member), _)] = args else {
-                return Err(Error::TypeError("a member of a value is written `value::member`".into()));
-            };
-            return instance::check_field(cx, heap, locals, *recv, *member, loc);
-        }
         _ => {}
     }
+    // SPECIAL-FORM DISPATCH END
     if SPECIAL_FORM_HEADS.contains(&head.well_known()) {
         unimplemented!("typeck: the special form `{}`", heap.symbol_spelling(head))
     }
@@ -673,7 +748,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         let expanded = macros::expand(cx.expander, heap, &path, shape, spelling, args)?;
         return check_expr(cx, heap, locals, expanded, expected, loc);
     }
-    if let Some(ty) = locals.lookup(head)? {
+    if let Some((ty, bound)) = locals.lookup_bound(head)? {
+        cx.note_local_ref(elems[0].1.as_ref(), bound);
         let callee = Typed { node: Node::Local { name: head }, ty: ty.clone(), loc: elems[0].1.clone() };
         return lambda::check_apply(cx, heap, locals, callee, None, args, expected, loc);
     }
@@ -861,7 +937,8 @@ pub(crate) fn check_body(
     let mut out = Vec::with_capacity(forms.len());
     for (i, (v, loc)) in forms.iter().enumerate() {
         let last = i + 1 == forms.len();
-        out.push(check_expr(cx, heap, locals, *v, if last { expected } else { None }, loc.clone())?);
+        let checked = check_expr(cx, heap, locals, *v, if last { expected } else { None }, loc.clone());
+        out.push(cx.recovered(checked, loc.clone())?);
     }
     let ty = match out.last() {
         Some(t) => t.ty.clone(),
