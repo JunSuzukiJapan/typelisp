@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Traits estándar
 
 Los traits para la iteración, la comparación, la aritmética y la adición y extracción de elementos. Los demás traits estándar están en sus propios
@@ -59,7 +59,7 @@ Cada método de trait se puede llamar como función tal cual (dentro de una rest
 
 `Eq` está implementado para: todos los tipos numéricos (`i8` a `u32` / `f32` / `f64` / `int` / `ratio`),
 `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, es decir, identidad; lo usan los patrones de
-valor de `match`) y `cons-cell<A,B>` (recursivamente, cuando los elementos son `Eq`). `Ord` está
+valor de `match`) y `cons-cell<A,B>` (recursivamente, cuando los elementos son `Eq`). `Option<T>` y `Result<T,E>` son iguales cuando son la misma variante y su contenido es `equals`; una lista es un `Option<Sexpr>`, así que sus celdas se comparan por la identidad de `Sexpr` (para comparar por contenido, use `equal`). `Ord` está
 implementado para: todos los tipos numéricos, `char` `string` y `cons-cell<A,B>` (lexicográficamente,
 cuando los elementos son `Ord`).
 

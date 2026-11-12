@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # 標準 trait
 
 用於迭代、比較、算術與存取元素的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`
@@ -48,7 +48,7 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
 已實作 `Eq` 的：所有數值型別（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）以及 `bool` `char` `string` `symbol` `complex`、`Sexpr`
-（`eq`，即同一性。供 `match` 的值模式使用），以及 `cons-cell<A,B>`（元素為 `Eq` 時遞迴比較）。已實作 `Ord` 的：所有數值型別以及 `char`
+（`eq`，即同一性。供 `match` 的值模式使用），以及 `cons-cell<A,B>`（元素為 `Eq` 時遞迴比較）。`Option<T>` 與 `Result<T,E>` 在變體相同且內容依 `equals` 相等時相等；列表是 `Option<Sexpr>`，所以其單元依 `Sexpr` 的同一性比較（依內容比較請用 `equal`）。已實作 `Ord` 的：所有數值型別以及 `char`
 `string`，以及 `cons-cell<A,B>`（字典序，元素為 `Ord` 時）。
 
 方法名稱之所以不與內建運算子（`= /= < <= > >=`）或 `eq`/`lt` 重疊，是因為內建的不能重新定義，各實作會委派給它們。純量的比較運算子本身是

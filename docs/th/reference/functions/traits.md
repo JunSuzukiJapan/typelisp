@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Trait มาตรฐาน
 
 trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มและนำสมาชิกออก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
@@ -59,7 +59,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 
 `Eq` ถูก implement สำหรับ: ชนิดตัวเลขทั้งหมด (`i8` ถึง `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr` (`eq` คือเอกลักษณ์ (identity) ใช้โดยรูปแบบค่าของ
-`match`) และ `cons-cell<A,B>` (แบบเวียนเกิด เมื่อสมาชิกเป็น `Eq`) `Ord` ถูก implement สำหรับ:
+`match`) และ `cons-cell<A,B>` (แบบเวียนเกิด เมื่อสมาชิกเป็น `Eq`) `Option<T>` และ `Result<T,E>` เท่ากันเมื่อเป็น variant เดียวกันและเนื้อหาเท่ากันตาม `equals` ลิสต์เป็น `Option<Sexpr>` เซลล์จึงเทียบด้วยเอกลักษณ์ของ `Sexpr` (ถ้าจะเทียบด้วยเนื้อหาให้ใช้ `equal`) `Ord` ถูก implement สำหรับ:
 ชนิดตัวเลขทั้งหมด, `char` `string` และ `cons-cell<A,B>` (ตามลำดับพจนานุกรม เมื่อสมาชิกเป็น
 `Ord`)
 

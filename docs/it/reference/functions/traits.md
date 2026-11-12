@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Trait standard
 
 I trait per l'iterazione, il confronto, l'aritmetica e l'aggiunta e la rimozione di elementi. Gli altri trait standard si trovano nei rispettivi
@@ -59,7 +59,7 @@ oppure su un tipo concreto che lo implementa):
 
 `Eq` è implementato per: tutti i tipi numerici (da `i8` a `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr` (`eq`, cioè l'identità; usato dai pattern di valore di
-`match`) e `cons-cell<A,B>` (ricorsivamente, quando gli elementi sono `Eq`). `Ord` è implementato per:
+`match`) e `cons-cell<A,B>` (ricorsivamente, quando gli elementi sono `Eq`). `Option<T>` e `Result<T,E>` sono uguali quando sono la stessa variante e il loro contenuto è `equals`; una lista è un `Option<Sexpr>`, quindi le sue celle si confrontano per identità di `Sexpr` (per confrontare il contenuto usare `equal`). `Ord` è implementato per:
 tutti i tipi numerici, `char` `string` e `cons-cell<A,B>` (in ordine lessicografico, quando gli elementi
 sono `Ord`).
 

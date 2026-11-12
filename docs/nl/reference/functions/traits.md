@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Standaardtraits
 
 De traits voor iteratie, vergelijking, rekenkunde en het toevoegen en uitnemen van elementen. De overige standaardtraits staan in hun eigen
@@ -61,7 +61,7 @@ Elke traitmethode kan zoals ze is als functie worden aangeroepen (binnen een
 
 `Eq` is geïmplementeerd voor: alle numerieke types (`i8` tot en met `u32` / `f32` / `f64` / `int` /
 `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, dat wil zeggen identiteit; gebruikt
-door de waardepatronen van `match`), en `cons-cell<A,B>` (recursief, wanneer de elementen `Eq` zijn).
+door de waardepatronen van `match`), en `cons-cell<A,B>` (recursief, wanneer de elementen `Eq` zijn). `Option<T>` en `Result<T,E>` zijn gelijk als ze dezelfde variant zijn en hun inhoud `equals` is; een lijst is een `Option<Sexpr>`, dus de cellen worden vergeleken op de identiteit van `Sexpr` (gebruik `equal` om op inhoud te vergelijken).
 `Ord` is geïmplementeerd voor: alle numerieke types, `char` `string`, en `cons-cell<A,B>`
 (lexicografisch, wanneer de elementen `Ord` zijn).
 

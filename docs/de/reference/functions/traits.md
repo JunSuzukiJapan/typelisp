@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Standard-Traits
 
 Die Traits für Iteration, Vergleich, Arithmetik und das Hinzufügen und Entnehmen von Elementen. Die anderen Standard-Traits stehen in ihren eigenen
@@ -59,7 +59,7 @@ Jede Trait-Methode lässt sich unverändert als Funktion aufrufen (innerhalb ein
 
 `Eq` ist implementiert für: alle numerischen Typen (`i8` bis `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr` (`eq`, also Identität; verwendet von den Wertmustern von `match`)
-und `cons-cell<A,B>` (rekursiv, wenn die Elemente `Eq` sind). `Ord` ist implementiert für: alle numerischen
+und `cons-cell<A,B>` (rekursiv, wenn die Elemente `Eq` sind). `Option<T>` und `Result<T,E>` sind gleich, wenn sie dieselbe Variante sind und ihr Inhalt `equals` ist; eine Liste ist ein `Option<Sexpr>`, daher werden ihre Zellen über die Identität von `Sexpr` verglichen (für einen inhaltlichen Vergleich `equal` verwenden). `Ord` ist implementiert für: alle numerischen
 Typen, `char` `string` und `cons-cell<A,B>` (lexikografisch, wenn die Elemente `Ord` sind).
 
 Die Methodennamen überschneiden sich nicht mit den eingebauten Operatoren (`= /= < <= > >=`) oder `eq`/`lt`,

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Standardtraits
 
 Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut element. De andra standardtraits finns i sina egna kapitel: `Hash`
@@ -59,7 +59,7 @@ en konkret typ som implementerar den):
 
 `Eq` är implementerat för: alla numeriska typer (`i8` till `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr` (`eq`, det vill säga identitet; används av värdemönstren i
-`match`) och `cons-cell<A,B>` (rekursivt, när elementen är `Eq`). `Ord` är implementerat för: alla
+`match`) och `cons-cell<A,B>` (rekursivt, när elementen är `Eq`). `Option<T>` och `Result<T,E>` är lika när de är samma variant och innehållet är `equals`; en lista är en `Option<Sexpr>`, så dess celler jämförs med identiteten hos `Sexpr` (använd `equal` för att jämföra innehåll). `Ord` är implementerat för: alla
 numeriska typer, `char` `string` och `cons-cell<A,B>` (lexikografiskt, när elementen är `Ord`).
 
 Metodnamnen överlappar inte de inbyggda operatorerna (`= /= < <= > >=`) eller `eq`/`lt` eftersom de

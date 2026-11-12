@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # स्टैंडर्ड trait
 
 इटरेशन, तुलना, अंकगणित और तत्व जोड़ने व निकालने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
@@ -42,7 +42,7 @@
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` इनके लिए लागू है: सभी संख्यात्मक टाइप (`i8` से `u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, यानी पहचान; `match` के मान पैटर्न द्वारा उपयोग), और `cons-cell<A,B>` (पुनरावर्ती रूप से, जब तत्व `Eq` हों)। `Ord` इनके लिए लागू है: सभी संख्यात्मक टाइप, `char` `string`, और `cons-cell<A,B>` (शब्दकोशीय क्रम में, जब तत्व `Ord` हों)।
+`Eq` इनके लिए लागू है: सभी संख्यात्मक टाइप (`i8` से `u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, यानी पहचान; `match` के मान पैटर्न द्वारा उपयोग), और `cons-cell<A,B>` (पुनरावर्ती रूप से, जब तत्व `Eq` हों)। `Option<T>` और `Result<T,E>` तब बराबर हैं जब वे एक ही वेरिएंट हों और उनकी सामग्री `equals` से बराबर हो; सूची `Option<Sexpr>` है, इसलिए उसके सेल `Sexpr` की पहचान से तुलना होते हैं (सामग्री से तुलना के लिए `equal` उपयोग करें)। `Ord` इनके लिए लागू है: सभी संख्यात्मक टाइप, `char` `string`, और `cons-cell<A,B>` (शब्दकोशीय क्रम में, जब तत्व `Ord` हों)।
 
 मेथड के नाम बिल्ट-इन ऑपरेटर (`= /= < <= > >=`) या `eq`/`lt` से नहीं टकराते क्योंकि बिल्ट-इन को दोबारा परिभाषित नहीं किया जा सकता, और हर इम्प्लीमेंटेशन उन्हें सौंप देता है। स्केलर तुलना ऑपरेटर स्वयं हर रिसीवर टाइप के बिल्ट-इन मेथड हैं ([संख्याएँ](numbers.md), [स्ट्रिंग और कैरेक्टर](collections.md))। बाउंड के भीतर, ऑपरेटर लिखने से वे trait मेथड के रूप में पढ़े जाते हैं (अध्याय 3)।
 

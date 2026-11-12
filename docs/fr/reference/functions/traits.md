@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Traits standard
 
 Les traits d'itération, de comparaison, d'arithmétique et d'ajout et de retrait d'éléments. Les autres traits standard se trouvent dans leurs propres
@@ -58,7 +58,7 @@ Chaque méthode de trait peut être appelée telle quelle comme une fonction (à
 
 `Eq` est implémenté pour : tous les types numériques (`i8` à `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr` (`eq`, c'est-à-dire l'identité ; utilisé par les motifs de valeur de
-`match`) et `cons-cell<A,B>` (récursivement, quand les éléments sont `Eq`). `Ord` est implémenté pour : tous les
+`match`) et `cons-cell<A,B>` (récursivement, quand les éléments sont `Eq`). `Option<T>` et `Result<T,E>` sont égaux quand ils sont de la même variante et que leur contenu est `equals` ; une liste est un `Option<Sexpr>`, donc ses cellules se comparent par l'identité de `Sexpr` (pour comparer par contenu, utilisez `equal`). `Ord` est implémenté pour : tous les
 types numériques, `char` `string` et `cons-cell<A,B>` (lexicographiquement, quand les éléments sont `Ord`).
 
 Les noms des méthodes ne recouvrent pas les opérateurs intégrés (`= /= < <= > >=`) ni `eq`/`lt`, parce que les

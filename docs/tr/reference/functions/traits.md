@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Standart Trait'ler
 
 Yineleme, karşılaştırma, aritmetik ve öğe ekleme ile çıkarma için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
@@ -60,7 +60,7 @@ içinde ya da onu gerçekleştiren somut bir tür üzerinde):
 
 `Eq` şunlar için gerçekleştirilmiştir: tüm sayısal türler (`i8`'den `u32`'ye / `f32` / `f64` / `int` /
 `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, yani kimlik; `match`'in değer
-örüntülerinde kullanılır) ve `cons-cell<A,B>` (elemanlar `Eq` olduğunda özyinelemeli olarak). `Ord`
+örüntülerinde kullanılır) ve `cons-cell<A,B>` (elemanlar `Eq` olduğunda özyinelemeli olarak). `Option<T>` ve `Result<T,E>`, aynı varyant olduklarında ve içerikleri `equals` ile eşit olduğunda eşittir; liste bir `Option<Sexpr>` olduğundan hücreleri `Sexpr`'in kimliğiyle karşılaştırılır (içerikle karşılaştırmak için `equal` kullanın). `Ord`
 şunlar için gerçekleştirilmiştir: tüm sayısal türler, `char` `string` ve `cons-cell<A,B>` (elemanlar
 `Ord` olduğunda sözlük sırasıyla).
 

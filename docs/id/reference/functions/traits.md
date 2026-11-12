@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Trait Standar
 
 Trait untuk iterasi, perbandingan, aritmetika, serta penambahan dan pengambilan elemen. Trait standar lainnya ada di bab masing-masing:
@@ -59,7 +59,7 @@ Setiap metode trait dapat dipanggil sebagai fungsi apa adanya (di dalam batas `w
 
 `Eq` diimplementasikan untuk: semua tipe numerik (`i8` sampai `u32` / `f32` / `f64` / `int` /
 `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, yaitu identitas; dipakai oleh
-pola nilai pada `match`), dan `cons-cell<A,B>` (secara rekursif, ketika elemennya `Eq`). `Ord`
+pola nilai pada `match`), dan `cons-cell<A,B>` (secara rekursif, ketika elemennya `Eq`). `Option<T>` dan `Result<T,E>` sama bila variannya sama dan isinya `equals`; daftar adalah `Option<Sexpr>`, sehingga sel-selnya dibandingkan dengan identitas `Sexpr` (gunakan `equal` untuk membandingkan isi). `Ord`
 diimplementasikan untuk: semua tipe numerik, `char` `string`, dan `cons-cell<A,B>` (secara
 leksikografis, ketika elemennya `Ord`).
 

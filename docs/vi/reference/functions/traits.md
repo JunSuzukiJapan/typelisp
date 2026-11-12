@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # Các trait chuẩn
 
 Các trait cho việc lặp, so sánh, số học và thêm, lấy ra phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
@@ -59,7 +59,7 @@ Mỗi phương thức của trait có thể được gọi như một hàm nguy�
 
 `Eq` được triển khai cho: mọi kiểu số (`i8` đến `u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char`
 `string` `symbol` `complex`, `Sexpr` (`eq`, tức là đồng nhất; được dùng bởi các mẫu giá trị của `match`),
-và `cons-cell<A,B>` (đệ quy, khi các phần tử là `Eq`). `Ord` được triển khai cho: mọi kiểu số, `char`
+và `cons-cell<A,B>` (đệ quy, khi các phần tử là `Eq`). `Option<T>` và `Result<T,E>` bằng nhau khi cùng biến thể và nội dung bằng nhau theo `equals`; danh sách là `Option<Sexpr>`, nên các ô được so sánh theo định danh của `Sexpr` (để so sánh theo nội dung, dùng `equal`). `Ord` được triển khai cho: mọi kiểu số, `char`
 `string`, và `cons-cell<A,B>` (theo thứ tự từ điển, khi các phần tử là `Ord`).
 
 Tên các phương thức không trùng với các toán tử dựng sẵn (`= /= < <= > >=`) hay `eq`/`lt` vì các thứ dựng

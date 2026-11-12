@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # 표준 트레이트
 
 반복, 비교, 산술, 요소의 추가와 꺼내기를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
@@ -53,7 +53,7 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
 `Eq`를 구현하는 타입: 모든 수 타입(`i8`~`u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char` `string` `symbol`
-`complex`, `Sexpr`(`eq`, 즉 동일성. `match`의 값 패턴이 쓴다), `cons-cell<A,B>`(요소가 `Eq`일 때 재귀적으로). `Ord`를
+`complex`, `Sexpr`(`eq`, 즉 동일성. `match`의 값 패턴이 쓴다), `cons-cell<A,B>`(요소가 `Eq`일 때 재귀적으로). `Option<T>`와 `Result<T,E>`는 같은 변형이고 내용이 `equals`로 같을 때 같다. 리스트는 `Option<Sexpr>`이므로 셀은 `Sexpr`의 동일성으로 비교한다(내용으로 비교하려면 `equal`). `Ord`를
 구현하는 타입: 모든 수 타입, `char` `string`, `cons-cell<A,B>`(요소가 `Ord`일 때 사전순으로).
 
 메서드 이름이 내장 연산자(`= /= < <= > >=`)나 `eq`/`lt`와 겹치지 않는 것은 내장된 것을 다시 정의할 수 없기 때문이며, 각

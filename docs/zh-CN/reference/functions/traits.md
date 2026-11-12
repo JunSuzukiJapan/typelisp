@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
 # 标准 trait
 
 用于迭代、比较、算术和存取元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
@@ -51,7 +51,7 @@
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
 已实现 `Eq` 的：所有数值类型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）以及 `bool` `char` `string` `symbol`
-`complex`、`Sexpr`（`eq`，即同一性。供 `match` 的值模式使用），以及 `cons-cell<A,B>`（元素为 `Eq` 时递归比较）。
+`complex`、`Sexpr`（`eq`，即同一性。供 `match` 的值模式使用），以及 `cons-cell<A,B>`（元素为 `Eq` 时递归比较）。`Option<T>` 与 `Result<T,E>` 在变体相同且内容按 `equals` 相等时相等；列表是 `Option<Sexpr>`，所以其单元按 `Sexpr` 的同一性比较（按内容比较请用 `equal`）。
 已实现 `Ord` 的：所有数值类型以及 `char` `string`，以及 `cons-cell<A,B>`（字典序，元素为 `Ord` 时）。
 
 方法名之所以不与内置运算符（`= /= < <= > >=`）或 `eq`/`lt` 重合，是因为内置的不能重定义，各实现会委托给它们。标量的
