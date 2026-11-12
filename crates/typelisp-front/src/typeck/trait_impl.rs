@@ -26,7 +26,7 @@ use super::bounds::parse_where;
 use super::defun::by_param;
 use super::impl_block::method_params;
 use super::lambda_list::LambdaList;
-use super::registry::{Definition, FnDef, MethodDef, Registry, Template, TraitDef, TraitImpl, TypeEntry};
+use super::registry::{Definition, FnDef, MethodDef, Registry, Template, TraitBound, TraitDef, TraitImpl, TypeEntry};
 use super::defun::{lower_template, split_doc, split_where};
 use super::generic::Base;
 use super::lower::Lowering;
@@ -416,6 +416,22 @@ fn adopt(tdef: &TraitDef, existing: &MethodDef, target: &Type, assoc: &[Type], o
             describe(&want_params, &want_ret)
         )));
     }
+    // Its own type parameters have the bounds the trait gives them.
+    let mut have: Vec<(TypeParam, TraitBound)> = Vec::new();
+    for (p, bounds) in &sig.bounds {
+        if let Type::Param(q) = reown.apply(&Type::Param(*p)) {
+            if want_own.contains(&q) {
+                have.extend(bounds.iter().map(|b| (q, b.at(&reown))));
+            }
+        }
+    }
+    let wanted: Vec<(TypeParam, TraitBound)> = want.bounds.iter().flat_map(|(p, bs)| bs.iter().map(move |b| (*p, b.clone()))).collect();
+    if have.len() != wanted.len() || !wanted.iter().all(|w| have.contains(w)) {
+        return Err(Error::TypeError(format!(
+            "{}: method `{}` bounds its own type parameters otherwise than `{}` declares",
+            shown, method, trait_path
+        )));
+    }
     Ok(())
 }
 
@@ -438,7 +454,8 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
     let to_impl = to_impl(tdef, want, at.clone(), &scope);
     let instance = want.params.first() == Some(&Type::Param(tdef.params[0]));
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&at[0]), notes: d.notes };
-    let bounds = method_bounds(heap, &tcx, &scope, of)?;
+    let mut bounds = method_bounds(heap, &tcx, &scope, of)?;
+    bounds.extend(trait_bounds(want, &to_impl));
     let sig = FnDef {
         public: true,
         bounds: by_param(bounds),
@@ -464,6 +481,17 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
 fn reown(scope: &TypeScope, of: &Of) -> Subst {
     let own: Vec<Type> = scope.params()[..of.head.len()].iter().map(|p| Type::Param(*p)).collect();
     Subst::positional(of.head, &own)
+}
+
+/// The bounds the trait declares on `want`'s own type parameters, put where
+/// `to_impl` puts them.
+fn trait_bounds(want: &super::registry::FnDef, to_impl: &Subst) -> Vec<(TypeParam, crate::typeck::registry::TraitBound)> {
+    let mut out = Vec::new();
+    for (p, bounds) in &want.bounds {
+        let Type::Param(q) = to_impl.apply(&Type::Param(*p)) else { unreachable!("a method's own type parameter is put at one of the method's") };
+        out.extend(bounds.iter().map(|b| (q, b.at(to_impl))));
+    }
+    out
 }
 
 /// What puts a trait method's signature where the `impl` puts the trait's
@@ -695,16 +723,26 @@ fn check_method(
     }
     let mut bounds = method_bounds(heap, &tcx, &scope, of)?;
     let own = own_where.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
-    bounds.extend(own.iter().cloned());
-    // The method's first parameters are the `impl`'s, by position; a bound
-    // on one of its own stays the method's.
+    // The method's first parameters are the `impl`'s, by position; its own
+    // have the bounds the trait gives them, and no more.
     let impl_part = &scope.params()[..of.head.len()];
+    if let Some((p, _)) = own.iter().find(|(p, _)| !impl_part.contains(p)) {
+        return Err(Error::TypeError(format!(
+            "{}: method `{}` bounds its own type parameter `{}`; the bounds on it are the ones `{}` declares",
+            shown,
+            method,
+            p.name.name(),
+            of.trait_path
+        )));
+    }
+    bounds.extend(own.iter().cloned());
+    bounds.extend(trait_bounds(want, &to_impl));
     let to_head = Subst::positional(impl_part, &of.head.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
     let own = own
         .into_iter()
-        .filter_map(|(p, b)| {
-            let i = impl_part.iter().position(|q| *q == p)?;
-            Some((of.head[i], b.at(&to_head)))
+        .map(|(p, b)| {
+            let i = impl_part.iter().position(|q| *q == p).expect("a bound on the `impl`'s parameter");
+            (of.head[i], b.at(&to_head))
         })
         .collect();
     let def = Method { owner, method, name, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds, inst: of.inst.map(<[Type]>::to_vec) };

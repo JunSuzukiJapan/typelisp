@@ -159,3 +159,40 @@ fn an_impl_method_cannot_add_type_parameters() {
     );
     assert!(msg.contains("method `show` declares 1 type parameter(s) of its own, and the trait declares 0"), "{}", msg);
 }
+
+const TRAIT_DEFS: &str = r##"
+(deftrait Pick ()
+  (defmethod pick<U> (self (a U) (b U)) U (:where (Ord U)))
+  (defmethod pick3<U> (self (a U) (b U) (c U)) U (:where (Ord U)) (pick self (pick self a b) c))
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Big (n int))
+(impl Pick Big
+  (defmethod pick<W> (self (a W) (b W)) W (if (less a b) b a))
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::n)))
+(defun via<T> ((x T)) string (:where (Pick T)) (format false "~a ~a" (pick x 3 9) (map-it x (lambda ((n int)) bool (> n 0)))))
+"##;
+
+/// A trait's method declares type parameters of its own, bounded by its
+/// `:where`: an `impl` declares as many, and a call on the type, through a
+/// bound, or in a default body solves them. Interpreted and compiled.
+#[test]
+fn a_trait_method_with_bounded_type_parameters_of_its_own() {
+    let body = r#"(let ((g (make-instance 'Big :n 4))) (format false "~a ~a ~a ~a" (pick g 1 5) (pick g "b" "a") (pick3 g 4 8 2) (via g)))"#;
+    let interpreted = eval_string(&format!("{}\n{}", TRAIT_DEFS, body));
+    assert_eq!(interpreted, "5 b 8 9 true");
+    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", TRAIT_DEFS, body));
+    assert_eq!(compiled, "5 b 8 9 true");
+}
+
+/// The bounds on a trait method's own type parameters are the trait's: a
+/// call must meet them, an `impl` may not add one, and the trait may bound
+/// nothing else in a method's `:where`.
+#[test]
+fn the_bounds_on_a_trait_methods_own_parameters_are_the_traits() {
+    let msg = check_err(&format!("{}\n(defstruct NoOrd (v int))\n(pick (make-instance 'Big :n 0) (make-instance 'NoOrd :v 1) (make-instance 'NoOrd :v 2))", TRAIT_DEFS));
+    assert!(msg.contains("type `NoOrd` does not implement trait `std::cmp::Ord`"), "{}", msg);
+    let msg = check_err("(deftrait P2 () (defmethod pick<U> (self (a U) (b U)) U))\n(defstruct B2 (n int))\n(impl P2 B2 (defmethod pick<U> (self (a U) (b U)) U (:where (Ord U)) a))");
+    assert!(msg.contains("bounds its own type parameter `U`; the bounds on it are the ones"), "{}", msg);
+    let msg = check_err("(deftrait P3 () (defmethod m (self (a int)) int (:where (Ord Self))))");
+    assert!(msg.contains("bounds `Self`, which is not a type parameter of the method's own"), "{}", msg);
+}

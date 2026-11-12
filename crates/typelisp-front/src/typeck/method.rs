@@ -155,6 +155,13 @@ pub(crate) fn check_trait_call(
     }
     let filled: Vec<Option<Type>> = filled.into_iter().chain(own.iter().cloned().map(Some)).collect();
     let at = |ty: &Type| in_params(&sig.type_params, &filled, ty).expect("every parameter of the trait is filled");
+    // The method's own type parameters meet the bounds the trait declares.
+    for (p, bounds) in &sig.bounds {
+        for b in bounds {
+            let b = crate::typeck::registry::TraitBound { trait_path: b.trait_path, assoc: b.assoc.iter().map(|(k, t)| (k.clone(), at(t))).collect() };
+            cx.require_bound(at(&Type::Param(*p)), b, what.clone(), p.name.name().to_string(), loc.clone())?;
+        }
+    }
     if super::args::has_tail(sig) {
         unimplemented!("typeck: the trait method `{}` with &optional, &rest or &key parameters", what)
     }

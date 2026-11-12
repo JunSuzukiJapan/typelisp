@@ -50,7 +50,7 @@ pub struct Variant {
 /// (optionally) concrete pins for that trait's associated types — e.g.
 /// `(Iter T (Item i32))` pins `T`'s `Item` to `i32`. `assoc` is empty for a
 /// bound with no pins (`(Iter T)`).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TraitBound {
     pub trait_path: Path,
     /// Associated-type name -> the type this bound pins it to. Only the pins
