@@ -576,6 +576,10 @@ fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value,
             heap.pop_root();
             form
         }
+        Pat::Dyn { sub } => {
+            let sub = lower_pattern(heap, lw, sub)?;
+            core::tagged(heap, wk::PAT_DYN, &[sub])
+        }
         Pat::Or(_) | Pat::When { .. } => unreachable!("`:or` and `:when` are an arm's whole pattern, lowered with the arm"),
     }
 }

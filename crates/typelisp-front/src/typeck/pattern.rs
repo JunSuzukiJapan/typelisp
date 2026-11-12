@@ -68,6 +68,12 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
             binds.push((id, expected.clone(), at));
             Ok(Pat::Bind(id))
         }
+        // A trait object is matched as the value it holds, by the `Sexpr`
+        // downcast patterns, as a `match` of one is.
+        Value::Cons(_) if matches!(cx.resolve(expected), Type::Dyn(..)) => {
+            let sub = check_pattern(cx, heap, locals, &sexpr_ty(), v, at, binds)?;
+            Ok(Pat::Dyn { sub: Box::new(sub) })
+        }
         Value::Cons(_) => {
             let written = heap.list_to_vec_locs(v)?;
             let parts: Vec<Value> = written.iter().map(|(p, _)| *p).collect();
@@ -186,9 +192,6 @@ fn sum_type<'r>(cx: &Cx<'r>, expected: &Type, what: impl Fn() -> String) -> Resu
                 AdtKind::Struct => Err(Error::TypeError(format!("pattern `{}` does not match a value of type `{}`, which is matched by its slots", what(), ty))),
             };
         }
-    }
-    if let Type::Dyn(..) = ty {
-        unimplemented!("typeck: matching a trait object")
     }
     Err(Error::TypeError(format!("pattern `{}` does not match a value of type `{}`", what(), ty)))
 }

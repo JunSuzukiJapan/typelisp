@@ -216,6 +216,9 @@ pub(crate) enum Pat {
     /// `(the ty sub)`: matches a `Sexpr` holding a value of `ty`, which
     /// `sub` matches.
     TypeTest { ty: Type, sub: Box<Pat> },
+    /// A pattern against a trait object: `sub`, a `Sexpr` pattern, matches
+    /// the value it holds.
+    Dyn { sub: Box<Pat> },
 }
 
 impl Pat {
@@ -225,7 +228,7 @@ impl Pat {
             Pat::Guard { test, .. } => vec![&**test],
             Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter().flat_map(Pat::tests).collect(),
             Pat::When { pat, test } => pat.tests().into_iter().chain([&**test]).collect(),
-            Pat::TypeTest { sub, .. } => sub.tests(),
+            Pat::TypeTest { sub, .. } | Pat::Dyn { sub } => sub.tests(),
             Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } => Vec::new(),
         }
     }
@@ -236,7 +239,7 @@ impl Pat {
             Pat::Guard { test, .. } => vec![&mut **test],
             Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter_mut().flat_map(Pat::tests_mut).collect(),
             Pat::When { pat, test } => pat.tests_mut().into_iter().chain([&mut **test]).collect(),
-            Pat::TypeTest { sub, .. } => sub.tests_mut(),
+            Pat::TypeTest { sub, .. } | Pat::Dyn { sub } => sub.tests_mut(),
             Pat::Wild | Pat::Bind(_) | Pat::Lit { .. } => Vec::new(),
         }
     }
@@ -246,7 +249,7 @@ impl Pat {
         match self {
             Pat::Lit { value, .. } => f(*value),
             Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter().for_each(|p| p.each_value(f)),
-            Pat::When { pat, .. } | Pat::TypeTest { sub: pat, .. } => pat.each_value(f),
+            Pat::When { pat, .. } | Pat::TypeTest { sub: pat, .. } | Pat::Dyn { sub: pat } => pat.each_value(f),
             Pat::Wild | Pat::Bind(_) | Pat::Guard { .. } => {}
         }
     }
@@ -256,7 +259,7 @@ impl Pat {
         match self {
             Pat::Lit { value, .. } => f(value),
             Pat::Ctor { subs, .. } | Pat::Or(subs) => subs.iter_mut().for_each(|p| p.values_mut(f)),
-            Pat::When { pat, .. } | Pat::TypeTest { sub: pat, .. } => pat.values_mut(f),
+            Pat::When { pat, .. } | Pat::TypeTest { sub: pat, .. } | Pat::Dyn { sub: pat } => pat.values_mut(f),
             Pat::Wild | Pat::Bind(_) | Pat::Guard { .. } => {}
         }
     }
@@ -270,7 +273,7 @@ impl Pat {
                 subs.iter_mut().for_each(|p| p.map_types(f));
             }
             Pat::Or(alts) => alts.iter_mut().for_each(|p| p.map_types(f)),
-            Pat::When { pat, .. } => pat.map_types(f),
+            Pat::When { pat, .. } | Pat::Dyn { sub: pat } => pat.map_types(f),
             Pat::TypeTest { ty, sub } => {
                 *ty = f(ty);
                 sub.map_types(f);

@@ -4584,6 +4584,14 @@ const SOURCE_TEMPLATE: &str = r#"
               (inner (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
          (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v type-name-form -1) fail-block)
          (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v inner fail-block)))
+      ;; `(pat-dyn SUB)` -- a trait object: unwrap it (`rt_dyn_value`, as
+      ;; `compile-dyn-value` does) and apply SUB to the value it holds.
+      (pat-dyn
+       (let ((dyn-args (alloca-args builder 1)))
+         (store-arg builder dyn-args 0 v)
+         (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup
+           (build-call builder (get-function m "rt_dyn_value") dyn-args 1)
+           (sexpr-car (sexpr-cdr pat)) fail-block)))
       (:else (panic (append "compile-pattern-test: unsupported pattern tag " (sexpr-sym-name (sexpr-car pat)))))))
 
 ;; The `pat-ctor` arm of `compile-pattern-test`, split out because its five

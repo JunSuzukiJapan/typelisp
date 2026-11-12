@@ -2823,6 +2823,12 @@ fn pattern_bindings(
             };
             pattern_bindings(heap, sub, &repr, cx, out)?;
         }
+        // The value a trait object holds, which its pattern matches as a
+        // `Sexpr` (`dyn-value`'s representation).
+        wk::PAT_DYN => {
+            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            pattern_bindings(heap, sub, &Repr::Sexpr, cx, out)?;
+        }
         _ => {}
     }
     Ok(())
@@ -2949,6 +2955,15 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
         // Its sub-patterns bind at the per-field representations the node
         // carries, so the enclosing value's is not passed on.
         wk::PAT_CTOR => translate_ctor_pattern(heap, pat, cx),
+        // `(pat-dyn P)`: the island unwraps the trait object and applies `P`
+        // to the value it holds, a `Sexpr`.
+        wk::PAT_DYN => {
+            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            let mut f = Items::new(heap);
+            let sub = translate_pattern(f.heap(), sub, &Repr::Sexpr, cx)?;
+            f.push(sub);
+            f.finish(wk::PAT_DYN)
+        }
         wk::PAT_TYPETEST => {
             // The node's own type, not one rebuilt from the path: the checker
             // wrote the instantiation, and the test compares it against the

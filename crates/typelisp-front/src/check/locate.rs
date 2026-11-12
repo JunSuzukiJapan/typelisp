@@ -63,6 +63,7 @@ fn is_opaque(tag: SymRef) -> bool {
             | wk::PAT_TYPETEST
             | wk::PAT_EMPTY
             | wk::PAT_SOME
+            | wk::PAT_DYN
     )
 }
 
@@ -421,6 +422,12 @@ fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
         // `(pat-typetest PATH KEY SUB)`.
         Some(wk::PAT_TYPETEST) => {
             if let Some(sub) = core::field(heap, pat, 2) {
+                pattern_bind_names(heap, sub, scope);
+            }
+        }
+        // `(pat-dyn SUB)` — the value a trait object holds.
+        Some(wk::PAT_DYN) => {
+            if let Some(sub) = core::field(heap, pat, 0) {
                 pattern_bind_names(heap, sub, scope);
             }
         }

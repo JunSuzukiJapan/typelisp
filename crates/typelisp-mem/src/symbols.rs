@@ -1023,6 +1023,7 @@ well_known_symbols! {
     F_C_LOAD => " c-load"
     F_C_STORE => " c-store"
     F_FFI_CALLBACK_ADDRESS => " ffi-callback-address"
+    PAT_DYN => "pat-dyn"
 }
 
 
@@ -1282,7 +1283,7 @@ pub const CORE_VOCABULARY: &[u32] = &[
     wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_STRUCT,
     wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::TYPE_NAMED, wk::TYPE_FN,
     wk::TYPE_DYN, wk::TYPE_PTR, wk::TYPE_CSTRUCT, wk::TYPE_PARAM, wk::RETIRED_TYPE_VAR, wk::TYPE_UNIT, wk::TYPE_NEVER,
-    wk::TYPE_REF, wk::TYPE_VALUE,
+    wk::TYPE_REF, wk::TYPE_VALUE, wk::PAT_DYN,
 ];
 
 /// The module the names of every type's members are made in, the root's

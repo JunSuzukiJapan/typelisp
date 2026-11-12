@@ -1451,6 +1451,18 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
     (_ 0)))
 ```
 
+構造体のフィールドや変種の中にある trait オブジェクトにも、同じパターンを書ける。この場合も
+実装型の集合は開いているので、`_` の腕が要る:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
+    (_ 0)))
+```
+
 **腕どうしの型推論**: 全ての腕は同じ型でなければならない（`panic` 等で発散する腕は除く）。
 期待型が無い位置に書かれた `match` では、腕が**互いに**足りない型引数を埋め合う——
 `(Result::ok v)` は `T` だけ、`(Result::err e)` は `E` だけを決めるが、両方を並べれば

@@ -1241,6 +1241,18 @@ pub(super) fn match_core_pattern(
                 _ => Ok(None),
             }
         }
+        // `(pat-dyn P)` — a trait object, `P` matching the value it holds.
+        "pat-dyn" => {
+            let inner = core::field(heap, pat, 0)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-dyn ..) has no sub-pattern".to_string()))?;
+            match v {
+                Value::Boxed(id) if heap.is_dyn(id) => {
+                    let held = heap.dyn_value(id);
+                    match_core_pattern(it, heap, env, inner, held)
+                }
+                other => Err(EvalError::Internal(format!("eval: (pat-dyn ..) against {:?}, which is not a trait object", other))),
+            }
+        }
         other => Err(EvalError::Internal(format!("eval: no matching for pattern `{}`", other))),
     }
 }

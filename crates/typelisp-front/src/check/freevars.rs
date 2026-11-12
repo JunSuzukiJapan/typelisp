@@ -411,6 +411,12 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Resul
                 pattern_bindings(heap, inner, out)?;
             }
         }
+        // `(pat-dyn SUB)`.
+        wk::PAT_DYN => {
+            if let Some(inner) = core::field(heap, pat, 0) {
+                pattern_bindings(heap, inner, out)?;
+            }
+        }
         // `(some P)` over a niched `Option`, which the niche turns into this
         // node rather than a `pat-ctor` (`typeck::pattern`). Missing it
         // made `P`'s names look *free* in the arm body, so a closure around
@@ -470,6 +476,11 @@ fn pattern_guard_tests(
         // being the type's key string.
         wk::PAT_TYPETEST => {
             if let Some(inner) = core::field(heap, pat, 2) {
+                pattern_guard_tests(heap, inner, f)?;
+            }
+        }
+        wk::PAT_DYN => {
+            if let Some(inner) = core::field(heap, pat, 0) {
                 pattern_guard_tests(heap, inner, f)?;
             }
         }

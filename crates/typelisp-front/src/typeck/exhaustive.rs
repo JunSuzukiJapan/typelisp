@@ -94,8 +94,9 @@ fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, V
         // Any other value matches only some values, and covers no variant;
         // nor does an arm whose `:when` may be false.
         Pat::Lit { .. } | Pat::Guard { .. } | Pat::When { .. } => return Some(Vec::new()),
-        // Out of a `Sexpr`, it matches only the values of one type.
-        Pat::TypeTest { .. } => return Some(Vec::new()),
+        // Out of a `Sexpr`, it matches only the values of one type; so does
+        // a pattern of the value a trait object holds, whose types are open.
+        Pat::TypeTest { .. } | Pat::Dyn { .. } => return Some(Vec::new()),
         // What one of the alternatives matches.
         Pat::Or(alts) => {
             let mut all_cases = Vec::new();
@@ -119,7 +120,7 @@ fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, V
         Pat::Ctor { downcast: true, .. } => Some(Vec::new()),
         Pat::Ctor { variant, subs, .. } => Some(vec![(*variant, subs.iter().collect())]),
         Pat::Wild | Pat::Bind(_) => Some(all.iter().filter(|(i, _, _)| *i != sexpr_variant::NIL).map(|(i, _, f)| (*i, vec![wild; f.len()])).collect()),
-        Pat::Lit { .. } | Pat::Guard { .. } | Pat::TypeTest { .. } => Some(Vec::new()),
+        Pat::Lit { .. } | Pat::Guard { .. } | Pat::TypeTest { .. } | Pat::Dyn { .. } => Some(Vec::new()),
         Pat::Or(_) | Pat::When { .. } => unreachable!("`:or` and `:when` are an arm's whole pattern, never a field's"),
     }
 }
