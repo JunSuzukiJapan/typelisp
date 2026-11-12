@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -1860,11 +1860,15 @@ qualsiasi di chiamate di funzione.
 ```
 
 - **I tag sono solo simboli letterali** (`'done`). A differenza di CL, non vengono valutati.
-- **Un tag porta un tipo.** Il tipo viene deciso la prima volta che si usa `'tag`, e ogni successivo
-  `throw`/`catch` dello stesso simbolo viene controllato rispetto ad esso. Usarlo con un altro tipo è un
-  errore di tipo.
-- Il tipo di `throw` è `!` (diverge). Il tipo di `(catch 'tag expr)` è l'unione del tipo di `expr` e del
-  tipo del tag.
+- **Un `catch` e il `throw` che lo raggiunge portano un solo tipo.** Un `throw` dello stesso tag
+  scritto lessicalmente dentro il `catch` è un errore di tipo se i tipi differiscono. Un `throw` che arriva
+  da un'altra funzione è un errore a runtime (`panic`) se il suo tipo differisce da quello del `catch`
+  raggiunto. Un `catch` di un altro tag viene oltrepassato, qualunque sia il suo tipo.
+- Il tipo è deciso in ogni punto d'uso. Un tag dentro un corpo generico porta il tipo di ciascuna
+  istanziazione.
+- Il tipo di `throw` è `!` (diverge). Il tipo di `(catch 'tag expr)` è il tipo di `expr`, e anche il
+  valore che il `catch` riceve ha questo tipo. Quando `expr` è `!` e nessun `throw` interno decide il
+  tipo, è `!`.
 - Il valore di `unwind-protect` è il valore di `protected`. Il valore di `cleanup` viene scartato.
   `cleanup` viene eseguito in qualunque modo si esca da `protected`: oltre al completamento normale,
   `throw` e `panic`, viene eseguito anche quando si esce con `break`/`return`/`return-from`. Un'uscita

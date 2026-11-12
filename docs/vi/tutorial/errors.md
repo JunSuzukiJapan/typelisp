@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # Xử lý lỗi
 
 Việc xử lý lỗi trong typelisp chia các thất bại thành hai loại.
@@ -160,13 +160,31 @@ Nếu `v` không có số âm, `validate` trả về `"all fine"`; nếu nó ch�
 trong `check-all` ra `catch`, và `catch` trả về `"negative: -7"`.
 
 - Hãy viết tag dưới dạng một symbol thông thường, như `'bad-input`.
-- **Mỗi tag mang các giá trị của đúng một kiểu.** Trong ví dụ trên `'bad-input` mang một `string`, nên
-  ném một `int` với cùng tag là lỗi kiểu. Kiểu của thân `catch` cũng phải khớp với kiểu của tag.
+- Giá trị của thân `catch` và giá trị mà `catch` nhận có cùng kiểu. `catch` trong ví dụ trên mang
+  `string`, nên không được ném `int` với `'bad-input`. Một `throw` viết bên trong `catch` là lỗi kiểu.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; lỗi kiểu: catch mang string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  Nếu ném từ bên trong hàm khác, như `check-all`, thì nó đến `catch` nào được quyết định lúc chạy,
+  nên lỗi xảy ra khi nó đến.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- Thẻ bên trong hàm generic mang kiểu của từng lần khởi tạo.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` mang `int` với `(pass 1)` và `string` với
+  `(pass "a")`.
 - Một `throw` không có `catch` cùng tag để tới là một lỗi.
 
 Nếu bạn chỉ muốn thoát sớm từ bên trong một hàm, hãy dùng `return-from` thay cho `catch` / `throw`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # لمبرمجي Common Lisp
 
 ترث typelisp صياغة Common Lisp (واختصارًا CL) وكثيرًا من أسماء دواله، لكنها لغة ذات أنواع ساكنة. ولهذا
@@ -178,8 +178,8 @@
 [Option وResult وأنواع الأخطاء](../reference/functions/option-result.md#3-أنواع-الأخطاء-والسمة-error).
 ويمكن استخدام `assert` و`warn` كما في CL.
 
-توجد `catch` / `throw` / `unwind-protect`. غير أن وسم `catch` محصور في رمز حرفي غير مقيَّم (`'done`)،
-والقيم المرمية بوسم واحد لها نوع واحد.
+`catch` / `throw` / `unwind-protect` موجودة. لكن وسم `catch` يقتصر على رمز حرفي غير مُقيَّم
+(`'done`)، و`throw` الذي يصل إلى `catch` بالوسم نفسه يحمل نوعًا آخر خطأ.
 
 ## 8. لا يوجد CLOS
 

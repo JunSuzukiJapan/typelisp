@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # त्रुटि संदेश
 
 `typl` के मुख्य त्रुटि संदेशों का अर्थ और उन्हें कैसे ठीक करें।
@@ -101,6 +101,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | सीमा से बाहर इंडेक्स। `len` से लंबाई जाँचें, या ऐसा फ़ंक्शन उपयोग करें जो सीमा से बाहर होने पर `none` लौटाता है (`nth`, `pop` आदि) |
 | `panic: an integer argument does not fit a fixnum` | इंडेक्स या गिनती लेने वाले आर्ग्युमेंट को ऐसा `int` पास किया गया जो 63 बिट में नहीं समाता |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` चला जबकि उसी टैग का कोई घेरने वाला `catch` नहीं था |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` उसी टैग के ऐसे `catch` तक पहुँचा जो दूसरा प्रकार ले जाता है |
 | `panic: <message>` | प्रोग्राम ने `(panic "<message>")` कॉल किया। विफल `assert` `assertion failed: ...` देता है |
 
 `panic` पूरी प्रोसेस को रोक देता है, चाहे वह किसी टास्क के भीतर हो ([सिंटैक्स संदर्भ 12.4](syntax.md#124-अन्य-सुविधाओं-के-साथ-अंतःक्रिया))। जिन विफलताओं से आप उबरना चाहते हैं उन्हें `Result` से व्यक्त करें ([सिंटैक्स संदर्भ अध्याय 9](syntax.md#9-त्रुटि-प्रबंधन-नीति))।

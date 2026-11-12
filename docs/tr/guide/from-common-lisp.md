@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Common Lisp Programcıları İçin
 
 typelisp, Common Lisp'in (CL) sözdizimini ve fonksiyon adlarının çoğunu devralır, ancak statik tür
@@ -185,8 +185,9 @@ yapma yolu
 [Option, Result ve Hata Türleri](../reference/functions/option-result.md#3-hata-türleri-ve-error-traiti)
 belgesindedir. `assert` ve `warn` CL'deki gibi kullanılabilir.
 
-`catch` / `throw` / `unwind-protect` vardır. Ancak `catch`'in etiketi, değerlendirilmeyen bir düz
-sembolle (`'done`) sınırlıdır ve bir etiketle fırlatılan değerlerin tek bir türü vardır.
+`catch` / `throw` / `unwind-protect` vardır. Ancak `catch` etiketi değerlendirilmeyen bir sembol
+değişmeziyle (`'done`) sınırlıdır ve aynı etiketli, başka bir tür taşıyan bir `catch`'e ulaşan `throw`
+bir hatadır.
 
 ## 8. CLOS yoktur
 

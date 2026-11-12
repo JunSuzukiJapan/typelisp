@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Komunikaty o błędach
 
 Co oznaczają główne komunikaty o błędach z `typl` i jak je naprawić.
@@ -103,6 +103,7 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | `panic: Vector: index 5 out of bounds` | Indeks poza zakresem. Sprawdź długość za pomocą `len` albo użyj funkcji zwracającej `none` poza zakresem (`nth`, `pop` i tak dalej) |
 | `panic: an integer argument does not fit a fixnum` | `int`, który nie mieści się w 63 bitach, przekazano do argumentu przyjmującego indeks lub liczbę |
 | `throw: no enclosing (catch 'oops) for this throw` | Wykonano `throw` bez otaczającego `catch` z tym samym znacznikiem |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` dotarł do `catch` z tym samym znacznikiem, który niesie inny typ |
 | `panic: <message>` | Program wywołał `(panic "<message>")`. Nieudane `assert` daje `assertion failed: ...` |
 
 `panic` zatrzymuje cały proces nawet wtedy, gdy zdarza się wewnątrz zadania

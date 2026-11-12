@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # 오류 처리
 
 typelisp의 오류 처리는 실패를 두 종류로 나눈다.
@@ -155,13 +155,32 @@ error: main.typl:4:7: panic: index 3 out of range
 `"negative: -7"`을 반환한다.
 
 - 태그는 `'bad-input`처럼 그냥 심볼로 쓴다.
-- **하나의 태그가 나르는 값의 타입은 하나뿐이다.** 위의 예에서 `'bad-input`은 `string`을 나르므로 같은 태그로
-  `int`를 throw하면 타입 오류이다. `catch`의 본체의 타입도 태그의 타입과 맞아야 한다.
+- `catch` 본체의 값과 그 `catch`가 받는 값은 같은 타입입니다. 위 예의 `catch`는 `string`을
+  나르므로 `'bad-input`으로 `int`를 던지면 안 됩니다. `catch` 안에 쓴 `throw`라면 타입 오류가
+  됩니다.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; 타입 오류: catch는 string을 나른다
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  `check-all`처럼 다른 함수 안에서 던졌다면 어느 `catch`에 닿을지는 실행 시에 정해지므로,
+  닿았을 때 오류가 됩니다.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- 제네릭 함수 안의 태그는 구체화마다의 타입을 나릅니다.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))`는 `(pass 1)`에서는 `int`를,
+  `(pass "a")`에서는 `string`을 나릅니다.
 - 도달할 같은 태그의 `catch`가 없는 `throw`는 오류이다.
 
 함수 안에서 일찍 반환하고 싶을 뿐이라면 `catch` / `throw` 대신 `return-from`을 쓴다. `return-from`은 함수를 넘을 수

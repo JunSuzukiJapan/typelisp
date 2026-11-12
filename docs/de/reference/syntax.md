@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1842,11 +1842,15 @@ Funktionsaufrufe hinweg.
 ```
 
 - **Marken sind nur literale Symbole** (`'done`). Anders als in CL werden sie nicht ausgewertet.
-- **Eine Marke trägt einen Typ.** Der Typ wird bei der ersten Verwendung von `'tag` bestimmt, und jedes spätere
-  `throw`/`catch` desselben Symbols wird dagegen geprüft. Sie mit einem anderen Typ zu verwenden, ist ein
-  Typfehler.
-- Der Typ von `throw` ist `!` (es divergiert). Der Typ von `(catch 'tag expr)` ist die Vereinigung des Typs von
-  `expr` und des Typs der Marke.
+- **Ein `catch` und ein `throw`, das es erreicht, tragen einen Typ.** Ein `throw` desselben Tags,
+  das lexikalisch im `catch` steht, ist ein Typfehler, wenn die Typen abweichen. Ein `throw` aus einer
+  anderen Funktion ist ein Laufzeitfehler (`panic`), wenn sein Typ von dem des erreichten `catch`
+  abweicht. Ein `catch` eines anderen Tags wird übergangen, gleich welchen Typ es trägt.
+- Der Typ wird an jeder Verwendungsstelle bestimmt. Ein Tag in einem generischen Rumpf trägt den Typ
+  der jeweiligen Instanziierung.
+- Der Typ von `throw` ist `!` (divergiert). Der Typ von `(catch 'tag expr)` ist der Typ von `expr`, und
+  auch der Wert, den das `catch` empfängt, hat diesen Typ. Ist `expr` `!` und bestimmt auch kein `throw`
+  darin den Typ, ist er `!`.
 - Der Wert von `unwind-protect` ist der Wert von `protected`. Der Wert von `cleanup` wird verworfen. `cleanup`
   läuft, wie auch immer `protected` verlassen wird: zusätzlich zu normalem Abschluss, `throw` und `panic` läuft es
   auch, wenn es durch `break`/`return`/`return-from` verlassen wird. Ein nichtlokaler Ausgang durch `cleanup`

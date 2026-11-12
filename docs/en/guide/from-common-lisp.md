@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # For Common Lisp Programmers
 
 typelisp inherits Common Lisp's (CL's) syntax and many of its function names, but it is a
@@ -186,7 +186,8 @@ own error type is in
 `assert` and `warn` can be used as in CL.
 
 `catch` / `throw` / `unwind-protect` exist. However, the tag of `catch` is limited to an unevaluated
-literal symbol (`'done`), and the values thrown with one tag have a single type.
+literal symbol (`'done`), and a `throw` that reaches a `catch` of the same tag carrying another type is
+an error.
 
 ## 8. There is no CLOS
 

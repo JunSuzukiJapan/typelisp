@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Pesan Kesalahan
 
 Arti pesan kesalahan utama dari `typl` dan cara memperbaikinya.
@@ -104,6 +104,7 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | `panic: Vector: index 5 out of bounds` | Indeks di luar rentang. Periksa panjang dengan `len`, atau gunakan fungsi yang mengembalikan `none` saat di luar rentang (`nth`, `pop`, dan sebagainya) |
 | `panic: an integer argument does not fit a fixnum` | `int` yang tidak muat dalam 63 bit diberikan ke argumen yang menerima indeks atau jumlah |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` dijalankan tanpa `catch` bertag sama yang melingkupinya |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Sebuah `throw` mencapai `catch` dengan tag yang sama yang membawa tipe lain |
 | `panic: <message>` | Program memanggil `(panic "<message>")`. `assert` yang gagal menghasilkan `assertion failed: ...` |
 
 `panic` menghentikan seluruh proses bahkan ketika terjadi di dalam task

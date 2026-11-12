@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # Hata Yönetimi
 
 typelisp'te hata yönetimi başarısızlıkları iki türe ayırır.
@@ -162,14 +162,32 @@ atlar.
 `check-all`'ın içinden `catch`'e atlar ve o da `"negative: -7"` döndürür.
 
 - Etiketi `'bad-input` gibi düz bir sembol olarak yazın.
-- **Her etiket tam olarak tek bir türden değerler taşır.** Yukarıdaki örnekte `'bad-input` bir
-  `string` taşır; bu yüzden aynı etiketle bir `int` fırlatmak tür hatasıdır. `catch` gövdesinin türü de
-  etiketin türüyle uyuşmalıdır.
+- `catch` gövdesinin değeri ile `catch`'in aldığı değer aynı türdedir. Yukarıdaki örnekteki `catch`
+  bir `string` taşır, bu yüzden `'bad-input` ile `int` fırlatmamalısınız. `catch` içinde yazılmış bir
+  `throw` tür hatasıdır.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; tür hatası: catch string taşır
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  `check-all` gibi başka bir fonksiyonun içinden fırlatılırsa hangi `catch`'e ulaşacağı çalışma
+  zamanında belirlenir, bu yüzden ulaştığında hata olur.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- Jenerik bir fonksiyondaki etiket her örneklemenin türünü taşır.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))`, `(pass 1)` için `int`, `(pass "a")` için
+  `string` taşır.
 - Ulaşılacak aynı etiketli bir `catch`'i olmayan bir `throw` hatadır.
 
 Yalnızca bir fonksiyonun içinden erken dönmek istiyorsanız `catch` / `throw` yerine `return-from`

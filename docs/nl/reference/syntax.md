@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1860,11 +1860,15 @@ functieaanroepen heen.
 ```
 
 - **Tags zijn alleen letterlijke symbolen** (`'done`). Anders dan in CL worden ze niet geëvalueerd.
-- **Een tag draagt een type.** Het type wordt bepaald bij het eerste gebruik van `'tag`, en elke latere
-  `throw`/`catch` van hetzelfde symbool wordt ertegen gecontroleerd. Het met een ander type gebruiken is
-  een typefout.
-- Het type van `throw` is `!` (het divergeert). Het type van `(catch 'tag expr)` is de join van het type
-  van `expr` en het type van de tag.
+- **Een `catch` en een `throw` die hem bereikt dragen één type.** Een `throw` van dezelfde tag die
+  lexicaal binnen de `catch` staat, is een typefout als de typen verschillen. Een `throw` die uit een
+  andere functie komt, is een runtimefout (`panic`) als zijn type verschilt van dat van de bereikte
+  `catch`. Een `catch` van een andere tag wordt gepasseerd, welk type hij ook draagt.
+- Het type wordt op elke plek van gebruik bepaald. Een tag in een generieke body draagt het type van
+  elke instantiatie.
+- Het type van `throw` is `!` (divergeert). Het type van `(catch 'tag expr)` is het type van `expr`, en
+  de waarde die de `catch` ontvangt heeft ook dit type. Als `expr` `!` is en geen `throw` erin het type
+  bepaalt, is het `!`.
 - De waarde van `unwind-protect` is de waarde van `protected`. De waarde van `cleanup` wordt weggegooid.
   `cleanup` wordt uitgevoerd hoe `protected` ook wordt verlaten: naast normale voltooiing, `throw` en
   `panic` wordt het ook uitgevoerd wanneer het via `break`/`return`/`return-from` wordt verlaten. Een

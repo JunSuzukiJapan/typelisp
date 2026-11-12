@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # ข้อความแสดงข้อผิดพลาด
 
 ความหมายของข้อความแสดงข้อผิดพลาดหลักจาก `typl` และวิธีแก้ไข
@@ -103,6 +103,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | ดัชนีเกินช่วง ตรวจสอบความยาวด้วย `len` หรือใช้ฟังก์ชันที่คืน `none` เมื่อเกินช่วง (`nth`, `pop` และอื่น ๆ) |
 | `panic: an integer argument does not fit a fixnum` | ส่ง `int` ที่ไม่พอดีใน 63 บิตให้อาร์กิวเมนต์ที่รับดัชนีหรือจำนวนนับ |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` รันโดยไม่มี `catch` แท็กเดียวกันห่อหุ้มอยู่ |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` ไปถึง `catch` แท็กเดียวกันที่พาชนิดอื่น |
 | `panic: <message>` | โปรแกรมเรียก `(panic "<message>")` `assert` ที่ล้มเหลวให้ `assertion failed: ...` |
 
 `panic` หยุดทั้งโพรเซสแม้เกิดขึ้นภายใน task

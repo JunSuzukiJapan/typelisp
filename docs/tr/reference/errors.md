@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Hata Mesajları
 
 `typl`'nin başlıca hata mesajlarının ne anlama geldiği ve nasıl düzeltileceği.
@@ -104,6 +104,7 @@ olduğu anlamına gelir.
 | `panic: Vector: index 5 out of bounds` | Aralık dışı bir indeks. Uzunluğu `len` ile kontrol edin ya da aralık dışında `none` döndüren bir fonksiyon kullanın (`nth`, `pop` vb.) |
 | `panic: an integer argument does not fit a fixnum` | Bir indeks ya da sayı alan bir bağımsız değişkene, 63 bite sığmayan bir `int` geçirildi |
 | `throw: no enclosing (catch 'oops) for this throw` | Aynı etiketli çevreleyen bir `catch` olmadan bir `throw` çalıştı |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Bir `throw`, aynı etiketli ve başka bir tür taşıyan bir `catch`'e ulaştı |
 | `panic: <message>` | Program `(panic "<message>")` çağırdı. Başarısız bir `assert`, `assertion failed: ...` verir |
 
 Bir `panic`, bir task'in içinde olsa bile tüm süreci durdurur

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Untuk Pemrogram Common Lisp
 
 typelisp mewarisi sintaks Common Lisp (CL) dan banyak nama fungsinya, tetapi ia adalah bahasa dengan
@@ -187,8 +187,9 @@ kesalahan sendiri ada di
 [Option, Result, dan Tipe Kesalahan](../reference/functions/option-result.md#3-tipe-kesalahan-dan-trait-error).
 `assert` dan `warn` dapat dipakai seperti di CL.
 
-`catch` / `throw` / `unwind-protect` ada. Namun, tag `catch` dibatasi pada simbol literal yang tidak
-dievaluasi (`'done`), dan nilai yang dilempar dengan satu tag memiliki satu tipe.
+`catch` / `throw` / `unwind-protect` tersedia. Namun, tag `catch` terbatas pada literal simbol
+yang tidak dievaluasi (`'done`), dan `throw` yang mencapai `catch` dengan tag yang sama tetapi membawa
+tipe lain adalah error.
 
 ## 8. Tidak ada CLOS
 

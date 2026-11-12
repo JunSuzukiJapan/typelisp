@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # 错误消息
 
 `typl` 给出的主要错误消息的含义和修正方法。
@@ -102,6 +102,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | 下标越界。用 `len` 确认长度，或者使用越界时返回 `none` 的函数（`nth`、`pop` 等） |
 | `panic: an integer argument does not fit a fixnum` | 给接受下标或个数的参数传入了 63 位放不下的 `int` |
 | `throw: no enclosing (catch 'oops) for this throw` | 执行了没有被同一标签的 `catch` 包围的 `throw` |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` 到达了同一标签但携带其他类型的 `catch` |
 | `panic: <消息>` | 程序调用了 `(panic "<消息>")`。`assert` 失败时是 `assertion failed: ...` |
 
 panic 即使发生在任务中也会停止整个进程（[语法参考 12.4](syntax.md#124-与其他功能的关系)）。想要恢复的失败用

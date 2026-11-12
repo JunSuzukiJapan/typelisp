@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # 錯誤處理
 
 typelisp 的錯誤處理把失敗分成兩類來考慮。
@@ -148,13 +148,31 @@ error: main.typl:4:7: panic: index 3 out of range
 `v` 中沒有負數時，`validate` 回傳 `"all fine"`；有 `-7` 時，會從 `check-all` 內部跳到 `catch`，回傳 `"negative: -7"`。
 
 - 標籤直接寫成 `'bad-input` 這樣的符號。
-- **每個標籤丟出的值的型別只有一種。** 上例中 `'bad-input` 攜帶 `string`，用同一標籤丟出 `int` 是型別錯誤。`catch` 本體的型別也必須
-  與標籤的型別一致。
+- `catch` 主體的值與該 `catch` 接收的值型別相同。上例的 `catch` 攜帶 `string`，所以不能用
+  `'bad-input` 拋出 `int`。寫在 `catch` 中的 `throw` 會成為型別錯誤。
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; 型別錯誤：catch 攜帶 string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  如果像 `check-all` 那樣從其他函式內部拋出，到達哪個 `catch` 要在執行期才決定，因此在到達時
+  報錯。
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- 泛型函式中的標籤攜帶每個實例化的型別。
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` 在 `(pass 1)` 中攜帶 `int`，在
+  `(pass "a")` 中攜帶 `string`。
 - `throw` 找不到同一標籤的 `catch` 時是錯誤。
 
 如果只是想在函式中途返回，請使用 `return-from` 而不是 `catch` / `throw`。`return-from` 不能跨越函式，但作為交換，閱讀原始碼就能知道它

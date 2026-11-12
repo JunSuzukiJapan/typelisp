@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로
@@ -170,8 +170,8 @@ CL과 다른 점은 세 가지다. 요소의 타입이 모두 같아야 한다(`
 [Option, Result, 오류 타입](../reference/functions/option-result.md#3-오류-타입과-error-트레이트)에 있다. `assert`와
 `warn`은 CL처럼 쓸 수 있다.
 
-`catch` / `throw` / `unwind-protect`는 있다. 다만 `catch`의 태그는 평가되지 않는 리터럴 심볼(`'done`)로 한정되고,
-하나의 태그로 던지는 값의 타입은 하나이다.
+`catch` / `throw` / `unwind-protect`는 있습니다. 다만 `catch`의 태그는 평가되지 않는 심볼
+리터럴(`'done`)로 한정되며, 같은 태그이면서 다른 타입을 나르는 `catch`에 닿은 `throw`는 오류입니다.
 
 ## 8. CLOS가 없다
 

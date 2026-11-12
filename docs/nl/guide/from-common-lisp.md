@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Voor Common Lisp-programmeurs
 
 typelisp erft de syntaxis van Common Lisp (CL) en veel van zijn functienamen, maar is een statisch
@@ -188,9 +188,9 @@ eigen foutentype maakt staat in
 [Option, Result en foutentypes](../reference/functions/option-result.md#3-foutentypes-en-de-trait-error).
 `assert` en `warn` kunnen worden gebruikt zoals in CL.
 
-`catch` / `throw` / `unwind-protect` bestaan. De tag van `catch` is echter beperkt tot een
-ongeëvalueerd letterlijk symbool (`'done`), en de waarden die met één tag worden gegooid hebben één
-type.
+`catch` / `throw` / `unwind-protect` bestaan. De tag van `catch` is echter beperkt tot een niet
+geëvalueerd letterlijk symbool (`'done`), en een `throw` die een `catch` van dezelfde tag met een ander
+type bereikt, is een fout.
 
 ## 8. Er is geen CLOS
 

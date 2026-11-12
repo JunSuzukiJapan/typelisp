@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # Gestion des erreurs
 
 La gestion des erreurs de typelisp répartit les échecs en deux sortes.
@@ -162,14 +162,32 @@ Si `v` ne contient aucun nombre négatif, `validate` renvoie `"all fine"` ; s'il
 de l'intérieur de `check-all` jusqu'au `catch`, qui renvoie `"negative: -7"`.
 
 - Écrivez l'étiquette comme un simple symbole, par exemple `'bad-input`.
-- **Chaque étiquette transporte des valeurs d'un seul type.** Dans l'exemple ci-dessus, `'bad-input` transporte
-  une `string` ; lancer un `int` avec la même étiquette est donc une erreur de type. Le type du corps du `catch`
-  doit aussi correspondre au type de l'étiquette.
+- La valeur du corps du `catch` et la valeur que reçoit le `catch` ont le même type. Le `catch` de
+  l'exemple ci-dessus porte une `string`, il ne faut donc pas lancer un `int` avec `'bad-input`. Un
+  `throw` écrit dans le `catch` est une erreur de type.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; erreur de type : le catch porte string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  S'il est lancé depuis une autre fonction, comme `check-all`, le `catch` atteint est décidé à
+  l'exécution ; c'est donc une erreur à son arrivée.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- Une étiquette dans une fonction générique porte le type de chaque instanciation.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` porte `int` pour `(pass 1)` et `string` pour
+  `(pass "a")`.
 - Un `throw` sans `catch` de même étiquette à atteindre est une erreur.
 
 Si vous voulez seulement revenir plus tôt depuis une fonction, utilisez `return-from` au lieu de `catch` /

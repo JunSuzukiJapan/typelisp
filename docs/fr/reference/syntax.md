@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1812,10 +1812,15 @@ Contrairement à `break`/`return` (chapitre 5), c'est une sortie **dynamique** :
 ```
 
 - **Les étiquettes ne sont que des symboles littéraux** (`'done`). Contrairement à CL, elles ne sont pas évaluées.
-- **Une étiquette porte un type.** Le type est décidé à la première utilisation de `'tag`, et chaque `throw`/`catch`
-  ultérieur du même symbole est vérifié par rapport à lui. L'utiliser avec un autre type est une erreur de type.
-- Le type de `throw` est `!` (il diverge). Le type de `(catch 'tag expr)` est la réunion du type de `expr` et du type
-  de l'étiquette.
+- **Un `catch` et le `throw` qui l'atteint portent un même type.** Un `throw` de la même étiquette
+  écrit lexicalement dans le `catch` est une erreur de type si les types diffèrent. Un `throw` venant
+  d'une autre fonction est une erreur à l'exécution (`panic`) si son type diffère de celui du `catch`
+  atteint. Un `catch` d'une autre étiquette est ignoré, quel que soit son type.
+- Le type est décidé à chaque lieu d'utilisation. Une étiquette dans un corps générique porte le type de
+  chaque instanciation.
+- Le type de `throw` est `!` (il diverge). Le type de `(catch 'tag expr)` est celui de `expr`, et la
+  valeur que reçoit le `catch` a aussi ce type. Quand `expr` est `!` et qu'aucun `throw` intérieur ne
+  décide le type, c'est `!`.
 - La valeur de `unwind-protect` est la valeur de `protected`. La valeur de `cleanup` est ignorée. `cleanup` s'exécute
   quelle que soit la façon dont `protected` est quitté : en plus de la fin normale, de `throw` et de `panic`, il
   s'exécute aussi quand on le quitte par `break`/`return`/`return-from`. Une sortie non locale par `cleanup`

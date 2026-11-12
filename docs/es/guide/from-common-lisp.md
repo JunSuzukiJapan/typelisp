@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Para programadores de Common Lisp
 
 typelisp hereda la sintaxis de Common Lisp (CL) y muchos de sus nombres de funciones, pero es un lenguaje
@@ -184,8 +184,9 @@ tipo de error está en
 [Option, Result y tipos de error](../reference/functions/option-result.md#3-tipos-de-error-y-el-trait-error).
 `assert` y `warn` se pueden usar como en CL.
 
-Existen `catch` / `throw` / `unwind-protect`. Sin embargo, la etiqueta de `catch` se limita a un símbolo
-literal sin evaluar (`'done`), y los valores lanzados con una etiqueta tienen un único tipo.
+`catch` / `throw` / `unwind-protect` existen. Sin embargo, la etiqueta de `catch` se limita a un
+símbolo literal sin evaluar (`'done`), y un `throw` que llega a un `catch` de la misma etiqueta que
+lleva otro tipo es un error.
 
 ## 8. No hay CLOS
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1790,10 +1790,13 @@ sözcüksel olarak aramaz ve istenen sayıda fonksiyon çağrısı boyunca aynı
 ```
 
 - **Etiketler yalnızca sabit sembollerdir** (`'done`). CL'den farklı olarak değerlendirilmezler.
-- **Bir etiket bir tür taşır.** Tür, `'tag`'in ilk kullanıldığı anda belirlenir ve aynı sembolün sonraki
-  her `throw`/`catch`'i ona karşı denetlenir. Onu başka bir türle kullanmak tür hatasıdır.
-- `throw`'un türü `!`'dir (sapar). `(catch 'tag expr)`'in türü, `expr`'in türü ile etiketin türünün
-  birleşimidir.
+- **Bir `catch` ile ona ulaşan `throw` tek bir tür taşır.** `catch` içinde sözcüksel olarak yazılmış
+  aynı etiketli bir `throw`, türler farklıysa tür hatasıdır. Başka bir fonksiyondan gelen `throw`, türü
+  ulaştığı `catch`'inkinden farklıysa çalışma zamanı hatasıdır (`panic`). Başka etiketli bir `catch`,
+  hangi türü taşırsa taşısın geçilir.
+- Tür her kullanım yerinde belirlenir. Jenerik bir gövdedeki etiket, her örneklemenin türünü taşır.
+- `throw`'un türü `!`'dir (ıraksar). `(catch 'tag expr)`'in türü `expr`'in türüdür ve `catch`'in aldığı
+  değer de bu türdedir. `expr` `!` olduğunda ve içerideki hiçbir `throw` türü belirlemediğinde `!`'dir.
 - `unwind-protect`'in değeri `protected`'ın değeridir. `cleanup`'ın değeri atılır. `cleanup`,
   `protected`'dan nasıl çıkılırsa çıkılsın çalışır: normal tamamlanma, `throw` ve `panic`'e ek olarak
   `break`/`return`/`return-from` ile çıkıldığında da çalışır. `cleanup`'ın kendisinin yaptığı yerel olmayan

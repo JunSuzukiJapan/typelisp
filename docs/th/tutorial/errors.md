@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # การจัดการข้อผิดพลาด
 
 การจัดการข้อผิดพลาดใน typelisp แบ่งความล้มเหลวเป็นสองประเภท
@@ -161,14 +161,31 @@ error: main.typl:4:7: panic: index 3 out of range
 `check-all` ออกไปยัง `catch` ซึ่งคืน `"negative: -7"`
 
 - เขียนแท็กเป็นสัญลักษณ์ธรรมดา เช่น `'bad-input`
-- **แต่ละแท็กพาค่าชนิดเดียวเท่านั้น** ในตัวอย่างข้างต้น `'bad-input` พา
-  `string` ดังนั้นการโยน `int` ด้วยแท็กเดียวกันเป็นข้อผิดพลาดของชนิด ชนิดของตัวเนื้อหา `catch`
-  ต้องตรงกับชนิดของแท็กด้วย
+- ค่าของบอดี `catch` และค่าที่ `catch` ได้รับเป็นชนิดเดียวกัน `catch` ในตัวอย่างข้างบนพา `string`
+  จึงห้ามโยน `int` ด้วย `'bad-input` `throw` ที่เขียนอยู่ภายใน `catch` เป็นข้อผิดพลาดชนิด
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; ข้อผิดพลาดชนิด: catch พา string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  ถ้าโยนจากภายในฟังก์ชันอื่นอย่าง `check-all` จะไปถึง `catch` ใดนั้นตัดสินขณะทำงาน
+  จึงเป็นข้อผิดพลาดเมื่อไปถึง
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- แท็กภายในฟังก์ชันเจเนอริกพาชนิดของแต่ละการทำให้เป็นรูปธรรม
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` พา `int` สำหรับ `(pass 1)` และ `string`
+  สำหรับ `(pass "a")`
 - `throw` ที่ไม่มี `catch` แท็กเดียวกันให้ไปถึงเป็นข้อผิดพลาด
 
 หากต้องการเพียงออกก่อนกำหนดจากภายในฟังก์ชัน ให้ใช้ `return-from` แทน `catch` /

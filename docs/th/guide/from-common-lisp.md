@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # สำหรับโปรแกรมเมอร์ Common Lisp
 
 typelisp สืบทอดไวยากรณ์และชื่อฟังก์ชันจำนวนมากของ Common Lisp (CL) แต่เป็นภาษาที่มี
@@ -179,8 +179,8 @@ typelisp ไม่แยกเนมสเปซของฟังก์ชั�
 [Option, Result และชนิดข้อผิดพลาด](../reference/functions/option-result.md#3-ชนิดข้อผิดพลาดและ-trait-error)
 `assert` และ `warn` ใช้ได้เหมือนใน CL
 
-`catch` / `throw` / `unwind-protect` มีอยู่ แต่แท็กของ `catch` จำกัดเฉพาะสัญลักษณ์ literal ที่ไม่ถูก
-ประเมินค่า (`'done`) และค่าที่โยนด้วยแท็กเดียวกันต้องมีชนิดเดียว
+มี `catch` / `throw` / `unwind-protect` แต่แท็กของ `catch` จำกัดอยู่ที่ลิเทอรัลสัญลักษณ์ที่ไม่ถูกประเมิน
+(`'done`) และ `throw` ที่ไปถึง `catch` แท็กเดียวกันซึ่งพาชนิดอื่นถือเป็นข้อผิดพลาด
 
 ## 8. ไม่มี CLOS
 

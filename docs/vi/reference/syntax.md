@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1743,10 +1743,13 @@ nghĩa từ vựng, và với tới một `catch` cùng tag xuyên qua bất k�
 ```
 
 - **Tag chỉ là các symbol literal** (`'done`). Khác CL, chúng không được đánh giá.
-- **Một tag mang một kiểu.** Kiểu được quyết định lần đầu `'tag` được dùng, và mọi `throw`/`catch` sau đó của
-  cùng symbol đều được kiểm tra theo nó. Dùng nó với kiểu khác là lỗi kiểu.
-- Kiểu của `throw` là `!` (nó không hội tụ). Kiểu của `(catch 'tag expr)` là phép hợp của kiểu của `expr` và kiểu
-  của tag.
+- **Một `catch` và `throw` đến được nó mang cùng một kiểu.** Một `throw` cùng thẻ viết về mặt từ vựng
+  bên trong `catch` là lỗi kiểu nếu kiểu khác nhau. Một `throw` đến từ hàm khác là lỗi lúc chạy (`panic`)
+  nếu kiểu của nó khác với `catch` mà nó đến. Một `catch` có thẻ khác được bỏ qua, bất kể kiểu nó mang.
+- Kiểu được quyết định ở mỗi nơi sử dụng. Thẻ bên trong thân generic mang kiểu của từng lần khởi tạo.
+- Kiểu của `throw` là `!` (phân kỳ). Kiểu của `(catch 'tag expr)` là kiểu của `expr`, và giá trị mà
+  `catch` nhận cũng có kiểu này. Khi `expr` là `!` và không `throw` nào bên trong quyết định kiểu, kiểu
+  là `!`.
 - Giá trị của `unwind-protect` là giá trị của `protected`. Giá trị của `cleanup` bị bỏ đi. `cleanup` chạy dù
   `protected` được rời đi bằng cách nào: ngoài hoàn tất bình thường, `throw` và `panic`, nó cũng chạy khi được
   rời đi bằng `break`/`return`/`return-from`. Một lối thoát phi cục bộ do chính `cleanup` thực hiện thắng lối

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # رسائل الخطأ
 
 معنى أهم رسائل الخطأ الصادرة من `typl` وكيفية إصلاحها.
@@ -103,6 +103,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | فهرس خارج النطاق. افحص الطول بـ `len` أو استخدم دالة تعيد `none` عند الخروج عن النطاق (`nth` و`pop` وغيرهما) |
 | `panic: an integer argument does not fit a fixnum` | مُرِّر `int` لا يتسع في 63 بتًا إلى وسيط يأخذ فهرسًا أو عددًا |
 | `throw: no enclosing (catch 'oops) for this throw` | نُفِّذ `throw` دون `catch` محيطة بالوسم نفسه |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | وصل `throw` إلى `catch` بالوسم نفسه يحمل نوعًا آخر |
 | `panic: <message>` | استدعى البرنامج `(panic "<message>")`. و`assert` الفاشلة تعطي `assertion failed: ...` |
 
 يوقف `panic` العملية كلها حتى عندما يحدث داخل مهمة

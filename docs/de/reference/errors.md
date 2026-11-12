@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Fehlermeldungen
 
 Was die wichtigsten Fehlermeldungen von `typl` bedeuten und wie man sie behebt.
@@ -104,6 +104,7 @@ Fehler, die vor der Ausführung gefunden werden. Die Form wird erst ausgeführt,
 | `panic: Vector: index 5 out of bounds` | Ein Index außerhalb des Bereichs. Die Länge prüft man mit `len`, oder man verwendet eine Funktion, die außerhalb des Bereichs `none` zurückgibt (`nth`, `pop` usw.) |
 | `panic: an integer argument does not fit a fixnum` | Ein `int`, das nicht in 63 Bit passt, wurde an ein Argument übergeben, das einen Index oder eine Anzahl nimmt |
 | `throw: no enclosing (catch 'oops) for this throw` | Ein `throw` lief ohne umschließendes `catch` mit derselben Marke |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Ein `throw` erreichte ein `catch` desselben Tags, das einen anderen Typ trägt |
 | `panic: <message>` | Das Programm hat `(panic "<message>")` aufgerufen. Ein fehlgeschlagenes `assert` ergibt `assertion failed: ...` |
 
 Ein `panic` hält den ganzen Prozess an, auch wenn er innerhalb eines Tasks auftritt

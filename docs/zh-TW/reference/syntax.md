@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -1426,8 +1426,12 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 ```
 
 - **標籤只能是字面的符號**（`'done`）。與 CL 不同，不會被求值。
-- **標籤攜帶型別。** `'tag` 第一次使用時決定型別，之後同一符號的 `throw`/`catch` 全部與它比對。以別的型別使用是型別錯誤。
-- `throw` 的型別是 `!`（發散）。`(catch 'tag expr)` 的型別是 `expr` 的型別與標籤型別的合併型別。
+- **`catch` 與到達它的 `throw` 攜帶同一型別。** 在 `catch` 中依詞法寫出的同一標籤的 `throw`，型別
+  不符即為型別錯誤。從其他函式到達的 `throw`，若型別與所到達的 `catch` 不同，則為執行期錯誤
+  （`panic`）。其他標籤的 `catch` 無論攜帶何種型別都會被越過。
+- 型別在每個使用處決定。泛型主體中的標籤攜帶每個實例化的型別。
+- `throw` 的型別是 `!`（發散）。`(catch 'tag expr)` 的型別是 `expr` 的型別，`catch` 接收的值也是
+  此型別。當 `expr` 為 `!` 且其中的 `throw` 也未決定型別時，為 `!`。
 - `unwind-protect` 的值是 `protected` 的值。`cleanup` 的值被丟棄。無論以何種方式離開 `protected`，`cleanup` 都會執行——除了正常結束、`throw`、
   panic，以 `break`/`return`/`return-from` 離開時也會執行。`cleanup` 本身的非區域跳出勝過正在進行的跳出。
 - 巢狀的 `unwind-protect` 由內而外依序執行。離開 `protected` **內部**迴圈的 `break` 並沒有離開 `protected`，所以其 `cleanup` 不執行。

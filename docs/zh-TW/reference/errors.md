@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # 錯誤訊息
 
 `typl` 提供的主要錯誤訊息的意義與修正方式。
@@ -102,6 +102,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | 索引超出範圍。以 `len` 確認長度，或使用超出範圍時回傳 `none` 的函式（`nth`、`pop` 等） |
 | `panic: an integer argument does not fit a fixnum` | 對接受索引或個數的引數傳入了 63 位元放不下的 `int` |
 | `throw: no enclosing (catch 'oops) for this throw` | 執行了沒有被同一標籤的 `catch` 包住的 `throw` |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` 到達了同一標籤但攜帶其他型別的 `catch` |
 | `panic: <訊息>` | 程式呼叫了 `(panic "<訊息>")`。`assert` 失敗時是 `assertion failed: ...` |
 
 panic 即使發生在任務中也會停止整個行程（[語法參考 12.4](syntax.md#124-與其他功能的關係)）。想要恢復的失敗以 `Result` 表示

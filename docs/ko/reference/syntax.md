@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -1563,9 +1563,12 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 ```
 
 - **태그는 리터럴 심볼만**(`'done`). CL과 달리 평가되지 않는다.
-- **태그는 타입을 나른다.** `'tag`를 처음 쓸 때 타입이 정해지고, 이후 같은 심볼의 `throw`/`catch`는 모두 그것과 대조된다.
-  다른 타입으로 쓰면 타입 오류이다.
-- `throw`의 타입은 `!`(발산)이다. `(catch 'tag expr)`의 타입은 `expr`의 타입과 태그의 타입을 합친 타입이다.
+- **`catch`와 거기에 닿는 `throw`는 하나의 타입을 나른다.** `catch` 안에 어휘적으로 쓴 같은 태그의
+  `throw`는 타입이 맞지 않으면 타입 오류. 다른 함수에서 온 `throw`는 닿은 `catch`와 타입이 다르면
+  실행 시 오류(`panic`)가 된다. 다른 태그의 `catch`는 타입과 상관없이 그냥 지나친다.
+- 타입은 사용하는 곳마다 정해진다. 제네릭 본체 안의 태그는 구체화마다의 타입을 나른다.
+- `throw`의 타입은 `!`(발산). `(catch 'tag expr)`의 타입은 `expr`의 타입이며, `catch`가 받는 값도
+  이 타입. `expr`가 `!`이고 안의 `throw`도 타입을 정하지 않으면 `!`.
 - `unwind-protect`의 값은 `protected`의 값이다. `cleanup`의 값은 버려진다. `protected`를 어떻게 빠져나가든 `cleanup`은
   실행된다. 정상 종료, `throw`, panic에 더해 `break`/`return`/`return-from`으로 빠져나갈 때도 실행된다. `cleanup` 자신의
   비지역 탈출은 진행 중인 탈출을 이긴다.

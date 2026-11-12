@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # Obsługa błędów
 
 Obsługa błędów w typelisp dzieli niepowodzenia na dwa rodzaje.
@@ -163,14 +163,32 @@ Jeśli `v` nie zawiera liczby ujemnej, `validate` zwraca `"all fine"`; jeśli za
 z wnętrza `check-all` do `catch`, które zwraca `"negative: -7"`.
 
 - Znacznik zapisuj jako zwykły symbol, jak `'bad-input`.
-- **Każdy znacznik niesie wartości dokładnie jednego typu.** W powyższym przykładzie `'bad-input` niesie
-  `string`, więc rzucenie `int` z tym samym znacznikiem jest błędem typu. Typ ciała `catch`
-  musi także zgadzać się z typem znacznika.
+- Wartość ciała `catch` i wartość, którą `catch` odbiera, mają ten sam typ. `catch` w powyższym
+  przykładzie niesie `string`, więc nie wolno rzucać `int` z `'bad-input`. `throw` napisany wewnątrz
+  `catch` jest błędem typu.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; błąd typu: catch niesie string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  Jeśli rzucono go z wnętrza innej funkcji, jak `check-all`, to do którego `catch` dotrze, ustala się
+  w czasie wykonania, więc jest to błąd w chwili dotarcia.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- Znacznik w funkcji generycznej niesie typ każdej instancjacji.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` niesie `int` dla `(pass 1)` i `string` dla
+  `(pass "a")`.
 - `throw`, do którego nie ma `catch` z tym samym znacznikiem, jest błędem.
 
 Jeśli chcesz tylko wcześniej wrócić z wnętrza funkcji, użyj `return-from` zamiast `catch` /

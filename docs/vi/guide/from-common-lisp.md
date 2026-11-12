@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Dành cho lập trình viên Common Lisp
 
 typelisp kế thừa cú pháp của Common Lisp (CL) và nhiều tên hàm của nó, nhưng là một ngôn ngữ có kiểu
@@ -182,8 +182,8 @@ riêng bạn nằm ở
 [Option, Result và các kiểu lỗi](../reference/functions/option-result.md#3-các-kiểu-lỗi-và-trait-error).
 `assert` và `warn` dùng được như trong CL.
 
-`catch` / `throw` / `unwind-protect` có tồn tại. Tuy nhiên, tag của `catch` bị giới hạn ở một ký hiệu
-literal không được đánh giá (`'done`), và các giá trị được ném với cùng một tag có một kiểu duy nhất.
+Có `catch` / `throw` / `unwind-protect`. Tuy nhiên, thẻ của `catch` chỉ giới hạn ở literal ký hiệu
+không được đánh giá (`'done`), và một `throw` đến một `catch` cùng thẻ nhưng mang kiểu khác là lỗi.
 
 ## 8. Không có CLOS
 

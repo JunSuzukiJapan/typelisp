@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # För Common Lisp-programmerare
 
 typelisp ärver syntaxen och många av funktionsnamnen från Common Lisp (CL), men är ett statiskt typat
@@ -184,8 +184,9 @@ beskrivs i
 [Option, Result och feltyper](../reference/functions/option-result.md#3-feltyper-och-traitet-error).
 `assert` och `warn` kan användas som i CL.
 
-`catch` / `throw` / `unwind-protect` finns. Taggen i `catch` är dock begränsad till en onekvaliserad
-literal symbol (`'done`), och de värden som kastas med en tagg har en enda typ.
+`catch` / `throw` / `unwind-protect` finns. Taggen för `catch` är dock begränsad till en icke
+evaluerad bokstavlig symbol (`'done`), och en `throw` som når en `catch` med samma tagg som bär en annan
+typ är ett fel.
 
 ## 8. Det finns inget CLOS
 

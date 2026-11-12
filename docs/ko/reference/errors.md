@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # 오류 메시지
 
 `typl`이 내는 주요 오류 메시지의 의미와 고치는 방법.
@@ -102,6 +102,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | 범위를 벗어난 인덱스. `len`으로 길이를 확인하거나, 범위를 벗어나면 `none`을 반환하는 함수(`nth`, `pop` 등)를 쓴다 |
 | `panic: an integer argument does not fit a fixnum` | 인덱스나 개수를 받는 인수에 63비트에 들어가지 않는 `int`를 넘겼다 |
 | `throw: no enclosing (catch 'oops) for this throw` | 같은 태그의 `catch`가 바깥에 없는 상태에서 `throw`가 실행되었다 |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw`가 다른 타입을 나르는 같은 태그의 `catch`에 닿았다 |
 | `panic: <message>` | 프로그램이 `(panic "<message>")`를 호출했다. `assert`가 실패하면 `assertion failed: ...`가 된다 |
 
 `panic`은 태스크 안에서 일어나도 프로세스 전체를 멈춘다([문법 레퍼런스 12.4](syntax.md#124-다른-기능과의-관계)).

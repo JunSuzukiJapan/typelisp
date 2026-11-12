@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -1454,8 +1454,12 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 ```
 
 - **标签只能是字面量符号**（`'done`）。与 CL 不同，不会被求值。
-- **标签携带类型。** `'tag` 第一次使用时确定类型，之后同一符号的 `throw`/`catch` 全部与它对照。用别的类型使用是类型错误。
-- `throw` 的类型是 `!`（发散）。`(catch 'tag expr)` 的类型是 `expr` 的类型与标签类型的合并类型。
+- **`catch` 与到达它的 `throw` 携带同一类型。** 在 `catch` 中按词法写出的同一标签的 `throw`，类型
+  不符即为类型错误。从其他函数到达的 `throw`，若类型与所到达的 `catch` 不同，则为运行时错误
+  （`panic`）。其他标签的 `catch` 无论携带何种类型都会被越过。
+- 类型在每个使用处决定。泛型主体中的标签携带每个实例化的类型。
+- `throw` 的类型是 `!`（发散）。`(catch 'tag expr)` 的类型是 `expr` 的类型，`catch` 接收的值也是
+  此类型。当 `expr` 为 `!` 且其中的 `throw` 也未决定类型时，为 `!`。
 - `unwind-protect` 的值是 `protected` 的值。`cleanup` 的值被丢弃。无论以何种方式离开 `protected`，`cleanup` 都会执行——除了
   正常结束、`throw`、panic，以 `break`/`return`/`return-from` 离开时也会执行。`cleanup` 自身的非局部退出胜过正在进行的退出。
 - 嵌套的 `unwind-protect` 从内向外依次执行。退出 `protected` **内部**循环的 `break` 并没有离开 `protected`，所以其 `cleanup` 不执行。

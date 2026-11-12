@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # 写给 Common Lisp 用户
 
 typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名，但它是静态类型语言。因此，CL 的写法并不总能直接通过。
@@ -161,8 +161,8 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 [Option、Result 与错误类型](../reference/functions/option-result.md#3-错误类型与-error-trait)。`assert` 和 `warn`
 可以像在 CL 中一样使用。
 
-`catch` / `throw` / `unwind-protect` 是有的。不过 `catch` 的标签限于不求值的符号字面量（`'done`），用同一标签抛出
-的值的类型只有一种。
+有 `catch` / `throw` / `unwind-protect`。但 `catch` 的标签仅限于不求值的符号字面量（`'done`），
+并且 `throw` 到达同一标签但携带其他类型的 `catch` 时会报错。
 
 ## 8. 没有 CLOS
 

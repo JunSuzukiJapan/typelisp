@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Für Common-Lisp-Programmierer
 
 typelisp übernimmt die Syntax von Common Lisp (CL) und viele seiner Funktionsnamen, ist aber eine statisch
@@ -187,8 +187,9 @@ einen eigenen Fehlertyp erstellt, steht in
 [Option, Result und Fehlertypen](../reference/functions/option-result.md#3-fehlertypen-und-der-trait-error).
 `assert` und `warn` lassen sich wie in CL verwenden.
 
-`catch` / `throw` / `unwind-protect` gibt es. Die Marke von `catch` ist jedoch auf ein nicht ausgewertetes
-literales Symbol (`'done`) beschränkt, und die mit einer Marke geworfenen Werte haben einen einzigen Typ.
+`catch` / `throw` / `unwind-protect` gibt es. Das Tag von `catch` ist jedoch auf ein nicht
+ausgewertetes Symbol-Literal (`'done`) beschränkt, und ein `throw`, das ein `catch` desselben Tags
+mit einem anderen Typ erreicht, ist ein Fehler.
 
 ## 8. Es gibt kein CLOS
 

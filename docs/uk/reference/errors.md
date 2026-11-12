@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Повідомлення про помилки
 
 Що означають основні повідомлення про помилки від `typl` і як їх виправити.
@@ -103,6 +103,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `panic: Vector: index 5 out of bounds` | Індекс поза межами. Перевірте довжину через `len` або використайте функцію, що повертає `none` поза межами (`nth`, `pop` тощо) |
 | `panic: an integer argument does not fit a fixnum` | В аргумент, що приймає індекс або кількість, передано `int`, який не вміщується в 63 біти |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` виконався без охоплювального `catch` із тим самим тегом |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` досяг `catch` з тією ж міткою, який несе інший тип |
 | `panic: <message>` | Програма викликала `(panic "<message>")`. Невдалий `assert` дає `assertion failed: ...` |
 
 `panic` зупиняє весь процес, навіть коли виникає всередині задачі

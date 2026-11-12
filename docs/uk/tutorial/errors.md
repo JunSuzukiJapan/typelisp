@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # Обробка помилок
 
 Обробка помилок у typelisp ділить збої на два види.
@@ -162,14 +162,32 @@ error: main.typl:4:7: panic: index 3 out of range
 стрибає з-усередини `check-all` до `catch`, який повертає `"negative: -7"`.
 
 - Пишіть тег як простий символ, як-от `'bad-input`.
-- **Кожен тег несе значення рівно одного типу.** У наведеному прикладі `'bad-input` несе `string`, тож
-  кинути `int` із тим самим тегом — це помилка типів. Тип тіла `catch` також має збігатися з типом
-  тега.
+- Значення тіла `catch` і значення, яке отримує `catch`, мають один тип. `catch` у прикладі вище
+  несе `string`, тож кидати `int` з `'bad-input` не можна. `throw`, написаний усередині `catch`, —
+  помилка типу.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; помилка типу: catch несе string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  Якщо кидок зроблено зсередини іншої функції, як `check-all`, то якого `catch` він досягне,
+  вирішується під час виконання, тому помилка виникає після прибуття.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- Мітка в узагальненій функції несе тип кожної конкретизації.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` несе `int` для `(pass 1)` і `string` для
+  `(pass "a")`.
 - `throw`, для якого немає `catch` з тим самим тегом, — це помилка.
 
 Якщо ви хочете лише достроково вийти з функції, використовуйте `return-from` замість `catch` /

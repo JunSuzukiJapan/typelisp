@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # Tratamento de erros
 
 O tratamento de erros no typelisp divide as falhas em dois tipos.
@@ -161,14 +161,32 @@ Se `v` não tem nenhum número negativo, `validate` devolve `"all fine"`; se con
 dentro de `check-all` para o `catch`, que devolve `"negative: -7"`.
 
 - Escreva a etiqueta como um símbolo simples, como `'bad-input`.
-- **Cada etiqueta carrega valores de um único tipo.** No exemplo acima `'bad-input` carrega uma `string`,
-  então lançar um `int` com a mesma etiqueta é um erro de tipo. O tipo do corpo do `catch` também precisa
-  bater com o tipo da etiqueta.
+- O valor do corpo do `catch` e o valor que o `catch` recebe têm o mesmo tipo. O `catch` do exemplo
+  acima carrega uma `string`, então não se deve lançar um `int` com `'bad-input`. Um `throw` escrito
+  dentro do `catch` é um erro de tipo.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; erro de tipo: o catch carrega string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  Se for lançado de dentro de outra função, como `check-all`, qual `catch` ele alcança é decidido em
+  tempo de execução, então é um erro quando chega.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- Uma tag dentro de uma função genérica carrega o tipo de cada instanciação.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` carrega `int` para `(pass 1)` e `string`
+  para `(pass "a")`.
 - Um `throw` sem nenhum `catch` com a mesma etiqueta para alcançar é um erro.
 
 Se você só quer retornar mais cedo dentro de uma função, use `return-from` em vez de `catch` / `throw`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1856,11 +1856,15 @@ fungsi.
 ```
 
 - **Tag hanya berupa simbol literal** (`'done`). Tidak seperti CL, tag tidak dievaluasi.
-- **Tag membawa tipe.** Tipe ditentukan pertama kali `'tag` dipakai, dan setiap `throw`/`catch`
-  berikutnya dengan simbol yang sama diperiksa terhadapnya. Memakainya dengan tipe lain adalah
-  kesalahan tipe.
-- Tipe `throw` adalah `!` (diverge). Tipe `(catch 'tag expr)` adalah gabungan tipe `expr` dan tipe
-  tag.
+- **`catch` dan `throw` yang mencapainya membawa satu tipe.** `throw` dengan tag yang sama yang ditulis
+  secara leksikal di dalam `catch` adalah error tipe jika tipenya berbeda. `throw` yang datang dari fungsi
+  lain adalah error saat runtime (`panic`) jika tipenya berbeda dari `catch` yang dicapainya. `catch`
+  dengan tag lain dilewati, apa pun tipenya.
+- Tipe ditentukan di setiap tempat penggunaan. Tag di dalam badan generik membawa tipe setiap
+  instansiasi.
+- Tipe `throw` adalah `!` (divergen). Tipe `(catch 'tag expr)` adalah tipe `expr`, dan nilai yang
+  diterima `catch` juga bertipe ini. Jika `expr` bertipe `!` dan tidak ada `throw` di dalamnya yang
+  menentukan tipe, tipenya `!`.
 - Nilai `unwind-protect` adalah nilai `protected`. Nilai `cleanup` dibuang. `cleanup` dijalankan
   bagaimanapun `protected` ditinggalkan: selain selesai normal, `throw`, dan `panic`, ia juga
   dijalankan ketika ditinggalkan oleh `break`/`return`/`return-from`. Keluar non-lokal oleh `cleanup`

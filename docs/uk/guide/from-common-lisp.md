@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Для програмістів на Common Lisp
 
 typelisp успадковує синтаксис Common Lisp (CL) і багато назв його функцій, але це мова зі статичною
@@ -183,8 +183,8 @@ typelisp не розділяє простори імен функцій і зм�
 [Option, Result і типи помилок](../reference/functions/option-result.md#3-типи-помилок-і-трейт-error).
 `assert` і `warn` можна використовувати як у CL.
 
-`catch` / `throw` / `unwind-protect` існують. Однак тег `catch` обмежено необчислюваним літеральним
-символом (`'done`), а значення, кинуті з одним тегом, мають один тип.
+`catch` / `throw` / `unwind-protect` є. Однак мітка `catch` обмежена необчислюваним літералом
+символу (`'done`), а `throw`, що досяг `catch` з тією ж міткою, але іншим типом, є помилкою.
 
 ## 8. Немає CLOS
 

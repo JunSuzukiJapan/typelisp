@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # معالجة الأخطاء
 
 تقسم معالجة الأخطاء في typelisp الإخفاقات إلى نوعين.
@@ -157,13 +157,31 @@ error: main.typl:4:7: panic: index 3 out of range
 `check-all` إلى `catch` التي تعيد `"negative: -7"`.
 
 - اكتب الوسم رمزًا عاديًا مثل `'bad-input`.
-- **يحمل كل وسم قيمًا من نوع واحد فقط.** في المثال أعلاه يحمل `'bad-input` قيمة `string`، فرمي `int`
-  بالوسم نفسه خطأ في الأنواع. ويجب أن يطابق نوع جسم `catch` نوع الوسم أيضًا.
+- قيمة جسم `catch` والقيمة التي يستقبلها `catch` من النوع نفسه. `catch` في المثال أعلاه يحمل
+  `string`، لذا لا يجوز رمي `int` بالوسم `'bad-input`. و`throw` المكتوب داخل `catch` خطأ نوع.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; خطأ نوع: catch يحمل string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  إذا رُمي من داخل دالة أخرى مثل `check-all`، فإن `catch` الذي يصل إليه يتحدد وقت التشغيل، ولذا
+  يكون خطأً عند وصوله.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- الوسم داخل دالة عامة يحمل نوع كل تخصيص.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` يحمل `int` في `(pass 1)` و`string` في
+  `(pass "a")`.
 - `throw` الذي لا توجد `catch` بالوسم نفسه يمكن بلوغها خطأ.
 
 وإذا أردت فقط العودة المبكرة من داخل دالة فاستخدم `return-from` بدلًا من `catch` / `throw`. لا تستطيع

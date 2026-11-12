@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # Penanganan Kesalahan
 
 Penanganan kesalahan di typelisp membagi kegagalan menjadi dua jenis.
@@ -165,14 +165,32 @@ Jika `v` tidak memiliki bilangan negatif, `validate` mengembalikan `"all fine"`;
 kendali melompat dari dalam `check-all` ke `catch`, yang mengembalikan `"negative: -7"`.
 
 - Tulis tag sebagai simbol polos, seperti `'bad-input`.
-- **Setiap tag membawa nilai dengan tepat satu tipe.** Pada contoh di atas `'bad-input` membawa
-  `string`, sehingga melempar `int` dengan tag yang sama adalah kesalahan tipe. Tipe badan `catch`
-  juga harus sama dengan tipe tag.
+- Nilai badan `catch` dan nilai yang diterima `catch` bertipe sama. `catch` pada contoh di atas
+  membawa `string`, jadi Anda tidak boleh melempar `int` dengan `'bad-input`. `throw` yang ditulis di
+  dalam `catch` adalah error tipe.
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; error tipe: catch membawa string
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  Jika dilempar dari dalam fungsi lain, seperti `check-all`, `catch` mana yang dicapai ditentukan
+  saat runtime, jadi error terjadi saat ia tiba.
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- Tag di dalam fungsi generik membawa tipe setiap instansiasi.
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` membawa `int` untuk `(pass 1)` dan `string`
+  untuk `(pass "a")`.
 - `throw` tanpa `catch` bertag sama untuk dituju adalah kesalahan.
 
 Jika Anda hanya ingin kembali lebih awal dari dalam sebuah fungsi, gunakan `return-from` sebagai

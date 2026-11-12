@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1791,10 +1791,14 @@ otaczającego `catch` i sięga do `catch` o tym samym znaczniku przez dowolną l
 ```
 
 - **Znaczniki to wyłącznie literały symboli** (`'done`). W przeciwieństwie do CL nie są obliczane.
-- **Znacznik niesie typ.** Typ jest ustalany przy pierwszym użyciu `'tag`, a każde późniejsze
-  `throw`/`catch` tego samego symbolu jest sprawdzane względem niego. Użycie z innym typem jest błędem typu.
-- Typem `throw` jest `!` (nie wraca). Typem `(catch 'tag expr)` jest złączenie typu
-  `expr` i typu znacznika.
+- **`catch` i docierający do niego `throw` niosą jeden typ.** `throw` z tym samym znacznikiem napisany
+  leksykalnie wewnątrz `catch` jest błędem typu, jeśli typy się różnią. `throw` przychodzący z innej
+  funkcji jest błędem czasu wykonania (`panic`), jeśli jego typ różni się od typu osiągniętego `catch`.
+  `catch` z innym znacznikiem jest pomijany bez względu na niesiony typ.
+- Typ jest ustalany w każdym miejscu użycia. Znacznik w generycznym ciele niesie typ każdej
+  instancjacji.
+- Typ `throw` to `!` (rozbieżny). Typ `(catch 'tag expr)` to typ `expr`, i wartość, którą odbiera
+  `catch`, też ma ten typ. Gdy `expr` ma typ `!`, a żaden wewnętrzny `throw` nie ustala typu, jest to `!`.
 - Wartością `unwind-protect` jest wartość `protected`. Wartość `cleanup` jest odrzucana.
   `cleanup` jest wykonywane bez względu na to, jak opuszczono `protected`: poza normalnym zakończeniem, `throw` i `panic`
   jest wykonywane także, gdy opuszczono je przez `break`/`return`/`return-from`. Wyjście nielokalne wykonane przez samo `cleanup` wygrywa

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Error Messages
 
 What the main error messages from `typl` mean and how to fix them.
@@ -104,6 +104,7 @@ Mistakes found before running. The form is not run until they are fixed.
 | `panic: Vector: index 5 out of bounds` | An index out of range. Check the length with `len`, or use a function that returns `none` when out of range (`nth`, `pop` and so on) |
 | `panic: an integer argument does not fit a fixnum` | An `int` that does not fit in 63 bits was passed to an argument taking an index or a count |
 | `throw: no enclosing (catch 'oops) for this throw` | A `throw` ran with no enclosing `catch` of the same tag |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | A `throw` reached a `catch` of the same tag that carries another type |
 | `panic: <message>` | The program called `(panic "<message>")`. A failed `assert` gives `assertion failed: ...` |
 
 A `panic` stops the whole process even when it happens inside a task

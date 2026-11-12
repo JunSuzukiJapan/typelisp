@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
 # त्रुटि प्रबंधन
 
 typelisp में त्रुटि प्रबंधन विफलताओं को दो प्रकारों में बाँटता है।
@@ -145,12 +145,32 @@ error: main.typl:4:7: panic: index 3 out of range
 यदि `v` में कोई ऋणात्मक संख्या नहीं है, तो `validate` `"all fine"` लौटाता है; यदि उसमें `-7` है, तो नियंत्रण `check-all` के भीतर से `catch` तक कूद जाता है, जो `"negative: -7"` लौटाता है।
 
 - टैग को सादे सिंबल के रूप में लिखें, जैसे `'bad-input`।
-- **हर टैग ठीक एक टाइप के मान ले जाता है।** ऊपर के उदाहरण में `'bad-input` एक `string` ले जाता है, इसलिए उसी टैग से `int` को throw करना टाइप त्रुटि है। `catch` की बॉडी का टाइप भी टैग के टाइप से मेल खाना चाहिए।
+- `catch` की बॉडी का मान और `catch` को मिलने वाला मान एक ही प्रकार के होते हैं। ऊपर के उदाहरण
+  का `catch` `string` ले जाता है, इसलिए `'bad-input` से `int` नहीं फेंकना चाहिए। `catch` के भीतर
+  लिखा `throw` प्रकार त्रुटि है।
+
+  ```lisp
+  (defun validate ((v Vector<int>)) string
+    (catch 'bad-input
+      (progn
+        (throw 'bad-input 1)   ; प्रकार त्रुटि: catch string ले जाता है
+        "all fine")))
+  ```
 
   ```
   error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
+  यदि `check-all` जैसे किसी दूसरे फ़ंक्शन के भीतर से फेंका जाए, तो वह किस `catch` तक पहुँचेगा
+  यह रनटाइम पर तय होता है, इसलिए पहुँचने पर त्रुटि होती है।
+
+  ```
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
+  ```
+
+- जेनेरिक फ़ंक्शन के भीतर का टैग हर इंस्टैंशिएशन का प्रकार ले जाता है।
+  `(defun pass<T> ((x T)) T (catch 'done (throw 'done x)))` `(pass 1)` में `int` और `(pass "a")` में
+  `string` ले जाता है।
 - ऐसा `throw` जिसके पहुँचने के लिए उसी टैग का कोई `catch` न हो, त्रुटि है।
 
 यदि आप केवल किसी फ़ंक्शन के भीतर से जल्दी लौटना चाहते हैं, तो `catch` / `throw` की जगह `return-from` का उपयोग करें। `return-from` फ़ंक्शनों को पार नहीं कर सकता, लेकिन बदले में आप सोर्स पढ़कर बता सकते हैं कि वह कहाँ लौटता है।

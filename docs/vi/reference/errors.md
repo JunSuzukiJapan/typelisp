@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
 # Thông báo lỗi
 
 Ý nghĩa của các thông báo lỗi chính từ `typl` và cách sửa chúng.
@@ -103,6 +103,7 @@ Các sai sót được phát hiện trước khi chạy. Dạng đó không đư
 | `panic: Vector: index 5 out of bounds` | Chỉ số ngoài phạm vi. Kiểm tra độ dài bằng `len`, hoặc dùng một hàm trả về `none` khi ngoài phạm vi (`nth`, `pop`, v.v.) |
 | `panic: an integer argument does not fit a fixnum` | Một `int` không vừa trong 63 bit được truyền cho một đối số nhận chỉ số hoặc số đếm |
 | `throw: no enclosing (catch 'oops) for this throw` | Một `throw` chạy mà không có `catch` bao quanh cùng tag |
+| ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Một `throw` đến một `catch` cùng thẻ nhưng mang kiểu khác |
 | `panic: <message>` | Chương trình gọi `(panic "<message>")`. Một `assert` thất bại cho `assertion failed: ...` |
 
 Một `panic` dừng toàn bộ tiến trình ngay cả khi nó xảy ra bên trong một task
