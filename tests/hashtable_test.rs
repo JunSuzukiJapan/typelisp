@@ -1,6 +1,6 @@
 //! Tests for the built-in `HashTable<K,V>` (CRUD via instance/static methods)
 //! and the generic-receiver `defmethod`/assoc-call dispatch it depends on
-//! (see `Checker::check_assoc_call`'s `AssocCall`/`subst` handling).
+//! (see `typeck::method`'s `AssocCall`/`subst` handling).
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};

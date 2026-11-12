@@ -5,9 +5,6 @@
 //! `f32`. A token cannot know that when it is read, so the reader gives every
 //! integer past `i32` a `bignum` box and every float an `f64` box, and the
 //! type is decided here.
-//!
-//! The current checker (`crate::check`) uses this module too, so the rules
-//! are written once.
 
 use crate::types::Type;
 use crate::{wk, Error, Heap, Value};

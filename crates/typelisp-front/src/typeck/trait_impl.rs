@@ -173,7 +173,7 @@ pub(crate) fn check_trait_impl(
         }
         // What the supertrait entry pins, in this trait's parameters, is
         // what the supertrait's `impl` binds. A type with a parameter left in
-        // it is the current checker's to leave unchecked, and is left so.
+        // it is not checked.
         let to_impl = Subst::positional(&tdef.params, &std::iter::once(target_ty.clone()).chain(assoc.iter().cloned()).collect::<Vec<_>>());
         let sup_impl = reg.trait_impls.get(&(sup.trait_path, owner)).and_then(|all| impl_at(all, inst.as_deref())).expect("checked above");
         let open = |t: &Type| {
@@ -571,8 +571,6 @@ pub(crate) fn default_body(reg: &Registry, trait_path: &Path, method: SymRef, at
     let Some(TypeEntry::Trait(tdef)) = reg.types.get(trait_path) else {
         unreachable!("a method is defaulted only from a trait")
     };
-    // The prelude's traits were checked by the current checker, which keeps
-    // their source, not a checked tree.
     let Some(template) = reg.template(&Base::Method(*trait_path, method)) else {
         unimplemented!("typeck: the default body of `{}::{}`, which this checker has no checked body of", trait_path, method)
     };

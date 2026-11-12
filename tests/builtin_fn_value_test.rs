@@ -3,7 +3,7 @@
 //! The interpreter used to hold these in Rust-side `RtValue::Builtin(String)`/
 //! `BuiltinMethod(Path, String)` variants, which had no `mem::Value` form at
 //! all. That gap is what kept `Type::Fn` off the list of types an enum field
-//! can store (`Checker::enum_field_storable` and its `Interp` twin): a
+//! can store (`typeck::defstruct` and its `Interp` twin): a
 //! `Type::Fn` field is fine for a *closure*, whose value is already a
 //! `BoxedObj::CompiledClosure`, but `(op::binary +)` had nothing to put in the
 //! slot — so any enum mentioning `Fn` fell back to the heap-invisible

@@ -1,4 +1,4 @@
-//! Tests for `Checker::check_list`'s name-resolution order between a free
+//! Tests for `typeck::expr`'s name-resolution order between a free
 //! function and a same-named instance method on a builtin generic type
 //! (`HashTable<K,V>`).
 //!
@@ -7,7 +7,7 @@
 //! method) always won, regardless of the call's actual argument type —
 //! calling `(remove h k)` for a `HashTable<K,V>` `h` failed with a type
 //! mismatch instead of reaching `HashTable`'s method.
-//! `Checker::resolve_name` now tries a receiver-typed instance method
+//! `typeck::resolve` now tries a receiver-typed instance method
 //! on the first argument's type *before* the free function, falling back to
 //! the free function only when no type-specific method matches — mirroring
 //! CLOS, where an existing ordinary function of the same name becomes a

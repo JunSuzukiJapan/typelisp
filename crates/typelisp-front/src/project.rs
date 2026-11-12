@@ -419,7 +419,7 @@ impl Loader {
                 // is collected and its cell recycled, and the module bundle
                 // built below ends up holding a fragment of it. That shows up
                 // at exec as `not a top-level core form: (())`, the same
-                // signature (and the same fix) as `Checker::check_impl`'s own
+                // signature (and the same fix) as `typeck::impl_block`'s own
                 // `body` vector. Released by the `pop_roots_to(mark)` below,
                 // once the bundle holding them is permanently rooted.
                 Ok(tl) => {
@@ -559,7 +559,7 @@ impl Loader {
     /// candidate (`<src-root>/<cur_segs' directory>/a/b/c.typl`) is tried, so
     /// `(use vector)` inside `geo/point.typl` can also reach a sibling
     /// `geo/vector.typl` without spelling out `(use geo::vector)`. Mirrored
-    /// on the checker side by `Checker::use_target`'s own sibling tier
+    /// on the checker side by `typeck::use_form`'s own sibling tier
     /// (`file_ns`), which resolves the *name* `(use vector)` binds once this
     /// has loaded the file under its true root-derived path (`geo::vector`,
     /// never a synthetic relative one).
@@ -786,7 +786,7 @@ fn value_path_segs(heap: &Heap, v: Value) -> Option<Vec<String>> {
 /// user-written `module` is deliberately *not* matched — executing one early
 /// would run arbitrary body expressions out of order. Its members that match
 /// are run by the checker itself as it checks the block
-/// (`Checker::check_module`), the one place between them.
+/// (`typeck::module`), the one place between them.
 pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
     match core::op_sym(heap, tl).map(|s| s.well_known()) {
         Some(wk::DEFMACRO) => true,

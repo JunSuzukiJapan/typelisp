@@ -1,4 +1,4 @@
-//! What the rebuilt checker's registry holds, written into a dump's unit
+//! What the checker's registry holds, written into a dump's unit
 //! (`docs/dev/checker-rebuild-plan.md` 8.3): what the unit defined, and the
 //! generic bodies it checked, so the prelude's are checked once, when its
 //! dump is made, and never by a session.
@@ -139,7 +139,7 @@ pub(crate) struct RegistryDelta {
     pub(crate) local_macros: u64,
 }
 
-/// What a unit wrote of the rebuilt checker's registry: its entries and
+/// What a unit wrote of the checker's registry: its entries and
 /// its generic bodies.
 #[derive(Default, Serialize, Deserialize)]
 pub struct RebuiltUnit {

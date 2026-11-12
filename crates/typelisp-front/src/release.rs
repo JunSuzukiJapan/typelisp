@@ -3,7 +3,7 @@
 //! One flag for the whole process. `--release` only sets it; whatever behaves
 //! differently in a release build asks it, at the time it does its work
 //! (today: `eprint`/`eprintln`, which the checker leaves out —
-//! `Checker::check_eprint`). An executable `compile-file` builds while the
+//! `typeck::format`). An executable `compile-file` builds while the
 //! flag is set carries it, so code it `eval`s asks the same question and
 //! gets the same answer (`shim::rt_eval_state`).
 

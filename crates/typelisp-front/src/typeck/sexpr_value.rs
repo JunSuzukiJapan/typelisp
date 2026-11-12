@@ -76,7 +76,7 @@ pub(crate) fn heap_value(reg: &Registry, ty: &Type) -> bool {
 
 /// `Sexpr` — the type a `&rest` parameter's collected arguments are bound as
 /// inside a `defun`/`lambda` body, and the type `apply`'s trailing list
-/// argument must have (see `Checker::parse_params_rest`/`check_call`/
+/// argument must have (see `typeck::lambda_list`/`check_call`/
 /// `check_apply_form`). Every Lisp's `&rest` parameter is an ordinary list
 /// (built from cons cells), never a homogeneous array type — `defmacro`'s own
 /// `&rest` already works this way unconditionally (`Interp::bind_macro_args`);
@@ -122,7 +122,7 @@ pub(crate) fn is_option_of_sexpr(ty: &Type) -> bool {
 }
 
 /// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
-/// (`Sexpr` itself needs no wrapping — see [`Checker::wrap_rest_elem`]).
+/// (`Sexpr` itself needs no wrapping — see `typeck::sexpr_value`).
 /// `&rest`'s declared element type must be one of these (or `Sexpr`) since
 /// nothing else has a lossless `Sexpr` encoding to collect into a list with.
 pub(crate) fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {

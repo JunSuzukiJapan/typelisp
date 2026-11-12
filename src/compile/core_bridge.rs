@@ -722,7 +722,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(pair);
             f.finish(wk::DYN_VALUE)
         }
-        // The `int` boundary's two sides (`Checker::int_boundary_raw`): the
+        // The `int` boundary's two sides (`check::lower::int_boundary_raw`): the
         // operand translated like any other, the tag kept, and the island
         // does the shift.
         wk::UNTAG_INT | wk::TAG_INT => {
@@ -1223,7 +1223,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     let Value::Bool(instance) = parts[2] else { return Err(malformed(heap, form)) };
     let ret = Repr::read(heap, parts[3]).ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, parts[4])?;
-    // The result's runtime identity — see `Checker::assoc_form`. A container
+    // The result's runtime identity — see `typeck::method`. A container
     // op that builds a box hands this to the shim that builds it; everything
     // else ignores it.
     let ret_type = parts[5];
@@ -1350,7 +1350,7 @@ fn translate_vector_op(
     if method.is(wk::M_NEW) {
         // The instantiated type, not the bare `vector`: this *is* the
         // value's runtime identity, and a pattern that tests it was compiled
-        // from the same type (`Checker::pattern_form`).
+        // from the same type (`typeck::pattern`).
         let name = type_ref(f.heap(), ret_type)?;
         f.push(name);
     } else {
@@ -1762,7 +1762,7 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
     }
     let parts = core::fields(heap, form)?;
     // A `defparameter` carries a fifth field, "assign even if already bound"
-    // (`Checker::defvar_form`). An initializer built here runs exactly once,
+    // (`typeck::defvar`). An initializer built here runs exactly once,
     // when the storage is created, so there is never an earlier binding for
     // the two to differ over.
     let (repr, value) = match parts[..] {
@@ -1985,7 +1985,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         }
         // Any other box is an object the reader cannot produce — a struct, an
         // enum value, a `Vector` — that a macro expansion or `eval` placed in
-        // the form, where it evaluates to itself (`Checker::check_atom`). The
+        // the form, where it evaluates to itself (`typeck::expr`). The
         // interpreter hands back that very object; compiled code could only
         // rebuild a copy from its parts, which is a different object (CL's
         // `compile` keeps literal objects `eql` to the source's). So it is

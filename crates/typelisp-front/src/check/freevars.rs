@@ -412,7 +412,7 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Resul
             }
         }
         // `(some P)` over a niched `Option`, which the niche turns into this
-        // node rather than a `pat-ctor` (`Checker::pattern_form`). Missing it
+        // node rather than a `pat-ctor` (`typeck::pattern`). Missing it
         // made `P`'s names look *free* in the arm body, so a closure around
         // the whole `match` captured a name bound inside it — and then had no
         // binder to read a representation from. Field 0 is the payload

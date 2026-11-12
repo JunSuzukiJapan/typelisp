@@ -6,7 +6,7 @@
 //!
 //! `int`'s arithmetic moved from free functions to an instance method too
 //! (so the same `+`/`<`/etc. symbol can dispatch per receiver type — see
-//! `Checker::receiver_method`); its own regression coverage already
+//! `typeck::method`); its own regression coverage already
 //! lives in `tests/eval_test.rs` (`arithmetic`, `comparison`,
 //! `builtin_as_value`, the `dotimes`/`while` family, etc.) and isn't
 //! duplicated here.
@@ -262,7 +262,7 @@ fn f64_signum() {
 #[test]
 fn f64_operator_as_a_value() {
     // Mirrors `tests/eval_test.rs`'s `builtin_as_value` (which covers `int`'s
-    // `+`) — confirms `Checker::method_value`/`Expr::MethodRef` generalizes
+    // `+`) — confirms `typeck::lambda`/`Expr::MethodRef` generalizes
     // to other receiver types, not just the one the regression surfaced on.
     let src = "(defun apply2 ((f (fn (f64 f64) f64)) (a f64) (b f64)) f64 (f a b)) \
                (apply2 + 1.5 2.5)";

@@ -6,7 +6,7 @@
 //! list.
 //!
 //! Arguments arrive as a `Sexpr` list whose elements the checker wrapped into
-//! their `Sexpr` encodings (`Checker::cons_hetero_sexpr`), so every element is
+//! their `Sexpr` encodings (`typeck::quote`), so every element is
 //! a [`Value`] rendered by [`render_value`]. The list is materialized into a
 //! `Vec<Value>` up front so the argument-jumping directives (`~*`, `~:*`,
 //! `~@*`, `~:P`) can move the cursor freely.

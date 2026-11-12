@@ -99,7 +99,7 @@ fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
     let (h, tls) = check_all("(defun id-fn<T> ((x T)) T x) (id-fn 42)").unwrap();
     // The generic definition itself has no core form at all: an erased body is
     // never executed, so it lowers to an empty `(module PATH)` — see
-    // `Checker::defun_form_unless_generic`.
+    // `typeck::generic`.
     assert_eq!(core::op_spelling(&h, tls[0]), Some("module"));
     assert_eq!(core::fields(&h, tls[0]).unwrap().len(), 1, "path only, no body");
     // The call comes back as [specialization, call] — one concrete defun.

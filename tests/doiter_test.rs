@@ -71,7 +71,7 @@ fn return_with_no_value_exits_the_doiter_loop_itself() {
     // typelisp's `return` exits the *nearest enclosing loop*, not the
     // function (no CL-style `block`/`return-from` exists) — `(return)`
     // inside `doiter` must agree with the loop's own type, fixed at `Unit`
-    // the same way `while`/`dolist` fix it (`Checker::check_doiter` seeds
+    // the same way `while`/`dolist` fix it (`typeck::looping` seeds
     // `check_loop_body` with `Type::Unit`), so only a value-less `(return)`
     // type-checks here, not `(return some-i32-value)`.
     let src = "(defun make-v () Vector<int> (Vector::new))
@@ -95,7 +95,7 @@ fn doiter_on_a_type_with_no_iter_impl_is_a_type_error() {
 #[test]
 fn doiter_works_inside_a_where_bounded_generic_function() {
     // `it: T` inside `count-iter`'s own body — no concrete `AdtDef` for `t`,
-    // so `next` resolves through `Expr::TraitCall` (`Checker::receiver_method`'s
+    // so `next` resolves through `Expr::TraitCall` (`typeck::method`'s
     // type-variable branch, reached transitively through `doiter`'s `defmacro`
     // expansion), not `Expr::Assoc`. `x`'s own type is `T`'s *associated*
     // type `Item` — left as `Iter`'s own unresolved `item` template here
@@ -166,7 +166,7 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
     // The Phase-4 combinators' key move: `A` is one of the function's own
     // type parameters, pinned via `(:where (Iter I (Item A)))` and appearing in
     // *no* ordinary argument — so it can only be inferred by resolving the
-    // concrete iterator's real `Item`. `Checker::check_call`'s pin-inference
+    // concrete iterator's real `Item`. `typeck::call`'s pin-inference
     // pass binds `A = int` from `vector-iter<int>`, letting `(the Vector<A> …)`
     // and the returned element type resolve. `last-of` returns the final
     // element, exercising exactly this "element type known only through the

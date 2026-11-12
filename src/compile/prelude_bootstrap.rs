@@ -297,7 +297,7 @@ impl PreludePlan {
 /// Records what [`PreludePlan`] must know about one checked top-level form.
 ///
 /// Recurses into a `(module ...)`, which covers the `impl` block grouping
-/// `Checker::check_impl` returns and the monomorphization bundle a generic
+/// `typeck::impl_block` returns and the monomorphization bundle a generic
 /// instantiation arrives in. A generic template — and a `deftrait`, which
 /// lowers the same way — is an *empty* `(module PATH)`, so both flatten to
 /// nothing here without a test of their own.

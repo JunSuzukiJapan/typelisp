@@ -73,7 +73,7 @@
 //! **`break`/`return` always exit the *nearest enclosing loop*, never a
 //! function** (`Expr::Return`'s own doc comment — this is CL's `(return
 //! value)`/`return-from nil`, not a Rust/C-style function return) — and
-//! `Checker::check_lambda`/`check_labels` both reset the loop stack to empty
+//! `typeck::lambda`/`check_labels` both reset the loop stack to empty
 //! before checking a nested function's own body (see those functions' doc
 //! comments), so a `break`/`return` can never need to unwind across an
 //! activation boundary this compiler doesn't already track explicitly: it's
@@ -1245,7 +1245,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `Scope::new` is a static call whose generic `V` can only be inferred from
 ;; an *expected* type (e.g. a `defun`'s declared return type), never from a
 ;; `let` binding's initializer (`check_let` always checks that with
-;; `expected: None` — see `Checker::check_let`) — so this tiny wrapper exists
+;; `expected: None` — see `typeck::binding`) — so this tiny wrapper exists
 ;; purely to give `Scope::new` a return type to infer from.
 (defun new-env () Scope<llvm-value> (Scope::new))
 
@@ -2210,7 +2210,7 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun compile-int-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
     (tag-fixnum builder (compile-int-any-width m fn-name builder e)))
 
-;; `(untag-int E)` -- the `int` boundary's raw side (`Checker::int_boundary_raw`):
+;; `(untag-int E)` -- the `int` boundary's raw side (`check::lower::int_boundary_raw`):
 ;; a Rust-implemented builtin's `int`-typed parameter crosses as a raw word,
 ;; so the fixnum's payload is shifted out here. A bignum has no raw word to
 ;; give — an index or a count that size is the program's mistake — and
@@ -2282,7 +2282,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; way `compile-int-any-width` is (a plain, untagged `i64` scalar --
 ;; `char->int`'s own Unicode-scalar-value payload, widened
 ;; from its `i32` result via the zero-cost `i32`<->`i64`
-;; `as` relabel `Checker::check_as` already allows), never
+;; `as` relabel `typeck::cast` already allows), never
 ;; a tagged `Sexpr::Char` (that's `compile-construct-
 ;; sexpr`'s own variant-3 arm, which calls this exactly
 ;; like `compile-int-any-width`'s own variant-1 arm calls
@@ -3441,7 +3441,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; below already closes over it) via `get-function`,
 ;; not `fn-env`, since a top-level `defun` is never
 ;; registered there. A top-level `defun` can never
-;; capture an outer scope (`Checker::check_defun`
+;; capture an outer scope (`typeck::defun`
 ;; always starts from an empty `Env` — see
 ;; `core_bridge::translate_call`'s doc comment), so
 ;; unlike `compile-apply` this never needs an env
@@ -3674,7 +3674,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; value against `env` *unmodified* into a fresh
 ;; accumulator `acc`, in order — CL `let` semantics
 ;; ("Binding values are checked in the *outer*
-;; environment" — `Checker::check_let`'s own comment),
+;; environment" — `typeck::binding`'s own comment),
 ;; so an earlier binding shadowing a name a *later*
 ;; binding's value-form also references must not leak
 ;; into that later computation. Lives in this `labels`
@@ -3849,7 +3849,7 @@ const SOURCE_TEMPLATE: &str = r#"
           ;; `lambda` is a new function
           ;; boundary — `break`/`return` can't
           ;; reach an outer loop through it
-          ;; (`Checker::check_lambda` resets
+          ;; (`typeck::lambda` resets
           ;; the loop stack the same way), so
           ;; this body is compiled with no
           ;; enclosing loop at all, regardless
@@ -3955,7 +3955,7 @@ const SOURCE_TEMPLATE: &str = r#"
                 ;; `loop`/`break`/`return`/`setf`:
                 ;; a `labels` sibling's own body is
                 ;; a new function boundary too
-                ;; (`Checker::check_labels` resets
+                ;; (`typeck::lambda` resets
                 ;; the loop stack per def, exactly
                 ;; like `check_lambda` — see
                 ;; `compile-lambda`'s matching
@@ -4005,7 +4005,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (declare-labels-siblings m fn-name fn-env inner-captured defs)
       (compile-labels-bodies m fn-name fn-env inner-captured defs)
       ;; The trailing body is *not* a new function
-      ;; boundary (`Checker::check_labels` checks
+      ;; boundary (`typeck::lambda` checks
       ;; `args[1..]` against the *unmodified*
       ;; loop stack — see this module's doc
       ;; comment), so `loop-exit`/`loop-slot` are
@@ -4225,7 +4225,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; cleanup block, so branching to whatever the name resolves to is exactly
 ;; "run every cleanup on the way out, then land at the block".
 ;;
-;; The `None` arms are unreachable: `Checker::check_return_from` rejects a
+;; The `None` arms are unreachable: `typeck::block` rejects a
 ;; `return-from` with no enclosing block of that name long before this runs.
 (defun compile-return-from ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((name (sexpr-str (sexpr-car (sexpr-cdr e))))
@@ -4297,7 +4297,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `false` use) as the loop's result. `loop-exit`/
 ;; `loop-slot`/`loop-root-base` are always
 ;; `Option::some` in any program that reaches this at
-;; all — `Checker::check_break` already rejects a
+;; all — `typeck::looping` already rejects a
 ;; `break` outside of a loop at type-checking time,
 ;; long before this runs — so the `None` arms are
 ;; purely defensive, the same role `resolve-value`'s
@@ -4391,7 +4391,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `labels` sibling's own name, which resolves through
 ;; `fn-env` instead, never `env`) panics — `setf` on a
 ;; sibling's own name is type-checker-legal
-;; (`Checker::check_labels` registers every sibling as
+;; (`typeck::lambda` registers every sibling as
 ;; an ordinary `Fn`-typed variable) but not something
 ;; any of `while`/`dotimes`/`dolist` (or anything else
 ;; this compiler is exercised against) ever does — an
@@ -4847,7 +4847,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; adding even one more arm there was enough to
 ;; overflow an unrelated test's stack (`scripts/
 ;; test-serial.sh`'s `RUST_MIN_STACK` comment records
-;; the incident), since `Checker::check_if`/
+;; the incident), since `typeck::control`/
 ;; `Interp::eval` never loopified `if`-chain recursion
 ;; the way `compile-value`'s own dispatch did.
 (defun compile-construct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
@@ -5177,7 +5177,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; unification plan — `docs/implementation-log.md` —
 ;; with `kind-i64`) — always a `BoxedObj::Struct`
 ;; `compile-construct-boxed-struct` built (this tag is
-;; only ever synthesized by `Checker::check_defstruct`
+;; only ever synthesized by `typeck::defstruct`
 ;; as a field accessor's own body, never for a `Sexpr`
 ;; — see `core_bridge::translate_field`'s doc
 ;; comment, and every `defstruct` is `mutable`): the
@@ -5778,7 +5778,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (load-raw builder slot 0)))
 
 ;; `(panic msg-form)` — `Expr::Panic`, always
-;; `Str`-typed (`Checker::check_panic` requires it), so
+;; `Str`-typed (`typeck::control` requires it), so
 ;; no `kind`/scrutinee-shape dispatch is needed the way
 ;; `Match`/`FieldGet` need — `msg-form` compiles down to
 ;; the exact tagged `Sexpr::Str` representation

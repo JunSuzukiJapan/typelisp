@@ -3,8 +3,7 @@
 //!
 //! Each is written as another form, which is checked in its place: `(+ a b
 //! c)` is `(+ (+ a b) c)`, `(< a b c)` is `(and (< a b) (< b c))` with each
-//! operand evaluated once, `(- x)` is `x`'s negation, and so on. The forms
-//! are the old checker's.
+//! operand evaluated once, `(- x)` is `x`'s negation, and so on.
 
 
 use crate::check::forms::{list_from_vec_locs, numeric_identity_literal, wrap_let_star};
@@ -210,7 +209,7 @@ fn log_with_base(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
     form(heap, &[div, number, base])
 }
 
-/// Which call sugar ([`Checker::check_call_sugar`]) a call of `head` with
+/// Which call sugar (`typeck::sugar`) a call of `head` with
 /// `nargs` arguments is: forms keyed on the name *and* the argument count,
 /// which no single definition could express. `concatenate_is_fn` says
 /// whether `concatenate` names a function here, which then wins.

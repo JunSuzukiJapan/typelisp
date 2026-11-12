@@ -5,8 +5,8 @@
 //! The table's slots are the trait's methods in its vtable order: every
 //! method inherited from a supertrait first (the supertraits in written
 //! order, a method reached twice through a diamond keeping one slot), then
-//! the trait's own. The current checker lays it out the same way, and the
-//! code it compiled for the prelude reads the slots by these numbers.
+//! the trait's own. The code compiled for the prelude reads the slots by
+//! these numbers.
 //!
 //! A value is boxed where a trait object is expected of it: a value of a
 //! type that implements the trait, with a heap representation, its `impl`
@@ -354,8 +354,8 @@ pub(crate) fn tables(lw: &mut Lowering, concrete: &Type, trait_path: &Path) -> R
     Ok((slots, supers))
 }
 
-/// Every supertrait of `path`, transitively, each once, in the order the
-/// current checker lists them.
+/// Every supertrait of `path`, transitively, each once: the written
+/// supertraits first, then theirs.
 fn supertrait_closure(reg: &Registry, path: &Path) -> Vec<Path> {
     let mut out: Vec<Path> = Vec::new();
     let mut stack = vec![*path];

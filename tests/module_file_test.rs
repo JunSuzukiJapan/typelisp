@@ -296,7 +296,7 @@ fn without_a_manifest_the_entry_directory_is_the_root() {
 /// A `use` inside `geo/point.typl` names a sibling `geo/arrow.typl` by its
 /// bare name (`arrow`), without spelling out the `geo::` directory prefix —
 /// the sibling-relative resolution `Loader::ensure_loaded`'s doc comment and
-/// `Checker::use_target`'s file-sibling tier add.
+/// `typeck::use_form`'s file-sibling tier add.
 #[test]
 fn use_resolves_a_sibling_file_by_its_bare_name() {
     let result = run_project(
@@ -332,7 +332,7 @@ fn use_prefers_a_root_relative_module_over_a_same_named_sibling() {
 
 /// A `use` inside a nested `(module inner ...)` block still resolves a
 /// sibling by the *enclosing file's* directory, not that inner block's own
-/// (filesystem-less) namespace — `Checker::file_ns` stays pinned to the
+/// (filesystem-less) namespace — the checker's file module stays pinned to the
 /// file's own path across nested `module` forms.
 #[test]
 fn use_inside_a_nested_module_still_resolves_against_the_files_directory() {

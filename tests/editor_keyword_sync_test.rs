@@ -620,7 +620,7 @@ fn the_editor_definitions_exist_where_the_tests_expect_them() {
 }
 
 /// `SPECIAL_FORM_HEADS` — the names a macro may not take over — is exactly
-/// what `check_list` dispatches on. A hand-kept copy of the list had fallen
+/// what `typeck::expr` dispatches on. A hand-kept copy of the list had fallen
 /// twelve names behind, which let a macro named `block` take over
 /// `(block ...)` at top level.
 #[test]
@@ -629,7 +629,7 @@ fn the_special_form_list_is_the_dispatch() {
     let listed: BTreeSet<String> = SPECIAL_FORM_HEADS.iter().map(|&i| BUILTIN_SYMBOLS[i as usize].to_string()).collect();
     assert_eq!(
         listed, dispatched,
-        "SPECIAL_FORM_HEADS and the checker's check_list dispatch differ: missing {:?}, extra {:?}",
+        "SPECIAL_FORM_HEADS and the checker's special-form dispatch differ: missing {:?}, extra {:?}",
         dispatched.difference(&listed).collect::<Vec<_>>(),
         listed.difference(&dispatched).collect::<Vec<_>>()
     );

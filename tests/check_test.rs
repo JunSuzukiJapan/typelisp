@@ -411,7 +411,7 @@ fn match_on_a_type_with_no_variants_needs_a_catch_all() {
 // `(Result::ok v)` fixes `T` and says nothing about `E`; `(Result::err e)`
 // does the reverse. Neither arm can type itself where the `match` has no
 // expected type, so the arms are probed, their partial types merged, and the
-// arms re-checked against the result (`Checker::check_match`'s B4).
+// arms re-checked against the result (`typeck::matching`'s B4).
 
 #[test]
 fn match_arms_pool_a_results_two_type_arguments() {
@@ -724,8 +724,8 @@ fn apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr() {
     // Was a `TypeError` before the Sexpr-user-ADT design plan
     // (`~/.claude/plans/async-conjuring-hanrahan.md`): `apply`'s trailing
     // "rest list" argument is checked against `expected = Sexpr`
-    // (`Checker::check_apply_form`), which now goes through the same
-    // scalar-auto-wrap fallback `(list 1 2)` does (`Checker::check_inner`'s
+    // (`typeck::lambda`), which now goes through the same
+    // scalar-auto-wrap fallback `(list 1 2)` does (`typeck::expr`'s
     // expected-type reconciliation, not scoped to `list`/`&rest` alone) —
     // `2` auto-wraps to `Sexpr::i32(2)`, same CL-conformant relaxation.
     // (A non-list shape there — as here — is still rejected, just at

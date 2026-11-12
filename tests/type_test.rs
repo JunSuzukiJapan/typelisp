@@ -385,7 +385,7 @@ fn a_generic_can_be_written_applied() {
 /// What the applied form is for: `Vector<(fn (int) int)>` cannot be written
 /// as a name, because a `(fn ...)` type is a list and the name grammar has no
 /// token for it. Substituting a trait's associated type into a signature has
-/// to be able to produce it anyway (`Checker::subst_value`), so the syntax it
+/// to be able to produce it anyway (`typeck::subst`), so the syntax it
 /// emits has to be able to hold one.
 #[test]
 fn an_applied_generic_carries_an_argument_no_name_can_spell() {

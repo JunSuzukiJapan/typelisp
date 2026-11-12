@@ -914,7 +914,7 @@ impl Interp {
     /// That uniformity is the point, and it is a correctness property rather
     /// than a simplification. A slot used to come in three kinds, routed by a
     /// declared type through `is_heap_repr_ty` and its checker-side twin
-    /// `Checker::is_heap_repr`, because the interpreter had a second value
+    /// `check::repr`, because the interpreter had a second value
     /// world (`RtValue`) whose variants were not heap values. But a heap cell
     /// is rooted by the collector's own `cell_registry` walk on *every*
     /// collection, whereas a native slot was only rooted when `sync_roots`
@@ -1584,7 +1584,7 @@ impl Interp {
     /// [`crate::compile::symbols::single_body_expr`] (labels/closures
     /// Stage 6 — see that function's doc comment for why this needs no
     /// `compiler.rs` change). For an instance method, `params`/`sig.0`
-    /// already carry the receiver as element `0` (`Checker::check_defmethod`
+    /// already carry the receiver as element `0` (`typeck::defmethod`
     /// pushes the receiver's own type onto `sig_params` before the method's
     /// declared parameters) — so it flows through exactly like any other
     /// parameter here, no special-casing needed. Shared by
@@ -1862,7 +1862,7 @@ impl Interp {
     ///
     /// `env` holds the parameters bound before this one, which a default may
     /// reference: `(defmacro dup (x &optional (y x)) ...)` copies `x` when `y`
-    /// is omitted. That is CL's rule, and `Checker::check_defmacro` checks each
+    /// is omitted. That is CL's rule, and `typeck::defmacro` checks each
     /// default in exactly this environment — so dropping `env` here made the
     /// checker accept a form the expander could not run (`macro `dup`: unbound
     /// variable: x`).
@@ -2728,7 +2728,7 @@ impl MacroExpander for Interp {
         //
         // `bind_macro_args` validates arity and binds every parameter
         // (defaulting omitted `&optional`/`&key` args); the call-site checker
-        // has already range-checked the raw count (`Checker::check_macro_arity`),
+        // has already range-checked the raw count (`typeck::macros`),
         // so any error here is a keyword/plist detail it deliberately deferred.
         //
         // `enter`, not `apply`: a macro body is an ordinary `Sexpr -> Sexpr`
@@ -2754,7 +2754,7 @@ impl MacroExpander for Interp {
 
     /// [`Self::exec`] on the form, which is the same arm the driver's own run
     /// of it between top-level forms takes. A `macrolet` binding's name is
-    /// synthesized and unwritable (`Checker::check_macrolet`), so nothing else
+    /// synthesized and unwritable (`typeck::macrolet`), so nothing else
     /// can collide with it and nothing needs to remove it afterwards: the
     /// *scope* is the checker's table, not this registration.
     fn install(&self, heap: &mut Heap, form: Value) -> Result<(), String> {
@@ -3048,7 +3048,7 @@ fn int_to_char(args: &[Value]) -> Result<Value, EvalError> {
 }
 
 /// `try-int->char` (`registry::int_assoc`): the `Option`-returning
-/// counterpart of [`int_to_char`], for `Checker::check_as`'s `try-as` —
+/// counterpart of [`int_to_char`], for `typeck::cast`'s `try-as` —
 /// same Unicode-scalar-value validity check, `None` instead of a panic.
 fn try_int_to_char(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     match args.first() {
@@ -3795,7 +3795,7 @@ pub(crate) fn eval_builtin_method(
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::HASHTABLE) {
         return match method.well_known() {
             // `ret_type` is the *result's* runtime identity, spelled by the
-            // checker (`Checker::assoc_form`): these builders have no field to
+            // checker (`typeck::method`): these builders have no field to
             // read an instantiation off, and `Vector<i32>` and `Vector<i64>`
             // share a representation, so nothing here could derive it.
             wk::M_NEW => Some(Ok(crate::type_key::alloc_hashtable_of(heap, ret_type))),
@@ -4391,7 +4391,7 @@ fn hashtable_values(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result
 
 /// Each entry becomes a `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
 /// `defstruct`, the boxed-struct `"cons-cell"` representation, matching how
-/// `Checker::check_construct` would build one from typelisp source; built
+/// `typeck::variant` would build one from typelisp source; built
 /// directly here since a defstruct instance is just tagged field data, not
 /// something only the checker/prelude can construct) wrapping the pair's
 /// already-encoded key/value `mem::Value`s straight from

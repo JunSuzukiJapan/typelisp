@@ -793,7 +793,7 @@ fn compile_returns_true_on_success() {
 }
 
 /// A `&rest` parameter is bound to a plain `Sexpr` inside the body (see
-/// `Checker::check_defun`'s desugaring), and `Sexpr` already has full
+/// `typeck::defun`'s desugaring), and `Sexpr` already has full
 /// `compile` support — so a variadic function compiles with no special-
 /// casing at all, as long as its body sticks to already-compilable
 /// operations on the rest list (e.g. `sexpr-car`/`sexpr-cdr`, which
@@ -2011,7 +2011,7 @@ fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code(
 /// through the full pipeline. Exercises the new alloca-backed `env`
 /// representation (`bind-params`/`bind-captures`/`bind-let-values`).
 /// `int`: a bare integer literal defaults to `int`
-/// (`Checker::check_let` always checks a binding's value with `expected:
+/// (`typeck::binding` always checks a binding's value with `expected:
 /// None`), and nothing here forces otherwise. The `setf`/read-back happen
 /// inside a `loop` (whose body, unlike `let`'s, may have any number of
 /// statements — see `ast_bridge::translate_let`'s single-expression-body
@@ -2037,7 +2037,7 @@ fn compile_dispatches_a_setf_on_a_let_bound_local_to_native_code() {
 /// A bare `(return value)` inside a `loop` exits immediately with that
 /// value — the simplest possible `loop`/`return` round trip, no `break`/
 /// `setf` involved. `int`: `(loop ...)` is seeded `Never` and refined purely
-/// from the `return`s found inside it (`Checker::check_loop`/`check_return`)
+/// from the `return`s found inside it (`typeck::looping`/`check_return`)
 /// — a `defun`'s own declared return type never propagates down into that
 /// seed, so the bare literal `42` still defaults to `int` regardless of
 /// what `loop-return-test` itself declares.
@@ -2083,7 +2083,7 @@ fn compile_dispatches_a_value_less_return_from_a_loop_to_native_code() {
 /// whose body conditionally exits via `return` (delivering the
 /// accumulator) and otherwise mutates loop-carried locals via `setf` —
 /// computes `0+1+...+n` without recursion. `i`/`acc` default to `int`
-/// (bare integer literals with no `expected` type — `Checker::check_let`
+/// (bare integer literals with no `expected` type — `typeck::binding`
 /// always checks a binding's value with `expected: None`), so `n` is `int`
 /// too, to keep every arithmetic operand the same type.
 #[test]
@@ -2107,7 +2107,7 @@ fn compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native
 }
 
 /// A `loop` exited via a bare `(break)` (no `return` anywhere) is
-/// necessarily `Unit`-typed (`Checker::check_break` always contributes
+/// necessarily `Unit`-typed (`typeck::looping` always contributes
 /// `Unit` to the enclosing loop's type) — this is the `compile-break`
 /// counterpart of the `return`-based tests above, and the only way to
 /// observe it actually terminating (rather than looping forever, or
@@ -2629,7 +2629,7 @@ fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many
 /// `malloc`'d-box representation above — `point::new`'s `Expr::Construct`
 /// dispatches to `compile-construct-boxed-struct` instead (Stage 3 of the
 /// Sexpr/RtValue unification plan, `docs/implementation-log.md`: the
-/// `mutable` flag `Checker::check_construct` sets for an `AdtKind::Struct`
+/// `mutable` flag `typeck::variant` sets for an `AdtKind::Struct`
 /// def), building a `BoxedObj::Struct` via `rt_struct_new` — the exact same
 /// tagged `Value::Boxed` representation the interpreter's own
 /// `Expr::Construct` `mutable` arm already builds (`heap.alloc_struct`), so
@@ -2706,7 +2706,7 @@ fn compile_dispatches_a_defstruct_field_accessor_method_to_native_code() {
 }
 
 /// The `FieldSet` counterpart, through `(setf p::x v)`'s own desugaring to
-/// `(set-x p v)` (`Checker::check_setf`) — `compile-field-set` mutates the
+/// `(set-x p v)` (`typeck::setf`) — `compile-field-set` mutates the
 /// box `make-point` returned *in place* (the same raw address, never
 /// copied), so reading it back afterward (interpreted `p::x`, still
 /// dispatching to the now-`compile`d `point::x` from the test above) sees
@@ -2757,7 +2757,7 @@ fn compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body() 
 }
 
 /// A self-recursive `defmethod` (CLOS-style call syntax, `(countdown self)`
-/// — see `Checker::check_defmethod`'s "register the signature before
+/// — see `typeck::defmethod`'s "register the signature before
 /// checking the body" comment for why self-recursion is allowed at all)
 /// through `compile-assoc`'s same generic branch: the mangled lookup name
 /// `counter::countdown` is exactly what `compile-function`'s own first step
@@ -2873,7 +2873,7 @@ fn a_seeded_stream_agrees_across_the_compile_boundary() {
 ///
 /// Nothing is left to look up at runtime — the checker's resolution is the
 /// answer — so there is no reason to carry the failure to the `(compile ...)`
-/// call. See `Checker::check_compile`'s doc comment.
+/// call. See `typeck::tools`'s doc comment.
 #[test]
 fn compile_of_an_unresolvable_name_is_a_check_time_error() {
     // A bare name that names nothing.
@@ -3009,7 +3009,7 @@ fn compile_a_modules_function_and_a_same_named_types_method_are_different_symbol
 
 /// `(compile "name")`/`(compile "type::method")` — a string literal, not an
 /// unevaluated symbol or `::`-path — is a type error caught at check time,
-/// before the compiler ever runs (see `Checker::check_compile`'s doc
+/// before the compiler ever runs (see `typeck::tools`'s doc
 /// comment for why the name being compiled is program structure, not
 /// runtime data).
 #[test]
@@ -4381,7 +4381,7 @@ fn compile_returns_a_selected_char_literal_across_the_jit_boundary() {
     assert_eq!(v, Value::Char('P'));
 }
 
-/// `+` reified as a value (`Expr::MethodRef`, `Checker::method_value`) and
+/// `+` reified as a value (`Expr::MethodRef`, `typeck::lambda`) and
 /// passed through a `Fn`-typed parameter — `translate_methodref`'s
 /// forwarding-`lambda`-to-`(assoc ...)` wrapper reaches the exact same
 /// `compile-assoc` native-arithmetic dispatch an ordinary `(+ a b)` call site
@@ -5279,7 +5279,7 @@ fn the_byte_specifier_family_compiles_at_every_width() {
     assert_eq!(compiled, Value::Int(63194));
 }
 
-/// CL's variadic sugar (`Checker::check_variadic_arith`/`check_variadic_cmp`,
+/// CL's variadic sugar (`typeck::sugar`/`check_variadic_cmp`,
 /// desugared at check time into nested 2-argument `Expr::Assoc` nodes) means
 /// `compile-assoc` never sees a 3-argument `+`/`<` call — this just confirms
 /// a function using the 3+-argument forms compiles and runs correctly.
@@ -6037,7 +6037,7 @@ fn compile_round_trips_a_vector_of_units() {
 // ---- a built-in type is identified by its whole path, not its last segment --
 //
 // Every built-in lives at the root namespace, but nothing stops a module from
-// defining `vector`/`hashtable` of its own (`Checker::check_redef` only
+// defining `vector`/`hashtable` of its own (`typeck::define` only
 // guards the root). Compiled code used to recognize the built-in by last
 // segment alone and lower the *user* type's methods to `vector-op`/
 // `hashtable-op` — reading a user struct as if it were the built-in.
@@ -6648,7 +6648,7 @@ fn an_interpreted_callee_of_compiled_code_still_returns_normally() {
 /// `(format false "~a" x)` on an `f64` *parameter*, compiled.
 ///
 /// `format`'s variadic tail is lowered by wrapping each argument as a `Sexpr`
-/// (`Checker::wrap_rest_elem`), and that wrap used to skip the constructor
+/// (`typeck::sexpr_value`), and that wrap used to skip the constructor
 /// entirely for any type `is_heap_repr` calls heap-resident — which `f64` is,
 /// *in the interpreter*, where an `f64` is a `BoxedObj::Float` and therefore
 /// already a `Sexpr::f64`. A compiled `f64` is neither boxed nor tagged: it

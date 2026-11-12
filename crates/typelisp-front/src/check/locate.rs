@@ -148,7 +148,7 @@ fn visit(heap: &Heap, form: Value, file: &str, cursor: (u32, u32), depth: usize,
 /// a plain [`DefLocs`] lookup — no name resolution needed. A local variable
 /// reference (`var`) resolves through `DefLocs::local_refs` instead, keyed by
 /// the reference's own position: that resolution already happened once at check
-/// time (`Checker::check_at`'s `Env::get_loc` lookup), so this is a lookup too,
+/// time (`typeck::expr`'s `Env::get_loc` lookup), so this is a lookup too,
 /// not a fresh scope search. A `var` with no recorded position of its own falls
 /// through to `None`, same as any node this pass doesn't recognize.
 pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option<Loc> {
@@ -239,9 +239,9 @@ pub fn hover_text(heap: &Heap, node: Value, def_locs: &DefLocs, docs: &Docs) -> 
 /// returning whatever names are on the stack at that point. A binding is only
 /// pushed once its own scope is entered: a `let` binding's *value* is checked
 /// in the outer environment (CL `let`, not `let*`) and correctly does not see
-/// the name being bound, matching `Checker::check_let`'s own order. A `match`
+/// the name being bound, matching `typeck::binding`'s own order. A `match`
 /// arm's pattern-bound names are pushed only for that arm's own body, matching
-/// `Checker::check_match`'s per-arm `extended_with_locs`.
+/// `typeck::matching`'s per-arm `extended_with_locs`.
 pub fn completion_locals(heap: &Heap, body: &[TopLevelForm], file: &str, line: u32, col: u32) -> Vec<String> {
     let Some(target) = locate_node(heap, body, file, line, col) else {
         return Vec::new();
@@ -337,7 +337,7 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
         }
         // `(labels ((SYM ((SYM R)...) RET-R E...)...) E...)`. Every function's
         // name is visible to every body (its own included) and to the trailing
-        // body — see `Checker::check_labels`.
+        // body — see `typeck::lambda`.
         wk::LABELS => {
             let defs = core::field(heap, form, 0).and_then(|d| heap.list_to_vec(d).ok()).unwrap_or_default();
             for d in &defs {

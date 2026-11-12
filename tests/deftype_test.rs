@@ -1,9 +1,9 @@
 //! Tests for `deftype` — CL's type-specifier abbreviation, narrowed to what a
 //! statically typed language can mean by it: a *spelling* for a type.
 //!
-//! `Checker::check_deftype` stores the body already canonical and already
+//! `typeck::deftype` stores the body already canonical and already
 //! alias-expanded (`TypeEntry::Alias` in the checker's registry), so a use site's expansion in
-//! `Checker::canon` is one substitution and an alias cycle is unconstructible.
+//! `typeck::type_syntax` is one substitution and an alias cycle is unconstructible.
 //! Because the rewrite happens inside the type parser, nothing downstream ever
 //! sees an alias — including error messages, which is what several of these
 //! tests actually assert.

@@ -950,15 +950,9 @@ pub(crate) fn check_body(
     Ok((out, ty))
 }
 
-/// The forms [`Checker::check_form_dispatch`] matches at top level. Each one
-/// defines or declares something for the whole program, so none of them
-/// means anything inside an expression.
-/// Every name [`Checker::check_list`] dispatches on as a special form — what
-/// [`Checker::is_builtin_form_head`] keeps a macro of the same name from
-/// taking over. One list, which `editor_keyword_sync_test` compares with the
-/// dispatch itself: a second, hand-kept copy had fallen behind by twelve
-/// names, and a macro named `block` took over `(block ...)` at top level
-/// while one inside a function still meant the special form.
+/// Every name an expression's head is a special form by — what keeps a
+/// macro of the same name from taking over. `editor_keyword_sync_test`
+/// compares it with the special-form dispatch in this file.
 pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::IF, wk::LET, wk::LET_STAR, wk::PROGN, wk::UNSAFE, wk::SETF,
     wk::INCF, wk::DECF, wk::ROTATEF, wk::SHIFTF, wk::LOOP, wk::BREAK,
@@ -972,6 +966,9 @@ pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 
+/// The forms checked only at top level. Each one defines or declares
+/// something for the whole program, so none of them means anything inside an
+/// expression.
 pub(crate) const TOPLEVEL_FORM_HEADS: &[u32] = &[
     wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
     wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,

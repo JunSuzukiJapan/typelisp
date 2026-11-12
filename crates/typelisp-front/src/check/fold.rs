@@ -127,7 +127,7 @@ pub(crate) fn fold_builtin_method(
 }
 
 /// The literal node `value` is, as a `ret`-typed result — the inverse of
-/// [`literal_value`], and the same spelling `Checker::check_inner` gives a
+/// [`literal_value`], and the same spelling `typeck::expr` gives a
 /// literal read from source: an `int` is `(int N)` when it fits a fixnum and
 /// `(bignum B)` otherwise, a fixed width is `(int-any-width N)`, a float is
 /// its box under `float-any-width`.

@@ -5,7 +5,7 @@
 //! Each is written as a `setf` form, which is checked in its place. A call
 //! place's arguments are first bound to temporaries, so each is evaluated
 //! once although the place is both read and written; a symbol macro's place
-//! is its form's. The forms are the old checker's.
+//! is its form's.
 
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::well_known_symbol;

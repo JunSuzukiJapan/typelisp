@@ -73,7 +73,7 @@ fn let_star_desugaring_survives_collection() {
 }
 
 /// `impl` substitutes `Self` by rewriting the read syntax tree
-/// (`Checker::subst_value`), rebuilding every list it passes through.
+/// (`typeck::subst`), rebuilding every list it passes through.
 #[test]
 fn impl_self_substitution_survives_collection() {
     assert_stress_agrees(
@@ -167,7 +167,7 @@ fn a_mixed_program_survives_collection() {
 
 /// A `~/name/` directive is resolved by checking a call built for it, and the
 /// control string is rebuilt with the resolved names
-/// (`Checker::resolve_format_calls`) — every one of those nodes has to stay
+/// (`typeck::format`) — every one of those nodes has to stay
 /// rooted until the call it ends up in is built.
 #[test]
 fn call_directive_resolution_survives_collection() {

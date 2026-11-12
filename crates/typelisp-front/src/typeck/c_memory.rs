@@ -9,8 +9,7 @@
 //! `(c-deref p)`, `p::field` and their `setf`s are calls of the internal
 //! builtins `crate::c_struct` names, and a typed pointer that came from C (a
 //! `defffi` result, a pointer field read back) is checked against the live
-//! allocations at run time. The rules and the messages are the old
-//! checker's (`check::analyze::c_struct`).
+//! allocations at run time.
 
 use crate::c_struct as b;
 use crate::typeck::registry::{CField, CStructDef};

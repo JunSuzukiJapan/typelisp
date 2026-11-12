@@ -17,7 +17,7 @@ use typelisp::{load_prelude, Checker, Heap, Interp, Reader};
 
 /// The first *check*-time error `src` raises.
 ///
-/// Since the control string became a literal (`Checker::control_string`), a
+/// Since the control string became a literal (`typeck::format`), a
 /// `~/name/` that names nothing, names something of the wrong shape, or sits
 /// in a control string that does not parse is caught here rather than in the
 /// middle of printing — the whole point of scanning it at compile time. These

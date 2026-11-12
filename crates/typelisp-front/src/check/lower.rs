@@ -593,7 +593,7 @@ pub(crate) trait CoreForms {
     /// question a `Repr` exists to answer — how a value crosses the compiled
     /// boundary — and the wrong one for the thunk, which has to emit
     /// `trunc i64 to i8`. Two questions about one type, the way `field_kind`
-    /// and `binding_kind` are. One producer (`Checker::check_defffi`), so they
+    /// and `binding_kind` are. One producer (`typeck::defffi`), so they
     /// cannot drift.
     #[allow(clippy::too_many_arguments)]
     fn defffi_form(

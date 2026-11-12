@@ -177,7 +177,7 @@ fn shiftf_requires_at_least_one_place() {
 #[test]
 fn rotatef_call_form_places_dedup_shared_subexpressions() {
     // Both places share the same receiver `t` and only differ by index —
-    // exercises `Checker::place_dedup` binding `t` once per place rather
+    // exercises `typeck::setf` binding `t` once per place rather
     // than re-evaluating the receiver expression for the read and the write.
     let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
@@ -220,7 +220,7 @@ fn setf_rejects_a_place_that_is_neither_variable_field_nor_call_form() {
 
 #[test]
 fn setf_on_a_user_defined_accessor_uses_the_set_prefix_convention() {
-    // No `defsetf`-style registration exists — `Checker::check_setf_call_place`
+    // No `defsetf`-style registration exists — `typeck::setf`
     // just checks whether `cells`'s (statically known) type has an instance
     // method literally named `set-at`, exactly the same `X`/`set-X`
     // convention `defstruct` already uses for field accessors.

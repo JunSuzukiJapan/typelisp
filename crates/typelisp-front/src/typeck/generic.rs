@@ -5,8 +5,7 @@
 //! runs is a copy of it per instantiation, lowered with the parameters
 //! replaced by the instantiation's types. Each top-level form generates the
 //! specializations it needs, so redefining a generic function leaves no copy
-//! of the old one behind; the current checker (`crate::check`) works the same
-//! way and names them with [`fn_specialization`] too.
+//! of the old one behind. A specialization is named by [`fn_specialization`].
 
 use std::collections::HashSet;
 

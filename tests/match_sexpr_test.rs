@@ -1,5 +1,5 @@
 //! Tests for `match` on a `Sexpr` scrutinee — re-allowed after Symbol/Sexpr
-//! redesign Phase 5 had fenced it off (`Checker::check_match`), in
+//! redesign Phase 5 had fenced it off (`typeck::matching`), in
 //! preparation for a user-facing `(read)`: read data's type is only known at
 //! runtime, and `match` (with type refinement and exhaustiveness over the
 //! sixteen `Sexpr` variants) is the language's natural eliminator for it. The

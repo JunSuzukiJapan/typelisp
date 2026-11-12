@@ -2317,7 +2317,7 @@ impl Interp {
             return Ok((State::Blocked(io_wait(heap, &argv, Some(d))?), None));
         }
         // A C callback's entry address — the checker's lowering of a callback
-        // argument (`analyze::ffi_callback`). The answer is a raw word, which
+        // argument (`typeck::callback`). The answer is a raw word, which
         // is how the interpreter carries a `ptr`.
         if path.std_builtin().is_some_and(|s| s.is(wk::F_FFI_CALLBACK_ADDRESS)) {
             let function = argv.first().and_then(|v| core::definition_value(*v));
@@ -2332,7 +2332,7 @@ impl Interp {
             return Ok((State::Apply(Value::Int(addr as i64)), None));
         }
         // The memory behind `def-c-struct`s and typed pointers
-        // (`analyze::c_struct`'s lowering).
+        // (`typeck::c_memory`'s lowering).
         if let Some(name) = path.std_builtin() {
             if let Some(result) = crate::c_struct::eval(heap, name, &argv) {
                 return Ok((State::Apply(result?), None));

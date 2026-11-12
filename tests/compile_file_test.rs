@@ -312,7 +312,7 @@ fn compiles_and_runs_arithmetic_in_main() {
     // see this module's doc comment) always defaults to `int` (the
     // checker resolves `+`/`-`/`*`'s receiver type from its *first*
     // argument checked with `expected: None`, by design — see
-    // `Checker::resolve_name`'s doc comment — so the outer
+    // `typeck::resolve`'s doc comment — so the outer
     // expectation from `main`'s declared return type never reaches it).
     // That's a type-checking-time distinction, not a codegen one: the core
     // IR's literal node is `int-any-width` and the island's
@@ -884,7 +884,7 @@ fn jit_and_aot_agree_on_a_defenum_global_read_and_write() {
 
 /// AOT used to reject anything that wasn't a `defun`/`defvar`/`defenum`, so
 /// a `defstruct` with methods could not appear in a compiled file at all —
-/// `Checker::check_defstruct`/`check_defmethod` return `TopLevel` shapes the
+/// `typeck::defstruct`/`check_defmethod` return `TopLevel` shapes the
 /// item loop had no arm for. Both now compile like any other body.
 #[test]
 fn compiles_a_defstruct_with_a_method() {
@@ -1511,7 +1511,7 @@ fn an_executable_that_never_evaluates_carries_no_interpreter() {
 /// A *generic* prelude function, instantiated for the first time by an eval'd
 /// form. Nothing in the program calls `pathname-name`, so the executable
 /// carries no instantiation of it — only the retained template, restored from
-/// the snapshot (`Checker::from_state`), can answer this.
+/// the snapshot (`Checker::apply_delta`), can answer this.
 ///
 /// The sharpest test of the snapshot there is: 61 of the prelude's 86 `defun`s
 /// are generic, the live templates hold raw heap `Value`s, and getting them

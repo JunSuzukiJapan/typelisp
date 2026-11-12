@@ -16,7 +16,7 @@
 //! `labels`-sibling/self calls, and top-level `defun`-to-`defun` calls
 //! including self-recursion (`call`, labels/closures Stage 3) — a
 //! callee must already be defined earlier in the file, the same forward-
-//! reference restriction `Checker::resolve_fn` enforces at type-checking
+//! reference restriction `typeck::call` enforces at type-checking
 //! time regardless of AOT/JIT (see `compile::CompiledFn::new`'s doc comment
 //! for the JIT-side counterpart of this same restriction). The loop below
 //! needs no special handling for that: by the time a later `defun` in the
@@ -81,7 +81,7 @@ const ENTRY_POINT_NAME: &str = "main";
 /// Recurses into a `(module ...)`, which covers three shapes at once — the
 /// monomorphization bundle a generic instantiation comes wrapped in, the
 /// `(module ...)` a user writes, and the per-target-type grouping
-/// `Checker::check_impl` returns for an `impl` block, and the file-derived
+/// `typeck::impl_block` returns for an `impl` block, and the file-derived
 /// module a `use`d dependency comes wrapped in. These are just containers of
 /// the same items; the enclosing
 /// module is already baked into
@@ -169,7 +169,7 @@ fn collect_aot_item(
             None
         }
         // `use`/`import`/`shadowing-import` (the checker lowers every
-        // spelling to this one tag, `Checker::check_use_forms`): no codegen,
+        // spelling to this one tag, `typeck::use_form`): no codegen,
         // and the interpreted `exec` below is what makes the used names
         // resolve — a compiled call site never mentions a `use`, only the
         // fully-qualified path it resolved to. The dependency file itself
@@ -627,7 +627,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // `_guard` in this scope would drop the outer one first).
     let result = {
         let m = module.borrow();
-        // One entry per C callback the program passes (`analyze::ffi_callback`),
+        // One entry per C callback the program passes (`typeck::callback`),
         // each running a function compiled into this module; the generated
         // `main` registers them before anything runs.
         let mut callback_entries = Vec::new();

@@ -234,7 +234,7 @@ fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
 }
 
 // ---- nested generic call-site bound propagation ---------------------------
-// `Checker::validate_where_bounds`'s two "concrete isn't fully resolved"
+// `typeck::bounds`'s two "concrete isn't fully resolved"
 // cases, both arising only when a `where`-bounded call happens inside
 // *another* generic function's own body-check (its type parameter not yet
 // concrete) — see that function's doc comment.
@@ -277,7 +277,7 @@ fn forwarding_a_bare_type_parameter_with_a_matching_where_bound_type_checks_and_
 /// `eval_ok` don't load the prelude): `wrap<T>` is `Boxed` with `Item = T`,
 /// so wrapping an outer function's own still-open type parameter `U` in
 /// `wrap<U>` produces exactly the "assoc type resolves to an open variable"
-/// shape `Checker::validate_where_bounds`'s second case exists for.
+/// shape `typeck::bounds`'s second case exists for.
 const BOXED_PRELUDE: &str = "
 (deftrait Boxed ()
   (:type Item)
@@ -564,7 +564,7 @@ fn a_trait_method_is_callable_from_outside_the_implementing_module() {
 
 // ---- default bodies are checked at the declaration -----------------------
 //
-// `Checker::precheck_trait_defaults`, the `deftrait` counterpart of the
+// `typeck::trait_impl`, the `deftrait` counterpart of the
 // blanket impl's declaration-time body check (tests/blanket_impl_test.rs).
 // Before it, a default body was only ever checked by an `impl` that inherited
 // it — so a default no `impl` omitted was never checked at all.
@@ -725,7 +725,7 @@ fn an_impl_omitting_an_associated_type_is_rejected() {
 /// variable, must come back as *that variable* — not the literal `Self` type
 /// variable the trait's template is written in.
 ///
-/// The bounds branch of `Checker::receiver_method` used to substitute
+/// The bounds branch of `typeck::method` used to substitute
 /// only the trait's associated types into the method's return type, so
 /// `(add a b)` under `(:where (Add T))` yielded `self` and the enclosing
 /// generic's `T` return position rejected it. Nothing in the prelude caught
@@ -770,7 +770,7 @@ fn an_inherited_self_returning_trait_method_resolves_to_the_bounded_type_variabl
 /// `Item`.
 ///
 /// The reader reads `Vector<Item>` as a single symbol (the same reason
-/// `impl<T>` is one), so `Checker::subst_value`'s whole-name lookup never
+/// `impl<T>` is one), so `typeck::subst`'s whole-name lookup never
 /// reached the `Item` inside it: the inherited signature stayed
 /// `(holder Vector<item>)` while the trait's own declaration substituted to
 /// `(holder Vector<char>)`, and the two failed to match. `Option<Item>` had

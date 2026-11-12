@@ -7,7 +7,7 @@ use crate::{Path, SymRef};
 /// method by its type's path and its own name.
 ///
 /// The target of a `(compile name)` / `(compile type::method)` form —
-/// `Checker::resolve_callable` builds it out of the one name resolution — and
+/// `typeck::tools` builds it out of the one name resolution — and
 /// also how the compile pipeline names a node of its call graph and an entry
 /// of a precompiled library. Nothing reads a definition back out of a spelled
 /// name: a function `b` of module `a` and a method `b` of type `a` are two

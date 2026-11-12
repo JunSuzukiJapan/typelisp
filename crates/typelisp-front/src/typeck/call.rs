@@ -91,7 +91,7 @@ pub(crate) fn check_call(
     expect(cx, &ret, expected)?;
     let targs: Vec<Type> = def.type_params.iter().map(|p| subst.apply(&Type::Param(*p))).collect();
     // A Rust builtin has no body to specialize: one entry point serves every
-    // instantiation, as in the current checker.
+    // instantiation.
     let call_targs = if def.builtin { Vec::new() } else { targs.clone() };
     for (p, t) in def.type_params.iter().zip(&targs) {
         let what = format!("cannot infer type parameter `{}` for `{}`", p.name.name(), path);

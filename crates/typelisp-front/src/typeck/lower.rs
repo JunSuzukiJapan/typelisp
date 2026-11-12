@@ -2,7 +2,7 @@
 //!
 //! One arm per kind of node. Lowering decides nothing a check depends on: by
 //! the time a tree is lowered, every type in it is settled. The core forms
-//! are built by [`CoreForms`], which the current checker builds with too.
+//! are built by [`CoreForms`].
 
 use crate::check::core;
 use crate::check::forms;

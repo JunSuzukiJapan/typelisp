@@ -1,4 +1,4 @@
-//! The rebuilt checker's registry: what the program has defined
+//! The checker's registry: what the program has defined
 //! (`docs/dev/checker-rebuild-plan.md` 8).
 //!
 //! Definitions are keyed by their [`Path`], which already says which module

@@ -153,7 +153,7 @@ fn check_default(
 ///
 /// The checker's own working shape while parsing a macro's lambda list; it is
 /// written into the `(defmacro ...)` form's own lambda field (see
-/// [`Checker::defmacro_form`]) and read back from there at expansion time, so
+/// `typeck::defmacro`) and read back from there at expansion time, so
 /// this type does not outlive checking and needs no serialized form of its own.
 /// A default-value body is a list of core forms, evaluated when the argument is
 /// omitted in an environment where the earlier params are already bound (an
@@ -172,9 +172,8 @@ pub struct MacroLambda {
     pub keys: Vec<(String, Vec<Value>)>,
 }
 
-/// The call-site arity shape of a macro, derived from its [`MacroDef`] by
-/// [`Info::resolve_macro`]/[`Info::macro_at`]
-/// and consumed by [`MacroShape::check_arity`]. Carries only what a raw
+/// The call-site arity shape of a macro, derived from its [`MacroDef`] and
+/// consumed by [`MacroShape::check_arity`]. Carries only what a raw
 /// argument *count* can be judged against — the `&key` names themselves aren't
 /// needed here (keyword validation happens in `Interp::expand_macro`).
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]

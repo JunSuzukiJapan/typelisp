@@ -31,7 +31,7 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 }
 
 /// `:hello` — a keyword, the one self-evaluating `symbol` literal
-/// (`Checker::check`'s `Value::Symbol` arm); `(quote hello)` is a `Sexpr`, not
+/// (`typeck::expr`'s `Value::Symbol` arm); `(quote hello)` is a `Sexpr`, not
 /// a `symbol`, so it cannot go in this field.
 const TAG_ENUM: &str = "(defenum tag (named symbol) (anon)) \
                         (defun make-tag ((s symbol)) tag (tag::named s)) \

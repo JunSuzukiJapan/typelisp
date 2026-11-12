@@ -1,5 +1,5 @@
 //! Tests for the CL-style `format`/`print`/`println` directive special forms
-//! (`Checker::check_format`/`check_print_like` + `Interp::run_format`, TODO
+//! (`typeck::format`/`check_print_like` + `Interp::run_format`, TODO
 //! T1). `format` with a `false` destination *returns* the formatted string, so
 //! the directive engine is exercised directly here without capturing stdout;
 //! `print`/`println` share the exact same engine (only the destination and a

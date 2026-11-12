@@ -3,7 +3,7 @@
 //! into S-expression data, itself.
 //!
 //! Each collection is written as the form that builds it, which is checked
-//! in its place; the forms are the old checker's. A literal's elements are
+//! in its place. A literal's elements are
 //! never evaluated: a symbol, a path or a list is quoted. The element type is
 //! what is expected (`Option<Sexpr>` where data is), or else what the
 //! elements make it.
@@ -113,7 +113,7 @@ fn rooted(heap: &mut Heap, make: impl FnOnce(&mut Heap) -> Result<Value, Error>)
     Ok(v)
 }
 
-/// The variable a vector literal is built in (`Checker::check_vector_literal`).
+/// The variable a vector literal is built in (`typeck::collection_literal`).
 /// Spelled with a leading `$` for the reason [`MATCH_SCRUT`] is: no reader
 /// produces it, so it cannot capture a name the program wrote — and a
 /// literal's elements are constants, so they never refer to it either.

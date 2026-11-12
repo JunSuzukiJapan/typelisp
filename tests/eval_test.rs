@@ -656,7 +656,7 @@ fn labels_function_can_be_bound_to_a_variable_like_any_other() {
 // ordinary Lisp list of cons cells, like every Lisp's `&rest` parameter —
 // never a homogeneous array type), with each element wrapped in its
 // `Sexpr` constructor (`(Int n)` for an integer element here) — see
-// `Checker::wrap_rest_elem`'s doc comment. These tests use `run`/`eval_ok`
+// `typeck::sexpr_value`'s doc comment. These tests use `run`/`eval_ok`
 // (no prelude loaded), so list length/indexing is done directly via the
 // `sexpr-*` accessor layer (`match` on `Sexpr` is fenced off — Symbol/Sexpr
 // redesign Phase 5 — and `car`/`cdr` are repurposed to a `cons<T,U>` pair).

@@ -459,7 +459,7 @@ pub(crate) fn trait_operator_method(op: SymRef) -> Option<SymRef> {
 }
 
 /// Whether `v` is a `(:where ...)` clause (vs. an ordinary body form) —
-/// `Checker::check_defun` peeks at this to decide whether to consume it.
+/// `typeck::defun` peeks at this to decide whether to consume it.
 pub(crate) fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
     Ok(matches!(v, Value::Cons(_)) && heap.list_to_vec(v)?.first().is_some_and(|h| is_symbol(*h, wk::KW_WHERE)))
 }

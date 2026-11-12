@@ -1,4 +1,4 @@
-//! Tests for the redefinition-policy safety net (`Checker::check_redef`):
+//! Tests for the redefinition-policy safety net (`typeck::define`):
 //! redefining a built-in (`typeck::builtins`) name is
 //! always an error, regardless of `RedefPolicy`; redefining anything else
 //! follows the configured policy (`Warn` by default).

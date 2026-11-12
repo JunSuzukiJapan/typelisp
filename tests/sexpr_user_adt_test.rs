@@ -2,8 +2,8 @@
 //! a `Sexpr` — CL's cons cells hold arbitrary objects (`(list (make-point ..)
 //! 42)` is valid, printed `#S(POINT :X 1 :Y 2)`); `typelisp`'s `Sexpr` was a
 //! closed built-in sum type with no such constructor. See
-//! `~/.claude/plans/async-conjuring-hanrahan.md` Stage 1: `Checker::check_inner`'s
-//! expected-type fallback and `Checker::wrap_rest_elem` now widen any
+//! `~/.claude/plans/async-conjuring-hanrahan.md` Stage 1: `typeck::expr`'s
+//! expected-type fallback and `typeck::sexpr_value` now widen any
 //! `is_heap_repr` ADT into `Sexpr` as a cost-free retype (its runtime
 //! representation is already `RtValue::Sexpr(Value::Boxed(_))`), and wrap a
 //! scalar (`int`/`f64`/.../`Str`) into its `Sexpr` constructor exactly as

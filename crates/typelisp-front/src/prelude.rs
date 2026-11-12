@@ -246,7 +246,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; the checker/interpreter/compiler need to understand natively going
 ;; forward — `while`/`dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/
 ;; `if-let` used to be hand-rolled `Expr`-producing Rust functions in
-;; `Checker::check_list` (`check_while`/`check_dotimes`/`check_dolist`/
+;; `typeck::expr` (`check_while`/`check_dotimes`/`check_dolist`/
 ;; `check_when`/`check_and_or`/`check_cond`/`check_if_let`), each duplicating
 ;; logic the *macro* system can express directly, the same way `until`/
 ;; `while-let`/`case`/`do` already do further down. Moving them to `defmacro`
@@ -256,7 +256,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; (`src/compile/`) to special-case. Most of the set (`while`/`dotimes`/
 ;; `dolist`/`when`/`unless`/`cond`/`if-let`) lives further down, right after
 ;; `append` — `,@` (unquote-splicing) always desugars through a call to
-;; `append` (`Checker::check_qq_template`), even when nothing follows the
+;; `append` (`typeck::quote`), even when nothing follows the
 ;; splice in the same list, so any macro using `,@` needs `append` already
 ;; registered. `and`/`or` are the exception, kept here: `equal` (just below)
 ;; already calls `and`, so they must be registered before it — and unlike
@@ -267,7 +267,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `and`/`or`: a self-recursive macro — each expansion peels off one
 ;; argument and re-emits a (shorter) `(and ...)`/`(or ...)` call, which the
 ;; checker re-expands the same way it already re-expands `case`'s `cond`
-;; output (`Checker::check_list`'s macro arm recursively re-`check`s its own
+;; output (`typeck::expr`'s macro arm recursively re-`check`s its own
 ;; expansion) — this is the first macro in the prelude whose expansion
 ;; mentions *itself* by name rather than a different macro, but the
 ;; mechanism is identical; termination follows from `cdr`/`null` shrinking
@@ -290,7 +290,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `compiler.rs` uses the `sexpr-*` layer plus `string` methods.
 
 ;; `sexpr-append`: the island's `Sexpr` list concatenation, for `,@`
-;; (unquote-splicing — `Checker::check_qq_template` desugars each splice to a
+;; (unquote-splicing — `typeck::quote` desugars each splice to a
 ;; `(sexpr-append spliced rest)` call) and `compiler.rs`. Navigates with the
 ;; `sexpr-*` layer (no `match`, no user-facing `car`/`cdr`). Placed here, before
 ;; the macros below, since every one of them uses `,@` in its expansion, and
@@ -299,14 +299,14 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; The rest of the loop/branch primitive reduction set (see the comment by
 ;; `and`/`or` above) — placed here, right after `sexpr-append`, since every one
 ;; of these uses `,@` (unquote-splicing) somewhere in its expansion, and `,@`
-;; always desugars through a call to `append` (`Checker::check_qq_template`).
+;; always desugars through a call to `append` (`typeck::quote`).
 
 ;; `while`: the *first* layer of sugar over `loop`. `if` always takes
-;; exactly 3 arguments (`Checker::check_if`, no CL-style implicit-`Unit`
+;; exactly 3 arguments (`typeck::control`, no CL-style implicit-`Unit`
 ;; 2-arg form), so the early-exit check needs an explicit `()` else branch —
 ;; `(break)` carries no value, so `(if (not test) (break) ())` is always
 ;; `Unit`-typed, matching `while`'s own `Unit` result —
-;; `Checker::check_loop`'s `Never`-seeded `join_types` widens to `Unit`
+;; `typeck::looping`'s `Never`-seeded `join_types` widens to `Unit`
 ;; automatically once this `break` is found, with no special-casing needed
 ;; (unlike the old `check_while`, which seeded the loop-stack frame with
 ;; `Unit` directly).
@@ -360,7 +360,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `(var list-form result-form)`; like `dotimes`/`doiter`, `gensym` gives the
 ;; cursor a fresh name so `list-form` is evaluated exactly once and the binding
 ;; can't collide with a same-named variable at the use site. `var` is bound to
-;; `(sexpr-car cursor)` inside the loop, so `Checker::check` infers its type
+;; `(sexpr-car cursor)` inside the loop, so `typeck::expr` infers its type
 ;; (`Sexpr`) with no annotation, exactly as `doiter`/`dotimes` rely on — no
 ;; checker special form. The optional `result-form` becomes the whole
 ;; construct's value (default `()`/`Unit`); unlike CL it is evaluated *outside*
@@ -393,7 +393,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; discarding whatever `body`'s own last form would otherwise evaluate to —
 ;; matching the old `check_when`'s explicit `body.push(unit_node())`. The
 ;; *untaken* side is bare `()` too; both resolve to `Unit` (not the empty list)
-;; via `Checker::check`'s `Value::Empty` special case, the same two-faced
+;; via `typeck::expr`'s `Value::Empty` special case, the same two-faced
 ;; `()` the rest of the language already relies on (see
 ;; `docs/dev/language-design.md` §0) — without the taken side's trailing `()`,
 ;; `if`'s `then`/`els` types would only agree by coincidence (e.g. `(when c
@@ -403,7 +403,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; self-recursion shape as `and`/`or` above). `else`-detection mirrors
 ;; `case`'s own `(eq (car c) (quote else))`.
 
-;; `if-let`: exactly the two-armed `match` `Checker::check_if_let` used to
+;; `if-let`: exactly the two-armed `match` `typeck::matching` used to
 ;; build directly (a constructor-pattern arm plus a wildcard `else` arm) —
 ;; the same shape `while-let` (further down) uses for its own loop
 ;; condition. Uses no `,@`, so it could have lived next to `and`/`or`
@@ -425,7 +425,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; and `Result<T,E>`, which only an instance method's per-receiver-type assoc
 ;; table allows (a free function has exactly one signature for its name —
 ;; see registry::int_assoc's step-6 comment for the same constraint on `+`).
-;; `(unwrap opt)` resolves via `Checker::receiver_method`: it checks
+;; `(unwrap opt)` resolves via `typeck::method`: it checks
 ;; `opt` first, then looks up `unwrap` in *its* type's assoc table, so the
 ;; same call syntax reaches `Option`'s or `Result`'s method independently.
 ;; The receiver's type parameter (`T`/`E` here) is resolved per call site
@@ -497,7 +497,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
              ,@(sexpr-cdr forms))))))
 
 ;; Higher-order helpers (roadmap step 7c) — the motivating use case for
-;; `defun`'s generic type parameters (`Checker::check_call`'s `unify`/
+;; `defun`'s generic type parameters (`typeck::call`'s `unify`/
 ;; `subst_apply` integration): each is plain `defun`, not a method, since
 ;; none of them is a method "on" a receiver type — they operate purely on
 ;; function values. `compose`/`flip` return a `lambda`, which closes over the
@@ -937,7 +937,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;;
 ;; **Every keyword is declared without a default.** That is forced, not
 ;; stylistic: a defaulted `&optional`/`&key` parameter's declared type may not
-;; mention the function's own type parameters (`Checker::check_defun_opt_key`),
+;; mention the function's own type parameters (`typeck::lambda_list`),
 ;; and `:key`/`:test` are function types over the element type. A defaultless
 ;; parameter arrives as `Option<...>`, so the default lives in the body.
 (module %internal (pub defun seq-in-bounds ((i int) (start Option<int>) (end Option<int>)) bool
@@ -1204,7 +1204,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `while-let` loops for as long as `binding`'s pattern matches `val`,
 ;; re-evaluating `val` each iteration (so it can be a call like `(next i)`
 ;; that observes mutated state) — same idea `if-let` uses
-;; (`Checker::check_if_let`: a `match` whose non-matching arm is the "false"
+;; (`typeck::matching`: a `match` whose non-matching arm is the "false"
 ;; branch), but built from `loop`/`match`/`break` rather than checker-level
 ;; machinery, and looping instead of running once. `binding` is `(pattern
 ;; val)`; `pattern` must be a constructor pattern (e.g. `(some x)`) to
@@ -1225,11 +1225,11 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; iteration) layered on top of `while-let` — `(next ,tmp)` is `while-let`'s
 ;; re-evaluated-every-iteration `val`, which is exactly the "observe `next`'s
 ;; mutated state each time" behavior `Iter` needs. `var`'s type is never
-;; named here: `Checker::check_ctor_pattern` infers a `(some var)` pattern's
+;; named here: `typeck::pattern` infers a `(some var)` pattern's
 ;; binding type from the scrutinee's own type (`next`'s return, `Option<Item>`)
 ;; the same way it already does for every other `match`, so this needs no
 ;; checker-level special form — `(next tmp)` resolves through the ordinary
-;; instance-method/trait-bound call machinery (`Checker::receiver_method`),
+;; instance-method/trait-bound call machinery (`typeck::method`),
 ;; concrete or `where`-bounded type variable alike.
 (module iter
 (pub defmacro doiter (spec &rest body)
@@ -1559,7 +1559,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `(:where (Iter I (Item A)))` — a *polymorphic* associated-type pin: `A` is
 ;; one of the function's own type parameters, inferred at each call site from
 ;; the predicate/mapping function's argument type and verified against the
-;; iterator's real `Item` (`Checker::check_call`'s where-bound validation).
+;; iterator's real `Item` (`typeck::call`'s where-bound validation).
 ;; This is why they are generic `defun`s, not methods: `map`/`foldl`/
 ;; `foldr` need type variables (`U`/`B`, the mapped element / accumulator)
 ;; beyond the receiver's, which a method — generic only through its owner's
@@ -2269,7 +2269,7 @@ user-visible capacity."
 ;; the refusal is right — the operator names belong to the primitive
 ;; types' own tables. The checker closes the gap from the other side: on a
 ;; receiver whose type is a `where`-bounded type variable, `(+ a b)`
-;; resolves to the `Add` bound's `add` (`Checker::trait_operator_method`),
+;; resolves to the `Add` bound's `add` (`typeck::bounds`),
 ;; so generic code is still written with operators and only these
 ;; declarations spell the names out.
 ;;
@@ -2611,7 +2611,7 @@ user-visible capacity."
 ;; type is an ordinary `defstruct`/`defenum`, and code that must hold any of
 ;; them uniformly writes `Result<T, :dyn Error>` — the counterpart of Rust's
 ;; `Box<dyn Error>`. Types and traits share one name space per module
-;; (`Checker::check_type_trait_clash`), which is exactly why the concrete
+;; (`typeck::define`), which is exactly why the concrete
 ;; types could not also be called `Error`.
 ;;
 ;; `source` is Rust's `Error::source`: the error this one wraps, or `None` at
@@ -2646,7 +2646,7 @@ user-visible capacity."
 ;; ordinary call since this language has no `?` (§7.3). The `(Error E)` bound
 ;; is what admits the boxing while `E` is still open: the checker leaves an
 ;; erased-generic placeholder here and lays out the real vtable when the call
-;; site's concrete `E` specializes this body (`Checker::coerce_to_dyn`).
+;; site's concrete `E` specializes this body (`typeck::dyn_trait`).
 (pub defun as-dyn-error<T,E> ((r Result<T,E>)) Result<T, :dyn Error> (:where (Error E))
   (match r
     ((ok v) (Result::ok v))
@@ -4471,7 +4471,7 @@ user-visible capacity."
 (pub defstruct complex (pub re f64) (pub im f64))
 
 ;; CL's two-argument `atan`, which `phase` is built on. `(atan y x)` is sugar
-;; for this (`Checker::check_list`, the same arity dispatch two-argument `log`
+;; for this (`typeck::expr`, the same arity dispatch two-argument `log`
 ;; uses) — a method cannot overload on arity, and `atan` is a built-in `f64`
 ;; method already.
 (pub defun atan2 ((y f64) (x f64)) f64
@@ -6830,7 +6830,7 @@ user-visible capacity."
 ;; 2. Subscripts are a `Vector<i32>` rather than a `&rest` of integers: a
 ;;    method resolves by arity, never by a trailing run of same-typed
 ;;    arguments. The CL-shaped `(aref a i j)` is checker sugar over exactly
-;;    these methods — see `Checker::check_aref`.
+;;    these methods — see `typeck::aref`.
 ;; 3. `Array::new` takes what a caller wants to hand over rather than the
 ;;    fields, which are the *representation* (dimensions, flat storage, fill
 ;;    pointer).
@@ -6849,7 +6849,7 @@ user-visible capacity."
   (pub fill-pointer Option<int>)))
 
 ;; The array a `#nA(..)` literal in source evaluates to
-;; (`Checker::check_array_literal`): its dimensions and its row-major elements
+;; (`typeck::collection_literal`): its dimensions and its row-major elements
 ;; already built, no fill pointer. Not `Array::new`, which needs an element
 ;; to fill with — a literal with a zero dimension has none.
 (module %internal (pub defun array-from-row-major<T> ((dims Vector<int>) (data Vector<T>)) Array<T>

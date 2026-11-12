@@ -2,7 +2,7 @@
 //! type every counting/indexing builtin answers with, and the type a
 //! Rust-implemented builtin's `int` parameters cross the compiled boundary
 //! at — as raw machine words, wrapped by the checker in `untag-int`/`tag-int`
-//! (`Checker::int_boundary_raw`).
+//! (`check::lower::int_boundary_raw`).
 //!
 //! Every boundary case below runs interpreted and compiled and asserts the
 //! two agree, because the boundary is the one place the two tiers hold the

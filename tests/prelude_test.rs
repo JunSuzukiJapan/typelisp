@@ -565,7 +565,7 @@ fn result_is_ok_and_is_err() {
 #[test]
 fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     // `unwrap` is defined on both `Option<T>` and `Result<T,E>` — same name,
-    // disambiguated by `Checker::receiver_method` from each call's
+    // disambiguated by `typeck::method` from each call's
     // receiver type, like any other type's instance methods.
     let src = r#"(use std::num::ParseIntError) 
         (defun get-r () Result<int,ParseIntError> (Result::ok 3))

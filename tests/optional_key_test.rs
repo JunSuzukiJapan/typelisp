@@ -1,8 +1,8 @@
 //! Tests for `defun`'s `&optional`/`&key` parameters.
 //!
-//! `Checker::check_defun_opt_key` registers each `&optional`/`&key`
+//! `typeck::lambda_list` registers each `&optional`/`&key`
 //! parameter as a `typeck::registry::OptKeyParam` (its declared type plus a
-//! checked default expression, if written); `Checker::check_call_opt_key`
+//! checked default expression, if written); `typeck::args`
 //! resolves every call site — filling in a default or `Option::none` for
 //! whatever's omitted, auto-wrapping a supplied value into `Some` for a
 //! defaultless parameter — into an ordinary fully-saturated `Expr::Call`, so
@@ -112,7 +112,7 @@ fn key_default_and_supplied_agree_between_interp_and_compile() {
 fn key_without_default_is_none_when_omitted_and_some_when_supplied() {
     // `test`'s declared type is `symbol` (no default), so its *effective*
     // type is `Option<symbol>`; a keyword literal like `:eq` is itself
-    // statically typed `symbol` (`Checker::check_inner`'s `Value::Symbol`
+    // statically typed `symbol` (`typeck::expr`'s `Value::Symbol`
     // case) — the plain value a caller supplies, auto-wrapped into `Some`.
     let omitted = eval_ok("(defun f (&key (test symbol)) bool (is-some test)) (f)");
     let supplied = eval_ok("(defun f (&key (test symbol)) bool (is-some test)) (f :test :eq)");
@@ -164,13 +164,13 @@ fn optional_is_rejected_on_lambda() {
 
 // ---- generic defun + &optional/&key ----------------------------------------
 //
-// `Checker::check_defun_opt_key` and `Checker::check_call_opt_key` run the
+// `typeck::lambda_list` and `typeck::args` run the
 // same `unify`/`subst_apply`/`validate_where_bounds`/monomorphization
-// machinery `Checker::check_call` uses for an ordinary generic call,
+// machinery `typeck::call` uses for an ordinary generic call,
 // restricted to what a call site can actually observe (required arguments,
 // plus whichever `&optional`/`&key` arguments it actually supplies — an
 // omitted one contributes nothing to inference). See that method's doc
-// comment, and `Checker::check_defun_opt_key`'s, for why a *defaulted*
+// comment, and `typeck::lambda_list`'s, for why a *defaulted*
 // `&optional`/`&key` parameter's declared type may never mention the
 // function's own type parameter.
 
@@ -237,7 +237,7 @@ fn generic_key_specialization_agrees_between_interp_and_compile() {
     // the compile pipeline's `ast_bridge`) agrees with plain interpretation
     // at *that* instantiation. This is the direct regression test for the
     // compile-side `.ty` safety issue found while planning this feature
-    // (see `Checker::check_defun_opt_key`'s doc comment): `use-a`'s default
+    // (see `typeck::lambda_list`'s doc comment): `use-a`'s default
     // (`bool true`, declared type independent of `T`) is checked exactly
     // once, on the unspecialized signature, and spliced verbatim into every
     // instantiation's call site — safe only because its type can never
@@ -272,9 +272,9 @@ fn generic_optional_self_recursive() {
 
 // ---- defmethod ------------------------------------------------------------
 //
-// The same two mechanisms, on the method side: `Checker::check_defmethod_in`
+// The same two mechanisms, on the method side: `typeck::defmethod`
 // registers the sections on the `AssocFn`'s own `FnSig`, and
-// `Checker::push_assoc_opt_key_args` (`check_assoc_call`'s branch) fills a
+// `typeck::args` (`check_assoc_call`'s branch) fills a
 // call site in. Method signatures have no type parameters of their own, so
 // there is no inference pass there — the only substitution is the one the
 // receiver's type arguments already fixed.
@@ -413,7 +413,7 @@ fn a_defaulted_method_parameter_may_not_mention_the_owners_type_parameter() {
 
 // ---- what has no named callee -------------------------------------------
 //
-// See `analyze::OPT_KEY_NEEDS_A_NAME`: filling an omitted argument in needs
+// See `typeck::lambda::OPT_KEY_NEEDS_A_NAME`: filling an omitted argument in needs
 // the callee's *checked default expression*, which lives on its signature
 // and is reachable only by resolving the callee by name. A `lambda`/`labels`
 // function is reached through its value, described by `Type::Fn` alone.

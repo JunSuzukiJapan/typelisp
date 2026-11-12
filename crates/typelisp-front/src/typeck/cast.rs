@@ -6,8 +6,7 @@
 //! `float->int`, `int->u8` ...), so the form becomes a call of it. A
 //! conversion into an integer or float family is registered at the family's
 //! widest type, and a narrower target is reached by converting the width
-//! after it. The table of conversions is the old checker's
-//! ([`as_conversion`]).
+//! after it. The table of conversions is [`as_conversion`].
 
 
 use crate::types::{prim_type_path, Type};
@@ -111,7 +110,7 @@ fn wrapped(value: Typed, try_variant: bool, loc: Option<Loc>) -> Typed {
     }
 }
 
-/// `Checker::check_as`'s conversion table: `(from, to)` -> `(panic_method,
+/// `typeck::cast`'s conversion table: `(from, to)` -> `(panic_method,
 /// try_method)`, where `panic_method` is the existing `registry.rs` instance
 /// method `as` always calls, and `try_method` — `Some` only for the two
 /// *partial* pairs — is the `Option`-returning counterpart `try-as` calls

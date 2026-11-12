@@ -4,7 +4,7 @@
 //! but not yet reachable from a root can be freed by the *next* allocation.
 //! Nothing in the type system says so: `heap.cons(a, b)` compiles fine whether
 //! or not `a` survived being built. The consequences are real and were live in
-//! this repo — `Checker::subst_value` and `forms::list_from_vec_locs` both dropped
+//! this repo — `typeck::subst` and `forms::list_from_vec_locs` both dropped
 //! freshly rebuilt syntax on the floor, which `tests/checker_gc_stress_test.rs`
 //! reproduces as a mangled `impl` receiver and a runaway `setf` expansion.
 //!

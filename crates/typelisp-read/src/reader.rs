@@ -2083,7 +2083,7 @@ fn type_args_error(what: &str) -> Error {
 }
 
 /// Reject malformed keyword tokens. A keyword is a token starting with a
-/// single `:` (CL's self-evaluating `:name`, `Checker::check_inner`'s
+/// single `:` (CL's self-evaluating `:name`, `typeck::expr`'s
 /// `Value::Symbol` case) — it carries no package/path structure, so any
 /// further `:` in it is a mistake rather than a path separator.
 ///

@@ -41,7 +41,7 @@ fn eval_ok(src: &str) -> (Value, Heap) {
 }
 
 /// Like `run`, but with the prelude loaded first — `,@` (unquote-splicing)
-/// desugars to a call to the prelude's `append` (`Checker::check_qq_template`),
+/// desugars to a call to the prelude's `append` (`typeck::quote`),
 /// so any test exercising it needs this instead of plain `run`.
 fn run_with_prelude(src: &str) -> Result<(Value, Heap), EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -534,7 +534,7 @@ fn if_let_binds_in_then_branch_and_falls_through_to_else() {
 #[test]
 fn cond_with_several_clauses_selects_the_first_true_one() {
     // 4 non-`else` clauses, so `cond`'s self-recursive expansion
-    // (`Checker::check_list`'s macro arm re-expanding its own output,
+    // (`typeck::expr`'s macro arm re-expanding its own output,
     // peeling off one clause per recursion) must unwind correctly more
     // than once, not just the 1-clause base case.
     let src = "(defun band ((n int)) string

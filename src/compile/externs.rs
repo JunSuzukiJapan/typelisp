@@ -128,7 +128,7 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         wk::F_MACROEXPAND => "rt_macroexpand",
         // The printing family. `format`/`print`/`println`/`pprint` and
         // `pprint-logical-block` are special forms; the names here are what
-        // the checker lowered them to (`Checker::check_format`/
+        // the checker lowered them to (`typeck::format`/
         // `check_print_like`/`check_pprint`/`check_pprint_logical_block`).
         // The last four are ordinary builtins (`registry`'s root `fns`).
         // All eleven run `typelisp_print::runtime::print_builtin`, the same

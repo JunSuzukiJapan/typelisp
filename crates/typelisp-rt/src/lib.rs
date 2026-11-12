@@ -1992,7 +1992,7 @@ pub unsafe extern "C" fn rt_hashtable_new(args: *const i64, argc: u32) -> i64 {
         fatal("rt_hashtable_new: expected 1 argument (the type)");
     }
     // The table's own runtime identity, spelled by the checker and handed
-    // down through the island (`Checker::assoc_form` -> `hashtable-op`'s name
+    // down through the island (`typeck::method` -> `hashtable-op`'s name
     // slot): `HashTable<string,i32>` and `HashTable<string,string>` are
     // different types and nothing in an empty table says which this is.
     let key = type_arg(*args, "rt_hashtable_new");
@@ -2177,7 +2177,7 @@ pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64
 }
 
 /// `(rt-hashtable-entries ht)` — a fresh `Vector<cons-cell<K,V>>`, each entry
-/// a `cons-cell` boxing the pair (matching `Checker::check_construct`'s own
+/// a `cons-cell` boxing the pair (matching `typeck::variant`'s own
 /// `cons-cell` layout and the interpreter's `hashtable_entries`). Unlike
 /// `keys`/`values`, each `cons-cell` is a *new* allocation, so each is rooted
 /// as it is built — otherwise a later `alloc_struct`'s GC could reclaim an

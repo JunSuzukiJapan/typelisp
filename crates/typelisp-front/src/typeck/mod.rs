@@ -1,10 +1,10 @@
-//! The rebuilt type checker (`docs/dev/checker-rebuild-plan.md`).
+//! The type checker (`docs/dev/checker-rebuild-plan.md`).
 //!
-//! It is built beside the current one (`crate::check`) and replaces it once
-//! every test passes through it. Each module does one thing and talks to the
+//! Each module does one thing and talks to the
 //! others only through [`crate::types::Type`] and the types it exports.
 //!
-//! - [`toplevel`]: the entry point, one top-level form at a time.
+//! - [`checker`]: the checker a driver holds, its entry point.
+//! - [`toplevel`]: checking one top-level form.
 //! - [`define`]: whether a definition may take its name.
 //! - [`defun`]: defining a function.
 //! - [`defvar`]: global variables.
@@ -44,8 +44,6 @@
 //! - [`subst`]: replacing declared type parameters with types.
 //! - [`unify`]: inference holes and the unification that solves them.
 //! - [`registry`]: what the program has defined, kept only when a form checks.
-//! - [`bridge`]: the current checker's registry copied in, while the two
-//!   checkers stand side by side.
 //! - [`tree`]: the typed tree checking produces.
 //! - [`lower`]: the typed tree to core IR.
 

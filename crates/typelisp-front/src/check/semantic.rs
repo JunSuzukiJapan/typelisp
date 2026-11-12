@@ -68,7 +68,7 @@ pub struct TypeToken {
 /// each document only reports its own), converts the 1-based `Loc`s to
 /// 0-based LSP positions, sorts into the document order the LSP delta
 /// encoding requires, and drops duplicates — a generic template is re-checked
-/// once per instantiation (`Checker::specialize_defun`), which records the
+/// once per instantiation (`typeck::generic`), which records the
 /// same annotation span once per pass.
 pub fn file_type_tokens(uses: &[TypeUse], file: &str) -> Vec<TypeToken> {
     let mut tokens: Vec<TypeToken> = uses

@@ -4,7 +4,7 @@
 //! `loop` stays what it was, an unconditional loop, whenever its first
 //! argument is not a keyword; that is CL's own rule (its "simple loop" form),
 //! so nothing that used to read as a body starts reading as a clause. When the
-//! first argument *is* a keyword, `Checker::check_loop` routes here.
+//! first argument *is* a keyword, `typeck::looping` routes here.
 //!
 //! This module does two separable jobs and nothing else:
 //!
@@ -25,7 +25,7 @@
 //! ```
 //!
 //! `Vector::new`'s type argument comes from the *expected* type, forwards; a
-//! later `push` cannot reach back for it. So `Checker::check_loop_dsl` checks
+//! later `push` cannot reach back for it. So `typeck::looping` checks
 //! each accumulated expression first, renders the type it found, and hands the
 //! written form down here — the checker knowing a type and writing it into the
 //! tree it builds, which is what it does everywhere else it has to
@@ -155,7 +155,7 @@ pub(crate) enum Verdict {
     Boolean,
     /// `:thereis` — `(none)` if the loop ran to exhaustion. The `Option`'s
     /// element type comes from the `:thereis` expression, which
-    /// `Checker::check_loop_dsl` finds by walking [`Plan::steps`].
+    /// `typeck::looping` finds by walking [`Plan::steps`].
     Optional,
 }
 

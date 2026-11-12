@@ -536,7 +536,7 @@ pub fn add_compiled_global_init(
 /// previously-defined `defun`/`defmethod` and marks the target `FnDef`
 /// node compiled (see `FnDef::compiled`) so `call`/`assoc`
 /// dispatches to native code instead of tree-walking it from then on.
-/// `target` is already fully resolved by `Checker::check_compile`, and is
+/// `target` is already fully resolved by `typeck::tools`, and is
 /// also what the call graph ([`compute_sccs`]) names each node by — a
 /// function and a method stay two different values all the way through. See
 /// [`add_compiled_function`] for the supported-shape scope.

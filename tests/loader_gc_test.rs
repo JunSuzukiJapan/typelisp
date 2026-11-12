@@ -10,7 +10,7 @@
 //! collected, its cell recycled into whatever the next form's checking
 //! allocates, and the bundle ends up holding a fragment. It surfaces much
 //! later, at exec, as `not a top-level core form: (())` — the same signature
-//! `Checker::check_impl`'s own `body` vector produced before it was fixed.
+//! `typeck::impl_block`'s own `body` vector produced before it was fixed.
 //!
 //! Found on 2026-08-18 by an unrelated change shifting allocation just enough
 //! to cross the threshold on a default-sized heap, which is exactly why this

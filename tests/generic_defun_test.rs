@@ -1,7 +1,7 @@
 //! Tests for generic type parameters on `defun`: `(defun name<T1,T2...> ...)`.
 //!
 //! The call-site inference reuses the same `unify`/`subst_apply` machinery
-//! `check_construct` uses for an ADT's `params` (see `Checker::check_call`),
+//! `check_construct` uses for an ADT's `params` (see `typeck::call`),
 //! so these tests focus on (a) the new declaration syntax parsing, (b)
 //! inference from argument types, (c) interaction with existing generic
 //! ADTs (`Option<T>`) including `match` binding inside a generic body, and

@@ -161,7 +161,7 @@ pub(crate) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
     // sequencing. `catch` carries its body the same way, for the same reason.
     //
     // `body` is rooted *first*, before anything else here allocates. It
-    // arrives from `Checker::let_form`, which builds under an `Items` and so
+    // arrives from `typeck::binding`, which builds under an `Items` and so
     // has already unrooted it — and the very next line allocates a string and
     // a node for the name. This is the window `rooted`'s doc comment
     // describes, and this was the fifth leak to live in it: without the root,
@@ -563,7 +563,7 @@ pub(crate) fn hole_form(heap: &mut Heap, loc: Option<Loc>) -> Result<Value, Erro
 /// `Vector<char>`, because the arguments here are arbitrary `Type`s and the
 /// name grammar cannot spell all of them: `Vector<(fn (i32) i32)>` has no
 /// written form at all. Emitting the list form makes the round trip total,
-/// which is what `Checker::subst_value` needs to substitute a trait's
+/// which is what `typeck::subst` needs to substitute a trait's
 /// associated type into a signature no matter what the `impl` bound it to.
 ///
 /// Every nested result is rooted as it is produced: each sibling's emission
@@ -632,7 +632,7 @@ pub(crate) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
 }
 
 /// Build a proper list `Value` from `items`, in order — the inverse of
-/// `heap.list_to_vec`, used by `Checker::check_impl` to reassemble a
+/// `heap.list_to_vec`, used by `typeck::impl_block` to reassemble a
 /// receiver/parameter form after substituting just its type position.
 /// Build a list, tagging each spine cell with its element's source span
 /// (`Heap::set_elem_loc`) — used by `check_impl`'s method-signature
@@ -689,7 +689,7 @@ pub(crate) fn wrap_let_star(heap: &mut Heap, bindings: Vec<(Value, Value)>, body
 /// Follows `expected` when it names one of this language's five numeric
 /// types, falling back to `i32` otherwise (a bare `Value::Int` — this
 /// language's own default for a context-free integer literal, see
-/// `Checker::int_lit_ty`) — there being no argument to infer a type from
+/// `typeck::literal`) — there being no argument to infer a type from
 /// is exactly the situation that fallback exists for. Builds a
 /// heap-boxed float/ratio directly (`Heap::alloc_f64`/`alloc_f32`/
 /// `alloc_ratio`) rather than a `(int->ratio 0)`-style call form — the same representation the reader itself produces for a
@@ -706,7 +706,7 @@ pub(crate) fn numeric_identity_literal(heap: &mut Heap, expected: Option<&Type>,
 
 /// The name the reader reads for the definition `p` from any module, for a
 /// form the checker writes and checks again: the definition's own symbol
-/// where that leads to it (`Info::find_named` — a definition at the root,
+/// where that leads to it (a definition at the root,
 /// or one named by its module's own symbol), or else the path from the root,
 /// each module by its name in the one before. Both tables are permanent, so
 /// the result needs no rooting of its own.

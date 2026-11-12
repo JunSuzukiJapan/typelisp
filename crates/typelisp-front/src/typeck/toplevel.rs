@@ -415,7 +415,7 @@ mod tests {
         checker
     }
 
-    /// `src`'s forms, read, checked by the rebuilt checker and run in order:
+    /// `src`'s forms, read, checked and run in order:
     /// the last one's value and type.
     fn run(src: &str) -> (Heap, Value, Type) {
         let mut heap = Heap::with_capacity(1 << 16);
@@ -1306,7 +1306,7 @@ mod tests {
         assert!(checker.reg.fn_def(&f).is_none());
     }
 
-    /// The rebuilt checker checks the core macro layer and the prelude, and
+    /// The checker checks the core macro layer and the prelude, and
     /// what it makes of them runs; the unit it writes of them reads back.
     #[test]
     fn the_prelude_checks_and_runs() {

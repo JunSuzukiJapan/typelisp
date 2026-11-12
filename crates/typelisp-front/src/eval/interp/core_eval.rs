@@ -375,7 +375,7 @@ impl Interp {
     /// The block name a `block`/`return-from` node's first field carries.
     ///
     /// A plain `(str "name")` node, not a quoted symbol: the name is settled at
-    /// check time (`Checker::block_stack`) and exists at run time only to tell
+    /// check time (`typeck::block`) and exists at run time only to tell
     /// nested blocks apart, so nothing here needs a symbol's identity.
     pub(super) fn block_name_of(&self, heap: &Heap, form: Value) -> Result<String, EvalError> {
         match core::field(heap, form, 0).and_then(|n| core::field(heap, n, 0)) {
@@ -1192,7 +1192,7 @@ pub(super) fn match_core_pattern(
         }
         // `(pat-empty)` — the empty list. Its own node rather than
         // `(pat-ctor sexpr 0 ..)` because the empty list outlives `Sexpr`'s
-        // `nil` variant; see `Checker::pattern_form`.
+        // `nil` variant; see `typeck::pattern`.
         "pat-empty" => Ok(if v.is_empty() { Some(Vec::new()) } else { None }),
         // `(pat-some REPR P)` — a niched `Option`'s `(some P)`. Under the
         // niche the payload is the same `Value`, so this rejects the empty
@@ -1799,7 +1799,7 @@ impl Interp {
                 heap.push_permanent_root(tl);
                 // Every parameter — and the result — is `Sexpr`. The checker
                 // already checks a macro body under exactly those types
-                // (`Checker::check_defmacro`), so this records a signature it
+                // (`typeck::defmacro`), so this records a signature it
                 // established rather than inventing one, and recording it is
                 // what makes a macro body compilable: `compiled_fn_body`
                 // refuses a `FnDef` without one, which is why `(compile
@@ -1836,7 +1836,7 @@ impl Interp {
             // initializer is not evaluated at all the second time, so
             // re-loading a file neither repeats its side effects nor throws
             // away what the session has since stored there. Absent reads as
-            // `defvar` — see `Checker::defvar_form`.
+            // `defvar` — see `typeck::defvar`.
             "defvar" => {
                 let name = definition_field(heap, tl, 0, "defvar")?;
                 let reassign = matches!(core::field(heap, tl, 4), Some(Value::Bool(true)));
@@ -1948,7 +1948,7 @@ impl Interp {
             }
             "use" => Ok(None),
             // A forward declaration produced no code — its whole effect
-            // happened in the checker (`Checker::check_defsignature`).
+            // happened in the checker (`typeck::defsignature`).
             "defsignature" => Ok(None),
             // `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR (CTYPE...) RET-CTYPE)`
             //

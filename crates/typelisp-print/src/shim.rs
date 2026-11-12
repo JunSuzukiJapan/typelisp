@@ -22,7 +22,7 @@
 //! interpreter does. The compiled ABI does not — an `i64`, a `bool` and `()`
 //! are bare machine words there, only heap values are tagged — so each shim
 //! converts at its own edge, per the signature the checker gave it
-//! (`Checker::check_format`/`check_print_like`/`check_pprint`, and
+//! (`typeck::format`/`check_print_like`/`check_pprint`, and
 //! `registry`'s `pprint-*` entries).
 //!
 //! # Unwinding

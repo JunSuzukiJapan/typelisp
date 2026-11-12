@@ -234,7 +234,7 @@ fn builtin_option_results_use_the_niche_in_both_tiers() {
 }
 
 /// An omitted defaultless `&optional`/`&key` argument is an `Option<T>` the
-/// *call site* builds — `Checker::option_form`, the same producer `(some x)`
+/// *call site* builds — `typeck::variant`, the same producer `(some x)`
 /// goes through — so the callee's `pat-some`/`pat-empty` read the shape they
 /// expect. (The first full run of this stage had the call site still
 /// boxing, and every prelude function with an omitted optional failed.)

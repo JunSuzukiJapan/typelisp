@@ -1,7 +1,7 @@
 //! Tests for the CL-equivalent docstring mechanism: a docstring attached to
 //! `defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/
 //! `defenum`/`deftrait`, and the `documentation` special form that reads it
-//! back — resolved entirely at check time (`Checker::check_documentation`)
+//! back — resolved entirely at check time (`typeck::documentation`)
 //! into a constant `Option<Str>`, so these tests exercise it the same way
 //! any other expression is evaluated.
 

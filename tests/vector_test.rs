@@ -227,7 +227,7 @@ fn incf_on_a_call_form_place_evaluates_the_index_exactly_once() {
     // If `(incf (get v (progn (setf idx (+ idx 1)) idx)) 10)` evaluated the
     // index subform twice, the read and the write would land on different
     // indices (0 then 1) and `v[0]` would stay `10` — the double-eval bug
-    // `Checker::place_dedup` exists to prevent.
+    // `typeck::setf` exists to prevent.
     let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)) (idx -1))
                  (push v 10)

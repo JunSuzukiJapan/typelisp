@@ -24,7 +24,7 @@ use crate::{Checker, Heap, Interp, Reader};
 
 pub const SOURCE: &str = r##"
 ;; `sexpr-append`: `Sexpr` list concatenation, for `,@` (unquote-splicing —
-;; `Checker::check_qq_template` desugars each splice to a `(sexpr-append
+;; `typeck::quote` desugars each splice to a `(sexpr-append
 ;; spliced rest)` call). First in this file because every macro below that
 ;; splices needs it already registered.
 (defun sexpr-append ((a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr>
@@ -34,7 +34,7 @@ pub const SOURCE: &str = r##"
 
 ;; `and`/`or`: a self-recursive macro — each expansion peels off one argument
 ;; and re-emits a (shorter) `(and ...)`/`(or ...)` call, which the checker
-;; re-expands the same way (`Checker::check_list`'s macro arm recursively
+;; re-expands the same way (`typeck::expr`'s macro arm recursively
 ;; re-`check`s its own expansion); termination follows from `cdr`/`null`
 ;; shrinking `args` by one each step.
 ;; Macro bodies navigate their `Sexpr` argument through the `sexpr-*` layer,
@@ -55,7 +55,7 @@ pub const SOURCE: &str = r##"
 ;; `when`/`unless`: `if` with one side missing. The taken side's trailing `()`
 ;; is not decoration — `if` is a fixed 3-element form here, so both sides must
 ;; agree in type, and the *untaken* side is bare `()`. Both resolve to `Unit`
-;; (not the empty list) via `Checker::check`'s `Value::Empty` special case, the
+;; (not the empty list) via `typeck::expr`'s `Value::Empty` special case, the
 ;; same two-faced `()` the rest of the language relies on (see
 ;; `docs/dev/language-design.md` §0). Without it, `(when c 5)` would try to unify
 ;; `i32` against the else branch's `Unit` and fail to check.

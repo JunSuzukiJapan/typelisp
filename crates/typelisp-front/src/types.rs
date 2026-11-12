@@ -454,7 +454,7 @@ pub enum Type {
     /// values are those two types' own values, kept normalized as CL's
     /// arithmetic leaves them (an integer-valued result is the `int`), so an
     /// `int` reaches a `rational` position as it stands and a `ratio` through
-    /// `ratio->rational`, which normalizes (`Checker::reconcile_expected`).
+    /// `ratio->rational`, which normalizes (`typeck::widen`).
     /// It is what `int`'s `/` answers, and what arithmetic mixing an `int`
     /// with a `ratio` answers.
     Rational,
@@ -492,15 +492,15 @@ pub enum Type {
     /// order — `:dyn Iter<i32>` is `Iter` with `Item = i32`, the counterpart
     /// of Rust's `dyn Iterator<Item = i32>`.
     ///
-    /// A `Dyn` is always heap-represented (`Checker::is_heap_repr`): its
+    /// A `Dyn` is always heap-represented (`check::repr`): its
     /// runtime value is a `BoxedObj::Dyn` fat box holding the vtable id
     /// alongside the concrete value.
     Dyn(Path, Vec<Type>),
     /// A function type `(fn (params...) ret)`, or — when the second field is
     /// `Some` — a variadic function type `(fn (params... &rest elem) ret)`:
     /// every call-site argument from that point on must have type `elem`
-    /// (see `Checker::check_call`/`check_apply`/`apply`'s desugaring, and
-    /// `Checker::parse_params_rest` for the parallel `defun`/`lambda`
+    /// (see `typeck::call`/`check_apply`/`apply`'s desugaring, and
+    /// `typeck::lambda_list` for the parallel `defun`/`lambda`
     /// parameter-list syntax).
     Fn(Vec<Type>, Option<Box<Type>>, Box<Type>),
     /// An opaque C pointer — `void *`, `FILE *`, whatever the declaration
@@ -551,13 +551,13 @@ pub enum Type {
     /// 7.1): a definition's `<T>`, a `defmethod` receiver's or an `impl`
     /// target's parameters, a `deftrait`'s `Self` and `(:type Item)`.
     Param(TypeParam),
-    /// A hole the rebuilt checker solves while it infers one call's type
+    /// A hole the checker solves while it infers one call's type
     /// arguments (`docs/dev/checker-rebuild-plan.md` 7.2). It never leaves
     /// the checker: no registry entry or output holds one.
     Infer(u32),
     /// The associated type, by its name, of the trait at the [`Path`] that
     /// the type in the box implements: Rust's `<T as Iter>::Item`. The
-    /// rebuilt checker writes it for an associated type a bound does not
+    /// checker writes it for an associated type a bound does not
     /// pin, inside the bounded definition, where it is a type nothing is
     /// known of; a specialization replaces it with the type the `impl`
     /// binds. No source writes one, so no signature or registry entry
@@ -705,7 +705,7 @@ impl Type {
 
     /// The six built-in integer types (`i8`/`i16`/`i32`, `u8`/`u16`/`u32`).
     /// The one authoritative list, so callers that need to single out "an
-    /// integer type" (`Checker::int_lit_ty`/pattern checking, `core_bridge`'s
+    /// integer type" (`typeck::literal`/pattern checking, `core_bridge`'s
     /// struct-field classifier) share it instead of each re-enumerating all
     /// six variants.
     ///
@@ -952,7 +952,7 @@ fn parse_ptr_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) 
 /// ([`parse_qualified_generic`]) can only spell arguments that are themselves
 /// names, `()`, or `:dyn` — never a `(fn ...)`. Substituting a trait's
 /// associated type into a signature has to be able to produce whatever the
-/// `impl` bound it to, so `Checker::subst_value` emits this form (see
+/// `impl` bound it to, so `typeck::subst` emits this form (see
 /// `check::forms::type_to_form`) instead of splicing text into a symbol's
 /// name.
 ///
@@ -1011,7 +1011,7 @@ fn parse_dyn_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) 
 
 /// Parse a `(fn (param-types...) ret-type)` list. The parameter-type list may
 /// end in `&rest elem-type` to write a variadic function type, mirroring
-/// `Checker::parse_params_rest`'s `defun`/`lambda` parameter syntax.
+/// `typeck::lambda_list`'s `defun`/`lambda` parameter syntax.
 fn parse_fn_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
     let elems = heap.list_to_vec_locs(v)?;
     if elems.len() != 3 {
@@ -1032,7 +1032,7 @@ fn parse_fn_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -
 
 /// Split a `(fn ...)` type's parameter-type list into fixed types and an
 /// optional trailing `&rest elem-type` (the type of each variadic argument) —
-/// the type-expression counterpart of `Checker::parse_params_rest`.
+/// the type-expression counterpart of `typeck::lambda_list`.
 fn parse_fn_params(
     heap: &Heap,
     ns: NsId,
@@ -1099,7 +1099,7 @@ pub fn path_spelling(heap: &Heap, id: PathId) -> String {
 
 /// The path a type name written in `ns` stands for, before the analysis
 /// looks it up: a bare name is its symbol in `ns`, where the lookup starts
-/// (`Info::find_written`); a `::` path is its last symbol in the module the
+/// (`typeck::resolve`); a `::` path is its last symbol in the module the
 /// path leads to ([`path_target`]).
 pub fn written_path(heap: &Heap, ns: NsId, v: Value) -> Result<Path, Error> {
     match v {

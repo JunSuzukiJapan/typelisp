@@ -1,7 +1,7 @@
 //! Tests for `defstruct`'s option list: `(defstruct (Name option...) ...)`.
 //!
-//! `Checker::check_defstruct` synthesizes the copier as method **source**
-//! and runs it through `Checker::check_defmethod_in`, which gives it
+//! `typeck::defstruct` synthesizes the copier as method **source**
+//! and runs it through `typeck::defmethod`, which gives it
 //! visibility and, for a generic owner, the `MethodTemplate::Form` retention
 //! that makes it specializable.
 
