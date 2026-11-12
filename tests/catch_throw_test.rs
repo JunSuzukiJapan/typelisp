@@ -162,7 +162,7 @@ fn a_throw_reaching_a_catch_of_its_symbol_and_another_type_is_an_error() {
         (defun middle () string (catch 'done (progn (deep) "body")))
         (defun f () int (catch 'done (progn (middle) 0)))
         "#;
-    let want = "throw: `done` carries `std::primitive::int`, but the nearest (catch 'done) carries `std::primitive::string`";
+    let want = "throw: `done` carries `int`, but the nearest (catch 'done) carries `string`";
     for r in [run(&format!("{} (f)", src)), run_compiled(&format!("{} (compile f) (f)", src))] {
         match r {
             Err(EvalError::Panic(msg)) => assert_eq!(msg, want),

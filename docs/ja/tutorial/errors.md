@@ -180,7 +180,7 @@ error: main.typl:4:7: panic: index 3 out of range
   届いたときにエラーになります。
 
   ```
-  error: panic: throw: `bad-input` carries `std::primitive::int`, but the nearest (catch 'bad-input) carries `std::primitive::string`
+  error: panic: throw: `bad-input` carries `int`, but the nearest (catch 'bad-input) carries `string`
   ```
 
 - ジェネリックな関数の中のタグは、具体化ごとの型を運びます。
