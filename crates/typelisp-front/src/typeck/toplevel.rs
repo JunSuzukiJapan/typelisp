@@ -1444,6 +1444,30 @@ mod tests {
         assert_eq!(run(src).1, Value::Int(6));
     }
 
+    /// A method one instantiation has: called through a bound with type
+    /// parameters of its own, and refused on a receiver whose type does not
+    /// say it is that instantiation.
+    #[test]
+    fn a_method_of_one_instantiation() {
+        let defs = "(defstruct B<T> (v T)) (impl B<int> (defmethod only-int (self) int self::v)) \
+                    (deftrait Mk () (defmethod mk<U> (self (u U)) U)) (impl Mk B<int> (defmethod mk<W> (self (u W)) W u)) \
+                    (defun g<X> ((x X)) int (:where (Mk X)) (mk x 5))";
+        assert_eq!(run(&format!("{} (g (make-instance 'B<int> :v 1))", defs)).1, Value::Int(5));
+        let e = check_err(&format!("{} (let ((b (make-instance 'B<bool> :v true))) b::only-int)", defs));
+        assert!(e.contains("`b::only-int`: `only-int` is a method of `B<int>` only, and `b` is a `B<bool>`"), "{}", e);
+        let e = check_err(&format!("{} (let ((b (make-instance 'B :v (Option::none)))) (only-int b))", defs));
+        assert!(e.contains("`only-int` is a method of some instantiations of `B`, and the receiver's type `B<Option<_>>` does not say which yet"), "{}", e);
+    }
+
+    /// A list headed by a keyword or a quote is no pattern.
+    #[test]
+    fn a_list_of_a_keyword_or_a_quote_is_no_pattern() {
+        let e = check_err("(defun f ((s Sexpr)) int (match s ((:k 1) 1) (_ 0)))");
+        assert!(e.contains("pattern: `(:k ...)` is no pattern"), "{}", e);
+        let e = check_err("(defun f ((s Sexpr)) int (match s ('(1 2) 1) (_ 0)))");
+        assert!(e.contains("is no pattern — a quoted symbol `'sym` is"), "{}", e);
+    }
+
     /// A method belongs to the type its receiver names; a function type
     /// names none.
     #[test]

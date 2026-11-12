@@ -336,7 +336,10 @@ pub(crate) fn tables(lw: &mut Lowering, concrete: &Type, trait_path: &Path) -> R
             Some(def) if super::toplevel::builtin_needs_specialization(lw.reg, &owner, def) => lw.requests.ask_method(&owner, *m, targs.clone()),
             Some(def) if def.sig.builtin || def.sig.type_params.is_empty() => *m,
             Some(def) if def.sig.type_params.len() == targs.len() => lw.requests.ask_method(&owner, *m, targs.clone()),
-            Some(_) => unimplemented!("typeck: `{}::{}`, with type parameters of its own, in the table of `{}`", owner, m, to),
+            // A trait object's trait has no method with type parameters of its
+            // own (`object_safe`), and an `impl`'s method declares as many as
+            // the trait's.
+            Some(_) => unreachable!("`{}::{}`, with type parameters of its own, in the table of `{}`", owner, m, to),
             None => match lw.reg.blanket_of(decl).filter(|b| lw.reg.method(&b.owner, *m).is_some()).map(|b| b.owner) {
                 Some(blanket) => lw.requests.ask_method(&blanket, *m, vec![concrete.clone()]),
                 None => return Err(Error::TypeError(format!("`{}`'s `impl {}` is missing method `{}`", owner, decl, m))),

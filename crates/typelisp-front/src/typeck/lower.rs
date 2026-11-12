@@ -131,7 +131,9 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 Type::Named(path, type_args) => (*path, type_args.clone()),
                 other => match prim_type_path(other) {
                     Some(path) => (path, Vec::new()),
-                    None => unimplemented!("typeck: `{}::{}` on a `{}`, which names no type", trait_path, method, other),
+                    // A type meets a bound by an `impl` of it, or by a blanket
+                    // `impl`, which covers only a type with a name.
+                    None => unreachable!("`{}::{}` on a `{}`, which names no type", trait_path, method, other),
                 },
             };
             let Some(def) = lw.reg.method_at(&owner, *method, &type_args) else {
@@ -152,11 +154,15 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             // An `impl`'s methods have the type's parameters, in order; one
             // for one instantiation has code under that instantiation's name.
             // The method's own type arguments follow the type's.
+            // One for one instantiation with type parameters of its own is
+            // specialized under that instantiation's name, as a direct call
+            // does.
             let method = if let Some(inst) = &def.inst_args {
-                if !own.is_empty() {
-                    unimplemented!("typeck: `{}::{}`, a method with type parameters of its own written for one instantiation", owner, method)
+                let code = super::generic::method_specialization(&owner, *method, inst);
+                match own.is_empty() {
+                    true => code,
+                    false => lw.requests.ask_method(&owner, code, own),
                 }
-                super::generic::method_specialization(&owner, *method, inst)
             } else if def.sig.builtin || def.sig.type_params.is_empty() {
                 *method
             } else {

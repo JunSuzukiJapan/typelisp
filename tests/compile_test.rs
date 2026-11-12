@@ -1547,6 +1547,24 @@ fn compile_dispatches_a_defstruct_field_of_fn_type_to_native_code() {
     assert_eq!(v, Value::Int(8));
 }
 
+/// A static method a `use` brought in is named by its bare name, as it is
+/// called; a trait's method is no one type's, and is refused.
+#[test]
+fn compile_names_a_static_method_a_use_brought_in() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m (pub defstruct P (x int)) (impl P (pub defmethod make () int 4)))
+        (use m::P::make)
+        (compile make)
+        (make)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, Value::Int(4));
+    let e = check_error("(deftrait Hello () (defmethod hi (self) int)) (compile Hello::hi)").to_string();
+    assert!(e.contains("`Hello::hi` names a method of the trait `Hello`"), "{}", e);
+}
+
 /// Follow-up to Stage 4: a `labels` sibling referenced *as a value* (not
 /// called) — here, the block's own trailing body bare-returns `f` instead of
 /// calling it. `ast_bridge::ast_to_sexpr_scoped`'s `Expr::Var` arm doesn't

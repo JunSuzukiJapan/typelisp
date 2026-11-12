@@ -115,8 +115,8 @@ fn target(cx: &Cx, heap: &Heap, v: Value, who: &str, message: &str) -> Result<Co
             if ctor_named(cx.reg, cx.ns, sym).is_some() {
                 return Err(Error::TypeError(format!("{}: `{}` is a constructor, not a function", who, name)));
             }
-            if static_use_named(cx.reg, cx.ns, sym).is_some() {
-                unimplemented!("typeck: `{}` of a static method a `use` brought in", who)
+            if let Some((owner, member)) = static_use_named(cx.reg, cx.ns, sym) {
+                return member_target(cx, owner, member, &name, who, generic);
             }
             match value_named(cx.reg, cx.ns, sym) {
                 Some((path, def)) => value_target(path, def, who, &name).map_err(|e| e.unwrap_or_else(|| generic(&name))),
@@ -130,20 +130,7 @@ fn target(cx: &Cx, heap: &Heap, v: Value, who: &str, message: &str) -> Result<Co
                     Some(def) => value_target(path, def, who, &name).map_err(|e| e.unwrap_or_else(|| generic(&name))),
                     None => Err(Error::TypeError(format!("{}: no function `{}` is visible from here", who, name))),
                 },
-                PathTarget::Member(owner, member) => {
-                    let Some(TypeEntry::Type(def)) = cx.reg.types.get(&owner) else {
-                        unimplemented!("typeck: `{}` of the path `{}`, through a type this checker does not know", who, name)
-                    };
-                    let method = member_symbol(member.name());
-                    if def.variant_index(method).is_some() {
-                        return Err(Error::TypeError(format!("{}: `{}` is a constructor, not a function", who, name)));
-                    }
-                    match member_code(cx, owner, method, &name, who)? {
-                        Some((_, m)) if !m.sig.builtin && !m.sig.type_params.is_empty() => Err(generic(&name)),
-                        Some((code, _)) => Ok(CompileTarget::Method(owner, code)),
-                        None => Err(Error::TypeError(format!("{}: type `{}` has no associated function or method `{}`", who, owner, member.name()))),
-                    }
-                }
+                PathTarget::Member(owner, member) => member_target(cx, owner, member, &name, who, generic),
             }
         }
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
@@ -167,6 +154,33 @@ fn target(cx: &Cx, heap: &Heap, v: Value, who: &str, message: &str) -> Result<Co
             )))
         }
         _ => Err(Error::TypeError(message.into())),
+    }
+}
+
+/// The member `member` of `owner`, written `name`, as what `who` acts on:
+/// a method, or a static one; `generic` is the error for a generic one.
+fn member_target(cx: &Cx, owner: Path, member: SymRef, name: &str, who: &str, generic: impl Fn(&str) -> Error) -> Result<CompileTarget, Error> {
+    let def = match cx.reg.types.get(&owner) {
+        Some(TypeEntry::Type(def)) => def,
+        Some(TypeEntry::Trait(_)) => {
+            return Err(Error::TypeError(format!(
+                "{}: `{}` names a method of the trait `{}`, which each type implementing it has its own of — name the type's, as `Type::{}`",
+                who,
+                name,
+                typelisp_print::shared::name_view().definition(owner.ns(), owner.name_symbol()),
+                member.name()
+            )))
+        }
+        _ => return Err(Error::TypeError(format!("{}: `{}` is not a type with methods", who, owner))),
+    };
+    let method = member_symbol(member.name());
+    if def.variant_index(method).is_some() {
+        return Err(Error::TypeError(format!("{}: `{}` is a constructor, not a function", who, name)));
+    }
+    match member_code(cx, owner, method, name, who)? {
+        Some((_, m)) if !m.sig.builtin && !m.sig.type_params.is_empty() => Err(generic(name)),
+        Some((code, _)) => Ok(CompileTarget::Method(owner, code)),
+        None => Err(Error::TypeError(format!("{}: type `{}` has no associated function or method `{}`", who, owner, member.name()))),
     }
 }
 

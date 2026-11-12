@@ -510,7 +510,8 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             _ => unreachable!("`crate::typeck::literal` made every other empty list a unit literal"),
         },
         Value::Boxed(id) => collection_literal::check_boxed(cx, heap, locals, id, expected, loc),
-        other => unimplemented!("typeck: checking {:?} (only literals, names and lists are checked so far)", other),
+        // `literal` takes every integer, character, boolean and string.
+        other => unreachable!("`literal` checked {:?}", other),
     }
 }
 
@@ -753,8 +754,9 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         _ => {}
     }
     // SPECIAL-FORM DISPATCH END
+    // `editor_keyword_sync_test` keeps the list and the dispatch above one.
     if SPECIAL_FORM_HEADS.contains(&head.well_known()) {
-        unimplemented!("typeck: the special form `{}`", heap.symbol_spelling(head))
+        unreachable!("the special form `{}` is dispatched above", heap.symbol_spelling(head))
     }
     crate::check::verify::expression_head(head, TOPLEVEL_FORM_HEADS)?;
     let spelling = heap.symbol_spelling(head);

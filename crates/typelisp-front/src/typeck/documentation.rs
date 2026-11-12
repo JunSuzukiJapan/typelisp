@@ -85,7 +85,7 @@ pub(crate) fn definition(cx: &Cx, heap: &Heap, v: Value, who: &str, message: &st
                             Some(_) => Ok(Definition::TraitMethod(owner, method)),
                             None => Err(Error::TypeError(format!("{}: trait `{}` has no method `{}`", who, owner, member.name()))),
                         },
-                        _ => unimplemented!("typeck: `{}` of `{}`, a member of what is not a type or a trait", who, name),
+                        _ => Err(Error::TypeError(format!("{}: `{}` is not a type with methods", who, owner))),
                     }
                 }
             }

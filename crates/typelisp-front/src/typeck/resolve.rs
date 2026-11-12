@@ -107,7 +107,13 @@ pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name
         super::unify::walk(a, &mut |t| open |= matches!(t, Type::Infer(_)));
         open
     }) {
-        unimplemented!("typeck: `{}`, which `{}` has for one instantiation, on a receiver whose type arguments are not decided yet", name.name(), owner)
+        return Err(Error::TypeError(format!(
+            "`{}` is a method of some instantiations of `{}`, and the receiver's type `{}` does not say which yet — say it, e.g. with `(the {}<...> ...)`",
+            name.name(),
+            typelisp_print::shared::name_view().definition(owner.ns(), owner.name_symbol()),
+            ty,
+            typelisp_print::shared::name_view().definition(owner.ns(), owner.name_symbol())
+        )));
     }
     let Some(m) = reg.method_at(&owner, name, args) else {
         return blanket_method(reg, ty, name);

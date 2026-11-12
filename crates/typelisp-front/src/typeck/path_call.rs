@@ -91,7 +91,7 @@ pub(crate) fn check_member_call(
                 member.name()
             )))
         }
-        _ => unimplemented!("typeck: the path `{}`, through a type this checker does not know", spelling),
+        _ => return Err(Error::TypeError(format!("`{}`: `{}` is not a type with methods", spelling, owner))),
     };
     let name = member_symbol(member.name());
     if let Some(variant) = def.variant_index(name) {

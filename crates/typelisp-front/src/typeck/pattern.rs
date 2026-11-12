@@ -90,8 +90,19 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                 }
                 // `(the Type pattern)`: out of a `Sexpr`, a value of `Type`.
                 Value::Symbol(h) if h.is(wk::THE) => return type_test(cx, heap, locals, expected, &written, binds),
-                Value::Symbol(h) if h.is_keyword() || h.is(wk::QUOTE) => {
-                    unimplemented!("typeck: the pattern `({} ...)`", heap.symbol_spelling(h))
+                Value::Symbol(h) if h.is(wk::QUOTE) => {
+                    return Err(Error::TypeError(format!(
+                        "pattern: `{}` is no pattern — a quoted symbol `'sym` is; to match an S-expression equal to a quoted one, test it with `equal` in a `:when`, as `(_ :when (equal x {}) ...)`",
+                        crate::check::core::print(heap, v),
+                        crate::check::core::print(heap, v)
+                    )));
+                }
+                Value::Symbol(h) if h.is_keyword() => {
+                    return Err(Error::TypeError(format!(
+                        "pattern: `({} ...)` is no pattern — a keyword is a pattern by itself, `{}`, and `(:= expr)` matches a value equal to `expr`",
+                        heap.symbol_spelling(h),
+                        heap.symbol_spelling(h)
+                    )));
                 }
                 Value::Symbol(h) => Some(h),
                 Value::Path(_) => None,

@@ -219,7 +219,16 @@ pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRe
     match cx.receiver_method(&recv_ty, name)? {
         Some((owner, def)) if def.instance => check_method_call(cx, heap, locals, owner, name, def, Some(obj), &[], &[], None, loc),
         _ if cx.reg.has_inst_method(path, name) => {
-            unimplemented!("typeck: `{}::{}`, a method `{}` has for one instantiation", recv.name(), member.name(), path)
+            let has: Vec<String> = cx.reg.inst_methods(path, name).iter().map(|(args, _)| format!("`{}`", Type::Named(*path, args.clone()))).collect();
+            Err(Error::TypeError(format!(
+                "`{}::{}`: `{}` is a method of {} only, and `{}` is a `{}`",
+                recv.name(),
+                member.name(),
+                member.name(),
+                has.join(", "),
+                recv.name(),
+                cx.holes.borrow().shown(&recv_ty)
+            )))
         }
         _ => Err(unresolved()),
     }
