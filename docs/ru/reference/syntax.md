@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Справочник по синтаксису typelisp
 
 typelisp — это Лисп со статической типизацией, записываемый S-выражениями. Список встроенных функций и методов — во
@@ -1481,6 +1481,18 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   (match d
     ((circle :r) (* (* r r) 3))    ; разбор по полям с именем типа впереди
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Объект трейта внутри поля структуры или варианта сопоставляется теми же образцами. И здесь множество
+реализующих типов открыто, поэтому нужна ветвь `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

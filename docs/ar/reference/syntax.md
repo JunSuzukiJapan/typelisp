@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -1410,6 +1410,18 @@ Rust). ويمكن استدعاء القيمة لاحقًا من خارج `unsafe
   (match d
     ((circle :r) (* (* r r) 3))    ; تفكيك الحقول مع اسم النوع أولًا
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+يمكن مطابقة كائن trait داخل حقل بنية أو داخل متغير بالأنماط نفسها. وهنا أيضًا مجموعة الأنواع المنفِّذة
+مفتوحة، لذا يلزم فرع `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

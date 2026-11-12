@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1546,6 +1546,18 @@ abierto, así que nunca puede ser exhaustivo, y `_` es obligatorio:
   (match d
     ((circle :r) (* (* r r) 3))    ; descomposición por campos con el nombre del tipo primero
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Un objeto de trait dentro del campo de un struct o de una variante se puede emparejar con los mismos
+patrones. También aquí el conjunto de tipos que lo implementan es abierto, así que hace falta un brazo `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

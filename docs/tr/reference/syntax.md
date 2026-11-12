@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1515,6 +1515,18 @@ bu yüzden ek sözdizimi yoktur. Gerçekleştiren türler kümesi açıktır; bu
   (match d
     ((circle :r) (* (* r r) 3))    ; field decomposition with the type name first
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Bir struct'ın alanındaki veya bir varyantın içindeki trait nesnesi de aynı desenlerle eşleştirilebilir.
+Burada da uygulayan türlerin kümesi açık olduğundan bir `_` kolu gerekir:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

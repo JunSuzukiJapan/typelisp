@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1519,6 +1519,18 @@ syntax behövs. Mängden implementerande typer är öppen, så den kan aldrig va
   (match d
     ((circle :r) (* (* r r) 3))    ; fältuppdelning med typnamnet först
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Ett trait-objekt i ett fält i en struct eller i en variant kan matchas med samma mönster. Även här är
+mängden implementerande typer öppen, så en `_`-gren behövs:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

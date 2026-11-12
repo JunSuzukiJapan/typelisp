@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # typelisp सिंटैक्स संदर्भ
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है, जो S-एक्सप्रेशन में लिखा जाता है। बिल्ट-इन फ़ंक्शन और मेथड की सूची के लिए [बिल्ट-इन फ़ंक्शन](functions/README.md) देखें; टाइप की सूची के लिए [types.md](types.md); और त्रुटि संदेश पढ़ने के लिए [errors.md](errors.md)।
@@ -1136,6 +1136,18 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   (match d
     ((circle :r) (* (* r r) 3))    ; टाइप के नाम को पहले रखकर फ़ील्ड विघटन
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+किसी struct के फ़ील्ड या किसी वेरिएंट के भीतर के trait ऑब्जेक्ट से भी इन्हीं पैटर्न से मिलान किया जा सकता
+है। यहाँ भी लागू करने वाले प्रकारों का समुच्चय खुला है, इसलिए `_` शाखा चाहिए:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

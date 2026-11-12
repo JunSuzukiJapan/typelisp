@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -1310,6 +1310,18 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   (match d
     ((circle :r) (* (* r r) 3))    ; 타입 이름을 앞에 둔 필드 분해
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+구조체의 필드나 변형 안에 있는 trait 객체에도 같은 패턴을 쓸 수 있다. 이 경우에도 구현 타입의 집합은
+열려 있으므로 `_` 팔이 필요하다:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1540,6 +1540,18 @@ et `_` est obligatoire :
   (match d
     ((circle :r) (* (* r r) 3))    ; décomposition en champs avec le nom du type en tête
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Un objet trait dans le champ d'une structure ou dans une variante se filtre avec les mêmes motifs.
+Ici aussi l'ensemble des types qui l'implémentent est ouvert, donc une branche `_` est nécessaire :
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1575,6 +1575,18 @@ sintaks tambahan. Himpunan tipe pengimplementasi terbuka, sehingga tidak pernah 
   (match d
     ((circle :r) (* (* r r) 3))    ; field decomposition with the type name first
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Objek trait di dalam field struct atau di dalam varian juga dapat dicocokkan dengan pola yang sama. Di sini
+pun himpunan tipe yang mengimplementasikannya terbuka, jadi diperlukan cabang `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

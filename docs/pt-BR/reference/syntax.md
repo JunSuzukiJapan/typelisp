@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1514,6 +1514,18 @@ então não há sintaxe adicional. O conjunto de tipos que o implementam é aber
   (match d
     ((circle :r) (* (* r r) 3))    ; decomposição por campos com o nome do tipo primeiro
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Um objeto trait dentro do campo de uma struct ou de uma variante pode ser casado com os mesmos padrões.
+Aqui também o conjunto de tipos que o implementam é aberto, então é preciso um braço `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

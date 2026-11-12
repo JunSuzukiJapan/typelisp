@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1567,6 +1567,18 @@ kann es nie vollständig sein, und `_` ist Pflicht:
   (match d
     ((circle :r) (* (* r r) 3))    ; Zerlegung in Felder mit dem Typnamen vorn
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Ein Trait-Objekt im Feld eines Structs oder in einer Variante lässt sich mit denselben Mustern
+abgleichen. Auch hier ist die Menge der implementierenden Typen offen, daher ist ein `_`-Zweig nötig:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -1190,6 +1190,18 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
   (match d
     ((circle :r) (* (* r r) 3))    ; 型別名稱在前的欄位拆解
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+結構體欄位或變體中的 trait 物件，也可以用同樣的模式比對。此時實作型別的集合同樣是開放的，
+因此需要 `_` 分支：
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

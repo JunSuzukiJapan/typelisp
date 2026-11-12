@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1476,6 +1476,18 @@ khai là mở, nên nó không bao giờ có thể đầy đủ, và cần `_`:
   (match d
     ((circle :r) (* (* r r) 3))    ; phân rã trường với tên kiểu đứng đầu
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Đối tượng trait bên trong trường của struct hoặc bên trong biến thể cũng khớp được bằng cùng các mẫu.
+Ở đây tập các kiểu cài đặt cũng mở, nên cần một nhánh `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

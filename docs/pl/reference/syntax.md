@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1520,6 +1520,18 @@ wymagane:
   (match d
     ((circle :r) (* (* r r) 3))    ; rozkład pól z nazwą typu na początku
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+Obiekt traitu w polu struktury lub w wariancie można dopasować tymi samymi wzorcami. Także tu zbiór
+typów implementujących jest otwarty, więc potrzebna jest gałąź `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

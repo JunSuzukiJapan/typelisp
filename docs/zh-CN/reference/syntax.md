@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -1214,6 +1214,18 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   (match d
     ((circle :r) (* (* r r) 3))    ; 类型名在前的字段拆解
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+结构体字段或变体中的 trait 对象，也可以用同样的模式匹配。此时实现类型的集合同样是开放的，
+因此需要 `_` 分支：
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 

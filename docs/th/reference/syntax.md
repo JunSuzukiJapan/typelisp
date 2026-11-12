@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -1427,6 +1427,18 @@ literal ที่ไม่ใช่ immediate (สตริง / จำนวน
   (match d
     ((circle :r) (* (* r r) 3))    ; field decomposition with the type name first
     ((the square s) (* s::side s::side))
+    (_ 0)))
+```
+
+trait object ที่อยู่ในฟิลด์ของ struct หรือในตัวแปรของ enum ก็จับคู่ด้วยแพตเทิร์นเดียวกันได้
+ในกรณีนี้เซตของชนิดที่อิมพลีเมนต์ก็เปิดเช่นกัน จึงต้องมีแขน `_`:
+
+```lisp
+(defstruct holder (d :dyn Drawable))
+
+(defun size ((h holder)) i32
+  (match h
+    ((holder :d (circle :r)) r)
     (_ 0)))
 ```
 
