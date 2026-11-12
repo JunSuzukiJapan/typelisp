@@ -177,6 +177,7 @@ core IR のほかに、登録表と型もチェッカーの外から読まれて
 4. 全テストが新しいチェッカーで通ったら切り替え、古いチェッカーを丸ごと消す。
    切り替えた（2026-11-11）。スイッチは無くなり、今のチェッカーの `check_form_at` は常にすべてのフォームを新しいチェッカーに渡す。
    古いチェッカーのチェック本体を消した（2026-11-12）。続いて、組み込みの定義を新しい登録表の形で書き直し、古い登録表（`check::registry`）・写す仕組み（`typeck::bridge`）・`Type::Var` を消した（2026-11-12、7.7・8.3）。
+   続いて、ドライバが持つ `check::Checker`（新しいチェッカーへ渡すだけの層）を `typeck::checker::Checker` 1 つにまとめ、`check/analyze.rs` を消した（2026-11-12）。`check` に残るのは、core IR の組み立て（`core`・`forms`・`lower`・`repr`・`freevars`・`fold`）、断るときの文（`verify`）、`loop` の DSL、エディタが読むもの（`locate`・`semantic`）、`CompileTarget` である。
 
 ## 7. `types` と `scope` の設計（案）
 
