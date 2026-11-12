@@ -7,7 +7,7 @@
 //! specializations it needs, so redefining a generic function leaves no copy
 //! of the old one behind. A specialization is named by [`fn_specialization`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::types::{Path, Type};
 use crate::{Error, Value};
@@ -82,9 +82,24 @@ pub(crate) struct Requests {
     /// What the form's `~/name/` directives call, each with how its
     /// argument crosses into it.
     format_calls: Vec<(crate::CompileTarget, typelisp_print::aot::ArgWord)>,
+    /// In the instantiation of a generic body being lowered, the name each
+    /// `labels` function it passes C is lifted under: the checked body names
+    /// one path for every instantiation, and each lifts its own function.
+    lifted_names: HashMap<Path, Path>,
 }
 
 impl Requests {
+    /// Lift the `labels` function the checked body names `checked` under
+    /// `lifted` in the instantiation being lowered.
+    pub(crate) fn name_lifted(&mut self, checked: Path, lifted: Path) {
+        self.lifted_names.insert(checked, lifted);
+    }
+
+    /// The name [`Self::name_lifted`] gave `checked`.
+    pub(crate) fn lifted_name(&self, checked: &Path) -> Option<Path> {
+        self.lifted_names.get(checked).copied()
+    }
+
     /// The definition `form`, rooted, of a function lifted for a callback.
     pub(crate) fn lift(&mut self, form: Value) {
         self.lifted.push(form);

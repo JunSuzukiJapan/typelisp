@@ -44,7 +44,7 @@ pub(crate) fn check_callback_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (arg
                 )));
             };
             conform_at(cx, Typed { node: Node::Local { name }, ty, loc: loc.clone() }, fn_ty)?;
-            let lifted = fresh_path(cx);
+            let lifted = fresh_path(cx.reg, cx.ns);
             pending.borrow_mut().push(LabelsCallback { name, lifted, loc: loc.clone() });
             Ok(callback(lifted, None))
         }
@@ -56,8 +56,19 @@ pub(crate) fn check_callback_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (arg
                      Pass a `lambda` that calls it instead.",
                     callee, path
                 ))),
+                // C calls a top-level function: one that calls the generic
+                // function at these type arguments, lifted as a `lambda` is.
                 Node::FnRef { path, ref targs, .. } if !targs.is_empty() => {
-                    unimplemented!("typeck: handing C the generic function `{}` at its type arguments", path)
+                    let targs = targs.clone();
+                    let Type::Fn(params, None, ret) = cx.resolve(fn_ty) else {
+                        unreachable!("a C callback's type is a function type without &rest")
+                    };
+                    let params: Vec<(typelisp_mem::SymRef, Type)> =
+                        params.into_iter().enumerate().map(|(i, t)| (typelisp_mem::symbols::unlisted(cx.ns, &format!("arg{}", i)), t)).collect();
+                    let args = params.iter().map(|(n, t)| Typed { node: Node::Local { name: *n }, ty: t.clone(), loc: loc.clone() }).collect();
+                    let call = Typed { node: Node::Call { path, targs, args }, ty: (*ret).clone(), loc: loc.clone() };
+                    let lambda = Typed { node: Node::Lambda { params, ret: *ret, body: vec![call] }, ty: fn_ty.clone(), loc: loc.clone() };
+                    Ok(callback(fresh_path(cx.reg, cx.ns), Some(Box::new(lambda))))
                 }
                 Node::FnRef { path, .. } => Ok(callback(path, None)),
                 _ => Err(written_here(callee)),
@@ -67,7 +78,7 @@ pub(crate) fn check_callback_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (arg
             let elems = heap.list_to_vec_locs(*arg)?;
             let lambda = check_callback_lambda(cx, heap, locals, &elems[1..], loc.clone())?;
             let lambda = conform_at(cx, lambda, fn_ty)?;
-            Ok(callback(fresh_path(cx), Some(Box::new(lambda))))
+            Ok(callback(fresh_path(cx.reg, cx.ns), Some(Box::new(lambda))))
         }
         _ => Err(written_here(callee)),
     }
@@ -81,12 +92,12 @@ fn written_here(callee: &Path) -> Error {
     ))
 }
 
-/// A path in the form's module, for a lifted function, that names nothing
+/// A path in the module `ns`, for a lifted function, that names nothing
 /// yet.
-fn fresh_path(cx: &Cx) -> Path {
+pub(crate) fn fresh_path(reg: &super::registry::Registry, ns: typelisp_mem::symbols::NsId) -> Path {
     loop {
-        let path = Path::in_ns(cx.ns, &format!("callback${}", cx.reg.next_callback()));
-        if cx.reg.values.get(&path).is_none() {
+        let path = Path::in_ns(ns, &format!("callback${}", reg.next_callback()));
+        if reg.values.get(&path).is_none() {
             return path;
         }
     }

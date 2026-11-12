@@ -54,8 +54,13 @@ pub(crate) fn check_call(
             path.last_segment()
         )));
     }
-    if def.ffi && first.is_some() && matches!(def.params.first(), Some(Type::Fn(..))) {
-        unimplemented!("typeck: a callback to the C function `{}` as an argument already checked", path)
+    // A callback is checked where it is written, which a first argument
+    // checked as a value already was not: it is checked again as one.
+    if def.ffi && matches!(def.params.first(), Some(Type::Fn(..))) {
+        if let Some(first) = first {
+            let rest: Vec<(Value, Option<Loc>)> = std::iter::once(first.written).chain(rest.iter().cloned()).collect();
+            return check_call(cx, heap, locals, path, def, None, &rest, expected, loc);
+        }
     }
     let required = def.params.len();
     if has_tail(def) && given < required {

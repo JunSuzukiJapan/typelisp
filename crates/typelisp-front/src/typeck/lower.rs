@@ -325,6 +325,13 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             lw.reg.lambda_form(heap, &params, &ret, &body)
         }
         Node::Labels { defs, body, lifted } => {
+            // In a generic body each instantiation lifts its own functions.
+            if !lw.subst.is_empty() {
+                for l in lifted {
+                    let named = super::callback::fresh_path(lw.reg, l.path.ns());
+                    lw.requests.name_lifted(l.path, named);
+                }
+            }
             let lowered = defs.iter().map(|d| lower_label(heap, lw, d)).collect::<Result<Vec<_>, _>>()?;
             let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
             for l in lifted {
@@ -373,15 +380,26 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             form
         }
         Node::Callback { target, fn_ty, lifted } => {
+            // In a generic body each instantiation lifts its own function, so
+            // each is named as it is lowered.
+            // A top-level function has one name in every instantiation; a
+            // `labels` function's is the one the block named.
+            let target = &match lifted {
+                _ if lw.subst.is_empty() => *target,
+                Some(_) => super::callback::fresh_path(lw.reg, target.ns()),
+                None => match lw.requests.lifted_name(target) {
+                    Some(named) => named,
+                    None => *target,
+                },
+            };
             if let Some(lambda) = lifted {
-                if !lw.subst.is_empty() {
-                    unimplemented!("typeck: a `lambda` passed to C as a callback inside a generic body")
-                }
                 let Node::Lambda { params, ret, body } = &lambda.node else {
                     unreachable!("a lifted callback is a `lambda`")
                 };
+                let params: Vec<(SymRef, Type)> = params.iter().map(|(n, t)| (*n, lw.settle(t))).collect();
+                let ret = lw.settle(ret);
                 let body = body.iter().map(|t| lower_rooted(heap, lw, t)).collect::<Result<Vec<_>, _>>()?;
-                let form = lw.reg.defun_form(heap, target, params, ret, &body)?;
+                let form = lw.reg.defun_form(heap, target, &params, &ret, &body)?;
                 heap.push_root(form);
                 lw.requests.lift(form);
             }
@@ -606,9 +624,10 @@ fn lower_label(heap: &mut Heap, lw: &mut Lowering, d: &super::lambda::Label) -> 
 /// `defs`, `DEF...` being those it reaches. The parameters' names are none a
 /// source can write, so none shadows a function of the copied block.
 fn lift_label(heap: &mut Heap, lw: &mut Lowering, defs: &[super::lambda::Label], l: &super::lambda::LiftedLabel) -> Result<(), Error> {
-    if !lw.subst.is_empty() {
-        unimplemented!("typeck: a `labels` function passed to C as a callback inside a generic body")
-    }
+    let path = match lw.subst.is_empty() {
+        true => l.path,
+        false => lw.requests.lifted_name(&l.path).expect("the `labels` being lowered named what it lifts"),
+    };
     let kept = defs.iter().filter(|d| l.kept.contains(&d.name)).map(|d| lower_label(heap, lw, d)).collect::<Result<Vec<_>, _>>()?;
     let g = defs.iter().find(|d| d.name == l.name).expect("a lifted function is the block's");
     let params: Vec<(SymRef, Type)> = g.params.iter().enumerate().map(|(i, (_, t))| (typelisp_mem::symbols::intern(&format!(" a{}", i)), lw.settle(t))).collect();
@@ -626,7 +645,7 @@ fn lift_label(heap: &mut Heap, lw: &mut Lowering, defs: &[super::lambda::Label],
     heap.push_root(call);
     let block = lw.reg.labels_core_form(heap, &kept, &[call])?;
     heap.push_root(block);
-    let form = lw.reg.defun_form(heap, &l.path, &params, &ret, &[block])?;
+    let form = lw.reg.defun_form(heap, &path, &params, &ret, &[block])?;
     heap.push_root(form);
     lw.requests.lift(form);
     Ok(())

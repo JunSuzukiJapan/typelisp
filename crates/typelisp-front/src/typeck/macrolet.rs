@@ -52,10 +52,11 @@ pub(crate) fn check_macrolet(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[
         let mut requests = Requests::default();
         let form = macro_form(&site, heap, &mut requests, &path, params, rest)?;
         let form = super::toplevel::bundled(heap, cx.reg, &mut requests, form)?;
-        let reached = requests.take_reached();
-        if !reached.callbacks.is_empty() || !reached.format_calls.is_empty() {
-            unimplemented!("typeck: a `macrolet` macro whose body hands C a callback or calls a definition through `~/name/`")
-        }
+        // The callback entries and `~/name/` targets it reaches are what an
+        // executable registers at startup; a macro runs while the program is
+        // checked, where they are made as they are first used, and is no
+        // part of an executable.
+        drop(requests.take_reached());
         cx.expander.install(heap, form).map_err(|e| Error::TypeError(format!("macrolet `{}`: {}", name.name(), e)))?;
         macros.push((name, path, shape));
     }

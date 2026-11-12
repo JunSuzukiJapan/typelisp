@@ -623,6 +623,66 @@ fn a_compiled_caller_passes_callbacks() {
     assert_eq!(text(&src), "cbaabc");
 }
 
+/// Inside a generic body each instantiation passes C its own function: a
+/// `lambda`, a `labels` function, a top-level function, and a generic
+/// function at the type arguments C's type decides; the same compiled.
+#[test]
+fn a_generic_body_passes_callbacks() {
+    let src = format!(
+        "{}
+         (defun desc ((a ptr) (b ptr)) i32 (unsafe (c-strncmp b a 1)))
+         (defun same<T> ((a T) (b T)) i32 (the i32 0))
+         (defun sorted<T> ((s string) (tag T) (how i32)) string
+           (unsafe
+             (let ((buf (c-strdup s)))
+               (labels ((cmp ((a ptr) (b ptr)) i32 (flip (c-strncmp a b 1)))
+                        (flip ((n i32)) i32 (- (the i32 0) n)))
+                 (case how
+                   (0 (c-qsort buf 4 1 (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1))))
+                   (1 (c-qsort buf 4 1 cmp))
+                   (2 (c-qsort buf 4 1 desc))
+                   (:else (c-qsort buf 4 1 same))))
+               (let ((r (text-of buf \"\"))) (c-free buf) r))))
+         (defun all () string
+           (append (sorted \"cadb\" 1 0) (sorted \"cadb\" \"x\" 0) (sorted \"cadb\" true 1)
+                   (sorted \"cadb\" 1 2) (sorted \"aaaa\" 1 3)))",
+        QSORT
+    );
+    let want = "abcdabcddcbadcbaaaaa";
+    assert_eq!(text(&format!("{} (all)", src)), want);
+    assert_eq!(text(&format!("{} (compile all) (all)", src)), want);
+}
+
+/// A `macrolet` macro's body runs while the program is checked: it may pass
+/// C a callback, and call a definition through `~/name/`.
+#[test]
+fn a_local_macro_passes_a_callback() {
+    let src = format!(
+        "{}
+         (defun bang ((s string) (colon bool) (at bool)) string (append s \"!\"))
+         (defun f () string
+           (macrolet ((sorted (s)
+                        (let ((txt (unsafe (let ((buf (c-strdup (sexpr-str s))))
+                                             (c-qsort buf 4 1 (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1)))
+                                             (let ((r (text-of buf \"\"))) (c-free buf) r)))))
+                          (str (format false \"~/bang/\" txt)))))
+             (sorted \"cadb\")))
+         (f)",
+        QSORT
+    );
+    assert_eq!(text(&src), "abcd!");
+}
+
+/// A C function whose first parameter is a callback: the first argument
+/// is checked where it is written, as any callback is, so one that names a
+/// local is refused.
+#[test]
+fn a_callback_may_be_the_first_argument() {
+    let e = err(r#"(defffi (c-atexit "atexit") ((fn () ())) i32)
+                   (defun f ((k i32)) i32 (unsafe (c-atexit (lambda () () (let ((x k)) ())))))"#);
+    assert!(e.contains("refers to `k`"), "unexpected error: {}", e);
+}
+
 #[test]
 fn a_lambda_that_captures_is_refused() {
     let e = err(&format!(
