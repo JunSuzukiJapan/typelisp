@@ -97,7 +97,7 @@ fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: Sym
         None => field.name().to_string(),
     };
     let setter = member_symbol(&format!("set-{}", field));
-    let Some((owner, def)) = cx.receiver_method(&obj.ty, setter) else {
+    let Some((owner, def)) = cx.receiver_method(&obj.ty, setter)? else {
         return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", owner, field)));
     };
     check_method_call(cx, heap, locals, owner, setter, def, Some(obj), &[], std::slice::from_ref(&value), None, loc)
@@ -137,7 +137,14 @@ fn set_call_place(
     if spelling == "get" {
         candidates.push(member_symbol("set"));
     }
-    let Some((setter, (owner, def))) = candidates.iter().find_map(|name| cx.receiver_method(&recv.ty, *name).map(|found| (*name, found))) else {
+    let mut found = None;
+    for name in &candidates {
+        if let Some(m) = cx.receiver_method(&recv.ty, *name)? {
+            found = Some((*name, m));
+            break;
+        }
+    }
+    let Some((setter, (owner, def))) = found else {
         let tried = candidates.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(" or ");
         return Err(Error::TypeError(format!("setf: `{}` has no setter for `{}` (looked for {})", owner, spelling, tried)));
     };

@@ -90,14 +90,18 @@ pub(crate) fn check_trait_impl(
     if !super::impl_block::all_or_none(&target_ty, head.params()) {
         return Err(super::impl_block::not_all_or_none(&format!("impl {} {}", trait_path, owner), &owner, &target_ty));
     }
+    super::impl_block::every_parameter_named(&format!("impl {} {}", trait_path, owner), &target_ty, head.params())?;
     let own: Vec<Type> = head.params().iter().map(|p| Type::Param(*p)).collect();
     let inst = match &target_ty {
         Type::Named(_, args) if *args == own => None,
         // Every type argument written outright: one instantiation's.
         Type::Named(_, args) if own.is_empty() => Some(args.clone()),
-        Type::Named(..) => unimplemented!("typeck: an `impl` of a trait whose type parameters are not the type's in order"),
+        // `impl<...>` declares the type's parameters in its order, and the
+        // target names every one (`impl_block::in_target_order`,
+        // `every_parameter_named`).
+        Type::Named(..) => unreachable!("the target `{}` names the declared parameters in order", target_ty),
         _ if own.is_empty() => None,
-        _ => unimplemented!("typeck: an `impl<...>` of a trait for a type without parameters"),
+        _ => unreachable!("the target `{}`, with no type arguments, names no declared parameter", target_ty),
     };
     // A trait is implemented either for every instantiation of a type or for
     // each one it applies to.
@@ -159,23 +163,24 @@ pub(crate) fn check_trait_impl(
         }
     }
     for sup in &tdef.supertraits {
-        if !implements(reg, &sup.trait_path, &owner, inst.as_deref()) && super::bounds::blanket_covers(reg, &target_ty, sup) {
-            if !sup.assoc.is_empty() {
-                unimplemented!("typeck: a supertrait with pinned associated types that a blanket `impl` gives `{}`", owner)
-            }
-            continue;
-        }
-        if !implements(reg, &sup.trait_path, &owner, inst.as_deref()) {
+        // The associated types of the supertrait's `impl`, or of the blanket
+        // `impl` that gives it the supertrait.
+        let own_impl = implements(reg, &sup.trait_path, &owner, inst.as_deref());
+        let unpinned = crate::typeck::registry::TraitBound { trait_path: sup.trait_path, assoc: Default::default() };
+        if !own_impl && !super::bounds::blanket_covers(reg, &target_ty, &unpinned) {
             return Err(Error::TypeError(format!(
                 "{}: `{}` requires `{}`, but `{}` has no `impl {}` — write it before this one",
                 shown, trait_path, sup.trait_path, owner, sup.trait_path
             )));
         }
+        let sup_assoc = |name: &str| match own_impl {
+            true => reg.trait_impls.get(&(sup.trait_path, owner)).and_then(|all| impl_at(all, inst.as_deref())).expect("checked above").assoc.get(name).cloned(),
+            false => reg.blanket_impls.get(&sup.trait_path).expect("a blanket `impl` covers it").assoc_at(name, &target_ty),
+        };
         // What the supertrait entry pins, in this trait's parameters, is
         // what the supertrait's `impl` binds. A type with a parameter left in
         // it is not checked.
         let to_impl = Subst::positional(&tdef.params, &std::iter::once(target_ty.clone()).chain(assoc.iter().cloned()).collect::<Vec<_>>());
-        let sup_impl = reg.trait_impls.get(&(sup.trait_path, owner)).and_then(|all| impl_at(all, inst.as_deref())).expect("checked above");
         let open = |t: &Type| {
             let mut found = false;
             super::unify::walk(t, &mut |u| found |= matches!(u, Type::Param(_)));
@@ -183,8 +188,8 @@ pub(crate) fn check_trait_impl(
         };
         for (name, pinned) in &sup.assoc {
             let want = to_impl.apply(pinned);
-            match sup_impl.assoc.get(name) {
-                Some(actual) if *actual == want || open(&want) || open(actual) => {}
+            match sup_assoc(name) {
+                Some(actual) if actual == want || open(&want) || open(&actual) => {}
                 Some(actual) => {
                     return Err(Error::TypeError(format!(
                         "{}: `{}` requires `{}`'s `{} = {}`, but `{}`'s `impl {}` binds it to `{}`",
@@ -533,8 +538,15 @@ fn check_blanket_impl(
 ) -> Result<Value, Error> {
     let ns = d.site.ns;
     let names = type_names.iter().map(|n| n.name()).collect::<Vec<_>>().join(",");
-    if type_names.len() != 1 {
-        unimplemented!("typeck: a blanket `impl` declaring type parameters besides its target")
+    if let Some(other) = type_names.iter().find(|n| **n != var) {
+        return Err(Error::TypeError(format!(
+            "impl<{}> {} {}: type parameter `{}` is declared, and the target `{}` does not name it — nothing would decide it",
+            names,
+            trait_path,
+            var.name(),
+            other.name(),
+            var.name()
+        )));
     }
     // Which of two would apply to a type could depend on bounds met later.
     if reg.blanket_impls.get(&trait_path).is_some() {
@@ -612,7 +624,8 @@ fn check_blanket_impl(
         impl_bounds.extend(own);
     }
     let bounds = impl_bounds.into_iter().map(|(_, b)| b).collect();
-    reg.define_blanket(trait_path, super::registry::BlanketImpl { owner, param, bounds });
+    let assoc = tdef.params[1..].iter().map(|a| a.name.name().to_string()).zip(assoc).collect();
+    reg.define_blanket(trait_path, super::registry::BlanketImpl { owner, param, bounds, assoc });
     crate::check::forms::module_form(heap, &Path::in_ns(ns, "nothing"), &[])
 }
 

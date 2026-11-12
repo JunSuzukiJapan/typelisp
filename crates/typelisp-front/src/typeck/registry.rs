@@ -292,13 +292,23 @@ impl TraitDef {
 }
 
 /// A blanket `impl`, `(impl<T> Trait T ...)`: the owner its methods are
-/// defined under, which no program can name; its type parameter; and the
-/// bounds a type meets to be covered, written in that parameter.
+/// defined under, which no program can name; its type parameter; the
+/// bounds a type meets to be covered; and the associated types it binds, by
+/// name. The bounds and the associated types are written in the parameter.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct BlanketImpl {
     pub(crate) owner: Path,
     pub(crate) param: TypeParam,
     pub(crate) bounds: Vec<TraitBound>,
+    pub(crate) assoc: BTreeMap<String, Type>,
+}
+
+impl BlanketImpl {
+    /// The associated type `name` it binds for the type `ty` it covers.
+    pub(crate) fn assoc_at(&self, name: &str, ty: &Type) -> Option<Type> {
+        let at = super::subst::Subst::positional(&[self.param], std::slice::from_ref(ty));
+        self.assoc.get(name).map(|t| at.apply(t))
+    }
 }
 
 /// An `impl` of a trait for a type: for every instantiation of it, or for
@@ -639,15 +649,16 @@ impl Registry {
         self.blanket_owners.get(owner).copied()
     }
 
-    /// The owner of the blanket `impl` methods named `name`: the one blanket
-    /// `impl` that has a method of the name.
-    pub(crate) fn blanket_with_method(&self, name: SymRef) -> Option<&BlanketImpl> {
-        let mut found = self.blanket_impls.iter().filter(|(_, b)| self.method(&b.owner, name).is_some());
-        let first = found.next().map(|(_, b)| b);
-        if found.next().is_some() {
-            unimplemented!("typeck: `{}`, a method of more than one blanket `impl`", name.name())
-        }
-        first
+    /// The blanket `impl` of the trait `trait_path`, when it has one: a
+    /// trait has at most one.
+    pub(crate) fn blanket_of(&self, trait_path: &Path) -> Option<&BlanketImpl> {
+        self.blanket_impls.get(trait_path)
+    }
+
+    /// The blanket `impl`s that have a method named `name`, with their
+    /// traits.
+    pub(crate) fn blankets_with_method(&self, name: SymRef) -> Vec<(Path, &BlanketImpl)> {
+        self.blanket_impls.iter().filter(|(_, b)| self.method(&b.owner, name).is_some()).map(|(t, b)| (*t, b)).collect()
     }
 
     /// Define (or redefine) the trait `path`.

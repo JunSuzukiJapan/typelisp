@@ -137,7 +137,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let Some(def) = lw.reg.method_at(&owner, *method, &type_args) else {
                 // No `impl` of the type gave it: the blanket `impl`'s,
                 // specialized at the type.
-                let Some(blanket) = lw.reg.blanket_with_method(*method).map(|b| b.owner) else {
+                let Some(blanket) = lw.reg.blanket_of(trait_path).map(|b| b.owner) else {
                     unreachable!("`{}` meets the bound on `{}`, so it has `{}`", recv, trait_path, method)
                 };
                 let code = lw.requests.ask_method(&blanket, *method, std::iter::once(recv.clone()).chain(own).collect());

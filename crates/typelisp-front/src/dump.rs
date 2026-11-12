@@ -46,7 +46,7 @@ use crate::types::Path;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 38;
+pub const FORMAT_VERSION: u32 = 39;
 
 /// Where the checker's registry's writes were at some point: taken before a
 /// unit is loaded and handed to [`crate::typeck::checker::Checker::capture_delta`]

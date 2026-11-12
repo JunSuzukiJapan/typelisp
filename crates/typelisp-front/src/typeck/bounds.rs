@@ -292,8 +292,11 @@ fn meets_at(q: Asker, ty: &Type, b: &TraitBound, seen: &[(Path, Type)]) -> Meets
                 Meets::NotYet => return Meets::NotYet,
             }
         }
-        if !b.assoc.is_empty() {
-            unimplemented!("typeck: whether a blanket `impl` of `{}` binds the associated types a bound pins", b.trait_path)
+        for (name, required) in &b.assoc {
+            let actual = blanket.assoc_at(name, ty);
+            if !actual.as_ref().is_some_and(|actual| q.agrees(required, actual)) {
+                return Meets::No(Unmet::Assoc { ty: ty.clone(), assoc: name.clone(), actual, required: q.resolve(required) });
+            }
         }
         return Meets::Yes;
     };
@@ -354,14 +357,23 @@ fn assoc_of(reg: &Registry, trait_path: Path, ty: &Type, assoc: &str) -> Type {
             let i = tdef.params[1..].iter().position(|a| a.name.name() == assoc).expect("the associated type is its trait's");
             return pins[i].clone();
         }
-        Type::Dyn(..) => unimplemented!("typeck: the associated type `{}` of `{}` that `{}`, a supertrait's object, binds", assoc, trait_path, ty),
+        // An object of a trait with `trait_path` among its supertraits: what
+        // the supertrait entries pin, at the object's own parameters.
+        Type::Dyn(dyn_trait, pins) => {
+            let at = std::iter::once(ty.clone()).chain(pins.iter().cloned()).map(Some).collect();
+            let at = trait_at(reg, *dyn_trait, at, &trait_path, 0).expect("a trait object implements its supertraits");
+            let tdef = trait_def(reg, &trait_path).expect("a supertrait is defined");
+            let i = tdef.params.iter().position(|a| a.name.name() == assoc).expect("the associated type is its trait's");
+            return at[i].clone().expect("a trait pins its supertraits' associated types, and its object pins its own");
+        }
         Type::Named(path, args) => (*path, args),
         other => (prim_type_path(other).unwrap_or_else(|| panic!("`{}` implements `{}`, but has no `impl`s", other, trait_path)), &[]),
     };
     match impl_for(reg, trait_path, path, args) {
         Some((imp, at)) => at.apply(imp.assoc.get(assoc).expect("an `impl` binds each associated type of its trait")),
         None if reg.blanket_impls.get(&trait_path).is_some() => {
-            unimplemented!("typeck: the associated type `{}` of `{}` that a blanket `impl` gives `{}`", assoc, trait_path, ty)
+            let blanket = reg.blanket_impls.get(&trait_path).expect("tested above");
+            blanket.assoc_at(assoc, ty).expect("a blanket `impl` binds each associated type of its trait")
         }
         None => panic!("`{}` meets the bound on `{}`, but has no `impl` of it", ty, trait_path),
     }
@@ -394,7 +406,9 @@ fn param_meets(cx: &Cx, p: TypeParam, b: &TraitBound) -> Meets {
 fn dyn_meets(reg: &Registry, ty: &Type, trait_path: Path, pins: &[Type], b: &TraitBound) -> Meets {
     let unimplemented = || Meets::No(Unmet::Unimplemented { ty: ty.clone(), trait_path: b.trait_path, via: None });
     let Some(tdef) = trait_def(reg, &b.trait_path) else { return unimplemented() };
-    let at = pins.iter().cloned().map(Some).collect();
+    // The trait's parameters: `Self`, the object itself, then the associated
+    // types it pins.
+    let at = std::iter::once(ty.clone()).chain(pins.iter().cloned()).map(Some).collect();
     let Some(at) = trait_at(reg, trait_path, at, &b.trait_path, 0) else { return unimplemented() };
     for (name, required) in &b.assoc {
         let i = tdef.params.iter().position(|a| a.name.name() == name).expect("a bound pins an associated type of its trait");

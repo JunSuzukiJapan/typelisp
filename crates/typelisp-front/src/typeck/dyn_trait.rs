@@ -225,8 +225,12 @@ fn admit(cx: &Cx, ty: &Type, path: &Path, tdef: &TraitDef, pins: &[Type]) -> Res
     let found = cx.reg.trait_impls.get(&(*path, owner)).and_then(|all| all.iter().find(|i| i.args.as_deref().is_none_or(|a| a == args)));
     // Met with no `impl` of its own: through the blanket `impl`.
     let Some(imp) = found else {
-        if !pins.is_empty() {
-            unimplemented!("typeck: the associated types a blanket `impl` of `{}` binds, pinned by `:dyn`", path)
+        let blanket = cx.reg.blanket_impls.get(path).expect("a type met the bound through the blanket `impl`");
+        for (a, pin) in tdef.params[1..].iter().zip(pins) {
+            let actual = blanket.assoc_at(a.name.name(), ty).expect("a blanket `impl` binds each associated type of its trait");
+            if cx.holes.borrow_mut().unify(pin, &actual).is_err() {
+                return Err(NotDyn::Assoc { owner, name: a.name.name().to_string(), actual, pin: cx.resolve(pin) });
+            }
         }
         return Ok(());
     };
@@ -333,7 +337,7 @@ pub(crate) fn tables(lw: &mut Lowering, concrete: &Type, trait_path: &Path) -> R
             Some(def) if def.sig.builtin || def.sig.type_params.is_empty() => *m,
             Some(def) if def.sig.type_params.len() == targs.len() => lw.requests.ask_method(&owner, *m, targs.clone()),
             Some(_) => unimplemented!("typeck: `{}::{}`, with type parameters of its own, in the table of `{}`", owner, m, to),
-            None => match lw.reg.blanket_with_method(*m).map(|b| b.owner) {
+            None => match lw.reg.blanket_of(decl).filter(|b| lw.reg.method(&b.owner, *m).is_some()).map(|b| b.owner) {
                 Some(blanket) => lw.requests.ask_method(&blanket, *m, vec![concrete.clone()]),
                 None => return Err(Error::TypeError(format!("`{}`'s `impl {}` is missing method `{}`", owner, decl, m))),
             },

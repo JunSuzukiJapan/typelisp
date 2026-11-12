@@ -9,7 +9,8 @@ use crate::types::{in_std, nominal_path, prelude_ns, Path, Type};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
 
-use super::registry::{MethodDef, Registry, TraitDef, TypeEntry, ValueDef};
+use super::registry::{BlanketImpl, MethodDef, Registry, TraitDef, TypeEntry, ValueDef};
+use crate::Error;
 
 /// What the bare name `sym`, read in the module `here`, names as `lookup`
 /// finds it among one module's definitions (`lookup` is given the module and
@@ -89,14 +90,14 @@ pub(crate) fn static_use_named(reg: &Registry, here: NsId, sym: SymRef) -> Optio
 /// An `Option<Sexpr>` is the type an S-expression has, so it answers to
 /// `Sexpr`'s instance methods too, whose signatures take it; what `Sexpr`
 /// does not have is `Option`'s.
-pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name: SymRef) -> Option<(Path, &'r MethodDef)> {
+pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name: SymRef) -> Result<Option<(Path, &'r MethodDef)>, Error> {
     if is_option_of_sexpr(ty) {
         let sexpr = Path::builtin(typelisp_mem::wk::SEXPR);
         if let Some(m) = reg.method(&sexpr, name).filter(|m| m.instance) {
-            return Some((sexpr, m));
+            return Ok(Some((sexpr, m)));
         }
     }
-    let owner = nominal_path(ty)?;
+    let Some(owner) = nominal_path(ty) else { return Ok(None) };
     let args = match ty {
         Type::Named(_, args) => args.as_slice(),
         _ => &[],
@@ -112,19 +113,37 @@ pub(crate) fn receiver_method<'r>(reg: &'r Registry, here: NsId, ty: &Type, name
         return blanket_method(reg, ty, name);
     };
     let home = m.home.map_or(owner.ns(), |h| h.ns());
-    (m.instance && (m.sig.public || sees(here, home))).then_some((owner, m))
+    Ok((m.instance && (m.sig.public || sees(here, home))).then_some((owner, m)))
 }
 
-/// The method `name` the blanket `impl` that has one gives `ty`, when it
-/// covers `ty`: under the blanket `impl`'s owner, to be specialized at `ty`.
-fn blanket_method<'r>(reg: &'r Registry, ty: &Type, name: SymRef) -> Option<(Path, &'r MethodDef)> {
-    let blanket = reg.blanket_with_method(name)?;
-    let trait_path = reg.blanket_trait(&blanket.owner).expect("a blanket `impl`'s owner is registered with it");
-    let bound = crate::typeck::registry::TraitBound { trait_path, assoc: Default::default() };
-    if !super::bounds::blanket_covers(reg, ty, &bound) {
-        return None;
+/// The method `name` the blanket `impl` covering `ty` gives it: under the
+/// blanket `impl`'s owner, to be specialized at `ty`. Two that cover `ty`
+/// both give it one, and which is meant is not said (Rust's "multiple
+/// applicable items").
+fn blanket_method<'r>(reg: &'r Registry, ty: &Type, name: SymRef) -> Result<Option<(Path, &'r MethodDef)>, Error> {
+    let covering: Vec<(Path, &BlanketImpl)> = reg
+        .blankets_with_method(name)
+        .into_iter()
+        .filter(|(trait_path, _)| super::bounds::blanket_covers(reg, ty, &crate::typeck::registry::TraitBound { trait_path: *trait_path, assoc: Default::default() }))
+        .collect();
+    match covering.as_slice() {
+        [] => Ok(None),
+        [(_, blanket)] => Ok(reg.method(&blanket.owner, name).filter(|m| m.instance).map(|m| (blanket.owner, m))),
+        [(a, _), (b, _), ..] => {
+            let view = typelisp_print::shared::name_view();
+            let (mut a, mut b) = (view.definition(a.ns(), a.name_symbol()), view.definition(b.ns(), b.name_symbol()));
+            if b < a {
+                std::mem::swap(&mut a, &mut b);
+            }
+            Err(Error::TypeError(format!(
+                "`{}` on a `{}`: the blanket `impl`s of `{}` and `{}` both give it one, and nothing says which is meant",
+                name.name(),
+                ty,
+                a,
+                b
+            )))
+        }
     }
-    reg.method(&blanket.owner, name).filter(|m| m.instance).map(|m| (blanket.owner, m))
 }
 
 /// Whether what the module `home` defines without `pub` is visible from

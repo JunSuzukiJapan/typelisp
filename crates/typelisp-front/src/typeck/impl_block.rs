@@ -46,9 +46,11 @@ pub(crate) fn check_impl(
     // item, a `(:where ...)` or nothing there.
     if let Some((second, _)) = parts.get(1) {
         if !matches!(second, Value::Cons(_)) || crate::types::is_type_application(heap, *second) {
-            return super::trait_impl::check_trait_impl(reg, d, heap, requests, type_names, parts);
+            let type_names = in_target_order(heap, *second, type_names)?;
+            return super::trait_impl::check_trait_impl(reg, d, heap, requests, &type_names, parts);
         }
     }
+    let type_names = &in_target_order(heap, *target, type_names)?;
     // The bounds an `impl`'s `(:where ...)` writes are on every method's
     // type parameters.
     let (clause, items) = match parts.get(1) {
@@ -116,6 +118,7 @@ fn check_item(
     if !all_or_none(&target_ty, &scope.params()[..impl_names.len()]) {
         return Err(not_all_or_none(&format!("method {}::{}", owner, method), &owner, &target_ty));
     }
+    every_parameter_named(&format!("method {}::{}", owner, method), &target_ty, &scope.params()[..impl_names.len()])?;
     let (receiver, written) = split_receiver(heap, name, *params)?;
     let what = format!("impl: method `{}`", method);
     let named = format!("method {}::{}", owner, method);
@@ -164,6 +167,44 @@ pub(crate) fn all_or_none(target: &Type, declared: &[crate::types::TypeParam]) -
         }
     }
     true
+}
+
+/// `names`, what `impl<...>` declares, in the order the target `target`
+/// writes them as its type arguments: `impl<X,Y> P<Y,X>` declares `Y` and
+/// `X`, `P`'s first and second. What declares a type's parameters declares
+/// them in the type's order, as the type's own definition does; a target that
+/// writes them otherwise leaves them as written, for the checks after.
+pub(crate) fn in_target_order(heap: &Heap, target: Value, names: &[SymRef]) -> Result<Vec<SymRef>, Error> {
+    if !crate::types::is_type_application(heap, target) {
+        return Ok(names.to_vec());
+    }
+    let parts = heap.list_to_vec(target)?;
+    let args: Vec<SymRef> = parts[2..].iter().filter_map(|a| match a {
+        Value::Symbol(s) if names.contains(s) => Some(*s),
+        _ => None,
+    }).collect();
+    let permutation = args.len() == parts.len() - 2 && args.len() == names.len() && args.iter().enumerate().all(|(i, a)| !args[..i].contains(a));
+    Ok(if permutation { args } else { names.to_vec() })
+}
+
+/// Every one of `declared` is named by the target `target`: what nothing
+/// binds would be no instantiation's.
+pub(crate) fn every_parameter_named(who: &str, target: &Type, declared: &[crate::types::TypeParam]) -> Result<(), Error> {
+    let mut named = Vec::new();
+    super::unify::walk(target, &mut |t| {
+        if let Type::Param(p) = t {
+            named.push(*p);
+        }
+    });
+    match declared.iter().find(|p| !named.contains(p)) {
+        Some(p) => Err(Error::TypeError(format!(
+            "{}: type parameter `{}` is declared, and the target `{}` does not name it — nothing would decide it",
+            who,
+            p.name.name(),
+            target
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// The error for a target [`all_or_none`] refuses, `who` naming the item.

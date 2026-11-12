@@ -216,7 +216,7 @@ pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRe
     if let Some((index, ty)) = field {
         return Ok(Typed { node: Node::FieldGet { obj: Box::new(obj), index }, ty, loc });
     }
-    match cx.receiver_method(&recv_ty, name) {
+    match cx.receiver_method(&recv_ty, name)? {
         Some((owner, def)) if def.instance => check_method_call(cx, heap, locals, owner, name, def, Some(obj), &[], &[], None, loc),
         _ if cx.reg.has_inst_method(path, name) => {
             unimplemented!("typeck: `{}::{}`, a method `{}` has for one instantiation", recv.name(), member.name(), path)

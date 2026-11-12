@@ -1373,6 +1373,77 @@ mod tests {
         assert!(e.contains("`P::add` is an instance method, which a path does not name"), "{}", e);
     }
 
+    /// `impl<...>` may name the type's parameters in another order: they
+    /// are the type's, in the type's order, whatever they are called. One
+    /// the target does not name is refused, as nothing would decide it.
+    #[test]
+    fn an_impl_names_the_type_s_parameters_in_any_order() {
+        let defs = "(defstruct P<A,B> (a A) (b B)) \
+                    (deftrait Twin () (defmethod twin (self) Self)) \
+                    (impl<X,Y> P<Y,X> (defmethod get-a (self) Y self::a) \
+                      (defmethod make ((a Y) (b X)) P<Y,X> (make-instance 'P<Y,X> :a a :b b))) \
+                    (impl<U,V> Twin P<V,U> (defmethod twin (self) Self self))";
+        let body = "(let ((p (P<int,string>::make 2 \"t\"))) (+ (get-a p) (get-a (twin p))))";
+        assert_eq!(run(&format!("{} {}", defs, body)).1, Value::Int(4));
+        let e = check_err("(defstruct P<A,B> (a A) (b B)) (impl<X,Y,Z> P<Y,X> (defmethod sh (self) int 1))");
+        assert!(e.contains("type parameter `Z` is declared, and the target `P<Y,X>` does not name it"), "{}", e);
+        let e = check_err("(deftrait Sh () (defmethod sh (self) int)) (impl<T> Sh int (defmethod sh (self) int 1))");
+        assert!(e.contains("type parameter `T` is declared, and the target `int` does not name it"), "{}", e);
+        let e = check_err("(deftrait Sh () (defmethod sh (self) int)) (impl<T,U> Sh T (defmethod sh (self) int 1))");
+        assert!(e.contains("type parameter `U` is declared, and the target `T` does not name it"), "{}", e);
+    }
+
+    /// Two blanket `impl`s may give methods of one name: a type one of them
+    /// covers has that one's, a bound says which trait's is meant, and a
+    /// call on a type both cover is refused.
+    #[test]
+    fn blanket_impls_with_methods_of_one_name() {
+        let defs = "(deftrait A () (defmethod hello (self) int)) (deftrait B () (defmethod hello (self) int)) \
+                    (deftrait Ba () (defmethod v (self) int)) (deftrait Bb () (defmethod w (self) int)) \
+                    (impl<T> A T (:where (Ba T)) (defmethod hello (self) int 1)) \
+                    (impl<T> B T (:where (Bb T)) (defmethod hello (self) int 2)) \
+                    (defstruct S (x int)) (defstruct R (x int)) (impl Bb S (defmethod w (self) int 0)) \
+                    (impl Ba R (defmethod v (self) int 0)) (impl Bb R (defmethod w (self) int 0)) \
+                    (defun g<T> ((x T)) int (:where (A T)) (hello x))";
+        let body = "(+ (* 10 (hello (make-instance 'S :x 1))) (g (make-instance 'R :x 1)))";
+        assert_eq!(run(&format!("{} {}", defs, body)).1, Value::Int(21));
+        let e = check_err(&format!("{} (hello (make-instance 'R :x 1))", defs));
+        assert!(e.contains("`hello` on a `R`: the blanket `impl`s of `A` and `B` both give it one"), "{}", e);
+    }
+
+    /// A blanket `impl` binds associated types as a type's `impl` does: a
+    /// bound pinning them, a supertrait entry pinning them and a trait
+    /// object pinning them are checked against what it binds.
+    #[test]
+    fn a_blanket_impl_binds_associated_types() {
+        let defs = "(deftrait Base () (defmethod v (self) int)) (deftrait Has () (:type Item) (defmethod item (self) Item)) \
+                    (impl<T> Has T (:where (Base T)) (:type Item int) (defmethod item (self) int (v self))) \
+                    (defstruct S (x int)) (impl Base S (defmethod v (self) int self::x)) \
+                    (deftrait Lower ((Has (Item int))) (defmethod sub (self) int)) (impl Lower S (defmethod sub (self) int 9)) \
+                    (defun grab<H> ((h H)) int (:where (Has H (Item int))) (item h))";
+        let body = "(let ((s (make-instance 'S :x 7))) (+ (grab s) (sub s) (item (as :dyn Has<int> s))))";
+        assert_eq!(run(&format!("{} {}", defs, body)).1, Value::Int(23));
+        let e = check_err(&format!("{} (defun g<H> ((h H)) int (:where (Has H (Item bool))) 1) (g (make-instance 'S :x 1))", defs));
+        assert!(e.contains("type `S`'s associated type `Item` is `int`, but `:where` clause requires `bool`"), "{}", e);
+        let e = check_err(&format!("{} (deftrait Upper ((Has (Item bool))) (defmethod up (self) int)) (impl Upper S (defmethod up (self) int 1))", defs));
+        assert!(e.contains("requires `Has`'s `Item = bool`, but `S`'s `impl Has` binds it to `int`"), "{}", e);
+    }
+
+    /// A trait object meets a bound on its trait's supertrait, and a generic
+    /// body at it reads the supertrait's associated types from what its
+    /// trait pins.
+    #[test]
+    fn a_trait_object_meets_its_supertrait_s_bound() {
+        let src = "(deftrait Has () (:type Item) (defmethod item (self) Item)) \
+                   (deftrait Lower ((Has (Item int))) (defmethod sub (self) int)) \
+                   (defstruct S (x int)) (impl Has S (:type Item int) (defmethod item (self) int self::x)) \
+                   (impl Lower S (defmethod sub (self) int 9)) \
+                   (defun grab<H> ((h H)) int (:where (Has H (Item int))) (item h)) \
+                   (defun keep<H> ((h H)) int (:where (Has H)) (let ((x (item h))) 1)) \
+                   (let ((d (as :dyn Lower (make-instance 'S :x 5)))) (+ (grab d) (keep d)))";
+        assert_eq!(run(src).1, Value::Int(6));
+    }
+
     /// A method belongs to the type its receiver names; a function type
     /// names none.
     #[test]

@@ -442,7 +442,7 @@ fn value_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, exp
     let comparable = match &ty {
         Type::Param(p) => bound_method(cx.reg, cx.scope, *p, equals).is_some(),
         Type::Dyn(t, _) => super::dyn_trait::has_method(cx.reg, t, equals),
-        _ => cx.receiver_method(&ty, equals).is_some(),
+        _ => cx.receiver_method(&ty, equals)?.is_some(),
     };
     if !comparable {
         return Err(Error::TypeError(format!(

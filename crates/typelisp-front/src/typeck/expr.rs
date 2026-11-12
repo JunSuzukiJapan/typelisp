@@ -227,10 +227,10 @@ impl<'a> Cx<'a> {
     /// a number literal's hole in them is decided first. So it is when the
     /// method can only be a blanket `impl`'s, whose bounds the type's
     /// arguments may decide.
-    pub(crate) fn receiver_method(&self, ty: &Type, name: SymRef) -> Option<(Path, &'a MethodDef)> {
+    pub(crate) fn receiver_method(&self, ty: &Type, name: SymRef) -> Result<Option<(Path, &'a MethodDef)>, Error> {
         let ty = self.with_default(ty);
         if let Some(owner) = crate::types::nominal_path(&ty) {
-            let blanket = self.reg.method(&owner, name).is_none() && self.reg.blanket_with_method(name).is_some();
+            let blanket = self.reg.method(&owner, name).is_none() && !self.reg.blankets_with_method(name).is_empty();
             if self.reg.has_inst_method(&owner, name) || blanket {
                 self.decide_all(&ty);
             }
@@ -591,7 +591,7 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected:
         if let Type::Fn(params, _, _) = cx.resolve(expected) {
             if let Some(receiver) = params.first() {
                 let member = member_symbol(heap.symbol_spelling(id));
-                if let Some((owner, def)) = cx.receiver_method(receiver, member).filter(|(_, d)| d.instance) {
+                if let Some((owner, def)) = cx.receiver_method(receiver, member)?.filter(|(_, d)| d.instance) {
                     return lambda::method_value(cx, owner, member, def, expected, loc);
                 }
                 if let Type::Param(p) = cx.resolve(receiver) {
@@ -822,7 +822,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             )));
         }
     }
-    if let Some((owner, def)) = cx.receiver_method(&first.ty, member) {
+    if let Some((owner, def)) = cx.receiver_method(&first.ty, member)? {
         cx.decide(&first.ty);
         return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), &[], rest, expected, loc);
     }
