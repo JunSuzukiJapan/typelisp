@@ -3008,7 +3008,7 @@ pub unsafe extern "C" fn rt_throw_matches(args: *const i64, argc: u32) -> i64 {
         Some(t) if t == tag => 1,
         // A throw of this symbol carrying another type: it becomes a panic,
         // which this `catch` declines like any other.
-        Some(t) => match typelisp_mem::symbols::throw_tag_mismatch(t, tag) {
+        Some(t) => match typelisp_mem::symbols::throw_tag_mismatch(t, tag, &typelisp_print::shared::name_view()) {
             Some(message) => {
                 clear_throw();
                 CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(Box::new(CompiledPanic { message })));

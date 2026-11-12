@@ -1959,9 +1959,10 @@ pub fn throw_tag_symbol(tag: SymRef, type_key: &str) -> SymRef {
 
 /// When `thrown` and `caught` are [`throw_tag_symbol`]s of one symbol
 /// carrying two types, the error a `throw` that reached a `catch` of its
-/// symbol carrying another type is. `None` when they are one tag, or tags of
-/// two symbols — the `catch` is the throw's, or not its business.
-pub fn throw_tag_mismatch(thrown: SymRef, caught: SymRef) -> Option<String> {
+/// symbol carrying another type is, with the types written as `view` writes
+/// them. `None` when they are one tag, or tags of two symbols — the `catch`
+/// is the throw's, or not its business.
+pub fn throw_tag_mismatch(thrown: SymRef, caught: SymRef, view: &crate::NameView) -> Option<String> {
     if thrown == caught || thrown.name() != caught.name() {
         return None;
     }
@@ -1971,29 +1972,9 @@ pub fn throw_tag_mismatch(thrown: SymRef, caught: SymRef) -> Option<String> {
         _ => None,
     };
     let ((tk, th), (ck, ch)) = (parts(&t)?, parts(&c)?);
-    (th == ch).then(|| format!("throw: `{}` carries `{}`, but the nearest (catch '{}) carries `{}`", thrown.name(), shown_type_key(&tk), caught.name(), shown_type_key(&ck)))
+    (th == ch).then(|| format!("throw: `{}` carries `{}`, but the nearest (catch '{}) carries `{}`", thrown.name(), view.type_key_name(&tk), caught.name(), view.type_key_name(&ck)))
 }
 
-/// The type key `key` as a message shows it: a path into `std::primitive`,
-/// at the start or inside type arguments, without that module (`int`,
-/// `Vector<int>`).
-fn shown_type_key(key: &str) -> String {
-    let prefix = ns_path(StdModule::PRIMITIVE.ns()).iter().map(|seg| format!("{}::", seg)).collect::<String>();
-    let mut out = String::with_capacity(key.len());
-    let mut rest = key;
-    while !rest.is_empty() {
-        let at_path_start = out.chars().last().is_none_or(|c| !(c.is_alphanumeric() || c == ':' || c == '_' || c == '-'));
-        match rest.strip_prefix(prefix.as_str()) {
-            Some(after) if at_path_start => rest = after,
-            _ => {
-                let c = rest.chars().next().expect("rest is not empty");
-                out.push(c);
-                rest = &rest[c.len_utf8()..];
-            }
-        }
-    }
-    out
-}
 
 /// The symbol a member of a type — a method — is named by: made in
 /// [`MEMBER_MODULE`], where a built-in method's name is the vocabulary

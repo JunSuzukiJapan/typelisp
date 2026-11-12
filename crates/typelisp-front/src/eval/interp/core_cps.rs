@@ -2989,7 +2989,7 @@ impl Interp {
 
             Frame::Catch { tag } => match exit {
                 EvalError::Throw(thrown, v) if thrown == tag => Ok((State::Apply(*v), None)),
-                EvalError::Throw(thrown, _) if let Some(msg) = typelisp_mem::symbols::throw_tag_mismatch(thrown, tag) => Ok((State::Unwind(EvalError::Panic(msg)), None)),
+                EvalError::Throw(thrown, _) if let Some(msg) = typelisp_mem::symbols::throw_tag_mismatch(thrown, tag, &typelisp_print::shared::name_view()) => Ok((State::Unwind(EvalError::Panic(msg)), None)),
                 other => Ok((State::Unwind(other), None)),
             },
 
