@@ -49,7 +49,7 @@ use crate::types::Path;
 pub const FORMAT_VERSION: u32 = 34;
 
 /// Where the checker's registry's writes were at some point: taken before a
-/// unit is loaded and handed to [`crate::check::Checker::capture_delta`]
+/// unit is loaded and handed to [`crate::typeck::checker::Checker::capture_delta`]
 /// afterwards, which writes down everything written since.
 pub struct RegistrySignature(u64);
 

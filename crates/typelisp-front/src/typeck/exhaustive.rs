@@ -6,7 +6,8 @@
 //! column (Maranget, "Warnings for pattern matching", 2007). A nested
 //! pattern counts: `((node (leaf) r) ..)` does not cover every `node`.
 
-use crate::check::analyze::{is_option_of_sexpr, OPTION_NONE};
+use crate::typeck::sexpr_value::is_option_of_sexpr;
+use crate::typeck::tree::OPTION_NONE;
 use crate::typeck::registry::AdtKind;
 use crate::sexpr_variant;
 use crate::types::{path_is_builtin, Path, Type};

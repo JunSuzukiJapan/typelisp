@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 
-use crate::check::analyze::MacroShape;
+use crate::typeck::defmacro::MacroShape;
 use crate::types::{Path, Type};
 use crate::{Error, Loc, Value};
 use typelisp_mem::SymRef;

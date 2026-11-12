@@ -6,7 +6,7 @@
 
 use crate::check::core;
 use crate::check::forms;
-use crate::check::analyze::SEXPR_RESERVED_VARIANT;
+use crate::typeck::variant::SEXPR_RESERVED_VARIANT;
 use crate::check::lower::{Arg, CoreForms, LoweredLabel};
 use crate::check::repr::Repr;
 use crate::types::{path_is_builtin, prim_type_path, Path, Type};
@@ -305,7 +305,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
         }
         Node::UntagInt { value } => {
             let value = lower_rooted(heap, lw, value)?;
-            crate::check::analyze::untag_int_form(heap, value)
+            crate::check::lower::untag_int_form(heap, value)
         }
         Node::Break => forms::break_form(heap),
         Node::Return { value } => {
@@ -348,7 +348,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             lw.requests.callback(sig);
             // `(call ADDRESS (quote FUNCTION) (type-value TYPE))`: the
             // entry's address, as a raw word.
-            let function = Typed { node: Node::Quote { datum: core::definition_form(target) }, ty: crate::check::analyze::sexpr_ty(), loc: None };
+            let function = Typed { node: Node::Quote { datum: core::definition_form(target) }, ty: crate::typeck::sexpr_value::sexpr_ty(), loc: None };
             let ty = Typed { node: Node::TypeValue { ty: fn_ty }, ty: Type::Int, loc: None };
             let call = Node::Call { path: Path::internal_builtin(crate::ffi_callback::ADDRESS_BUILTIN), targs: Vec::new(), args: vec![function, ty] };
             lower(heap, lw, &Typed { node: call, ty: Type::Ptr, loc: None })

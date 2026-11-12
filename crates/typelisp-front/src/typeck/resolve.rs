@@ -4,7 +4,7 @@
 //! A module sees what it defines and what it brings in. No enclosing module
 //! is consulted.
 
-use crate::check::analyze::is_option_of_sexpr;
+use crate::typeck::sexpr_value::is_option_of_sexpr;
 use crate::types::{in_std, nominal_path, prelude_ns, Path, Type};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;

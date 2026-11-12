@@ -79,7 +79,7 @@ fn parse_variant(heap: &Heap, cx: &TypeCx, item: Value) -> Result<Variant, Error
     };
     let fields = fields.iter().map(|(t, at)| parse_type(heap, cx, *t, at.as_ref())).collect::<Result<Vec<_>, _>>()?;
     for f in &fields {
-        crate::check::Checker::reject_raw_word_storage(f, "the variant", name.name())?;
+        super::c_memory::reject_raw_word_storage(f, "the variant", name.name())?;
     }
     Ok(Variant { name: member_symbol(name.name()), fields })
 }

@@ -92,7 +92,7 @@ fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: Sym
         _ => return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv.name(), field.name()))),
     };
     // A tuple's element `t::1` is its field of that number.
-    let field = match crate::check::analyze::tuple_element_field(&cx.holes.borrow().shown(&obj.ty), field.name())? {
+    let field = match crate::typeck::instance::tuple_element_field(&cx.holes.borrow().shown(&obj.ty), field.name())? {
         Some(name) => name,
         None => field.name().to_string(),
     };

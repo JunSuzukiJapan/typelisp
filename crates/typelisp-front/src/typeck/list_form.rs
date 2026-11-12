@@ -4,7 +4,8 @@
 //! `Sexpr` encoding may be one ([`super::widen`]). The list is built from
 //! `Sexpr`'s cons variant, ending in the empty list.
 
-use crate::check::analyze::{option_of_sexpr, SEXPR_RESERVED_VARIANT};
+use crate::typeck::sexpr_value::option_of_sexpr;
+use crate::typeck::variant::SEXPR_RESERVED_VARIANT;
 use crate::sexpr_variant::CONS;
 use crate::types::Path;
 use crate::{Error, Heap, Loc, Value};

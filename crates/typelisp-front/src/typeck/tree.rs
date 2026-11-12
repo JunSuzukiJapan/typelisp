@@ -5,7 +5,7 @@
 //! hold an inference hole while the form is being checked, and the core IR
 //! writes each value's representation, which only a solved type has.
 
-use crate::check::analyze::{OPTION_NONE, OPTION_SOME};
+
 use crate::owned_form::OwnedForm;
 use crate::types::{Path, Type};
 use crate::{Loc, Value};
@@ -521,3 +521,10 @@ impl Typed {
 fn option_path() -> Path {
     Path::builtin(typelisp_mem::wk::OPTION)
 }
+
+/// `Option`'s variant indices (`typeck::builtins`'s `Option`). Written down
+/// once because three places already depend on the order — `()`'s inference
+/// rule, the niche pattern shapes, and `check_construct`'s `None` shortcut.
+pub(crate) const OPTION_SOME: usize = 0;
+
+pub(crate) const OPTION_NONE: usize = 1;

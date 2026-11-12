@@ -52,7 +52,7 @@ pub(crate) fn check_impl(
     // The bounds an `impl`'s `(:where ...)` writes are on every method's
     // type parameters.
     let (clause, items) = match parts.get(1) {
-        Some((second, _)) if crate::check::analyze::is_where_clause(heap, *second)? => (Some(*second), &parts[2..]),
+        Some((second, _)) if crate::typeck::bounds::is_where_clause(heap, *second)? => (Some(*second), &parts[2..]),
         _ => (None, &parts[1..]),
     };
     let owner = receiver_type_path(heap, reg, ns, *target)?;

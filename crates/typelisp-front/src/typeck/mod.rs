@@ -61,6 +61,7 @@ pub(crate) mod call;
 pub(crate) mod callback;
 pub(crate) mod cast;
 pub(crate) mod catch;
+pub(crate) mod checker;
 pub(crate) mod collection_literal;
 pub(crate) mod control;
 pub(crate) mod define;

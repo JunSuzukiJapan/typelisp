@@ -5,7 +5,8 @@
 //! the rest of the form decides, or a type parameter of a generic body, so
 //! the encoding is chosen when the tree is lowered, from the settled type.
 
-use crate::check::analyze::{is_sexpr_expectation, sexpr_ctor_for};
+
+use crate::types::Path;
 use crate::check::lower::CoreForms;
 use crate::typeck::registry::AdtKind;
 use crate::types::{path_is_builtin, Type};
@@ -70,5 +71,80 @@ pub(crate) fn heap_value(reg: &Registry, ty: &Type) -> bool {
         Type::Dyn(..) => true,
         Type::RandomState | Type::Int | Type::Ratio | Type::Rational | Type::F64 | Type::Str => true,
         _ => false,
+    }
+}
+
+/// `Sexpr` — the type a `&rest` parameter's collected arguments are bound as
+/// inside a `defun`/`lambda` body, and the type `apply`'s trailing list
+/// argument must have (see `Checker::parse_params_rest`/`check_call`/
+/// `check_apply_form`). Every Lisp's `&rest` parameter is an ordinary list
+/// (built from cons cells), never a homogeneous array type — `defmacro`'s own
+/// `&rest` already works this way unconditionally (`Interp::bind_macro_args`);
+/// `defun`/`lambda`'s `&rest` now matches it, just with an added call-site
+/// check (below) that every individual variadic argument satisfies the
+/// declared element type before it's wrapped into the list.
+pub(crate) fn sexpr_ty() -> Type {
+    Type::Named(Path::builtin(typelisp_mem::wk::SEXPR), vec![])
+}
+
+/// `Option<Sexpr>` — the type an S-expression datum has once the empty list
+/// is `none` (see [`is_option_of_sexpr`]).
+pub(crate) fn option_of_sexpr() -> Type {
+    Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![sexpr_ty()])
+}
+
+/// Does an expected type ask for an S-expression?
+///
+/// Both spellings answer yes. `Option<Sexpr>` is what a datum has, and it is
+/// what the implicit widenings should fire on — a `Symbol`, a heap value or a
+/// `:dyn` reaching "an S-expression is wanted here" is the same rule
+/// whichever of the two the site declared. Bare `Sexpr` still means
+/// *non-empty*, and a widening into it is just as sound: nothing these rules
+/// produce is the empty list.
+pub(crate) fn is_sexpr_expectation(ty: &Type) -> bool {
+    *ty == sexpr_ty() || is_option_of_sexpr(ty)
+}
+
+/// Is `ty` exactly `Option<Sexpr>` — the type the empty list's niche belongs
+/// to (`check/repr.rs`)?
+///
+/// One predicate because three decisions have to agree on the same boundary:
+/// how the value is represented, how its constructors lower, and which
+/// patterns a `match` on it accepts. Were any of them drawn wider — around
+/// "an `Option` whose payload *represents* like a `Sexpr`", which
+/// `Option<Option<Sexpr>>` does — the outer level would claim the same
+/// empty-list word as the inner one and the two `none`s would collide.
+pub(crate) fn is_option_of_sexpr(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, args)
+        if crate::types::path_is_builtin(p, typelisp_mem::wk::OPTION)
+            && args.len() == 1
+            && matches!(&args[0], Type::Named(a, _) if crate::types::path_is_builtin(a, typelisp_mem::wk::SEXPR)))
+}
+
+/// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
+/// (`Sexpr` itself needs no wrapping — see [`Checker::wrap_rest_elem`]).
+/// `&rest`'s declared element type must be one of these (or `Sexpr`) since
+/// nothing else has a lossless `Sexpr` encoding to collect into a list with.
+pub(crate) fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
+    match elem_ty {
+        // One variant per width, spelled by the type's own name. There is no
+        // folding left to do: `Sexpr` has an `i8` and a `u32` because the
+        // types do, and a value that arrives here as a `u32` comes back out
+        // of the `Sexpr` as a `u32`.
+        Type::I8 => Some("i8"),
+        Type::I16 => Some("i16"),
+        Type::I32 => Some("i32"),
+        Type::U8 => Some("u8"),
+        Type::U16 => Some("u16"),
+        Type::U32 => Some("u32"),
+        Type::F32 => Some("f32"),
+        Type::F64 => Some("f64"),
+        Type::Int => Some("int"),
+        Type::Ratio => Some("ratio"),
+        Type::Char => Some("char"),
+        Type::Bool => Some("bool"),
+        Type::Str => Some("str"),
+        Type::Symbol => Some("sym"),
+        _ => None,
     }
 }

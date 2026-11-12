@@ -9,7 +9,7 @@
 //! - Defining a name again is what the redefinition policy says; a built-in
 //!   definition is never replaced.
 
-use crate::check::{MacroExpander, RedefPolicy};
+use crate::typeck::checker::{MacroExpander, RedefPolicy};
 use crate::typeck::library::PRELUDE_MODULES;
 use crate::types::{in_std, std_module, Path, Type};
 use crate::{Error, Heap};

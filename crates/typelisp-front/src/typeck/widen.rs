@@ -8,7 +8,7 @@
 //! `match` says. Where a `rational` is expected, an `int` or a `ratio` may
 //! be. There is no other widening: the checker has no subtyping.
 
-use crate::check::analyze::{is_sexpr_expectation, option_of_sexpr, sexpr_ty};
+use crate::typeck::sexpr_value::{is_sexpr_expectation, option_of_sexpr, sexpr_ty};
 use crate::types::{Path, Type};
 use crate::{wk, Error};
 use typelisp_mem::symbols::well_known_symbol;

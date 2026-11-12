@@ -14,7 +14,7 @@
 //! parameter with a default may not mention the function's type
 //! parameters.
 
-use crate::check::analyze::option_of_sexpr;
+use crate::typeck::sexpr_value::option_of_sexpr;
 use crate::typeck::registry::{opt_key_effective_ty, OptKeyParam};
 use crate::owned_form::value_to_owned;
 use crate::types::{ParamOwner, Type};

@@ -1,9 +1,7 @@
-//! Checking one top-level form: the rebuilt checker's entry point.
-
-use std::cell::RefCell;
+//! Checking one top-level form, for [`super::checker::Checker`].
 
 use crate::check::lower::CoreForms;
-use crate::check::{MacroExpander, MONO_BUNDLE_MODULE};
+use super::checker::{MacroExpander, MONO_BUNDLE_MODULE};
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::intern_in;
@@ -11,7 +9,7 @@ use typelisp_mem::SymRef;
 
 use super::attribute::{check_attribute, is_attribute, Tests};
 use super::define::Definer;
-use crate::check::TestForms;
+use crate::typeck::attribute::TestForms;
 use super::macros::expand_toplevel;
 use super::module::module_site;
 use super::defenum::check_defenum;
@@ -21,7 +19,7 @@ use super::defstruct::check_defstruct;
 use super::defun::{check_defun, parse_header};
 use super::defvar::{check_defvar, Which};
 use super::impl_block::check_impl;
-use super::use_form::{check_use, register_for_reading, Site};
+use super::use_form::{check_use, Site};
 use super::expr::{check_expr, Cx, Notes};
 use super::generic::{Base, Name, Request, Requests};
 use super::locals::Locals;
@@ -30,322 +28,15 @@ use super::registry::{MethodDef, Registry, Since, TypeEntry};
 use super::tree::{Node, Typed};
 use super::scope::TypeScope;
 use super::subst::Subst;
-use super::wire::{RebuiltUnit, Unit};
-
-/// The checker, as the driver hands it each top-level form
-/// (`docs/dev/checker-rebuild-plan.md` 6).
-#[derive(Debug)]
-pub(crate) struct TypeChecker {
-    /// What the program has defined, the built-in definitions first.
-    reg: Registry,
-    /// Whether the session's names have been told everything the registry
-    /// holds ([`Self::publish_names`]); after that, each form tells them
-    /// what it wrote.
-    published: std::cell::Cell<bool>,
-    /// The type of the last form, when it was an expression.
-    expr_ty: Option<Type>,
-    /// The warnings checking has given and no one has taken yet.
-    warnings: RefCell<Vec<String>>,
-    /// Every C callback entry the checked code asks for, in the order first
-    /// asked.
-    callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    /// Every definition a `~/name/` directive calls.
-    format_calls: std::collections::BTreeSet<crate::CompileTarget>,
-    /// The module the last form, an `(in-module path)`, made the current
-    /// one, for the driver, which keeps the current module, to take.
-    entered: Option<typelisp_mem::NsId>,
-    /// What a `#[test]` definition is checked into, and the tests found.
-    tests: Tests,
-    /// What checking has written down beside the trees.
-    notes: Notes,
-}
-
-impl Default for TypeChecker {
-    fn default() -> TypeChecker {
-        let mut reg = Registry::default();
-        super::builtins::define(&mut reg);
-        reg.commit();
-        debug_assert_eq!(reg.generation(), CREATED);
-        TypeChecker {
-            reg,
-            published: std::cell::Cell::new(false),
-            expr_ty: None,
-            warnings: RefCell::default(),
-            callbacks: Vec::new(),
-            format_calls: std::collections::BTreeSet::new(),
-            entered: None,
-            tests: Tests::default(),
-            notes: Notes::default(),
-        }
-    }
-}
-
-impl TypeChecker {
-    /// Tell the session's names everything the registry holds: what a heap
-    /// that has not been told reads before the forms checked next tell it
-    /// what they write.
-    pub(crate) fn publish_names(&self, heap: &Heap) {
-        publish_all(&self.reg, heap);
-        self.published.set(true);
-    }
-
-    /// The driver has made `ns` the module forms are checked in: a module
-    /// the session has, which the session's names are told of before the
-    /// next form is checked.
-    pub(crate) fn enter_module(&mut self, ns: typelisp_mem::NsId) {
-        if self.reg.modules.get(&ns).is_none() {
-            self.reg.modules.insert(ns, ());
-            self.reg.commit();
-            self.published.set(false);
-        }
-    }
-
-    /// Make the printer write paths for the module `ns`, as forms checked
-    /// there read them.
-    pub(crate) fn publish_name_view(&self, ns: typelisp_mem::NsId) {
-        publish_name_view(&self.reg, ns);
-    }
-
-    /// `v`, a form written at `site`, checked: its core form, unrooted.
-    /// `expander` expands its macro calls.
-    ///
-    /// What the form defines is kept only if checking it succeeds.
-    pub(crate) fn check_form(
-        &mut self,
-        heap: &mut Heap,
-        expander: &dyn MacroExpander,
-        site: Site,
-        v: Value,
-        loc: Option<Loc>,
-    ) -> Result<Value, Error> {
-        if !self.published.get() {
-            self.publish_names(heap);
-        }
-        let reg = &mut self.reg;
-        publish_name_view(reg, site.ns);
-        self.expr_ty = None;
-        let entered = in_module(heap, site, v).map_err(|e| match &loc {
-            Some(l) => e.at(l.clone()),
-            None => e,
-        })?;
-        if let Some(inner) = entered {
-            self.entered = Some(inner.ns);
-            reg.modules.insert(inner.ns, ());
-            reg.commit();
-            publish(reg, heap, &[inner.ns], &[], &[]);
-            return crate::check::forms::module_form(heap, &Path::of_module(inner.ns), &[]);
-        }
-        // Every value the tree holds is rooted from here until it is lowered
-        // into the form, which is then reachable from nothing but the caller.
-        // Nothing allocates between releasing them and the caller rooting it.
-        let roots_base = heap.root_count();
-        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.tests);
-        heap.truncate_roots(roots_base);
-        match result {
-            Ok((form, ty, reached)) => {
-                self.format_calls.extend(reached.format_calls);
-                for sig in reached.callbacks {
-                    if !self.callbacks.contains(&sig) {
-                        self.callbacks.push(sig);
-                    }
-                }
-                if crate::types::in_std(site.ns) {
-                    super::library::reexport(reg);
-                    super::library::publish(reg, &mut heap.names(), Since::Commit);
-                }
-                let modules = reg.modules.keys(Since::Commit);
-                let types = reg.types.keys(Since::Commit);
-                let methods = reg.method_keys(Since::Commit);
-                reg.commit();
-                publish(reg, heap, &modules, &types, &methods);
-                publish_name_view(reg, site.ns);
-                self.expr_ty = ty;
-                Ok(form)
-            }
-            Err(e) => {
-                reg.rollback();
-                let e = match &loc {
-                    Some(l) => e.at(l.clone()),
-                    None => e,
-                };
-                // In recover mode the form is a hole, and what follows it
-                // is still checked.
-                if !self.notes.recover {
-                    return Err(e);
-                }
-                self.notes.errors.borrow_mut().push(e);
-                let hole = crate::check::forms::hole_form(heap, loc)?;
-                crate::check::forms::expr_form(heap, hole)
-            }
-        }
-    }
-
-    /// Turn recover mode on or off.
-    pub(crate) fn set_recover(&mut self, on: bool) {
-        self.notes.recover = on;
-    }
-
-    /// Each place a type or a trait the program defines was named, since
-    /// they were last taken.
-    pub(crate) fn take_type_uses(&self) -> Vec<crate::check::semantic::TypeUse> {
-        std::mem::take(&mut *self.notes.type_uses.borrow_mut())
-    }
-
-    /// The errors recover mode has checked past since they were last taken.
-    pub(crate) fn take_errors(&self) -> Vec<Error> {
-        std::mem::take(&mut *self.notes.errors.borrow_mut())
-    }
-
-    /// Every C callback entry the checked code asks for, for an executable
-    /// to emit.
-    pub(crate) fn ffi_callbacks(&self) -> Vec<crate::ffi_callback::CallbackSig> {
-        self.callbacks.clone()
-    }
-
-    /// Every definition a `~/name/` directive calls, for an executable to
-    /// register.
-    pub(crate) fn format_call_targets(&self) -> Vec<crate::CompileTarget> {
-        self.format_calls.iter().cloned().collect()
-    }
-
-    /// A unit a dump wrote, taken in, and what it defined told to the
-    /// session's names.
-    pub(crate) fn take_unit(&mut self, heap: &Heap, unit: Unit) {
-        let reg = &mut self.reg;
-        let (modules, types, methods) = unit.written();
-        unit.apply(reg);
-        publish_uses(reg, heap, Since::Commit);
-        reg.commit();
-        publish(reg, heap, &modules, &types, &methods);
-    }
-
-    /// Every entry the registry holds beyond the built-in definitions, one
-    /// line each and sorted: what two registries are compared by.
-    pub(crate) fn entries(&self) -> Vec<String> {
-        let d = self.reg.changed_since(CREATED);
-        let mut out = Vec::new();
-        macro_rules! each {
-            ($($table:ident),*) => {
-                $(out.extend(d.$table.iter().map(|e| format!("{}: {:?}", stringify!($table), e)));)*
-            };
-        }
-        each!(values, types, methods, inst_methods, method_names, imports, reexports, ctors, static_uses, module_aliases, modules, trait_impls, blanket_impls, blanket_owners, docs, predeclared, throw_tags);
-        out.sort();
-        out
-    }
-
-    /// The generation of the registry's writes, for a dump's unit to be
-    /// taken since.
-    pub(crate) fn generation(&self) -> u64 {
-        self.reg.generation()
-    }
-
-    /// What the registry was written since the generation `since`, for a
-    /// dump's unit.
-    pub(crate) fn capture(&self, heap: &Heap, since: u64) -> Result<RebuiltUnit, Error> {
-        RebuiltUnit::of(heap, &self.reg, since)
-    }
-
-    /// What `(use path)` written at `site` brings in, registered for reading
-    /// the forms after it (`use_form::register_for_reading`).
-    pub(crate) fn register_use_for_reading(&self, heap: &Heap, site: Site, path: &[SymRef]) {
-        register_for_reading(&self.reg, heap, site, path);
-    }
-
-    /// `v`, written in the module `ns`, expanded once when it is a call of a
-    /// macro, for a driver that reads what the expansion `use`s before the
-    /// form is checked.
-    pub(crate) fn expand_toplevel_macro(&self, heap: &mut Heap, expander: &dyn MacroExpander, ns: typelisp_mem::NsId, v: Value) -> Result<Option<Value>, Error> {
-        super::macros::expand_toplevel(&self.reg, expander, heap, ns, v)
-    }
-
-    /// The functions a `defsignature` declared that no `defun` has defined,
-    /// forgotten: what finishing a unit reports.
-    pub(crate) fn take_predeclared(&mut self) -> Vec<Path> {
-        let reg = &mut self.reg;
-        let mut paths: Vec<Path> = reg.predeclared.iter().map(|(p, _)| *p).collect();
-        for p in &paths {
-            reg.predeclared.remove(p);
-        }
-        reg.commit();
-        paths.sort_by_key(|p| p.to_string());
-        paths
-    }
-
-    /// Every bare name visible for completion in `here`.
-    pub(crate) fn completion_candidates(&self, here: typelisp_mem::NsId) -> Vec<crate::check::CompletionCandidate> {
-        super::editor::candidates(&self.reg, here)
-    }
-
-    /// Where each definition, and each local variable a reference names,
-    /// was written, and the type of each expression.
-    pub(crate) fn def_locs(&self) -> crate::check::DefLocs {
-        super::editor::def_locs(&self.reg, &self.notes)
-    }
-
-    /// Every definition the registry holds.
-    pub(crate) fn definitions(&self) -> Vec<crate::check::Defined> {
-        super::editor::definitions(&self.reg)
-    }
-
-    /// Every name a `use` brought into a module.
-    pub(crate) fn imports(&self) -> Vec<crate::check::Imported> {
-        super::editor::imports(&self.reg)
-    }
-
-    /// The documentation of each definition.
-    pub(crate) fn docs(&self) -> crate::check::Docs {
-        super::editor::docs(&self.reg)
-    }
-
-    /// What the function `path` returns, when it is a module-level
-    /// function.
-    pub(crate) fn fn_ret(&self, path: &Path) -> Option<Type> {
-        self.reg.fn_def(path).map(|def| def.ret.clone())
-    }
-
-    /// The kind of the type `path`, when it is a data type.
-    pub(crate) fn type_kind(&self, path: &Path) -> Option<crate::typeck::registry::AdtKind> {
-        self.reg.type_def(path).map(|def| def.kind)
-    }
-
-    /// The type of the last form [`Self::check_form`] checked, when it was an
-    /// expression.
-    pub(crate) fn expr_type(&self) -> Option<&Type> {
-        self.expr_ty.as_ref()
-    }
-
-    /// The module the last form made the current one, when it was an
-    /// `(in-module path)`.
-    /// What a `#[test]` definition and a top-level expression are checked
-    /// into.
-    pub(crate) fn set_test_forms(&mut self, forms: crate::check::TestForms) {
-        self.tests.forms = forms;
-    }
-
-    /// The tests found since the last call, in the order they were defined.
-    pub(crate) fn take_tests(&mut self) -> Vec<crate::check::TestCase> {
-        std::mem::take(&mut self.tests.found)
-    }
-
-    pub(crate) fn take_entered(&mut self) -> Option<typelisp_mem::NsId> {
-        self.entered.take()
-    }
-
-    /// The warnings given since they were last taken.
-    pub(crate) fn take_warnings(&self) -> Vec<String> {
-        std::mem::take(&mut *self.warnings.borrow_mut())
-    }
-}
 
 /// The generation of a registry just made: its copy of the current
 /// checker's registry and the units that waited for it are written before.
-const CREATED: u64 = 1;
+pub(super) const CREATED: u64 = 1;
 
 /// `v`'s core form, its type when it is an expression, and what its code
 /// asks to be reached from outside it. The specializations the form asks for come first,
 /// then the functions lifted for its callbacks, in one bundle with it.
-fn check_toplevel(
+pub(super) fn check_toplevel(
     reg: &mut Registry,
     expander: &dyn MacroExpander,
     heap: &mut Heap,
@@ -395,7 +86,7 @@ pub(crate) fn bundled(heap: &mut Heap, reg: &Registry, requests: &mut Requests, 
 
 /// The site the form `v` written at `site` makes current, when it is an
 /// `(in-module path)`: the module `path` names under `site`'s.
-fn in_module(heap: &Heap, site: Site, v: Value) -> Result<Option<Site>, Error> {
+pub(super) fn in_module(heap: &Heap, site: Site, v: Value) -> Result<Option<Site>, Error> {
     if !matches!(heap.car(v), Ok(Value::Symbol(h)) if h.is(wk::IN_MODULE)) {
         return Ok(None);
     }
@@ -556,7 +247,7 @@ fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc
 /// (`typelisp_mem::NameView`): those it brought in, and those `std::prelude`
 /// re-exports that no type of its own or brought in takes the name of, by
 /// their last segment.
-fn publish_name_view(reg: &Registry, ns: typelisp_mem::NsId) {
+pub(super) fn publish_name_view(reg: &Registry, ns: typelisp_mem::NsId) {
     let is_type = |p: &Path| matches!(reg.types.get(p), Some(TypeEntry::Type(_) | TypeEntry::Trait(_)));
     let mut imports = std::collections::HashMap::new();
     let mut taken = std::collections::HashSet::new();
@@ -580,7 +271,7 @@ fn publish_name_view(reg: &Registry, ns: typelisp_mem::NsId) {
 /// Tells the session's table of what names mean (`Heap::names`) everything
 /// the registry holds, as [`publish`] and [`publish_uses`] tell it what a
 /// form wrote.
-fn publish_all(reg: &Registry, heap: &Heap) {
+pub(super) fn publish_all(reg: &Registry, heap: &Heap) {
     publish_uses(reg, heap, Since::Ever);
     publish(reg, heap, &reg.modules.keys(Since::Ever), &reg.types.keys(Since::Ever), &reg.method_keys(Since::Ever));
 }
@@ -589,7 +280,7 @@ fn publish_all(reg: &Registry, heap: &Heap) {
 /// the `use`s written since `since` brought in: an import as what it names,
 /// a module brought in under a short name, and a type's variants and static
 /// methods brought in bare.
-fn publish_uses(reg: &Registry, heap: &Heap, since: Since) {
+pub(super) fn publish_uses(reg: &Registry, heap: &Heap, since: Since) {
     super::library::publish(reg, &mut heap.names(), since);
     let mut names = heap.names();
     for key in reg.module_aliases.keys(since) {
@@ -615,7 +306,7 @@ fn publish_uses(reg: &Registry, heap: &Heap, since: Since) {
 /// (`geo::area`) or the type (`Shape::circle`, `Pair::new`). A type's
 /// members are its variants, its fields and its methods, read as in the
 /// type's own module.
-fn publish(reg: &Registry, heap: &Heap, modules: &[typelisp_mem::NsId], types: &[Path], methods: &[(Path, SymRef)]) {
+pub(super) fn publish(reg: &Registry, heap: &Heap, modules: &[typelisp_mem::NsId], types: &[Path], methods: &[(Path, SymRef)]) {
     let mut names = heap.names();
     for ns in modules {
         names.declare_module(*ns);
@@ -712,11 +403,17 @@ pub(crate) fn builtin_needs_specialization(reg: &Registry, owner: &Path, def: &M
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::typeck::checker::{Checker, RedefPolicy};
+    use crate::typeck::wire::RebuiltUnit;
     use crate::{Interp, Reader};
     use typelisp_mem::symbols::NsId;
 
-    /// The module the tests' forms are written in.
-    const ROOT_SITE: Site = Site { ns: NsId::ROOT, file: None, policy: crate::check::RedefPolicy::Error };
+    /// A checker that refuses redefinitions, its forms written at the root.
+    fn checker() -> Checker {
+        let mut checker = Checker::new();
+        checker.set_redef_policy(RedefPolicy::Error);
+        checker
+    }
 
     /// `src`'s forms, read, checked by the rebuilt checker and run in order:
     /// the last one's value and type.
@@ -724,13 +421,13 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
         let interp = Interp::new();
-        let mut checker = TypeChecker::default();
+        let mut checker = checker();
         checker.publish_names(&heap);
         let mut forms = reader.forms(src);
         let mut last = None;
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            let form = checker.check_form(&mut heap, &interp, ROOT_SITE, v, Some(loc)).expect("check failed");
+            let form = checker.check_form_at(&mut heap, &interp, v, Some(loc)).expect("check failed");
             heap.push_root(form);
             if let Some(value) = interp.exec(&mut heap, form).expect("run failed") {
                 last = Some((value, checker.expr_type().expect("an expression has a type").clone()));
@@ -745,13 +442,13 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
         let interp = Interp::new();
-        let mut checker = TypeChecker::default();
+        let mut checker = checker();
         checker.publish_names(&heap);
         let mut forms = reader.forms(src);
         let mut result = Ok(Value::Empty);
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            result = checker.check_form(&mut heap, &interp, ROOT_SITE, v, Some(loc));
+            result = checker.check_form_at(&mut heap, &interp, v, Some(loc));
         }
         match result {
             Err(e) => e.to_string(),
@@ -765,12 +462,12 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
         let interp = Interp::new();
-        let mut checker = TypeChecker::default();
+        let mut checker = checker();
         checker.publish_names(&heap);
         let mut forms = reader.forms(src);
         while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
             heap.push_root(v);
-            let form = checker.check_form(&mut heap, &interp, ROOT_SITE, v, Some(loc)).expect("check failed");
+            let form = checker.check_form_at(&mut heap, &interp, v, Some(loc)).expect("check failed");
             heap.push_root(form);
         }
         checker.expr_type().expect("the last form is an expression").clone()
@@ -1189,7 +886,7 @@ mod tests {
     /// `list` is an `Option<Sexpr>`, each item held as a `Sexpr`.
     #[test]
     fn list_holds_its_items_as_sexprs() {
-        assert_eq!(check_ok("(list 1 \"a\" 'b (list))"), crate::check::analyze::option_of_sexpr());
+        assert_eq!(check_ok("(list 1 \"a\" 'b (list))"), crate::typeck::sexpr_value::option_of_sexpr());
     }
 
     /// `as` converts through the source type's method, a narrower width
@@ -1515,8 +1212,8 @@ mod tests {
     #[test]
     fn quote_types_its_datum() {
         assert_eq!(check_ok("'foo"), Type::Symbol);
-        assert_eq!(check_ok("'(1 2)"), crate::check::analyze::option_of_sexpr());
-        assert_eq!(check_ok("'()"), crate::check::analyze::option_of_sexpr());
+        assert_eq!(check_ok("'(1 2)"), crate::typeck::sexpr_value::option_of_sexpr());
+        assert_eq!(check_ok("'()"), crate::typeck::sexpr_value::option_of_sexpr());
         let msg = check_err("(quote a b)");
         assert!(msg.contains("quote: (quote datum)"), "{}", msg);
     }
@@ -1599,12 +1296,12 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 16);
         let reader = Reader::new();
         let interp = Interp::new();
-        let mut checker = TypeChecker::default();
+        let mut checker = checker();
         checker.publish_names(&heap);
         let mut forms = reader.forms("(defun f () int true)");
         let (v, loc) = forms.next_form(&mut heap).unwrap().unwrap();
         heap.push_root(v);
-        assert!(checker.check_form(&mut heap, &interp, ROOT_SITE, v, Some(loc)).is_err());
+        assert!(checker.check_form_at(&mut heap, &interp, v, Some(loc)).is_err());
         let f = crate::types::Path::of_symbol(NsId::ROOT, typelisp_mem::symbols::intern_in(NsId::ROOT, "f"));
         assert!(checker.reg.fn_def(&f).is_none());
     }
@@ -1616,14 +1313,14 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 20);
         let reader = Reader::new();
         let interp = Interp::new();
-        let mut checker = TypeChecker::default();
+        let mut checker = checker();
         checker.publish_names(&heap);
-        let site = Site { ns: NsId::STD, file: None, policy: crate::check::RedefPolicy::Error };
+        checker.set_current_ns(NsId::STD);
         for src in [crate::core_macros::SOURCE, crate::prelude::SOURCE.as_str()] {
             let mut forms = reader.forms_within(crate::LIBRARY_FILE, src, NsId::STD);
             while let Some((v, loc)) = forms.next_form(&mut heap).expect("read failed") {
                 heap.push_root(v);
-                let form = checker.check_form(&mut heap, &interp, site, v, Some(loc.clone())).unwrap_or_else(|e| panic!("{:?}: {:?}", loc, e));
+                let form = checker.check_form_at(&mut heap, &interp, v, Some(loc.clone())).unwrap_or_else(|e| panic!("{:?}: {:?}", loc, e));
                 heap.push_root(form);
                 interp.exec(&mut heap, form).unwrap_or_else(|e| panic!("{:?}: {:?}", loc, e));
             }

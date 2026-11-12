@@ -19,6 +19,7 @@ pub use typelisp_front::read::*;
 pub use typelisp_front::mem::*;
 pub use typelisp_front::types::*;
 pub use typelisp_front::check::*;
+pub use typelisp_front::{Checker, MacroExpander, MacroLambda, RedefPolicy, TestCase, TestForms, TestReturn, TopLevelForm, MONO_BUNDLE_MODULE, SPECIAL_FORM_HEADS};
 pub use typelisp_front::eval::*;
 // The two LLVM-handle accessors moved to the backend with the rest of the
 // island's IR builders; re-exported here under the names they have always had

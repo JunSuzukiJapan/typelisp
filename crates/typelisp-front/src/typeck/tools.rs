@@ -8,7 +8,7 @@
 //! these forms takes one.
 
 use crate::check::resolved::CompileTarget;
-use crate::check::analyze::sexpr_ty;
+use crate::typeck::sexpr_value::sexpr_ty;
 use crate::types::{path_spelling, path_target, Path, PathTarget, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;

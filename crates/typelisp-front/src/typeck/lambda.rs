@@ -7,7 +7,7 @@
 //! and `&key` need a named callee, whose definition has the defaults: a
 //! function type has no place for them.
 
-use crate::check::analyze::option_of_sexpr;
+use crate::typeck::sexpr_value::option_of_sexpr;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;

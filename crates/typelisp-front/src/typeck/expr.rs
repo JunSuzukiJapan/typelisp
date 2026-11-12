@@ -24,9 +24,9 @@ use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::typeck::registry::TraitBound;
 use super::{binding, block, call, catch, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
-use crate::check::analyze::TOPLEVEL_FORM_HEADS;
+
 use super::type_syntax::mentions_raw_word;
-use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
+use crate::typeck::checker::MacroExpander;
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
@@ -796,7 +796,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         let sexpr = crate::types::Path::builtin(wk::SEXPR);
         if let Some(def) = cx.reg.method(&sexpr, member).filter(|m| m.instance) {
             let loc_first = first.loc.clone();
-            let held = Typed { node: Node::DynValue { value: Box::new(first) }, ty: crate::check::analyze::option_of_sexpr(), loc: loc_first };
+            let held = Typed { node: Node::DynValue { value: Box::new(first) }, ty: crate::typeck::sexpr_value::option_of_sexpr(), loc: loc_first };
             return method::check_method_call(cx, heap, locals, sexpr, member, def, Some(held), rest, expected, loc);
         }
         // Neither a function nor the trait's method: the name may be a
@@ -949,3 +949,32 @@ pub(crate) fn check_body(
     };
     Ok((out, ty))
 }
+
+/// The forms [`Checker::check_form_dispatch`] matches at top level. Each one
+/// defines or declares something for the whole program, so none of them
+/// means anything inside an expression.
+/// Every name [`Checker::check_list`] dispatches on as a special form — what
+/// [`Checker::is_builtin_form_head`] keeps a macro of the same name from
+/// taking over. One list, which `editor_keyword_sync_test` compares with the
+/// dispatch itself: a second, hand-kept copy had fallen behind by twelve
+/// names, and a macro named `block` took over `(block ...)` at top level
+/// while one inside a function still meant the special form.
+pub const SPECIAL_FORM_HEADS: &[u32] = &[
+    wk::IF, wk::LET, wk::LET_STAR, wk::PROGN, wk::UNSAFE, wk::SETF,
+    wk::INCF, wk::DECF, wk::ROTATEF, wk::SHIFTF, wk::LOOP, wk::BREAK,
+    wk::RETURN, wk::BLOCK, wk::RETURN_FROM, wk::CATCH, wk::THROW, wk::UNWIND_PROTECT,
+    wk::LIST, wk::LAMBDA, wk::LABELS, wk::MACROLET, wk::SYMBOL_MACROLET, wk::MATCH,
+    wk::PANIC, wk::THE, wk::AS, wk::TRY_AS, wk::COMPILE, wk::TASK,
+    wk::THREAD, wk::SELECT, wk::QUOTE, wk::QUASIQUOTE, wk::FORMAT, wk::PRINT,
+    wk::PRINTLN, wk::EPRINT, wk::EPRINTLN, wk::SOURCE_FILE, wk::PPRINT, wk::PPRINT_FILL,
+    wk::PPRINT_LINEAR, wk::PPRINT_TABULAR, wk::PPRINT_LOGICAL_BLOCK, wk::C_ALLOC, wk::C_REF, wk::C_DEREF,
+    wk::DEF_C_STRUCT, wk::DYN, wk::APPLY, wk::MAKE_INSTANCE, wk::DOCUMENTATION, wk::TRACE,
+    wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
+];
+
+pub(crate) const TOPLEVEL_FORM_HEADS: &[u32] = &[
+    wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
+    wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,
+    wk::DEFTRAIT, wk::DEFTYPE, wk::IMPL, wk::USE, wk::LOAD, wk::IMPORT,
+    wk::SHADOWING_IMPORT, wk::IN_MODULE, wk::DEF_C_STRUCT, wk::SHADOW,
+];

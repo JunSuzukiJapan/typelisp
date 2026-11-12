@@ -36,7 +36,7 @@ pub(crate) fn check_match(
     let scrut = match cx.resolve(&scrut.ty) {
         Type::Dyn(..) => {
             let loc = scrut.loc.clone();
-            Typed { node: Node::DynValue { value: Box::new(scrut) }, ty: crate::check::analyze::sexpr_ty(), loc }
+            Typed { node: Node::DynValue { value: Box::new(scrut) }, ty: crate::typeck::sexpr_value::sexpr_ty(), loc }
         }
         _ => scrut,
     };
@@ -100,7 +100,7 @@ fn check_arm(cx: &Cx, heap: &mut Heap, locals: &Locals, scrut_ty: &Type, result:
     };
     // `(:or p1 p2 ...)`, anywhere in the pattern, is the whole patterns
     // it stands for, which one body reads the names of.
-    let alternatives = crate::check::analyze::expand_or_patterns(heap, *pat).map_err(at)?;
+    let alternatives = crate::typeck::matching::expand_or_patterns(heap, *pat).map_err(at)?;
     let mut pats = Vec::with_capacity(alternatives.len());
     let mut first: Option<Binds> = None;
     // The alternatives `(:or ...)` stands for are made from it; only one
@@ -151,4 +151,68 @@ fn same_binds(cx: &Cx, first: &Binds, other: &Binds) -> Result<(), Error> {
         show(&a),
         show(&b)
     )))
+}
+
+/// Whether `v` is the pre-interned symbol numbered `konst`.
+///
+/// Takes the number rather than a name: the syntax words this asks about are
+/// pre-interned (`BUILTIN_SYMBOLS`), so the test is an integer comparison and
+/// there is no spelling to get wrong.
+pub(crate) fn is_symbol(v: Value, konst: u32) -> bool {
+    matches!(v, Value::Symbol(id) if id.is(konst))
+}
+
+/// A `match` arm's pattern with every `(:or p1 p2 ...)` in it multiplied
+/// out: one pattern per combination of alternatives, in the order the arms
+/// they stand for are tried (left to right, the outer alternative varying
+/// slowest). A pattern with no `:or` comes back as itself, so it keeps the
+/// source positions its cells carry.
+///
+/// `(:= expr)` and `'datum` hold an expression and a datum, not patterns, so
+/// nothing inside them is an alternative. The lists built here are rooted
+/// on the heap's stack, which the enclosing top-level check releases.
+pub(crate) fn expand_or_patterns(heap: &mut Heap, v: Value) -> Result<Vec<Value>, Error> {
+    let Value::Cons(_) = v else { return Ok(vec![v]) };
+    let items = heap.list_to_vec(v)?;
+    let Some(&head) = items.first() else { return Ok(vec![v]) };
+    if is_symbol(head, wk::KW_OR) {
+        if items.len() < 2 {
+            return Err(Error::TypeError("pattern: `(:or)` needs at least one alternative".into()));
+        }
+        let mut out = Vec::new();
+        for alt in &items[1..] {
+            out.extend(expand_or_patterns(heap, *alt)?);
+        }
+        return Ok(out);
+    }
+    if is_symbol(head, wk::COLON_EQUALS) || is_symbol(head, wk::QUOTE) {
+        return Ok(vec![v]);
+    }
+    let mut per_item: Vec<Vec<Value>> = vec![vec![head]];
+    for item in &items[1..] {
+        per_item.push(expand_or_patterns(heap, *item)?);
+    }
+    if per_item.iter().all(|alts| alts.len() == 1) {
+        return Ok(vec![v]);
+    }
+    let mut combos: Vec<Vec<Value>> = vec![Vec::new()];
+    for alts in &per_item {
+        combos = combos
+            .into_iter()
+            .flat_map(|prefix| {
+                alts.iter().map(move |a| {
+                    let mut c = prefix.clone();
+                    c.push(*a);
+                    c
+                })
+            })
+            .collect();
+    }
+    let mut out = Vec::with_capacity(combos.len());
+    for c in combos {
+        let list = crate::check::core::list(heap, &c)?;
+        heap.push_root(list);
+        out.push(list);
+    }
+    Ok(out)
 }

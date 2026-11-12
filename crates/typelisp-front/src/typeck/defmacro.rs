@@ -6,13 +6,14 @@
 //! `&optional`, `&rest` and `&key` ones, an optional or key one with a
 //! default form, which sees the parameters before it. The body is checked
 //! here; the evaluator holds it, and expands each call
-//! ([`crate::check::MacroExpander`]).
+//! ([`crate::typeck::checker::MacroExpander`]).
 
-use crate::check::analyze::{option_of_sexpr, parse_macro_lambda_list, MacroLambda, MacroShape};
+use crate::wk;
+use crate::typeck::sexpr_value::option_of_sexpr;
 use crate::check::bound_name;
 use crate::typeck::registry::MacroDef;
 use crate::types::{Path, Type};
-use crate::check::MacroExpander;
+use crate::typeck::checker::MacroExpander;
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
@@ -144,4 +145,173 @@ fn check_default(
     let lowered = lower_rooted(heap, &mut lw, &tree[0])?;
     tree.clear();
     Ok(vec![lowered])
+}
+
+/// The `&optional`/`&key` structure of a `defmacro` lambda list, beyond its
+/// leading required params (and any single trailing `&rest`, whose presence is
+/// tracked separately by the `rest` flag on the `defmacro` form).
+///
+/// The checker's own working shape while parsing a macro's lambda list; it is
+/// written into the `(defmacro ...)` form's own lambda field (see
+/// [`Checker::defmacro_form`]) and read back from there at expansion time, so
+/// this type does not outlive checking and needs no serialized form of its own.
+/// A default-value body is a list of core forms, evaluated when the argument is
+/// omitted in an environment where the earlier params are already bound (an
+/// empty body binds `nil`). A plain fixed-or-`&rest` macro carries a `required`
+/// equal to its fixed-param count with both `optionals` and `keys` empty (the
+/// common case).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MacroLambda {
+    /// Number of leading required (positional, non-defaulted) params — the
+    /// call's minimum argument count.
+    pub required: usize,
+    /// Default-value body for each `&optional` param, in order.
+    pub optionals: Vec<Vec<Value>>,
+    /// Each `&key` param's `(name, default-value body)`, in order — matched at
+    /// the call site by the keyword symbol `:name`.
+    pub keys: Vec<(String, Vec<Value>)>,
+}
+
+/// The call-site arity shape of a macro, derived from its [`MacroDef`] by
+/// [`Info::resolve_macro`]/[`Info::macro_at`]
+/// and consumed by [`MacroShape::check_arity`]. Carries only what a raw
+/// argument *count* can be judged against — the `&key` names themselves aren't
+/// needed here (keyword validation happens in `Interp::expand_macro`).
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct MacroShape {
+    required: usize,
+    optional: usize,
+    rest: bool,
+    has_keys: bool,
+}
+
+impl MacroShape {
+    pub(crate) fn of(def: &MacroDef) -> MacroShape {
+        MacroShape { required: def.required, optional: def.optional, rest: def.rest, has_keys: !def.keys.is_empty() }
+    }
+
+    /// The arity check shared by every macro-expansion site. Only the bounds a
+    /// call site can judge from raw argument *count* are checked here; the
+    /// finer validation that needs to parse the argument forms (an unknown
+    /// `&key` keyword, an odd `&key` plist) is left to `Interp::expand_macro`,
+    /// whose error is surfaced the same way (`macro `name`: ...`).
+    ///
+    /// - A minimum of `required` args always applies.
+    /// - With neither `&rest` nor `&key`, the maximum is `required + optional`
+    ///   (exact when there are no `&optional` params — the plain-macro case,
+    ///   preserving the original exact-arity message).
+    /// - With `&rest` or `&key`, there is no call-site upper bound (the
+    ///   trailing args are a `&rest` list and/or a keyword plist).
+    pub(crate) fn check_arity(self, head: &str, got: usize) -> Result<(), Error> {
+        let MacroShape { required, optional, rest, has_keys } = self;
+        if got < required {
+            return Err(Error::TypeError(format!(
+                "macro `{}` expects at least {} argument(s), got {}",
+                head, required, got
+            )));
+        }
+        if !rest && !has_keys {
+            let max = required + optional;
+            if got > max {
+                return Err(Error::TypeError(if optional == 0 {
+                    format!("macro `{}` expects {} argument(s), got {}", head, required, got)
+                } else {
+                    format!("macro `{}` expects {} to {} argument(s), got {}", head, required, max, got)
+                }));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// What a `defmacro` lambda list parses into: the required parameter names,
+/// the `&optional` parameters (each with its default form, if it declared
+/// one), the `&rest` name, and the `&key` parameters in the same shape as the
+/// optionals.
+pub(crate) type MacroLambdaList = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
+
+pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLambdaList, Error> {
+    // Section rank: required=0, &optional=1, &rest=2, &key=3. A marker may
+    // only advance the rank forward, so each appears at most once and in
+    // order.
+    let mut rank = 0u8;
+    let mut required_names: Vec<SymRef> = Vec::new();
+    let mut optionals: Vec<(SymRef, Option<Value>)> = Vec::new();
+    let mut rest_name: Option<SymRef> = None;
+    let mut keys: Vec<(SymRef, Option<Value>)> = Vec::new();
+
+    for p in param_vals {
+        if let Value::Symbol(id) = p {
+            match id.well_known() {
+                wk::OPTIONAL => {
+                    if rank >= 1 {
+                        return Err(Error::TypeError("defmacro: &optional must precede &rest and &key, and appear once".into()));
+                    }
+                    rank = 1;
+                    continue;
+                }
+                wk::REST => {
+                    if rank >= 2 {
+                        return Err(Error::TypeError("defmacro: &rest must precede &key, and appear once".into()));
+                    }
+                    rank = 2;
+                    continue;
+                }
+                wk::KEY => {
+                    if rank >= 3 {
+                        return Err(Error::TypeError("defmacro: &key may appear only once".into()));
+                    }
+                    rank = 3;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        match rank {
+            0 => required_names.push(macro_param_name(*p, "required")?),
+            1 => optionals.push(macro_opt_key_spec(heap, *p, "&optional")?),
+            2 => {
+                if rest_name.is_some() {
+                    return Err(Error::TypeError("defmacro: &rest takes exactly one parameter name".into()));
+                }
+                rest_name = Some(macro_param_name(*p, "&rest")?);
+            }
+            _ => keys.push(macro_opt_key_spec(heap, *p, "&key")?),
+        }
+    }
+    if rank == 2 && rest_name.is_none() {
+        return Err(Error::TypeError("defmacro: &rest must be followed by exactly one parameter name".into()));
+    }
+    Ok((required_names, optionals, rest_name, keys))
+}
+
+/// A bare-symbol lambda-list parameter name (`required`/`&rest`).
+fn macro_param_name(v: Value, section: &str) -> Result<SymRef, Error> {
+    match v {
+        Value::Symbol(id) => Ok(id),
+        _ => Err(Error::TypeError(format!("defmacro: {} parameter must be a name", section))),
+    }
+}
+
+/// An `&optional`/`&key` item: either a bare `name` (no default) or a
+/// `(name default-form)` pair. Returns `(name, Some(form)|None)`.
+fn macro_opt_key_spec(heap: &Heap, v: Value, section: &str) -> Result<(SymRef, Option<Value>), Error> {
+    match v {
+        Value::Symbol(id) => Ok((id, None)),
+        Value::Cons(_) => {
+            let items = heap.list_to_vec(v)?;
+            if items.is_empty() || items.len() > 2 {
+                return Err(Error::TypeError(format!(
+                    "defmacro: {} parameter must be `name` or `(name default)`",
+                    section
+                )));
+            }
+            let name = macro_param_name(items[0], section)?;
+            Ok((name, items.get(1).copied()))
+        }
+        _ => Err(Error::TypeError(format!(
+            "defmacro: {} parameter must be `name` or `(name default)`",
+            section
+        ))),
+    }
 }

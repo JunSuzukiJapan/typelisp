@@ -5,7 +5,7 @@
 //! What starts it has to be a call: the call is checked as one would be
 //! without the form, and it has to lower to one.
 
-use crate::check::analyze::{SPECIAL_FORM_HEADS, TOPLEVEL_FORM_HEADS};
+use crate::typeck::expr::{SPECIAL_FORM_HEADS, TOPLEVEL_FORM_HEADS};
 use super::builtins::{task_of, thread_of};
 use crate::{wk, Error, Heap, Loc, Value};
 

@@ -173,7 +173,7 @@ fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
     }
     let (doc, body) = split_doc(heap, body);
     if let Some((first, _)) = body.first() {
-        if crate::check::analyze::is_where_clause(heap, *first)? {
+        if crate::typeck::bounds::is_where_clause(heap, *first)? {
             unimplemented!("typeck: a trait method with a `(:where ...)` clause")
         }
     }

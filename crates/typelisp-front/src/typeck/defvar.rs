@@ -8,7 +8,6 @@
 //! the variable.
 
 use crate::check::lower::CoreForms;
-use crate::check::Checker;
 use crate::types::Path;
 use crate::{Error, Heap, Loc, Value};
 
@@ -70,7 +69,7 @@ pub(crate) fn check_defvar(
     d.record(reg, Definition::Var(Path::of_symbol(d.site.ns, name)), doc);
     let scope = TypeScope::empty();
     let ty = parse_type(heap, &super::type_syntax::TypeCx { reg, ns: d.site.ns, scope: &scope, self_type: None, notes: d.notes }, ty.0, ty.1.as_ref())?;
-    Checker::reject_raw_word_storage(&ty, "the global", &heap.symbol_spelling(name))?;
+    super::c_memory::reject_raw_word_storage(&ty, "the global", &heap.symbol_spelling(name))?;
     let value = {
         let cx = Cx::new(reg, d.expander, d.site.ns, &scope, None, d.notes);
         let mut value = check_expr(&cx, heap, &Locals::empty(), value.0, Some(&ty), value.1.clone())?;

@@ -204,7 +204,7 @@ pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRe
     }
     let Type::Named(path, args) = &recv_ty else { return Err(unresolved()) };
     // A tuple's element `t::1` is its field of that number.
-    let name = match crate::check::analyze::tuple_element_field(&cx.holes.borrow().shown(&recv_ty), member.name())? {
+    let name = match crate::typeck::instance::tuple_element_field(&cx.holes.borrow().shown(&recv_ty), member.name())? {
         Some(field) => member_symbol(&field),
         None => member_symbol(member.name()),
     };
@@ -222,5 +222,26 @@ pub(crate) fn check_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRe
             unimplemented!("typeck: `{}::{}`, a method `{}` has for one instantiation", recv.name(), member.name(), path)
         }
         _ => Err(unresolved()),
+    }
+}
+
+/// `t::0` on a tuple: the field that holds element `0`, or an error naming
+/// the tuple's arity when there is no such element. `None` when `ty` is not
+/// a tuple or `name` is not an index, so the name is looked up as written.
+pub(crate) fn tuple_element_field(ty: &Type, name: &str) -> Result<Option<String>, Error> {
+    let Type::Named(path, _) = ty else { return Ok(None) };
+    let Some(arity) = crate::types::tuple_arity(path) else { return Ok(None) };
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(None);
+    }
+    match name.parse::<usize>() {
+        Ok(i) if i < arity => Ok(Some(crate::types::tuple_field(i))),
+        _ => Err(Error::TypeError(format!(
+            "`{}` has {} element(s), numbered 0 to {}; there is no element `{}`",
+            ty,
+            arity,
+            arity - 1,
+            name
+        ))),
     }
 }

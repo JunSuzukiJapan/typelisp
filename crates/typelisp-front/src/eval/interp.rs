@@ -595,7 +595,7 @@ pub struct Interp {
     /// top-level forms through; the borrow discipline (never hold a checker
     /// borrow across an `exec` that could `eval`) keeps the two from
     /// double-borrowing — see `Self::eval_form` and the drivers' own comments.
-    pub(crate) checker: Option<Rc<RefCell<crate::check::Checker>>>,
+    pub(crate) checker: Option<Rc<RefCell<crate::typeck::checker::Checker>>>,
     /// Every `defvar`/`defconstant` global some compiled function has
     /// referenced, promoted to a compiled-global slot (a permanent GC root
     /// — `typelisp_rt::global_new`) and mapped to the id that slot got.
@@ -841,7 +841,7 @@ impl Interp {
     /// A shared handle to the live `Checker`, for the paths that need to check
     /// or capture against this environment (`(dump ...)`). `None` where no
     /// driver wired one — see the `checker` field.
-    pub fn checker_handle(&self) -> Option<Rc<RefCell<crate::check::Checker>>> {
+    pub fn checker_handle(&self) -> Option<Rc<RefCell<crate::typeck::checker::Checker>>> {
         self.checker.clone()
     }
 
@@ -902,7 +902,7 @@ impl Interp {
     /// right after construction; contexts that never run user `eval` (AOT
     /// compilation, the compiler-island bootstrap, most tests) skip it and
     /// leave the handle `None`. See the `checker` field's doc comment.
-    pub fn set_checker(&mut self, checker: Rc<RefCell<crate::check::Checker>>) {
+    pub fn set_checker(&mut self, checker: Rc<RefCell<crate::typeck::checker::Checker>>) {
         self.checker = Some(checker);
     }
 

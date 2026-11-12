@@ -9,7 +9,7 @@
 //! `Type::member` or `Type::*`, a type's variants and public static methods
 //! brought in bare; or it names a module.
 
-use crate::check::RedefPolicy;
+use crate::typeck::checker::RedefPolicy;
 use crate::types::Path;
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{find_exact, intern_in, ns_parent, Import, NsId, PathStep};

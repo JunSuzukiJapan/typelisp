@@ -212,7 +212,7 @@ fn parse_fields(heap: &Heap, cx: &TypeCx, items: &[(Value, Option<Loc>)]) -> Res
             return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", name)));
         }
         let ty = parse_type(heap, cx, ty, ty_at.as_ref())?;
-        crate::check::Checker::reject_raw_word_storage(&ty, "the field", name.name())?;
+        super::c_memory::reject_raw_word_storage(&ty, "the field", name.name())?;
         out.push((Field { name, ty, public, default: default.is_some() }, default));
     }
     Ok(out)

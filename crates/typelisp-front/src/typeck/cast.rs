@@ -9,7 +9,7 @@
 //! after it. The table of conversions is the old checker's
 //! ([`as_conversion`]).
 
-use crate::check::analyze::{as_conversion, called_width};
+
 use crate::types::{prim_type_path, Type};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
@@ -108,5 +108,79 @@ fn wrapped(value: Typed, try_variant: bool, loc: Option<Loc>) -> Typed {
         Typed::some(value, loc)
     } else {
         value
+    }
+}
+
+/// `Checker::check_as`'s conversion table: `(from, to)` -> `(panic_method,
+/// try_method)`, where `panic_method` is the existing `registry.rs` instance
+/// method `as` always calls, and `try_method` — `Some` only for the two
+/// *partial* pairs — is the `Option`-returning counterpart `try-as` calls
+/// instead (`None` here means the pair is total: `try-as` calls
+/// `panic_method` too and wraps the result in `Some`).
+///
+/// Every `to`-is-`i64` request is looked up as if `to` were `i32` instead:
+/// `float->int`/`bignum->int`/`char->int` (`registry.rs`) are always
+/// registered with a hardcoded `I32` return even though the underlying
+/// computation already produces a full `i64` (`Value::Int` is uniformly
+/// `i64` regardless of which static width labels it) — `check_as` relabels
+/// the result to `I64` afterward on that branch, so this table only ever
+/// needs to name the `i32` method once. An `i32`<->`i64` source/target pair
+/// itself never reaches this table — `check_as` relabels that directly,
+/// before the lookup.
+pub(crate) fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'static str>)> {
+    use Type::*;
+    // Widths do not appear in a conversion method's name: every integer type
+    // has the same `int->float`/`int->bignum`/... catalog (they share one
+    // runtime representation), and both float types the same `float->int`.
+    // So the table is written between *families*, and `check_as` relabels the
+    // result to the width that was actually asked for.
+    let to_key = called_width(to);
+    match (from, &to_key) {
+        // A C word can be *read* as a `bignum`, and as nothing else here. It is
+        // the only target that never loses anything, which is the whole point:
+        // it is how a `size_t` too large for `i32` is read at all (`as i32`
+        // truncates and `try-as i32` answers `none`). `f64` would round,
+        // `ratio` and `char` are not what a machine word means, and none of
+        // the three is registered for these types anyway
+        // (`registry::c_word_assoc`). Ahead of the integer arm, which these
+        // deliberately fail.
+        _ if from.is_c_word() => match &to_key {
+            Int => Some(("int->int", None)),
+            _ => None,
+        },
+        _ if from.is_int_family() => match &to_key {
+            F64 => Some(("int->float", None)),
+            Ratio => Some(("int->ratio", None)),
+            Char => Some(("int->char", Some("try-int->char"))),
+            _ => None,
+        },
+        _ if from.is_float() => match &to_key {
+            Int => Some(("float->int", None)),
+            Ratio => Some(("float->ratio", None)),
+            _ => None,
+        },
+        (Char, Int) => Some(("char->int", None)),
+        (Ratio, F64) => Some(("ratio->float", None)),
+        (Ratio, Int) => Some(("ratio->int", None)),
+        (Ratio, Rational) => Some(("ratio->rational", None)),
+        // `as int` truncates, as `ratio`'s does; `try-as int` answers whether
+        // the value is an integer (CL's `integerp`).
+        (Rational, Int) => Some(("rational->int", Some("try-rational->int"))),
+        (Rational, Ratio) => Some(("rational->ratio", None)),
+        (Rational, F64) => Some(("rational->float", None)),
+        _ => None,
+    }
+}
+
+/// The width a conversion *into* `ty`'s family is actually registered at:
+/// `i32` for every integer, `f64` for both floats, and `ty` itself for
+/// everything else. See [`as_conversion`].
+pub(crate) fn called_width(ty: &Type) -> Type {
+    if ty.is_integer() {
+        Type::Int
+    } else if ty.is_float() {
+        Type::F64
+    } else {
+        ty.clone()
     }
 }

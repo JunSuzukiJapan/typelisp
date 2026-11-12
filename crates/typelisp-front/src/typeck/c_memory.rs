@@ -128,7 +128,7 @@ fn c_positions(reg: &Registry, ty: &Type, base: u64, out: &mut Vec<(u64, Type)>)
 /// declarations and an expression would be checked by two different rules.
 pub(crate) fn declares_c_structs(heap: &Heap, forms: &[(Value, Option<Loc>)]) -> Result<bool, Error> {
     let raw: Vec<Value> = forms.iter().map(|(v, _)| *v).collect();
-    crate::check::Checker::unsafe_declares_c_structs(heap, &raw)
+    unsafe_declares_c_structs(heap, &raw)
 }
 
 /// `(unsafe (def-c-struct ...)...)` at top level: each struct registered.
@@ -427,4 +427,57 @@ fn store(cx: &Cx, heap: &mut Heap, addr: Typed, offset: u64, ty: &Type, value: T
     let local = || Typed { node: Node::Local { name: temp }, ty: ty.clone(), loc: None };
     let stored = builtin(b::STORE, vec![addr, word(heap, offset)?, word(heap, kind as u64)?, local()], Type::Unit);
     Ok(Typed { node: Node::Let { binds: vec![(temp, value)], body: vec![stored, local()] }, ty: ty.clone(), loc: None })
+}
+
+/// Whether `ty` is, or contains, one of the FFI's raw machine words.
+fn type_mentions_raw_word(ty: &Type) -> bool {
+    match ty {
+        Type::Ptr | Type::CLong | Type::CULong | Type::PtrTo(_) => true,
+        Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(type_mentions_raw_word),
+        Type::Fn(ps, rest, ret) => {
+            ps.iter().any(type_mentions_raw_word)
+                || rest.as_deref().map(type_mentions_raw_word).unwrap_or(false)
+                || type_mentions_raw_word(ret)
+        }
+        _ => false,
+    }
+}
+
+/// Refuses a declared slot (`what` `name`) of type `ty` when `ty` mentions
+/// a raw C word: a slot tags what it holds, which would drop the word's top
+/// bits.
+pub(crate) fn reject_raw_word_storage(ty: &Type, what: &str, name: &str) -> Result<(), Error> {
+    if type_mentions_raw_word(ty) {
+        return Err(Error::TypeError(format!(
+            "{} `{}` is declared `{}`, and a raw C word cannot be stored: the slot tags what \
+             it holds, which would drop the word's top three bits — the same reason this \
+             language has no 64-bit integer type. Keep it in a local inside `(unsafe ...)`, \
+             or convert it (`as i32`, `as bignum`).",
+            what,
+            name,
+            ty
+        )));
+    }
+    Ok(())
+}
+
+/// A top-level `(unsafe ...)` whose every form is a `def-c-struct`
+/// (possibly `pub`): `Some(true)`. One that holds none: `Some(false)`, an
+/// ordinary expression. A mixture is refused — the declarations and the
+/// expression would be checked by two different rules.
+pub(crate) fn unsafe_declares_c_structs(heap: &Heap, forms: &[Value]) -> Result<bool, Error> {
+    let is_decl = |v: &Value| -> bool {
+        let Ok(items) = heap.list_to_vec(*v) else { return false };
+        let head = |i: usize, konst: u32| matches!(items.get(i), Some(Value::Symbol(id)) if id.is(konst));
+        head(0, wk::DEF_C_STRUCT) || (head(0, wk::PUB) && head(1, wk::DEF_C_STRUCT))
+    };
+    let n = forms.iter().filter(|v| is_decl(v)).count();
+    if n > 0 && n != forms.len() {
+        return Err(Error::TypeError(
+            "an `(unsafe ...)` that declares C structs holds nothing but `def-c-struct`s — \
+             write the expressions in an `(unsafe ...)` of their own"
+                .into(),
+        ));
+    }
+    Ok(n > 0)
 }

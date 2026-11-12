@@ -5,9 +5,10 @@
 //! The body of a macro is the evaluator's ([`MacroExpander`]); the checker
 //! knows how many arguments a call of it may have.
 
-use crate::check::analyze::MacroShape;
-use crate::check::analyze::TOPLEVEL_FORM_HEADS;
-use crate::check::{MacroExpander, SPECIAL_FORM_HEADS};
+use crate::typeck::defmacro::MacroShape;
+use crate::typeck::expr::TOPLEVEL_FORM_HEADS;
+use crate::typeck::checker::MacroExpander;
+use crate::typeck::expr::SPECIAL_FORM_HEADS;
 use crate::types::{path_target, Path, PathTarget};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::NsId;

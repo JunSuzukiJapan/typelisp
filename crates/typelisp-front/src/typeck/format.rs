@@ -11,7 +11,7 @@
 //! arguments each one takes and of what type. That is checked once the form
 //! is, when every argument's type is settled ([`super::expr::Cx::settle`]).
 
-use crate::check::analyze::{option_of_sexpr, sexpr_ty};
+use crate::typeck::sexpr_value::{option_of_sexpr, sexpr_ty};
 use crate::typeck::registry::TraitBound;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};

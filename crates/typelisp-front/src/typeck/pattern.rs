@@ -7,7 +7,8 @@
 //! fields matched by the patterns; the variant is named bare, since the
 //! type is the one being matched.
 
-use crate::check::analyze::{is_option_of_sexpr, is_sexpr_expectation, sexpr_ty, sexpr_variant_for_literal, BIGNUM_IS_GONE, NIL_IS_GONE};
+use crate::typeck::sexpr_value::{is_option_of_sexpr, is_sexpr_expectation, sexpr_ty};
+use crate::typeck::variant::{BIGNUM_IS_GONE, NIL_IS_GONE};
 use crate::sexpr_variant::{self, is_ctor_name};
 use crate::typeck::registry::AdtKind;
 use crate::types::{path_is_builtin, Path, Type};
@@ -396,7 +397,7 @@ fn tuple_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, id:
     let path = crate::types::tuple_path(n);
     let (targs, downcast) = match cx.resolve(expected) {
         Type::Named(p, args) if p == path => (args, false),
-        t if is_sexpr_expectation(&t) => (vec![crate::check::analyze::option_of_sexpr(); n], true),
+        t if is_sexpr_expectation(&t) => (vec![crate::typeck::sexpr_value::option_of_sexpr(); n], true),
         t => {
             return Err(Error::TypeError(format!(
                 "pattern: `{}` is a tuple of {} element(s), which does not match `{}`",
@@ -463,3 +464,20 @@ fn value_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, exp
 /// The local a value pattern's test names the value matched by: no reader
 /// can write a name that starts with `$`.
 const MATCH_SCRUT: &str = "$match-scrut";
+
+/// The `Sexpr` variant that destructures a literal of `v`'s kind —
+/// `check_pattern`'s suggestion when a by-identity literal is written
+/// against a `Sexpr` scrutinee. Only the four kinds that reach it (a
+/// `Str` literal, and the three boxed numbers) are named; anything else
+/// falls back to the variant that binds without destructuring, which is
+/// always true and always available.
+pub(crate) fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
+    match v {
+        Value::Str(_) => "str",
+        Value::Boxed(id) if heap.is_f64(id) => "f64",
+        Value::Boxed(id) if heap.is_f32(id) => "f32",
+        Value::Boxed(id) if heap.is_bignum(id) => "int",
+        Value::Boxed(id) if heap.is_ratio(id) => "ratio",
+        _ => "the sexpr",
+    }
+}

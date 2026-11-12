@@ -23,7 +23,7 @@
 
 use typelisp_mem::{wk, Error, Heap, Loc, NsId, RootScope, SymRef, Value};
 
-use crate::check::analyze::MacroLambda;
+use crate::typeck::defmacro::MacroLambda;
 use crate::check::core::{self, definition_form, Items};
 use crate::check::repr::Repr;
 use crate::check::resolved::CompileTarget;
@@ -568,7 +568,7 @@ pub(crate) fn hole_form(heap: &mut Heap, loc: Option<Loc>) -> Result<Value, Erro
 ///
 /// Every nested result is rooted as it is produced: each sibling's emission
 /// allocates, and a `Vec<Value>` is invisible to the collector.
-pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
+pub(crate) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
     match t {
         Type::Unit => Ok(Value::Empty),
         // Not in `prim_type_path` (`!` has no method table), so spelled here.

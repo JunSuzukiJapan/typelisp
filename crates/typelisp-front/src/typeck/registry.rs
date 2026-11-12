@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::check::analyze::MacroShape;
+use crate::typeck::defmacro::MacroShape;
 use crate::check::lower::CoreForms;
 use std::collections::BTreeMap;
 

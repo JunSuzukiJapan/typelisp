@@ -1,7 +1,7 @@
 //! A sum type's value: `(Name::Variant value...)`, or the bare variant name
 //! a `use` of the type brought in.
 
-use crate::check::analyze::{is_retired_bignum, is_retired_nil, BIGNUM_IS_GONE, NIL_IS_GONE};
+
 use crate::types::{Path, Type};
 use crate::{Error, Heap, Loc, Value};
 
@@ -58,4 +58,43 @@ pub(crate) fn check_variant(
         cx.must_decide(t.clone(), what, loc.clone());
     }
     Ok(Typed { node: Node::Construct { owner, targs, variant, mutable: false, field_tys, args: checked }, ty, loc })
+}
+
+/// `Sexpr`'s `nil` variant — the old empty list.
+///
+/// The variant is still *in* `sexpr_def`, and deliberately so: its number is
+/// burned into the island's IR and into compiled code (`crate::sexpr_variant`
+/// says why numbers are only ever appended). Removing the entry would
+/// renumber every variant after it.
+///
+/// What is gone is its *surface*: `(nil)` can no longer be written as a
+/// constructor or a pattern, because a writable empty-list `Sexpr` would
+/// make `Option<Sexpr>`'s niche unsound — `(Option::some (nil))` and
+/// `(Option::none)` would be the same word. The empty list is reached as
+/// `Option<Sexpr>`'s `none`, and the core IR still spells it `(construct
+/// sexpr 0 ..)`, which the checker emits itself.
+pub(crate) const SEXPR_RESERVED_VARIANT: usize = crate::sexpr_variant::NIL;
+
+/// `Sexpr`'s old `bignum` variant, retired with the type: a bignum box is an
+/// `int` now. Same treatment as [`SEXPR_RESERVED_VARIANT`]:
+/// the slot stays so nothing renumbers, and its surface is refused.
+const SEXPR_RETIRED_BIGNUM: usize = crate::sexpr_variant::RETIRED_BIGNUM;
+
+/// Message for a `(bignum ..)` constructor or pattern.
+pub(crate) const BIGNUM_IS_GONE: &str = "`bignum` is no longer a `Sexpr` constructor: the `bignum` type was folded \
+     into `int`, so a big integer is `(int n)` like any other.";
+
+/// Message for a `(nil)` that survived in source somewhere.
+pub(crate) const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty list is \
+     `Option<Sexpr>`'s `none`. Write `()` where an `Option<Sexpr>` is expected, or \
+     `(Option::none)`; match it with `((none) ...)`.";
+
+/// Is `(adt, variant)` the retired `Sexpr::nil`?
+pub(crate) fn is_retired_nil(adt: &Path, variant: usize) -> bool {
+    variant == SEXPR_RESERVED_VARIANT && crate::types::path_is_builtin(adt, typelisp_mem::wk::SEXPR)
+}
+
+/// Is `(adt, variant)` the retired `Sexpr::bignum`?
+pub(crate) fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
+    variant == SEXPR_RETIRED_BIGNUM && crate::types::path_is_builtin(adt, typelisp_mem::wk::SEXPR)
 }

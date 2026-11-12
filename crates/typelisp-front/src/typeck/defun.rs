@@ -118,7 +118,7 @@ pub(crate) fn check_defun(
 /// it has one, and the rest.
 pub(crate) fn split_where<'b>(heap: &Heap, body: &'b [(Value, Option<Loc>)]) -> Result<(Option<Value>, &'b [(Value, Option<Loc>)]), Error> {
     match body.split_first() {
-        Some(((first, _), rest)) if crate::check::analyze::is_where_clause(heap, *first)? => Ok((Some(*first), rest)),
+        Some(((first, _), rest)) if crate::typeck::bounds::is_where_clause(heap, *first)? => Ok((Some(*first), rest)),
         _ => Ok((None, body)),
     }
 }

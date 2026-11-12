@@ -7,7 +7,7 @@
 //! logical block opens before its body and closes after it; what the body
 //! prints is its content.
 
-use crate::check::analyze::{option_of_sexpr, sexpr_ty};
+use crate::typeck::sexpr_value::{option_of_sexpr, sexpr_ty};
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;

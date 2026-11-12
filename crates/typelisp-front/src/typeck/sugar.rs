@@ -6,7 +6,7 @@
 //! operand evaluated once, `(- x)` is `x`'s negation, and so on. The forms
 //! are the old checker's.
 
-use crate::check::analyze::{call_sugar, CallSugar};
+
 use crate::check::forms::{list_from_vec_locs, numeric_identity_literal, wrap_let_star};
 use crate::types::Type;
 use crate::{wk, Error, Heap, Loc, Value};
@@ -208,4 +208,45 @@ fn log_with_base(heap: &mut Heap, args: &[Value]) -> Result<Value, Error> {
     let base = form(heap, &[log, args[1]])?;
     let div = std_symbol(heap, "/");
     form(heap, &[div, number, base])
+}
+
+/// Which call sugar ([`Checker::check_call_sugar`]) a call of `head` with
+/// `nargs` arguments is: forms keyed on the name *and* the argument count,
+/// which no single definition could express. `concatenate_is_fn` says
+/// whether `concatenate` names a function here, which then wins.
+pub(crate) fn call_sugar(head: &str, nargs: usize, concatenate_is_fn: impl FnOnce() -> bool) -> Option<CallSugar> {
+    const ARITH: [&str; 11] = ["+", "-", "*", "/", "max", "min", "logand", "logior", "logxor", "gcd", "lcm"];
+    const CMP: [&str; 6] = ["<", "<=", ">", ">=", "=", "/="];
+    Some(if nargs <= 1 && (ARITH.contains(&head) || CMP.contains(&head)) {
+        CallSugar::NullaryOrUnary
+    } else if nargs > 2 && ARITH.contains(&head) {
+        CallSugar::VariadicArith
+    } else if nargs > 2 && CMP.contains(&head) {
+        CallSugar::VariadicCmp
+    } else if head == "append" && nargs > 2 {
+        CallSugar::VariadicAppend
+    } else if head == "concatenate" && !concatenate_is_fn() {
+        CallSugar::Concatenate
+    } else if head == "aref" && nargs > 0 {
+        CallSugar::Aref
+    } else if head == "log" && nargs == 2 {
+        CallSugar::LogWithBase
+    } else if head == "atan" && nargs == 2 {
+        CallSugar::Atan2
+    } else {
+        return None;
+    })
+}
+
+/// The kinds of call sugar [`call_sugar`] tells apart.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CallSugar {
+    NullaryOrUnary,
+    VariadicArith,
+    VariadicCmp,
+    VariadicAppend,
+    Concatenate,
+    Aref,
+    LogWithBase,
+    Atan2,
 }

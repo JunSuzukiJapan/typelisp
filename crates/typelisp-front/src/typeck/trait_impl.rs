@@ -70,7 +70,7 @@ pub(crate) fn check_trait_impl(
     // `(:where ...)` bounds the type's parameters: the type implements the
     // trait when its arguments meet them, and every method may use them.
     let (clause, items) = match items.split_first() {
-        Some(((first, _), rest)) if crate::check::analyze::is_where_clause(heap, *first)? => (Some(*first), rest),
+        Some(((first, _), rest)) if crate::typeck::bounds::is_where_clause(heap, *first)? => (Some(*first), rest),
         _ => (None, items),
     };
     // `(impl<T> Trait T ...)`: every type that meets the bounds.

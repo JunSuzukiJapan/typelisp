@@ -1,7 +1,7 @@
 //! A call to a method: `(name receiver arg...)`, the instance method found
 //! on the receiver's type, or `(Type::name arg...)`, a static method.
 
-use crate::check::analyze::is_option_of_sexpr;
+use crate::typeck::sexpr_value::is_option_of_sexpr;
 use crate::types::{path_is_builtin, Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;

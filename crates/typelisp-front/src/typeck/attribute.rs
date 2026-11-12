@@ -5,7 +5,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::check::{TestCase, TestForms, TestReturn};
 use crate::typeck::registry::TraitBound;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
@@ -121,4 +120,52 @@ fn test_return(reg: &Registry, name: &str, ret: &Type) -> Result<TestReturn, Err
 
 fn not_a_test_return(name: &str, ret: &Type) -> Error {
     Error::TypeError(format!("`#[test]` function `{}` must return `()` or `Result<(), E>`, not `{}`", name, ret))
+}
+
+/// What the checker does with a `#[test]` definition, and with a top-level
+/// expression.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TestForms {
+    /// A `#[test]` definition is left out without being checked — an
+    /// ordinary run, `compile-file`, the REPL.
+    #[default]
+    Skip,
+    /// A `#[test]` definition is checked and defined like any other. The
+    /// editor, which has to report the errors in a test too.
+    Check,
+    /// [`TestForms::Check`], and each test is recorded for
+    /// [`Checker::take_tests`]. A top-level expression is checked and then
+    /// left out: it is the program's own work, which a test run does not do —
+    /// Go's `main` under `go test`. A readtable registration still runs, since
+    /// the rest of the file cannot be read without it.
+    Collect,
+}
+
+/// What a `#[test]` function returns, and so how `typl test` tells (and
+/// reports) a failure besides a `panic`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TestReturn {
+    /// `()`: only a `panic` or a runtime error fails it.
+    Unit,
+    /// `Result<(), E>` with `E` an `Error` (a `:dyn Error` too): an `err`
+    /// fails it, reported by `describe-error` — the message and its causes.
+    ResultError,
+    /// `Result<(), E>` with `E` no `Error` but printable: an `err` fails it,
+    /// reported by `print-object`.
+    ResultPrinted,
+}
+
+/// One `#[test]` function, as [`Checker::take_tests`] reports it.
+#[derive(Clone, Debug)]
+pub struct TestCase {
+    /// The function's full name — what `typl test` prints and filters on.
+    pub path: Path,
+    /// The module it is defined in. A test need not be `pub`, so it is
+    /// called from inside that module.
+    pub ns: typelisp_mem::NsId,
+    /// The name as written, a symbol of that module: calling the test is
+    /// checking `(NAME)` there.
+    pub name: Value,
+    pub returns: TestReturn,
+    pub loc: Option<Loc>,
 }

@@ -6,7 +6,7 @@
 //! `Option<Sexpr>`, since `'()` is one and the empty list is `none`. A
 //! quasiquote's value is always S-expression data.
 
-use crate::check::analyze::option_of_sexpr;
+use crate::typeck::sexpr_value::option_of_sexpr;
 use crate::sexpr_variant::CONS;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};

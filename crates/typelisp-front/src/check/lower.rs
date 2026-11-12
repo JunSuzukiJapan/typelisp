@@ -9,7 +9,6 @@
 use typelisp_mem::{wk, Error, Heap, RootScope, SymRef, Value};
 
 use crate::types::{Path, Type};
-use super::analyze::*;
 use super::core::{self, Items};
 use crate::typeck::registry::{AdtKind, Variant};
 use super::repr::Repr;
@@ -760,3 +759,89 @@ pub(crate) trait CoreForms {
     }
 }
 
+/// Whether a Rust-implemented builtin method's `int`-typed parameters and
+/// result cross the compiled boundary as **raw machine words**.
+///
+/// An `int` is a tagged word in a register (`Repr::Int`), and the `rt_*`
+/// shims that implement the builtin catalog — `rt_str_substring`,
+/// `rt_hashtable_bucket_*`, the LLVM builders' `rt_llvm_call` — read and
+/// answer plain `i64`s, as they did when these parameters were `i32`. So the
+/// call site does the conversion: an `int` argument goes through
+/// `(untag-int E)` (a fixnum's payload; a bignum is a language error — an
+/// index or a count that size is a program's mistake) and an `int` result
+/// through `(tag-int E)`. The interpreter's `untag-int` is the same check
+/// with no shift, so both tiers refuse the same programs.
+///
+/// The exceptions are the builtins whose native lowering already speaks
+/// tagged ints, because their answer can be a bignum: every method of `int`
+/// and of `rational`, the conversions *into* `int` (`float->int`, `ratio->int`,
+/// `numerator`, `denominator`, `int->int`), and `Chan`'s `len`/`cap`, whose
+/// answers arrive through the suspension driver tagged like every wake value.
+/// `ash`/`logbitp` on the fixed widths are exceptions too, the other way
+/// round: their count is an `int` the island untags itself (`untag-int-value`),
+/// the same way it does for `int`'s own. This list and the island's lowering
+/// are one decision written twice; `tests/int_default_test.rs` runs each of
+/// them in both tiers.
+pub(crate) fn int_boundary_raw(type_name: &Path, method: SymRef) -> bool {
+    use crate::types::path_is_builtin;
+    // `rational`'s shims (`typelisp_rt::rational`) speak tagged words
+    // throughout, the `int` answers included.
+    if path_is_builtin(type_name, typelisp_mem::wk::INT) || path_is_builtin(type_name, typelisp_mem::wk::REPR_RATIONAL) {
+        return false;
+    }
+    if path_is_builtin(type_name, typelisp_mem::wk::CHAN) && matches!(method.well_known(), wk::M_LEN | wk::M_CAP) {
+        return false;
+    }
+    !matches!(
+        method.well_known(),
+        wk::M_FLOAT_TO_INT | wk::M_RATIO_TO_INT | wk::M_NUMERATOR | wk::M_DENOMINATOR | wk::M_INT_TO_INT | wk::M_ASH | wk::M_LOGBITP
+    )
+}
+
+/// [`int_boundary_raw`] for a free builtin: `sexpr-int` answers the tagged
+/// word an `int` node already is.
+pub(crate) fn int_boundary_native_fn(name: SymRef) -> bool {
+    name.is(wk::F_SEXPR_INT)
+}
+
+/// The `(TEMPLATE...)` list a `defstruct`/`defenum` form carries: each
+/// field's type, the owning type's parameters written as `(type-param N)`
+/// ([`core::type_form`]).
+pub(crate) fn field_template_list(heap: &mut Heap, fields: &[Type]) -> Result<Value, Error> {
+    let mut items = Items::new(heap);
+    for field in fields {
+        let t = core::type_form(items.heap(), field)?;
+        items.push(t);
+    }
+    items.finish_list()
+}
+
+/// A list of strings, each rooted as it is made — `defstruct`'s field names.
+pub(crate) fn string_list(heap: &mut Heap, items: &[String]) -> Result<Value, Error> {
+    let mut list = Items::new(heap);
+    for s in items {
+        let v = list.heap().alloc_string(s.clone());
+        list.push(v);
+    }
+    list.finish_list()
+}
+
+/// `(untag-int E)` — see [`int_boundary_raw`].
+pub(crate) fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
+    core::tagged(heap, wk::UNTAG_INT, &[e])
+}
+
+/// `(tag-int E)` — see [`int_boundary_raw`].
+pub(crate) fn tag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
+    core::tagged(heap, wk::TAG_INT, &[e])
+}
+
+pub(crate) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<Value, Error> {
+    let mut f = Items::new(heap);
+    for (ty, method) in slots {
+        let tp = core::definition_form(ty);
+        let one = core::list(f.heap(), &[tp, Value::Symbol(*method)])?;
+        f.push(one);
+    }
+    f.finish_list()
+}

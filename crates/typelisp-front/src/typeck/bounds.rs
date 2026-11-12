@@ -6,6 +6,9 @@
 //! implementing a trait implements its supertraits, so a bound on a trait
 //! is a bound on each of its supertraits too.
 
+use typelisp_mem::SymRef;
+use crate::wk;
+use super::matching::is_symbol;
 use std::collections::BTreeMap;
 
 use crate::check::core::Unmet;
@@ -105,7 +108,7 @@ pub(crate) fn bound_method<'r>(reg: &'r Registry, scope: &TypeScope, p: TypePara
         None
     };
     // An operator no bound declares is the trait method it spells.
-    find(name).or_else(|| crate::check::analyze::trait_operator_method(name).and_then(find))
+    find(name).or_else(|| crate::typeck::bounds::trait_operator_method(name).and_then(find))
 }
 
 /// The trait `trait_path`'s parameters, `Self` being `self_ty`, at the
@@ -414,4 +417,49 @@ fn trait_at(reg: &Registry, from: Path, at: Vec<Option<Type>>, want: &Path, dept
         let sup_at = supertrait_at(reg, tdef, &at, sup)?;
         trait_at(reg, sup.trait_path, sup_at, want, depth + 1)
     })
+}
+
+/// The type of an integer literal: the expected integer type if any, else `i32`.
+/// The trait method an operator spells when its receiver is a `where`-bounded
+/// type variable — `+` is `Add`'s `add`, `<` is `Ord`'s `less`.
+///
+/// One table, not a rule: the prelude's numeric traits pick these names
+/// (`prelude.rs`'s "arithmetic traits" section says why they cannot be the
+/// operators), and this is the other half of that choice. A name absent from
+/// the table is passed through unchanged, and so is one a bound declares
+/// itself.
+pub(crate) fn trait_operator_method(op: SymRef) -> Option<SymRef> {
+    const TABLE: [(&str, &str); 15] = [
+        ("+", "add"),
+        ("-", "sub"),
+        ("*", "mul"),
+        ("/", "div"),
+        ("rem", "remainder"),
+        ("logand", "bit-and"),
+        ("logior", "bit-or"),
+        ("logxor", "bit-xor"),
+        ("lognot", "bit-not"),
+        // `Eq`/`Ord` predate the arithmetic traits and already had these four
+        // under spelled-out names; the operators reach them the same way.
+        ("=", "equals"),
+        ("/=", "not-equals"),
+        ("<", "less"),
+        ("<=", "less-equal"),
+        (">", "greater"),
+        (">=", "greater-equal"),
+    ];
+    static MEMBERS: std::sync::OnceLock<Vec<(SymRef, SymRef)>> = std::sync::OnceLock::new();
+    let members = MEMBERS.get_or_init(|| {
+        TABLE
+            .iter()
+            .map(|(o, m)| (typelisp_mem::symbols::member_symbol(o), typelisp_mem::symbols::member_symbol(m)))
+            .collect()
+    });
+    members.iter().find(|(o, _)| *o == op).map(|(_, m)| *m)
+}
+
+/// Whether `v` is a `(:where ...)` clause (vs. an ordinary body form) —
+/// `Checker::check_defun` peeks at this to decide whether to consume it.
+pub(crate) fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
+    Ok(matches!(v, Value::Cons(_)) && heap.list_to_vec(v)?.first().is_some_and(|h| is_symbol(*h, wk::KW_WHERE)))
 }

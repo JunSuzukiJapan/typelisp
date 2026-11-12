@@ -8,7 +8,10 @@
 //! what is expected (`Option<Sexpr>` where data is), or else what the
 //! elements make it.
 
-use crate::check::analyze::{is_sexpr_expectation, option_of_sexpr, literal_element_form, literal_element_type, vector_literal_form};
+use crate::check::forms;
+use crate::RootScope;
+use super::sexpr_value::is_option_of_sexpr;
+use crate::typeck::sexpr_value::{is_sexpr_expectation, option_of_sexpr};
 use crate::check::forms::{list_from_vec_locs, member_form, name_form};
 use crate::mem::BoxId;
 use crate::types::{tuple_path, Path, Type};
@@ -108,4 +111,78 @@ fn rooted(heap: &mut Heap, make: impl FnOnce(&mut Heap) -> Result<Value, Error>)
     let v = make(heap)?;
     heap.push_root(v);
     Ok(v)
+}
+
+/// The variable a vector literal is built in (`Checker::check_vector_literal`).
+/// Spelled with a leading `$` for the reason [`MATCH_SCRUT`] is: no reader
+/// produces it, so it cannot capture a name the program wrote — and a
+/// literal's elements are constants, so they never refer to it either.
+const VECTOR_LITERAL_VAR: &str = "$vector-literal";
+
+/// The element type the context of a `#(..)`/`#nA(..)` literal fixes:
+/// `T` of an expected `Vector<T>`/`Array<T>` (`collection` names which), or
+/// `Option<Sexpr>` when the literal is expected as S-expression data. `None`
+/// when the context says nothing, and the first element decides.
+pub(crate) fn literal_element_type(expected: Option<&Type>, collection: &Path) -> Option<Type> {
+    match expected {
+        Some(Type::Named(p, args)) if p == collection && args.len() == 1 => {
+            Some(args[0].clone())
+        }
+        Some(t) if is_sexpr_expectation(t) => Some(option_of_sexpr()),
+        _ => None,
+    }
+}
+
+/// One element of a literal collection, as the form that evaluates to it. A
+/// literal's contents are never evaluated, so a symbol, a path or a list is
+/// quoted; numbers, strings, characters, booleans and nested literals
+/// evaluate to themselves already. In a data vector (`data`) every element
+/// is quoted, so that each one is S-expression data.
+pub(crate) fn literal_element_form(heap: &mut Heap, e: Value, data: bool) -> Result<Value, Error> {
+    if data || matches!(e, Value::Symbol(_) | Value::Path(_) | Value::Cons(_)) {
+        let quote = heap.intern_symbol("quote");
+        forms::list_from_vec_locs(heap, &[(quote, None), (e, None)])
+    } else {
+        Ok(e)
+    }
+}
+
+/// `(let (($vector-literal (the Vector<T> (Vector::new))))
+///    (push $vector-literal E)... $vector-literal)` for the elements `elems`.
+/// With no `elem_ty`, the vector is `(Vector::new)` and the first element
+/// decides `T`.
+pub(crate) fn vector_literal_form(heap: &mut Heap, elem_ty: Option<&Type>, elems: &[Value]) -> Result<Value, Error> {
+    let data = elem_ty.is_some_and(is_option_of_sexpr);
+    let mut s = RootScope::new(heap);
+    let var = s.intern_symbol(VECTOR_LITERAL_VAR);
+    let new = forms::member_form(&mut s, &Path::builtin(typelisp_mem::wk::VECTOR), "new")?;
+    s.push_root(new);
+    let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
+    s.push_root(new_call);
+    let init = match elem_ty {
+        Some(elem_ty) => {
+            let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![elem_ty.clone()]))?;
+            s.push_root(vec_ty);
+            let the = s.intern_symbol("the");
+            forms::list_from_vec_locs(&mut s, &[(the, None), (vec_ty, None), (new_call, None)])?
+        }
+        None => new_call,
+    };
+    s.push_root(init);
+    let binding = forms::list_from_vec_locs(&mut s, &[(var, None), (init, None)])?;
+    s.push_root(binding);
+    let bindings = forms::list_from_vec_locs(&mut s, &[(binding, None)])?;
+    s.push_root(bindings);
+    let let_sym = s.intern_symbol("let");
+    let push = Value::Symbol(s.names().read(typelisp_mem::NsId::STD, "push"));
+    let mut items: Vec<(Value, Option<Loc>)> = vec![(let_sym, None), (bindings, None)];
+    for &e in elems {
+        let ef = literal_element_form(&mut s, e, data)?;
+        s.push_root(ef);
+        let call = forms::list_from_vec_locs(&mut s, &[(push, None), (var, None), (ef, None)])?;
+        s.push_root(call);
+        items.push((call, None));
+    }
+    items.push((var, None));
+    forms::list_from_vec_locs(&mut s, &items)
 }

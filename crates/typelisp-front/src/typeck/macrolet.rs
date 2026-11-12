@@ -5,7 +5,7 @@
 //! the evaluator here, before the body is checked, so the calls of it in the
 //! body are expanded as a module-level macro's are.
 
-use crate::check::analyze::{parse_macro_lambda_list, MacroShape};
+use crate::typeck::defmacro::{parse_macro_lambda_list, MacroShape};
 use crate::typeck::registry::MacroDef;
 use crate::check::verify::bound_name;
 use crate::types::{Path, Type};
