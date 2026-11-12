@@ -1289,6 +1289,24 @@ mod tests {
         assert!(msg.contains("pub: expected defun"), "{}", msg);
     }
 
+    /// `Type<args>::member` is the member of that instantiation: a variant
+    /// of it, a static method with the type's parameters at `args`, or the
+    /// static method written for that one instantiation.
+    #[test]
+    fn a_member_of_one_instantiation() {
+        assert_eq!(check_ok("(Option<int>::none)"), Type::Named(Path::builtin(wk::OPTION), vec![Type::Int]));
+        assert_eq!(run("(let ((v (Vector<u8>::new))) (push v 3) (len v))").1, Value::Int(1));
+        let pair = "(defstruct Pair<T> (a T) (b T))
+                    (impl Pair<int> (defmethod make () Pair<int> (make-instance 'Pair<int> :a 1 :b 2)))
+                    (impl Pair<bool> (defmethod make () Pair<bool> (make-instance 'Pair<bool> :a true :b false)))";
+        assert_eq!(run(&format!("{} (let ((p (Pair<int>::make))) p::b)", pair)).1, Value::Int(2));
+        assert_eq!(run(&format!("{} (let ((p (Pair<bool>::make))) p::a)", pair)).1, Value::Bool(true));
+        let e = check_err(&format!("{} (Pair<string>::make)", pair));
+        assert!(e.contains("is written for `Pair<int>`, `Pair<bool>`, not for `Pair<string>`"), "{}", e);
+        let e = check_err("(Option<int>::some \"a\")");
+        assert!(e.contains("expected `int`, found `string`"), "{}", e);
+    }
+
     /// A definition whose checking fails is not kept (plan 4.4): calling it
     /// afterwards is not a call to anything this checker defined.
     #[test]

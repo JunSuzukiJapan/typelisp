@@ -17,6 +17,8 @@ use super::tree::{Node, Typed};
 /// A call to the method `def` of the type `owner`: an instance method's with
 /// its `receiver` already checked, a static method's with none. Each other
 /// argument in `rest` is checked where its parameter's type is expected.
+/// `written` are the type's arguments the call's path wrote
+/// (`(Type<args>::name ...)`), none when it wrote none.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_method_call(
     cx: &Cx,
@@ -26,6 +28,7 @@ pub(crate) fn check_method_call(
     method: SymRef,
     def: &MethodDef,
     receiver: Option<Typed>,
+    written: &[Type],
     rest: &[(Value, Option<Loc>)],
     expected: Option<&Type>,
     loc: Option<Loc>,
@@ -41,6 +44,13 @@ pub(crate) fn check_method_call(
         return Err(Error::TypeError(format!("{}: expected {} argument(s), got {}", what, required, given)));
     }
     let subst = cx.holes.borrow_mut().instantiate(&sig.type_params);
+    // The type's parameters come first; one instantiation's method has none
+    // of them, and its instantiation was chosen by what was written.
+    if def.inst_args.is_none() {
+        for (p, t) in sig.type_params.iter().zip(written) {
+            agree(cx, &subst.apply(&Type::Param(*p)), Some(t))?;
+        }
+    }
     let instance = receiver.is_some();
     let mut args = Vec::with_capacity(sig.params.len());
     let mut rational_op = false;

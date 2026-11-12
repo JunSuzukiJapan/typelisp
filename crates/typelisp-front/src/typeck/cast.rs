@@ -98,7 +98,7 @@ fn call_conversion(cx: &Cx, heap: &mut Heap, locals: &Locals, src: Typed, name: 
     let Some(def) = cx.reg.method(&owner, method) else {
         return Err(Error::TypeError(format!("as: `{}` has no conversion `{}`", src.ty, name)));
     };
-    check_method_call(cx, heap, locals, owner, method, def, Some(src), &[], None, loc)
+    check_method_call(cx, heap, locals, owner, method, def, Some(src), &[], &[], None, loc)
 }
 
 /// `value`, or `(some value)` for `try-as`.

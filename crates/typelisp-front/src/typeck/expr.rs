@@ -642,12 +642,21 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         // checker writes (`forms::member_form`) or `Type<args>::member`.
         Value::Cons(_) if matches!(heap.car(elems[0].0), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
             let parts = heap.list_to_vec(elems[0].0)?;
-            let [_, ty @ (Value::Symbol(_) | Value::Path(_)), Value::Symbol(member)] = parts.as_slice() else {
-                unimplemented!("typeck: calling a member of one instantiation (`Type<args>::member`)")
+            let [_, ty, Value::Symbol(member)] = parts.as_slice() else {
+                return Err(Error::TypeError("a member of a type is written `Type::member`".into()));
             };
-            let owner = super::type_syntax::type_path(heap, &cx.types(), *ty)?;
-            let spelling = format!("{}::{}", owner, member.name());
-            return path_call::check_member_call(cx, heap, locals, owner, *member, &spelling, args, expected, loc);
+            if let Value::Symbol(_) | Value::Path(_) = ty {
+                let owner = super::type_syntax::type_path(heap, &cx.types(), *ty)?;
+                let spelling = format!("{}::{}", owner, member.name());
+                return path_call::check_member_call(cx, heap, locals, owner, None, *member, &spelling, args, expected, loc);
+            }
+            // `Type<args>::member`: the member of that instantiation.
+            let written = super::type_syntax::parse_type(heap, &cx.types(), *ty, elems[0].1.as_ref())?;
+            let Type::Named(owner, targs) = &written else {
+                return Err(Error::TypeError(format!("`{}::{}`: only a struct or a sum type has members", written, member.name())));
+            };
+            let spelling = format!("{}::{}", written, member.name());
+            return path_call::check_member_call(cx, heap, locals, *owner, Some(targs), *member, &spelling, args, expected, loc);
         }
         // Any other head is an expression whose value is applied.
         other => {
@@ -767,7 +776,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     if let Some((owner, name)) = static_use_named(cx.reg, cx.ns, head) {
         let def = cx.reg.method(&owner, name).expect("a `use` brings in a defined static method");
-        return method::check_method_call(cx, heap, locals, owner, name, def, None, args, expected, loc);
+        return method::check_method_call(cx, heap, locals, owner, name, def, None, &[], args, expected, loc);
     }
     let Some(((first, first_loc), rest)) = args.split_first() else {
         return call_function(cx, heap, locals, value, spelling, None, args, expected, loc);
@@ -797,7 +806,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         if let Some(def) = cx.reg.method(&sexpr, member).filter(|m| m.instance) {
             let loc_first = first.loc.clone();
             let held = Typed { node: Node::DynValue { value: Box::new(first) }, ty: crate::typeck::sexpr_value::option_of_sexpr(), loc: loc_first };
-            return method::check_method_call(cx, heap, locals, sexpr, member, def, Some(held), rest, expected, loc);
+            return method::check_method_call(cx, heap, locals, sexpr, member, def, Some(held), &[], rest, expected, loc);
         }
         // Neither a function nor the trait's method: the name may be a
         // function of the library this module has not brought in.
@@ -810,7 +819,7 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     if let Some((owner, def)) = cx.receiver_method(&first.ty, member) {
         cx.decide(&first.ty);
-        return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), rest, expected, loc);
+        return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), &[], rest, expected, loc);
     }
     if let Type::Param(p) = cx.resolve(&first.ty) {
         if let Some(bound) = bound_method(cx.reg, cx.scope, p, member) {

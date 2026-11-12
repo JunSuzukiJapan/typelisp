@@ -100,7 +100,7 @@ fn set_field(cx: &Cx, heap: &mut Heap, locals: &Locals, recv: SymRef, field: Sym
     let Some((owner, def)) = cx.receiver_method(&obj.ty, setter) else {
         return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", owner, field)));
     };
-    check_method_call(cx, heap, locals, owner, setter, def, Some(obj), std::slice::from_ref(&value), None, loc)
+    check_method_call(cx, heap, locals, owner, setter, def, Some(obj), &[], std::slice::from_ref(&value), None, loc)
 }
 
 /// `(setf (accessor recv key...) value)`: the receiver's type's
@@ -142,5 +142,5 @@ fn set_call_place(
         return Err(Error::TypeError(format!("setf: `{}` has no setter for `{}` (looked for {})", owner, spelling, tried)));
     };
     let args: Vec<(Value, Option<Loc>)> = keys.iter().cloned().chain([value]).collect();
-    check_method_call(cx, heap, locals, owner, setter, def, Some(recv), &args, None, loc)
+    check_method_call(cx, heap, locals, owner, setter, def, Some(recv), &[], &args, None, loc)
 }

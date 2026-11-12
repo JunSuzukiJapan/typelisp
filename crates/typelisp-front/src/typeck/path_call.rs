@@ -19,6 +19,7 @@ use super::registry::{TypeEntry, ValueDef};
 use super::resolve::{reexported, sees};
 use super::tree::{Node, Typed};
 use super::variant::check_variant;
+use super::widen::expect;
 
 /// `(path arg...)`.
 #[allow(clippy::too_many_arguments)]
@@ -38,7 +39,7 @@ pub(crate) fn check_path_call(
             if let Some(entry) = cx.reg.types.get(&owner) {
                 super::type_syntax::note_path_head(cx.notes(), owner, entry, &spelling, at);
             }
-            check_member_call(cx, heap, locals, owner, member, &spelling, args, expected, loc)
+            check_member_call(cx, heap, locals, owner, None, member, &spelling, args, expected, loc)
         }
         // A definition another module does not make `pub` is not there for
         // this one.
@@ -59,13 +60,16 @@ pub(crate) fn check_path_call(
 }
 
 /// `(Type::member arg...)`, `spelling` how the path is written: a variant of
-/// the type, or its static method.
+/// the type, or its static method. `written` are the type's arguments when
+/// the path wrote them (`(Type<args>::member arg...)`): the value is of that
+/// instantiation.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check_member_call(
     cx: &Cx,
     heap: &mut Heap,
     locals: &Locals,
     owner: Path,
+    written: Option<&[Type]>,
     member: SymRef,
     spelling: &str,
     args: &[(Value, Option<Loc>)],
@@ -79,11 +83,19 @@ pub(crate) fn check_member_call(
     };
     let name = member_symbol(member.name());
     if let Some(variant) = def.variant_index(name) {
-        return check_variant(cx, heap, locals, owner, variant, args, expected, loc);
+        let Some(w) = written else {
+            return check_variant(cx, heap, locals, owner, variant, args, expected, loc);
+        };
+        let value = check_variant(cx, heap, locals, owner, variant, args, Some(&Type::Named(owner, w.to_vec())), loc)?;
+        expect(cx, &value.ty, expected)?;
+        return Ok(value);
     }
     let method = match cx.reg.method(&owner, name) {
         Some(m) => Some(m),
-        None if cx.reg.has_inst_method(&owner, name) => Some(inst_static(cx, owner, name, spelling, expected)?),
+        None if cx.reg.has_inst_method(&owner, name) => Some(match written {
+            Some(w) => written_inst(cx, owner, name, spelling, w)?,
+            None => inst_static(cx, owner, name, spelling, expected)?,
+        }),
         None => None,
     };
     let Some(method) = method else {
@@ -116,7 +128,18 @@ pub(crate) fn check_member_call(
             spelling
         )));
     }
-    check_method_call(cx, heap, locals, owner, name, method, None, args, expected, loc)
+    check_method_call(cx, heap, locals, owner, name, method, None, written.unwrap_or(&[]), args, expected, loc)
+}
+
+/// The static method `name` of `owner` written for the instantiation
+/// `written`, which the call's path names (`spelling`).
+fn written_inst<'r>(cx: &Cx<'r>, owner: Path, name: SymRef, spelling: &str, written: &[Type]) -> Result<&'r super::registry::MethodDef, Error> {
+    let insts = cx.reg.inst_methods(&owner, name);
+    if let Some((_, def)) = insts.iter().find(|(a, _)| a == written) {
+        return Ok(def);
+    }
+    let have: Vec<String> = insts.iter().map(|(a, _)| format!("`{}`", Type::Named(owner, a.clone()))).collect();
+    Err(Error::TypeError(format!("`{}` is written for {}, not for `{}`", spelling, have.join(", "), Type::Named(owner, written.to_vec()))))
 }
 
 /// The static method `name` of `owner`, written for one instantiation each
