@@ -545,10 +545,10 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // definition from its own tables when the directive runs, but a
     // standalone executable has none, so each becomes a startup registration
     // below, exactly as `print-object` does.
-    let format_calls: Vec<(String, String)> = chk
+    let format_calls: Vec<(String, String, typelisp_print::aot::ArgWord)> = chk
         .format_call_targets()
         .into_iter()
-        .map(|target| {
+        .map(|(target, arg)| {
             let symbol = items
                 .iter()
                 .find(|item| **item == target)
@@ -557,7 +557,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
                     "compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file",
                     target.link_name()
                 ))?;
-            Ok((target.link_name(), symbol))
+            Ok((target.link_name(), symbol, arg))
         })
         .collect::<Result<_, String>>()?;
 
@@ -724,7 +724,7 @@ fn build_main_wrapper(
     field_templates: &[(Path, i64, i64, crate::TypeId)],
     field_names: &[(Path, i64, String)],
     print_objects: &[(typelisp_mem::TypeId, String)],
-    format_calls: &[(String, String)],
+    format_calls: &[(String, String, typelisp_print::aot::ArgWord)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
@@ -931,13 +931,13 @@ fn build_main_wrapper(
             let fn_ptr = classic_door(ctx, module, target)?;
             call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
         }
-        for (name, symbol) in format_calls {
+        for (name, symbol, arg) in format_calls {
             let target = module.get_function(symbol).ok_or_else(|| {
                 format!("compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file", name)
             })?;
             let (name_ptr, name_len) = literal(&builder, name)?;
             let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_format_call_method", &[name_ptr, name_len, fn_ptr])?;
+            call(&builder, "rt_format_call_method", &[name_ptr, name_len, fn_ptr, i64_ty.const_int(arg.code() as u64, true)])?;
         }
         for (name, id) in printer_globals {
             let (name_ptr, name_len) = literal(&builder, name)?;

@@ -65,7 +65,7 @@ pub(crate) struct Request {
 #[derive(Debug, Default)]
 pub(crate) struct Reached {
     pub(crate) callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    pub(crate) format_calls: Vec<crate::CompileTarget>,
+    pub(crate) format_calls: Vec<(crate::CompileTarget, typelisp_print::aot::ArgWord)>,
 }
 
 /// What one top-level form asks to be made besides itself: the
@@ -79,8 +79,9 @@ pub(crate) struct Requests {
     /// The lifted functions' definitions, rooted.
     lifted: Vec<Value>,
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    /// What the form's `~/name/` directives call.
-    format_calls: Vec<crate::CompileTarget>,
+    /// What the form's `~/name/` directives call, each with how its
+    /// argument crosses into it.
+    format_calls: Vec<(crate::CompileTarget, typelisp_print::aot::ArgWord)>,
 }
 
 impl Requests {
@@ -96,10 +97,11 @@ impl Requests {
         }
     }
 
-    /// The definition `target`, which a `~/name/` directive calls.
-    pub(crate) fn format_call(&mut self, target: crate::CompileTarget) {
-        if !self.format_calls.contains(&target) {
-            self.format_calls.push(target);
+    /// The definition `target`, which a `~/name/` directive calls, its
+    /// argument crossing as `arg`.
+    pub(crate) fn format_call(&mut self, target: crate::CompileTarget, arg: typelisp_print::aot::ArgWord) {
+        if !self.format_calls.iter().any(|(t, _)| *t == target) {
+            self.format_calls.push((target, arg));
         }
     }
 

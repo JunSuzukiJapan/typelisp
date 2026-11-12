@@ -15,9 +15,10 @@ use typelisp_mem::SymRef;
 
 use super::generic::Requests;
 use super::registry::Registry;
+use crate::CompileTarget;
 use super::sexpr_value::{encoding, no_encoding, Encoding};
 use super::subst::Subst;
-use super::tree::{Node, Pat, SelectArm, Typed};
+use super::tree::{FormatSite, Node, Pat, SelectArm, Typed};
 
 /// What lowering one tree needs: the definitions, the substitution that
 /// makes a generic body one specialization (empty for any other tree), and
@@ -329,9 +330,45 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             }
             lw.reg.labels_core_form(heap, &lowered, &body)
         }
-        Node::FormatCalls { control, targets } => {
-            targets.iter().for_each(|t| lw.requests.format_call(t.clone()));
-            lower(heap, lw, control)
+        Node::FormatCalls { text, sites } => {
+            // Each directive is renamed to the code it calls: a generic
+            // definition's specialization at the settled type arguments.
+            let mut names = Vec::with_capacity(sites.len());
+            for site in sites {
+                let FormatSite::Call { target, targs } = site else {
+                    let FormatSite::Name(name) = site else { unreachable!() };
+                    names.push(name.clone());
+                    continue;
+                };
+                let targs: Vec<Type> = targs.iter().map(|t| lw.settle(t)).collect();
+                // The argument crosses as the first parameter's type, at
+                // the type arguments.
+                let (type_params, param) = match target {
+                    CompileTarget::Fn(path) => {
+                        let def = lw.reg.fn_def(path).expect("a directive calls a defined function");
+                        (&def.type_params, &def.params[0])
+                    }
+                    CompileTarget::Method(owner, method) => {
+                        let def = lw.reg.method_by_code(owner, *method).expect("a directive calls a defined method");
+                        (&def.sig.type_params, &def.sig.params[0])
+                    }
+                };
+                let param = if targs.is_empty() { param.clone() } else { super::subst::Subst::positional(type_params, &targs).apply(param) };
+                let arg = lw.reg.repr(&param).arg_word();
+                let code = match (target, targs.is_empty()) {
+                    (_, true) => target.clone(),
+                    (CompileTarget::Fn(path), false) => CompileTarget::Fn(lw.requests.ask_fn(path, targs)),
+                    (CompileTarget::Method(owner, method), false) => CompileTarget::Method(*owner, lw.requests.ask_method(owner, *method, targs)),
+                };
+                names.push(code.link_name());
+                lw.requests.format_call(code, arg);
+            }
+            let renamed = typelisp_print::format::rename_calls(text, &names).map_err(Error::TypeError)?;
+            let renamed = heap.alloc_string(renamed);
+            heap.push_root(renamed);
+            let form = core::tagged(heap, wk::STR, &[renamed]);
+            heap.pop_root();
+            form
         }
         Node::Callback { target, fn_ty, lifted } => {
             if let Some(lambda) = lifted {

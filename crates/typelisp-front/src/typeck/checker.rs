@@ -4,7 +4,7 @@
 //! [`super::toplevel`].
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use typelisp_mem::{NsId, SymRef};
 
@@ -100,7 +100,7 @@ pub struct Checker {
     /// asked.
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
     /// Every definition a `~/name/` directive calls.
-    format_calls: BTreeSet<CompileTarget>,
+    format_calls: BTreeMap<CompileTarget, typelisp_print::aot::ArgWord>,
     /// What a `#[test]` definition is checked into, and the tests found.
     tests: Tests,
     /// What checking has written down beside the trees.
@@ -139,7 +139,7 @@ impl Checker {
             expr_ty: None,
             warnings: RefCell::default(),
             callbacks: Vec::new(),
-            format_calls: BTreeSet::new(),
+            format_calls: BTreeMap::new(),
             tests: Tests::default(),
             notes: Notes::default(),
             ns: NsId::ROOT,
@@ -302,11 +302,12 @@ impl Checker {
         self.callbacks.clone()
     }
 
-    /// Every definition a `~/name/` directive checked so far calls. Read by
-    /// `compile::aot::compile_file`, which turns each into a startup
-    /// registration so the directive works in a standalone executable.
-    pub fn format_call_targets(&self) -> Vec<CompileTarget> {
-        self.format_calls.iter().cloned().collect()
+    /// Every definition a `~/name/` directive checked so far calls, with how
+    /// its argument crosses into it. Read by `compile::aot::compile_file`,
+    /// which turns each into a startup registration so the directive works
+    /// in a standalone executable.
+    pub fn format_call_targets(&self) -> Vec<(CompileTarget, typelisp_print::aot::ArgWord)> {
+        self.format_calls.iter().map(|(t, a)| (t.clone(), *a)).collect()
     }
 
     /// Reports every `defsignature` in this unit that never got a definition.

@@ -183,7 +183,10 @@ pub(crate) fn parse_header(heap: &Heap, v: Value) -> Result<(SymRef, Vec<SymRef>
 pub(crate) fn parse_param(heap: &Heap, cx: &TypeCx, p: Value) -> Result<(SymRef, Type), Error> {
     if let Value::Symbol(id) = p {
         if id.name().starts_with('&') {
-            unimplemented!("typeck: the `{}` parameter marker", id.name())
+            return Err(Error::TypeError(format!(
+                "`{}` is not a parameter marker; a parameter list has `&optional`, `&rest` and `&key` — bind anything else with `let` in the body",
+                id.name()
+            )));
         }
     }
     let pair = heap.list_to_vec_locs(p).map_err(|_| Error::TypeError(SHAPE.into()))?;

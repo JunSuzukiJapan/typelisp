@@ -47,7 +47,11 @@ pub(crate) fn check_path_call(
             let path = reexported(cx.reg, path);
             match cx.reg.values.get(&path).filter(|def| def.public() || sees(cx.ns, path.ns())) {
                 Some(ValueDef::Fn(def)) => check_call(cx, heap, locals, path, def, None, args, expected, loc),
-                Some(ValueDef::Var(_)) => unimplemented!("typeck: calling the function the global `{}` holds", path_spelling(heap, id)),
+                // A global holding a function: its value, called.
+                Some(ValueDef::Var(var)) => {
+                    let callee = Typed { node: Node::Global { path }, ty: var.ty.clone(), loc: at.cloned() };
+                    super::lambda::check_apply(cx, heap, locals, callee, None, args, expected, loc)
+                }
                 Some(ValueDef::Macro { shape, .. }) => {
                     let spelling = path_spelling(heap, id);
                     let expanded = expand(cx.expander, heap, &path, *shape, &spelling, args)?;
@@ -78,7 +82,15 @@ pub(crate) fn check_member_call(
 ) -> Result<Typed, Error> {
     let def = match cx.reg.types.get(&owner) {
         Some(TypeEntry::Type(def)) => def,
-        Some(TypeEntry::Trait(_)) => unimplemented!("typeck: calling a trait's method through its path (`{}`)", spelling),
+        // Which type's implementation is meant, the path does not say.
+        Some(TypeEntry::Trait(_)) => {
+            return Err(Error::TypeError(format!(
+                "`{}` names a method of the trait `{}`, not of a type implementing it — call it through the type, as `(Type::{} ...)`",
+                spelling,
+                owner,
+                member.name()
+            )))
+        }
         _ => unimplemented!("typeck: the path `{}`, through a type this checker does not know", spelling),
     };
     let name = member_symbol(member.name());
@@ -180,6 +192,9 @@ pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, expected: Optio
                 None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
             }
         }
-        PathTarget::Member(..) => unimplemented!("typeck: the member `{}` of a type as a value", path_spelling(heap, id)),
+        PathTarget::Member(..) => Err(Error::TypeError(format!(
+            "`{}` is a constructor or a static method, which is called rather than taken as a value",
+            path_spelling(heap, id)
+        ))),
     }
 }

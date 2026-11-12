@@ -190,7 +190,7 @@ pub(crate) fn coerce(cx: &Cx, t: Typed, to: &Path, pins: &[Type]) -> Result<Type
             }
             Ok(boxed(t, *to, to_ty))
         }
-        Type::Infer(_) => unimplemented!("typeck: a value whose type is not decided yet, boxed as `{}`", to_ty),
+        Type::Infer(_) => Err(Error::TypeError(format!("a value is boxed as `{}` before its type is decided: which `impl` it is boxed by is its type's, and its type is not decided here — say it, e.g. with `(the Type ...)` or a typed `let`", to_ty))),
         _ => {
             let (tdef, _) = object_safe(cx.reg, to)?;
             dyn_at(tdef, to, &found, pins)?;
@@ -213,7 +213,7 @@ fn admit(cx: &Cx, ty: &Type, path: &Path, tdef: &TraitDef, pins: &[Type]) -> Res
     match super::bounds::meets(cx, ty, &TraitBound { trait_path: *path, assoc: Default::default() }) {
         Meets::Yes => {}
         Meets::No(_) => return Err(NotDyn::Unimplemented),
-        Meets::NotYet => unimplemented!("typeck: whether `{}`, not decided yet, implements `{}`", ty, path),
+        Meets::NotYet => return Err(NotDyn::Undecided),
     }
     storable(cx.reg, ty)?;
     // As `meets` decided it: an `impl` may be one instantiation's.

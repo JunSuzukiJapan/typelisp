@@ -626,6 +626,24 @@ impl Repr {
             Class::NotRepresentable => k::NOT_REPRESENTABLE,
         }) as i64
     }
+
+    /// How a value of this representation crosses into a compiled
+    /// definition a `~/name/` directive calls in an executable.
+    pub fn arg_word(&self) -> typelisp_print::aot::ArgWord {
+        use typelisp_print::aot::ArgWord;
+        if matches!(self, Repr::F32) {
+            return ArgWord::F32;
+        }
+        match self.class() {
+            Class::Int => ArgWord::Narrow,
+            Class::Float => ArgWord::F64,
+            Class::Char => ArgWord::Char,
+            Class::Bool => ArgWord::Bool,
+            Class::Tagged { .. } => ArgWord::Tagged,
+            Class::Unit => ArgWord::Unit,
+            Class::RawWord | Class::NotRepresentable => unreachable!("a `~/name/` directive calls a definition of a type a value has, never {:?}", self),
+        }
+    }
 }
 
 /// What compiled code does with a value at a boundary — see [`Repr::class`],

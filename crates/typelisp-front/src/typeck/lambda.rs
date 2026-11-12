@@ -93,7 +93,7 @@ pub(crate) fn check_apply(
 ) -> Result<Typed, Error> {
     let (params, rest, ret) = match cx.with_default(&callee.ty) {
         Type::Fn(p, r, ret) => (p, r, *ret),
-        Type::Infer(_) => unimplemented!("typeck: calling a value whose type is not decided yet"),
+        Type::Infer(_) => return Err(Error::TypeError("a value is called before its type is decided: what it takes and returns is known only from its type, and its type is not decided here — say it, e.g. with `(the Type ...)` or a typed `let`".into())),
         other => return Err(Error::TypeError(format!("value is not callable: `{}`", other))),
     };
     let fixed = params.len();
@@ -143,7 +143,7 @@ pub(crate) fn check_apply_form(cx: &Cx, heap: &mut Heap, locals: &Locals, args: 
     let (params, ret) = match cx.with_default(&callee.ty) {
         Type::Fn(p, Some(_), ret) => (p, *ret),
         Type::Fn(_, None, _) => return Err(Error::TypeError("apply: function has no `&rest` parameter to apply a list to".into())),
-        Type::Infer(_) => unimplemented!("typeck: `apply` of a value whose type is not decided yet"),
+        Type::Infer(_) => return Err(Error::TypeError("apply: the function's type is not decided here — say it, e.g. with `(the Type ...)` or a typed `let`".into())),
         other => return Err(Error::TypeError(format!("apply: value is not callable: `{}`", other))),
     };
     if fixed.len() != params.len() {

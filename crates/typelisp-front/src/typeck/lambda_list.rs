@@ -172,7 +172,11 @@ fn sections(items: &[Value], what: &str) -> Result<[Vec<Value>; 4], Error> {
                 wk::OPTIONAL => (1, "&optional must precede &rest and &key, and appear once"),
                 wk::REST => (2, "&rest must precede &key, and appear once"),
                 wk::KEY => (3, "&key may appear only once"),
-                _ if id.name().starts_with('&') => unimplemented!("typeck: the `{}` parameter marker", id.name()),
+                _ if id.name().starts_with('&') => return Err(Error::TypeError(format!(
+                    "{}: `{}` is not a parameter marker; a parameter list has `&optional`, `&rest` and `&key` — bind anything else with `let` in the body",
+                    what,
+                    id.name()
+                ))),
                 _ => (0, ""),
             };
             if at > 0 {

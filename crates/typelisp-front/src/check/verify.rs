@@ -69,6 +69,10 @@ pub(crate) fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &
         NotDyn::NotNominal => {
             format!("`{}` cannot be used as `:dyn {}`: it is not a nominal type", ty, trait_path)
         }
+        NotDyn::Undecided => format!(
+            "whether `{}` implements `{}` depends on type arguments the form does not decide, so it cannot be boxed as `:dyn {}` — say them, e.g. with `(the Type ...)`",
+            ty, trait_path, trait_path
+        ),
         NotDyn::Unimplemented => format!(
             "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
             ty, trait_path, trait_path

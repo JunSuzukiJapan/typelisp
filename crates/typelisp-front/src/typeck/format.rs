@@ -20,7 +20,7 @@ use typelisp_print::format::{call_sites, ArgKind, ArgType, CallArg, CallSite};
 
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
-use super::tree::{Node, Typed};
+use super::tree::{FormatSite, Node, Typed};
 
 /// A control string to check against its arguments' types once they are
 /// settled.
@@ -186,8 +186,7 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
     }
     let args: Vec<ArgType> = types.iter().map(|ty| ArgType { kind: arg_kind(ty), shown: ty.to_string() }).collect();
     let sites = call_sites(text, &args).map_err(Error::TypeError)?;
-    let mut names = Vec::with_capacity(sites.len());
-    let mut targets: Vec<CompileTarget> = Vec::new();
+    let mut calls = Vec::with_capacity(sites.len());
     for site in &sites {
         if site.args.contains(&CallArg::Element) {
             return Err(Error::TypeError(format!(
@@ -196,7 +195,7 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
                 what, site.name, site.name
             )));
         }
-        let mut found: Option<(CompileTarget, &Type)> = None;
+        let mut found: Option<((CompileTarget, Vec<Type>), &Type)> = None;
         for arg in &site.args {
             let CallArg::Arg(i) = *arg else { unreachable!("elements were refused above") };
             let target = call_target(cx, heap, locals, what, site, &types[i])?;
@@ -210,37 +209,28 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
                         site.name,
                         first_ty,
                         types[i],
-                        first.written_name(),
-                        target.written_name()
+                        first.0.written_name(),
+                        target.0.written_name()
                     )));
                 }
                 Some(_) => {}
             }
         }
-        names.push(match found {
-            Some((target, _)) => {
-                let name = target.link_name();
-                if !targets.contains(&target) {
-                    targets.push(target);
-                }
-                name
-            }
+        calls.push(match found {
+            Some(((target, targs), _)) => FormatSite::Call { target, targs },
             // No path through the control string reaches it.
-            None => site.name.clone(),
+            None => FormatSite::Name(site.name.clone()),
         });
     }
-    let renamed = typelisp_print::format::rename_calls(text, &names).map_err(Error::TypeError)?;
-    let renamed = heap.alloc_string(renamed);
-    heap.push_root(renamed);
-    let control = check_expr(cx, heap, locals, renamed, Some(&Type::Str), loc.clone())?;
-    Ok(Typed { node: Node::FormatCalls { control: Box::new(control), targets }, ty: Type::Str, loc })
+    Ok(Typed { node: Node::FormatCalls { text: text.to_string(), sites: calls }, ty: Type::Str, loc })
 }
 
 /// What `(name arg colon at)` calls here, `arg` being of the type `ty`:
 /// checked as that very call, so the name means what it means anywhere
 /// else. It has to be a function or a method written in typelisp that takes
 /// `arg` as it is: the engine hands the value over and nothing else.
-fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &CallSite, ty: &Type) -> Result<CompileTarget, Error> {
+/// The definition, and its type arguments when it is generic.
+fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &CallSite, ty: &Type) -> Result<(CompileTarget, Vec<Type>), Error> {
     // A name no source can bind: `'` ends a symbol.
     let arg = typelisp_mem::symbols::intern("format''arg");
     let shown = format!("~/{}/", site.name);
@@ -269,28 +259,28 @@ fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &Cal
             what, shown, as_call
         ))
     };
-    let (target, first, generic) = match &checked.node {
+    let (target, first, targs) = match &checked.node {
         Node::Call { path, targs, args } => {
             if cx.reg.fn_def(path).is_some_and(|d| d.builtin) {
                 return Err(not_a_definition());
             }
-            (CompileTarget::Fn(*path), args.first(), !targs.is_empty())
+            (CompileTarget::Fn(*path), args.first(), targs)
         }
         Node::MethodCall { owner, method, targs, args, .. } => {
             if cx.reg.method(owner, *method).is_some_and(|d| d.sig.builtin) {
                 return Err(not_a_definition());
             }
-            (CompileTarget::Method(*owner, *method), args.first(), !targs.is_empty())
+            (CompileTarget::Method(*owner, *method), args.first(), targs)
         }
         _ => return Err(not_a_definition()),
     };
     if !first.is_some_and(|a| matches!(a.node, Node::Local { name } if name == arg)) {
         return Err(not_a_definition());
     }
-    if generic {
-        unimplemented!("typeck: {} calling `{}`, a generic definition", shown, target.written_name())
-    }
-    Ok(target)
+    // A generic one is the specialization at these, made when the form is
+    // lowered.
+    targs.iter().for_each(|t| cx.decide_all(t));
+    Ok((target, targs.iter().map(|t| cx.resolve(t)).collect()))
 }
 
 /// `items` as one `Sexpr` list, each held as a `Sexpr` by its own type.

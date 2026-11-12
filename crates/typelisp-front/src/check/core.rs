@@ -39,6 +39,9 @@ use crate::types::Type;
 pub(crate) enum NotDyn {
     /// Its type is not a nominal type.
     NotNominal,
+    /// Its type's arguments are not decided, and whether it implements the
+    /// trait depends on them.
+    Undecided,
     /// Its type does not implement the trait.
     Unimplemented,
     /// Its type has no heap representation for the box to hold.

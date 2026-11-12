@@ -1338,6 +1338,32 @@ mod tests {
         assert!(e.contains("method `map-it` is generic"), "{}", e);
     }
 
+    /// A path that names a global holding a function calls it; one that
+    /// names a trait's method, a static method as a value, or a parameter
+    /// marker the language does not have is refused.
+    #[test]
+    fn calls_and_values_through_a_path() {
+        let global = "(module m (pub defvar (g (fn (int) int)) (lambda ((x int)) int (+ x 1))))";
+        assert_eq!(run(&format!("{} (m::g 2)", global)).1, Value::Int(3));
+        let e = check_err("(deftrait Hello () (defmethod hi () int)) (defstruct A (x int)) (impl Hello A (defmethod hi () int 1)) (Hello::hi)");
+        assert!(e.contains("names a method of the trait"), "{}", e);
+        let e = check_err("(defstruct P (x int)) (impl P (defmethod make ((x int)) P (make-instance 'P :x x))) (let ((mk P::make)) 1)");
+        assert!(e.contains("`P::make` is a constructor or a static method, which is called rather than taken as a value"), "{}", e);
+        let e = check_err("(defun f (&aux (x 1)) int 1)");
+        assert!(e.contains("`&aux` is not a parameter marker"), "{}", e);
+    }
+
+    /// A value called, or applied, before anything decided its type is
+    /// refused: what it takes is known only from its type (Rust's "type
+    /// annotations needed").
+    #[test]
+    fn a_value_whose_type_is_not_decided_is_not_called() {
+        let e = check_err("(let ((v (Vector::new))) (let ((r ((get v 0) 1))) (push v (lambda ((x int)) int x)) r))");
+        assert!(e.contains("a value is called before its type is decided"), "{}", e);
+        let e = check_err("(let ((v (Vector::new))) (let ((r (apply (get v 0) ()))) (push v (lambda ((x int)) int x)) r))");
+        assert!(e.contains("apply: the function's type is not decided here"), "{}", e);
+    }
+
     /// A definition whose checking fails is not kept (plan 4.4): calling it
     /// afterwards is not a call to anything this checker defined.
     #[test]

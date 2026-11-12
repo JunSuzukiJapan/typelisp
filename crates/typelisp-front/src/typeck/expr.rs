@@ -342,7 +342,16 @@ impl<'a> Cx<'a> {
             super::catch::record(self, *tag, ty)?;
         }
         if let Some(r) = self.required.borrow().first() {
-            unimplemented!("typeck: the `:where` bound on `{}` of `{}`, whose type argument nothing decided", r.param, r.of)
+            let e = Error::TypeError(format!(
+                "{}: the type argument `{}` must meet a `:where` bound, and it is `{}`, which the form does not decide — say it, e.g. with `(the Type ...)`",
+                r.of,
+                r.param,
+                self.holes.borrow().shown(&self.resolve(&r.ty))
+            ));
+            return Err(match &r.loc {
+                Some(l) => e.at(l.clone()),
+                None => e,
+            });
         }
         Ok(())
     }

@@ -195,7 +195,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
 /// every definition some directive in this program resolved to, registered
 /// at startup — so a name that reaches here has an entry.
 fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
-    let Some(addr) = crate::shared::print_shared().format_call.read().get(name).copied() else {
+    let Some(entry) = crate::shared::print_shared().format_call.read().get(name).copied() else {
         return Err(format!("format: ~/{}/ is not registered in this executable", name));
     };
     // SAFETY: the same contract `aot_print_object` relies on — `addr` came
@@ -205,8 +205,9 @@ fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool)
     // checker verified the signature (`(T, bool, bool) -> string`) before
     // naming it. `extern "C-unwind"` because a `(panic ...)` inside the
     // definition unwinds out through here.
+    let (addr, arg) = entry;
     let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
-    let args = [encode(v), i64::from(colon), i64::from(at)];
+    let args = [arg.word(heap, v).map_err(|m| format!("format: ~/{}/: {}", name, m))?, i64::from(colon), i64::from(at)];
     match decode(unsafe { f(args.as_ptr(), 3) }) {
         Value::Str(id) => Ok(heap.string(id).to_string()),
         other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
@@ -353,19 +354,73 @@ pub unsafe extern "C" fn rt_print_object_method(args: *const i64, argc: u32) -> 
 ///
 /// # Safety
 ///
-/// `args` must point to 3 valid `i64`s, the last being the address of a
-/// function compiled under the shared compiled-function ABI whose signature
-/// is `((x T) (colon bool) (at bool)) -> string`.
+/// `args` must point to 4 valid `i64`s: the name's pointer and length, the
+/// address of a function compiled under the shared compiled-function ABI
+/// whose signature is `((x T) (colon bool) (at bool)) -> string`, and the
+/// [`ArgWord`] its `x` crosses as.
 #[no_mangle]
 pub unsafe extern "C" fn rt_format_call_method(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_format_call_method: expected 3 arguments");
+    if argc < 4 {
+        fatal("rt_format_call_method: expected 4 arguments");
     }
     let name = static_str(args, 0, "rt_format_call_method");
     let addr = *args.add(2) as usize;
+    let Some(arg) = ArgWord::of_code(*args.add(3)) else {
+        fatal(&format!("rt_format_call_method: {} is not an argument encoding", *args.add(3)))
+    };
     install();
-    crate::shared::print_shared().format_call.write().insert(name.to_string(), addr);
+    crate::shared::print_shared().format_call.write().insert(name.to_string(), (addr, arg));
     0
+}
+
+/// How the argument a `~/name/` directive hands its definition crosses into
+/// compiled code: the representation of the definition's first parameter,
+/// which the value alone does not say (an `f64` and a `Sexpr` holding one
+/// are the same value, and cross differently).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArgWord {
+    /// The tagged word the value is.
+    Tagged,
+    /// A fixed-width integer, as a raw word.
+    Narrow,
+    /// `0` or `1`.
+    Bool,
+    /// The code point.
+    Char,
+    /// `()`, which carries nothing: `0`.
+    Unit,
+    /// The `f64`'s bits.
+    F64,
+    /// The `f32` widened to an `f64`, its bits.
+    F32,
+}
+
+impl ArgWord {
+    /// The number a startup registration passes it as.
+    pub const fn code(self) -> i64 {
+        self as i64
+    }
+
+    fn of_code(n: i64) -> Option<ArgWord> {
+        [ArgWord::Tagged, ArgWord::Narrow, ArgWord::Bool, ArgWord::Char, ArgWord::Unit, ArgWord::F64, ArgWord::F32].into_iter().find(|a| a.code() == n)
+    }
+
+    /// `v`, crossing as this.
+    fn word(self, heap: &Heap, v: Value) -> Result<i64, String> {
+        match (self, v) {
+            (ArgWord::Tagged, v) => Ok(encode(v)),
+            // Held as a `Sexpr`, a fixed-width integer is boxed with its
+            // width; the checker made the width the parameter's.
+            (ArgWord::Narrow, Value::Int(n)) => Ok(n),
+            (ArgWord::Narrow, Value::Boxed(id)) if heap.narrow_box(id).is_some() => Ok(heap.narrow_box(id).expect("checked").value),
+            (ArgWord::Bool, Value::Bool(b)) => Ok(i64::from(b)),
+            (ArgWord::Char, Value::Char(c)) => Ok(c as i64),
+            (ArgWord::Unit, _) => Ok(0),
+            (ArgWord::F64, Value::Boxed(id)) if heap.is_f64(id) => Ok(heap.f64_value(id).to_bits() as i64),
+            (ArgWord::F32, Value::Boxed(id)) if heap.is_f32(id) => Ok(f64::from(heap.f32_value(id)).to_bits() as i64),
+            (want, v) => Err(format!("expected an argument crossing as {:?}, got {:?}", want, v)),
+        }
+    }
 }
 
 /// Registers one printer control variable's compiled global: `args` is

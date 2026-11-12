@@ -95,9 +95,10 @@ pub(crate) enum Node {
     /// address of an entry that calls the top-level function `target`.
     /// `lifted` is the `lambda` `target` is made of, when it is one.
     Callback { target: Path, fn_ty: Type, lifted: Option<Box<Typed>> },
-    /// A control string whose `~/name/` directives were renamed to the
-    /// definitions `targets` they call, which an executable registers.
-    FormatCalls { control: Box<Typed>, targets: Vec<crate::check::resolved::CompileTarget> },
+    /// The control string `text`, whose `~/name/` directives call what
+    /// `sites` say, in order: lowered with each renamed to the code it calls,
+    /// which an executable registers.
+    FormatCalls { text: String, sites: Vec<FormatSite> },
     /// The function `path` as a value, `targs` its type arguments (none for
     /// a builtin, whose one entry serves them all); `params` are the types
     /// of the parameters it really takes, a `&rest` one as a list.
@@ -288,6 +289,18 @@ impl Drop for Typed {
     }
 }
 
+
+/// What one `~/name/` directive of a control string calls.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) enum FormatSite {
+    /// Nothing: no path through the control string reaches it, and the
+    /// name stays as written.
+    Name(String),
+    /// The definition `target`, at the type arguments `targs` when it is
+    /// generic.
+    Call { target: crate::check::resolved::CompileTarget, targs: Vec<Type> },
+}
+
 impl Typed {
     /// `(some value)`, an `Option` of `value`'s type.
     pub(crate) fn some(value: Typed, loc: Option<Loc>) -> Typed {
@@ -313,6 +326,7 @@ impl Typed {
     fn children(&self) -> Vec<&Typed> {
         match &self.node {
             Node::Literal { .. }
+            | Node::FormatCalls { .. }
             | Node::Number { .. }
             | Node::Quote { .. }
             | Node::Hole
@@ -346,7 +360,6 @@ impl Typed {
             | Node::Catch { body: obj, .. }
             | Node::Throw { value: obj, .. }
             | Node::UntagInt { value: obj }
-            | Node::FormatCalls { control: obj, .. }
             | Node::Panic { message: obj }
             | Node::Step { inner: obj } => {
                 vec![&**obj]
@@ -362,6 +375,7 @@ impl Typed {
     fn children_mut(&mut self) -> Vec<&mut Typed> {
         match &mut self.node {
             Node::Literal { .. }
+            | Node::FormatCalls { .. }
             | Node::Number { .. }
             | Node::Quote { .. }
             | Node::Hole
@@ -395,7 +409,6 @@ impl Typed {
             | Node::Catch { body: obj, .. }
             | Node::Throw { value: obj, .. }
             | Node::UntagInt { value: obj }
-            | Node::FormatCalls { control: obj, .. }
             | Node::Panic { message: obj }
             | Node::Step { inner: obj } => {
                 vec![&mut **obj]
@@ -431,6 +444,11 @@ impl Typed {
             t.ty = f(&t.ty);
             match &mut t.node {
                 Node::Call { targs, .. } | Node::MethodCall { targs, .. } | Node::TraitCall { own: targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
+                Node::FormatCalls { sites, .. } => sites.iter_mut().for_each(|site| {
+                    if let FormatSite::Call { targs, .. } = site {
+                        targs.iter_mut().for_each(|ty| *ty = f(ty));
+                    }
+                }),
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
                 Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } | Node::TypeValue { ty: field_ty } | Node::Callback { fn_ty: field_ty, .. } => *field_ty = f(field_ty),
                 Node::Lambda { params, ret, .. } => {
@@ -469,7 +487,6 @@ impl Typed {
                 | Node::ReturnFrom { .. }
                 | Node::Throw { .. }
                 | Node::UntagInt { .. }
-                | Node::FormatCalls { .. }
                 | Node::UnwindProtect { .. }
                 | Node::Panic { .. }
                 | Node::Step { .. }

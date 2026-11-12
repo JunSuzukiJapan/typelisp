@@ -548,3 +548,20 @@ fn a_type_variable_argument_in_a_generic_body() {
     assert_eq!(eval_string(&format!("{}\n{}", defs, body)), expected);
     assert_eq!(eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body)), expected);
 }
+
+/// A `~/name/` directive may call a generic function or method: it calls
+/// the specialization at its argument's type, which inside a generic body is
+/// decided by each instantiation. Interpreted and compiled.
+#[test]
+fn a_call_directive_calls_a_generic_definition() {
+    let defs = r#"
+(defun angle<T> ((x T) (colon bool) (at bool)) string (format false "<~a>" x))
+(defun wrap<T> ((x T)) string (format false "[~/angle/]" x))
+(defstruct Box<T> (v T))
+(impl<T> Box<T> (defmethod tag (self (colon bool) (at bool)) string (format false "box:~a" self::v)))
+"#;
+    let body = r#"(format false "~a ~a ~/angle/ ~/tag/" (wrap 1) (wrap "s") 2.5 (make-instance 'Box :v 7))"#;
+    let expected = "[<1>] [<s>] <2.5> box:7";
+    assert_eq!(eval_string(&format!("{}\n{}", defs, body)), expected);
+    assert_eq!(eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body)), expected);
+}

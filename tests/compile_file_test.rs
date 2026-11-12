@@ -127,6 +127,41 @@ fn a_call_directive_calls_a_function_in_a_compiled_executable() {
     );
 }
 
+/// A `~/name/` hands its definition the argument in the representation the
+/// definition's parameter declares: a `bool`, a `char` and an `f64` are raw
+/// words in compiled code, not the tagged words the format engine holds.
+#[test]
+fn a_call_directive_hands_a_scalar_argument_by_its_declared_type() {
+    assert_eq!(
+        compile_and_run(
+            "format_call_scalars",
+            r#"(defun b ((x bool) (colon bool) (at bool)) string (format false "<~a>" x))
+               (defun c ((x char) (colon bool) (at bool)) string (format false "<~a>" x))
+               (defun f ((x f64) (colon bool) (at bool)) string (format false "<~a>" x))
+               (defun n ((x u8) (colon bool) (at bool)) string (format false "<~a>" x))
+               (defun main () int
+                 (if (equal (format false "~/b/~/c/~/f/~/n/" true #\z 1.5 (the u8 7)) "<true><z><1.5><7>") 0 1))"#,
+        ),
+        0
+    );
+}
+
+/// A `~/name/` that calls a generic function calls its specialization at
+/// the argument's type, also from inside a generic body, in an executable.
+#[test]
+fn a_call_directive_calls_a_generic_function_in_a_compiled_executable() {
+    assert_eq!(
+        compile_and_run(
+            "format_call_generic",
+            r#"(defun angle<T> ((x T) (colon bool) (at bool)) string (format false "<~a>" x))
+               (defun wrap<T> ((x T)) string (format false "[~/angle/]" x))
+               (defun main () int
+                 (if (equal (format false "~a ~a ~/angle/" (wrap 1) (wrap "s") true) "[<1>] [<s>] <true>") 0 1))"#,
+        ),
+        0
+    );
+}
+
 /// `print`/`println` taken as function values print the same in an
 /// executable, interpreted, and after `compile`. They used to be Rust builtins
 /// only the interpreter implemented: the compiled tiers refused them, and the
