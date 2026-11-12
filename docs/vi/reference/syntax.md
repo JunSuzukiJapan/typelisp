@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -938,7 +938,7 @@ khớp với thân mà không cần biết kiểu cụ thể.
 **Tham số kiểu riêng của phương thức**: phương thức của trait cũng có thể khai báo tham số kiểu riêng
 bằng cách viết `<U>` trong tên. Phương thức của `impl` khai báo cùng số lượng (tên tùy ý; tương ứng theo
 vị trí), và chữ ký của nó theo chữ ký của trait sau khi thay chúng vào. Tham số kiểu được suy ra từ đối số
-ở mỗi lời gọi. Trait có phương thức như vậy không thể là `:dyn` (một ô vtable chỉ có một điểm vào).
+ở mỗi lời gọi. `:where` của phương thức ràng buộc các tham số kiểu riêng của nó; phương thức của `impl` thừa hưởng các ràng buộc đó và không thể thêm. Trait có phương thức như vậy không thể là `:dyn` (một ô vtable chỉ có một điểm vào).
 
 ```lisp
 (deftrait Mapper ()

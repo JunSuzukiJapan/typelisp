@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -976,7 +976,7 @@ fixés à eux-mêmes ; une signature qui renvoie `Item` est donc confrontée au 
 **Paramètres de type propres d'une méthode** : une méthode d'un trait peut aussi déclarer ses propres
 paramètres de type en écrivant `<U>` dans son nom. Une méthode d'un `impl` en déclare autant (les noms
 sont libres ; ils se correspondent par position), et sa signature suit celle du trait où ils sont mis.
-Les paramètres de type sont inférés des arguments à chaque appel. Un trait ayant une telle méthode ne
+Les paramètres de type sont inférés des arguments à chaque appel. Le `:where` d'une méthode borne ses propres paramètres de type ; une méthode d'un `impl` reprend ces bornes et ne peut pas en ajouter. Un trait ayant une telle méthode ne
 peut pas être un `:dyn` (un emplacement de vtable n'a qu'un seul point d'entrée).
 
 ```lisp

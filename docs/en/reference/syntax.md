@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -964,7 +964,7 @@ type.
 **A method's own type parameters**: a trait's method can also declare type parameters of its own by
 writing `<U>` in its name. A method of an `impl` declares as many (the names are free; they correspond
 by position), and its signature follows the trait's with them put in. The type parameters are inferred
-from the arguments at each call. A trait with such a method cannot be a `:dyn` (a vtable slot has only
+from the arguments at each call. A method's `:where` bounds its own type parameters; a method of an `impl` takes those bounds and cannot add to them. A trait with such a method cannot be a `:dyn` (a vtable slot has only
 one entry point).
 
 ```lisp

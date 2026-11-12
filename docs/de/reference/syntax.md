@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -994,7 +994,7 @@ Rumpf abgeglichen, ohne den konkreten Typ zu kennen.
 **Eigene Typparameter einer Methode**: Auch eine Methode eines Traits kann eigene Typparameter
 deklarieren, indem sie `<U>` in ihren Namen schreibt. Eine Methode eines `impl` deklariert ebenso viele
 (die Namen sind frei; sie entsprechen sich nach Position), und ihre Signatur folgt der des Traits mit
-diesen eingesetzt. Die Typparameter werden bei jedem Aufruf aus den Argumenten abgeleitet. Ein Trait mit
+diesen eingesetzt. Die Typparameter werden bei jedem Aufruf aus den Argumenten abgeleitet. Das `:where` einer Methode beschränkt ihre eigenen Typparameter; eine Methode eines `impl` übernimmt diese Schranken und kann keine hinzufügen. Ein Trait mit
 einer solchen Methode kann kein `:dyn` sein (ein vtable-Platz hat nur einen Einsprungpunkt).
 
 ```lisp

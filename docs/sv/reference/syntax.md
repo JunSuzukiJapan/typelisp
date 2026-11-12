@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -962,7 +962,7 @@ typen.
 **En metods egna typparametrar**: även ett traits metod kan deklarera egna typparametrar genom att skriva
 `<U>` i sitt namn. En metod i en `impl` deklarerar lika många (namnen är fria; de motsvarar varandra efter
 position), och dess signatur följer traitets med dem insatta. Typparametrarna härleds ur argumenten vid
-varje anrop. Ett trait med en sådan metod kan inte vara en `:dyn` (en vtable-plats har bara en
+varje anrop. En metods `:where` begränsar dess egna typparametrar; en metod i en `impl` ärver de begränsningarna och kan inte lägga till fler. Ett trait med en sådan metod kan inte vara en `:dyn` (en vtable-plats har bara en
 ingångspunkt).
 
 ```lisp

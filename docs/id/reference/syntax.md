@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1000,7 +1000,7 @@ mengembalikan `Item` dicocokkan dengan badan tanpa mengetahui tipe konkretnya.
 **Parameter tipe milik metode**: metode sebuah trait juga dapat mendeklarasikan parameter tipenya sendiri
 dengan menulis `<U>` di namanya. Metode sebuah `impl` mendeklarasikan sebanyak itu (namanya bebas;
 berpadanan menurut posisi), dan signature-nya mengikuti signature trait dengan parameter itu dipasang.
-Parameter tipe disimpulkan dari argumen pada tiap panggilan. Trait yang memiliki metode seperti itu tidak
+Parameter tipe disimpulkan dari argumen pada tiap panggilan. `:where` sebuah metode membatasi parameter tipenya sendiri; metode sebuah `impl` mewarisi batasan itu dan tidak dapat menambahkannya. Trait yang memiliki metode seperti itu tidak
 bisa menjadi `:dyn` (slot vtable hanya punya satu titik masuk).
 
 ```lisp

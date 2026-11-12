@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -963,7 +963,7 @@ typu.
 **Własne parametry typu metody**: metoda traitu także może zadeklarować własne parametry typu, pisząc
 `<U>` w nazwie. Metoda `impl` deklaruje ich tyle samo (nazwy są dowolne; odpowiadają sobie według
 pozycji), a jej sygnatura idzie za sygnaturą traitu z nimi wstawionymi. Parametry typu są wnioskowane z
-argumentów przy każdym wywołaniu. Trait z taką metodą nie może być `:dyn` (miejsce w vtable ma tylko
+argumentów przy każdym wywołaniu. `:where` metody ogranicza jej własne parametry typu; metoda `impl` przejmuje te ograniczenia i nie może dodać innych. Trait z taką metodą nie może być `:dyn` (miejsce w vtable ma tylko
 jeden punkt wejścia).
 
 ```lisp

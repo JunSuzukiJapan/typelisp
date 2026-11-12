@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -999,7 +999,7 @@ confrontata con il corpo senza conoscere il tipo concreto.
 **Parametri di tipo propri di un metodo**: anche un metodo di un trait può dichiarare parametri di tipo
 propri scrivendo `<U>` nel suo nome. Un metodo di un `impl` ne dichiara altrettanti (i nomi sono liberi; si
 corrispondono per posizione), e la sua firma segue quella del trait con essi al loro posto. I parametri di
-tipo si deducono dagli argomenti a ogni chiamata. Un trait con un metodo del genere non può essere un `:dyn`
+tipo si deducono dagli argomenti a ogni chiamata. Il `:where` di un metodo vincola i suoi parametri di tipo propri; un metodo di un `impl` eredita quei vincoli e non può aggiungerne. Un trait con un metodo del genere non può essere un `:dyn`
 (uno slot della vtable ha un solo punto d'ingresso).
 
 ```lisp

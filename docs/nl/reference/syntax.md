@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1002,7 +1002,7 @@ tegen de body gematcht zonder het concrete type te kennen.
 **Eigen typeparameters van een methode**: ook een methode van een trait kan eigen typeparameters
 declareren door `<U>` in haar naam te schrijven. Een methode van een `impl` declareert er evenveel (de
 namen zijn vrij; ze komen overeen op positie), en haar signatuur volgt die van de trait met deze ingevuld.
-De typeparameters worden bij elke aanroep uit de argumenten afgeleid. Een trait met zo'n methode kan geen
+De typeparameters worden bij elke aanroep uit de argumenten afgeleid. De `:where` van een methode begrenst haar eigen typeparameters; een methode van een `impl` neemt die grenzen over en kan er geen toevoegen. Een trait met zo'n methode kan geen
 `:dyn` zijn (een vtable-plaats heeft maar één ingangspunt).
 
 ```lisp

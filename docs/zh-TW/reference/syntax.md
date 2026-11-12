@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -751,7 +751,7 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 
 **方法自身的型別參數**：trait 的方法也可以在名稱中寫 `<U>` 來宣告自身的型別參數。`impl` 的方法宣告同樣
 數量的型別參數（名稱隨意，依位置對應），簽章遵循以它們替換後的 trait 簽章。型別參數在每次呼叫時由引數推斷。
-擁有這種方法的 trait 不能作為 `:dyn`（vtable 的槽只有一個入口）。
+方法的 `:where` 為該方法自身的型別參數加上約束。`impl` 的方法繼承這些約束，不能自己加上。擁有這種方法的 trait 不能作為 `:dyn`（vtable 的槽只有一個入口）。
 
 ```lisp
 (deftrait Mapper ()

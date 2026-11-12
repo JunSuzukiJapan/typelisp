@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 96b65a330a61cf93e05280be895043ca5249fe2a -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -964,7 +964,7 @@ gövdeyle eşleştirilir.
 **Metodun kendi tür parametreleri**: bir trait'in metodu da adına `<U>` yazarak kendi tür
 parametrelerini bildirebilir. Bir `impl`'in metodu aynı sayıda bildirir (adlar serbesttir; konuma göre
 eşleşir) ve imzası, bunlar yerleştirilmiş trait imzasını izler. Tür parametreleri her çağrıda
-argümanlardan çıkarılır. Böyle bir metodu olan trait `:dyn` olamaz (bir vtable yuvasının yalnızca bir
+argümanlardan çıkarılır. Bir metodun `:where`'i kendi tür parametrelerini sınırlar; bir `impl`'in metodu bu sınırları devralır ve yenisini ekleyemez. Böyle bir metodu olan trait `:dyn` olamaz (bir vtable yuvasının yalnızca bir
 giriş noktası vardır).
 
 ```lisp
