@@ -162,9 +162,7 @@ pub(crate) fn check_trait_call(
             cx.require_bound(at(&Type::Param(*p)), b, what.clone(), p.name.name().to_string(), loc.clone())?;
         }
     }
-    if super::args::has_tail(sig) {
-        unimplemented!("typeck: the trait method `{}` with &optional, &rest or &key parameters", what)
-    }
+    assert!(!super::args::has_tail(sig), "a trait's method declares no &optional, &rest or &key parameter (`impl_block::method_params`)");
     let given = rest.len() + 1;
     if given != sig.params.len() {
         return Err(Error::TypeError(format!("{}: expected {} argument(s), got {}", what, sig.params.len(), given)));

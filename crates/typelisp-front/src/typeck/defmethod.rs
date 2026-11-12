@@ -220,7 +220,10 @@ pub(crate) fn receiver_type_path(heap: &Heap, reg: &Registry, ns: NsId, written:
         };
     }
     let Some(Value::Symbol(id)) = head else {
-        unimplemented!("typeck: a `defmethod` receiver whose type is not a name")
+        return Err(Error::TypeError(format!(
+            "defmethod: the receiver's type `{}` names no type — a method belongs to the type its first parameter names, and a function, trait object or pointer type names none; write a function",
+            crate::check::core::print(heap, written)
+        )));
     };
     if let Some(p) = scalar_of_symbol(id).as_ref().and_then(prim_type_path) {
         return Ok(p);

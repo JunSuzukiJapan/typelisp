@@ -400,7 +400,7 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 - `defmacro`（`typeck::defmacro`）：引数と結果は `Option<Sexpr>`。`&optional`・`&key` の既定値は、それより前の引数を束縛してチェックする。本体は評価器が持つ。
 - `list`（`typeck::list_form`）。各要素は `Option<Sexpr>` を期待してチェックし、`Sexpr` の cons 変種でつなぐ。`panic`（型は `!`）と `unwind-protect`（型は守られる式の型、後始末の値は捨てる）。
 - `as`・`try-as`（`typeck::cast`）。変換は元の型のメソッドの呼び出しにする（表は旧チェッカーの `as_conversion`）。整数・浮動小数点数の族への変換は族の広い型で登録されているので、狭い型へはその後に幅の変換をつなぐ。トレイトオブジェクトへの `as` はまだ扱わない。
-- `defun` の `&optional`・`&rest`・`&key`（`typeck::lambda_list`）と、それらを持つ関数・メソッドの呼び出し（`typeck::args`）。呼び出しは引数を 1 つずつそろえた呼び出しにする。省いた引数は、既定値（`defun` のときに引数を束縛せずにチェックし、core IR にして持つ）か `none`、既定値のない引数を渡したら `some` で包む。`&rest` の引数は 1 つの `Sexpr` のリストにする。既定値を持つ引数の型は、関数の型パラメータを含んではいけない。`defmethod` と型の `impl` のメソッドも同じ。トレイトの `impl` のメソッドは目印を書けない（トレイトのメソッドの引数の数は `deftrait` が決める）。
+- `defun` の `&optional`・`&rest`・`&key`（`typeck::lambda_list`）と、それらを持つ関数・メソッドの呼び出し（`typeck::args`）。呼び出しは引数を 1 つずつそろえた呼び出しにする。省いた引数は、既定値（`defun` のときに引数を束縛せずにチェックし、core IR にして持つ）か `none`、既定値のない引数を渡したら `some` で包む。`&rest` の引数は 1 つの `Sexpr` のリストにする。既定値を持つ引数の型は、関数の型パラメータを含んではいけない。`defmethod` と型の `impl` のメソッドも同じ。トレイトのメソッドは、`deftrait` でも `impl` でも目印を書けない（引数の数は vtable の枠で決まる。`impl_block::method_params` が断る）。
 - 関数の値（`typeck::lambda`）：`lambda`、`labels`、`apply`、関数の型を持つ値の呼び出し、型パラメータと `&optional`・`&key` を持たない関数を値として取り出すこと。`lambda` と `labels` の関数の本体からは、外のループを抜けられない。`block` を扱うときは、`labels` の関数に名前の暗黙の block を付ける（旧チェッカーと同じ）。
 - `let*`（入れ子の `let` にする）と、引数の数で意味が変わる呼び出し（`typeck::sugar`）：可変個の算術と比較、0 個・1 個の算術と比較、`(log x base)`、`(atan y x)`。書き換えた形をその位置でチェックする。3 つ以上の `append`・`concatenate`・`aref` はまだ扱わない。
 - 1 つの本体を名指す道具（`typeck::tools`）：`compile`・`trace`・`untrace`・`disassemble`。名前は関数・マクロ・型のメソッドを指し、ジェネリックな定義は断る。1 つの具体化のためのメソッド（`Type<args>::member`）はまだ扱わない。
@@ -430,10 +430,10 @@ core IR の形（`(call ...)`、`(let ...)`、`(defun ...)` など）を組み�
 
 新しいチェッカーがこれらに出会うと `unimplemented!()` で止まる。
 
-- トレイト：`&optional`・`&rest`・`&key` を持つトレイトのメソッド、2 つ以上の blanket `impl` が持つメソッド、対象のほかに型パラメータを宣言する blanket `impl`、blanket `impl` が与える関連型、型パラメータが型のものと順に並ばない `impl`、型パラメータの無い型への `impl<...>`。
+- トレイト：2 つ以上の blanket `impl` が持つメソッド、対象のほかに型パラメータを宣言する blanket `impl`、blanket `impl` が与える関連型、型パラメータが型のものと順に並ばない `impl`、型パラメータの無い型への `impl<...>`。
 - 1 つの具体化のためのメンバー：型引数がまだ決まっていない受け手でのそのメソッドの呼び出し、`use` で入ったそれ、自分の型パラメータを持つそれへの境界越しの呼び出し。
 - ジェネリックな本体の中で：C に渡すジェネリックな関数。
-- そのほか：トレイトオブジェクトの `match`、`&optional`・`&key` を持つメソッドを値として使うこと、型の名前でない `defmethod` の受け手、`macrolet` のマクロの本体から C にコールバックを渡すことや `~/name/` で定義を呼ぶこと。
+- そのほか：トレイトオブジェクトの `match`、`macrolet` のマクロの本体から C にコールバックを渡すことや `~/name/` で定義を呼ぶこと。
 
 ### 9.3 今のチェッカーと振る舞いが変わる点
 

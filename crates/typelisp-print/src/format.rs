@@ -2292,6 +2292,22 @@ fn group_digits(digits: &str, commachar: char, interval: usize) -> String {
     out.into_iter().collect()
 }
 
+/// How `prin1` writes the float `f` (CLHS 22.1.3.1.3): `fixed`, its text
+/// with a decimal point, when it is zero or its magnitude is at least 10^-3
+/// and under 10^7, else `exponent`, its shortest text in exponent notation
+/// (`1.5e300`), given a decimal point when its mantissa has none (`1.0e7`).
+/// What is not finite has one text either way.
+fn float_text(f: f64, fixed: String, exponent: String) -> String {
+    let magnitude = f.abs();
+    if !f.is_finite() || f == 0.0 || (1e-3..1e7).contains(&magnitude) {
+        return fixed;
+    }
+    match exponent.split_once('e') {
+        Some((mantissa, exp)) if !mantissa.contains('.') => format!("{}.0e{}", mantissa, exp),
+        _ => exponent,
+    }
+}
+
 fn trim_f64(f: f64) -> String {
     if f == f.trunc() && f.is_finite() {
         format!("{:.1}", f)
@@ -3079,8 +3095,8 @@ impl Renderer {
                 out.push_str(&text);
             }
             Value::Boxed(id) if heap.float_box(id).is_some() => match heap.float_box(id) {
-                Some(FloatBox::F32(f)) => out.push_str(&trim_f32(f)),
-                Some(FloatBox::F64(f)) => out.push_str(&trim_f64(f)),
+                Some(FloatBox::F32(f)) => out.push_str(&float_text(f64::from(f), trim_f32(f), format!("{:e}", f))),
+                Some(FloatBox::F64(f)) => out.push_str(&float_text(f, trim_f64(f), format!("{:e}", f))),
                 None => unreachable!("guarded by float_box above"),
             },
             // A `BoxedObj::Cell` — a binding slot, never a value handed to the

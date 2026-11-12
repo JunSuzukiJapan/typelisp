@@ -186,6 +186,15 @@ pub(crate) fn method_params(heap: &Heap, tcx: &TypeCx, name: SymRef, params: Val
         all.push((*s, self_ty.clone(), at.clone()));
     }
     for p in written {
+        if let Value::Symbol(marker) = p {
+            if [wk::OPTIONAL, wk::REST, wk::KEY].iter().any(|m| marker.is(*m)) {
+                return Err(Error::TypeError(format!(
+                    "{}: a trait's method may not declare `{}` — its arity is fixed by its vtable slot, so a call through a trait object passes every `impl` the same arguments",
+                    name.name(),
+                    marker.name()
+                )));
+            }
+        }
         let (n, t) = parse_param(heap, tcx, p)?;
         all.push((n, t, name_loc(heap, p)));
     }

@@ -36,6 +36,18 @@ fn float_bignum_ratio_and_bool_arguments() {
     assert_eq!(eval_string(r#"(format false "~a" true)"#), "true");
 }
 
+/// A float is written as `prin1` writes it (CLHS 22.1.3.1.3): with a decimal
+/// point when it is zero or its magnitude is at least 10^-3 and under 10^7,
+/// in exponent notation otherwise. `~F` with no parameters stays fixed.
+#[test]
+fn a_float_outside_the_fixed_range_is_written_with_an_exponent() {
+    assert_eq!(
+        eval_string(r#"(format false "~a ~a ~a ~a ~a ~s ~a" 1.5e300 1e7 9999999.0 0.001 0.0001 -2.5e-10 (the f32 1e20))"#),
+        "1.5e300 1.0e7 9999999.0 0.001 1.0e-4 -2.5e-10 1.0e20"
+    );
+    assert_eq!(eval_string(r#"(format false "~f" 1e8)"#), "100000000.0");
+}
+
 #[test]
 fn tilde_and_newline_directives() {
     assert_eq!(eval_string(r#"(format false "50~~ off~%done")"#), "50~ off\ndone");

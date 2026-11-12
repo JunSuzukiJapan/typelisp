@@ -209,14 +209,13 @@ pub(crate) fn fn_value(cx: &Cx, path: Path, def: &FnDef, expected: Option<&Type>
 /// The method `method` of `owner`, defined as `def`, taken as a value: what
 /// a bare name is where a function is expected, `expected`, whose first
 /// parameter, the receiver, has the method. Its type arguments are what the
-/// expected function's type says.
+/// expected function's type says. Its `&optional` and `&key` parameters are
+/// passed by position, as a function's are ([`fn_value`]).
 pub(crate) fn method_value(cx: &Cx, owner: Path, method: SymRef, def: &MethodDef, expected: &Type, loc: Option<Loc>) -> Result<Typed, Error> {
     let sig = &def.sig;
-    if !sig.optionals.is_empty() || !sig.keys.is_empty() {
-        unimplemented!("typeck: the method `{}::{}`, which takes &optional or &key parameters, as a value", owner, method.name())
-    }
     let subst = cx.holes.borrow_mut().instantiate(&sig.type_params);
-    let params: Vec<Type> = sig.params.iter().map(|p| subst.apply(p)).collect();
+    let mut params: Vec<Type> = sig.params.iter().map(|p| subst.apply(p)).collect();
+    params.extend(sig.optionals.iter().chain(&sig.keys).map(|p| subst.apply(&p.effective_ty())));
     let rest = sig.rest.as_ref().map(|r| subst.apply(r));
     let ret = subst.apply(&sig.ret);
     let ty = Type::Fn(params.clone(), rest.clone().map(Box::new), Box::new(ret.clone()));
@@ -241,8 +240,12 @@ pub(crate) fn method_value(cx: &Cx, owner: Path, method: SymRef, def: &MethodDef
         Some(inst) => super::generic::method_specialization(&owner, method, inst),
         None => method,
     };
+    // Every parameter the method really takes: a `&rest` one is a list,
+    // after the `&optional` ones.
     let mut taken = params;
-    taken.extend(rest.map(|_| option_of_sexpr()));
+    if rest.is_some() {
+        taken.insert(sig.params.len() + sig.optionals.len(), option_of_sexpr());
+    }
     Ok(Typed { node: Node::MethodRef { owner, method: code, targs, params: taken, ret }, ty, loc })
 }
 

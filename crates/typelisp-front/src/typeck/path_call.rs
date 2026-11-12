@@ -192,9 +192,17 @@ pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, expected: Optio
                 None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
             }
         }
-        PathTarget::Member(..) => Err(Error::TypeError(format!(
-            "`{}` is a constructor or a static method, which is called rather than taken as a value",
-            path_spelling(heap, id)
-        ))),
+        PathTarget::Member(owner, member) => match cx.reg.method(&owner, member_symbol(member.name())) {
+            Some(def) if def.instance => Err(Error::TypeError(format!(
+                "`{}` is an instance method, which a path does not name — where a function taking a `{}` first is expected, write its name, `{}`",
+                path_spelling(heap, id),
+                typelisp_print::shared::name_view().definition(owner.ns(), owner.name_symbol()),
+                member.name()
+            ))),
+            _ => Err(Error::TypeError(format!(
+                "`{}` is a constructor or a static method, which is called rather than taken as a value",
+                path_spelling(heap, id)
+            ))),
+        },
     }
 }

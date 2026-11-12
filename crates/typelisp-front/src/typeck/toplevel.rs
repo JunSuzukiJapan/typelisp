@@ -1351,6 +1351,34 @@ mod tests {
         assert!(e.contains("`P::make` is a constructor or a static method, which is called rather than taken as a value"), "{}", e);
         let e = check_err("(defun f (&aux (x 1)) int 1)");
         assert!(e.contains("`&aux` is not a parameter marker"), "{}", e);
+        // A trait's method has the arity of its vtable slot.
+        let e = check_err("(deftrait Greet () (defmethod greet (self &optional (n int 1)) int))");
+        assert!(e.contains("greet: a trait's method may not declare `&optional`"), "{}", e);
+        let e = check_err("(deftrait Greet () (defmethod greet (self) int)) (defstruct G (v int)) (impl Greet G (defmethod greet (self &key (n int 1)) int n))");
+        assert!(e.contains("method `greet` may not declare &optional/&key/&rest"), "{}", e);
+    }
+
+    /// A method taken as a value passes its `&optional`, `&key` and `&rest`
+    /// parameters by position, as a function does; a path does not name an
+    /// instance method.
+    #[test]
+    fn a_method_with_optional_key_or_rest_parameters_as_a_value() {
+        let defs = "(defstruct P (x int)) (impl P (defmethod add (self &optional (n int 1)) int (+ self::x n)) \
+                    (defmethod sum (self &rest (xs int)) int (match xs ((none) self::x) (_ (+ self::x 100)))) \
+                    (defmethod kw (self &key (k int 5)) int (* self::x k))) \
+                    (defun ap ((f (fn (P int) int)) (p P)) int (f p 10))";
+        let body = "(let ((p (make-instance 'P :x 2)) (s (the (fn (P &rest int) int) sum))) (+ (ap add p) (ap kw p) (s p 7 8)))";
+        assert_eq!(run(&format!("{} {}", defs, body)).1, Value::Int(134));
+        let e = check_err(&format!("{} (let ((f P::add)) 1)", defs));
+        assert!(e.contains("`P::add` is an instance method, which a path does not name"), "{}", e);
+    }
+
+    /// A method belongs to the type its receiver names; a function type
+    /// names none.
+    #[test]
+    fn a_method_s_receiver_names_a_type() {
+        let e = check_err("(defmethod size ((v (fn (int) int))) int 1)");
+        assert!(e.contains("defmethod: the receiver's type `(fn (int) int)` names no type"), "{}", e);
     }
 
     /// A value called, or applied, before anything decided its type is
