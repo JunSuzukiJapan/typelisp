@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -880,10 +880,11 @@ Een lijst `(Name option...)` op de plaats van de naam geeft opties op (dezelfde 
     functienamespace te voorkomen. Hier zijn accessors methoden die op het type van de ontvanger worden
     verzonden, dus botsingen komen niet voor, en een voorvoegsel zou `instance::field` breken (dat alleen
     de slotnaam kent).
-  - **`:predicate`**: beantwoordt tijdens runtime "is deze waarde een `point`?". Hier zijn types een
-    classificatie tijdens het compileren zonder runtimegetuige, en er is geen positie waar "een waarde van
-    onbekend type die een point zou kunnen zijn" bestaat (`match` op `Sexpr` is verzegeld, en `:dyn` kan
-    niet worden gedowncast), dus een gegenereerd predicaat zou alleen ooit `true` kunnen teruggeven.
+  - **`:predicate`**: beantwoordt tijdens het uitvoeren "is deze waarde een `point`?". Hier ligt het type
+    van een waarde vast bij het compileren, en een waarde die een `point` zou kunnen zijn, komt alleen voor
+    als `Sexpr` of als trait-object (`:dyn`). Daar naar het type vragen is de taak van de downcast-patronen
+    van `match` (`((point :x) ...)`, `(the point p)`, [4.3](#43-match--patroonherkenning)), die bij het vragen ook de inhoud eruit halen.
+    Een predicaat dat een argument van een vastgelegd type neemt, kan alleen `true` teruggeven.
   - **`:type` / `:initial-offset` / `:named`**: deze vervangen de representatie van de waarde door een
     lijst of vector. De representatie is van de compiler en kan vanuit de taal niet worden waargenomen.
 

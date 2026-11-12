@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -658,8 +658,10 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   - **`:constructor`** — 建構函式在 `impl` 中寫成靜態方法（3.5）。寫了這個選項會出現錯誤，並說明如何改寫。
   - **`:conc-name`** —— 在 CL 中是為存取器加前綴，以避免在一個平坦的函式命名空間中衝突。在這裡存取器是依接收者型別分派的方法，不會衝突，而且
     加前綴會破壞 `instance::field`（只知道槽名稱）。
-  - **`:predicate`** —— 在執行期回答「這個值是 `point` 嗎」。在這裡型別是沒有執行期見證的編譯時分類，也不存在「可能是 point 的未知型別的值」
-    所在的位置（對 `Sexpr` 的 `match` 是封閉的，`:dyn` 不能向下轉型），所以產生的述詞只能一律回傳 `true`。
+  - **`:predicate`**：在執行期回答「這個值是 `point` 嗎」。這裡值的型別在編譯期就已確定，可能是
+    `point` 的值只會以 `Sexpr` 或 trait 物件（`:dyn`）出現。在那裡詢問型別由 `match` 的向下轉型模式
+    （`((point :x) ...)`、`(the point p)`、[4.3](#43-match--模式比對)）負責，詢問的同時還能取出內容。接受已定型別參數的
+    述詞只能總是傳回 `true`。
   - **`:type` / `:initial-offset` / `:named`** —— 把值的表示換成串列或向量的指定。表示屬於編譯器，從語言中無法觀察。
 
 ### 3.7 defenum — 列舉（和型別）

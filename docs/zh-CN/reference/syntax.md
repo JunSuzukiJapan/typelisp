@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -667,8 +667,10 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   - **`:constructor`** — 构造函数在 `impl` 中写成静态方法（3.5）。写了这个选项会报错，并说明如何改写。
   - **`:conc-name`** —— 在 CL 中是给访问器加前缀，以避免在一个平坦的函数命名空间中冲突。在这里访问器是按接收者类型分派的方法，
     不会冲突，而且加前缀会破坏 `instance::field`（只知道槽名）。
-  - **`:predicate`** —— 在运行时回答"这个值是 `point` 吗"。在这里类型是没有运行时见证的编译时分类，也不存在"可能是 point 的
-    未知类型的值"所在的位置（对 `Sexpr` 的 `match` 是封闭的，`:dyn` 不能向下转换），所以生成的谓词只能总是返回 `true`。
+  - **`:predicate`**：在运行时回答“这个值是 `point` 吗”。这里值的类型在编译时就已确定，可能是
+    `point` 的值只会以 `Sexpr` 或 trait 对象（`:dyn`）出现。在那里询问类型由 `match` 的向下转型模式
+    （`((point :x) ...)`、`(the point p)`、[4.3](#43-match--模式匹配)）负责，询问的同时还能取出内容。接受已定类型参数的
+    谓词只能总是返回 `true`。
   - **`:type` / `:initial-offset` / `:named`** —— 把值的表示换成列表或向量的指定。表示属于编译器，从语言中无法观察。
 
 ### 3.7 defenum — 枚举（和类型）

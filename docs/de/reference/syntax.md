@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -872,10 +872,11 @@ Eine Liste `(Name option...)` an der Stelle des Namens gibt Optionen an (dieselb
     flachen Funktionsnamensraum zu vermeiden. Hier sind Zugriffsfunktionen Methoden, die nach dem Typ des
     Empfängers gewählt werden, daher kommt es nicht zu Kollisionen, und ein Präfix würde `instance::field`
     zerstören (das nur den Slotnamen kennt).
-  - **`:predicate`**: Beantwortet zur Laufzeit „ist dieser Wert ein `point`?“. Hier sind Typen eine
-    Klassifikation zur Kompilierzeit ohne Zeugen zur Laufzeit, und es gibt keine Stelle, an der „ein Wert
-    unbekannten Typs, der ein point sein könnte“ existiert (`match` auf `Sexpr` ist abgeschlossen, und `:dyn`
-    lässt sich nicht herabcasten), daher könnte ein erzeugtes Prädikat immer nur `true` zurückgeben.
+  - **`:predicate`**: Beantwortet zur Laufzeit „ist dieser Wert ein `point`?“. Hier steht der Typ eines
+    Wertes zur Kompilierzeit fest, und ein Wert, der ein `point` sein könnte, kommt nur als `Sexpr` oder
+    als Trait-Objekt (`:dyn`) vor. Dort nach dem Typ zu fragen, übernehmen die Downcast-Muster von `match`
+    (`((point :x) ...)`, `(the point p)`, [4.3](#43-match--mustervergleich)), die beim Fragen zugleich den Inhalt herausholen. Ein
+    Prädikat mit einem Argument festgelegten Typs könnte immer nur `true` zurückgeben.
   - **`:type` / `:initial-offset` / `:named`**: Diese ersetzen die Darstellung des Wertes durch eine Liste oder
     einen Vektor. Die Darstellung gehört dem Compiler und lässt sich aus der Sprache nicht beobachten.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -843,10 +843,11 @@ Writing a list `(Name option...)` in the name position specifies options (the sa
   - **`:conc-name`**: in CL it prefixes accessors to avoid clashes in one flat function namespace. Here,
     accessors are methods dispatched on the receiver's type, so clashes do not occur, and a prefix would
     break `instance::field` (which knows only the slot name).
-  - **`:predicate`**: answers at run time "is this value a `point`?". Here types are a compile-time
-    classification with no run-time witness, and there is no position where "a value of unknown type
-    that might be a point" exists (`match` on `Sexpr` is sealed, and `:dyn` cannot be downcast), so a
-    generated predicate could only ever return `true`.
+  - **`:predicate`**: answers at run time "is this value a `point`?". Here a value's type is decided at
+    compile time, and a value that might be a `point` appears only as a `Sexpr` or a trait object
+    (`:dyn`). Asking its type there is the job of `match`'s downcast patterns (`((point :x) ...)`,
+    `(the point p)`, [4.3](#43-match--pattern-matching)), which take its contents out as they ask. A predicate taking an argument
+    of a decided type could only ever return `true`.
   - **`:type` / `:initial-offset` / `:named`**: these replace the value's representation with a list or
     vector. The representation belongs to the compiler and cannot be observed from the language.
 

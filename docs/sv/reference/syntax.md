@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -841,10 +841,11 @@ En lista `(Name option...)` på namnets plats anger alternativ (samma plats som 
   - **`:conc-name`**: i CL sätter det ett prefix på accessorer för att undvika krockar i en enda platt
     funktionsnamnrymd. Här är accessorer metoder som dispatchas på mottagarens typ, så krockar uppstår inte,
     och ett prefix skulle bryta `instance::field` (som bara känner till platsnamnet).
-  - **`:predicate`**: svarar vid körning på "är det här värdet ett `point`?". Här är typer en klassificering
-    vid kompilering utan vittne vid körning, och det finns ingen position där "ett värde av okänd typ som
-    kan vara ett point" existerar (`match` på `Sexpr` är förseglad, och `:dyn` kan inte nedkastas), så ett
-    genererat predikat kunde bara någonsin returnera `true`.
+  - **`:predicate`**: svarar vid körning på "är detta värde en `point`?". Här bestäms ett värdes typ vid
+    kompilering, och ett värde som kan vara en `point` förekommer bara som `Sexpr` eller som trait-objekt
+    (`:dyn`). Att fråga efter typen där sköts av `match`s downcast-mönster (`((point :x) ...)`,
+    `(the point p)`, [4.3](#43-match--mönstermatchning)), som samtidigt tar ut innehållet. Ett predikat som tar ett argument av
+    bestämd typ skulle bara kunna returnera `true`.
   - **`:type` / `:initial-offset` / `:named`**: dessa ersätter värdets representation med en lista eller
     vektor. Representationen tillhör kompilatorn och kan inte observeras från språket.
 

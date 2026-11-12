@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -875,11 +875,11 @@ CL).
     namespace piatto di funzioni. Qui gli accessori sono metodi con dispatch sul tipo del ricevitore,
     quindi i conflitti non avvengono, e un prefisso romperebbe `instance::field` (che conosce solo il
     nome dello slot).
-  - **`:predicate`**: risponde a runtime a "questo valore è un `point`?". Qui i tipi sono una
-    classificazione a tempo di compilazione senza testimone a runtime, e non esiste una posizione in cui
-    esista "un valore di tipo sconosciuto che potrebbe essere un point" (`match` su `Sexpr` è sigillato, e
-    `:dyn` non si può sottoporre a downcast), quindi un predicato generato potrebbe solo restituire
-    `true`.
+  - **`:predicate`**: risponde a runtime a «questo valore è un `point`?». Qui il tipo di un valore è
+    deciso in compilazione, e un valore che potrebbe essere un `point` compare solo come `Sexpr` o come
+    oggetto trait (`:dyn`). Chiederne lì il tipo è compito dei pattern di downcast di `match`
+    (`((point :x) ...)`, `(the point p)`, [4.3](#43-match--pattern-matching)), che nel chiedere ne estraggono anche il contenuto. Un
+    predicato che prende un argomento di tipo deciso potrebbe restituire solo `true`.
   - **`:type` / `:initial-offset` / `:named`**: sostituiscono la rappresentazione del valore con una
     lista o un vettore. La rappresentazione appartiene al compilatore e non può essere osservata dal
     linguaggio.

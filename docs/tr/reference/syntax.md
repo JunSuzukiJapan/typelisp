@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -844,10 +844,11 @@ Ad konumuna bir `(Name option...)` listesi yazmak seçenekleri belirtir (CL ile 
   - **`:conc-name`**: CL'de tek bir düz fonksiyon ad alanındaki çakışmaları önlemek için erişimcilere
     önek koyar. Burada erişimciler alıcının türüne göre dağıtılan metotlardır; bu yüzden çakışma olmaz ve
     bir önek `instance::field`'ı (yalnızca slot adını bilen) bozardı.
-  - **`:predicate`**: çalışma zamanında "bu değer bir `point` mi?" sorusunu yanıtlar. Burada türler,
-    çalışma zamanı tanığı olmayan bir derleme zamanı sınıflandırmasıdır ve "bir point olabilecek bilinmeyen
-    türde bir değer"in var olduğu bir konum yoktur (`Sexpr` üzerindeki `match` mühürlüdür ve `:dyn` aşağı
-    dönüştürülemez); bu yüzden üretilen bir yüklem yalnızca `true` döndürebilirdi.
+  - **`:predicate`**: çalışma zamanında "bu değer bir `point` mi?" sorusunu yanıtlar. Burada bir değerin
+    türü derleme zamanında belirlenir ve `point` olabilecek bir değer yalnızca `Sexpr` ya da trait nesnesi
+    (`:dyn`) olarak görünür. Orada türünü sormak `match`'in downcast desenlerinin (`((point :x) ...)`,
+    `(the point p)`, [4.3](#43-match--örüntü-eşleme)) işidir; bunlar sorarken içeriği de çıkarır. Türü belirlenmiş bir argüman
+    alan bir yüklem yalnızca `true` döndürebilir.
   - **`:type` / `:initial-offset` / `:named`**: bunlar değerin gösterimini bir liste ya da vektörle
     değiştirir. Gösterim derleyiciye aittir ve dilden gözlemlenemez.
 

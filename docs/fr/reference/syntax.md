@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -857,10 +857,11 @@ Une valeur de structure se crée avec `make-instance`, comme en CLOS.
   - **`:conc-name`** : en CL, il préfixe les accesseurs pour éviter les conflits dans un espace de noms de fonctions
     unique et plat. Ici, les accesseurs sont des méthodes choisies selon le type du receveur ; les conflits ne se
     produisent donc pas, et un préfixe casserait `instance::field` (qui ne connaît que le nom du slot).
-  - **`:predicate`** : répond à l'exécution à « cette valeur est-elle un `point` ? ». Ici, les types sont une
-    classification à la compilation sans témoin à l'exécution, et il n'existe aucune position où « une valeur de type
-    inconnu qui pourrait être un point » existe (`match` sur `Sexpr` est fermé, et `:dyn` ne peut pas être transtypé
-    vers le bas) ; un prédicat généré ne pourrait donc jamais renvoyer que `true`.
+  - **`:predicate`** : répond à l'exécution à « cette valeur est-elle un `point` ? ». Ici le type d'une
+    valeur est décidé à la compilation, et une valeur qui pourrait être un `point` n'apparaît que comme
+    `Sexpr` ou comme objet trait (`:dyn`). Y demander son type est le rôle des motifs de downcast de `match`
+    (`((point :x) ...)`, `(the point p)`, [4.3](#43-match--filtrage-par-motifs)), qui en extraient le contenu en même temps. Un prédicat
+    prenant un argument de type décidé ne pourrait jamais renvoyer que `true`.
   - **`:type` / `:initial-offset` / `:named`** : ils remplacent la représentation de la valeur par une liste ou un
     vecteur. La représentation appartient au compilateur et ne peut pas être observée depuis le langage.
 

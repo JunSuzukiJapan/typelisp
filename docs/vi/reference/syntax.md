@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -820,10 +820,11 @@ Viết một danh sách `(Name option...)` ở vị trí tên sẽ chỉ định
   - **`:conc-name`**: trong CL nó thêm tiền tố cho các hàm truy cập để tránh xung đột trong một không gian tên
     hàm phẳng. Ở đây, các hàm truy cập là phương thức dispatch theo kiểu của bên nhận, nên xung đột không xảy
     ra, và một tiền tố sẽ làm hỏng `instance::field` (vốn chỉ biết tên slot).
-  - **`:predicate`**: trả lời lúc chạy "giá trị này có phải một `point` không?". Ở đây kiểu là một phân loại
-    lúc biên dịch không có bằng chứng lúc chạy, và không có vị trí nào tồn tại "một giá trị có kiểu chưa biết
-    có thể là một point" (`match` trên `Sexpr` là kín, và `:dyn` không thể downcast), nên một vị từ được sinh
-    ra chỉ có thể trả về `true`.
+  - **`:predicate`**: trả lời lúc chạy câu hỏi "giá trị này có phải `point` không?". Ở đây kiểu của giá
+    trị được quyết định lúc biên dịch, và giá trị có thể là `point` chỉ xuất hiện dưới dạng `Sexpr` hoặc
+    đối tượng trait (`:dyn`). Hỏi kiểu ở đó là việc của các mẫu downcast của `match` (`((point :x) ...)`,
+    `(the point p)`, [4.3](#43-match--so-khớp-mẫu)), vừa hỏi vừa lấy nội dung ra. Một vị từ nhận đối số có kiểu đã định chỉ
+    có thể trả về `true`.
   - **`:type` / `:initial-offset` / `:named`**: các tùy chọn này thay biểu diễn của giá trị bằng một danh sách
     hoặc vector. Biểu diễn thuộc về trình biên dịch và không thể quan sát từ ngôn ngữ.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 34c8c8614827a5f4965142995a79250880635a73 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -875,11 +875,11 @@ Menulis list `(Name option...)` di posisi nama menentukan opsi (posisi yang sama
     ruang nama fungsi yang datar. Di sini, pengakses adalah metode yang di-dispatch berdasarkan tipe
     penerima, sehingga bentrok tidak terjadi, dan awalan akan merusak `instance::field` (yang hanya
     mengenal nama slot).
-  - **`:predicate`**: menjawab saat dijalankan "apakah nilai ini sebuah `point`?". Di sini tipe
-    adalah klasifikasi saat kompilasi tanpa saksi saat dijalankan, dan tidak ada posisi tempat "nilai
-    bertipe tak dikenal yang mungkin sebuah point" ada (`match` pada `Sexpr` tertutup, dan `:dyn`
-    tidak dapat di-downcast), sehingga predikat yang dihasilkan hanya akan selalu mengembalikan
-    `true`.
+  - **`:predicate`**: menjawab saat runtime "apakah nilai ini sebuah `point`?". Di sini tipe sebuah nilai
+    ditentukan saat kompilasi, dan nilai yang mungkin berupa `point` hanya muncul sebagai `Sexpr` atau
+    objek trait (`:dyn`). Menanyakan tipenya di sana adalah tugas pola downcast `match` (`((point :x) ...)`,
+    `(the point p)`, [4.3](#43-match--pencocokan-pola)), yang sekaligus mengeluarkan isinya. Predikat yang menerima argumen bertipe
+    pasti hanya bisa mengembalikan `true`.
   - **`:type` / `:initial-offset` / `:named`**: semuanya mengganti representasi nilai dengan daftar
     atau vector. Representasi adalah milik kompiler dan tidak dapat diamati dari bahasa.
 
