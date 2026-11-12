@@ -43,10 +43,6 @@ pub(crate) fn bound_message(of: &str, param: &str, unmet: &Unmet) -> String {
             }
             m
         }
-        Unmet::NoImpls { ty } => format!(
-            "{}: type `{}` does not implement a trait required by `:where` clause on type parameter `{}`",
-            of, ty, param
-        ),
         Unmet::Assoc { ty, assoc, actual, required } => format!(
             "{}: type `{}`'s associated type `{}` is `{}`, but `:where` clause requires `{}`",
             of,
@@ -98,9 +94,6 @@ pub(crate) fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &
             pin
         ),
         NotDyn::NotInherited { from } => converts(format!("`{}` does not inherit `{}`", from, trait_path)),
-        NotDyn::OutsideChain { from } => {
-            converts(format!("`{}` is not in `{}`'s supertrait chain", trait_path, from))
-        }
         NotDyn::PinDiffers { from, name, actual, want } => converts(format!(
             "`{}` pins `{}`'s `{}` to `{}`, not `{}`",
             from,

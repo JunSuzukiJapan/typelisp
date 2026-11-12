@@ -2092,8 +2092,8 @@ user-visible capacity."
 ;; `equal`/`equalp` are already all four callable on it) and keeps the cost
 ;; of a comparison a constant.
 ;;
-;; What this buys, since `match`'s value patterns compare through `Eq`
-;; (`Pattern::Guard`): a literal pattern against a `Sexpr` scrutinee now
+;; What this buys, since `match`'s value patterns compare through `Eq`:
+;; a literal pattern against a `Sexpr` scrutinee now
 ;; type-checks, and *matches* for every immediate — `'foo` (interned, so
 ;; identity is content equality), an integer, a `char`, a `bool`. What it
 ;; does not buy: `"a"`, a float, a bignum/ratio or a quoted list, whose

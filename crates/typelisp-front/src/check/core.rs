@@ -34,177 +34,9 @@ use typelisp_mem::{wk, Error, Heap, Loc, RootScope, SymRef, Value};
 
 use crate::types::Type;
 
-/// What analyzing one expression produces: the expression as the analysis
-/// resolved it — a node of the analyzed tree (`docs/dev/explicit-symbols-plan.md`,
-/// 3.10) — and the type it was proved to have.
-///
-/// The type is the checker's own working value — it drives the next inference
-/// step, the next arity check, the next `Repr` — and it stops here: lowering
-/// (`check::lower`) writes only representations into the core form, and
-/// nothing downstream of the checker can ask for a type.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Checked {
-    pub ty: Type,
-    pub node: Node,
-    /// Where the expression was written, which its lowered form carries.
-    pub loc: Option<Loc>,
-}
-
-/// One node of the analyzed tree: an expression with what it refers to
-/// resolved. Its children are the [`Checked`] of each subexpression.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Node {
-    /// `(if cond then else)`.
-    If { cond: Box<Checked>, then: Box<Checked>, els: Box<Checked> },
-    /// `(panic message)`.
-    Panic { message: Box<Checked> },
-    /// A literal: its core tag (`int`, `int-any-width`, `bignum`, `ratio`,
-    /// `float-any-width`, `bool`, `char`, `str`, `sym`, `unit`) and its value,
-    /// none for `unit`. The tag is the node's, decided from the literal's
-    /// type, not something lowering could read off the value.
-    Literal { tag: u32, value: Option<Value> },
-    /// `(quote datum)`, also a self-evaluating object of no reader syntax.
-    Quote { datum: Value },
-    /// A local binding.
-    Local { name: SymRef },
-    /// A module's global variable, by its full path, read at its declared
-    /// type `ty`.
-    Global { path: crate::Path, ty: Type },
-    /// A named free function reified as a value, with the parameter types of
-    /// the function it names.
-    FnRef { path: crate::Path, params: Vec<Type> },
-    /// A method of `owner` reified as a value: `method` is the name it is
-    /// registered under (a specialization's own name for a generic one).
-    MethodRef { owner: crate::Path, method: SymRef, params: Vec<Type>, ret: Type },
-    /// A call of the free function at `path`.
-    Call { path: crate::Path, args: Vec<Checked> },
-    /// A value of variant `variant` of `owner<targs>`; `field_tys` are the
-    /// variant's declared field types with `targs` substituted in.
-    Construct { owner: crate::Path, targs: Vec<Type>, variant: usize, mutable: bool, field_tys: Vec<Type>, args: Vec<Checked> },
-    /// A niched `Option` put into the box a `Sexpr` holds it as.
-    BoxOption { value: Box<Checked> },
-    /// The type `ty`, as the value an internal builtin is handed a type in.
-    TypeValue { ty: Type },
-    /// The concrete value inside a trait object, as a `Sexpr` datum.
-    DynValue { value: Box<Checked> },
-    /// A call of the method `method` of `owner` (`args[0]` is the receiver
-    /// when `instance`), returning `ret`. A builtin's call over literal
-    /// arguments lowers to its value.
-    Assoc { owner: crate::Path, method: SymRef, instance: bool, ret: Type, args: Vec<Checked> },
-    /// A trait object re-made around the table of the trait `to`.
-    DynUpcast { to: crate::Path, value: Box<Checked> },
-    /// The body of a generic function where `what` needs the type arguments:
-    /// never executed, since every specialization checks the site again.
-    ErasedGeneric { what: Box<str> },
-    /// `value` boxed as a trait object of `trait_path`; `slots` and `supers`
-    /// are the vtables.
-    DynNew {
-        trait_path: crate::Path,
-        slots: Vec<(crate::Path, SymRef)>,
-        supers: Vec<(crate::Path, Vec<(crate::Path, SymRef)>)>,
-        value: Box<Checked>,
-    },
-    /// A call through a trait object's vtable slot `slot`; `targets` are the
-    /// bodies it may reach.
-    DynCall { trait_path: crate::Path, method: SymRef, slot: usize, targets: Vec<(crate::Path, SymRef)>, args: Vec<Checked> },
-    /// `binds` in scope for `body`, which runs in order; each binding is its
-    /// name, its type and its value. With no bindings this is `progn`.
-    Let { binds: Vec<(SymRef, Type, Checked)>, body: Vec<Checked> },
-    /// An assignment to the local `name`.
-    Set { name: SymRef, value: Box<Checked> },
-    /// An assignment to the global at `path`, declared `ty`.
-    SetGlobal { path: crate::Path, ty: Type, value: Box<Checked> },
-    /// Applying the function value `callee`, which returns `ret`.
-    Apply { callee: Box<Checked>, ret: Type, args: Vec<Checked> },
-    /// An anonymous function.
-    Lambda { params: Vec<(SymRef, Type)>, ret: Type, body: Vec<Checked> },
-    /// Local functions in scope for each other and for `body`.
-    Labels { defs: Vec<super::analyze::LabelsDef>, body: Vec<Checked> },
-    /// `(loop body...)`, whose exits deliver a `ty`.
-    Loop { ty: Type, body: Vec<Checked> },
-    /// Leaving the nearest loop with no value.
-    Break,
-    /// Leaving the nearest loop, with `value` or none.
-    Return { value: Option<Box<Checked>> },
-    /// A named escape target of value `ty`.
-    Block { name: Box<str>, ty: Type, body: Box<Checked> },
-    /// Leaving the enclosing block `name`, with `value` or none.
-    ReturnFrom { name: Box<str>, value: Option<Box<Checked>> },
-    /// `body`, or the value a `throw` to the symbol `tag` delivers; `carried`
-    /// is the type the tag carries.
-    Catch { tag: Value, carried: Type, body: Box<Checked> },
-    /// Leaving for the nearest `catch` on the symbol `tag` with `value`.
-    Throw { tag: Value, value: Box<Checked> },
-    /// `protected`, then `cleanup` on every way out of it.
-    UnwindProtect { protected: Box<Checked>, cleanup: Box<Checked> },
-    /// An `int`'s raw machine word.
-    UntagInt { value: Box<Checked> },
-    /// Waiting until one of the channel operations `arms` can go, and running
-    /// that arm. Its operands are locals bound around it.
-    Select { arms: Vec<SelectArm> },
-    /// `(match scrut arms...)`: the first arm whose pattern matches runs.
-    Match { scrut: Box<Checked>, arms: Vec<(super::resolved::Pattern, Vec<Checked>)> },
-    /// A niched `Option` of type `ty` holding `value`: `value` as a tagged
-    /// field word, with no box.
-    SomeOf { ty: Type, value: Box<Checked> },
-    /// Running `call` as a task or a thread (`tag`), answering a `handle`.
-    Spawn { tag: u32, handle: Type, call: Box<Checked> },
-    /// `(compile name)`.
-    Compile { target: super::resolved::CompileTarget },
-    /// `(trace ...)` or `(untrace ...)` (`tag`).
-    Trace { tag: u32, targets: Vec<super::resolved::CompileTarget> },
-    /// `(disassemble name)`, as LLVM IR when `llvm_ir`.
-    Disassemble { target: super::resolved::CompileTarget, llvm_ir: bool },
-    /// `(step form)`.
-    Step { inner: Box<Checked> },
-    /// What stands for a subexpression that failed to check, written at
-    /// `loc`.
-    Hole { loc: Option<Loc> },
-    /// An `&optional`/`&key` default, checked once with its definition and
-    /// copied into each call that omits the argument.
-    Default { form: crate::owned_form::OwnedForm },
-    /// `value`, which disagrees with what was settled before it. The analysis
-    /// goes on with the type settled first; checking reports `what`
-    /// (`check::verify`).
-    Disagree { what: Disagreement, value: Box<Checked> },
-}
-
-/// What a [`Node::Disagree`] disagrees with.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Disagreement {
-    /// An expected type the value is not, and no widening reconciles.
-    Expected(Type),
-    /// Two ways out of one expression — branches, arms, a block's end and its
-    /// `return-from`s — whose types have nothing in common.
-    Branches(Type, Type),
-    /// A part of an argument's type, found, where its parameter's type has
-    /// the expected one.
-    Mismatch(Type, Type),
-    /// A type parameter an earlier argument bound to the first type, and this
-    /// one to the second.
-    Conflict(String, Type, Type),
-    /// An empty body, whose value is `()`, where the type is to be this one.
-    EmptyBody(Type),
-    /// A `where` bound of `of` on its type parameter `param` that the type
-    /// the call decided for it does not meet.
-    Bound { of: String, param: String, unmet: Unmet },
-    /// A `match` whose arms leave values of the type it matches on unmatched.
-    Uncovered(Uncovered),
-    /// A `make-instance` of `ty` that gives `slot`, which is not `pub` and is
-    /// given outside `module`, where `ty` is defined.
-    HiddenSlot { ty: String, slot: String, module: String },
-    /// What needs `(unsafe ...)`, outside one.
-    Unsafe(Unsafe),
-    /// A `setf` of a place that cannot be assigned.
-    Unassignable(Unassignable),
-    /// A value of `ty` reaching `:dyn trait_path<pins>`, which it can be
-    /// neither boxed as nor converted to.
-    NotDyn { ty: Type, trait_path: crate::Path, pins: Vec<Type>, why: NotDyn },
-}
-
 /// Why a value is not admitted as a trait object.
 #[derive(Clone, Debug, PartialEq)]
-pub enum NotDyn {
+pub(crate) enum NotDyn {
     /// Its type is not a nominal type.
     NotNominal,
     /// Its type does not implement the trait.
@@ -218,9 +50,6 @@ pub enum NotDyn {
     Assoc { owner: crate::Path, name: String, actual: Type, pin: Type },
     /// It is a `:dyn from` already, and `from` does not inherit the trait.
     NotInherited { from: crate::Path },
-    /// It is a `:dyn from` already, and the trait is not in `from`'s
-    /// supertrait chain.
-    OutsideChain { from: crate::Path },
     /// It is a `:dyn from` already, whose pins make the trait's `name`
     /// `actual`, and the `:dyn` pins it to `want`.
     PinDiffers { from: crate::Path, name: String, actual: Type, want: Type },
@@ -228,165 +57,18 @@ pub enum NotDyn {
     Unpinned { from: crate::Path, name: String },
 }
 
-/// Why a place a `setf` names cannot be assigned.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Unassignable {
-    /// The global `name`, a constant.
-    Constant { name: String },
-    /// A C struct field holding a struct of `ty` by value, whose own fields
-    /// are what is assigned.
-    WholeCStruct { ty: Type },
-}
-
-/// What only `(unsafe ...)` permits, or what it cannot answer.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Unsafe {
-    /// A call to the C function `name` a `defffi` declared.
-    CCall { name: crate::Path },
-    /// A value of `ty`, which mentions a raw machine word from the C FFI.
-    RawWord { ty: Type },
-    /// An `(unsafe ...)` answering `ty`, which mentions a typed pointer into
-    /// memory freed when the `unsafe` is left.
-    TypedPtrAnswer { ty: Type },
-}
-
-/// What a `match`'s arms leave unmatched.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Uncovered {
-    /// Some of the `total` variants of `adt`; the arms cover `covered`.
-    Variants { adt: crate::Path, covered: usize, total: usize },
-    /// One of the two `bool`s, `missing`.
-    Bool { missing: bool },
-    /// Values of `ty`, which has no variants, so only a `_` arm covers it.
-    ByValue { ty: Type },
-}
-
 /// How a type decided for a bounded type parameter falls short of the bound.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Unmet {
+pub(crate) enum Unmet {
     /// It is the enclosing function's own type parameter `var`, which its
     /// `where` clause does not bound by `trait_path`.
     Undeclared { var: String, trait_path: crate::Path },
     /// `ty` does not implement `trait_path`. `via` is a method of `ty`
     /// taking only the receiver whose result does, when it has one.
     Unimplemented { ty: Type, trait_path: crate::Path, via: Option<SymRef> },
-    /// `ty` names no type, so it has no impls.
-    NoImpls { ty: Type },
     /// `ty`'s associated type `assoc` is `actual` (`None`: it has none), not
     /// the `required` one.
     Assoc { ty: Type, assoc: String, actual: Option<Type>, required: Type },
-}
-
-impl Node {
-    /// The node's subexpressions, in the order they are written.
-    pub fn children(&self) -> Vec<&Checked> {
-        fn one(c: &Checked) -> Vec<&Checked> {
-            vec![c]
-        }
-        match self {
-            Node::If { cond, then, els } => vec![cond, then, els],
-            Node::Panic { message: c }
-            | Node::BoxOption { value: c, .. }
-            | Node::DynValue { value: c }
-            | Node::DynUpcast { value: c, .. }
-            | Node::DynNew { value: c, .. }
-            | Node::Set { value: c, .. }
-            | Node::SetGlobal { value: c, .. }
-            | Node::Block { body: c, .. }
-            | Node::Catch { body: c, .. }
-            | Node::Throw { value: c, .. }
-            | Node::UntagInt { value: c }
-            | Node::SomeOf { value: c, .. }
-            | Node::Spawn { call: c, .. }
-            | Node::Step { inner: c }
-            | Node::Disagree { value: c, .. } => one(c),
-            Node::Call { args, .. } | Node::Construct { args, .. } | Node::Assoc { args, .. } | Node::DynCall { args, .. } => {
-                args.iter().collect()
-            }
-            Node::Let { binds, body } => binds.iter().map(|(_, _, c)| c).chain(body).collect(),
-            Node::Apply { callee, args, .. } => std::iter::once(&**callee).chain(args).collect(),
-            Node::Lambda { body, .. } | Node::Loop { body, .. } => body.iter().collect(),
-            Node::Labels { defs, body } => defs.iter().flat_map(|(_, _, _, b)| b).chain(body).collect(),
-            Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter().map(|c| &**c).collect(),
-            Node::UnwindProtect { protected, cleanup } => vec![protected, cleanup],
-            Node::Select { arms } => arms
-                .iter()
-                .flat_map(|arm| match arm {
-                    SelectArm::Recv { chan, body, .. } => vec![chan, body],
-                    SelectArm::Send { chan, value, body, .. } => vec![chan, value, body],
-                    SelectArm::Else { body } => vec![body],
-                })
-                .collect(),
-            Node::Match { scrut, arms } => {
-                let mut out = vec![&**scrut];
-                for (pat, body) in arms {
-                    pat.guards(&mut out);
-                    out.extend(body);
-                }
-                out
-            }
-            Node::Literal { .. }
-            | Node::Quote { .. }
-            | Node::TypeValue { .. }
-            | Node::Local { .. }
-            | Node::Global { .. }
-            | Node::FnRef { .. }
-            | Node::MethodRef { .. }
-            | Node::ErasedGeneric { .. }
-            | Node::Break
-            | Node::Compile { .. }
-            | Node::Trace { .. }
-            | Node::Disassemble { .. }
-            | Node::Hole { .. }
-            | Node::Default { .. } => Vec::new(),
-        }
-    }
-}
-
-/// One arm of a [`Node::Select`].
-#[derive(Clone, Debug, PartialEq)]
-pub enum SelectArm {
-    /// `((var (recv chan)) body...)`; `bound` is the `Option` `var` is
-    /// bound to.
-    Recv { var: SymRef, bound: Type, chan: Checked, body: Checked },
-    /// `((send chan value) body...)`; `kind` is how the value is stored.
-    Send { kind: i64, chan: Checked, value: Checked, body: Checked },
-    /// `(:else body...)`.
-    Else { body: Checked },
-}
-
-/// A tree is as deep as the expression it was analyzed from, and dropping it
-/// visits it recursively: each level grows the stack when it runs short, as
-/// the walks that built it do.
-impl Drop for Checked {
-    fn drop(&mut self) {
-        let node = std::mem::replace(&mut self.node, Node::Break);
-        typelisp_mem::grow_stack(move || drop(node));
-    }
-}
-
-impl Checked {
-    /// The type `ty`, as the value an internal builtin is handed a type in.
-    pub fn type_value(ty: &Type) -> Checked {
-        Checked::of(Node::TypeValue { ty: ty.clone() }, Type::Int)
-    }
-
-    /// The same expression, seen at type `ty`: a widening that needs no
-    /// runtime work (a `Symbol` where a `Sexpr` is expected, ...). The node
-    /// stays as it is.
-    pub fn retyped(mut self, ty: Type) -> Checked {
-        self.ty = ty;
-        self
-    }
-
-    /// The expression `node` stands for, of type `ty`.
-    ///
-    /// A heap value the node holds (a literal's box, a quoted datum) has to
-    /// stay rooted until the tree is lowered; `Checker::literal` and
-    /// `Checker::quoted` build those nodes.
-    pub(super) fn of(node: Node, ty: Type) -> Checked {
-        Checked { ty, node, loc: None }
-    }
 }
 
 /// Cons a proper list from `items`, in order.
@@ -509,7 +191,7 @@ impl<'h> Items<'h> {
 
     /// Build `(tag field...)` and record its source position — see
     /// [`tagged_at`].
-    pub fn finish_at(mut self, tag: u32, loc: Option<Loc>) -> Result<Value, Error> {
+    pub(crate) fn finish_at(mut self, tag: u32, loc: Option<Loc>) -> Result<Value, Error> {
         let vals = std::mem::take(&mut self.vals);
         tagged_at(&mut self.scope, tag, &vals, loc)
     }
@@ -568,7 +250,7 @@ pub fn op_spelling(heap: &Heap, form: Value) -> Option<&str> {
 /// Here rather than on `Checker` because the *driver* is what knows a group of
 /// forms belongs together: a file's own definitions, wrapped once the whole
 /// file has been checked.
-pub fn tagged_module(heap: &mut Heap, path: &crate::Path, body: &[Value]) -> Result<Value, Error> {
+pub(crate) fn tagged_module(heap: &mut Heap, path: &crate::Path, body: &[Value]) -> Result<Value, Error> {
     let mut s = RootScope::new(heap);
     for form in body {
         s.push_root(*form);
@@ -619,7 +301,7 @@ pub fn definition_form(p: &crate::Path) -> Value {
 /// way: a module's name is read in its parent, where it may be a symbol made
 /// elsewhere (one `std` offers), so its symbol alone would not say where the
 /// module is. [`root_path_value`] reads it back.
-pub fn root_path_form(heap: &mut Heap, p: &crate::Path) -> Value {
+pub(crate) fn root_path_form(heap: &mut Heap, p: &crate::Path) -> Value {
     let mut segs = vec![typelisp_mem::symbols::intern_in(typelisp_mem::NsId::ROOT, "")];
     segs.extend(typelisp_mem::symbols::ns_names(p.ns()));
     segs.push(p.name_symbol());
@@ -639,7 +321,7 @@ pub fn root_path_value(heap: &Heap, v: Value) -> Option<crate::Path> {
 /// A type parameter — of the owning type, in a field's template, or of a
 /// generic definition, in a body that is lowered but never run — is written
 /// `(type-param N)` by its position.
-pub fn type_form(heap: &mut Heap, ty: &Type) -> Result<Value, Error> {
+pub(crate) fn type_form(heap: &mut Heap, ty: &Type) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     let tag = match ty {
         Type::Named(p, args) | Type::Dyn(p, args) => {
@@ -776,7 +458,7 @@ pub fn definition_value(v: Value) -> Option<crate::Path> {
 /// reports the mismatch as an internal error instead: a walk over checked forms
 /// looking for what they mention has nowhere to report to, and every field it
 /// does not recognize is simply not the one it was after.
-pub fn sym_field(heap: &Heap, form: Value, i: usize) -> Option<SymRef> {
+pub(crate) fn sym_field(heap: &Heap, form: Value, i: usize) -> Option<SymRef> {
     match field(heap, form, i)? {
         Value::Symbol(id) => Some(id),
         _ => None,
@@ -784,7 +466,7 @@ pub fn sym_field(heap: &Heap, form: Value, i: usize) -> Option<SymRef> {
 }
 
 /// [`sym_field`]'s symbol's spelling.
-pub fn sym_name_field(heap: &Heap, form: Value, i: usize) -> Option<String> {
+pub(crate) fn sym_name_field(heap: &Heap, form: Value, i: usize) -> Option<String> {
     match field(heap, form, i)? {
         Value::Symbol(id) => Some(heap.symbol_spelling(id).to_string()),
         _ => None,

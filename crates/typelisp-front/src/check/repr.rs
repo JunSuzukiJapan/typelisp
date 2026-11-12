@@ -22,8 +22,6 @@
 //!   disagreements made a `HashTable<K,V>` field of a `defstruct` fail to
 //!   compile while claiming the type had no representation at all.
 
-use std::collections::HashSet;
-
 use typelisp_mem::{wk, Error, Heap, Value};
 
 use crate::typeck::registry::AdtKind;
@@ -48,7 +46,7 @@ pub fn is_llvm_handle_ty(ty: &Type) -> bool {
 /// `kind_of` alone is not enough: `Option`/`Result` and the concrete error
 /// types are recognized *structurally*, so a caller whose lookup does not know
 /// them still classifies them correctly.
-pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> bool {
+pub(crate) fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> bool {
     match ty {
         Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::OPTION) && args.len() == 1 => true,
         Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::RESULT) && args.len() == 2 => true,
@@ -204,35 +202,7 @@ pub enum Repr {
 }
 
 impl Repr {
-    /// Classify `ty`.
-    ///
-    /// `structs`/`enums` are the type paths the checker resolved to
-    /// `AdtKind::Struct`/`AdtKind::Sum`, passed as plain pre-resolved sets so
-    /// this needs no live `Registry`.
-    ///
-    /// Order matters: the guards below are not disjoint as written (an LLVM
-    /// handle and a `Scope<V>` are both `Type::Named`, and so is every struct
-    /// and enum), so each earlier arm is also an exclusion for the later ones.
-    pub fn of(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> Repr {
-        Repr::of_by(ty, &|p| {
-            if structs.contains(p) {
-                Some(AdtKind::Struct)
-            } else if enums.contains(p) {
-                Some(AdtKind::Sum)
-            } else {
-                None
-            }
-        })
-    }
-
     /// Classify `ty`, resolving a nominal type's kind through `kind_of`.
-    ///
-    /// The form the checker uses: it has a live [`Registry`](crate::Registry)
-    /// that is still being *added to* as a file is checked (every `defstruct`
-    /// registers one more type), so it cannot hand over a pair of frozen sets
-    /// without either rebuilding them per node or risking a stale answer for a
-    /// type defined earlier in the same file. A lookup asks the registry at the
-    /// moment the question is put.
     ///
     /// Order matters: the guards below are not disjoint as written (an LLVM
     /// handle and a `Scope<V>` are both `Type::Named`, and so is every struct
@@ -345,7 +315,7 @@ impl Repr {
 
     /// The vocabulary member [`Repr::write`] spells this representation's
     /// head with — [`Repr::tag`]'s symbol.
-    pub fn tag_wk(&self) -> u32 {
+    pub(crate) fn tag_wk(&self) -> u32 {
         match self {
             Repr::Narrow => wk::INT_ANY_WIDTH,
             Repr::Int => wk::INT,
@@ -376,7 +346,7 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub const SIMPLE: [Repr; 20] = [
+    pub(crate) const SIMPLE: [Repr; 20] = [
         Repr::Narrow,
         Repr::Int,
         Repr::RawWord,
@@ -438,7 +408,7 @@ impl Repr {
     ///
     /// The `Type`-side twin of `typelisp_mem::option_payload_niches`; the
     /// two are pinned together by `tests/option_niche_test.rs`.
-    pub fn niches(&self) -> bool {
+    pub(crate) fn niches(&self) -> bool {
         !matches!(self, Repr::Niche(_) | Repr::Unit | Repr::RawWord | Repr::None)
     }
 
@@ -690,12 +660,15 @@ mod tests {
     use super::*;
     use crate::sexpr_variant::field_kind as k;
 
-    fn sets() -> (HashSet<Path>, HashSet<Path>) {
-        let mut structs = HashSet::new();
-        structs.insert(Path::root("point"));
-        let mut enums = HashSet::new();
-        enums.insert(Path::root("my-enum"));
-        (structs, enums)
+    /// The kinds of the two user types the tests name.
+    fn kind_of(p: &Path) -> Option<AdtKind> {
+        if *p == Path::root("point") {
+            Some(AdtKind::Struct)
+        } else if *p == Path::root("my-enum") {
+            Some(AdtKind::Sum)
+        } else {
+            None
+        }
     }
 
     /// Every representation the checker can produce survives being written
@@ -763,8 +736,7 @@ mod tests {
 
     #[test]
     fn scalars_and_adts_classify_by_their_declared_type() {
-        let (structs, enums) = sets();
-        let of = |t: Type| Repr::of(&t, &structs, &enums);
+        let of = |t: Type| Repr::of_by(&t, &kind_of);
         assert_eq!(of(Type::I32), Repr::Narrow);
         assert_eq!(of(Type::U32), Repr::Narrow);
         assert_eq!(of(Type::F64), Repr::F64);
@@ -788,11 +760,10 @@ mod tests {
             of(Type::Named(Path::builtin(typelisp_mem::wk::HASHTABLE), vec![Type::Str, Type::Bool])),
             Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Bool))
         );
-        // Recognized structurally rather than through the set — passing an
-        // empty one must not turn `Option`/`Result` into `Repr::None`.
-        let none: HashSet<Path> = HashSet::new();
+        // Recognized structurally rather than through the kinds — knowing
+        // no type must not turn `Option`/`Result` into `Repr::None`.
         assert_eq!(
-            Repr::of(&Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![Type::I32]), &none, &none),
+            Repr::of_by(&Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![Type::I32]), &|_| None),
             Repr::Niche(Box::new(Repr::Narrow))
         );
         // The niche stops where the payload could be the empty word.
@@ -805,7 +776,7 @@ mod tests {
         assert_eq!(of(option(Type::Named(Path::root("point"), vec![]))), Repr::Niche(Box::new(Repr::Struct)));
         assert_eq!(of(option(Type::F64)), Repr::Niche(Box::new(Repr::F64)));
         assert_eq!(
-            Repr::of(&Type::Named(Path::builtin(typelisp_mem::wk::RESULT), vec![Type::I32, Type::Str]), &none, &none),
+            Repr::of_by(&Type::Named(Path::builtin(typelisp_mem::wk::RESULT), vec![Type::I32, Type::Str]), &|_| None),
             Repr::Enum
         );
         assert_eq!(of(Type::Fn(vec![], None, Box::new(Type::Unit))), Repr::Fn);

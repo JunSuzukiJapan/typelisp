@@ -1142,7 +1142,7 @@ pub(super) fn match_core_pattern(
         // `(pat-guard SYM TEST)` — matches iff `TEST` (a checked `bool`
         // expression that reads the value under test through `SYM`) is true.
         // This is what a `string`/`f64`/`symbol`/`bignum`/`ratio` literal and
-        // an explicit `(:= expr)` both lower to; see `Pattern::Guard`.
+        // an explicit `(:= expr)` both lower to.
         //
         // The binding is made here and thrown away here: the frame it needs
         // exists only for the duration of the test, and `SYM` is the

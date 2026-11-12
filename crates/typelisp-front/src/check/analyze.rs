@@ -16,7 +16,7 @@ use crate::{wk, Error, Heap, Loc, Path, RootScope, Type, Value};
 use typelisp_mem::SymRef;
 use super::semantic::TypeUse;
 
-use super::core::{self, Checked, Items};
+use super::core::{self, Items};
 use super::forms;
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -400,11 +400,6 @@ pub(super) fn tag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::TAG_INT, &[e])
 }
 
-/// One `labels` definition on its way into a node: its name, its parameters
-/// (name and declared type), its return type, and its already-checked body
-/// forms.
-pub(super) type LabelsDef = (SymRef, Vec<(SymRef, Type)>, Type, Vec<Checked>);
-
 /// What a `defmacro` lambda list parses into: the required parameter names,
 /// the `&optional` parameters (each with its default form, if it declared
 /// one), the `&rest` name, and the `&key` parameters in the same shape as the
@@ -412,7 +407,7 @@ pub(super) type LabelsDef = (SymRef, Vec<(SymRef, Type)>, Type, Vec<Checked>);
 pub(crate) type MacroLambdaList = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
 
 /// Opaque saved namespace context — see [`Checker::suspend_ns_context`].
-pub struct NsContext {
+pub(crate) struct NsContext {
     ns: typelisp_mem::NsId,
     file_ns: Vec<typelisp_mem::NsId>,
 }
@@ -542,7 +537,7 @@ impl Checker {
     }
 
     /// Reinstates what a unit of a dump wrote of the registry.
-    pub fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
+    pub(crate) fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
         let written: crate::typeck::wire::RebuiltUnit = bincode::deserialize(&delta.registry).map_err(|e| {
             format!(
                 "reading the checker's part of the dump failed: {} — its shape has changed since the dump was made; run scripts/regen-prelude-bitcode.sh",
@@ -752,7 +747,7 @@ impl Checker {
     /// a top-level form and scan the expansion for `(use ...)` dependencies
     /// before checking it. The caller must root the returned expansion
     /// (`Heap::push_root`) before anything that may allocate.
-    pub fn try_expand_toplevel_macro(
+    pub(crate) fn try_expand_toplevel_macro(
         &self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -852,7 +847,7 @@ impl Checker {
     /// The root's `keyword` is the keyword namespace (CL's `KEYWORD`
     /// package), which owns every keyword and nothing else, so no module may
     /// take its place.
-    pub fn enter_module(&mut self, segs: &[String]) -> Result<Path, Error> {
+    pub(crate) fn enter_module(&mut self, segs: &[String]) -> Result<Path, Error> {
         if self.info.ns == typelisp_mem::NsId::ROOT && segs.first().is_some_and(|s| s.eq_ignore_ascii_case(typelisp_mem::symbols::KEYWORD_MODULE)) {
             return Err(Error::TypeError(format!(
                 "module `{}` is the keyword namespace, which holds the keywords and nothing else — choose another name",
@@ -910,7 +905,7 @@ impl Checker {
     /// `use`s before `enter_file_module`), but a `use` surfaced by macro
     /// expansion is only discovered mid-check — see
     /// `Loader::load_source_inner`. Pair with [`Self::resume_ns_context`].
-    pub fn suspend_ns_context(&mut self) -> NsContext {
+    pub(crate) fn suspend_ns_context(&mut self) -> NsContext {
         NsContext {
             ns: std::mem::replace(&mut self.info.ns, typelisp_mem::NsId::ROOT),
             file_ns: std::mem::take(&mut self.info.file_ns),
@@ -921,7 +916,7 @@ impl Checker {
     /// in-between load must have left the context empty again (every
     /// `enter_file_module` paired with an `exit_file_module`, even on error
     /// — see `load_source_inner`).
-    pub fn resume_ns_context(&mut self, saved: NsContext) {
+    pub(crate) fn resume_ns_context(&mut self, saved: NsContext) {
         debug_assert!(
             self.info.ns == typelisp_mem::NsId::ROOT && self.info.file_ns.is_empty(),
             "dependency load left an unbalanced namespace context"
@@ -939,7 +934,7 @@ impl Checker {
     /// under the same name. Resolved as [`Self::check_use`] resolves it
     /// ([`Self::use_target`]). A path that resolves to nothing is left for
     /// `check_use` to report.
-    pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[typelisp_mem::SymRef]) {
+    pub(crate) fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[typelisp_mem::SymRef]) {
         let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
         self.rebuilt.register_use_for_reading(heap, site, path)
     }
