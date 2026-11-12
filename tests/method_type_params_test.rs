@@ -150,12 +150,12 @@ fn an_undeclared_type_variable_is_still_unknown() {
     assert!(msg.contains("unknown type `W`"), "{}", msg);
 }
 
-/// A trait declares its methods' signatures, and those have no type
-/// parameters of their own, so an `impl` cannot add one.
+/// A trait declares how many type parameters of its own each method has,
+/// so an `impl` cannot add one.
 #[test]
 fn an_impl_method_cannot_add_type_parameters() {
     let msg = check_err(
         "(deftrait Show () (defmethod show (self) string))\n(defstruct P (x int))\n(impl Show P (defmethod show<U> (self) string \"p\"))",
     );
-    assert!(msg.contains("`show<U>` declares type parameters of its own"), "{}", msg);
+    assert!(msg.contains("method `show` declares 1 type parameter(s) of its own, and the trait declares 0"), "{}", msg);
 }

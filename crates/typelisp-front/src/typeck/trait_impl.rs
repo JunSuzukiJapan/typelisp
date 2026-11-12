@@ -302,15 +302,17 @@ fn items_of(
                     return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
                 };
                 let (name, own) = parse_header(heap, *header)?;
-                if !own.is_empty() {
+                let m = member_symbol(name.name());
+                let declared = tdef.method(m).map_or(0, |want| want.type_params.len() - tdef.params.len());
+                if tdef.method(m).is_some() && own.len() != declared {
                     return Err(Error::TypeError(format!(
-                        "{}: `{}<{}>` declares type parameters of its own, and a trait's method has the signature the trait gives it",
+                        "{}: method `{}` declares {} type parameter(s) of its own, and the trait declares {}",
                         shown,
-                        name.name(),
-                        own.iter().map(|o| o.name()).collect::<Vec<_>>().join(",")
+                        m,
+                        own.len(),
+                        declared
                     )));
                 }
-                let m = member_symbol(name.name());
                 if methods.iter().any(|(w, _)| *w == m) {
                     return Err(Error::TypeError(format!("{}: method `{}` is given twice", shown, m)));
                 }
@@ -386,11 +388,21 @@ fn adopt(tdef: &TraitDef, existing: &MethodDef, target: &Type, assoc: &[Type], o
             shown, method, trait_path
         )));
     }
-    if sig.type_params.len() != own.len() {
-        unimplemented!("typeck: adopting `{}`, a method with type parameters of its own, as a trait's", method)
+    // The method's own type parameters, after the type's, are the trait
+    // method's, by position.
+    let want_own = &want.type_params[tdef.params.len()..];
+    if sig.type_params.len() != own.len() + want_own.len() {
+        return Err(Error::TypeError(format!(
+            "{}: method `{}` declares {} type parameter(s) of its own, and `{}` declares {}",
+            shown,
+            method,
+            sig.type_params.len().saturating_sub(own.len()),
+            trait_path,
+            want_own.len()
+        )));
     }
     // The method's types are written in its own parameters, the type's.
-    let reown = Subst::positional(&sig.type_params, &own.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
+    let reown = Subst::positional(&sig.type_params, &own.iter().chain(want_own).map(|p| Type::Param(*p)).collect::<Vec<_>>());
     let params: Vec<Type> = sig.params.iter().map(|t| reown.apply(t)).collect();
     let ret = reown.apply(&sig.ret);
     if params != want_params || ret != want_ret {
@@ -413,14 +425,17 @@ fn adopt(tdef: &TraitDef, existing: &MethodDef, target: &Type, assoc: &[Type], o
 /// none, to lower its body at.
 fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &TraitDef, of: &Of, method: SymRef) -> Result<Option<Vec<Type>>, Error> {
     let (ns, owner) = (d.site.ns, of.owner);
+    let want = tdef.method(method).expect("a default is of the trait's own method");
+    // The method's own type parameters are the trait method's, after the
+    // `impl`'s.
+    let names: Vec<SymRef> = of.type_names.iter().copied().chain(want.type_params[tdef.params.len()..].iter().map(|p| p.name)).collect();
     let root = TypeScope::empty();
-    let scope = root.declare(ParamOwner::Method(owner, method), of.type_names).map_err(|twice| {
+    let scope = root.declare(ParamOwner::Method(owner, method), &names).map_err(|twice| {
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
     let reown = reown(&scope, of);
     let at: Vec<Type> = std::iter::once(reown.apply(of.target)).chain(of.assoc.iter().map(|t| reown.apply(t))).collect();
-    let to_impl = Subst::positional(&tdef.params, &at);
-    let want = tdef.method(method).expect("a default is of the trait's own method");
+    let to_impl = to_impl(tdef, want, at.clone(), &scope);
     let instance = want.params.first() == Some(&Type::Param(tdef.params[0]));
     let tcx = TypeCx { reg, ns, scope: &scope, self_type: Some(&at[0]), notes: d.notes };
     let bounds = method_bounds(heap, &tcx, &scope, of)?;
@@ -447,8 +462,16 @@ fn define_defaulted(reg: &mut Registry, d: &mut Definer, heap: &Heap, tdef: &Tra
 /// What puts the `impl`'s types, written in the parameters `impl<...>`
 /// declares, in a method's, which `scope` declares.
 fn reown(scope: &TypeScope, of: &Of) -> Subst {
-    let own: Vec<Type> = scope.params().iter().map(|p| Type::Param(*p)).collect();
+    let own: Vec<Type> = scope.params()[..of.head.len()].iter().map(|p| Type::Param(*p)).collect();
     Subst::positional(of.head, &own)
+}
+
+/// What puts a trait method's signature where the `impl` puts the trait's
+/// parameters (`at`, `Self` and the associated types), its own type
+/// parameters the method's after the `impl`'s in `scope`.
+fn to_impl(tdef: &TraitDef, want: &super::registry::FnDef, at: Vec<Type>, scope: &TypeScope) -> Subst {
+    let own = &scope.params()[scope.params().len() - (want.type_params.len() - tdef.params.len())..];
+    Subst::positional(&want.type_params, &at.into_iter().chain(own.iter().map(|p| Type::Param(*p))).collect::<Vec<_>>())
 }
 
 /// The bounds a method of the `impl` `of` has: its `(:where ...)`, read
@@ -565,16 +588,25 @@ fn check_blanket_impl(
     crate::check::forms::module_form(heap, &Path::in_ns(ns, "nothing"), &[])
 }
 
+/// How many type parameters the trait `trait_path`'s method `method`
+/// declares of its own.
+pub(crate) fn own_type_params(reg: &Registry, trait_path: &Path, method: SymRef) -> usize {
+    let Some(TypeEntry::Trait(tdef)) = reg.types.get(trait_path) else {
+        unreachable!("a method is defaulted only from a trait")
+    };
+    tdef.method(method).expect("a method of the trait").type_params.len() - tdef.params.len()
+}
+
 /// The trait `trait_path`'s default body of `method`, and the substitution
-/// that puts the trait's parameters at `at`.
+/// that puts the method's type parameters, the trait's and then its own, at
+/// `at`.
 pub(crate) fn default_body(reg: &Registry, trait_path: &Path, method: SymRef, at: &[Type]) -> (Rc<Template>, Subst) {
     let Some(TypeEntry::Trait(tdef)) = reg.types.get(trait_path) else {
         unreachable!("a method is defaulted only from a trait")
     };
-    let Some(template) = reg.template(&Base::Method(*trait_path, method)) else {
-        unimplemented!("typeck: the default body of `{}::{}`, which this checker has no checked body of", trait_path, method)
-    };
-    (template, Subst::positional(&tdef.params, at))
+    let want = tdef.method(method).expect("a default is of the trait's own method");
+    let template = reg.template(&Base::Method(*trait_path, method)).expect("a default body is checked with its trait");
+    (template, Subst::positional(&want.type_params, at))
 }
 
 /// One method of the `impl`, `want` its signature in the trait: checked to
@@ -608,11 +640,13 @@ fn check_method(
     // One instantiation's method is documented under its code's name.
     let key = of.inst.as_ref().map_or(method, |args| super::generic::method_specialization(&of.owner, method, args));
     d.record(reg, Definition::Method(of.owner, key), doc);
-    let (name, _) = parse_header(heap, *header)?;
+    let (name, own_names) = parse_header(heap, *header)?;
     let (ns, owner) = (d.site.ns, of.owner);
-    // The method owns the `impl`'s parameters, as an inherent `impl`'s does.
+    // The method owns the `impl`'s parameters, then its own, as an inherent
+    // `impl`'s does.
+    let names: Vec<SymRef> = of.type_names.iter().chain(&own_names).copied().collect();
     let root = TypeScope::empty();
-    let scope = root.declare(ParamOwner::Method(owner, method), of.type_names).map_err(|twice| {
+    let scope = root.declare(ParamOwner::Method(owner, method), &names).map_err(|twice| {
         Error::TypeError(format!("method {}::{}: type parameter `{}` is declared twice", owner, method.name(), twice.0.name()))
     })?;
     let reown = reown(&scope, of);
@@ -632,7 +666,7 @@ fn check_method(
     }
     let (instance, ps) = method_params(heap, &tcx, name, *params, &target_ty)?;
     let ret = parse_type(heap, &tcx, *ret, ret_at.as_ref())?;
-    let to_impl = Subst::positional(&tdef.params, &std::iter::once(target_ty.clone()).chain(assoc).collect::<Vec<_>>());
+    let to_impl = to_impl(tdef, want, std::iter::once(target_ty.clone()).chain(assoc).collect(), &scope);
     let want_params: Vec<Type> = want.params.iter().map(|t| to_impl.apply(t)).collect();
     let want_ret = to_impl.apply(&want.ret);
     let want_instance = want.params.first() == Some(&Type::Param(tdef.params[0]));
@@ -662,13 +696,15 @@ fn check_method(
     let mut bounds = method_bounds(heap, &tcx, &scope, of)?;
     let own = own_where.map(|c| parse_where(heap, &tcx, c)).transpose()?.unwrap_or_default();
     bounds.extend(own.iter().cloned());
-    // The method's parameters are the `impl`'s, by position.
-    let to_head = Subst::positional(scope.params(), &of.head.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
+    // The method's first parameters are the `impl`'s, by position; a bound
+    // on one of its own stays the method's.
+    let impl_part = &scope.params()[..of.head.len()];
+    let to_head = Subst::positional(impl_part, &of.head.iter().map(|p| Type::Param(*p)).collect::<Vec<_>>());
     let own = own
         .into_iter()
-        .map(|(p, b)| {
-            let i = scope.params().iter().position(|q| *q == p).expect("a bound is on a declared parameter");
-            (of.head[i], b.at(&to_head))
+        .filter_map(|(p, b)| {
+            let i = impl_part.iter().position(|q| *q == p)?;
+            Some((of.head[i], b.at(&to_head)))
         })
         .collect();
     let def = Method { owner, method, name, instance, public: true, home: None, params: LambdaList::plain(ps), ret, bounds, inst: of.inst.map(<[Type]>::to_vec) };

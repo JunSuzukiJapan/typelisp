@@ -582,7 +582,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   (pub defmethod name ...))                                  ; 型を定義したモジュールの外にも公開する
 
 ; ジェネリックな型
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; impl の外: 第 1 引数の型のメソッド
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -632,16 +632,16 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- メソッド自身の型パラメータには、`impl` に書いた対象の型の型パラメータ（`(impl Box<T> ...)` の
-  `T`）と違う名前を付ける。
-- トレイトの `impl` のメソッドには型パラメータを足せない。シグネチャはトレイトが宣言したものに従う。
+- メソッド自身の型パラメータには、`impl<T>` で宣言した対象の型の型パラメータ（`T`）と違う名前を
+  付ける。
+- トレイトの `impl` のメソッドには、トレイトがそのメソッドに宣言した数だけ型パラメータを書く（3.9）。
 
 ジェネリックな型の `impl` には、型パラメータを全部変数で書く（`Box<T>`。すべての具体型に共通）か、
 全部具体的な型で書く（`Box<int>`。その具体型だけのもの）。具体型ごとの `impl` は別々の実装になるので、
@@ -665,7 +665,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 - インスタンスメソッドは受け手の型で選ばれる。`impl` の無い具体型（例えば `Box<f64>`）には
   そのメソッドは無い。
 - 静的メソッドは、呼び出しに期待される戻り値の型で選ばれる（上の例の `(the Box<int> ...)`）。
-  その名前の静的メソッドを持つ具体型が 1 つだけなら、期待型は要らない。
+  その名前の静的メソッドを持つ具体型が 1 つだけなら、期待型は要らない。`(Box<int>::make)` のように
+  具体型を書いて選ぶこともできる。
 - 同じ名前のメソッドを、変数で書いた `impl`（`Box<T>`）と具体型の `impl`（`Box<int>`）の両方に
   書くことはできない（書いた順によらずエラー）。フィールドのアクセサも、変数で書いた側のメソッドに当たる。
 - `documentation`・`compile`・`trace` などでメソッドを名指すときは、`Box<int>::twice` のように
@@ -692,11 +693,11 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   定義した型にもメソッドを足せる（固有 `impl` は型を定義した側しか書けない）。
 - 公開は `impl` の中と同じく `(pub defmethod ...)`。付けなければ、定義したモジュールの中だけで
   使える。
-- ジェネリックな型の受け手は型パラメータを変数のまま書く（`((v Vector<T>))`）。この `T` は受け手の
-  型パラメータで、メソッド自身の型パラメータとして `<T>` を重ねて宣言することはできない。
+- ジェネリックな型の受け手は、型パラメータをメソッドの名前で宣言して書く（`second-elem<T>` と
+  `((v Vector<T>))`）。受け手に書いただけの名前は型パラメータにならない。
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -730,8 +731,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   名前は、`defun` の引数型でも `the` でも同じく `unknown type` のエラーになる。したがって互いを
   参照し合う 2 つの型は書けない。
 - **型変数は宣言部に書いたものだけ**。`defun`/`defstruct`/`defenum`/`deftype` は名前の `<T>`、
-  固有 `impl` は対象の型（`(impl box<T> ...)`）と各メソッドの名前の `<U>`、トレイトの `impl` は
-  対象の型と `impl<T>`、`deftrait` は `Self` と `(:type Item)` の関連型。それ以外の
+  `impl` は `impl<T>`、`impl` の中と外の `defmethod` は各メソッドの名前の `<U>`、`deftrait` は
+  `Self` と `(:type Item)` の関連型と、各メソッドの名前の `<U>`。それ以外の
   場所——引数・戻り値・本体の `the`/`lambda`——に初めて現れる名前は型変数にはならず、
   `unknown type` になる。
 - **docstring**: 名前の直後、フィールド列の前に文字列リテラルを置くと docstring になる
@@ -908,6 +909,21 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 行う（Rust と同じ）——どの `impl` も省略しないデフォルトでも、どの実装型でも通らない誤りは
 そこで弾かれる。`self` に対するそのトレイト自身・継承元のメソッド呼び出しはこの境界で通り、
 関連型は自分自身に固定されるので `Item` を返すシグネチャと本体は具体型を知らないまま照合される。
+
+**メソッド自身の型パラメータ**: トレイトのメソッドも、名前に `<U>` を書いて自身の型パラメータを
+宣言できる。`impl` のメソッドは同じ数の型パラメータを宣言し（名前は自由で、位置で対応する）、
+シグネチャはそれに置き換えたトレイトのものに従う。型パラメータは呼び出しごとに引数から推論される。
+このメソッドを持つトレイトは `:dyn` にできない（vtable のスロットは入口を 1 つしか持たない）。
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **具体型ごとの実装**: ジェネリックな型には、具体型ごとに別の `impl` を書ける
 （`(impl Show Box<int> ...)` と `(impl Show Box<string> ...)`）。`:dyn`・`:where` の境界・関連型・

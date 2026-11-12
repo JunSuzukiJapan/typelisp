@@ -147,6 +147,13 @@ pub(crate) fn check_trait_call(
         .zip(&sig.type_params)
         .map(|(t, p)| Some(t.clone().unwrap_or_else(|| Type::Proj(bound.trait_path, Box::new(self_ty.clone()), p.name.name().to_string()))))
         .collect();
+    // The method's own type parameters, after the trait's, are holes the
+    // call solves.
+    let own: Vec<Type> = sig.type_params[filled.len()..].iter().map(|_| cx.holes.borrow_mut().fresh()).collect();
+    for (p, t) in sig.type_params[filled.len()..].iter().zip(&own) {
+        cx.must_decide(t.clone(), format!("cannot infer type parameter `{}` for `{}`", p.name.name(), what), loc.clone());
+    }
+    let filled: Vec<Option<Type>> = filled.into_iter().chain(own.iter().cloned().map(Some)).collect();
     let at = |ty: &Type| in_params(&sig.type_params, &filled, ty).expect("every parameter of the trait is filled");
     if super::args::has_tail(sig) {
         unimplemented!("typeck: the trait method `{}` with &optional, &rest or &key parameters", what)
@@ -162,7 +169,7 @@ pub(crate) fn check_trait_call(
     }
     let ret = at(&sig.ret);
     expect(cx, &ret, expected)?;
-    Ok(Typed { node: Node::TraitCall { trait_path: bound.trait_path, method, args }, ty: ret, loc })
+    Ok(Typed { node: Node::TraitCall { trait_path: bound.trait_path, method, own, args }, ty: ret, loc })
 }
 
 /// Whether the type `ty` mentions the type parameter `p`.

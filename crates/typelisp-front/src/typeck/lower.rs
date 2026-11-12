@@ -109,11 +109,12 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             }
             lw.reg.assoc_form(heap, &owner, method, *instance, &ret, &lowered)
         }
-        Node::TraitCall { trait_path, method, args } => {
+        Node::TraitCall { trait_path, method, own, args } => {
             // The receiver's type is the specialization's.
             let recv = lw.settle(&args[0].ty);
             // A trait object, which meets the bound by its trait: the call is
             // through its table.
+            let own: Vec<Type> = own.iter().map(|t| lw.settle(t)).collect();
             if let Type::Dyn(dyn_trait, _) = &recv {
                 let slots = super::dyn_trait::vtable(lw.reg, dyn_trait)?;
                 let slot = slots.iter().position(|(m, _)| m == method).expect("a trait object meets a bound of its own trait or a supertrait, whose methods are in its table");
@@ -138,7 +139,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 let Some(blanket) = lw.reg.blanket_with_method(*method).map(|b| b.owner) else {
                     unreachable!("`{}` meets the bound on `{}`, so it has `{}`", recv, trait_path, method)
                 };
-                let code = lw.requests.ask_method(&blanket, *method, vec![recv.clone()]);
+                let code = lw.requests.ask_method(&blanket, *method, std::iter::once(recv.clone()).chain(own).collect());
                 let mut lowered = Vec::with_capacity(args.len());
                 for a in args {
                     lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
@@ -149,14 +150,16 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             };
             // An `impl`'s methods have the type's parameters, in order; one
             // for one instantiation has code under that instantiation's name.
+            // The method's own type arguments follow the type's.
             let method = if let Some(inst) = &def.inst_args {
+                if !own.is_empty() {
+                    unimplemented!("typeck: `{}::{}`, a method with type parameters of its own written for one instantiation", owner, method)
+                }
                 super::generic::method_specialization(&owner, *method, inst)
             } else if def.sig.builtin || def.sig.type_params.is_empty() {
                 *method
-            } else if def.sig.type_params.len() == type_args.len() {
-                lw.requests.ask_method(&owner, *method, type_args)
             } else {
-                unimplemented!("typeck: `{}::{}`, a trait method with type parameters of its own", owner, method)
+                lw.requests.ask_method(&owner, *method, type_args.into_iter().chain(own).collect())
             };
             let mut lowered = Vec::with_capacity(args.len());
             for a in args {

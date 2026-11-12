@@ -341,16 +341,16 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
     let (template, subst) = match (reg.template(&req.base), req.base) {
         (Some(template), _) => (template, Subst::positional(type_params, &req.args)),
         // A method an `impl` took from the trait's default body is that
-        // body, the trait's parameters where the `impl` puts them.
+        // body, the trait's parameters where the `impl` puts them and the
+        // method's own, which come last, at the request's.
         (None, Base::Method(owner, m)) if reg.defaulted(&owner, m).is_some() => {
             let (trait_path, at) = reg.defaulted(&owner, m).expect("checked above");
             let outer = Subst::positional(type_params, &req.args);
-            let at: Vec<Type> = at.iter().map(|t| outer.apply(t)).collect();
+            let own = &req.args[req.args.len() - super::trait_impl::own_type_params(reg, trait_path, m)..];
+            let at: Vec<Type> = at.iter().map(|t| outer.apply(t)).chain(own.iter().cloned()).collect();
             super::trait_impl::default_body(reg, trait_path, m, &at)
         }
-        // The prelude's generic definitions were checked by the current
-        // checker, which keeps their source, not a checked tree.
-        (None, _) => unimplemented!("typeck: specializing {:?}, which this checker has no checked body of", req.base),
+        (None, _) => unreachable!("a generic definition keeps its checked body: {:?}", req.base),
     };
     let mut lw = Lowering { reg, subst: &subst, requests };
     let (params, ret, body) = super::defun::lower_template(heap, &mut lw, &template)?;
@@ -1305,6 +1305,37 @@ mod tests {
         assert!(e.contains("is written for `Pair<int>`, `Pair<bool>`, not for `Pair<string>`"), "{}", e);
         let e = check_err("(Option<int>::some \"a\")");
         assert!(e.contains("expected `int`, found `string`"), "{}", e);
+    }
+
+    /// A trait method may declare type parameters of its own, after the
+    /// trait's: the `impl` declares as many, and each call, on a type or
+    /// through a bound, solves them.
+    #[test]
+    fn a_trait_method_with_type_parameters_of_its_own() {
+        let mapper = "(deftrait Mapper ()
+                        (defmethod map-it<U> (self (f (fn (int) U))) U)
+                        (defmethod map-both<U> (self (f (fn (int) U))) Vector<U>
+                          (let ((v (Vector::new))) (push v (map-it self f)) (push v (map-it self f)) v)))
+                      (defstruct Box (v int))";
+        let given = format!("{} (impl Mapper Box (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))", mapper);
+        assert_eq!(run(&format!("{} (map-it (make-instance 'Box :v 3) (lambda ((n int)) int (* n 2)))", given)).1, Value::Int(6));
+        assert_eq!(run(&format!("{} (map-it (make-instance 'Box :v 3) (lambda ((n int)) bool (> n 2)))", given)).1, Value::Bool(true));
+        let bounded = format!("{} (defun via<T> ((x T)) int (:where (Mapper T)) (map-it x (lambda ((n int)) int (+ n 100))))", given);
+        assert_eq!(run(&format!("{} (via (make-instance 'Box :v 3))", bounded)).1, Value::Int(103));
+        assert_eq!(run(&format!("{} (len (map-both (make-instance 'Box :v 5) (lambda ((n int)) bool (> n 4))))", given)).1, Value::Int(2));
+        // A method the type already has is the trait's when its own
+        // parameters line up.
+        let adopted = format!("{} (impl Box (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v))) (impl Mapper Box)", mapper);
+        assert_eq!(run(&format!("{} (map-it (make-instance 'Box :v 4) (lambda ((n int)) int (- n)))", adopted)).1, Value::Int(-4));
+        let e = check_err(&format!("{} (impl Mapper Box (defmethod map-it (self (f (fn (int) int))) int (f self::v)))", mapper));
+        assert!(e.contains("declares 0 type parameter(s) of its own, and the trait declares 1"), "{}", e);
+        let e = check_err(&format!("{} (impl Mapper Box (defmethod map-it<W> (self (f (fn (int) W))) int (f self::v)))", mapper));
+        assert!(e.contains("but `Mapper` declares `(Box (fn (int) W)) W`"), "{}", e);
+        let e = check_err("(deftrait T2 () (defmethod m<Self> (self) int))");
+        assert!(e.contains("declares `Self`, which is already the trait's"), "{}", e);
+        // A slot of a trait object has one entry point.
+        let e = check_err(&format!("{} (defun g ((m :dyn Mapper)) int 1) (g (make-instance 'Box :v 1))", given));
+        assert!(e.contains("method `map-it` is generic"), "{}", e);
     }
 
     /// A definition whose checking fails is not kept (plan 4.4): calling it

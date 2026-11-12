@@ -45,8 +45,9 @@ pub(crate) enum Node {
     /// A call of the method `method` of the trait `trait_path`, on a
     /// receiver whose type is a type parameter the trait bounds. Once the
     /// tree is specialized, the receiver's type is one with an `impl` of the
-    /// trait, whose method the call is.
-    TraitCall { trait_path: Path, #[serde(with = "crate::owned_form::sym_serde")] method: SymRef, args: Vec<Typed> },
+    /// trait, whose method the call is. `own` are the method's own type
+    /// arguments, when it declares type parameters of its own.
+    TraitCall { trait_path: Path, #[serde(with = "crate::owned_form::sym_serde")] method: SymRef, own: Vec<Type>, args: Vec<Typed> },
     /// A new value of the type `owner<targs>`: its variant `variant`'s fields,
     /// whose declared types at these arguments are `field_tys`. A struct's is
     /// mutable.
@@ -429,7 +430,7 @@ impl Typed {
         let mapped = self.walk_mut(&mut |t| {
             t.ty = f(&t.ty);
             match &mut t.node {
-                Node::Call { targs, .. } | Node::MethodCall { targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
+                Node::Call { targs, .. } | Node::MethodCall { targs, .. } | Node::TraitCall { own: targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
                 Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } | Node::TypeValue { ty: field_ty } | Node::Callback { fn_ty: field_ty, .. } => *field_ty = f(field_ty),
                 Node::Lambda { params, ret, .. } => {
@@ -475,7 +476,6 @@ impl Typed {
                 | Node::Default { .. }
                 | Node::Apply { .. }
                 | Node::Tool { .. }
-                | Node::TraitCall { .. }
                 | Node::DynNew { .. }
                 | Node::DynCall { .. }
                 | Node::DynUpcast { .. }

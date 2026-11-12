@@ -71,21 +71,29 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     let mut def = TraitDef { params: params.clone(), methods: Vec::new(), defaults: Vec::new(), supertraits, public: d.public };
     reg.define_trait(path, def.clone());
     super::type_syntax::note_definition(d.notes, path, &super::registry::TypeEntry::Trait(def.clone()), name_at.as_ref());
-    let tcx = TypeCx { reg, ns, scope: &scope, self_type: None, notes: d.notes };
     let self_ty = Type::Param(params[0]);
     let mut bodies = Vec::new();
     let mut bodyless = Vec::new();
     for w in &methods {
+        let m = member_symbol(w.name.name());
+        // A method's own type parameters follow the trait's.
+        let own = scope.declare(ParamOwner::Method(path, m), &w.own).map_err(|twice| {
+            Error::TypeError(format!("deftrait {}: method `{}` declares `{}` twice", spelling, m, twice.0.name()))
+        })?;
+        if let Some(clash) = w.own.iter().find(|o| names.iter().any(|n| n.name() == o.name())) {
+            return Err(Error::TypeError(format!("deftrait {}: method `{}` declares `{}`, which is already the trait's", spelling, m, clash.name())));
+        }
+        let tcx = TypeCx { reg, ns, scope: &own, self_type: None, notes: d.notes };
         let (_, ps) = method_params(heap, &tcx, w.name, w.params, &self_ty)?;
         let ret = parse_type(heap, &tcx, w.ret, w.ret_at.as_ref())?;
-        let m = member_symbol(w.name.name());
-        let sig = FnDef { public: true, ..FnDef::plain(params.clone(), ps.iter().map(|(_, t, _)| t.clone()).collect(), ret.clone()) };
+        let type_params = params.iter().chain(own.params()).copied().collect();
+        let sig = FnDef { public: true, ..FnDef::plain(type_params, ps.iter().map(|(_, t, _)| t.clone()).collect(), ret.clone()) };
         def.methods.push((m, sig));
         if w.body.is_empty() {
             bodyless.push(m);
         } else {
             def.defaults.push(m);
-            bodies.push((m, w.name, ps, ret, &w.body));
+            bodies.push((m, w.name, &w.own, ps, ret, &w.body));
         }
     }
     // The vtable a trait object of it is called through: a method may not
@@ -106,9 +114,10 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
     // types the trait's other parameters.
     let assoc = params[1..].iter().map(|a| (a.name.name().to_string(), Type::Param(*a))).collect();
     let bounded = scope.bound(vec![(params[0], TraitBound { trait_path: path, assoc })]);
-    for (m, name, ps, ret, body) in bodies {
+    for (m, name, own, ps, ret, body) in bodies {
+        let own = bounded.declare(ParamOwner::Method(path, m), own).expect("declared once above");
         let mut body = {
-            let cx = Cx::new(reg, d.expander, ns, &bounded, Some(&self_ty), d.notes);
+            let cx = Cx::new(reg, d.expander, ns, &own, Some(&self_ty), d.notes);
             let locals_root = Locals::empty();
             let locals = locals_root.bind(ps.clone())?;
             let mut body = check_named_body(&cx, heap, &locals, name, body, &ret)?;
@@ -127,6 +136,8 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
 /// result type and its default body, empty when it has none.
 struct Written {
     name: SymRef,
+    /// The type parameters the method declares of its own (`name<U...>`).
+    own: Vec<SymRef>,
     params: Value,
     ret: Value,
     ret_at: Option<Loc>,
@@ -168,16 +179,13 @@ fn item_of(heap: &Heap, item: Value) -> Result<Item, Error> {
         ));
     };
     let (name, own) = parse_header(heap, *header)?;
-    if !own.is_empty() {
-        unimplemented!("typeck: a trait method with type parameters of its own")
-    }
     let (doc, body) = split_doc(heap, body);
     if let Some((first, _)) = body.first() {
         if crate::typeck::bounds::is_where_clause(heap, *first)? {
             unimplemented!("typeck: a trait method with a `(:where ...)` clause")
         }
     }
-    Ok(Item::Method(Written { name, params: *params, ret: *ret, ret_at: ret_at.clone(), doc, body: body.to_vec() }))
+    Ok(Item::Method(Written { name, own, params: *params, ret: *ret, ret_at: ret_at.clone(), doc, body: body.to_vec() }))
 }
 
 /// The supertrait list `v` of the trait `name`.

@@ -154,7 +154,7 @@ TypeLisp は静的型付きの Lisp です。
 ```
 (defstruct Pair<A,B> (first A) (second B))
 
-(impl Pair<A,B>
+(impl<A,B> Pair<A,B>
   (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 
