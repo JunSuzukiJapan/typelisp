@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -464,7 +464,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   (pub defmethod name ...))                                      ; 在定義型別的模組之外也公開
 
 ; 泛型型別
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; impl 之外：第一個參數的型別的方法
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -512,15 +512,15 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- 方法自身的型別參數，要取與 `impl` 中所寫對象型別的型別參數（`(impl Box<T> ...)` 的 `T`）不同的名稱。
-- trait 的 `impl` 的方法不能加上型別參數。簽章遵循 trait 所宣告的簽章。
+- 方法自身的型別參數，要取與 `impl<T>` 所宣告的對象型別的型別參數（`T`）不同的名稱。
+- trait 的 `impl` 的方法，要寫與 trait 為該方法宣告的數量相同的型別參數（3.9）。
 
 泛型型別的 `impl`，要嘛把型別參數全部寫成變數（`Box<T>`，所有具體型別共用），要嘛全部寫成具體型別
 （`Box<int>`，只屬於該具體型別）。各具體型別的 `impl` 是彼此獨立的實作，所以可以分別給 `Box<int>` 和
@@ -544,6 +544,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - 實例方法依接收者的型別選擇。沒有 `impl` 的具體型別（例如 `Box<f64>`）沒有該方法。
 - 靜態方法依呼叫所期望的回傳型別選擇（上例中的 `(the Box<int> ...)`）。只有一個具體型別擁有該名稱的
   靜態方法時，不需要期望型別。
+  也可以像 `(Box<int>::make)` 這樣寫出具體型別來選擇。
 - 同名的方法不能同時寫在以變數寫的 `impl`（`Box<T>`）和具體型別的 `impl`（`Box<int>`）中，不論先寫哪個
   都是錯誤。欄位的存取器也算作以變數寫的那一方的方法。
 - 在 `documentation`、`compile`、`trace` 等處指名這樣的方法時，寫出具體型別：`Box<int>::twice`。只有一個
@@ -566,10 +567,10 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - 與 `impl` 中的 `defmethod` 的差別只有一點：第一個參數不能是 `self`。第一個參數寫成 `(名稱 型別)`，該型別就是方法的擁有者。寫 `self` 會出錯。
 - **可以為任何型別書寫。** 可以為 `int`、`Vector` 這類標準函式庫的型別以及在其他模組中定義的型別增加方法（固有 `impl` 只有定義該型別的一方才能書寫）。
 - 公開與 `impl` 中相同，寫成 `(pub defmethod ...)`。不加時，只能在定義它的模組內使用。
-- 泛型型別的接收者把型別參數照原樣寫成變數（`((v Vector<T>))`）。這個 `T` 是接收者的型別參數，不能再用 `<T>` 把它重複宣告為方法自己的型別參數。
+- 泛型型別的接收者在方法的名稱中宣告型別參數（`second-elem<T>` 和 `((v Vector<T>))`）。只寫在接收者中的名稱不會成為型別參數。
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -600,9 +601,9 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - **型別要在被指名之前定義。** 欄位的型別可以寫自己（`(next Option<node>)`），但不能寫之後定義的型別——型別沒有相當於 `defsignature` 的前置
   宣告。尚未定義的名稱，在 `defun` 的引數型別與 `the` 中同樣會得到 `unknown type` 錯誤。因此互相參照的兩個型別無法寫出。
 - **型別變數只有寫在宣告部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名稱的 `<T>`，
-  固有 `impl` 是對象型別（`(impl box<T> ...)`）以及各方法名稱中的 `<U>`，trait 的 `impl` 是對象型別與
-  `impl<T>`，`deftrait` 是 `Self` 以及 `(:type Item)` 的關聯型別。在其他地方——引數、回傳值、本體中
-  的 `the`/`lambda`——第一次出現的名稱不會成為型別變數，而是 `unknown type`。
+  `impl` 是 `impl<T>`，`impl` 內外的 `defmethod` 是各方法名稱中的 `<U>`，`deftrait` 是 `Self`、
+  `(:type Item)` 的關聯型別以及各方法名稱中的 `<U>`。在其他地方——引數、回傳值、本體中的
+  `the`/`lambda`——第一次出現的名稱不會成為型別變數，而是 `unknown type`。
 - **文件字串**：在名稱之後、欄位清單之前放置字串字面值，它就成為文件字串（`(defstruct Name "doc" (field Type)...)`——與 CL 的 `defstruct`
   位置相同）。欄位一律是 `(name Type ...)` 的形式，不可能是裸字串，所以沒有歧義。以 `(documentation Name)` 取出。
 
@@ -747,6 +748,20 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 有本體的方法也可以寫 `:where` 子句與文件字串。本體的型別檢查**在宣告時進行一次**，`Self` 保持為型別變數（以 `Self: 該 trait` 為約束）（與 Rust
 相同）——即使是沒有任何 `impl` 省略的預設實作，對任何實作型別都通不過的錯誤也會在那裡被排除。對 `self` 呼叫該 trait 本身及其繼承來源的方法會
 藉這個約束通過，關聯型別固定為自己，所以回傳 `Item` 的簽章與本體在不知道具體型別的情況下進行比對。
+
+**方法自身的型別參數**：trait 的方法也可以在名稱中寫 `<U>` 來宣告自身的型別參數。`impl` 的方法宣告同樣
+數量的型別參數（名稱隨意，依位置對應），簽章遵循以它們替換後的 trait 簽章。型別參數在每次呼叫時由引數推斷。
+擁有這種方法的 trait 不能作為 `:dyn`（vtable 的槽只有一個入口）。
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **依具體型別的實作**：泛型型別可以為每個具體型別分別寫 `impl`（`(impl Show Box<int> ...)` 和
 `(impl Show Box<string> ...)`）。`:dyn`、`:where` 約束、關聯型別和 `print-object` 也都依具體型別生效，

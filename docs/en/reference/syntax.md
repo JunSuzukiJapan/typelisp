@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -624,7 +624,7 @@ The type annotation is required (it is not inferred from the initializer). `defv
   (pub defmethod name ...))                                      ; public outside the type's module too
 
 ; a generic type
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; outside an impl: a method of the first parameter's type
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -677,7 +677,7 @@ the arguments of each call.
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
@@ -685,9 +685,9 @@ the arguments of each call.
 ```
 
 - Give the method's own type parameters names that differ from the target type's type parameters
-  written in the `impl` (the `T` of `(impl Box<T> ...)`).
-- A method of a trait's `impl` cannot add type parameters: its signature follows the one the trait
-  declares.
+  declared by `impl<T>` (`T`).
+- A method of a trait's `impl` declares as many type parameters as the trait declares for that method
+  (3.9).
 
 The `impl` of a generic type writes all of its type parameters as variables (`Box<T>`, shared by every
 instantiation) or all of them as concrete types (`Box<int>`, for that instantiation only). The `impl`s
@@ -713,6 +713,7 @@ a method of the same name.
   example) does not have the method.
 - A static method is chosen by the type the call is expected to return (the `(the Box<int> ...)`
   above). When only one instantiation has a static method of that name, no expected type is needed.
+  The instantiation can also be written to choose one, as in `(Box<int>::make)`.
 - A method of one name cannot be written both in an `impl` with variables (`Box<T>`) and in an `impl`
   of an instantiation (`Box<int>`); either order is an error. A field's accessor counts as a method of
   the `impl` with variables.
@@ -736,10 +737,10 @@ A `defmethod` written outside an `impl` becomes **a method of its first paramete
 - It differs from a `defmethod` inside an `impl` only in that its first parameter cannot be `self`. The first parameter is written `(name Type)`, and that type owns the method. Writing `self` is an error.
 - **It can be written for any type.** Methods can be added to standard-library types such as `int` and `Vector`, and to types defined in other modules (an inherent `impl` can only be written by the side that defines the type).
 - Visibility is `(pub defmethod ...)`, as inside an `impl`. Without it, the method can be used only inside the module that defines it.
-- A receiver of a generic type writes its type parameters as variables (`((v Vector<T>))`). This `T` is the receiver's type parameter; declaring `<T>` again as the method's own type parameter is not allowed.
+- A receiver of a generic type declares its type parameters in the method's name (`second-elem<T>` and `((v Vector<T>))`). A name written only in the receiver does not become a type parameter.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -772,11 +773,11 @@ A `defmethod` written outside an `impl` becomes **a method of its first paramete
   name not yet defined gives the same `unknown type` error in a `defun` argument type or in `the`. So two
   types that refer to each other cannot be written.
 - **Type variables are only those written in declaring positions.** For
-  `defun`/`defstruct`/`defenum`/`deftype`, the `<T>` of the name; for an inherent `impl`, the target
-  type (`(impl box<T> ...)`) and the `<U>` of each method's name; for a trait's `impl`, the target type
-  and `impl<T>`; for `deftrait`, `Self` and the associated types of `(:type Item)`. A name appearing for
-  the first time anywhere else (arguments, the return value, `the`/`lambda` in the body) does not
-  become a type variable; it is `unknown type`.
+  `defun`/`defstruct`/`defenum`/`deftype`, the `<T>` of the name; for `impl`, `impl<T>`; for a
+  `defmethod` inside or outside an `impl`, the `<U>` of the method's name; for `deftrait`, `Self`, the
+  associated types of `(:type Item)` and the `<U>` of each method's name. A name appearing for the
+  first time anywhere else (arguments, the return value, `the`/`lambda` in the body) does not become a
+  type variable; it is `unknown type`.
 - **Docstrings**: a string literal right after the name, before the fields, becomes the docstring
   (`(defstruct Name "doc" (field Type)...)`, the same position as CL's `defstruct`). A field is always of
   the form `(name Type ...)` and can never be a bare string, so there is no ambiguity. Retrieve it with
@@ -959,6 +960,22 @@ implementing type, even in defaults no `impl` ever omits, are caught there. Call
 the trait itself or its supertraits pass through this bound, and associated types are fixed to
 themselves, so a signature returning `Item` is matched against the body without knowing the concrete
 type.
+
+**A method's own type parameters**: a trait's method can also declare type parameters of its own by
+writing `<U>` in its name. A method of an `impl` declares as many (the names are free; they correspond
+by position), and its signature follows the trait's with them put in. The type parameters are inferred
+from the arguments at each call. A trait with such a method cannot be a `:dyn` (a vtable slot has only
+one entry point).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Implementations per instantiation**: a generic type can have a separate `impl` for each
 instantiation (`(impl Show Box<int> ...)` and `(impl Show Box<string> ...)`). `:dyn`, `:where` bounds,

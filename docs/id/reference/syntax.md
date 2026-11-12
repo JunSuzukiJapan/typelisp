@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -653,7 +653,7 @@ tidak dapat (`setf` adalah kesalahan).
   (pub defmethod name ...))                                      ; publik juga di luar modul tipe
 
 ; tipe generik
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; di luar impl: metode milik tipe parameter pertama
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -705,17 +705,17 @@ argumen tiap pemanggilan.
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Beri parameter tipe milik metode nama yang berbeda dari parameter tipe tipe sasaran yang ditulis di
-  `impl` (`T` pada `(impl Box<T> ...)`).
-- Metode di `impl` sebuah trait tidak dapat menambah parameter tipe: signature-nya mengikuti yang
-  dideklarasikan trait.
+- Beri parameter tipe milik metode nama yang berbeda dari parameter tipe tipe sasaran yang dideklarasikan
+  oleh `impl<T>` (`T`).
+- Metode di `impl` sebuah trait mendeklarasikan parameter tipe sebanyak yang dideklarasikan trait untuk
+  metode itu (3.9).
 
 `impl` sebuah tipe generik menulis semua parameter tipenya sebagai variabel (`Box<T>`, bersama untuk semua
 instansiasi) atau semuanya sebagai tipe konkret (`Box<int>`, khusus instansiasi itu). `impl` dari instansiasi
@@ -742,6 +742,7 @@ metode bernama sama.
 - Metode statis dipilih menurut tipe yang diharapkan dikembalikan oleh panggilan (`(the Box<int> ...)` di
   atas). Jika hanya satu instansiasi yang memiliki metode statis dengan nama itu, tipe yang diharapkan tidak
   diperlukan.
+  Instansiasinya juga bisa ditulis untuk memilihnya, seperti `(Box<int>::make)`.
 - Metode bernama sama tidak bisa ditulis sekaligus di `impl` dengan variabel (`Box<T>`) dan di `impl` sebuah
   instansiasi (`Box<int>`); urutan mana pun adalah galat. Pengakses field juga dihitung sebagai metode dari
   `impl` dengan variabel.
@@ -766,10 +767,10 @@ metode bernama sama.
 - Bedanya dengan `defmethod` di dalam `impl` hanyalah parameter pertamanya tidak bisa `self`. Parameter pertama ditulis `(nama Tipe)`, dan tipe itulah pemilik metodenya. Menulis `self` adalah galat.
 - **Dapat ditulis untuk tipe apa pun.** Metode dapat ditambahkan pada tipe pustaka standar seperti `int` dan `Vector`, juga pada tipe yang didefinisikan di modul lain (`impl` inheren hanya dapat ditulis oleh pihak yang mendefinisikan tipenya).
 - Visibilitasnya `(pub defmethod ...)`, sama seperti di dalam `impl`. Tanpa itu, metode hanya dapat dipakai di dalam modul yang mendefinisikannya.
-- Penerima bertipe generik menulis parameter tipenya sebagai variabel (`((v Vector<T>))`). `T` ini adalah parameter tipe penerima; mendeklarasikan lagi `<T>` sebagai parameter tipe milik metode itu sendiri tidak diizinkan.
+- Penerima bertipe generik mendeklarasikan parameter tipenya di nama metode (`second-elem<T>` dan `((v Vector<T>))`). Nama yang hanya ditulis di penerima tidak menjadi parameter tipe.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -803,10 +804,10 @@ metode bernama sama.
   kesalahan `unknown type` yang sama pada tipe argumen `defun` atau pada `the`. Jadi dua tipe yang
   saling merujuk tidak dapat ditulis.
 - **Variabel tipe hanyalah yang ditulis di posisi deklarasi.** Untuk `defun`/`defstruct`/`defenum`/`deftype`,
-  `<T>` pada nama; untuk `impl` inheren, tipe sasaran (`(impl box<T> ...)`) dan `<U>` pada nama tiap
-  metode; untuk `impl` sebuah trait, tipe sasaran dan `impl<T>`; untuk `deftrait`, `Self` dan tipe terkait
-  dari `(:type Item)`. Nama yang muncul pertama kali di tempat lain (argumen, nilai kembali, `the`/`lambda`
-  di badan) tidak menjadi variabel tipe; ia adalah `unknown type`.
+  `<T>` pada nama; untuk `impl`, `impl<T>`; untuk `defmethod` di dalam atau di luar `impl`, `<U>` pada nama
+  metode; untuk `deftrait`, `Self`, tipe terkait dari `(:type Item)`, dan `<U>` pada nama tiap metode. Nama
+  yang muncul pertama kali di tempat lain (argumen, nilai kembali, `the`/`lambda` di badan) tidak menjadi
+  variabel tipe; ia adalah `unknown type`.
 - **Docstring**: literal string tepat setelah nama, sebelum field, menjadi docstring
   (`(defstruct Name "doc" (field Type)...)`, posisi yang sama seperti `defstruct` pada CL). Sebuah
   field selalu berbentuk `(name Type ...)` dan tidak pernah dapat berupa string polos, sehingga tidak
@@ -995,6 +996,22 @@ diperiksa tipenya **sekali, pada titik deklarasi**, dengan `Self` dibiarkan seba
 mana pun, tertangkap di sana. Pemanggilan pada `self` ke metode trait itu sendiri atau supertrait-nya
 melewati batas ini, dan tipe terkait ditetapkan ke dirinya sendiri, sehingga signature yang
 mengembalikan `Item` dicocokkan dengan badan tanpa mengetahui tipe konkretnya.
+
+**Parameter tipe milik metode**: metode sebuah trait juga dapat mendeklarasikan parameter tipenya sendiri
+dengan menulis `<U>` di namanya. Metode sebuah `impl` mendeklarasikan sebanyak itu (namanya bebas;
+berpadanan menurut posisi), dan signature-nya mengikuti signature trait dengan parameter itu dipasang.
+Parameter tipe disimpulkan dari argumen pada tiap panggilan. Trait yang memiliki metode seperti itu tidak
+bisa menjadi `:dyn` (slot vtable hanya punya satu titik masuk).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Implementasi per instansiasi**: tipe generik bisa memiliki `impl` terpisah untuk tiap instansiasi
 (`(impl Show Box<int> ...)` dan `(impl Show Box<string> ...)`). `:dyn`, batasan `:where`, tipe terkait, dan

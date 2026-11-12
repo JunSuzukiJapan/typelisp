@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 58742456287dabee9fe2844fa4aa7c76cb2d4f87 -->
+<!-- translated-from: README_JP.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -151,7 +151,7 @@ go in a `:where` clause.
 ```
 (defstruct Pair<A,B> (first A) (second B))
 
-(impl Pair<A,B>
+(impl<A,B> Pair<A,B>
   (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -604,7 +604,7 @@ Chú thích kiểu là bắt buộc (nó không được suy ra từ biểu th�
   (pub defmethod name ...))                                      ; công khai cả bên ngoài module của kiểu
 
 ; một kiểu generic
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; bên ngoài impl: phương thức của kiểu của tham số đầu
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -656,17 +656,17 @@ ra từ đối số của mỗi lần gọi.
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Đặt cho tham số kiểu riêng của phương thức những tên khác với tham số kiểu của kiểu đích viết trong
-  `impl` (`T` của `(impl Box<T> ...)`).
-- Phương thức trong `impl` của một trait không thể thêm tham số kiểu: chữ ký của nó theo chữ ký mà trait
-  khai báo.
+- Đặt cho tham số kiểu riêng của phương thức những tên khác với tham số kiểu của kiểu đích được khai báo
+  bằng `impl<T>` (`T`).
+- Phương thức trong `impl` của một trait khai báo số tham số kiểu bằng số mà trait khai báo cho phương thức
+  đó (3.9).
 
 `impl` của một kiểu generic viết tất cả tham số kiểu dưới dạng biến (`Box<T>`, dùng chung cho mọi thể hiện)
 hoặc tất cả dưới dạng kiểu cụ thể (`Box<int>`, chỉ riêng cho thể hiện đó). Các `impl` của những thể hiện khác
@@ -691,6 +691,7 @@ nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` c�
   `Box<f64>`) không có phương thức đó.
 - Phương thức tĩnh được chọn theo kiểu mà lời gọi được kỳ vọng trả về (`(the Box<int> ...)` ở trên). Nếu chỉ
   một thể hiện có phương thức tĩnh với tên đó thì không cần kiểu kỳ vọng.
+  Cũng có thể viết thể hiện để chọn, như `(Box<int>::make)`.
 - Không thể viết một phương thức cùng tên vừa trong `impl` dùng biến (`Box<T>`) vừa trong `impl` của một thể
   hiện (`Box<int>`); theo thứ tự nào cũng là lỗi. Hàm truy cập của trường cũng được tính là phương thức của
   `impl` dùng biến.
@@ -714,10 +715,10 @@ nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` c�
 - Nó chỉ khác `defmethod` bên trong `impl` ở chỗ tham số đầu không thể là `self`. Tham số đầu được viết `(tên Kiểu)`, và kiểu đó là chủ của phương thức. Viết `self` là lỗi.
 - **Có thể viết cho bất kỳ kiểu nào.** Có thể thêm phương thức cho các kiểu của thư viện chuẩn như `int` và `Vector`, và cho các kiểu định nghĩa trong module khác (`impl` cố hữu chỉ bên định nghĩa kiểu mới viết được).
 - Tính công khai là `(pub defmethod ...)`, giống bên trong `impl`. Không có nó, phương thức chỉ dùng được bên trong module định nghĩa nó.
-- Bên nhận có kiểu generic viết tham số kiểu dưới dạng biến (`((v Vector<T>))`). `T` này là tham số kiểu của bên nhận; không được khai báo lại `<T>` làm tham số kiểu riêng của phương thức.
+- Bên nhận có kiểu generic khai báo tham số kiểu trong tên phương thức (`second-elem<T>` và `((v Vector<T>))`). Tên chỉ viết ở bên nhận không trở thành tham số kiểu.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -750,10 +751,10 @@ nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` c�
   ứng với `defsignature`. Một tên chưa được định nghĩa cho cùng lỗi `unknown type` trong một kiểu đối số của
   `defun` hoặc trong `the`. Vì vậy hai kiểu tham chiếu lẫn nhau không thể viết được.
 - **Biến kiểu chỉ là những gì được viết ở vị trí khai báo.** Với `defun`/`defstruct`/`defenum`/`deftype`,
-  là `<T>` của tên; với `impl` cố hữu, là kiểu đích (`(impl box<T> ...)`) và `<U>` trong tên của mỗi
-  phương thức; với `impl` của trait, là kiểu đích và `impl<T>`; với `deftrait`, là `Self` và các kiểu
-  liên kết của `(:type Item)`. Một tên xuất hiện lần đầu ở bất kỳ chỗ nào khác (đối số, giá trị trả về,
-  `the`/`lambda` trong thân) không trở thành biến kiểu; nó là `unknown type`.
+  là `<T>` của tên; với `impl`, là `impl<T>`; với `defmethod` trong hay ngoài `impl`, là `<U>` trong tên
+  phương thức; với `deftrait`, là `Self`, các kiểu liên kết của `(:type Item)` và `<U>` trong tên của mỗi
+  phương thức. Một tên xuất hiện lần đầu ở bất kỳ chỗ nào khác (đối số, giá trị trả về, `the`/`lambda`
+  trong thân) không trở thành biến kiểu; nó là `unknown type`.
 - **Docstring**: một literal chuỗi ngay sau tên, trước các trường, trở thành docstring
   (`(defstruct Name "doc" (field Type)...)`, cùng vị trí như `defstruct` của CL). Một trường luôn có dạng
   `(name Type ...)` và không bao giờ có thể là một chuỗi trần, nên không có sự mơ hồ. Lấy nó bằng
@@ -933,6 +934,21 @@ Rust: các sai sót sẽ thất bại với mọi `impl` và mọi kiểu triể
 nào bỏ ra, đều bị bắt ở đó. Các lời gọi trên `self` tới các phương thức của chính trait hoặc các supertrait của
 nó đi qua ràng buộc này, và các kiểu liên kết được cố định bằng chính chúng, nên một chữ ký trả về `Item` được
 khớp với thân mà không cần biết kiểu cụ thể.
+
+**Tham số kiểu riêng của phương thức**: phương thức của trait cũng có thể khai báo tham số kiểu riêng
+bằng cách viết `<U>` trong tên. Phương thức của `impl` khai báo cùng số lượng (tên tùy ý; tương ứng theo
+vị trí), và chữ ký của nó theo chữ ký của trait sau khi thay chúng vào. Tham số kiểu được suy ra từ đối số
+ở mỗi lời gọi. Trait có phương thức như vậy không thể là `:dyn` (một ô vtable chỉ có một điểm vào).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Cài đặt theo từng thể hiện**: một kiểu generic có thể có `impl` riêng cho từng thể hiện
 (`(impl Show Box<int> ...)` và `(impl Show Box<string> ...)`). `:dyn`, ràng buộc `:where`, kiểu liên kết và

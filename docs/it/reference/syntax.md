@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -652,7 +652,7 @@ modificata; `defconstant` no (`setf` è un errore).
   (pub defmethod name ...))                                      ; pubblico anche fuori dal modulo del tipo
 
 ; un tipo generico
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; fuori da un impl: un metodo del tipo del primo parametro
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -705,7 +705,7 @@ metodo (`U`) sono inferiti dagli argomenti di ogni chiamata.
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
@@ -713,9 +713,9 @@ metodo (`U`) sono inferiti dagli argomenti di ogni chiamata.
 ```
 
 - Dai ai parametri di tipo propri del metodo nomi diversi dai parametri di tipo del tipo di destinazione
-  scritti nell'`impl` (la `T` di `(impl Box<T> ...)`).
-- Un metodo dell'`impl` di un trait non può aggiungere parametri di tipo: la sua firma segue quella che
-  il trait dichiara.
+  dichiarati con `impl<T>` (`T`).
+- Un metodo dell'`impl` di un trait dichiara tanti parametri di tipo quanti il trait ne dichiara per quel
+  metodo (3.9).
 
 L'`impl` di un tipo generico scrive tutti i suoi parametri di tipo come variabili (`Box<T>`, comune a tutte
 le istanziazioni) o tutti come tipi concreti (`Box<int>`, solo per quell'istanziazione). Gli `impl` di
@@ -741,6 +741,7 @@ un metodo con lo stesso nome.
   `Box<f64>`) non ha il metodo.
 - Un metodo statico si sceglie dal tipo che la chiamata deve restituire (il `(the Box<int> ...)` sopra). Se
   solo un'istanziazione ha un metodo statico con quel nome, non serve un tipo atteso.
+  Si può anche scrivere l'istanziazione per sceglierlo, come in `(Box<int>::make)`.
 - Un metodo con lo stesso nome non può stare insieme in un `impl` con variabili (`Box<T>`) e nell'`impl` di
   un'istanziazione (`Box<int>`); in qualunque ordine è un errore. L'accessore di un campo conta come metodo
   dell'`impl` con variabili.
@@ -764,10 +765,10 @@ Un `defmethod` scritto fuori da un `impl` diventa **un metodo del tipo del suo p
 - Si differenzia da un `defmethod` dentro un `impl` solo perché il suo primo parametro non può essere `self`. Il primo parametro si scrive `(nome Tipo)`, e quel tipo possiede il metodo. Scrivere `self` è un errore.
 - **Si può scrivere per qualsiasi tipo.** Si possono aggiungere metodi a tipi della libreria standard come `int` e `Vector`, e a tipi definiti in altri moduli (un `impl` inerente lo può scrivere solo chi definisce il tipo).
 - La visibilità è `(pub defmethod ...)`, come dentro un `impl`. Senza `pub`, il metodo si può usare solo dentro il modulo che lo definisce.
-- Un ricevente di un tipo generico scrive i suoi parametri di tipo come variabili (`((v Vector<T>))`). Questo `T` è il parametro di tipo del ricevente; non è permesso dichiarare di nuovo `<T>` come parametro di tipo proprio del metodo.
+- Un ricevente di un tipo generico dichiara i suoi parametri di tipo nel nome del metodo (`second-elem<T>` e `((v Vector<T>))`). Un nome scritto solo nel ricevente non diventa un parametro di tipo.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -801,11 +802,11 @@ Un `defmethod` scritto fuori da un `impl` diventa **un metodo del tipo del suo p
   tipo di un argomento di `defun` o in `the`. Quindi due tipi che si riferiscono l'uno all'altro non si
   possono scrivere.
 - **Le variabili di tipo sono solo quelle scritte nelle posizioni di dichiarazione.** Per
-  `defun`/`defstruct`/`defenum`/`deftype`, il `<T>` del nome; per un `impl` inerente, il tipo di
-  destinazione (`(impl box<T> ...)`) e il `<U>` del nome di ciascun metodo; per l'`impl` di un trait, il
-  tipo di destinazione e `impl<T>`; per `deftrait`, `Self` e i tipi associati di `(:type Item)`. Un nome che
-  compare per la prima volta altrove (argomenti, valore di ritorno, `the`/`lambda` nel corpo) non diventa
-  una variabile di tipo; è `unknown type`.
+  `defun`/`defstruct`/`defenum`/`deftype`, il `<T>` del nome; per `impl`, `impl<T>`; per un `defmethod`
+  dentro o fuori un `impl`, il `<U>` del nome del metodo; per `deftrait`, `Self`, i tipi associati di
+  `(:type Item)` e il `<U>` del nome di ciascun metodo. Un nome che compare per la prima volta altrove
+  (argomenti, valore di ritorno, `the`/`lambda` nel corpo) non diventa una variabile di tipo; è
+  `unknown type`.
 - **Docstring**: un letterale stringa subito dopo il nome, prima dei campi, diventa la docstring
   (`(defstruct Name "doc" (field Type)...)`, la stessa posizione del `defstruct` di CL). Un campo ha
   sempre la forma `(name Type ...)` e non può mai essere una stringa semplice, quindi non c'è ambiguità.
@@ -994,6 +995,22 @@ ogni `impl` e per ogni tipo che implementa, anche nei predefiniti che nessun `im
 trovati lì. Le chiamate su `self` a metodi del trait stesso o dei suoi supertrait passano attraverso
 questo vincolo, e i tipi associati sono fissati a se stessi, quindi una firma che restituisce `Item` viene
 confrontata con il corpo senza conoscere il tipo concreto.
+
+**Parametri di tipo propri di un metodo**: anche un metodo di un trait può dichiarare parametri di tipo
+propri scrivendo `<U>` nel suo nome. Un metodo di un `impl` ne dichiara altrettanti (i nomi sono liberi; si
+corrispondono per posizione), e la sua firma segue quella del trait con essi al loro posto. I parametri di
+tipo si deducono dagli argomenti a ogni chiamata. Un trait con un metodo del genere non può essere un `:dyn`
+(uno slot della vtable ha un solo punto d'ingresso).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Implementazioni per istanziazione**: un tipo generico può avere un `impl` distinto per ogni
 istanziazione (`(impl Show Box<int> ...)` e `(impl Show Box<string> ...)`). `:dyn`, i vincoli `:where`, i

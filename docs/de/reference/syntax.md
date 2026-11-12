@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -647,7 +647,7 @@ Die Typannotation ist Pflicht (sie wird nicht aus dem Initialisierer abgeleitet)
   (pub defmethod name ...))                                      ; auch außerhalb des Moduls des Typs öffentlich
 
 ; ein generischer Typ
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; außerhalb eines impl: eine Methode des Typs des ersten Parameters
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -702,17 +702,17 @@ Die Typparameter des Zieltyps (`T` unten) werden durch den Empfänger festgelegt
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Gib den eigenen Typparametern der Methode Namen, die sich von den im `impl` geschriebenen
-  Typparametern des Zieltyps unterscheiden (dem `T` von `(impl Box<T> ...)`).
-- Eine Methode im `impl` eines Traits kann keine Typparameter hinzufügen: Ihre Signatur folgt der, die
-  der Trait deklariert.
+- Gib den eigenen Typparametern der Methode Namen, die sich von den mit `impl<T>` deklarierten
+  Typparametern des Zieltyps (`T`) unterscheiden.
+- Eine Methode im `impl` eines Traits deklariert so viele Typparameter, wie der Trait für diese Methode
+  deklariert (3.9).
 
 Das `impl` eines generischen Typs schreibt alle seine Typparameter als Variablen (`Box<T>`, allen
 Instanziierungen gemeinsam) oder alle als konkrete Typen (`Box<int>`, nur für diese Instanziierung). Die
@@ -738,6 +738,7 @@ Instanziierungen gemeinsam) oder alle als konkrete Typen (`Box<int>`, nur für d
   `Box<f64>`) hat die Methode nicht.
 - Eine statische Methode wird nach dem Typ gewählt, den der Aufruf zurückgeben soll (das `(the Box<int> ...)`
   oben). Hat nur eine Instanziierung eine statische Methode dieses Namens, ist kein erwarteter Typ nötig.
+  Man kann auch die Instanziierung schreiben, um eine zu wählen, etwa `(Box<int>::make)`.
 - Eine Methode desselben Namens kann nicht zugleich in einem `impl` mit Variablen (`Box<T>`) und im `impl`
   einer Instanziierung (`Box<int>`) stehen; in beiden Reihenfolgen ist das ein Fehler. Der Accessor eines
   Felds zählt als Methode des `impl` mit Variablen.
@@ -761,10 +762,10 @@ Ein außerhalb eines `impl` geschriebenes `defmethod` wird zu **einer Methode de
 - Es unterscheidet sich von einem `defmethod` innerhalb eines `impl` nur darin, dass sein erster Parameter nicht `self` sein kann. Der erste Parameter wird als `(Name Typ)` geschrieben, und dieser Typ besitzt die Methode. `self` zu schreiben ist ein Fehler.
 - **Es kann für jeden Typ geschrieben werden.** Methoden lassen sich Typen der Standardbibliothek wie `int` und `Vector` sowie in anderen Modulen definierten Typen hinzufügen (ein inhärentes `impl` kann nur die Seite schreiben, die den Typ definiert).
 - Die Sichtbarkeit ist `(pub defmethod ...)`, wie innerhalb eines `impl`. Ohne `pub` ist die Methode nur innerhalb des Moduls verwendbar, das sie definiert.
-- Ein Empfänger eines generischen Typs schreibt seine Typparameter als Variablen (`((v Vector<T>))`). Dieses `T` ist der Typparameter des Empfängers; es noch einmal als `<T>` als eigenen Typparameter der Methode zu deklarieren, ist nicht erlaubt.
+- Ein Empfänger eines generischen Typs deklariert seine Typparameter im Namen der Methode (`second-elem<T>` und `((v Vector<T>))`). Ein Name, der nur im Empfänger steht, wird kein Typparameter.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -799,9 +800,9 @@ Ein außerhalb eines `impl` geschriebenes `defmethod` wird zu **einer Methode de
   denselben Fehler `unknown type`. Zwei Typen, die sich gegenseitig verweisen, lassen sich daher nicht
   schreiben.
 - **Typvariablen sind nur die an deklarierenden Stellen geschriebenen.** Bei
-  `defun`/`defstruct`/`defenum`/`deftype` das `<T>` des Namens; bei einem inhärenten `impl` der Zieltyp
-  (`(impl box<T> ...)`) und das `<U>` im Namen jeder Methode; beim `impl` eines Traits der Zieltyp und
-  `impl<T>`; bei `deftrait` `Self` und die assoziierten Typen von `(:type Item)`. Ein Name, der zum ersten
+  `defun`/`defstruct`/`defenum`/`deftype` das `<T>` des Namens; bei `impl` das `impl<T>`; bei einem
+  `defmethod` innerhalb oder außerhalb eines `impl` das `<U>` im Namen der Methode; bei `deftrait` `Self`,
+  die assoziierten Typen von `(:type Item)` und das `<U>` im Namen jeder Methode. Ein Name, der zum ersten
   Mal an einer anderen Stelle auftaucht (Argumente, Rückgabewert, `the`/`lambda` im Rumpf), wird keine
   Typvariable; er ist `unknown type`.
 - **Docstrings**: Ein Zeichenkettenliteral direkt nach dem Namen, vor den Feldern, wird zum Docstring
@@ -989,6 +990,22 @@ scheitern würden, werden dort gefunden, auch in Standardimplementierungen, die 
 Aufrufe auf `self` von Methoden des Traits selbst oder seiner Obertraits gehen durch diese Schranke, und
 assoziierte Typen sind auf sich selbst festgelegt, daher wird eine Signatur, die `Item` zurückgibt, gegen den
 Rumpf abgeglichen, ohne den konkreten Typ zu kennen.
+
+**Eigene Typparameter einer Methode**: Auch eine Methode eines Traits kann eigene Typparameter
+deklarieren, indem sie `<U>` in ihren Namen schreibt. Eine Methode eines `impl` deklariert ebenso viele
+(die Namen sind frei; sie entsprechen sich nach Position), und ihre Signatur folgt der des Traits mit
+diesen eingesetzt. Die Typparameter werden bei jedem Aufruf aus den Argumenten abgeleitet. Ein Trait mit
+einer solchen Methode kann kein `:dyn` sein (ein vtable-Platz hat nur einen Einsprungpunkt).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Implementierungen je Instanziierung**: Ein generischer Typ kann für jede Instanziierung ein eigenes
 `impl` haben (`(impl Show Box<int> ...)` und `(impl Show Box<string> ...)`). `:dyn`, `:where`-Schranken,

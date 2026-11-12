@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -472,7 +472,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   (pub defmethod name ...))                                      ; 在定义类型的模块之外也公开
 
 ; 泛型类型
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; impl 之外：第一个参数的类型的方法
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -520,15 +520,15 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- 方法自身的类型参数，要取与 `impl` 中所写目标类型的类型参数（`(impl Box<T> ...)` 的 `T`）不同的名字。
-- trait 的 `impl` 的方法不能添加类型参数。签名遵循 trait 所声明的签名。
+- 方法自身的类型参数，要取与 `impl<T>` 所声明的目标类型的类型参数（`T`）不同的名字。
+- trait 的 `impl` 的方法，要写与 trait 为该方法声明的数量相同的类型参数（3.9）。
 
 泛型类型的 `impl`，要么把类型参数全部写成变量（`Box<T>`，所有具体类型共用），要么全部写成具体类型
 （`Box<int>`，只属于该具体类型）。各具体类型的 `impl` 是彼此独立的实现，所以可以分别给 `Box<int>` 和
@@ -552,6 +552,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - 实例方法按接收者的类型选择。没有 `impl` 的具体类型（例如 `Box<f64>`）没有该方法。
 - 静态方法按调用所期望的返回类型选择（上例中的 `(the Box<int> ...)`）。只有一个具体类型拥有该名字的
   静态方法时，不需要期望类型。
+  也可以像 `(Box<int>::make)` 这样写出具体类型来选择。
 - 同名的方法不能同时写在用变量写的 `impl`（`Box<T>`）和具体类型的 `impl`（`Box<int>`）中，不论先写哪个
   都是错误。字段的访问器也算作用变量写的那一方的方法。
 - 在 `documentation`、`compile`、`trace` 等处指名这样的方法时，写出具体类型：`Box<int>::twice`。只有一个
@@ -574,10 +575,10 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - 与 `impl` 中的 `defmethod` 的区别只有一点：第一个参数不能是 `self`。第一个参数写成 `(名字 类型)`，该类型就是方法的所有者。写 `self` 会报错。
 - **可以为任何类型书写。** 可以为 `int`、`Vector` 这样的标准库类型以及在其他模块中定义的类型增加方法（固有 `impl` 只有定义该类型的一方才能书写）。
 - 公开与 `impl` 中相同，写成 `(pub defmethod ...)`。不加时，只能在定义它的模块内使用。
-- 泛型类型的接收者把类型参数照原样写成变量（`((v Vector<T>))`）。这个 `T` 是接收者的类型参数，不能再用 `<T>` 把它重复声明为方法自己的类型参数。
+- 泛型类型的接收者在方法的名字中声明类型参数（`second-elem<T>` 和 `((v Vector<T>))`）。只写在接收者中的名字不会成为类型参数。
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -609,8 +610,8 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   `defsignature` 的前向声明。尚未定义的名字，在 `defun` 的参数类型和 `the` 中同样会得到 `unknown type` 错误。因此互相引用的两个
   类型无法写出。
 - **类型变量只有写在声明部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名字的 `<T>`，
-  固有 `impl` 是目标类型（`(impl box<T> ...)`）和各方法名字的 `<U>`，trait 的 `impl` 是目标类型和
-  `impl<T>`，`deftrait` 是 `Self` 和 `(:type Item)` 的关联类型。在其他位置（参数、返回值、本体中的
+  `impl` 是 `impl<T>`，`impl` 内外的 `defmethod` 是各方法名字的 `<U>`，`deftrait` 是 `Self`、
+  `(:type Item)` 的关联类型和各方法名字的 `<U>`。在其他位置（参数、返回值、本体中的
   `the`/`lambda`）首次出现的名字不会成为类型变量，而是 `unknown type`。
 - **文档字符串**：在名字之后、字段列表之前放置字符串字面量，它就成为文档字符串（`(defstruct Name "doc" (field Type)...)`——与
   CL 的 `defstruct` 位置相同）。字段总是 `(name Type ...)` 的形式，不可能是裸字符串，所以没有歧义。用 `(documentation Name)` 取出。
@@ -761,6 +762,20 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 （以 `Self: 该 trait` 为约束）（与 Rust 相同）——即使是没有任何 `impl` 省略的默认实现，对任何实现类型都通不过的错误也会在那里被
 排除。对 `self` 调用该 trait 自身及其继承来源的方法会借这个约束通过，关联类型固定为自身，所以返回 `Item` 的签名与函数体在不知道
 具体类型的情况下进行对照。
+
+**方法自身的类型参数**：trait 的方法也可以在名字中写 `<U>` 来声明自身的类型参数。`impl` 的方法声明同样
+数量的类型参数（名字随意，按位置对应），签名遵循用它们替换后的 trait 签名。类型参数在每次调用时由参数推断。
+拥有这种方法的 trait 不能作为 `:dyn`（vtable 的槽只有一个入口）。
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **按具体类型的实现**：泛型类型可以为每个具体类型分别写 `impl`（`(impl Show Box<int> ...)` 和
 `(impl Show Box<string> ...)`）。`:dyn`、`:where` 约束、关联类型和 `print-object` 也都按具体类型生效，

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -626,7 +626,7 @@ Adnotacja typu jest wymagana (nie jest wnioskowana z inicjalizatora). `defvar` m
   (pub defmethod name ...))                                      ; publiczna także poza modułem typu
 
 ; typ generyczny
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; poza impl: metoda typu pierwszego parametru
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -679,17 +679,16 @@ każdego wywołania.
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Nadaj własnym parametrom typu metody nazwy inne niż parametry typu typu docelowego zapisane w `impl`
-  (`T` w `(impl Box<T> ...)`).
-- Metoda w `impl` traitu nie może dodawać parametrów typu: jej sygnatura idzie za tą, którą deklaruje
-  trait.
+- Nadaj własnym parametrom typu metody nazwy inne niż parametry typu typu docelowego zadeklarowane przez
+  `impl<T>` (`T`).
+- Metoda w `impl` traitu deklaruje tyle parametrów typu, ile trait deklaruje dla tej metody (3.9).
 
 `impl` typu generycznego zapisuje wszystkie parametry typu jako zmienne (`Box<T>`, wspólny dla wszystkich
 instancjacji) albo wszystkie jako typy konkretne (`Box<int>`, tylko dla tej instancjacji). `impl` różnych
@@ -715,6 +714,7 @@ samej nazwie.
   ma tej metody.
 - Metoda statyczna jest wybierana według typu, który wywołanie ma zwrócić (`(the Box<int> ...)` powyżej). Jeśli
   metodę statyczną o tej nazwie ma tylko jedna instancjacja, oczekiwany typ nie jest potrzebny.
+  Można też napisać instancjację, aby ją wybrać, jak w `(Box<int>::make)`.
 - Metody o jednej nazwie nie można napisać jednocześnie w `impl` ze zmiennymi (`Box<T>`) i w `impl` instancjacji
   (`Box<int>`); w dowolnej kolejności jest to błąd. Akcesor pola liczy się jako metoda `impl` ze zmiennymi.
 - Aby wskazać taką metodę w `documentation`, `compile`, `trace` i podobnych, napisz instancjację:
@@ -737,10 +737,10 @@ samej nazwie.
 - Od `defmethod` wewnątrz `impl` różni się tylko tym, że jego pierwszym parametrem nie może być `self`. Pierwszy parametr zapisuje się jako `(nazwa Typ)`, a ten typ jest właścicielem metody. Zapisanie `self` jest błędem.
 - **Można go napisać dla dowolnego typu.** Metody można dodawać do typów biblioteki standardowej, takich jak `int` i `Vector`, oraz do typów zdefiniowanych w innych modułach (własny `impl` typu może napisać tylko strona, która definiuje typ).
 - Widoczność to `(pub defmethod ...)`, tak jak wewnątrz `impl`. Bez `pub` metoda jest dostępna tylko wewnątrz modułu, który ją definiuje.
-- Odbiorca typu generycznego zapisuje swoje parametry typu jako zmienne (`((v Vector<T>))`). To `T` jest parametrem typu odbiorcy; ponowne zadeklarowanie `<T>` jako własnego parametru typu metody jest niedozwolone.
+- Odbiorca typu generycznego deklaruje swoje parametry typu w nazwie metody (`second-elem<T>` i `((v Vector<T>))`). Nazwa zapisana tylko w odbiorcy nie staje się parametrem typu.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -773,11 +773,10 @@ samej nazwie.
   jeszcze niezdefiniowana daje ten sam błąd `unknown type` w typie argumentu `defun` lub w `the`. Zatem dwa
   typy odwołujące się do siebie nawzajem nie mogą być zapisane.
 - **Zmienne typu to tylko te zapisane w pozycjach deklarujących.** Dla
-  `defun`/`defstruct`/`defenum`/`deftype` — `<T>` nazwy; dla własnego `impl` typu — typ docelowy
-  (`(impl box<T> ...)`) i `<U>` w nazwie każdej metody; dla `impl` traitu — typ docelowy i `impl<T>`; dla
-  `deftrait` — `Self` i typy powiązane z `(:type Item)`. Nazwa, która pojawia się po raz pierwszy gdzie
-  indziej (argumenty, wartość zwracana, `the`/`lambda` w ciele), nie staje się zmienną typu; to
-  `unknown type`.
+  `defun`/`defstruct`/`defenum`/`deftype` — `<T>` nazwy; dla `impl` — `impl<T>`; dla `defmethod` w `impl`
+  lub poza nim — `<U>` w nazwie metody; dla `deftrait` — `Self`, typy powiązane z `(:type Item)` i `<U>`
+  w nazwie każdej metody. Nazwa, która pojawia się po raz pierwszy gdzie indziej (argumenty, wartość
+  zwracana, `the`/`lambda` w ciele), nie staje się zmienną typu; to `unknown type`.
 - **Docstringi**: literał łańcuchowy zaraz po nazwie, przed polami, staje się docstringiem
   (`(defstruct Name "doc" (field Type)...)`, ta sama pozycja co w `defstruct` z CL). Pole ma zawsze
   postać `(name Type ...)` i nigdy nie może być gołym łańcuchem, więc nie ma niejednoznaczności. Pobierz go za pomocą
@@ -960,6 +959,22 @@ implementującego typu, nawet w wartościach domyślnych, które żadne `impl` n
 samego traitu lub jego supertraitów przechodzą przez to ograniczenie, a typy powiązane są ustalone na
 siebie, więc sygnatura zwracająca `Item` jest dopasowywana do ciała bez znajomości konkretnego
 typu.
+
+**Własne parametry typu metody**: metoda traitu także może zadeklarować własne parametry typu, pisząc
+`<U>` w nazwie. Metoda `impl` deklaruje ich tyle samo (nazwy są dowolne; odpowiadają sobie według
+pozycji), a jej sygnatura idzie za sygnaturą traitu z nimi wstawionymi. Parametry typu są wnioskowane z
+argumentów przy każdym wywołaniu. Trait z taką metodą nie może być `:dyn` (miejsce w vtable ma tylko
+jeden punkt wejścia).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Implementacje dla każdej instancjacji**: typ generyczny może mieć osobny `impl` dla każdej instancjacji
 (`(impl Show Box<int> ...)` i `(impl Show Box<string> ...)`). `:dyn`, ograniczenia `:where`, typy powiązane i

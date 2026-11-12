@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/README.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # Documentação do typelisp (português do Brasil)
 
 typelisp é um Lisp com tipagem estática. Para instalá-lo e compilá-lo, consulte o
@@ -41,7 +41,7 @@ função. As restrições de trait ficam em uma cláusula `:where`. Consulte
 ```lisp
 (defstruct Pair<A,B> (first A) (second B))
 
-(impl Pair<A,B>
+(impl<A,B> Pair<A,B>
   (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 

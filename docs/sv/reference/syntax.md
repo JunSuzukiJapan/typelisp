@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -626,7 +626,7 @@ kan inte (`setf` är ett fel).
   (pub defmethod name ...))                                      ; publik även utanför typens modul
 
 ; en generisk typ
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; utanför en impl: en metod hos typen för den första parametern
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -677,17 +677,17 @@ nedan) bestäms av mottagaren; metodens egna (`U`) härleds ur argumenten i varj
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Ge metodens egna typparametrar namn som skiljer sig från måltypens typparametrar som skrivs i `impl`
-  (`T` i `(impl Box<T> ...)`).
-- En metod i ett traits `impl` kan inte lägga till typparametrar: dess signatur följer den som traitet
-  deklarerar.
+- Ge metodens egna typparametrar namn som skiljer sig från måltypens typparametrar som deklareras med
+  `impl<T>` (`T`).
+- En metod i ett traits `impl` deklarerar lika många typparametrar som traitet deklarerar för den metoden
+  (3.9).
 
 `impl` för en generisk typ skriver alla sina typparametrar som variabler (`Box<T>`, gemensam för alla
 instansieringar) eller alla som konkreta typer (`Box<int>`, bara för den instansieringen). `impl` för olika
@@ -713,6 +713,7 @@ namn.
   metoden.
 - En statisk metod väljs efter den typ anropet förväntas returnera (`(the Box<int> ...)` ovan). Har bara en
   instansiering en statisk metod med det namnet behövs ingen förväntad typ.
+  Man kan också skriva instansieringen för att välja, som i `(Box<int>::make)`.
 - En metod med ett visst namn kan inte skrivas både i en `impl` med variabler (`Box<T>`) och i en
   instansierings `impl` (`Box<int>`); i vilken ordning som helst är det ett fel. Ett fälts accessor räknas som
   en metod i `impl` med variabler.
@@ -736,10 +737,10 @@ En `defmethod` som skrivs utanför en `impl` blir **en metod hos typen för dess
 - Den skiljer sig från en `defmethod` inuti en `impl` bara genom att dess första parameter inte kan vara `self`. Den första parametern skrivs `(namn Typ)`, och den typen äger metoden. Att skriva `self` är ett fel.
 - **Den kan skrivas för vilken typ som helst.** Metoder kan läggas till typer från standardbiblioteket som `int` och `Vector`, och till typer som definieras i andra moduler (en inneboende `impl` kan bara skrivas av den sida som definierar typen).
 - Synligheten är `(pub defmethod ...)`, som inuti en `impl`. Utan `pub` kan metoden bara användas inom den modul som definierar den.
-- En mottagare av en generisk typ skriver sina typparametrar som variabler (`((v Vector<T>))`). Detta `T` är mottagarens typparameter; att deklarera `<T>` igen som metodens egen typparameter är inte tillåtet.
+- En mottagare av en generisk typ deklarerar sina typparametrar i metodens namn (`second-elem<T>` och `((v Vector<T>))`). Ett namn som bara skrivs i mottagaren blir ingen typparameter.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -772,10 +773,10 @@ En `defmethod` som skrivs utanför en `impl` blir **en metod hos typen för dess
   Ett namn som ännu inte är definierat ger samma `unknown type`-fel i en `defun`-argumenttyp eller i
   `the`. Så två typer som refererar till varandra kan inte skrivas.
 - **Typvariabler är bara de som skrivs i deklarerande positioner.** För `defun`/`defstruct`/`defenum`/`deftype`
-  namnets `<T>`; för en inneboende `impl` måltypen (`(impl box<T> ...)`) och `<U>` i varje metods namn; för
-  ett traits `impl` måltypen och `impl<T>`; för `deftrait` `Self` och de associerade typerna i
-  `(:type Item)`. Ett namn som dyker upp första gången någon annanstans (argument, returvärde,
-  `the`/`lambda` i kroppen) blir ingen typvariabel; det är `unknown type`.
+  namnets `<T>`; för `impl` `impl<T>`; för en `defmethod` i eller utanför en `impl` `<U>` i metodens namn;
+  för `deftrait` `Self`, de associerade typerna i `(:type Item)` och `<U>` i varje metods namn. Ett namn
+  som dyker upp första gången någon annanstans (argument, returvärde, `the`/`lambda` i kroppen) blir ingen
+  typvariabel; det är `unknown type`.
 - **Dokumentationssträngar**: en strängliteral direkt efter namnet, före fälten, blir dokumentationssträngen
   (`(defstruct Name "doc" (field Type)...)`, samma position som CL:s `defstruct`). Ett fält har alltid
   formen `(name Type ...)` och kan aldrig vara en bar sträng, så det finns ingen tvetydighet. Hämta den med
@@ -957,6 +958,22 @@ typ, även i standardvärden som ingen `impl` någonsin utelämnar, fångas där
 själva traitet eller dess supertraits passerar genom den här gränsen, och associerade typer är fastlagda
 till sig själva, så en signatur som returnerar `Item` matchas mot kroppen utan att känna till den konkreta
 typen.
+
+**En metods egna typparametrar**: även ett traits metod kan deklarera egna typparametrar genom att skriva
+`<U>` i sitt namn. En metod i en `impl` deklarerar lika många (namnen är fria; de motsvarar varandra efter
+position), och dess signatur följer traitets med dem insatta. Typparametrarna härleds ur argumenten vid
+varje anrop. Ett trait med en sådan metod kan inte vara en `:dyn` (en vtable-plats har bara en
+ingångspunkt).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Implementationer per instansiering**: en generisk typ kan ha en egen `impl` för varje instansiering
 (`(impl Show Box<int> ...)` och `(impl Show Box<string> ...)`). `:dyn`, `:where`-gränser, associerade typer

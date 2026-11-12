@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -630,7 +630,7 @@ değiştirilemez (`setf` bir hatadır).
   (pub defmethod name ...))                                      ; türün modülü dışında da açık
 
 ; genel bir tür
-(impl Type<T> (:where (Trait T)...) item...)
+(impl<T> Type<T> (:where (Trait T)...) item...)
 
 ; impl dışında: ilk parametrenin türünün metodu
 (defmethod name ((x Type) (arg Type2) ...) RetType body...)
@@ -682,16 +682,16 @@ parametreleri (aşağıdaki `T`) alıcı tarafından belirlenir; metodun kendi p
 ```lisp
 (defstruct Box<T> (v T))
 
-(impl Box<T>
+(impl<T> Box<T>
   (defmethod fmap<U> (self (f (fn (T) U))) Box<U>
     (make-instance 'Box :v (f self::v))))
 
 (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Metodun kendi tür parametrelerine, `impl`'de yazılan hedef türün tür parametrelerinden
-  (`(impl Box<T> ...)`'in `T`'si) farklı adlar verin.
-- Bir trait'in `impl`'indeki metot tür parametresi ekleyemez: imzası trait'in bildirdiğini izler.
+- Metodun kendi tür parametrelerine, `impl<T>` ile bildirilen hedef türün tür parametrelerinden (`T`)
+  farklı adlar verin.
+- Bir trait'in `impl`'indeki metot, trait'in o metot için bildirdiği kadar tür parametresi bildirir (3.9).
 
 Genel bir türün `impl`'i tür parametrelerinin hepsini değişken olarak (`Box<T>`, tüm örneklenmeler için
 ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme için) yazar. Farklı örneklenmelerin
@@ -716,6 +716,7 @@ ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme içi
   yoktur.
 - Statik metot, çağrının döndürmesi beklenen türe göre seçilir (yukarıdaki `(the Box<int> ...)`). O adda
   statik metodu olan yalnızca bir örneklenme varsa beklenen tür gerekmez.
+  Seçmek için örneklenme de yazılabilir: `(Box<int>::make)` gibi.
 - Aynı adlı bir metot hem değişkenli bir `impl`'de (`Box<T>`) hem de bir örneklenmenin `impl`'inde
   (`Box<int>`) yazılamaz; hangi sırayla olursa olsun hatadır. Bir alanın erişimcisi de değişkenli `impl`'in
   metodu sayılır.
@@ -739,10 +740,10 @@ ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme içi
 - `impl` içindeki `defmethod`'dan tek farkı, ilk parametresinin `self` olamamasıdır. İlk parametre `(ad Tür)` diye yazılır ve metodun sahibi o türdür. `self` yazmak hatadır.
 - **Her tür için yazılabilir.** `int` ve `Vector` gibi standart kütüphane türlerine ve başka modüllerde tanımlanmış türlere metot eklenebilir (içsel `impl`'i yalnızca türü tanımlayan taraf yazabilir).
 - Görünürlük, `impl` içinde olduğu gibi `(pub defmethod ...)` ile belirlenir. O olmadan metot yalnızca onu tanımlayan modülün içinde kullanılabilir.
-- Genel (generic) bir türün alıcısı, tür parametrelerini değişken olarak yazar (`((v Vector<T>))`). Bu `T` alıcının tür parametresidir; `<T>`'yi metodun kendi tür parametresi olarak yeniden bildirmek yasaktır.
+- Genel (generic) bir türün alıcısı, tür parametrelerini metodun adında bildirir (`second-elem<T>` ve `((v Vector<T>))`). Yalnızca alıcıda yazılan bir ad tür parametresi olmaz.
 
 ```lisp
-(defmethod second-elem ((v Vector<T>)) T
+(defmethod second-elem<T> ((v Vector<T>)) T
   (get v 1))
 
 (second-elem #(10 20 30))   ; => 20
@@ -775,10 +776,10 @@ ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme içi
   gelen bir ileri bildirimi yoktur. Henüz tanımlanmamış bir ad, bir `defun` bağımsız değişken türünde ya da
   `the` içinde aynı `unknown type` hatasını verir. Bu yüzden birbirine başvuran iki tür yazılamaz.
 - **Tür değişkenleri yalnızca bildirim konumlarında yazılanlardır.** `defun`/`defstruct`/`defenum`/`deftype`
-  için adın `<T>`'si; içsel bir `impl` için hedef tür (`(impl box<T> ...)`) ve her metodun adındaki `<U>`;
-  bir trait'in `impl`'i için hedef tür ve `impl<T>`; `deftrait` için `Self` ve `(:type Item)`'ın ilişkili
-  türleri. Başka bir yerde (argümanlar, dönüş değeri, gövdedeki `the`/`lambda`) ilk kez görünen bir ad
-  tür değişkeni olmaz; `unknown type` olur.
+  için adın `<T>`'si; `impl` için `impl<T>`; bir `impl`'in içindeki ya da dışındaki `defmethod` için
+  metodun adındaki `<U>`; `deftrait` için `Self`, `(:type Item)`'ın ilişkili türleri ve her metodun
+  adındaki `<U>`. Başka bir yerde (argümanlar, dönüş değeri, gövdedeki `the`/`lambda`) ilk kez görünen
+  bir ad tür değişkeni olmaz; `unknown type` olur.
 - **Docstring'ler**: adın hemen ardından, alanlardan önce gelen bir string sabiti docstring olur
   (`(defstruct Name "doc" (field Type)...)`, CL'nin `defstruct`'ıyla aynı konum). Bir alan her zaman
   `(name Type ...)` biçimindedir ve asla çıplak bir string olamaz; bu yüzden belirsizlik yoktur.
@@ -959,6 +960,22 @@ başarısız olacak hatalar, hiçbir `impl`'in asla atlamadığı varsayılanlar
 `self` üzerinde trait'in kendisinin ya da üst trait'lerinin metotlarına yapılan çağrılar bu sınırdan
 geçer ve ilişkili türler kendilerine sabitlenir; bu yüzden `Item` döndüren bir imza, somut türü bilmeden
 gövdeyle eşleştirilir.
+
+**Metodun kendi tür parametreleri**: bir trait'in metodu da adına `<U>` yazarak kendi tür
+parametrelerini bildirebilir. Bir `impl`'in metodu aynı sayıda bildirir (adlar serbesttir; konuma göre
+eşleşir) ve imzası, bunlar yerleştirilmiş trait imzasını izler. Tür parametreleri her çağrıda
+argümanlardan çıkarılır. Böyle bir metodu olan trait `:dyn` olamaz (bir vtable yuvasının yalnızca bir
+giriş noktası vardır).
+
+```lisp
+(deftrait Mapper ()
+  (defmethod map-it<U> (self (f (fn (int) U))) U))
+(defstruct Cell (v int))
+(impl Mapper Cell
+  (defmethod map-it<W> (self (f (fn (int) W))) W (f self::v)))
+
+(map-it (make-instance 'Cell :v 3) (lambda ((n int)) bool (> n 2)))   ; => true
+```
 
 **Örneklenme başına uygulamalar**: genel bir türün her örneklenmesi için ayrı bir `impl` olabilir
 (`(impl Show Box<int> ...)` ve `(impl Show Box<string> ...)`). `:dyn`, `:where` sınırları, ilişkili türler

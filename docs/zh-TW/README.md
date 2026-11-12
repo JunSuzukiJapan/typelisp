@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/README.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # typelisp 文件（繁體中文）
 
 typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫根目錄的 [README.md](../../README.md)（英文）。
@@ -37,7 +37,7 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
 ```lisp
 (defstruct Pair<A,B> (first A) (second B))
 
-(impl Pair<A,B>
+(impl<A,B> Pair<A,B>
   (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 

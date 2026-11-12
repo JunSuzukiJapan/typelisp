@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/README.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # typelisp दस्तावेज़ (हिन्दी)
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है। इसे इंस्टॉल और बिल्ड करने के लिए रिपॉज़िटरी के शीर्ष स्तर पर मौजूद
@@ -38,7 +38,7 @@ typelisp एक स्टैटिक रूप से टाइप किया
 ```lisp
 (defstruct Pair<A,B> (first A) (second B))
 
-(impl Pair<A,B>
+(impl<A,B> Pair<A,B>
   (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/README.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
 # เอกสารประกอบ typelisp (ภาษาไทย)
 
 typelisp คือภาษา Lisp ที่มีระบบชนิดแบบสถิต (statically typed) สำหรับการติดตั้งและการบิลด์ ดู
@@ -38,7 +38,7 @@ typelisp คือภาษา Lisp ที่มีระบบชนิดแ�
 ```lisp
 (defstruct Pair<A,B> (first A) (second B))
 
-(impl Pair<A,B>
+(impl<A,B> Pair<A,B>
   (defmethod swap (self) Pair<B,A>
     (make-instance 'Pair :first self::second :second self::first)))
 
