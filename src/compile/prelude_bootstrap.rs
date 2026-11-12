@@ -452,7 +452,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
 
     // Interpreted, deliberately: see this module's doc comment on why there is
     // no snapshot chain.
-    let before = chk.signature(&heap)?;
+    let before = chk.signature();
     let plan = load_interpreted_plan(&mut heap, &mut chk, &mut interp);
     let globals = promote_globals(&mut heap, &interp, &plan)?;
     let delta = chk.capture_delta(&heap, &before)?;

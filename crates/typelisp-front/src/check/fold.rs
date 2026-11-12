@@ -90,7 +90,7 @@ fn foldable_receiver(type_name: &Path) -> bool {
 /// literal node the call lowers to instead.
 ///
 /// The caller has established that `method` is a *builtin* of `type_name`
-/// (`AssocFn::builtin`), so the evaluator's dispatch is guaranteed to have an
+/// (`FnDef::builtin`), so the evaluator's dispatch is guaranteed to have an
 /// arm for it: reaching `None` from it here is a hole between the registry
 /// and the evaluator, not a call that merely cannot be folded.
 pub(crate) fn fold_builtin_method(

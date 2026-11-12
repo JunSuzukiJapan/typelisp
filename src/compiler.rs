@@ -196,7 +196,7 @@
 //! for its callee.
 //!
 //! **`env`/`fn-env` model a real "list of scopes," not one flat table per
-//! function** — `Scope<V>` (`crate::check::registry::scope_def`/
+//! function** — `Scope<V>` (`typelisp_front::typeck::builtins`/
 //! `crate::eval::interp`'s `scope_*` builtins) is a stack of frames, each an
 //! ordinary `String`-keyed map. A function activation (`compile-function`/
 //! `compile-lambda`/each `labels` sibling) starts a *fresh* `Scope` —
@@ -688,7 +688,7 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-i32` — the island's typed
 ;; `Sexpr` field extractors — are now Rust builtins (`Interp::eval_builtin`,
-;; registered in `check::registry`), not `match`-based typelisp defuns.
+;; defined in `typeck::builtins`), not `match`-based typelisp defuns.
 ;; Symbol/Sexpr redesign Phase 2 moved them out of this source so the island
 ;; navigates `Sexpr` structure entirely through the `sexpr-*` layer, never the
 ;; user-facing `match` (Phase 5 fences `match` to enum scrutinees). Each still
@@ -1882,7 +1882,7 @@ const SOURCE_TEMPLATE: &str = r#"
       ()))
 
 ;; Tests whether tagged Sexpr value `v` is Sexpr variant `variant`
-;; (`registry::sexpr_def`'s variant order: 0=nil 1=i32 2=f64 3=char
+;; (`Sexpr`'s definition's (`typeck::builtins`) variant order: 0=nil 1=i32 2=f64 3=char
 ;; 4=bool 5=sym 6=str 7=cons 8=bignum 9=ratio 10=path 11=f32 12=i8 13=i16
 ;; 14=u8 15=u16 16=u32) -- `nil`/`bool` both compile
 ;; to the same immediate sub-class (`typelisp-mem`'s `TAG_IMMEDIATE`) and are
@@ -2159,7 +2159,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `(unit)` — `Expr::Unit`, represented (like every
 ;; other compiled value) as a plain `i64`; `0`, the
 ;; same encoding `compile-bool` already uses for
-;; `false` (`registry::llvm_module_def`'s "every
+;; `false` (`llvm-module`'s definition's (`typeck::builtins::llvm`) "every
 ;; compiled value is a plain i64" convention). Needed
 ;; now that `translate_return`'s value-less `(return)`
 ;; case desugars to an explicit `(unit)` value-form
@@ -2296,7 +2296,7 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; `(bool b)` (if/let/comparisons, labels/closures
 ;; Stage 5) — every compiled value is a plain `i64`
-;; (see `registry::llvm_module_def`'s doc comment), so
+;; (see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`)), so
 ;; a `bool` literal is just `0`/`1`, the same
 ;; representation `build-icmp-*` already produces and
 ;; `compile-if`'s `build-cond-br` already expects.
@@ -3615,7 +3615,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; the borrowed-value retain) into a single shared
 ;; 1-slot `alloca-args` rather than an LLVM `phi` node
 ;; — every compiled value is already a plain `i64`
-;; (see `registry::llvm_module_def`'s doc comment), so
+;; (see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`)), so
 ;; the existing `alloca-args`/`store-arg`/`load-raw`
 ;; triple (already built for call-argument arrays)
 ;; covers a 2-way merge with no new builtin needed for

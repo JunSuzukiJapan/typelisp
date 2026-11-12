@@ -31,7 +31,9 @@
 use typelisp_mem::{wk, Heap, NsId, Value};
 
 use crate::check::core;
-use crate::{DefLocs, Docs, Loc, Path, SymRef, TopLevelForm};
+use std::collections::HashMap;
+
+use crate::{Loc, Path, SymRef, TopLevelForm};
 
 /// Tags whose fields are *not* sub-expressions, so a walk must not descend
 /// into them.
@@ -539,3 +541,45 @@ pub struct Imported {
     pub reexported: bool,
 }
 
+/// Where each definition was written, and what the language server reads
+/// beside it: the binding each local variable reference resolves to, and
+/// the type of each expression. Goto-definition and hover
+/// ([`definition_target`], [`hover_text`]) read it; a lookup miss (a
+/// builtin, or anything not yet defined) is "no definition to jump to".
+#[derive(Clone, Default)]
+pub struct DefLocs {
+    pub fns: HashMap<Path, Loc>,
+    pub methods: HashMap<(Path, SymRef), Loc>,
+    pub types: HashMap<Path, Loc>,
+    pub vars: HashMap<Path, Loc>,
+    pub traits: HashMap<Path, Loc>,
+    pub macros: HashMap<Path, Loc>,
+    /// A local variable reference's own source position (`line`, `col`) ->
+    /// the `Loc` of the binding it resolves to. A local binding has no
+    /// stable identity of its own — the same name can be bound many times in
+    /// one file — so this is keyed by the *reference's* position, resolved
+    /// when the reference is checked.
+    pub local_refs: HashMap<(u32, u32), Loc>,
+    /// The type the checker proved for the node at each source position —
+    /// the hover text. A side table because the type stops at the checker:
+    /// it is not written into the lowered form.
+    pub node_types: HashMap<(u32, u32), crate::Type>,
+}
+
+/// Docstrings, keyed the way [`DefLocs`] keys source locations: what the
+/// `documentation` special form and the language server's hover
+/// ([`doc_for`]) read.
+#[derive(Clone, Default)]
+pub struct Docs {
+    pub fns: HashMap<Path, String>,
+    pub methods: HashMap<(Path, SymRef), String>,
+    pub types: HashMap<Path, String>,
+    pub vars: HashMap<Path, String>,
+    pub traits: HashMap<Path, String>,
+    pub macros: HashMap<Path, String>,
+    /// Docstrings on a `deftrait`'s *individual* methods, keyed by (trait
+    /// path, method name). Only a method with a default body can carry one:
+    /// in a bodyless signature a trailing string is the return value, with
+    /// nothing to tell the two apart.
+    pub trait_methods: HashMap<(Path, SymRef), String>,
+}

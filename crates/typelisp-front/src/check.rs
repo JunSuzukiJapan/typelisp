@@ -10,7 +10,6 @@ pub mod core;
 pub mod freevars;
 pub mod forms;
 pub mod repr;
-pub mod registry;
 pub mod members;
 mod info;
 pub(crate) mod lower;
@@ -23,9 +22,8 @@ pub mod semantic;
 
 pub(crate) use verify::{bound_message, bound_name, not_dyn};
 pub use resolved::{CompileTarget, Pattern};
-pub use registry::{AdtDef, AdtKind, AssocFn, CField, CStructDef, DefLocs, Docs, FnSig, MacroDef, Namespace, Registry, TypeAlias, VarInfo, Variant};
 pub use analyze::{Checker, MacroExpander, MacroLambda, RedefPolicy, TestCase, TestForms, TestReturn, TopLevelForm, MONO_BUNDLE_MODULE, SPECIAL_FORM_HEADS};
 pub use locate::{
     completion_locals, definition_target, doc_for, hover_text, locate_node, CompletionCandidate,
-    CompletionKind, Defined, DefinedKind, Imported,
+    CompletionKind, DefLocs, Defined, DefinedKind, Docs, Imported,
 };

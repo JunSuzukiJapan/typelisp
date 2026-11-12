@@ -7,12 +7,10 @@
 
 use typelisp_mem::NsId;
 
-use super::registry::Registry;
 
 
 /// See the module documentation.
 pub(super) struct Info {
-    pub(super) reg: Registry,
     /// The module forms are checked in now.
     pub(super) ns: NsId,
     /// Stack of enclosing *files'* own modules, innermost last — set by
@@ -40,7 +38,6 @@ pub(super) struct Info {
 impl Info {
     pub(super) fn new() -> Info {
         Info {
-            reg: Registry::with_builtins(),
             ns: NsId::ROOT,
             file_ns: Vec::new(),
             ns_base: Vec::new(),

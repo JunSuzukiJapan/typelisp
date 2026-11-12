@@ -1,7 +1,7 @@
 //! Tests for `defun`'s `&optional`/`&key` parameters.
 //!
 //! `Checker::check_defun_opt_key` registers each `&optional`/`&key`
-//! parameter as a `check::registry::OptKeyParam` (its declared type plus a
+//! parameter as a `typeck::registry::OptKeyParam` (its declared type plus a
 //! checked default expression, if written); `Checker::check_call_opt_key`
 //! resolves every call site — filling in a default or `Option::none` for
 //! whatever's omitted, auto-wrapping a supplied value into `Some` for a

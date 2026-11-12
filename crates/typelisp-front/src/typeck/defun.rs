@@ -7,7 +7,7 @@
 //! empty `(module PATH)`, the form that defines a name and runs nothing.
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::SymRef;

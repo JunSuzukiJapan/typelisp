@@ -1,6 +1,6 @@
 //! `Sexpr`'s variant numbers — the one place they are written down.
 //!
-//! A variant's number is its index in `registry::sexpr_def`, and that index
+//! A variant's number is its index in `typeck::builtins`'s `Sexpr`, and that index
 //! reaches much further than the registry: the interpreter's core evaluator
 //! matches on it, `core_bridge` emits it into the core IR, `Repr::field_kind`
 //! borrows it for struct fields, and the compiler island's `case` arms are

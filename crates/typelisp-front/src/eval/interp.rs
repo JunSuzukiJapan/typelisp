@@ -94,7 +94,7 @@ pub struct FnDef {
     pub lambda: Option<MacroLambda>,
     /// `(parameter representations, return representation)`, parallel to
     /// `params` — `None` for a `defmacro` (every parameter and the implicit
-    /// return are always `Sexpr`, see `check::registry::MacroDef`'s doc
+    /// return are always `Sexpr`, see `typeck::registry::MacroDef`'s doc
     /// comment) since a macro is never a `compile` target.
     ///
     /// Representations, not `Type`s: the type is gone from the IR by the time
@@ -128,7 +128,7 @@ pub struct FnDef {
     /// old design's two separate top-level fields (`fns`/`compiled`) did.
     pub compiled: RefCell<Option<Rc<dyn CompiledBody>>>,
     /// Declared by `(defffi ...)`: `body` is empty and `compiled` is the thunk
-    /// that reaches the C function — the runtime twin of `FnSig::ffi`.
+    /// that reaches the C function — the runtime twin of `FnDef::ffi`.
     ///
     /// The interpreter itself never consults this: `enter` prefers a compiled
     /// body whatever the definition is, which is exactly right here. It exists
@@ -740,81 +740,70 @@ impl Interp {
         // per-`Interp`, so a stale entry from an earlier pair on this thread
         // must not survive into this one.
         typelisp_rt::reset_vtable_table();
-        // `vector` is registered directly in `Registry::with_builtins`
-        // (`registry::vector_def`) with `AdtKind::Struct`, so its
-        // `construct` sites already get `mutable = true`
-        // (`Checker::check_construct`) — but it never executes a
-        // `TopLevel::Defstruct`, the only other place a struct `TypeEntry`
-        // gets populated, so it's seeded here by hand, in the standard
-        // library's module where the checker registered it. `hashtable`/`scope`
-        // don't need this: both are `AdtKind::Sum` (`registry::hashtable_def`/
-        // `scope_def`) with no `variants`/`field_names` of their own — user
-        // code only ever builds one through its `::new()` assoc fn, never
-        // `construct`, so there is no construct site to affect.
+        // The built-in types no definition form ever runs for
+        // (`typeck::builtins::runtime_types`) are seeded here, in the
+        // standard library's modules where the checker defines them, so the
+        // printer finds them.
         let mut root = scope::ModuleScope::default();
-        // No field representations: `Vector<T>`'s storage is internal
-        // (`rt_struct_*`), it has no constructor-pattern shape, and nothing
-        // ever names one of its fields — so there is nothing for a `construct`
-        // or a pattern to read here.
-        // Its elements do print, though, and they are all of the one type
-        // argument: a uniform template says so.
-        let vector = Path::builtin(typelisp_mem::wk::VECTOR);
-        root.insert_type(
-            &vector,
-            scope::TypeEntry::Struct {
-                reprs: Vec::new(),
-                templates: scope::FieldTemplates::Uniform(crate::type_key::field_template(&["T".to_string()], &crate::Type::Var("T".to_string()))),
-                names: Vec::new(),
-            },
-        );
-        // `Task<T>`/`Thread<T>`/`Chan<T>` are the other built-in structs
-        // (`registry::task_def` and friends): a handle box holding the
-        // scheduler's id and nothing else, built by the runtime
-        // (`typelisp_rt::sched::task_handle`). Nothing constructs or matches
-        // one either, but it prints as its type and the id (`#<Chan<int> 3>`),
-        // so the printer has to find it here — positionally, with no names.
-        use crate::check::registry::{chan_of, task_of, thread_of};
-        for handle_of in [task_of, thread_of, chan_of] {
-            let crate::Type::Named(handle, _) = handle_of(crate::Type::Int) else { unreachable!("a handle type is named") };
-            root.insert_type(
-                &handle,
-                scope::TypeEntry::Struct {
-                    reprs: Vec::new(),
-                    templates: scope::FieldTemplates::Positional(vec![crate::type_key::type_id(&crate::Type::Int)]),
-                    names: Vec::new(),
-                },
-            );
-        }
-        // `Option`/`Result`/the four concrete error types are `AdtKind::Sum`
-        // registrations in `Registry::with_builtins`
-        // (`registry::builtin_sum_defs`, the single source both sides read)
-        // but — like `vector` above — never execute a `TopLevel::Defenum`, so
-        // nothing would otherwise put their variant names in this tree. That
-        // used to mean a printed `Option` came out as `(<unknown-variant> 1)`
-        // (`Self::render_ctx`'s `enums` table had no entry for it); seeding
-        // through the same `register_enum` a real `defenum` uses closes that
-        // gap by construction rather than papering over it at the print site.
-        for def in crate::check::registry::builtin_sum_defs() {
-            let name = def.name;
-            // The field types are the builtins' own declarations, so their
-            // representations come from the same classification a `defenum`'s
-            // do — `Repr::of_by` with no ADT lookup, since none of these
-            // mention a user type (`Option<T>`/`Result<T,E>`'s fields are type
-            // variables, an error type's are scalars).
-            let templates = def
-                .variants
-                .iter()
-                .map(|v| v.fields.iter().map(|t| crate::type_key::field_template(&def.params, t)).collect())
-                .collect();
-            let variants = def
-                .variants
-                .into_iter()
-                .map(|v| {
-                    let reprs = v.fields.iter().map(|t| Repr::of_by(t, &|_| None)).collect();
-                    (v.name.name().to_string(), reprs)
-                })
-                .collect();
-            root.register_enum(&name, EnumDef { variants, templates });
+        use crate::typeck::builtins::{chan_of, task_of, thread_of};
+        let handles: Vec<Path> = [task_of, thread_of, chan_of]
+            .into_iter()
+            .map(|handle_of| match handle_of(crate::Type::Int) {
+                crate::Type::Named(p, _) => p,
+                _ => unreachable!("a handle type is named"),
+            })
+            .collect();
+        for (path, def) in crate::typeck::builtins::runtime_types() {
+            match def.kind {
+                // `Vector<T>`'s storage is internal (`rt_struct_*`), it has no
+                // constructor-pattern shape, and nothing ever names one of
+                // its fields — so there is nothing for a `construct` or a
+                // pattern to read here. Its elements do print, though, and
+                // they are all of the one type argument: a uniform template
+                // says so.
+                crate::typeck::registry::AdtKind::Struct if path == Path::builtin(typelisp_mem::wk::VECTOR) => {
+                    let t = crate::Type::Param(def.params[0]);
+                    root.insert_type(
+                        &path,
+                        scope::TypeEntry::Struct { reprs: Vec::new(), templates: scope::FieldTemplates::Uniform(crate::type_key::type_id(&t)), names: Vec::new() },
+                    );
+                }
+                // `Task<T>`/`Thread<T>`/`Chan<T>`: a handle box holding the
+                // scheduler's id and nothing else, built by the runtime
+                // (`typelisp_rt::sched::task_handle`). Nothing constructs or
+                // matches one either, but it prints as its type and the id
+                // (`#<Chan<int> 3>`), so the printer has to find it here —
+                // positionally, with no names.
+                crate::typeck::registry::AdtKind::Struct => {
+                    assert!(handles.contains(&path), "`{}` is a built-in struct the interpreter does not know", path);
+                    root.insert_type(
+                        &path,
+                        scope::TypeEntry::Struct {
+                            reprs: Vec::new(),
+                            templates: scope::FieldTemplates::Positional(vec![crate::type_key::type_id(&crate::Type::Int)]),
+                            names: Vec::new(),
+                        },
+                    );
+                }
+                // `Option`/`Result`/the concrete error types: seeded through
+                // the same `register_enum` a real `defenum` uses, so a printed
+                // value's variant has its name. The field types are the
+                // builtins' own declarations, so their representations come
+                // from the same classification a `defenum`'s do — `Repr::of_by`
+                // with no ADT lookup, since none of these mention a user type.
+                crate::typeck::registry::AdtKind::Sum => {
+                    let templates = def.variants.iter().map(|v| v.fields.iter().map(crate::type_key::type_id).collect()).collect();
+                    let variants = def
+                        .variants
+                        .into_iter()
+                        .map(|v| {
+                            let reprs = v.fields.iter().map(|t| Repr::of_by(t, &|_| None)).collect();
+                            (v.name.name().to_string(), reprs)
+                        })
+                        .collect();
+                    root.register_enum(&path, EnumDef { variants, templates });
+                }
+            }
         }
         Interp {
             callback_entries: RefCell::new(HashMap::new()),
@@ -2416,7 +2405,7 @@ impl Interp {
     ///
     /// The tree holds every `TypeEntry::Enum`: a user `defenum`'s own exec,
     /// *and* the built-in sum types (`Option`/`Result`/the error types),
-    /// which `Interp::new` seeds from `registry::builtin_sum_defs` up front
+    /// which `Interp::new` seeds from `typeck::builtins::runtime_types` up front
     /// precisely so this lookup never needs a second table to fall back to.
     /// Coming up empty means the lookup itself is broken (a stale type, an
     /// enum the tree was never told about), not that the name lives
@@ -3768,11 +3757,11 @@ fn is_float_receiver(type_name: &Path) -> bool {
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
 /// have no `defmethod` body to run — currently `HashTable<K,V>`
-/// (`crate::check::registry`'s `hashtable_def`).
+/// (`crate::typeck::builtins`'s `hashtable`).
 /// Mirrors `Interp::eval_builtin` for free functions: `assoc`'s eval arm
 /// tries `Interp::methods` (user `defmethod`s) first, falling back to this.
 /// Argument count/types are trusted (the checker already validated them
-/// against the type's `AdtDef` signatures), so arms index `args` directly
+/// against the methods' signatures), so arms index `args` directly
 /// rather than re-checking shape. Takes `heap` (unlike most of these arms
 /// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::f64`'s
 /// actual value (`Heap::f64_value`) to tell it apart from `eq`'s identity
@@ -3811,7 +3800,7 @@ pub(crate) fn eval_builtin_method(
             // share a representation, so nothing here could derive it.
             wk::M_NEW => Some(Ok(crate::type_key::alloc_hashtable_of(heap, ret_type))),
             // `get`/`set`/`remove` are prelude methods, written on these
-            // five — see `registry::hashtable_def`.
+            // five — see `HashTable`'s definition (`typeck::builtins`).
             wk::M_BUCKET_COUNT => Some(hashtable_bucket_count(heap, args)),
             wk::M_BUCKET_KEY => Some(hashtable_bucket_key(heap, args)),
             wk::M_BUCKET_VALUE => Some(hashtable_bucket_value(heap, args)),
@@ -4335,7 +4324,7 @@ fn result_err(heap: &mut Heap, result: &TypeSpec, err_type: u32, msg: String) ->
 /// The bucket primitives, the interpreted half of `rt_hashtable_bucket_*`.
 /// The hash and the index are ordinary `i32`s the prelude computed; this
 /// layer neither hashes nor compares, because it cannot — see
-/// `registry::hashtable_def`.
+/// `HashTable`'s definition (`typeck::builtins`).
 fn bucket_args(args: &[Value], who: &str) -> Result<(BoxId, i64, usize), EvalError> {
     let id = expect_struct_box(&args[0])?;
     let Value::Int(hash) = args[1] else {

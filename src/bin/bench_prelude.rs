@@ -184,16 +184,6 @@ fn startup_breakdown() {
         island_total.as_secs_f64() * 1000.0
     );
 
-    // What `(dump ...)` costs a session that never calls it: the baseline
-    // signature has to be taken while the environment is still only the loaded
-    // units, so it is paid at startup or not at all.
-    let t0 = Instant::now();
-    let sig = chk.signature(&heap).expect("signature");
-    println!(
-        "  baseline signature for (dump ...): {:.1} ms over {} entries",
-        t0.elapsed().as_secs_f64() * 1000.0,
-        sig.len()
-    );
     println!();
 }
 

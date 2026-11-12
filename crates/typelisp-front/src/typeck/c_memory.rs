@@ -13,7 +13,7 @@
 //! checker's (`check::analyze::c_struct`).
 
 use crate::c_struct as b;
-use crate::check::registry::{CField, CStructDef};
+use crate::typeck::registry::{CField, CStructDef};
 use crate::types::{written_path, Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;

@@ -9,7 +9,7 @@
 
 use crate::check::analyze::{is_option_of_sexpr, is_sexpr_expectation, sexpr_ty, sexpr_variant_for_literal, BIGNUM_IS_GONE, NIL_IS_GONE};
 use crate::sexpr_variant::{self, is_ctor_name};
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::types::{path_is_builtin, Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{intern, member_symbol, NsId};

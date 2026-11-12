@@ -3002,7 +3002,7 @@ impl Renderer {
                 let variant = heap.enum_variant(id);
                 // Every enum is registered — a user `defenum`'s own exec, and
                 // the built-in sum types (`Option`/`Result`/the error types),
-                // which `Interp::new` seeds from `registry::builtin_sum_defs`
+                // which `Interp::new` seeds from `typeck::builtins::runtime_types`
                 // up front — so a lookup that comes up empty is broken (a
                 // stale `Path`, an enum this table was never told about), and
                 // says so.

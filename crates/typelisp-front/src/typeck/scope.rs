@@ -13,7 +13,7 @@
 //! The frames form a chain in which each frame refers to its parent and
 //! neither is copied or changed.
 
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{ParamOwner, Type, TypeParam};
 use typelisp_mem::SymRef;
 

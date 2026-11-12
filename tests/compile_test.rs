@@ -1,7 +1,7 @@
 //! Tests for the LLVM-backed `compile`/`compile-file` machinery (Phase 0:
 //! the shared core that lets the (typelisp-hosted) compiler body build an
 //! LLVM module at all — `llvm-module`/`llvm-function`/`llvm-builder`/
-//! `llvm-value`, see `registry::llvm_module_def` and friends). No AST
+//! `llvm-value`, see `llvm-module`'s definition (`typeck::builtins::llvm`) and friends). No AST
 //! bridge or JIT/AOT output path exists yet; these only exercise the raw
 //! LLVM builtins from typelisp source, the same way `hashtable_test.rs`
 //! exercises `HashTable<K,V>`.
@@ -391,7 +391,7 @@ fn expect_bool(v: Value) -> bool {
 
 /// The Phase 0 vertical slice: build an `i64`-returning LLVM function (under
 /// the fixed `i64 name(i64* args, int argc)` ABI every compiled function
-/// uses, see `registry::llvm_module_def`'s doc comment) by calling the raw
+/// uses, see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`)) by calling the raw
 /// LLVM builtins directly from typelisp source (no AST bridge yet — that's
 /// a later phase), and check the resulting IR.
 const BUILD_ANSWER_MODULE: &str = r#"
@@ -568,7 +568,7 @@ fn the_built_module_actually_jit_executes_to_42() {
     assert_eq!(unsafe { answer() }, 42);
 }
 
-/// Exercises the fixed-ABI parameter convention (`registry::llvm_module_def`'s
+/// Exercises the fixed-ABI parameter convention (`llvm-module`'s definition's (`typeck::builtins::llvm`)
 /// doc comment: every compiled function is `i64 name(i64* args, int argc)`)
 /// end to end: `load-arg` pulls two logical parameters out of that array,
 /// `build-add` combines them, and the JIT-executed result is checked against
@@ -3979,7 +3979,7 @@ fn compile_match_binds_and_returns_a_sym_payload() {
     assert_eq!(v, "hello");
 }
 
-/// The `path` variant (`registry::sexpr_def`'s eleventh, added alongside
+/// The `path` variant (`Sexpr`'s definition's (`typeck::builtins`) eleventh, added alongside
 /// `sym`'s fix): tag-tests against `TAG_PATH` (`compile-sexpr-tag-test`
 /// variant `10` -> tag `5`) and extracts its payload as a fresh `Sexpr` list
 /// of `sym`s via the new `rt_path_to_list` runtime shim (`compile-sexpr-

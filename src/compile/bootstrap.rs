@@ -80,7 +80,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     // After the prelude, before the island: what the island unit records is
     // what the *island* added, and the checker they share cannot say
     // afterwards which of them contributed what.
-    let before = chk.signature(&heap)?;
+    let before = chk.signature();
 
     // The island is written in the core IR's module, whose symbols are the
     // IR's tags: a `case` key `var` there is the tag `var`, and the island's

@@ -15,7 +15,7 @@
 //! parameters.
 
 use crate::check::analyze::option_of_sexpr;
-use crate::check::registry::{opt_key_effective_ty, OptKeyParam};
+use crate::typeck::registry::{opt_key_effective_ty, OptKeyParam};
 use crate::owned_form::value_to_owned;
 use crate::types::{ParamOwner, Type};
 use crate::{wk, Error, Heap, Loc, Value};

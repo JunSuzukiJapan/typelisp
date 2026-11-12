@@ -204,7 +204,7 @@ pub(crate) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 pub(crate) fn spawn_form(heap: &mut Heap, tag: u32, ret: Value, handle: &Type, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
     let ret = rooted(heap, ret);
-    let key = core::type_form(heap, handle, &[])?;
+    let key = core::type_form(heap, handle)?;
     let key = rooted(heap, key);
     let form = core::tagged(heap, tag, &[ret, key, call])?;
     Ok(rooted(heap, form))
@@ -256,7 +256,7 @@ pub(crate) fn select_recv_arm(
     let tag = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::RECV));
     f.push(tag);
     f.push(Value::Symbol(var));
-    let k = core::type_form(f.heap(), bound, &[])?;
+    let k = core::type_form(f.heap(), bound)?;
     f.push(k);
     f.push(chan);
     f.push(body);
@@ -387,7 +387,7 @@ pub(crate) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Res
 pub(crate) fn box_option_form(heap: &mut Heap, option: &Type, value: Value) -> Result<Value, Error> {
     let mut s = RootScope::new(heap);
     s.push_root(value);
-    let key = core::type_form(&mut s, option, &[])?;
+    let key = core::type_form(&mut s, option)?;
     s.push_root(key);
     core::tagged(&mut s, wk::BOX_OPTION, &[key, value])
 }
@@ -573,7 +573,6 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         Type::Unit => Ok(Value::Empty),
         // Not in `prim_type_path` (`!` has no method table), so spelled here.
         Type::Never => Ok(heap.intern_symbol("!")),
-        Type::Var(name) => Ok(heap.intern_symbol(name)),
         Type::Named(p, args) if args.is_empty() => Ok(name_form(heap, p)),
         // `(%type-apply Name Arg...)`, the reader's structure for `Name<Arg,...>`.
         Type::Named(p, args) => {

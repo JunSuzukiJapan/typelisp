@@ -16,10 +16,11 @@
 //! — the same position ECL is in, and for the same reason.
 //!
 //! **A unit carries what it added, not everything in scope.** The island unit
-//! holds the island's 121 definitions, not the prelude's as well. Cumulative
-//! units would mean replacing the checker wholesale on each load, which would
-//! re-root every generic template the previous unit permanently rooted (61 in
-//! the prelude alone) with no way to drop the old ones.
+//! holds the island's definitions, not the prelude's as well: what the
+//! checker's registry was written since the unit began
+//! ([`RegistrySignature`]). Cumulative units would mean replacing the
+//! checker wholesale on each load, which would re-root every generic body
+//! the previous unit permanently rooted with no way to drop the old ones.
 //!
 //! **What a dump does not save.** Values: `defvar` initializers are re-run when
 //! the unit loads, so a global comes back at its initial value rather than
@@ -27,161 +28,39 @@
 //! differs from SBCL, and it is what makes stream handles, closures and foreign
 //! pointers non-problems — none of them are ever written down. Non-definition
 //! top-level forms are not saved either (a dump that re-prints your session's
-//! output on load is nobody's idea of a dump), nor is `Registry::def_locs`,
-//! which only `typl-lsp` reads.
+//! output on load is nobody's idea of a dump), nor are the places definitions
+//! were written, which only `typl-lsp` reads.
 
-use typelisp_mem::{wk, SymRef};
+use typelisp_mem::wk;
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
-use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::check::registry::{AdtDef, BlanketImpl, CStructDef, FnSig, MacroDef, Namespace, Registry, TraitDef, TypeAlias, VarInfo};
 use crate::owned_form::OwnedForm;
 use crate::types::Path;
-use crate::Type;
 
 /// Bumped whenever the wire shape changes. Producer and consumer ship
 /// together, so this catches a stale artifact rather than a version skew
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 33;
+pub const FORMAT_VERSION: u32 = 34;
 
-/// Which table an entry came out of. Part of its identity: `foo` the function
-/// and `foo` the macro are different entries in the same namespace.
-pub mod cat {
-    pub const MODULE: u8 = 0;
-    pub const FN: u8 = 1;
-    pub const TYPE: u8 = 2;
-    pub const TRAIT: u8 = 3;
-    pub const MACRO: u8 = 4;
-    pub const CTOR: u8 = 5;
-    pub const VAR: u8 = 6;
-    pub const ALIAS: u8 = 7;
-    pub const MOD_ALIAS: u8 = 8;
-    pub const STATIC_USE: u8 = 9;
-    pub const BLANKET: u8 = 10;
-    pub const DOC_FN: u8 = 11;
-    pub const DOC_METHOD: u8 = 12;
-    pub const DOC_TYPE: u8 = 13;
-    pub const DOC_VAR: u8 = 14;
-    pub const DOC_TRAIT: u8 = 15;
-    pub const DOC_MACRO: u8 = 16;
-    pub const DOC_TRAIT_METHOD: u8 = 17;
-    pub const THROW_TAG: u8 = 18;
-    pub const PREDECLARED: u8 = 19;
-    pub const FN_TEMPLATE: u8 = 20;
-    pub const METHOD_TEMPLATE: u8 = 21;
-    pub const TYPE_ALIAS: u8 = 22;
-    pub const STRUCT_DEFAULT: u8 = 23;
-    pub const C_STRUCT: u8 = 24;
-    pub const REEXPORT: u8 = 25;
-}
-
-/// One registry entry, with its value already serialized.
-///
-/// The payload is bincode rather than a typed enum with one variant per table
-/// because the walk that produces these has to serialize each value anyway (to
-/// hash it for [`RegistrySignature`]), and a `Vec<u8>` it already has costs
-/// nothing to keep. `apply` reads `cat` to know what to deserialize it back
-/// into.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Entry {
-    cat: u8,
-    /// The module path the entry lives in — `[]` for the root, and for the
-    /// tables (docs, throw tags) that are keyed absolutely rather than by
-    /// namespace.
-    ns: Vec<String>,
-    /// The entry's name within its table. For an absolutely keyed table, the
-    /// identity the entry is compared under; its key is in the payload.
-    name: String,
-    payload: Vec<u8>,
-}
-
-/// Every registry entry's identity and content-hash, as of some point in time.
-///
-/// Taken before a unit is loaded and handed to [`crate::check::Checker::capture_delta`]
-/// afterwards; the delta is every entry whose hash is new or different.
-/// Content-hashing rather than key-comparison because entries get *modified*,
-/// not just added — an `impl` block grows an existing `AdtDef`'s `assoc` table,
-/// and a redefinition replaces a `FnSig` in place.
-#[derive(Default)]
-pub struct RegistrySignature(BTreeMap<(u8, String), u64>, Option<u64>);
+/// Where the checker's registry's writes were at some point: taken before a
+/// unit is loaded and handed to [`crate::check::Checker::capture_delta`]
+/// afterwards, which writes down everything written since.
+pub struct RegistrySignature(u64);
 
 impl RegistrySignature {
-    /// The generation of the rebuilt checker's registry as of now, for its
-    /// part of the delta; `None` when it is off or has made no registry yet.
-    pub(crate) fn set_rebuilt(&mut self, generation: Option<u64>) {
-        self.1 = generation;
+    /// The registry's writes as of the generation `generation`.
+    pub(crate) fn at(generation: u64) -> RegistrySignature {
+        RegistrySignature(generation)
     }
 
-    pub(crate) fn rebuilt(&self) -> Option<u64> {
-        self.1
-    }
-
-    pub(crate) fn record(&mut self, cat: u8, key: String, hash: u64) {
-        self.0.insert((cat, key), hash);
-    }
-
-    pub(crate) fn unchanged(&self, cat: u8, key: &str, hash: u64) -> bool {
-        self.0.get(&(cat, key.to_string())) == Some(&hash)
-    }
-
-    /// How many entries the registry held — reported by the artifact
-    /// generators so a delta that suddenly swallows the world is visible.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Every entry that differs between two signatures, as readable lines.
-    ///
-    /// The failure message of the round-trip guard test: "the two registries
-    /// are not equal" is useless, "`prelude::length` is missing on the restored
-    /// side" is the bug.
-    pub fn difference(&self, other: &RegistrySignature) -> Vec<String> {
-        let name = |cat: u8| match cat {
-            cat::MODULE => "module",
-            cat::FN => "fn",
-            cat::TYPE => "type",
-            cat::TRAIT => "trait",
-            cat::MACRO => "macro",
-            cat::CTOR => "ctor",
-            cat::VAR => "var",
-            cat::ALIAS => "alias",
-            cat::MOD_ALIAS => "mod-alias",
-            cat::STATIC_USE => "static-use",
-            cat::BLANKET => "blanket-impl",
-            cat::THROW_TAG => "throw-tag",
-            cat::PREDECLARED => "predeclared",
-            cat::FN_TEMPLATE => "fn-template",
-            cat::METHOD_TEMPLATE => "method-template",
-            cat::TYPE_ALIAS => "type-alias",
-            cat::STRUCT_DEFAULT => "struct-defaults",
-            cat::C_STRUCT => "c-struct",
-            cat::REEXPORT => "reexport",
-            _ => "doc",
-        };
-        let mut out = Vec::new();
-        for (key, hash) in &self.0 {
-            match other.0.get(key) {
-                None => out.push(format!("only on the left: {} {}", name(key.0), key.1)),
-                Some(h) if h != hash => out.push(format!("differs: {} {}", name(key.0), key.1)),
-                Some(_) => {}
-            }
-        }
-        for key in other.0.keys() {
-            if !self.0.contains_key(key) {
-                out.push(format!("only on the right: {} {}", name(key.0), key.1));
-            }
-        }
-        out
+    pub(crate) fn generation(&self) -> u64 {
+        self.0
     }
 }
 
@@ -264,389 +143,12 @@ pub fn parse<'a>(bytes: &'a [u8], label: &str) -> Result<Vec<UnitRef<'a>>, Strin
     Ok(units)
 }
 
-/// A generic `defun`'s retained source form, heap-independent.
-///
-/// The live `FnTemplate` holds `Vec<Value>` — raw read forms, permanently
-/// rooted. 61 of the prelude's 86 `defun`s are generic, so this is the bulk of
-/// its unit: an eval'd or newly-instantiated call at a fresh type argument
-/// re-checks the template.
-#[derive(Serialize, Deserialize)]
-pub struct WireFnTemplate {
-    pub parts: Vec<OwnedForm>,
-    pub ns: Vec<String>,
-    pub type_params: Vec<String>,
-}
-
-/// The `MethodTemplate` counterpart. `Getter`/`Setter` carry no form at all —
-/// `check_defstruct` synthesizes those bodies, so specialization re-synthesizes
-/// them from the owner's `AdtDef`.
-#[derive(Serialize, Deserialize)]
-pub enum WireMethodTemplate {
-    Form { parts: Vec<OwnedForm>, ns: Vec<String>, written_vars: Vec<String>, own_vars: Vec<String> },
-    Getter { index: usize },
-    Setter { index: usize },
-}
-
-/// What one unit added to the checker.
-///
-/// Entries are in walk order (a module before anything inside it), which is
-/// the order [`CheckerDelta::apply`] replays them in.
+/// What one unit wrote of the checker's registry
+/// (`typeck::wire::RebuiltUnit`, serialized): what the unit defined, and its
+/// generic bodies.
 #[derive(Default, Serialize, Deserialize)]
 pub struct CheckerDelta {
-    pub entries: Vec<Entry>,
-    /// Kept typed rather than in `entries` because applying one has to rebuild
-    /// its forms in the live heap and permanently root them.
-    pub fn_templates: Vec<(Path, WireFnTemplate)>,
-    /// The template's owner, its name (written down, since an
-    /// instantiation's own method is named by a specialization), and it.
-    pub method_templates: Vec<(Path, crate::owned_form::OwnedSym, WireMethodTemplate)>,
-    /// What the unit wrote of the rebuilt checker's registry
-    /// (`typeck::wire::RebuiltUnit`): what the unit defined, and its generic
-    /// bodies; empty for a unit that has none written down.
-    pub rebuilt: Vec<u8>,
-}
-
-/// Serializes `value` and returns the bytes together with their hash.
-///
-/// The hash is over the bytes rather than a `Hash` impl so that no registry
-/// type has to implement `Hash`, and so that "what changed" is exactly "what
-/// would be written down differently".
-pub(crate) fn wire<T: Serialize>(value: &T) -> Result<(Vec<u8>, u64), String> {
-    let bytes = bincode::serialize(value).map_err(|e| format!("dump: serializing failed: {}", e))?;
-    let mut h = DefaultHasher::new();
-    bytes.hash(&mut h);
-    Ok((bytes, h.finish()))
-}
-
-fn key_of(ns: &[String], name: &str) -> String {
-    if ns.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}::{}", ns.join("::"), name)
-    }
-}
-
-/// Feeds every registry entry to `visit` as `(category, namespace, name,
-/// serialized value, hash)`.
-///
-/// One walk, two readers: [`signature`] keeps the hashes and throws the bytes
-/// away, [`delta`] does the reverse. Writing it once is the point — a table
-/// that only one of them knew about would produce a delta that silently drops
-/// definitions.
-/// What [`walk`] hands every registry entry to: which table it came out of
-/// ([`cat`]), the namespace path it sits in, its own name, the serialized
-/// value, and that value's hash.
-type Visit<'a> = dyn FnMut(u8, &[String], &str, Vec<u8>, u64) -> Result<(), String> + 'a;
-
-fn walk(
-    reg: &Registry,
-    throw_tags: &ThrowTags,
-    predeclared: &[Path],
-    visit: &mut Visit<'_>,
-) -> Result<(), String> {
-    let (docs, struct_defaults) = (&reg.docs, &reg.struct_defaults);
-    walk_ns(reg, reg.root(), &mut Vec::new(), visit)?;
-
-    // Keyed absolutely, like the doc tables — this one hangs off the
-    // `Registry`, not off any namespace. The key is written in the payload,
-    // as a `Path` is; the identity the walk hands `visit` is only compared.
-    for (path, defaults) in struct_defaults {
-        let (bytes, hash) = wire(&(path, defaults))?;
-        visit(cat::STRUCT_DEFAULT, &[], &path.to_string(), bytes, hash)?;
-    }
-
-    // Each row is the identity, the key written as what it is, and the text.
-    macro_rules! doc_table {
-        ($cat:expr, $rows:expr) => {
-            let mut rows: Vec<_> = $rows.collect();
-            rows.sort_by(|a, b| a.0.cmp(&b.0));
-            for (identity, key, v) in rows {
-                let (bytes, hash) = wire(&(key, v))?;
-                visit($cat, &[], &identity, bytes, hash)?;
-            }
-        };
-    }
-    doc_table!(cat::DOC_FN, docs.fns.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
-    doc_table!(cat::DOC_TYPE, docs.types.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
-    doc_table!(cat::DOC_VAR, docs.vars.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
-    doc_table!(cat::DOC_TRAIT, docs.traits.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
-    doc_table!(cat::DOC_MACRO, docs.macros.iter().map(|(p, v)| (p.to_string(), p.clone(), v)));
-    doc_table!(cat::DOC_METHOD, docs.methods.iter().map(|(k, v)| (method_identity(k), method_key(k), v)));
-    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods.iter().map(|(k, v)| (method_identity(k), method_key(k), v)));
-
-    let mut tags: Vec<_> = throw_tags.iter().map(|(tag, ty)| (symbol_identity(*tag), tag, ty)).collect();
-    tags.sort_by(|a, b| a.0.cmp(&b.0));
-    for (identity, tag, ty) in tags {
-        let (bytes, hash) = wire(&(crate::owned_form::OwnedSym::of(*tag), ty))?;
-        visit(cat::THROW_TAG, &[], &identity, bytes, hash)?;
-    }
-    for path in predeclared {
-        let (bytes, hash) = wire(path)?;
-        visit(cat::PREDECLARED, &[], &path.to_string(), bytes, hash)?;
-    }
-    Ok(())
-}
-
-fn walk_ns(
-    reg: &Registry,
-    ns: &Namespace,
-    path: &mut Vec<String>,
-    visit: &mut Visit<'_>,
-) -> Result<(), String> {
-    // Sorted, not in iteration order: the namespace's own tables are
-    // `HashMap`s, so walking them as they come would put a unit's entries in a
-    // different order every run and make the dump's bytes differ from build to
-    // build for no change in content.
-    macro_rules! table {
-        ($cat:expr, $map:expr) => {
-            let mut rows: Vec<_> = $map.iter().collect();
-            rows.sort_by_key(|(name, _)| *name);
-            for (name, v) in rows {
-                let (bytes, hash) = wire(v)?;
-                visit($cat, path, name, bytes, hash)?;
-            }
-        };
-    }
-    table!(cat::FN, ns.fns);
-    table!(cat::TYPE, ns.types);
-    table!(cat::TRAIT, ns.traits);
-    table!(cat::MACRO, ns.macros);
-    table!(cat::CTOR, ns.ctors);
-    table!(cat::VAR, ns.vars);
-    table!(cat::ALIAS, ns.aliases);
-    table!(cat::REEXPORT, ns.reexports);
-    // A module is written as its segments from the root, as a `Path` is.
-    let mut rows: Vec<_> = ns.mod_aliases.iter().collect();
-    rows.sort_by_key(|(name, _)| *name);
-    for (name, m) in rows {
-        let (bytes, hash) = wire(&typelisp_mem::symbols::ns_path(*m))?;
-        visit(cat::MOD_ALIAS, path, name, bytes, hash)?;
-    }
-    // The member as its symbol written down, as a `Path`'s name is.
-    let mut rows: Vec<_> = ns.static_uses.iter().collect();
-    rows.sort_by_key(|(name, _)| *name);
-    for (name, (ty, member)) in rows {
-        let (bytes, hash) = wire(&(ty, crate::owned_form::OwnedSym::of(*member)))?;
-        visit(cat::STATIC_USE, path, name, bytes, hash)?;
-    }
-    table!(cat::TYPE_ALIAS, ns.type_aliases);
-    table!(cat::C_STRUCT, ns.c_structs);
-    // Positional, not keyed: at most one blanket `impl` may cover any trait,
-    // so the index is a stable identity for as long as the list only grows.
-    for (i, imp) in ns.blanket_impls.iter().enumerate() {
-        let (bytes, hash) = wire(imp)?;
-        visit(cat::BLANKET, path, &i.to_string(), bytes, hash)?;
-    }
-
-    let mut children = reg.children(ns.ns);
-    children.sort_by_key(|(name, _)| *name);
-    for (name, child) in children {
-        // Emitted before its contents so `apply` creates the module first —
-        // and so a module that is *only* a container still appears.
-        let (bytes, hash) = wire(&())?;
-        visit(cat::MODULE, path, name, bytes, hash)?;
-        path.push(name.to_string());
-        walk_ns(reg, child, path, visit)?;
-        path.pop();
-    }
-    Ok(())
-}
-
-/// Every entry's content hash, as of now.
-pub fn signature(
-    reg: &Registry,
-    throw_tags: &ThrowTags,
-    predeclared: &[Path],
-) -> Result<RegistrySignature, String> {
-    let mut sig = RegistrySignature::default();
-    walk(reg, throw_tags, predeclared, &mut |cat, ns, name, _bytes, hash| {
-        sig.record(cat, key_of(ns, name), hash);
-        Ok(())
-    })?;
-    Ok(sig)
-}
-
-/// Every entry that is new or different since `before`.
-pub fn delta(
-    reg: &Registry,
-    throw_tags: &ThrowTags,
-    predeclared: &[Path],
-    before: &RegistrySignature,
-) -> Result<Vec<Entry>, String> {
-    let mut entries = Vec::new();
-    walk(reg, throw_tags, predeclared, &mut |cat, ns, name, bytes, hash| {
-        if !before.unchanged(cat, &key_of(ns, name), hash) {
-            entries.push(Entry { cat, ns: ns.to_vec(), name: name.to_string(), payload: bytes });
-        }
-        Ok(())
-    })?;
-    Ok(entries)
-}
-
-/// Reinstates `entries` in a live registry.
-///
-/// Inserts straight into each table rather than going through
-/// `Namespace::add_type` and friends: the walk recorded what the tables *held*,
-/// including the constructor index those helpers maintain, so replaying their
-/// side effects on top would be doing the same work twice from worse
-/// information.
-#[allow(clippy::too_many_arguments)]
-pub fn apply_entries(
-    reg: &mut Registry,
-    throw_tags: &mut ThrowTags,
-    predeclared: &mut dyn FnMut(Path),
-    entries: Vec<Entry>,
-) -> Result<(), String> {
-    for e in entries {
-        let module = typelisp_mem::symbols::ns_of(&e.ns);
-        match e.cat {
-            cat::MODULE => {
-                reg.module_mut(typelisp_mem::symbols::child_ns(module, &e.name));
-            }
-            cat::FN => {
-                let v: FnSig = bincode::deserialize(&e.payload).map_err(|err| read_failed("function signature", err))?;
-                reg.module_mut(module).fns.insert(e.name, v);
-            }
-            cat::TYPE => {
-                let v: AdtDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("type", err))?;
-                reg.module_mut(module).types.insert(e.name, v);
-            }
-            cat::TRAIT => {
-                let v: TraitDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("trait", err))?;
-                reg.module_mut(module).traits.insert(e.name, v);
-            }
-            cat::MACRO => {
-                let v: MacroDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("macro", err))?;
-                reg.module_mut(module).macros.insert(e.name, v);
-            }
-            cat::CTOR => {
-                let v: (Path, usize) = bincode::deserialize(&e.payload).map_err(|err| read_failed("constructor", err))?;
-                reg.module_mut(module).ctors.insert(e.name, v);
-            }
-            cat::VAR => {
-                let v: VarInfo = bincode::deserialize(&e.payload).map_err(|err| read_failed("global", err))?;
-                reg.module_mut(module).vars.insert(e.name, v);
-            }
-            cat::ALIAS => {
-                let v: Path = bincode::deserialize(&e.payload).map_err(|err| read_failed("use alias", err))?;
-                reg.module_mut(module).aliases.insert(e.name, v);
-            }
-            cat::REEXPORT => {
-                reg.module_mut(module).reexports.insert(e.name, ());
-            }
-            cat::MOD_ALIAS => {
-                let v: Vec<String> = bincode::deserialize(&e.payload).map_err(|err| read_failed("module alias", err))?;
-                reg.module_mut(module).mod_aliases.insert(e.name, typelisp_mem::symbols::ns_of(&v));
-            }
-            cat::STATIC_USE => {
-                let (ty, member): (Path, crate::owned_form::OwnedSym) =
-                    bincode::deserialize(&e.payload).map_err(|err| read_failed("static use", err))?;
-                reg.module_mut(module).static_uses.insert(e.name, (ty, member.symbol()));
-            }
-            cat::TYPE_ALIAS => {
-                let v: TypeAlias = bincode::deserialize(&e.payload).map_err(|err| read_failed("type alias", err))?;
-                reg.module_mut(module).type_aliases.insert(e.name, v);
-            }
-            cat::C_STRUCT => {
-                let v: CStructDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("C struct", err))?;
-                reg.module_mut(module).c_structs.insert(e.name, v);
-            }
-            cat::STRUCT_DEFAULT => {
-                let (path, v): (Path, Vec<Option<OwnedForm>>) =
-                    bincode::deserialize(&e.payload).map_err(|err| read_failed("struct slot defaults", err))?;
-                reg.struct_defaults.insert(path, v);
-            }
-            cat::BLANKET => {
-                let v: BlanketImpl = bincode::deserialize(&e.payload).map_err(|err| read_failed("blanket impl", err))?;
-                let index: usize =
-                    e.name.parse().map_err(|_| format!("dump: blanket impl index `{}` is not a number", e.name))?;
-                let list = &mut reg.module_mut(module).blanket_impls;
-                if index < list.len() {
-                    list[index] = v;
-                } else if index == list.len() {
-                    list.push(v);
-                } else {
-                    return Err(format!(
-                        "dump: blanket impl {} arrives with only {} in place — the units were applied out of order",
-                        index,
-                        list.len()
-                    ));
-                }
-            }
-            cat::THROW_TAG => {
-                let (tag, v): (crate::owned_form::OwnedSym, Type) =
-                    bincode::deserialize(&e.payload).map_err(|err| read_failed("throw tag", err))?;
-                throw_tags.insert(tag.symbol(), v);
-            }
-            cat::PREDECLARED => {
-                let path: Path = bincode::deserialize(&e.payload).map_err(|err| read_failed("declaration", err))?;
-                predeclared(path)
-            }
-            cat::DOC_FN => {
-                let (path, text) = doc_row(&e.payload)?;
-                reg.docs.fns.insert(path, text);
-            }
-            cat::DOC_TYPE => {
-                let (path, text) = doc_row(&e.payload)?;
-                reg.docs.types.insert(path, text);
-            }
-            cat::DOC_VAR => {
-                let (path, text) = doc_row(&e.payload)?;
-                reg.docs.vars.insert(path, text);
-            }
-            cat::DOC_TRAIT => {
-                let (path, text) = doc_row(&e.payload)?;
-                reg.docs.traits.insert(path, text);
-            }
-            cat::DOC_MACRO => {
-                let (path, text) = doc_row(&e.payload)?;
-                reg.docs.macros.insert(path, text);
-            }
-            cat::DOC_METHOD => {
-                let ((owner, member), text): ((Path, crate::owned_form::OwnedSym), String) = doc_row(&e.payload)?;
-                reg.docs.methods.insert((owner, member.symbol()), text);
-            }
-            cat::DOC_TRAIT_METHOD => {
-                let ((owner, member), text): ((Path, crate::owned_form::OwnedSym), String) = doc_row(&e.payload)?;
-                reg.docs.trait_methods.insert((owner, member.symbol()), text);
-            }
-            other => return Err(format!("dump: entry category {} is not one this build knows", other)),
-        }
-    }
-    Ok(())
-}
-
-/// The one message shape every mis-read entry gets, so a corrupt or
-/// version-skewed dump names the table it broke on.
-fn read_failed(what: &str, err: bincode::Error) -> String {
-    format!("dump: reading a {}: {}", what, err)
-}
-
-fn doc_row<K: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<(K, String), String> {
-    bincode::deserialize(payload).map_err(|e| format!("dump: reading a docstring: {}", e))
-}
-
-/// The checker's throw tags: the type each `catch`/`throw` tag carries, by
-/// the tag's symbol.
-pub type ThrowTags = std::collections::HashMap<SymRef, Type>;
-
-/// A method table's key as written: the owner's path and the member symbol.
-pub(crate) fn method_key(k: &(Path, SymRef)) -> (Path, crate::owned_form::OwnedSym) {
-    (k.0.clone(), crate::owned_form::OwnedSym::of(k.1))
-}
-
-/// The identity a method table's row is compared under between two
-/// signatures. Never read back: the key itself is in the payload.
-pub(crate) fn method_identity(k: &(Path, SymRef)) -> String {
-    typelisp_mem::ConcreteNames::method_link(&k.0, k.1.name())
-}
-
-/// The identity a symbol-keyed row is compared under: its module's segments
-/// and its spelling, so two modules' `'done` are two rows.
-fn symbol_identity(sym: SymRef) -> String {
-    let mut segments = typelisp_mem::symbols::ns_path(sym.home());
-    segments.push(sym.spelling().to_string());
-    segments.join("::")
+    pub registry: Vec<u8>,
 }
 
 /// One compilation's output: what it added to the checker, and what its

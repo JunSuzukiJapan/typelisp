@@ -454,10 +454,10 @@ fn reown(scope: &TypeScope, of: &Of) -> Subst {
 /// The bounds a method of the `impl` `of` has: its `(:where ...)`, read
 /// where `tcx` says, and for a blanket `impl` the trait itself on its type
 /// parameter.
-fn method_bounds(heap: &Heap, tcx: &TypeCx, scope: &TypeScope, of: &Of) -> Result<Vec<(TypeParam, crate::check::registry::TraitBound)>, Error> {
+fn method_bounds(heap: &Heap, tcx: &TypeCx, scope: &TypeScope, of: &Of) -> Result<Vec<(TypeParam, crate::typeck::registry::TraitBound)>, Error> {
     let mut bounds = of.clause.map(|c| parse_where(heap, tcx, c)).transpose()?.unwrap_or_default();
     if of.blanket {
-        bounds.push((scope.params()[0], crate::check::registry::TraitBound { trait_path: of.trait_path, assoc: Default::default() }));
+        bounds.push((scope.params()[0], crate::typeck::registry::TraitBound { trait_path: of.trait_path, assoc: Default::default() }));
     }
     Ok(bounds)
 }
@@ -595,7 +595,7 @@ fn check_method(
     want: &super::registry::FnDef,
     shown: &str,
     item: Value,
-) -> Result<(Option<Value>, Vec<(TypeParam, crate::check::registry::TraitBound)>), Error> {
+) -> Result<(Option<Value>, Vec<(TypeParam, crate::typeck::registry::TraitBound)>), Error> {
     let elems = heap.list_to_vec_locs(item)?;
     let rest = match elems.split_first() {
         Some(((Value::Symbol(p), _), rest)) if p.is(wk::PUB) => &rest[1..],

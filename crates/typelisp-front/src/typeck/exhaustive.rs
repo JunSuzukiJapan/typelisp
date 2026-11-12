@@ -7,7 +7,7 @@
 //! pattern counts: `((node (leaf) r) ..)` does not cover every `node`.
 
 use crate::check::analyze::{is_option_of_sexpr, OPTION_NONE};
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::sexpr_variant;
 use crate::types::{path_is_builtin, Path, Type};
 use crate::wk;

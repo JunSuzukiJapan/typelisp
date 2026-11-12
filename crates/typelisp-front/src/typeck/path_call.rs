@@ -4,7 +4,7 @@
 //! The path is followed as it was read (`types::path_target`): to a member
 //! of a type, or to a name in a module.
 
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::types::{path_spelling, path_target, Path, PathTarget, Type};
 use crate::{Error, Heap, Loc, PathId, Value};
 use typelisp_mem::symbols::member_symbol;

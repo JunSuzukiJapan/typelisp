@@ -1,6 +1,6 @@
 //! Reading a written type.
 
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::check::semantic::{TypeKind, TypeUse};
 use crate::types::{is_dyn_form, is_type_application, last_segment_span, scalar_of_symbol, scalar_type, tuple_path, written_path, Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};

@@ -8,7 +8,7 @@
 //! are other parameters, whatever they are called.
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{is_type_application, prim_type_path, scalar_of_symbol, ParamOwner, Path, Type, TypeParam};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{member_symbol, NsId};

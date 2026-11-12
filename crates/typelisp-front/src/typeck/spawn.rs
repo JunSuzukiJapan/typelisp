@@ -6,7 +6,7 @@
 //! without the form, and it has to lower to one.
 
 use crate::check::analyze::{SPECIAL_FORM_HEADS, TOPLEVEL_FORM_HEADS};
-use crate::check::registry::{task_of, thread_of};
+use super::builtins::{task_of, thread_of};
 use crate::{wk, Error, Heap, Loc, Value};
 
 use super::expr::{check_expr, Cx};

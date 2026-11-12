@@ -1,5 +1,5 @@
 //! Tests for the redefinition-policy safety net (`Checker::check_redef`):
-//! redefining a built-in (`Registry::with_builtins`-registered) name is
+//! redefining a built-in (`typeck::builtins`) name is
 //! always an error, regardless of `RedefPolicy`; redefining anything else
 //! follows the configured policy (`Warn` by default).
 
@@ -35,7 +35,7 @@ fn redefining_a_builtin_function_is_always_an_error() {
     // level names now (`car` is the `cons<T,U>` pair accessor — Symbol/Sexpr
     // redesign Phase 4b), and this `run` helper loads no prelude, so redefining
     // them wouldn't conflict with what this test checks. `sexpr-car` is a
-    // genuine `Registry::with_builtins` free function (direct cons-heap access —
+    // genuine `typeck::builtins` free function (direct cons-heap access —
     // can't be written in typelisp itself), so it still exercises this rule.
     // In `std::sexpr`, where the function is registered: a definition
     // anywhere else is another module's name.

@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::check::{TestCase, TestForms, TestReturn};
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 

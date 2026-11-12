@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use crate::check::core::Unmet;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{prim_type_path, Path, Type, TypeParam};
 use crate::{Error, Heap, Value};
 

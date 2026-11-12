@@ -11,8 +11,7 @@ use typelisp_mem::{wk, Error, Heap, RootScope, SymRef, Value};
 use crate::types::{Path, Type};
 use super::analyze::*;
 use super::core::{self, Items};
-use super::info::Info;
-use super::registry::{AdtKind, Variant};
+use crate::typeck::registry::{AdtKind, Variant};
 use super::repr::Repr;
 use super::forms;
 
@@ -205,7 +204,7 @@ pub(crate) trait CoreForms {
         // instantiation travels from here, the one place that knows it. The
         // representation above cannot stand in: `Repr::Vector(Int)` is
         // `Vector<i32>` and `Vector<i64>` at once.
-        let key = core::type_form(f.heap(), ret, &[])?;
+        let key = core::type_form(f.heap(), ret)?;
         f.push(key);
         for (i, a) in args.iter().enumerate() {
             let form = if declared_int(i) { untag_int_form(f.heap(), a.form)? } else { a.form };
@@ -256,7 +255,7 @@ pub(crate) trait CoreForms {
         f.push(Value::Symbol(method));
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
-        let key = core::type_form(f.heap(), ret, &[])?;
+        let key = core::type_form(f.heap(), ret)?;
         f.push(key);
         f.finish(wk::METHODREF)
     }
@@ -319,7 +318,7 @@ pub(crate) trait CoreForms {
         // above stays for the questions that are about the *definition*
         // (struct or enum, where it was defined); this is the one about the
         // *value* (which instantiation it is).
-        let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.to_vec()), &[])?;
+        let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.to_vec()))?;
         f.push(key);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(mutable));
@@ -386,7 +385,7 @@ pub(crate) trait CoreForms {
         let mut f = Items::new(heap);
         let tp = core::definition_form(type_name);
         f.push(tp);
-        let key = core::type_form(f.heap(), &Type::Named(*type_name, targs.to_vec()), &[])?;
+        let key = core::type_form(f.heap(), &Type::Named(*type_name, targs.to_vec()))?;
         f.push(key);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(downcast));
@@ -501,7 +500,7 @@ pub(crate) trait CoreForms {
         value: Value,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let key = core::type_form(f.heap(), value_ty, &[])?;
+        let key = core::type_form(f.heap(), value_ty)?;
         f.push(key);
         let tp = core::definition_form(trait_path);
         f.push(tp);
@@ -632,12 +631,12 @@ pub(crate) trait CoreForms {
         f.push(r);
         let mut cs = Items::new(f.heap());
         for t in params {
-            let k = core::type_form(cs.heap(), t, &[])?;
+            let k = core::type_form(cs.heap(), t)?;
             cs.push(k);
         }
         let types = cs.finish_list()?;
         f.push(types);
-        let rk = core::type_form(f.heap(), ret, &[])?;
+        let rk = core::type_form(f.heap(), ret)?;
         f.push(rk);
         f.finish(wk::DEFFFI)
     }
@@ -717,7 +716,6 @@ pub(crate) trait CoreForms {
         &self,
         heap: &mut Heap,
         name: &Path,
-        params: &[String],
         fields: &[Type],
         names: &[String],
     ) -> Result<Value, Error> {
@@ -726,7 +724,7 @@ pub(crate) trait CoreForms {
         f.push(path);
         let reprs = self.repr_forms(f.heap(), fields.to_vec())?;
         f.push(reprs);
-        let templates = field_template_list(f.heap(), params, fields)?;
+        let templates = field_template_list(f.heap(), fields)?;
         f.push(templates);
         let names = string_list(f.heap(), names)?;
         f.push(names);
@@ -736,7 +734,7 @@ pub(crate) trait CoreForms {
     /// `(defenum PATH (SYM...) ((REPR...)...) ((TEMPLATE...)...))` — the
     /// variant names, then each variant's field representations, then each
     /// variant's field key templates (see [`Self::defstruct_form`]).
-    fn defenum_form(&self, heap: &mut Heap, name: &Path, params: &[String], variants: &[Variant]) -> Result<Value, Error> {
+    fn defenum_form(&self, heap: &mut Heap, name: &Path, variants: &[Variant]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = core::definition_form(name);
         f.push(path);
@@ -753,7 +751,7 @@ pub(crate) trait CoreForms {
         f.push(per_variant);
         let mut ts = Items::new(f.heap());
         for v in variants {
-            let templates = field_template_list(ts.heap(), params, &v.fields)?;
+            let templates = field_template_list(ts.heap(), &v.fields)?;
             ts.push(templates);
         }
         let per_variant_templates = ts.finish_list()?;
@@ -762,26 +760,3 @@ pub(crate) trait CoreForms {
     }
 }
 
-impl CoreForms for Info {
-    fn type_kind(&self, p: &Path) -> Option<AdtKind> {
-        self.reg.type_def(p).map(|d| d.kind)
-    }
-
-    fn builtin_fn_sig(&self, p: &Path) -> Option<(Vec<Type>, Type)> {
-        self.reg.fn_sig(p).filter(|sig| sig.builtin && !sig.ffi).map(|sig| (sig.params.clone(), sig.ret.clone()))
-    }
-
-    fn builtin_method_sig(&self, owner: &Path, method: SymRef) -> Option<(Vec<Type>, Type)> {
-        self.reg
-            .type_def(owner)
-            .and_then(|d| d.assoc.get(method))
-            .filter(|af| af.builtin)
-            .map(|af| (af.sig.params.clone(), af.sig.ret.clone()))
-    }
-}
-
-/// The builders that are this checker's own: they read its registry's
-/// name-keyed type parameters, or lower its tree's nodes themselves.
-impl Info {
-
-}

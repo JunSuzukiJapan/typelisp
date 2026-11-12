@@ -22,7 +22,7 @@ use super::looping::LoopExit;
 use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use super::{binding, block, call, catch, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
 use crate::check::analyze::TOPLEVEL_FORM_HEADS;
 use super::type_syntax::mentions_raw_word;

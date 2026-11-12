@@ -38,7 +38,7 @@ pub(crate) fn check_make_instance(
     };
     let (path, def, targs) = instance_type(cx, heap, written, written_at.as_ref())?;
     let tname = path.to_string();
-    if def.kind != crate::check::registry::AdtKind::Struct || def.builtin {
+    if def.kind != crate::typeck::registry::AdtKind::Struct || def.builtin {
         return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", crate::check::core::print(heap, written))));
     }
     let subst = Subst::positional(&def.params, &targs);

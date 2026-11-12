@@ -6,7 +6,7 @@
 //! body are expanded as a module-level macro's are.
 
 use crate::check::analyze::{parse_macro_lambda_list, MacroShape};
-use crate::check::registry::MacroDef;
+use crate::typeck::registry::MacroDef;
 use crate::check::verify::bound_name;
 use crate::types::{Path, Type};
 use crate::{Error, Heap, Loc, Value};

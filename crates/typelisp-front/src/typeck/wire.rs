@@ -139,21 +139,6 @@ pub(crate) struct RegistryDelta {
     pub(crate) local_macros: u64,
 }
 
-impl RegistryDelta {
-    /// Whether it writes no entry. The counters are not entries.
-    fn is_empty(&self) -> bool {
-        let RegistryDelta {
-            values, types, methods, inst_methods, method_names, imports, reexports, ctors, static_uses, module_aliases,
-            modules, trait_impls, blanket_impls, blanket_owners, docs, predeclared, throw_tags, callbacks_lifted: _, local_macros: _,
-        } = self;
-        values.is_empty() && types.is_empty() && methods.is_empty() && inst_methods.is_empty() && method_names.is_empty()
-            && imports.is_empty() && reexports.is_empty() && ctors.is_empty() && static_uses.is_empty() && module_aliases.is_empty()
-            && modules.is_empty()
-            && trait_impls.is_empty() && blanket_impls.is_empty() && blanket_owners.is_empty() && docs.is_empty()
-            && predeclared.is_empty() && throw_tags.is_empty()
-    }
-}
-
 /// What a unit wrote of the rebuilt checker's registry: its entries and
 /// its generic bodies.
 #[derive(Default, Serialize, Deserialize)]
@@ -183,21 +168,6 @@ pub(crate) struct Unit {
 }
 
 impl Unit {
-    /// Whether it holds registry entries, not only generic bodies.
-    pub(crate) fn has_entries(&self) -> bool {
-        !self.registry.is_empty()
-    }
-
-    /// What `old`, a registry holding only what a unit the current checker
-    /// checked defines, defines, as the rebuilt checker's. Only while the
-    /// two checkers run side by side: a unit written with the rebuilt
-    /// checker off has nothing of its own for it.
-    pub(crate) fn bridged(old: &crate::check::Registry) -> Unit {
-        let mut reg = Registry::default();
-        super::bridge::import(old, &mut reg);
-        Unit { registry: reg.changed_since(0), bodies: Bodies::default() }
-    }
-
     /// Into `reg`, uncommitted.
     pub(crate) fn apply(self, reg: &mut Registry) {
         reg.apply(self.registry);

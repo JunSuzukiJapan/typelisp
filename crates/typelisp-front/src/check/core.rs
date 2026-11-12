@@ -636,19 +636,17 @@ pub fn root_path_value(heap: &Heap, v: Value) -> Option<crate::Path> {
 
 /// A type, as a core form field writes one: the form
 /// [`typelisp_mem::type_key_of_form`] reads a value's runtime identity off.
-///
-/// `params` are the owning type's parameters, for a field's template: the
-/// `N`th is written `(type-param N)`. Any other type variable is a generic
-/// definition's own parameter, in a body that is lowered but never run, and
-/// is written `(type-var "NAME")`.
-pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value, Error> {
+/// A type parameter — of the owning type, in a field's template, or of a
+/// generic definition, in a body that is lowered but never run — is written
+/// `(type-param N)` by its position.
+pub fn type_form(heap: &mut Heap, ty: &Type) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     let tag = match ty {
         Type::Named(p, args) | Type::Dyn(p, args) => {
             let v = definition_form(p);
             f.push(v);
             for a in args {
-                let v = type_form(f.heap(), a, params)?;
+                let v = type_form(f.heap(), a)?;
                 f.push(v);
             }
             if matches!(ty, Type::Named(..)) { wk::TYPE_NAMED } else { wk::TYPE_DYN }
@@ -656,22 +654,22 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
         Type::Fn(ps, rest, ret) => {
             let mut l = Items::new(f.heap());
             for p in ps {
-                let v = type_form(l.heap(), p, params)?;
+                let v = type_form(l.heap(), p)?;
                 l.push(v);
             }
             let l = l.finish_list()?;
             f.push(l);
             let r = match rest {
-                Some(t) => type_form(f.heap(), t, params)?,
+                Some(t) => type_form(f.heap(), t)?,
                 None => Value::Empty,
             };
             f.push(r);
-            let r = type_form(f.heap(), ret, params)?;
+            let r = type_form(f.heap(), ret)?;
             f.push(r);
             wk::TYPE_FN
         }
         Type::PtrTo(t) => {
-            let v = type_form(f.heap(), t, params)?;
+            let v = type_form(f.heap(), t)?;
             f.push(v);
             wk::TYPE_PTR
         }
@@ -680,19 +678,8 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
             f.push(v);
             wk::TYPE_CSTRUCT
         }
-        Type::Var(name) => match params.iter().position(|p| p == name) {
-            Some(i) => {
-                f.push(Value::Int(i as i64));
-                wk::TYPE_PARAM
-            }
-            None => {
-                let v = f.heap().alloc_string(name.clone());
-                f.push(v);
-                wk::TYPE_VAR
-            }
-        },
-        // The rebuilt checker writes a field's type in its type's own
-        // parameters, by position, and lowers nothing else that has one.
+        // A field's type is written in its type's own parameters, by
+        // position, and so is a generic body's.
         Type::Param(p) => {
             f.push(Value::Int(p.index as i64));
             wk::TYPE_PARAM
@@ -940,7 +927,7 @@ mod tests {
             Type::CStruct(Path::root("timeval")),
         ];
         for ty in &types {
-            let form = type_form(&mut heap, ty, &[]).expect("type form");
+            let form = type_form(&mut heap, ty).expect("type form");
             assert_eq!(type_key_of_form(&heap, form).as_deref(), Some(ty.type_key().as_str()), "{:?}", ty);
         }
     }

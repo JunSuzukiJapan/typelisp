@@ -6,7 +6,7 @@
 //! LSP-transport-specific and covered by `src/bin/lsp.rs`'s own unit tests).
 //!
 //! `Checker::new()` (unlike a real document's checker, which loads the
-//! prelude) still registers every Rust-implemented builtin (`with_builtins`)
+//! prelude) still registers every Rust-implemented builtin (`typeck::builtins`)
 //! — so assertions check for the presence/absence of the user-defined names
 //! each test cares about (`contains`/`!contains`), not an exact candidate
 //! list, the same way a real completion response would mix builtins in

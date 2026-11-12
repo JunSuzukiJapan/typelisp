@@ -10,7 +10,7 @@
 
 use crate::check::analyze::{option_of_sexpr, parse_macro_lambda_list, MacroLambda, MacroShape};
 use crate::check::bound_name;
-use crate::check::registry::MacroDef;
+use crate::typeck::registry::MacroDef;
 use crate::types::{Path, Type};
 use crate::check::MacroExpander;
 use crate::{Error, Heap, Loc, Value};

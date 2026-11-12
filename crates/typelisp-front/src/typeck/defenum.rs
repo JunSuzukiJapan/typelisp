@@ -8,7 +8,7 @@
 //! the type, and taken apart with `match`.
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::{AdtKind, Variant};
+use crate::typeck::registry::{AdtKind, Variant};
 use crate::types::{ParamOwner, Path};
 use crate::{Error, Heap, Loc, Value};
 use typelisp_mem::symbols::member_symbol;
@@ -64,7 +64,7 @@ pub(crate) fn check_defenum(reg: &mut Registry, d: &mut Definer, heap: &mut Heap
         return Err(Error::TypeError("defenum: needs at least one variant".into()));
     }
     reg.types.insert(path, TypeEntry::Type(TypeDef { variants: variants.clone(), ..stub }));
-    reg.defenum_form(heap, &path, &[], &variants)
+    reg.defenum_form(heap, &path, &variants)
 }
 
 /// `(Variant Type...)` or a bare `Variant`.

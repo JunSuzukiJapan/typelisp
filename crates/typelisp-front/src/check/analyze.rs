@@ -9,8 +9,6 @@
 //! everything else synthesizes its own type and is reconciled against the
 //! expectation.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 
 
 use crate::{wk, Error, Heap, Loc, Path, RootScope, Type, Value};
@@ -27,7 +25,7 @@ mod attribute;
 mod c_struct;
 mod ffi_callback;
 pub use attribute::{TestCase, TestForms, TestReturn};
-use super::registry::{AdtKind, MacroDef, Registry};
+use crate::typeck::registry::{AdtKind, MacroDef};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -185,8 +183,8 @@ impl MacroShape {
 
 /// What happens when a `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`
 /// reuses a name already defined by *non-builtin* code (the same module, in
-/// the same namespace). Redefining a builtin (`with_builtins`-registered) is
-/// always an error, regardless of this setting — see [`Checker::check_redef`].
+/// the same namespace). Redefining a builtin (`typeck::builtins`) is always an
+/// error, regardless of this setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RedefPolicy {
     /// Allow the redefinition, but record a warning (`Checker::take_warnings`).
@@ -198,59 +196,6 @@ pub enum RedefPolicy {
     Silent,
 }
 
-
-/// A generic `defun`'s retained raw source form, for re-checking at each
-/// concrete instantiation — see [`Checker::specialize_defun`]. The checked
-/// `Typed` body can't serve this purpose: it was lowered once with the type
-/// variables still abstract, and everything the checker *derives* from types
-/// (`construct`'s `MUTABLE`, `Pattern::Ctor::sexpr_fields`, method
-/// resolution, an unresolved bounded-generic call vs `assoc`) would have to be re-derived
-/// anyway — re-running the checker on the source with the type variables
-/// bound (see `Checker::type_var_bindings`) gets all of that for free.
-#[derive(Clone)]
-struct FnTemplate {
-    /// The `defun` form's parts (everything after the `defun` symbol),
-    /// exactly as `check_defun` received them. Each `Value` is permanently
-    /// rooted in the heap (`Heap::push_permanent_root`) — a template must
-    /// outlive any number of GC cycles between its definition and its last
-    /// instantiation.
-    parts: Vec<Value>,
-    /// The namespace the `defun` was defined in — specialization re-checks
-    /// the body under the *defining* module's name resolution, not the
-    /// caller's.
-    ns: typelisp_mem::NsId,
-    type_params: Vec<String>,
-}
-
-/// A generic associated method, retained for per-instantiation
-/// re-generation — the method-side counterpart of [`FnTemplate`]. A method
-/// is generic through its *owner* (`Option<T>`'s `unwrap`, a generic
-/// `defstruct`'s accessors), through type parameters of its own (`map<U>`),
-/// or both. The instantiation arguments are the owner's type arguments
-/// followed by the method's own.
-#[derive(Clone)]
-enum MethodTemplate {
-    /// A written `defmethod` whose receiver names the owner's type
-    /// parameters (directly, or synthesized by `check_impl`'s
-    /// `Self`-substitution). `written_vars` are the type-variable names *as
-    /// the receiver spelled them* (`(self Option<U>)` -> `["u"]`), zipped
-    /// positionally with the owner's concrete type arguments at
-    /// specialization time — they need not match the `AdtDef::params`
-    /// names the call site's substitution is keyed by. Empty when the
-    /// receiver names no variables (the owner is not generic, or the method
-    /// is written for one instantiation of it).
-    ///
-    /// `own_vars` are the method's own type parameters, bound to the
-    /// instantiation arguments after the owner's.
-    Form { parts: Vec<Value>, ns: typelisp_mem::NsId, written_vars: Vec<String>, own_vars: Vec<String> },
-    /// A generic `defstruct` field getter — there is no raw form to
-    /// re-check (`check_defstruct` synthesizes accessor ASTs directly), so
-    /// specialization re-synthesizes the `FieldGet` with the field type
-    /// substituted from the owner's `AdtDef`.
-    Getter { index: usize },
-    /// The matching `set-<field>` setter (`FieldSet`).
-    Setter { index: usize },
-}
 
 /// The synthetic `TopLevel::Module` path under which `check_form` bundles
 /// monomorphized specializations together with the form that requested them.
@@ -333,7 +278,7 @@ pub(crate) fn vector_literal_form(heap: &mut Heap, elem_ty: Option<&Type>, elems
     forms::list_from_vec_locs(&mut s, &items)
 }
 
-/// `Option`'s variant indices (`check::registry::option_def`). Written down
+/// `Option`'s variant indices (`typeck::builtins`'s `Option`). Written down
 /// once because three places already depend on the order — `()`'s inference
 /// rule, the niche pattern shapes, and `check_construct`'s `None` shortcut.
 pub(crate) const OPTION_SOME: usize = 0;
@@ -426,10 +371,10 @@ pub(super) fn int_boundary_native_fn(name: SymRef) -> bool {
 /// The `(TEMPLATE...)` list a `defstruct`/`defenum` form carries: each
 /// field's type, the owning type's parameters written as `(type-param N)`
 /// ([`core::type_form`]).
-pub(super) fn field_template_list(heap: &mut Heap, params: &[String], fields: &[Type]) -> Result<Value, Error> {
+pub(super) fn field_template_list(heap: &mut Heap, fields: &[Type]) -> Result<Value, Error> {
     let mut items = Items::new(heap);
     for field in fields {
-        let t = core::type_form(items.heap(), field, params)?;
+        let t = core::type_form(items.heap(), field)?;
         items.push(t);
     }
     items.finish_list()
@@ -477,53 +422,14 @@ pub struct NsContext {
 
 
 pub struct Checker {
-    /// What names mean where the checker is: the registry, the module
-    /// context, and the lexical scopes of type variables and local macros —
-    /// see [`Info`].
+    /// The module context: the module forms are checked in, and the files'
+    /// own modules — see [`Info`].
     info: Info,
-    /// The type each `catch`/`throw` symbol carries, learned from the first
-    /// use of that symbol and enforced on every later one.
-    ///
-    /// `catch`/`throw` are *dynamic* — CL's, not a lexical `block`/
-    /// `return-from` — so a `(throw 'found v)` can sit in a function called
-    /// from inside `(catch 'found ...)`, with no lexical nesting between
-    /// them. That rules out the mechanism [`Self::loop_stack`] uses, where
-    /// `break`/`return` unify into the enclosing frame they can see: the
-    /// throw site cannot see its catch site at all.
-    ///
-    /// What both sites *can* see is the symbol, so that is where the type
-    /// lives. `(catch 'found body)` has `body`'s type, and registers it under
-    /// `found`; `(throw 'found v)` checks `v` against whatever `found` is
-    /// already known to carry (or establishes it, when the throw is checked
-    /// first). Using one symbol for two types is a type error, which is the
-    /// price of dynamic tags in a statically typed language — and what lets
-    /// `(throw 'found 42)` be rejected where `found` carries strings.
-    ///
-    /// Keyed by the tag's symbol; a dump writes it as the symbol written
-    /// down (`owned_form::OwnedSym`).
-    throw_tags: RefCell<crate::dump::ThrowTags>,
     /// What to do when a `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`
     /// reuses a non-builtin name — see [`RedefPolicy`]. Defaults to `Warn`;
     /// override with [`Self::set_redef_policy`] (e.g. from a CLI flag).
     redef_policy: RedefPolicy,
-    /// Every generic `defun`'s retained source form, keyed by its
-    /// fully-qualified path — see [`FnTemplate`].
-    generic_fn_templates: HashMap<Path, FnTemplate>,
-    /// Every generic method's retained template, keyed by `(owner type
-    /// path, method name)` — the [`method_specialization`]'s name for a method written
-    /// for one instantiation of its type. See [`MethodTemplate`].
-    generic_method_templates: HashMap<(Path, SymRef), MethodTemplate>,
-    /// Fully-qualified names a `defsignature` has announced and no `defun`
-    /// has yet defined ([`Self::check_defsignature`]). The matching
-    /// `check_defun` removes its own entry, which is how it knows the
-    /// registry entry already under that name is the declaration it is
-    /// fulfilling rather than a genuine redefinition (see
-    /// [`Self::claim_predeclared`]). A name still here when the unit is
-    /// finished is a declaration nothing defined, which
-    /// [`Self::finish_unit`] reports: a declaration promises a definition.
-    predeclared: std::collections::BTreeSet<Path>,
-    /// The rebuilt checker, which checks every form instead of this one
-    /// (`docs/dev/checker-rebuild-plan.md` 6). Removed with this checker.
+    /// The checker proper (`docs/dev/checker-rebuild-plan.md` 6).
     rebuilt: crate::typeck::toplevel::TypeChecker,
 }
 
@@ -601,11 +507,7 @@ impl Checker {
     pub fn new() -> Checker {
         Checker {
             info: Info::new(),
-            throw_tags: RefCell::new(crate::dump::ThrowTags::new()),
             redef_policy: RedefPolicy::default(),
-            generic_fn_templates: HashMap::new(),
-            generic_method_templates: HashMap::new(),
-            predeclared: std::collections::BTreeSet::new(),
             rebuilt: crate::typeck::toplevel::TypeChecker::default(),
         }
     }
@@ -618,190 +520,37 @@ impl Checker {
         self.rebuilt.format_call_targets()
     }
 
-    /// Every registry entry's content hash, as of now.
-    ///
-    /// The "before" half of [`Self::capture_delta`]: take one, load a unit,
-    /// then ask what changed. Hashes rather than a copy of the state, because
-    /// this is taken at startup on the path a dump exists to make fast — and
-    /// hashes of what a table *would serialize to* is exactly the question the
-    /// delta asks.
-    pub fn signature(&self, heap: &Heap) -> Result<RegistrySignature, String> {
-        let mut sig = crate::dump::signature(
-            &self.info.reg,
-            &self.throw_tags.borrow(),
-            &self.sorted_predeclared(),
-        )
-?;
-        self.visit_templates(heap, &mut |cat, key, _wire_bytes, hash| {
-            sig.record(cat, key, hash);
-            Ok(())
-        })?;
-        sig.set_rebuilt(self.rebuilt.generation());
-        Ok(sig)
+    /// Where the registry's writes are as of now: the "before" half of
+    /// [`Self::capture_delta`]. Take one, load a unit, then ask what changed.
+    pub fn signature(&self) -> RegistrySignature {
+        RegistrySignature::at(self.rebuilt.generation())
     }
 
-    /// Every checker entry that is new or different since `before`.
-    ///
-    /// See [`crate::dump`] for why a unit carries its own additions rather
-    /// than the whole world.
+    /// Every entry the registry holds beyond the built-in definitions, one
+    /// line each and sorted, for a test to compare two sessions by.
+    pub fn registry_entries(&self) -> Vec<String> {
+        self.rebuilt.entries()
+    }
+
+    /// Everything the registry was written since `before`, for a unit of a
+    /// dump. See [`crate::dump`] for why a unit carries its own additions
+    /// rather than the whole world.
     pub fn capture_delta(&self, heap: &Heap, before: &RegistrySignature) -> Result<CheckerDelta, String> {
-        let entries = crate::dump::delta(
-            &self.info.reg,
-            &self.throw_tags.borrow(),
-            &self.sorted_predeclared(),
-            before,
-        )?;
+        let unit = self.rebuilt.capture(heap, before.generation()).map_err(|e| format!("writing the checker's registry failed: {}", e))?;
+        let registry = bincode::serialize(&unit).map_err(|e| format!("writing the checker's registry failed: {}", e))?;
+        Ok(CheckerDelta { registry })
+    }
 
-        let mut fn_templates = Vec::new();
-        let mut method_templates = Vec::new();
-        self.visit_templates(heap, &mut |cat, key, bytes, hash| {
-            if before.unchanged(cat, &key, hash) {
-                return Ok(());
-            }
-            if cat == crate::dump::cat::FN_TEMPLATE {
-                fn_templates.push(bincode_read(&bytes)?);
-            } else {
-                let ((owner, name), template): ((Path, crate::owned_form::OwnedSym), crate::dump::WireMethodTemplate) =
-                    bincode_read(&bytes)?;
-                method_templates.push((owner, name, template));
-            }
-            Ok(())
+    /// Reinstates what a unit of a dump wrote of the registry.
+    pub fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
+        let written: crate::typeck::wire::RebuiltUnit = bincode::deserialize(&delta.registry).map_err(|e| {
+            format!(
+                "reading the checker's part of the dump failed: {} — its shape has changed since the dump was made; run scripts/regen-prelude-bitcode.sh",
+                e
+            )
         })?;
-        let unit = self.rebuilt.capture(heap, before.rebuilt()).map_err(|e| format!("writing the rebuilt checker's registry failed: {}", e))?;
-        let rebuilt = bincode::serialize(&unit).map_err(|e| format!("writing the rebuilt checker's registry failed: {}", e))?;
-        Ok(CheckerDelta { entries, fn_templates, method_templates, rebuilt })
-    }
-
-    /// Reinstates a unit's checker additions in `self`.
-    ///
-    /// Each rebuilt template form is pushed as a **permanent** root, matching
-    /// what the definition-checking path does for a template it retains: a
-    /// template must outlive any number of collections between here and its
-    /// last instantiation, and nothing else refers to it.
-    pub fn apply_delta(&mut self, mut delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
-        let rebuilt = std::mem::take(&mut delta.rebuilt);
-        // A unit with nothing for the rebuilt checker, loaded after its
-        // registry was made: what the unit alone defines, for the bridge.
-        let bridged = match &self.rebuilt {
-            r if rebuilt.is_empty() && !delta.entries.is_empty() && r.has_registry() => {
-                let mut only = crate::check::Registry::empty();
-                crate::dump::apply_entries(&mut only, &mut crate::dump::ThrowTags::new(), &mut |_| {}, delta.entries.clone())?;
-                Some(crate::typeck::wire::Unit::bridged(&only))
-            }
-            _ => None,
-        };
-        let mut predeclared = std::mem::take(&mut self.predeclared);
-        crate::dump::apply_entries(
-            &mut self.info.reg,
-            &mut self.throw_tags.borrow_mut(),
-            &mut |name| {
-                predeclared.insert(name);
-            },
-            delta.entries,
-        )?;
-        self.predeclared = predeclared;
-
-        let rebuild = |parts: &[crate::owned_form::OwnedForm], heap: &mut Heap| -> Result<Vec<Value>, String> {
-            let mut out = Vec::with_capacity(parts.len());
-            for p in parts {
-                let v = crate::owned_form::owned_to_value(heap, p).map_err(|e| e.to_string())?;
-                heap.push_permanent_root(v);
-                out.push(v);
-            }
-            Ok(out)
-        };
-        for (path, t) in delta.fn_templates {
-            let parts = rebuild(&t.parts, heap)?;
-            self.generic_fn_templates
-                .insert(path, FnTemplate { parts, ns: typelisp_mem::symbols::ns_of(&t.ns), type_params: t.type_params });
-        }
-        for (owner, name, t) in delta.method_templates {
-            let key = (owner, name.symbol());
-            let restored = match t {
-                crate::dump::WireMethodTemplate::Form { parts, ns, written_vars, own_vars } => {
-                    MethodTemplate::Form { parts: rebuild(&parts, heap)?, ns: typelisp_mem::symbols::ns_of(&ns), written_vars, own_vars }
-                }
-                crate::dump::WireMethodTemplate::Getter { index } => MethodTemplate::Getter { index },
-                crate::dump::WireMethodTemplate::Setter { index } => MethodTemplate::Setter { index },
-            };
-            self.generic_method_templates.insert(key, restored);
-        }
-        // The rebuilt checker's part.
-        {
-            let r = &mut self.rebuilt;
-            let unit = match (bridged, rebuilt.is_empty()) {
-                (Some(unit), _) => unit,
-                (None, true) => crate::typeck::wire::Unit::default(),
-                (None, false) => {
-                    let written: crate::typeck::wire::RebuiltUnit = bincode::deserialize(&rebuilt).map_err(|e| {
-                        format!(
-                            "reading the rebuilt checker's part of the dump failed: {} — its shape has changed since the dump was made; run scripts/regen-prelude-bitcode.sh",
-                            e
-                        )
-                    })?;
-                    written.restore(heap).map_err(|e| e.to_string())?
-                }
-            };
-            r.take_unit(heap, &self.info.reg, unit);
-        }
-        Ok(())
-    }
-
-    /// The pre-declared names in a fixed order, so two runs of the same load
-    /// produce the same bytes.
-    fn sorted_predeclared(&self) -> Vec<Path> {
-        self.predeclared.iter().cloned().collect()
-    }
-
-    /// Feeds every retained generic template to `visit` as `(category,
-    /// identity, serialized key and wire form, hash)`. The identity is only
-    /// compared between signatures; the key is read back from the payload.
-    ///
-    /// The templates live on the `Checker` rather than in the `Registry`, so
-    /// `dump::walk` cannot see them; this is their half of the same walk, and
-    /// both [`Self::signature`] and [`Self::capture_delta`] go through it for
-    /// the same reason `dump::walk` is written once.
-    fn visit_templates(
-        &self,
-        heap: &Heap,
-        visit: &mut dyn FnMut(u8, String, Vec<u8>, u64) -> Result<(), String>,
-    ) -> Result<(), String> {
-        let owned = |parts: &[Value]| -> Result<Vec<crate::owned_form::OwnedForm>, String> {
-            parts
-                .iter()
-                .map(|v| crate::owned_form::value_to_owned(heap, *v).map_err(|e| e.to_string()))
-                .collect()
-        };
-
-        let mut fns: Vec<(&Path, &FnTemplate)> = self.generic_fn_templates.iter().collect();
-        fns.sort_by_key(|(p, _)| p.to_string());
-        for (path, t) in fns {
-            let w = crate::dump::WireFnTemplate {
-                parts: owned(&t.parts)?,
-                ns: typelisp_mem::symbols::ns_path(t.ns),
-                type_params: t.type_params.clone(),
-            };
-            let (bytes, hash) = crate::dump::wire(&(path, w))?;
-            visit(crate::dump::cat::FN_TEMPLATE, path.to_string(), bytes, hash)?;
-        }
-
-        let mut methods: Vec<(&(Path, SymRef), &MethodTemplate)> =
-            self.generic_method_templates.iter().collect();
-        methods.sort_by_key(|(k, _)| (k.0.to_string(), k.1.name().to_string()));
-        for (key, t) in methods {
-            let w = match t {
-                MethodTemplate::Form { parts, ns, written_vars, own_vars } => crate::dump::WireMethodTemplate::Form {
-                    parts: owned(parts)?,
-                    ns: typelisp_mem::symbols::ns_path(*ns),
-                    written_vars: written_vars.clone(),
-                    own_vars: own_vars.clone(),
-                },
-                MethodTemplate::Getter { index } => crate::dump::WireMethodTemplate::Getter { index: *index },
-                MethodTemplate::Setter { index } => crate::dump::WireMethodTemplate::Setter { index: *index },
-            };
-            let (bytes, hash) = crate::dump::wire(&(crate::dump::method_key(key), w))?;
-            visit(crate::dump::cat::METHOD_TEMPLATE, crate::dump::method_identity(key), bytes, hash)?;
-        }
+        let unit = written.restore(heap).map_err(|e| e.to_string())?;
+        self.rebuilt.take_unit(heap, unit);
         Ok(())
     }
 
@@ -874,31 +623,24 @@ impl Checker {
     /// alongside the value (`Reader::read_all_in_spanned`) and this is where
     /// it enters the checker. Mirrors [`Self::check_at`] vs [`Self::check`].
     pub fn check_form_at(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevelForm, Error> {
-        // What the registry defines is what the session's names mean, before
-        // this form (a registry built without this heap, or a dump) and after
-        // it (what it defined), for the forms read next. The form is run in
-        // the module it is checked in, which is where a `read` it makes at
-        // run time reads.
-        self.publish_names(heap);
+        // The form is run in the module it is checked in, which is where a
+        // `read` it makes at run time reads.
         heap.names().enter_module(self.current_module());
         let ns = self.current_module();
         let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
-        let r = self.rebuilt.check_form(heap, &self.info.reg, interp, site, v, heap.cons_loc(v).or(loc_hint));
+        let r = self.rebuilt.check_form(heap, interp, site, v, heap.cons_loc(v).or(loc_hint));
         if let Some(ns) = self.rebuilt.take_entered() {
             self.info.ns = ns;
-            self.info.reg.module_mut(ns);
         }
-        self.info.reg.reexport_std_in_prelude();
-        self.publish_names(heap);
         r
     }
 
     /// Writes what the registry defines into `heap`'s table of what names
-    /// mean (`Registry::publish_names`). [`Self::check_form_at`] does it
-    /// around every form; a driver that reads before checking anything — a
-    /// prelude or a dump just loaded — does it once first.
+    /// mean. The first form [`Self::check_form_at`] checks does it, and
+    /// each form after tells it what it wrote; a driver that reads before
+    /// checking anything — a prelude or a dump just loaded — does it first.
     pub fn publish_names(&self, heap: &Heap) {
-        self.info.reg.publish_names(&mut heap.names());
+        self.rebuilt.publish_names(heap);
     }
 
     /// Reports every `defsignature` in this unit that never got a definition.
@@ -908,15 +650,12 @@ impl Checker {
     /// line and its definition on the next are two batches, and both are one
     /// session.
     pub fn finish_unit(&mut self) -> Result<(), Error> {
-        self.predeclared.extend(self.rebuilt.take_predeclared());
-        if self.predeclared.is_empty() {
+        let names: Vec<String> = self.rebuilt.take_predeclared().iter().map(Path::to_string).collect();
+        if names.is_empty() {
             return Ok(());
         }
-        let mut names: Vec<String> = self.sorted_predeclared().iter().map(Path::to_string).collect();
-        self.predeclared.clear();
         let list = names.join("`, `");
         let (subject, verb) = if names.len() == 1 { ("declaration", "has") } else { ("declarations", "have") };
-        names.clear();
         Err(Error::TypeError(format!(
             "defsignature: `{}` {} no definition in this file — a {} promises one",
             list, verb, subject
@@ -943,29 +682,29 @@ impl Checker {
         let Some(here) = typelisp_mem::symbols::find_ns(module_path) else {
             return Vec::new();
         };
-        self.rebuilt.completion_candidates(&self.info.reg, here)
+        self.rebuilt.completion_candidates(here)
     }
 
     /// Where each definition, and each local variable a reference names,
     /// was written, and the type of each expression: what the LSP's
     /// goto-definition and hover read.
     pub fn def_locs(&self) -> super::DefLocs {
-        self.rebuilt.def_locs(&self.info.reg)
+        self.rebuilt.def_locs()
     }
 
     /// The documentation of each definition.
     pub fn docs(&self) -> super::Docs {
-        self.rebuilt.docs(&self.info.reg)
+        self.rebuilt.docs()
     }
 
     /// Every definition the session holds, the library's and the program's.
     pub fn definitions(&self) -> Vec<super::Defined> {
-        self.rebuilt.definitions(&self.info.reg)
+        self.rebuilt.definitions()
     }
 
     /// Every name a `use` brought into a module.
     pub fn imports(&self) -> Vec<super::Imported> {
-        self.rebuilt.imports(&self.info.reg)
+        self.rebuilt.imports()
     }
 
     /// What the module-level function `path` returns, when there is one.
@@ -978,12 +717,6 @@ impl Checker {
         self.rebuilt.type_kind(path)
     }
 
-    /// The type/constructor registry — exposed so a caller (e.g. the REPL)
-    /// can resolve an ADT variant's constructor name when printing an enum
-    /// result (the box stores the variant index, not its name).
-    pub fn registry(&self) -> &Registry {
-        &self.info.reg
-    }
 
     // ---- namespace navigation & resolution --------------------------------
     //
@@ -1025,7 +758,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         v: Value,
     ) -> Result<Option<Value>, Error> {
-        self.rebuilt.expand_toplevel_macro(heap, &self.info.reg, interp, self.info.ns, v)
+        self.rebuilt.expand_toplevel_macro(heap, interp, self.info.ns, v)
     }
 
 
@@ -1127,7 +860,7 @@ impl Checker {
             )));
         }
         self.info.ns = segs.iter().fold(self.info.ns, |ns, s| typelisp_mem::symbols::child_ns(ns, s));
-        self.info.reg.module_mut(self.info.ns);
+        self.rebuilt.enter_module(self.info.ns);
         self.publish_name_view();
         Ok(Path::of_module(self.info.ns))
     }
@@ -1137,34 +870,7 @@ impl Checker {
     /// in, by their last segment. Called wherever the current module changes,
     /// and before each form, since a form can bring a type in.
     fn publish_name_view(&self) {
-        let mut imports = std::collections::HashMap::new();
-        let own = self.info.reg.module_at(self.info.ns);
-        if let Some(m) = own {
-            for (bare, target) in &m.aliases {
-                if self.info.reg.type_def(target).is_some() {
-                    imports.insert((target.ns(), target.name_symbol()), bare);
-                }
-            }
-        }
-        // Every module reads what `std::prelude` re-exports, so its types
-        // are written as if brought in — except where this module's own
-        // definition or import takes the name.
-        if let Some(prelude) = self.info.reg.module_at(crate::types::prelude_ns()) {
-            for local in prelude.reexports.symbols() {
-                let target = prelude.aliases.get_sym(local).expect("a re-export is one of the module's imports");
-                if self.info.reg.type_def(target).is_none() && self.info.reg.trait_def(target).is_none() {
-                    continue;
-                }
-                let name = local.name();
-                if own.is_some_and(|m| m.types.contains_key(name)
-                    || m.traits.contains_key(name)
-                    || m.aliases.get(name).is_some_and(|t| self.info.reg.type_def(t).is_some())) {
-                    continue;
-                }
-                imports.entry((target.ns(), target.name_symbol())).or_insert(name);
-            }
-        }
-        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.info.ns, imports));
+        self.rebuilt.publish_name_view(self.info.ns);
     }
 
     /// [`Self::enter_module`], plus recording `segs` as the file currently
@@ -1235,7 +941,7 @@ impl Checker {
     /// `check_use` to report.
     pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[typelisp_mem::SymRef]) {
         let site = crate::typeck::use_form::Site { ns, file: self.info.file_ns.last().copied(), policy: self.redef_policy };
-        self.rebuilt.register_use_for_reading(heap, &self.info.reg, site, path)
+        self.rebuilt.register_use_for_reading(heap, site, path)
     }
 
     // ---- expressions ------------------------------------------------------
@@ -1623,10 +1329,3 @@ pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Resu
     Ok((required_names, optionals, rest_name, keys))
 }
 
-/// One serialized entry back into the type it was written from.
-///
-/// Free rather than a method so [`Checker::capture_delta`]'s two template
-/// arms, which deserialize different types, can share the error wording.
-fn bincode_read<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
-    bincode::deserialize(bytes).map_err(|e| format!("dump: reading a template: {}", e))
-}

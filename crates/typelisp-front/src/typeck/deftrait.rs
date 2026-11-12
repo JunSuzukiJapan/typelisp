@@ -7,7 +7,7 @@
 //! in them. An `impl` of the trait for a type gives the bodies.
 
 use crate::check::bound_name;
-use crate::check::registry::TraitBound;
+use crate::typeck::registry::TraitBound;
 use crate::types::{ParamOwner, Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{member_symbol, well_known_symbol};

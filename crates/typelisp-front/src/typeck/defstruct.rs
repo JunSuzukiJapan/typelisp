@@ -20,7 +20,7 @@
 //! another is not a subtype of it: the field list is all it takes.
 
 use crate::check::lower::CoreForms;
-use crate::check::registry::AdtKind;
+use crate::typeck::registry::AdtKind;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
 use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::{intern, member_symbol};
@@ -102,7 +102,7 @@ pub(crate) fn check_defstruct(
     let mut forms = Vec::new();
     let names: Vec<String> = fields.iter().map(|f| f.name.name().to_string()).collect();
     let field_tys: Vec<Type> = fields.iter().map(|f| f.ty.clone()).collect();
-    let def_form = reg.defstruct_form(heap, &path, &[], &field_tys, &names)?;
+    let def_form = reg.defstruct_form(heap, &path, &field_tys, &names)?;
     heap.push_root(def_form);
     forms.push(def_form);
     let mut push = |heap: &mut Heap, form: Option<Value>| {

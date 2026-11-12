@@ -55,7 +55,7 @@ pub(crate) mod attribute;
 pub(crate) mod binding;
 pub(crate) mod block;
 pub(crate) mod bounds;
-pub(crate) mod bridge;
+pub(crate) mod builtins;
 pub(crate) mod c_memory;
 pub(crate) mod call;
 pub(crate) mod callback;

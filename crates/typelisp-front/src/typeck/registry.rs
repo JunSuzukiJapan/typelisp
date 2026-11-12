@@ -16,7 +16,6 @@ use crate::check::analyze::MacroShape;
 use crate::check::lower::CoreForms;
 use std::collections::BTreeMap;
 
-use crate::check::registry::{AdtKind, OptKeyParam, TraitBound, Variant};
 use crate::types::{Path, Type, TypeParam};
 use typelisp_mem::symbols::NsId;
 use typelisp_mem::SymRef;
@@ -25,24 +24,161 @@ use super::generic::Base;
 use super::tree::Typed;
 use super::wire::{sorted, Ns, RegistryDelta, Sym};
 
+/// Whether a data type is a sum of variants (`defenum`, `Option`, `Sexpr`
+/// ...) or a struct of fields (`defstruct`, `Vector` ...). Only a struct is
+/// built as a *mutable* boxed struct (`BoxedObj::Struct`); a sum's value is
+/// an immutable enum box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AdtKind {
+    Sum,
+    Struct,
+}
+
+/// One variant of a sum type: its name and its fields' types, written in the
+/// type's parameters. The name is the variant's member symbol
+/// ([`typelisp_mem::symbols::member_symbol`]): a pattern finds it on the
+/// type it matches by the name written, wherever it was written, as a method
+/// call finds a method.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Variant {
+    #[serde(with = "crate::owned_form::sym_serde")]
+    pub name: SymRef,
+    pub fields: Vec<Type>,
+}
+
+/// One `:where` bound: a trait a type parameter must implement, plus
+/// (optionally) concrete pins for that trait's associated types — e.g.
+/// `(Iter T (Item i32))` pins `T`'s `Item` to `i32`. `assoc` is empty for a
+/// bound with no pins (`(Iter T)`).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TraitBound {
+    pub trait_path: Path,
+    /// Associated-type name -> the type this bound pins it to. Only the pins
+    /// the bound writes are here.
+    pub assoc: BTreeMap<String, Type>,
+}
+
+/// One `&optional`/`&key` parameter of a function.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OptKeyParam {
+    /// The keyword a call passes it with (`:name`) — for an `&optional`
+    /// parameter, which is passed by position, only what a message calls it.
+    #[serde(with = "crate::owned_form::sym_serde")]
+    pub name: SymRef,
+    /// The declared type as written — always the plain (non-`Option`-
+    /// wrapped) type, even when `default` is absent. See
+    /// [`Self::effective_ty`] for the type bound in the callee's body and
+    /// expected of an omitted call-site argument.
+    pub decl_ty: Type,
+    /// The checked default-value expression, when the parameter declared one
+    /// (`(name type default-form)`), spliced into a call that omits the
+    /// argument. `None` means "no default": the parameter's *effective* type
+    /// is then `Option<decl_ty>` — a caller who does supply the argument
+    /// still writes a plain `decl_ty`-typed value, wrapped into `some` by the
+    /// call.
+    ///
+    /// Held as an [`OwnedForm`](crate::owned_form::OwnedForm), not as the
+    /// lowered core form itself: a `Value` is an index into *a* heap, and
+    /// this signature outlives the checker's per-form root truncation and is
+    /// written into a dump. Rebuilding it per call site with
+    /// `owned_form::owned_to_value` is also the right splice semantics — each
+    /// site needs its own cells, not a shared subtree. The source position
+    /// survives the round trip because `OwnedForm::Cons` carries both of a
+    /// cell's location slots.
+    pub default: Option<crate::owned_form::OwnedForm>,
+}
+
+impl OptKeyParam {
+    /// The type this parameter is bound at in the callee's body — see
+    /// [`Self::default`]'s doc comment.
+    pub fn effective_ty(&self) -> Type {
+        opt_key_effective_ty(&self.decl_ty, self.default.is_some())
+    }
+}
+
+/// [`OptKeyParam::effective_ty`] before the default has been checked into an
+/// [`OwnedForm`](crate::owned_form::OwnedForm): all it depends on is
+/// *whether* there is one.
+pub fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
+    if has_default {
+        decl_ty.clone()
+    } else {
+        Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![decl_ty.clone()])
+    }
+}
+
+/// A `defmacro`'s lambda list, as a call's arguments are counted against it
+/// (every parameter and the result are `Sexpr`, so there is no type to
+/// record).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct MacroDef {
+    /// The number of leading required parameters — the call's minimum
+    /// argument count.
+    pub required: usize,
+    /// The number of `&optional` parameters (each omittable, filled
+    /// positionally after the required ones). Together with `required` this
+    /// bounds a plain call's argument count when there is neither `&rest`
+    /// nor `&key`.
+    pub optional: usize,
+    /// Whether the parameter list ends in `&rest name`.
+    pub rest: bool,
+    /// The `&key` parameter names (bare, no leading colon), empty when the
+    /// lambda list has no `&key` section.
+    pub keys: Vec<String>,
+    /// Visible outside its defining module.
+    pub public: bool,
+    pub builtin: bool,
+}
+
+/// A `def-c-struct`: a struct laid out the way C lays it out, which exists
+/// only behind a typed pointer (`Type::PtrTo`) into memory an `(unsafe ...)`
+/// allocated. The layout is computed once, when the definition is checked,
+/// by C's rules on an LP64 target.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CStructDef {
+    /// The struct's fully-qualified name, its identity (`Type::CStruct`).
+    pub name: Path,
+    pub fields: Vec<CField>,
+    /// `sizeof`, trailing padding included.
+    pub size: u64,
+    /// `_Alignof`.
+    pub align: u64,
+    /// Visible outside its defining module.
+    pub public: bool,
+}
+
+/// One field of a [`CStructDef`].
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CField {
+    /// The field's member symbol: `p::x` finds it on the struct by the name
+    /// written.
+    #[serde(with = "crate::owned_form::sym_serde")]
+    pub name: SymRef,
+    /// A C scalar type, `ptr`, a `Type::PtrTo`, or a `Type::CStruct` held by
+    /// value.
+    pub ty: Type,
+    /// `offsetof`.
+    pub offset: u64,
+}
+
 /// A function: its type parameters, its parameter types and its result
 /// type. The types may mention the type parameters.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct FnDef {
-    pub(crate) type_params: Vec<TypeParam>,
-    pub(crate) params: Vec<Type>,
-    pub(crate) ret: Type,
-    pub(crate) public: bool,
+pub struct FnDef {
+    pub type_params: Vec<TypeParam>,
+    pub params: Vec<Type>,
+    pub ret: Type,
+    pub public: bool,
     /// Implemented in Rust, with no typelisp body.
-    pub(crate) builtin: bool,
+    pub builtin: bool,
     /// A C function (`defffi`).
-    pub(crate) ffi: bool,
+    pub ffi: bool,
     /// The element type of a trailing `&rest` parameter.
-    pub(crate) rest: Option<Type>,
-    pub(crate) optionals: Vec<OptKeyParam>,
-    pub(crate) keys: Vec<OptKeyParam>,
+    pub rest: Option<Type>,
+    pub optionals: Vec<OptKeyParam>,
+    pub keys: Vec<OptKeyParam>,
     /// The `:where` bounds, by the type parameter they bound.
-    pub(crate) bounds: Vec<(TypeParam, Vec<TraitBound>)>,
+    pub bounds: Vec<(TypeParam, Vec<TraitBound>)>,
 }
 
 impl FnDef {
@@ -66,36 +202,36 @@ impl FnDef {
 /// A method of a type. Its type parameters are the type's, in order, then
 /// the method's own (`docs/dev/checker-rebuild-plan.md` 7.3).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct MethodDef {
-    pub(crate) sig: FnDef,
+pub struct MethodDef {
+    pub sig: FnDef,
     /// The first parameter is the receiver.
-    pub(crate) instance: bool,
+    pub instance: bool,
     /// The module a `defmethod` outside an `impl` was written in, where a
     /// method without `pub` is visible; `None` for one an `impl` gave.
-    pub(crate) home: Option<Path>,
+    pub home: Option<Path>,
     /// For a method written for one instantiation of a generic type, that
     /// instantiation's type arguments: its code is named for them.
-    pub(crate) inst_args: Option<Vec<Type>>,
+    pub inst_args: Option<Vec<Type>>,
 }
 
 /// A type: its kind, its type parameters, and a struct's fields or a sum
 /// type's variants.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct TypeDef {
-    pub(crate) kind: AdtKind,
-    pub(crate) params: Vec<TypeParam>,
-    pub(crate) public: bool,
+pub struct TypeDef {
+    pub kind: AdtKind,
+    pub params: Vec<TypeParam>,
+    pub public: bool,
     /// Implemented in Rust (`Vector`, `HashTable`, ...): no `make-instance`.
-    pub(crate) builtin: bool,
+    pub builtin: bool,
     /// Defined by the standard library, so only the standard library may
     /// write an inherent `impl` of it.
-    pub(crate) stdlib: bool,
+    pub stdlib: bool,
     /// A struct's fields, in order. Their types are written in this type's
     /// own parameters.
-    pub(crate) fields: Vec<Field>,
+    pub fields: Vec<Field>,
     /// A sum type's variants, in order: a variant is its index here. Their
     /// field types are written in this type's own parameters.
-    pub(crate) variants: Vec<Variant>,
+    pub variants: Vec<Variant>,
 }
 
 impl TypeDef {
@@ -108,14 +244,14 @@ impl TypeDef {
 /// A struct's field: its member symbol, its type, whether it is `pub`, and
 /// whether it has a default.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct Field {
+pub struct Field {
     #[serde(with = "crate::owned_form::sym_serde")]
-    pub(crate) name: SymRef,
-    pub(crate) ty: Type,
-    pub(crate) public: bool,
+    pub name: SymRef,
+    pub ty: Type,
+    pub public: bool,
     /// Written with a default, which `make-instance` gives the slot when
     /// it is not given ([`super::defstruct::default_method`]).
-    pub(crate) default: bool,
+    pub default: bool,
 }
 
 /// What a module-level name in the type name space is: a type, a type
@@ -127,7 +263,7 @@ pub(crate) enum TypeEntry {
     Alias { public: bool, params: Vec<TypeParam>, body: Type },
     Trait(TraitDef),
     /// A `def-c-struct`: its fields laid out as C lays them out.
-    CStruct(crate::check::registry::CStructDef),
+    CStruct(CStructDef),
 }
 
 /// A trait: its type parameters, `Self` first and then its associated
@@ -220,6 +356,15 @@ pub(crate) struct Template {
     pub(crate) body: Vec<Typed>,
 }
 
+/// Which writes a question about the registry's keys is about.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Since {
+    /// Those since the last commit.
+    Commit,
+    /// Every one: what the registry holds.
+    Ever,
+}
+
 /// One table of the registry, keeping what each write replaced since the
 /// last commit.
 #[derive(Debug)]
@@ -282,6 +427,15 @@ impl<K: Hash + Eq + Clone, V> Table<K, V> {
     /// The keys written since the last commit, each once for each write.
     pub(crate) fn written(&self) -> impl Iterator<Item = &K> {
         self.undo.iter().map(|(k, _)| k)
+    }
+
+    /// The keys written since `since`: since the last commit, or ever (every
+    /// key the table holds).
+    pub(crate) fn keys(&self, since: Since) -> Vec<K> {
+        match since {
+            Since::Commit => self.written().cloned().collect(),
+            Since::Ever => self.map.keys().cloned().collect(),
+        }
     }
 
     fn commit(&mut self, generation: u64) {
@@ -583,9 +737,12 @@ impl Registry {
         out
     }
 
-        /// The methods defined since the last commit.
-    pub(crate) fn methods_written(&self) -> impl Iterator<Item = &(Path, SymRef)> {
-        self.methods.written().chain(self.inst_methods.written())
+    /// The methods (each for every instantiation, or for one) defined since
+    /// `since`, by their types and member symbols.
+    pub(crate) fn method_keys(&self, since: Since) -> Vec<(Path, SymRef)> {
+        let mut keys = self.methods.keys(since);
+        keys.extend(self.inst_methods.keys(since));
+        keys
     }
 
     /// The method `name` of the type `owner` for a value whose type arguments

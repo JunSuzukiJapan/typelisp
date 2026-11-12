@@ -10,7 +10,7 @@
 //! gives is given as `(some value)`. A function has `&key` parameters or
 //! `&optional` and `&rest` ones, never both.
 
-use crate::check::registry::OptKeyParam;
+use crate::typeck::registry::OptKeyParam;
 use crate::types::Type;
 use crate::{Error, Heap, Loc, Value};
 

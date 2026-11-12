@@ -10,7 +10,7 @@
 //!   definition is never replaced.
 
 use crate::check::{MacroExpander, RedefPolicy};
-use crate::check::registry::PRELUDE_MODULES;
+use crate::typeck::library::PRELUDE_MODULES;
 use crate::types::{in_std, std_module, Path, Type};
 use crate::{Error, Heap};
 use typelisp_mem::symbols::NsId;
