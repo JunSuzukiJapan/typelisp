@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # السمات القياسية
 
 سمات التكرار والمقارنة والحساب وإضافة العناصر وإخراجها. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
@@ -22,46 +22,53 @@
 أما قوائم `Sexpr` فلا تنفّذ `Iter` (فأنواع عناصرها غير موحدة). وإذا نفّذت `Iter` لنوعك الخاص أمكن المرور
 عليه بـ `doiter` كما هو، وتمريره إلى [دوال التسلسلات](sequences.md#4-دوال-التسلسلات-على-iter).
 
-## 2. `Eq` / `Ord` (المقارنة)
+## 2. `Equal` / `Ord` (المقارنة)
 
-تقابل `PartialEq`/`PartialOrd` في Rust (وتُسمّى `Eq`/`Ord`). وتُستخدم في قيود `:where` للدوال العامة
-لاشتراط أن تكون أنواع العناصر قابلة للمقارنة (`sort`/`member`/`assoc` وهكذا).
+`Equal` هي السمة التي يستعملها `equal`، وتقابل `PartialEq` في Rust. وتقابل `Ord` السمة `PartialOrd` في
+Rust. تُستعملان في قيود `:where` للدوال العامة لاشتراط أن يكون نوع العناصر قابلًا للمقارنة.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; يجب تنفيذه
-  (defmethod not-equals (self (other Self)) bool             ; تنفيذ افتراضي
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; ترث من Eq
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; يجب تنفيذه
+(deftrait Ord (Equal)                                     ; يرث Equal
   (defmethod less (self (other Self)) bool)                  ; يجب تنفيذه
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-لتنفيذ `Eq` تكتب `equals` فقط، ولتنفيذ `Ord` تكتب `less` فقط. وتملأ التنفيذات الافتراضية الباقي. وترث
-`Ord` من `Eq`، فيلزم `impl Eq X` قبل `impl Ord X`.
+لتنفيذ `Equal` اكتب `equal`، ولتنفيذ `Ord` اكتب `less` وحده. وتملأ التنفيذات الافتراضية بقية `Ord`.
+ترث `Ord` السمة `Equal`، فيلزم `impl Equal X` قبل `impl Ord X`.
 
-يمكن استدعاء كل تابع سمة كدالة كما هو (داخل قيد `where (Eq A)`/`(Ord A)`، أو على نوع ملموس ينفّذه):
+يستدعي `(equal a b)` تنفيذ `Equal` لنوع `a`. وكتابته لنوع لا ينفّذ `Equal` خطأ نوع. للمقارنة بالهوية
+استعمل `eq`/`eql`، وللمقارنة بالبنية استعمل `equalp`. وهذه الثلاث تصلح لقيمة من أي نوع.
+
+يمكن استدعاء كل دالة من دوال السمة دالةً كما هي (داخل قيد `where (Equal A)`/`(Ord A)`، أو على نوع محدد
+ينفّذها):
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` حيث `Eq A` | هل هما متساويان (`==` في Rust) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` حيث `Eq A` | هل هما غير متساويين (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` حيث `Equal A` | هل هما متساويان (`==` في Rust) |
 | `less` | `(less a b)` | `(A,A)→bool` حيث `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` حيث `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` حيث `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` حيث `Ord A` | `a >= b` |
 
-تُنفَّذ `Eq` لـ: كل الأنواع العددية (من `i8` إلى `u32` / `f32` / `f64` / `int` / `ratio`)، و`bool`
-و`char` و`string` و`symbol` و`complex`، و`Sexpr` (`eq`، أي الهوية؛ وتُستخدم في أنماط القيم في `match`)،
-و`cons-cell<A,B>` (تراجعيًا، عندما تكون العناصر `Eq`). وتتساوى قيمتا `Option<T>` و`Result<T,E>` حين تكونان من المتغير نفسه ويكون محتواهما متساويًا بـ `equals`؛ والقائمة من النوع `Option<Sexpr>`، فتُقارَن خلاياها بهوية `Sexpr` (استخدم `equal` للمقارنة بالمحتوى). وتُنفَّذ `Ord` لـ: كل الأنواع العددية، و`char`
-و`string`، و`cons-cell<A,B>` (معجميًا، عندما تكون العناصر `Ord`).
+تُنفَّذ `Equal` لـ: كل الأنواع العددية (`i8` إلى `u32` / `f32` / `f64` / `int` / `ratio`)، و`bool` و`char`
+و`string` و`symbol` و`complex`، و`Sexpr`، و`cons-cell<A,B>` والصفوف (عنصرًا عنصرًا، عندما تكون العناصر
+`Equal`)، و`Option<T>` و`Result<T,E>` (عندما تكونان من المتغير نفسه ومحتواهما `equal`). وفي الأنواع المدمجة
+تكون الدالة المدمجة `equal` الخاصة بالنوع هي تنفيذ `Equal` كما هي. تُقارَن الأعداد بـ `=`، والسلاسل
+بالمحتوى مع التمييز بين الأحرف الكبيرة والصغيرة. وتُنفَّذ `Ord` لـ: كل الأنواع العددية، و`char` و`string`،
+و`cons-cell<A,B>` (معجميًا، عندما تكون العناصر `Ord`).
 
-لا تتداخل أسماء التوابع مع المعامِلات المضمنة (`= /= < <= > >=`) ولا مع `eq`/`lt` لأن المضمنة لا يمكن
-إعادة تعريفها، ويفوّض كل تنفيذ إليها. ومعامِلات المقارنة العددية نفسها توابع مضمنة في كل نوع مستقبِل
-([الأعداد](numbers.md)، [السلاسل النصية والمحارف](collections.md)). وداخل القيد تُقرأ كتابة المعامِلات على
-أنها توابع السمة (الفصل 3).
+و`equal` القائمة (`Sexpr`) هو `equal` في CL: تُقارَن خلايا cons بالبنية، والسلاسل بالمحتوى، وكل ذرة أخرى
+بـ `eql`. وهذه المقارنة تمرّ على القيم وقت التشغيل ولا تستدعي أي دالة. لذا تُقارَن البنية داخل القائمة
+بالهوية كما في CL، أيًّا كان `impl Equal` لنوعها.
+
+لا تتداخل أسماء دوال `Ord` مع العوامل المدمجة (`< <= > >=`) أو `lt`، لأن المدمج لا يُعاد تعريفه وكل تنفيذ
+يفوّض إليها. وعوامل المقارنة العددية نفسها دوال مدمجة بحسب نوع المستقبِل ([الأعداد](numbers.md)،
+[السلاسل والمحارف](collections.md)). وداخل القيد يُقرأ العامل المكتوب على أنه دالة السمة (الفصل 3). يصير
+`=` هو `equal`، ويصير `/=` هو `(not (equal a b))`.
 
 ## 3. سمات الحساب (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -85,7 +92,7 @@
 
 **داخل القيد يمكنك كتابة المعامِلات.** عندما يكون المستقبِل متغير نوع مقيّدًا بـ `:where` تُقرأ المعامِلات
 على أنها توابع السمة (`+`→`add` و`-`→`sub` و`*`→`mul` و`/`→`div` و`rem`→`remainder` و
-`logand`→`bit-and` و`=`→`equals` و`<`→`less` ...):
+`logand`→`bit-and` و`=`→`equal` و`<`→`less` ...):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -120,7 +127,7 @@
 | `Vector<T>` | يضيف في النهاية |
 | `Deque<T>` | يضيف في النهاية (`push-back`) |
 | `Array<T>` | يضيف عند مؤشر الملء (`push-extend`). ويحدث `panic` بدون مؤشر ملء |
-| `HashSet<T>` | يضعه في المجموعة (`insert`). ولا يكون `Push` إلا حين يطبّق نوع العناصر `Hash` |
+| `HashSet<T>` | يضعه في المجموعة (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Типы
 
 Типы typelisp и стандартные трейты, которые реализует каждый тип. Как записывать типы, описано в
@@ -33,7 +33,7 @@
 | `Option<T>` | Значение, которое есть или которого нет. `some` / `none` | [Option и Result](functions/option-result.md) |
 | `Result<T,E>` | Успех или неудача. `ok` / `err` | То же |
 | `Vector<T>` | Растущий массив | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | Хеш-таблица. Тип ключа должен реализовывать `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | Хеш-таблица. Как сравниваются ключи, определяет `:test` при создании, а в таблице `equal` тип ключей должен реализовывать `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Кортеж (от 1 до 12 элементов). Элементы читаются как `t::0` | [Синтаксис, глава 2](syntax.md#2-запись-типов) |
 | `Task<T>` | Дескриптор задачи | [Задачи](functions/concurrency.md#1-taskt--дескрипторы-задач) |
 | `Thread<T>` | Дескриптор задачи, выполняющейся в отдельном потоке ОС | [Thread](functions/concurrency.md#7-threadt--отдельные-потоки-ос) |
@@ -103,7 +103,7 @@
 
 | Трейт | Реализующие типы | Подробности |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-сравнение) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-сравнение) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | То же |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` и все встроенные типы ошибок | [print-object](functions/printing.md#5-print-object-печатное-представление-по-типу) |
@@ -125,7 +125,7 @@
 | Трейт | Реализующие типы |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` типы модуля `lazy` (`lazy::map-iter<I,A,U>` и др.) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (когда тип элементов реализует `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Потоки

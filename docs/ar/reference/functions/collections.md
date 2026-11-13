@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # السلاسل النصية والمحارف والمجموعات
 
 `string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.
@@ -77,7 +77,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | عدد العناصر |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | يزيل العنصر الأخير ويعيده. `none` إذا كان فارغًا (وبخلاف `get`/`set` لا يحدث `panic`) (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | يصنع مكرِّرًا ينفّذ `Iter` |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` حيث `Eq T` | يضيف `x` إذا لم يوجد عنصر مساوٍ (`pushnew` في CL. ولا يحتاج إلى إعادة كتابة موضع (place)، فهو تابع لا ماكرو) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | يضيف `x` في الآخر إن لم يوجد عنصر `eql` له (`pushnew` في CL. لا يحتاج إلى إعادة كتابة موضع، لذا هو دالة وليس ماكرو) |
 
 `map`/`filter` وأخواتهما [دوال تسلسلات](sequences.md#4-دوال-التسلسلات-على-iter): مرّر المتجه عبر `iter`
 كما في `(map (iter v) f)`. والعمليات المُتلِفة (`nreverse` و`delete` وهكذا) في
@@ -87,7 +87,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | يصنع جدولًا فارغًا |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | ينشئ جدولًا فارغًا. `:test` هو كيفية مقارنة المفاتيح (الجدول أدناه)؛ وبدونه `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | بحث |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | إدراج أو استبدال |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | يزيل الإدخال ويعيد القيمة القديمة إن وُجدت |
@@ -100,39 +100,48 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | `maphash` في CL |
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` في CL. وفي هذا الجدول هو عدد الإدخالات المشغولة (يساوي `count`) |
 
-**يمكن لأي نوع ينفّذ `Hash` أن يكون مفتاحًا**، بما في ذلك أنواع `defstruct`/`defenum`. وتحمل `get`/`set`/
-`remove` القيد `(:where (Hash K))`، فالجدول المفتاحه نوع لا ينفّذه **خطأ في الأنواع** (ولا يوجد `Hash` لـ
-`f64` بسبب `NaN`).
+تُختار كيفية مقارنة المفاتيح عند إنشاء الجدول بـ `:test`، كما في `make-hash-table` في CL. ويأخذ `:test`
+واحدًا من `eq` و`eql` و`equal` و`equalp` (يُكتب `'equal` أو `equal`).
+
+| `:test` | كيفية مقارنة المفاتيح | أنواع المفاتيح |
+|---|---|---|
+| `eql` (الافتراضي) | الأعداد والمحارف بالقيمة، والباقي بالهوية | أي نوع |
+| `eq` | بالهوية | أي نوع |
+| `equal` | بـ `equal` (`Equal`) وبالتجزئة `sxhash` (`Hash`) لنوع المفتاح | الأنواع التي تنفّذ `Hash` |
+| `equalp` | بـ `equalp` (السلاسل دون تمييز حالة الأحرف، والبنى حقلًا حقلًا) | أي نوع |
+
+الافتراضي `eql`، فسلسلتان بالمحتوى نفسه أُنشئتا كلٌّ على حدة مفتاحان مختلفان. لمفاتيح السلاسل اكتب
+`(HashTable::new :test 'equal)`. وإن لم ينفّذ نوع مفاتيح جدول `equal` السمة `Hash` فذلك **خطأ نوع** في موضع
+إنشاء الجدول (ليس لـ `f64` سمة `Hash` بسبب `NaN`).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; تعيد قيمة غير سالبة تتسع في fixnum
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; يعيد قيمة غير سالبة تتسع في fixnum
 ```
 
-منفَّذة لـ: `int` والأنواع الصحيحة الستة ذات العرض الثابت و`bool` و`char` و`string` و`symbol` (وليس لأعداد
-الفاصلة العائمة). ولأنواعك الخاصة أبقِ النتيجة غير سالبة بتطبيق `logand` عليها مع `*sxhash-mask*` (2^30-1).
-ولتجزئة سلسلة نصية يمكنك استدعاء `(sxhash-string s)` (‏FNV-1a بـ 32 بت)، وهي التي يستخدمها التنفيذ الخاص
-بـ `string`.
+تُنفَّذ `Hash` لـ: `int` والأعداد الصحيحة الستة ذات العرض الثابت، و`bool` و`char` و`string` و`symbol` (وليس
+لأعداد الفاصلة العائمة). في أنواعك الخاصة أبقِ النتيجة غير سالبة بتطبيق `logand` عليها مع `*sxhash-mask*`
+(2^30-1). ولتجزئة سلسلة يمكنك استدعاء `(sxhash-string s)` (FNV-1a بـ 32 بت)، وهو ما يستعمله تنفيذ `string`.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-يتحدد ما إذا كان مفتاحان هما نفسه بـ **نوع المفتاح نفسه** (`sxhash`، و`equals` من `Eq` السمة الأعلى لـ
-`Hash`)، لا بهوية الكائن. ولهذا يمكنك، كما في المثال، البحث بمفتاح "قيمة مختلفة لكنها مساوية".
+في جدول `equal` يقرر **نوع المفتاح نفسه** (`sxhash`، و`equal` من `Equal`، السمة الأم لـ `Hash`) هل المفتاحان
+متماثلان، لا هوية الكائنات. لذلك، كما في المثال أعلاه، يعثر مفتاح "قيمته مختلفة لكنه مساوٍ" على المدخل.
 
-ولا بأس أن تتصادم `sxhash` (فعقد `Hash` في اتجاه واحد فقط: القيم المتساوية يجب أن يكون لها التجزئة
-نفسها). وتُميَّز المفاتيح المتصادمة بـ `equals`.
+لا بأس بتصادم `sxhash` (عقد `Hash` في الاتجاه المعاكس: يقول فقط إن القيم المتساوية بـ `equal` لها التجزئة
+نفسها). وتُميَّز المفاتيح المتصادمة بـ `equal`.
 
 ## 5. `Array<T>` (المصفوفات متعددة الأبعاد)
 
@@ -186,12 +195,13 @@
 
 ## 7. `HashSet<T>`
 
-مجموعة عناصر بلا تكرار (`HashSet` في Rust). وهي `defstruct` من المكتبة القياسية محتواه
-`HashTable<T,()>`. يجب أن ينفّذ نوع العنصر `Hash`، كما يجب لمفتاح `HashTable`.
+مجموعة من العناصر بلا تكرار (`HashSet` في Rust). وهي `defstruct` من المكتبة القياسية محتواه
+`HashTable<T,()>`. تحدد `:test` كيفية مقارنة العناصر، كما في مفاتيح `HashTable`، وفي مجموعة `equal` يجب أن
+ينفّذ نوع العناصر `Hash`.
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | تنشئ مجموعة فارغة. يُؤخذ وسيط النوع من النوع المتوقع |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | ينشئ مجموعة فارغة. يأتي وسيط النوع من النوع المتوقع. `:test` كما في `HashTable`؛ وبدونه `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | تضيف `x`. `true` إن لم يكن موجودًا، و`false` إن كان موجودًا |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | هل `x` موجود |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | تُخرج `x`. `true` إن كان موجودًا |
@@ -202,7 +212,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

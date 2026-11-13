@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -34,7 +34,7 @@ Er is geen 64-bits geheel type. Gebruik voor gehele getallen waarvan de breedte 
 | `Option<T>` | Een waarde die er is of niet. `some` / `none` | [Option en Result](functions/option-result.md) |
 | `Result<T,E>` | Succes of mislukking. `ok` / `err` | Idem |
 | `Vector<T>` | Een groeibare array | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | Een hashtabel. Het sleuteltype moet `Hash` implementeren | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | Een hashtabel. Hoe sleutels vergeleken worden bepaalt `:test` bij het maken, en in een `equal`-tabel moet het sleuteltype `Hash` implementeren | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 tot 12 elementen). Elementen lees je met `t::0` | [Syntaxis hoofdstuk 2](syntax.md#2-types-schrijven) |
 | `Task<T>` | Een handle naar een taak | [Taken](functions/concurrency.md#1-taskt--handles-voor-taken) |
 | `Thread<T>` | Een handle naar een taak die op een eigen OS-thread draait | [Thread](functions/concurrency.md#7-threadt--eigen-os-threads) |
@@ -106,7 +106,7 @@ genoemd.
 
 | Trait | Implementerende types | Details |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-vergelijking) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-vergelijking) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Idem |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` en alle ingebouwde foutentypes | [print-object](functions/printing.md#5-print-object-afgedrukte-weergave-per-type) |
@@ -128,7 +128,7 @@ Details staan in [Rekenkundige traits](functions/traits.md#3-rekenkundige-traits
 | Trait | Implementerende types |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` de typen van de module `lazy` (`lazy::map-iter<I,A,U>` enz.) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (als het elementtype `Hash` implementeert) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Streams

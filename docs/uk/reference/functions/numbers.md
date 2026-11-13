@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Числа
 
 Операції над цілими числами, числами з рухомою комою, раціональними, комплексними числами та булевими
@@ -187,7 +187,7 @@
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Перетворює на `f64` і обчислює (`(sqrt 1/4)` дорівнює `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Те саме |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Те саме |
-| `sxhash` | `(sxhash x)` | `ratio→int` | Реалізація `Hash`. `ratio` може бути ключем `HashTable` |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Реалізація `Hash`. `ratio` може бути ключем `HashTable` з `equal` |
 
 У CL ціле число — це раціональне число зі знаменником 1, тому `int` теж має `numerator` (саме
 число), `denominator` (`1`), `float`, `rational`, `rationalize` і 15 функцій від `sqrt` до `atanh`
@@ -233,7 +233,7 @@
 
 `(as int q)` — це `rational->int` (усічення), `(try-as int q)` — `try-rational->int`, `(as ratio q)` і
 `(as f64 q)` — відповідні перетворення, а `(as rational x)` розширює з `int`/`ratio`. Також реалізовано
-`Eq`, `Ord`, `Hash`, `print-object` і арифметичні трейти.
+`Equal`, `Ord`, `Hash`, `print-object` і арифметичні трейти.
 
 ## 6. Комплексні числа `complex`
 
@@ -257,7 +257,7 @@
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Абсолютне значення. **Єдиний `abs`, що не повертає тип одержувача** (як у CL, абсолютне значення комплексного числа дійсне) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Комплексна арифметика |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Покомпонентна рівність. `Eq` теж реалізовано (`Ord` немає: комплексні числа не мають порядку, і `<` з CL їх теж відхиляє) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Покомпонентна рівність. `Equal` теж реалізовано (`Ord` немає: комплексні числа не мають порядку, і `<` з CL їх теж відхиляє) |
 | `zerop` | `(zerop z)` | `complex→bool` | Чи обидва компоненти дорівнюють 0 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` дають головні значення |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

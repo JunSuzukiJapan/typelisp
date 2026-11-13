@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -99,7 +99,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   읽기 오류. `deftype`으로 이름을 붙이면 `Vector<F>`로 쓸 수 있다). 트레이트의 연관 타입을 시그니처에 대입한 결과처럼, 구현이 타입을 보일 때 이 형식으로
   나오기도 한다.
 - **튜플 타입**: `#{int string}`(값과 같은 모양). 요소는 1~12개이며 제네릭 타입의 인수로도 쓸 수 있다(`Vector<#{int string}>`).
-  요소는 `t::0` `t::1`로 읽고 `(setf t::0 v)`로 바꾼다. `Eq`, `Ord`(첫 요소부터 차례로 비교), `Hash`, `print-object`는 모든
+  요소는 `t::0` `t::1`로 읽고 `(setf t::0 v)`로 바꾼다. `Equal`, `Ord`(첫 요소부터 차례로 비교), `Hash`, `print-object`는 모든
   요소의 타입이 그것을 구현하면 쓸 수 있다.
 - **한정된 타입 이름**: `module::Type`처럼 `::`로 한정할 수 있다.
 - **트레이트 객체 타입**: `:dyn Trait`(공백으로 구분된 두 단어가 하나의 타입). 구체적인 타입이 실행 중에 정해지는 값을
@@ -814,15 +814,15 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 있으면 **모든 연관 타입을 고정한** `(Trait (Assoc Type))`이다.
 
 ```lisp
-(deftrait Eq () ...)                       ; 상속 없음
-(deftrait Ord (Eq) ...)                    ; Rust의 trait Ord: Eq
+(deftrait Equal () ...)                       ; 상속 없음
+(deftrait Ord (Equal) ...)                    ; Rust의 trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; 연관 타입을 고정한다
   (defmethod rewind (self) ()))
 ```
 
-상속에는 세 가지 효과가 있다. (1) `impl Ord X`는 `impl Eq X`가 **먼저** 쓰여 있기를 요구한다(쓰는 순서에 관한 규칙. REPL과
-하나씩 하는 `load`에서 결정적으로 판단할 수 있는 유일한 형태이며 Rust보다 엄격하다). (2) `(:where (Ord T))`만으로 `Eq`의
-메서드도 호출할 수 있다. (3) `:dyn Ord`에서 `Eq`의 메서드를 호출할 수 있고, `:dyn Ord`의 값은 `:dyn Eq`가 요구되는 곳에 그대로
+상속에는 세 가지 효과가 있다. (1) `impl Ord X`는 `impl Equal X`가 **먼저** 쓰여 있기를 요구한다(쓰는 순서에 관한 규칙. REPL과
+하나씩 하는 `load`에서 결정적으로 판단할 수 있는 유일한 형태이며 Rust보다 엄격하다). (2) `(:where (Ord T))`만으로 `Equal`의
+메서드도 호출할 수 있다. (3) `:dyn Ord`에서 `Equal`의 메서드를 호출할 수 있고, `:dyn Ord`의 값은 `:dyn Equal`가 요구되는 곳에 그대로
 넘길 수 있다(업캐스트). 하위 트레이트가 부모와 같은 이름의 메서드를 다시 선언하는 것과, 두 부모에서 같은 이름의 메서드를
 상속하는 것은 모두 오류이다(vtable의 슬롯은 이름마다 하나). 다이아몬드 상속은 하나의 슬롯으로 합쳐진다.
 
@@ -873,8 +873,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 가질 수 있다(`(deftrait Name () "doc" (:type ...) (method ...)...)`). 본체가 없는 시그니처는 문서 문자열을 가질 수 없다. 끝의
 문자열 자체가 기본 구현의 반환값이 되어 둘을 구별할 수 없기 때문이다.
 
-표준 라이브러리가 제공하는 트레이트: **`Iter`**(`next` / 연관 타입 `Item`. `doiter`와 시퀀스 함수의 바탕), **`Eq`**(`equals`.
-`not-equals`는 기본 구현), **`Ord`**(`Eq`를 상속. `less`만 구현 필수이고 `less-equal` / `greater` / `greater-equal`은 기본
+표준 라이브러리가 제공하는 트레이트: **`Iter`**(`next` / 연관 타입 `Item`. `doiter`와 시퀀스 함수의 바탕), **`Equal`** (`equal`이 쓰는 트레이트), **`Ord`**(`Equal`를 상속. `less`만 구현 필수이고 `less-equal` / `greater` / `greater-equal`은 기본
 구현), **`Error`**(`message` / `source`. 오류 타입을 한결같이 다루는 `:dyn Error`), **`print-object`**(타입별 출력 표현),
 **`Pathish`**(경로명 지정자 = 문자열 또는 `pathname`), 그리고 스트림 계층 **`Stream`** → **`InputStream`** /
 **`OutputStream`** → **`CharInput`** / **`CharOutput`** → **`PeekInput`**. 어느 타입이 어느 트레이트를 구현하는지는
@@ -1058,10 +1057,10 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ### 3.16 `#[test]` — 테스트 함수
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 `#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()` 또는 `Result<(), E>`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다. `Result`를 반환하는 테스트는 `err`를 반환하면 실패하며 그 오류를 표시합니다. 따라서 `E`는 `Error` 또는 `print-object`를 구현해야 합니다(Rust가 테스트의 오류 타입에 `Debug`를 요구하는 것과 같음). `Error`라면 `describe-error`(메시지와 원인의 연쇄)로, 그렇지 않으면 `print-object`로 표시합니다. `:dyn Error`도 `Error`이므로 여러 오류를 하나의 타입으로 모아 반환할 수 있습니다.
@@ -1077,7 +1076,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 
 - **일반 실행과 `compile-file`에서는 건너뜁니다.** 내용을 검사하지도 않습니다(Rust가 테스트를 `--test`일 때만 컴파일하는 것과 같음). 프로그램 쪽에서는 테스트 함수를 호출할 수 없습니다.
 - 테스트는 함수를 둘 수 있는 어느 파일에든, 어느 `module` 안에든 쓸 수 있습니다. 프로젝트의 `tests/` 폴더에 따로 써도 됩니다.
-- 실패는 `panic`, 실행 시간 오류, `err`를 반환하는 것입니다. `assert`, 또는 양변을 출력하는 `assert-eq`([시스템](functions/system.md))로 확인합니다. 하나가 실패해도 나머지 테스트는 실행됩니다.
+- 실패는 `panic`, 실행 시간 오류, `err`를 반환하는 것입니다. `assert`, 또는 양변을 출력하는 `assert-equal`([시스템](functions/system.md))로 확인합니다. 하나가 실패해도 나머지 테스트는 실행됩니다.
 
 ```sh
 typl test                 # 이 폴더의 프로젝트 테스트를 모두 실행
@@ -1100,7 +1099,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1210,10 +1209,10 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - 맨 변형 이름 — 인수를 받지 않는 변형과 맞는다(`(match c (red 1) (blue 2))`). 필드가 있는 변형을 맨 이름으로 쓰면 인수 개수
   오류가 되므로 `(circle r)`처럼 괄호로 쓴다
 - **즉시값 리터럴**: 정수 / `true`/`false` / 문자 — 워드로 비교한다
-- **값 리터럴**: 문자열 / 부동소수점 수 / 심볼(`'foo`) / 다배정도 정수 / ratio — 그 타입의 `Eq::equals`
-  ([표준 트레이트](functions/traits.md#2-eq--ord비교))로 값을 비교한다. 문자열은 동일성이 아니라 내용을 비교한다
-- `(:= expr)` — 아무 식이나 평가해 `Eq::equals`로 비교한다. 리터럴 구문이 없는 타입(`defstruct` 인스턴스, 전역 변수, 계산
-  결과)을 비교하는 유일한 방법이며, 사용자 정의 `Eq` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
+- **값 리터럴**: 문자열 / 부동소수점 수 / 심볼(`'foo`) / 다배정도 정수 / ratio — 그 타입의 `equal`
+  ([표준 트레이트](functions/traits.md#2-equal--ord비교))로 값을 비교한다. 문자열은 동일성이 아니라 내용을 비교한다
+- `(:= expr)` — 아무 식이나 평가해 `equal`로 비교한다. 리터럴 구문이 없는 타입(`defstruct` 인스턴스, 전역 변수, 계산
+  결과)을 비교하는 유일한 방법이며, 사용자 정의 `Equal` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
   모든 것(인수, 바깥 바인딩, 전역 변수)을 참조할 수 있다
 - `(Ctor sub-pattern...)` — 생성자 패턴(`(some x)` `(none)` `(cons a d)` `(ok v)` 등)
 - `(Type :slot pattern... :slot...)` — 구조체의 패턴. 타입 이름 뒤에 슬롯을 키워드로 쓴다. 키워드
@@ -1232,7 +1231,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `(:or p1 p2 ...)` — or 패턴. 선택지 중 하나라도 맞으면 맞는다. 본체가 하나뿐이므로 모든 선택지가 같은 이름의 변수를 같은 타입으로 묶어야 한다. 생성자
   패턴 안에도 쓸 수 있다(`(some (:or (circle r) (rect r _)))`)
 
-`Eq`를 구현하지 않은 타입을 값 리터럴 / `(:= expr)`로 비교하면 타입 오류이다(조용히 맞지 않는 갈래를 남기는 대신 비교할 수
+`Equal`를 구현하지 않은 타입을 값 리터럴 / `(:= expr)`로 비교하면 타입 오류이다(조용히 맞지 않는 갈래를 남기는 대신 비교할 수
 없다고 말하는 쪽을 택한다).
 
 **가드**: 패턴 뒤에 `:when 조건`을 쓰면 패턴이 맞고 조건도 참일 때만 그 갈래를 고른다. 조건이 거짓이면 다음 갈래를 시도한다. 조건은 패턴이 묶은 변수를 읽을 수
@@ -1250,17 +1249,13 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - 가드가 붙은 갈래는 망라성 검사에서 세지 않는다(Rust와 같다). 조건이 거짓일 수 있으므로, 그 갈래가 덮을 변형에는 가드 없는 갈래나 `_`가 따로 필요하다.
 - or 패턴과 가드는 함께 쓸 수 있다. 가드는 어느 선택지로 맞았든 평가된다(`((:or 1 2 3) :when on "small")`).
 
-**`Sexpr` 검사 대상에 대한 값 리터럴**: `sexpr`의 `Eq`는 `eq`(CL의 동일성)이므로 즉시값 — `'foo`(인턴됨) / 정수 / 문자 /
-`true`/`false` — 은 그대로 쓸 수 있고 내용으로 맞는다.
+**`Sexpr` 검사 대상에 대한 값 리터럴**: `Sexpr`의 `equal`은 CL의 `equal`이므로 `'foo` / 정수 / 문자 /
+`true`/`false` / 문자열 / 부동소수점 / 다배정도 정수 / ratio를 그대로 쓸 수 있고, 내용대로 일치한다(문자열은
+내용으로, 수는 `eql`로 비교):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-즉시값이 아닌 리터럴(문자열 / 부동소수점 수 / 다배정도 정수 / ratio)은 `Sexpr`에 대해 **쓸 수 없다**. 그 `eq`는 객체의
-동일성을 비교하므로 "타입은 통과하지만 결코 맞지 않는 갈래"가 되기 때문에, 변형 패턴을 가리키는 오류로 한다.
-`(str "hi")`라고 쓰면 `string`으로 분해해 내용으로 비교한다. `(:= expr)`는 명시적으로 `equals`를 요구하므로 이 제한을 받지
-않는다.
 
 **검사 대상이 ADT일 필요는 없다.** `string`/`symbol`/`i32`/`f64` 등을 바로 `match`할 수 있다(문자열 리터럴 패턴이 쓰이는
 곳이 바로 거기이다). 다만 변형이 없는 타입은 열거로 망라할 수 없으므로 `_`(또는 와일드카드 역할의 바인딩 패턴)가 필요하다.
@@ -1632,7 +1627,7 @@ CL의 컨디션(`define-condition`/`handler-bind`/`invoke-restart`)은 채택하
 
 컴파일할 **수 있는** 것: 스트림과 파일 입출력, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, 초월 함수, 비트 연산,
-`catch`/`throw`/`unwind-protect`, `eq`/`eql`/`equal`/`equalp` 네 가지 모두(그래서 `case`도 모든 타입에 대해 컴파일된다),
+`catch`/`throw`/`unwind-protect`, `eq`/`eql`/`equal`/`equalp` 네 가지 모두,
 `print`/`println`/`format`/`pprint`와 `pprint-logical-block`을 포함한 출력 기능 전부, `read`, 그리고 `eval`. 표준
 라이브러리는 컴파일된 상태로 함께 제공된다.
 

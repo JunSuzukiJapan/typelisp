@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # السمات (Traits)
 
 السمة (trait) وعد بأن "هذا النوع يدعم هذه العمليات". تتيح السمات لعدة أنواع أن تشترك في عمليات بالاسم
@@ -96,20 +96,20 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | السمة | التوابع الواجب تنفيذها | ما تتيحه |
 |---|---|---|
-| `Eq` | `equals` | `member` و`find` و`position` ونمط `(:= expr)` في `match` وغيرها |
-| `Ord` | `less` | `less-equal` و`greater` وغيرها. وترث `Ord` من `Eq` |
+| `Equal` | `equal` | `equal` و`=` و`assert-equal` ونمط `(:= تعبير)` في `match` و`member` مع `:test equal` وغيرها |
+| `Ord` | `less` | `less-equal` و`greater` وغيرها. وترث `Ord` من `Equal` |
 | `print-object` | `print-object` | كيف تعرض `println` وأخواتها القيم |
 | `Iter` | `next` | `doiter` و`map` و`filter` و`sort` وغيرها |
 | `Error` | `message` و`source` | الاستخدام كنوع خطأ ([معالجة الأخطاء](errors.md)) |
 
-لننفّذ `Eq` و`Ord` لنوع يمثل مبلغًا من المال. ولأن `Ord` ترث من `Eq` يجب أن يأتي `impl` الخاص بـ `Eq`
+لننفّذ `Equal` و`Ord` لنوع يمثل مبلغًا من المال. ولأن `Ord` ترث من `Equal` يجب أن يأتي `impl` الخاص بـ `Equal`
 أولًا.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -185,7 +185,7 @@ total 9
 [مرجع الصياغة 3.9](../reference/syntax.md#39-deftrait--impl--السمات).
 
 لا يمكن استخدام بعض السمات مع `:dyn`: تلك التي تستخدم توابعها `Self` لوسيط غير `self` أو للقيمة الراجعة
-(مثل `equals` في `Eq`). فبما أن النوع غير معروف حتى وقت التشغيل لا توجد طريقة لإنتاج "قيمة من النوع
+(مثل `equal` في `Equal`). فبما أن النوع غير معروف حتى وقت التشغيل لا توجد طريقة لإنتاج "قيمة من النوع
 نفسه".
 
 ## 6. القيود

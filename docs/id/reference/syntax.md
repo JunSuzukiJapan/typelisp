@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -141,7 +141,7 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
   menyubstitusikan tipe terkait sebuah trait ke dalam signature.
 - **Tipe tuple**: `#{int string}` (bentuk yang sama dengan nilainya). Tuple memiliki 1 sampai 12
   elemen, dan tipe tuple juga dapat menjadi argumen tipe (`Vector<#{int string}>`). Elemen dibaca
-  dengan `t::0` `t::1` dan diubah dengan `(setf t::0 v)`. `Eq`, `Ord` (membandingkan mulai dari
+  dengan `t::0` `t::1` dan diubah dengan `(setf t::0 v)`. `Equal`, `Ord` (membandingkan mulai dari
   elemen pertama), `Hash`, dan `print-object` tersedia bila semua tipe elemen
   mengimplementasikannya.
 - **Nama tipe terkualifikasi**: dapat dikualifikasi dengan `::`, seperti `module::Type`.
@@ -972,17 +972,17 @@ trait polos, atau, jika trait itu memiliki tipe terkait, `(Trait (Assoc Type))` 
 terkaitnya ditetapkan**.
 
 ```lisp
-(deftrait Eq () ...)                       ; no supertraits
-(deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
+(deftrait Equal () ...)                       ; no supertraits
+(deftrait Ord (Equal) ...)                    ; Rust's trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
   (defmethod rewind (self) ()))
 ```
 
-Pewarisan memiliki tiga efek. (1) `impl Ord X` mensyaratkan `impl Eq X` ditulis **lebih dulu**
+Pewarisan memiliki tiga efek. (1) `impl Ord X` mensyaratkan `impl Equal X` ditulis **lebih dulu**
 (aturan tentang urutan penulisan: satu-satunya bentuk yang dapat ditentukan secara deterministik di
 REPL dan dengan `load` langkah demi langkah, dan lebih ketat daripada Rust). (2) `(:where (Ord T))`
-saja memungkinkan Anda memanggil metode `Eq` juga. (3) Metode `Eq` dapat dipanggil melalui `:dyn Ord`,
-dan nilai `:dyn Ord` dapat diserahkan apa adanya di tempat `:dyn Eq` diperlukan (upcasting). Subtrait
+saja memungkinkan Anda memanggil metode `Equal` juga. (3) Metode `Equal` dapat dipanggil melalui `:dyn Ord`,
+dan nilai `:dyn Ord` dapat diserahkan apa adanya di tempat `:dyn Equal` diperlukan (upcasting). Subtrait
 yang mendeklarasikan ulang metode bernama sama dengan induknya, dan pewarisan metode bernama sama
 dari dua induk, keduanya adalah kesalahan (vtable memiliki satu slot per nama). Pewarisan berlian
 digabung menjadi satu slot.
@@ -1046,8 +1046,8 @@ docstring: string di akhir akan menjadi nilai kembalian implementasi bawaan itu 
 keduanya tidak dapat dibedakan.
 
 Trait yang disediakan pustaka standar: **`Iter`** (`next` / tipe terkait `Item`; dasar `doiter` dan
-fungsi sekuens), **`Eq`** (`equals`; `not-equals` adalah implementasi bawaan), **`Ord`** (mewarisi
-`Eq`; hanya `less` yang wajib diimplementasikan, dan `less-equal` / `greater` / `greater-equal`
+fungsi sekuens), **`Equal`** (trait yang dipakai `equal`), **`Ord`** (mewarisi
+`Equal`; hanya `less` yang wajib diimplementasikan, dan `less-equal` / `greater` / `greater-equal`
 adalah implementasi bawaan), **`Error`** (`message` / `source`; `:dyn Error` untuk menangani tipe
 kesalahan secara seragam), **`print-object`** (representasi cetak per tipe), **`Pathish`**
 (pathname designator: string atau `pathname`), dan hierarki stream **`Stream`** → **`InputStream`** /
@@ -1283,10 +1283,10 @@ terperinci dan contohnya ada di
 ### 3.16 `#[test]` — fungsi uji
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 `defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `err`, dan galatnya ditampilkan, sehingga `E` harus mengimplementasikan `Error` atau `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian). `Error` ditampilkan dengan `describe-error` (pesan dan rantai penyebabnya), selain itu dengan `print-object`. `:dyn Error` juga merupakan `Error`, sehingga pengujian dapat mengumpulkan berbagai galat ke dalam satu tipe lalu mengembalikannya.
@@ -1302,7 +1302,7 @@ terperinci dan contohnya ada di
 
 - **Eksekusi biasa dan `compile-file` melewatinya**, bahkan tanpa memeriksa isinya (sama seperti Rust hanya mengompilasi pengujian dengan `--test`). Program itu sendiri tidak dapat memanggil fungsi uji.
 - Pengujian dapat ditulis di file mana pun yang berisi fungsi, di dalam `module` mana pun. Pengujian juga bisa disimpan terpisah di folder `tests/` proyek.
-- Pengujian gagal karena `panic`, galat waktu jalan, atau mengembalikan `err`. Periksa dengan `assert`, atau dengan `assert-eq` yang mencetak kedua sisi ([Sistem](functions/system.md)). Jika satu pengujian gagal, sisanya tetap berjalan.
+- Pengujian gagal karena `panic`, galat waktu jalan, atau mengembalikan `err`. Periksa dengan `assert`, atau dengan `assert-equal` yang mencetak kedua sisi ([Sistem](functions/system.md)). Jika satu pengujian gagal, sisanya tetap berjalan.
 
 ```sh
 typl test                 # jalankan semua pengujian proyek di folder ini
@@ -1325,7 +1325,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1448,12 +1448,12 @@ Jenis pola:
   kesalahan arity, jadi tulis dalam kurung, seperti `(circle r)`
 - **Literal langsung**: bilangan bulat / `true`/`false` / karakter — dibandingkan sebagai word
 - **Literal nilai**: string / bilangan floating-point / simbol (`'foo`) / bilangan bulat bignum /
-  rasio — dibandingkan berdasarkan nilai dengan `Eq::equals` tipe itu
-  ([Trait Standar](functions/traits.md#2-eq--ord-perbandingan)). String dibandingkan berdasarkan isi,
+  rasio — dibandingkan berdasarkan nilai dengan `equal` tipe itu
+  ([Trait Standar](functions/traits.md#2-equal--ord-perbandingan)). String dibandingkan berdasarkan isi,
   bukan identitas
-- `(:= expr)` — mengevaluasi ekspresi apa pun dan membandingkan dengan `Eq::equals`. Satu-satunya cara
+- `(:= expr)` — mengevaluasi ekspresi apa pun dan membandingkan dengan `equal`. Satu-satunya cara
   membandingkan tipe yang tidak memiliki sintaks literal (instans `defstruct`, variabel global, hasil
-  komputasi), dan implementasi `Eq` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
+  komputasi), dan implementasi `Equal` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
 - `(Ctor sub-pattern...)` — pola konstruktor (`(some x)` `(none)` `(cons a d)` `(ok v)` dan sebagainya)
 - `(Type :slot pattern... :slot...)` — pola struct. Tulis slot setelah nama tipe sebagai kata kunci. Jika
@@ -1475,7 +1475,7 @@ Jenis pola:
   setiap alternatif harus mengikat variabel yang sama dengan tipe yang sama. Dapat juga ditulis di
   dalam pola konstruktor (`(some (:or (circle r) (rect r _)))`)
 
-Membandingkan tipe yang tidak mengimplementasikan `Eq` dengan literal nilai / `(:= expr)` adalah
+Membandingkan tipe yang tidak mengimplementasikan `Equal` dengan literal nilai / `(:= expr)` adalah
 kesalahan tipe (bahasa ini memilih untuk mengatakan "ini tidak dapat dibandingkan" daripada
 membiarkan cabang yang diam-diam tidak pernah cocok).
 
@@ -1497,20 +1497,13 @@ variabel yang diikat pola.
 - Pola atau dan penjaga dapat digabung. Penjaga dievaluasi alternatif mana pun yang cocok
   (`((:or 1 2 3) :when on "small")`).
 
-**Literal nilai terhadap scrutinee `Sexpr`**: `Eq` pada `sexpr` adalah `eq` (identitas pada CL),
-sehingga literal langsung (`'foo` (di-intern) / bilangan bulat / karakter / `true`/`false`) dapat
-ditulis apa adanya dan cocok berdasarkan isi:
+**Literal nilai terhadap `Sexpr` yang diperiksa**: `equal` milik `Sexpr` adalah `equal` CL, jadi `'foo` /
+bilangan bulat / karakter / `true`/`false` / string / bilangan titik mengambang / bilangan bulat besar /
+pecahan dapat ditulis apa adanya dan cocok berdasarkan isi (string berdasarkan isi, bilangan dengan `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Literal non-langsung (string / bilangan floating-point / bilangan bulat bignum / rasio) **tidak dapat
-ditulis** terhadap `Sexpr`. `eq` pada literal itu membandingkan identitas objek, yang akan membuat
-"cabang yang lolos pemeriksaan tipe tetapi tidak pernah cocok", sehingga ia adalah kesalahan yang
-menyebut pola varian: tulis `(str "hi")` dan ia dibongkar menjadi `string` lalu dibandingkan
-berdasarkan isi. `(:= expr)` secara eksplisit meminta `equals`, sehingga batasan ini tidak berlaku
-padanya.
 
 **Scrutinee tidak harus berupa ADT.** `string`/`symbol`/`i32`/`f64` dan sejenisnya dapat dicocokkan
 langsung (di situlah pola literal string berada). Namun, tipe tanpa varian tidak dapat dicakup dengan
@@ -1937,8 +1930,7 @@ itu sendiri). `room`/`dribble`/`ed` bukan bagian dari ini dan dapat dikompilasi 
 Yang **dapat** dikompilasi: I/O stream dan berkas, `random`, `gensym`,
 `symbol->string`/`intern`, `parse-int`/`parse-float`,
 `get-universal-time`/`get-internal-real-time`, `exit`, fungsi transendental, operasi bit,
-`catch`/`throw`/`unwind-protect`, keempat `eq`/`eql`/`equal`/`equalp` (yang membuat `case` dapat
-dikompilasi untuk setiap tipe), seluruh keluarga pencetakan termasuk
+`catch`/`throw`/`unwind-protect`, keempat `eq`/`eql`/`equal`/`equalp`, seluruh keluarga pencetakan termasuk
 `print`/`println`/`format`/`pprint` dan `pprint-logical-block`, `read`, dan `eval`. Pustaka standar
 dikirim sudah terkompilasi.
 

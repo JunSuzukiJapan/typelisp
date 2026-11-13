@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Час, середовище та реалізація
 
 Функції для часу, запитів про середовище виконання, засобів реалізації, розбору й обчислення тексту,
@@ -324,7 +324,7 @@ CL повертає **два значення** (значення й позиц�
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panic, якщо хибно. Без повідомлення — `assertion failed: <тест, як записано>` (це макрос, тож він може назвати сам вираз). Перезапусків CL у цій мові не існує |
-| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, де `T` реалізує `Eq` і `print-object` | Panic, якщо два значення не рівні за `equals`, з друком обох сторін (два рядки, `  left: ...` / ` right: ...`). Перший рядок без повідомлення — `assertion failed: <вираз, як його записано>`, з повідомленням — `msg`. Використовується переважно всередині функцій `#[test]` ([Синтаксис](../syntax.md)). `assert_eq!` з Rust |
+| `assert-equal` | `(assert-equal left right)` / `(assert-equal left right msg)` | `(T,T[,string])→()`, де `T` реалізує `Equal` і `print-object` | Panic, якщо два значення не рівні за `equal`, з друком обох сторін (два рядки, `  left: ...` / ` right: ...`). Перший рядок без повідомлення — `assertion failed: <вираз, як його записано>`, з повідомленням — `msg`. Використовується переважно всередині функцій `#[test]` ([Синтаксис](../syntax.md)). `assert_eq!` з Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Записує один рядок із префіксом `WARNING: ` у `*error-output*` і **продовжує**. Спосіб повідомити про щось, не повертаючи `Result` і не завершуючи програму |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Замінює глобальні змінні лише на час `body` і відновлює їх на виході. CL пише це як `let`, але `let` у цій мові завжди зв'язує лексично, звідси окрема назва (та сама роль, що й у макросу Emacs Lisp з такою ж назвою). Відновлює, як би не залишили тіло: нормальне завершення, `throw`, `panic`, `break`/`return`. **Не зв'язування на рівні задачі** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Виконує `body`, поставивши кожну керівну змінну принтера на стандартне значення, а `*read-eval*` — на `true` ([Друк](printing.md#6-керування-обсягом-друку)) |

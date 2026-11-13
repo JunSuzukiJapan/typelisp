@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait
 
 Un trait è una promessa che "questo tipo supporta queste operazioni". I trait permettono a più tipi di
@@ -99,20 +99,20 @@ standard che lo usano.
 
 | Trait | Metodi da implementare | Che cosa abilita |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, il pattern `(:= expr)` di `match` e così via |
-| `Ord` | `less` | `less-equal`, `greater` e così via. `Ord` eredita da `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, il pattern `(:= espr)` di `match`, `member` con `:test equal`, ecc. |
+| `Ord` | `less` | `less-equal`, `greater` e così via. `Ord` eredita da `Equal` |
 | `print-object` | `print-object` | Come i valori vengono mostrati da `println` e simili |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` e così via |
 | `Error` | `message`, `source` | Uso come tipo di errore ([Gestione degli errori](errors.md)) |
 
-Implementiamo `Eq` e `Ord` per un tipo che rappresenta una somma di denaro. Poiché `Ord` eredita da
-`Eq`, l'`impl` di `Eq` deve venire per primo.
+Implementiamo `Equal` e `Ord` per un tipo che rappresenta una somma di denaro. Poiché `Ord` eredita da
+`Equal`, l'`impl` di `Equal` deve venire per primo.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -192,7 +192,7 @@ L'elenco esatto dei tipi utilizzabili si trova nel
 [Riferimento della sintassi 3.9](../reference/syntax.md#39-deftrait--impl--trait).
 
 Alcuni trait non si possono usare con `:dyn`: quelli i cui metodi usano `Self` per un argomento diverso
-da `self` o per il valore di ritorno (come `equals` in `Eq`). Poiché il tipo non è noto fino al
+da `self` o per il valore di ritorno (come `equal` in `Equal`). Poiché il tipo non è noto fino al
 runtime, non c'è modo di produrre "un valore dello stesso tipo".
 
 ## 6. Restrizioni

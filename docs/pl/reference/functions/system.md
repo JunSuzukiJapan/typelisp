@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -323,7 +323,7 @@ kompilowana jest rozwinięta postać ciała.
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Powoduje panic, jeśli fałsz. Bez komunikatu `assertion failed: <test jak zapisano>` (jest to makro, więc może nazwać samo wyrażenie). Restarty z CL nie istnieją w tym języku |
-| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, gdzie `T` implementuje `Eq` i `print-object` | Panic, jeśli obie wartości nie są równe według `equals`; wypisuje obie strony (dwa wiersze, `  left: ...` / ` right: ...`). Pierwszy wiersz to bez komunikatu `assertion failed: <wyrażenie w zapisanej postaci>`, a z komunikatem `msg`. Używane głównie w funkcjach `#[test]` ([Składnia](../syntax.md)). `assert_eq!` z Rust |
+| `assert-equal` | `(assert-equal left right)` / `(assert-equal left right msg)` | `(T,T[,string])→()`, gdzie `T` implementuje `Equal` i `print-object` | Panic, jeśli obie wartości nie są równe według `equal`; wypisuje obie strony (dwa wiersze, `  left: ...` / ` right: ...`). Pierwszy wiersz to bez komunikatu `assertion failed: <wyrażenie w zapisanej postaci>`, a z komunikatem `msg`. Używane głównie w funkcjach `#[test]` ([Składnia](../syntax.md)). `assert_eq!` z Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Zapisuje jedną linię z prefiksem `WARNING: ` do `*error-output*` i **kontynuuje**. Sposób zgłoszenia czegoś bez zwracania `Result` i bez kończenia programu |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Zastępuje zmienne globalne tylko w czasie `body` i przywraca je przy wyjściu. CL zapisuje to jako `let`, ale `let` w tym języku zawsze wiąże leksykalnie, stąd osobna nazwa (ta sama rola co makro o tej samej nazwie w Emacs Lisp). Przywraca je bez względu na to, jak ciało zostanie opuszczone: normalne zakończenie, `throw`, `panic`, `break`/`return`. **Nie jest wiązaniem na zadanie** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Wykonuje `body` z każdą zmienną sterującą drukarki ustawioną na wartość standardową i `*read-eval*` ustawionym na `true` ([Wypisywanie](printing.md#6-kontrolowanie-ile-jest-wypisywane)) |

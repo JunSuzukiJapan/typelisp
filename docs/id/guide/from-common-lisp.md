@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Untuk Pemrogram Common Lisp
 
 typelisp mewarisi sintaks Common Lisp (CL) dan banyak nama fungsinya, tetapi ia adalah bahasa dengan
@@ -129,6 +129,21 @@ mengubah literal tidak terdefinisi). `#()` yang kosong perlu diberi tipe, sepert
 
 Fungsi sekuens seperti `map`, `filter`, `sort`, dan `find` bekerja pada nilai yang mengimplementasikan
 trait `Iter`. Serahkan `Vector` setelah mengubahnya menjadi iterator dengan `(iter v)`.
+
+`eq`, `eql`, dan `equalp` dapat dipakai pada nilai bertipe apa pun, seperti di CL. `equal` adalah metode
+trait `Equal` dan hanya dapat dipakai pada tipe yang mengimplementasikannya. Setiap tipe bawaan
+mengimplementasikannya, dan `equal` sebuah list adalah `equal` CL. Untuk tipe Anda sendiri, menulis
+`(impl Equal tipe ...)` menentukan cara membandingkannya. Perbandingan yang dipakai `member`, `find`,
+`position`, `remove`, dan sejenisnya secara bawaan adalah `eql`, seperti di CL. Untuk mencari string atau
+list berdasarkan isi, tulis `:test equal`, seperti di CL (`#'` tidak diperlukan):
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false (string yang dibuat terpisah tidak eql)
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+`HashTable` juga memilih cara kunci dibandingkan dengan `:test` saat dibuat, seperti `make-hash-table` di
+CL, dan bawaannya `eql`. Untuk kunci string, tulis `(HashTable::new :test 'equal)`.
 
 ## 5. Tidak ada nilai ganda
 

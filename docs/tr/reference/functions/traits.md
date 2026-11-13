@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Standart Trait'ler
 
 Yineleme, karşılaştırma, aritmetik ve öğe ekleme ile çıkarma için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
@@ -24,50 +24,58 @@ Yineleme, karşılaştırma, aritmetik ve öğe ekleme ile çıkarma için trait
 gerçekleştirirseniz `doiter` ile olduğu gibi gezilebilir ve
 [dizi fonksiyonlarına](sequences.md#4-iter-üzerinde-dizi-fonksiyonları) geçirilebilir.
 
-## 2. `Eq` / `Ord` (karşılaştırma)
+## 2. `Equal` / `Ord` (karşılaştırma)
 
-Bunlar Rust'ın `PartialEq`/`PartialOrd`'una karşılık gelir (`Eq`/`Ord` olarak adlandırılmıştır).
-Eleman türlerinin karşılaştırılabildiğini istemek için jenerik fonksiyonların `:where` sınırlarında
-kullanılırlar (`sort`/`member`/`assoc` vb.).
+`Equal`, `equal`'ın kullandığı trait'tir ve Rust'taki `PartialEq`'e karşılık gelir. `Ord`, Rust'taki
+`PartialOrd`'a karşılık gelir. Genel fonksiyonların `:where` sınırlarında, eleman türünün
+karşılaştırılabilmesini istemek için kullanılırlar.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; must be implemented
-  (defmethod not-equals (self (other Self)) bool             ; default implementation
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; inherits from Eq
-  (defmethod less (self (other Self)) bool)                  ; must be implemented
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; uygulanmalı
+(deftrait Ord (Equal)                                     ; Equal'dan kalıtır
+  (defmethod less (self (other Self)) bool)                  ; uygulanmalı
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-`Eq`'i gerçekleştirmek için yalnızca `equals`, `Ord` için yalnızca `less` yazarsınız. Varsayılan
-gerçekleştirmeler geri kalanını doldurur. `Ord`, `Eq`'ten miras alır; bu yüzden `impl Ord X`'ten önce
-`impl Eq X` gerekir.
+`Equal`'ı uygulamak için `equal`, `Ord` için yalnızca `less` yazılır. `Ord`'un geri kalanını varsayılan
+uygulamalar doldurur. `Ord`, `Equal`'dan kalıttığı için `impl Ord X`'ten önce `impl Equal X` gerekir.
 
-Her trait metodu olduğu gibi bir fonksiyon olarak çağrılabilir (bir `where (Eq A)`/`(Ord A)` sınırı
-içinde ya da onu gerçekleştiren somut bir tür üzerinde):
+`(equal a b)`, `a`'nın türünün `Equal` uygulamasını çağırır. `Equal`'ı uygulamayan bir tür için yazmak
+tür hatasıdır. Kimliğe göre karşılaştırmak için `eq`/`eql`, yapıya göre karşılaştırmak için `equalp`
+kullanılır. Bu üçü her türden değerde kullanılabilir.
+
+Her trait metodu doğrudan bir fonksiyon olarak çağrılabilir (bir `where (Equal A)`/`(Ord A)` sınırı içinde
+ya da onu uygulayan somut bir türde):
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | Eşit olup olmadıkları (Rust'ın `==`'i) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | Eşit olmayıp olmadıkları (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Eşit olup olmadıkları (Rust'taki `==`) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` şunlar için gerçekleştirilmiştir: tüm sayısal türler (`i8`'den `u32`'ye / `f32` / `f64` / `int` /
-`ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, yani kimlik; `match`'in değer
-örüntülerinde kullanılır) ve `cons-cell<A,B>` (elemanlar `Eq` olduğunda özyinelemeli olarak). `Option<T>` ve `Result<T,E>`, aynı varyant olduklarında ve içerikleri `equals` ile eşit olduğunda eşittir; liste bir `Option<Sexpr>` olduğundan hücreleri `Sexpr`'in kimliğiyle karşılaştırılır (içerikle karşılaştırmak için `equal` kullanın). `Ord`
-şunlar için gerçekleştirilmiştir: tüm sayısal türler, `char` `string` ve `cons-cell<A,B>` (elemanlar
-`Ord` olduğunda sözlük sırasıyla).
+`Equal` şunlar için uygulanmıştır: tüm sayısal türler (`i8`'den `u32`'ye / `f32` / `f64` / `int` /
+`ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` ve demetler (elemanlar
+`Equal` olduğunda eleman eleman), ayrıca `Option<T>` ve `Result<T,E>` (aynı varyant olup içerikleri
+`equal` olduğunda). Yerleşik türlerde, türün kendi yerleşik `equal` metodu olduğu gibi `Equal`
+uygulamasıdır. Sayılar `=` ile, dizgeler büyük-küçük harf ayrımıyla içeriğe göre karşılaştırılır. `Ord`
+şunlar için uygulanmıştır: tüm sayısal türler, `char` `string` ve `cons-cell<A,B>` (elemanlar `Ord`
+olduğunda sözlüksel olarak).
 
-Metot adları, yerleşik işleçlerle (`= /= < <= > >=`) ya da `eq`/`lt` ile çakışmaz; çünkü yerleşikler
-yeniden tanımlanamaz ve her gerçekleştirme onlara devreder. Skaler karşılaştırma işleçlerinin kendileri
-her alıcı türünün yerleşik metotlarıdır ([Sayılar](numbers.md), [String'ler ve Karakterler](collections.md)).
-Bir sınırın içinde işleçleri yazmak onları trait metotları olarak okur (3. bölüm).
+Bir listenin (`Sexpr`) `equal`'ı CL'in `equal`'ıdır: cons'lar yapıya, dizgeler içeriğe, diğer her atom
+`eql`'e göre karşılaştırılır. Bu karşılaştırma değerleri çalışma zamanında dolaşır ve hiçbir metot
+çağırmaz. Bu yüzden bir liste içindeki struct, türünün `impl Equal`'ı ne olursa olsun, CL'deki gibi
+kimliğe göre karşılaştırılır.
+
+`Ord`'un metot adları yerleşik operatörlerle (`< <= > >=`) ya da `lt` ile çakışmaz; çünkü yerleşikler
+yeniden tanımlanamaz ve her uygulama onlara devreder. Skaler karşılaştırma operatörlerinin kendisi,
+alıcı türüne göre yerleşik metotlardır ([Sayılar](numbers.md), [Dizgeler ve karakterler](collections.md)).
+Bir sınır içinde yazılan operatör trait'in metodu olarak okunur (3. bölüm). `=` `equal` olur, `/=` ise
+`(not (equal a b))` olur.
 
 ## 3. Aritmetik trait'ler (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -91,7 +99,7 @@ yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçm
 
 **Bir sınırın içinde işleç yazabilirsiniz.** Alıcı, `:where` ile bağlanmış bir tür değişkeni olduğunda
 işleçler trait metotları olarak okunur (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -130,7 +138,7 @@ bölme ister (o zaman `int` geçirilemez).
 | `Vector<T>` | Sona ekler |
 | `Deque<T>` | Sona ekler (`push-back`) |
 | `Array<T>` | Doldurma işaretçisinin yerine ekler (`push-extend`). Doldurma işaretçisi olmadan panic olur |
-| `HashSet<T>` | Kümeye koyar (`insert`). Yalnızca öğe türü `Hash`'i uyguladığında `Push`'tur |
+| `HashSet<T>` | Kümeye koyar (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

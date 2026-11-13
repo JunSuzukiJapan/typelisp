@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Вбудовані функції
 
 Перелік вбудованих функцій, методів і стандартної бібліотеки. Про синтаксис (спеціальні форми та способи
@@ -23,7 +23,7 @@
   керівні макроси, порівняння й арифметичні трейти
 - будь-яке ім'я, що є і в пакеті `COMMON-LISP` мови Common Lisp (`length`, `format`, `open` тощо)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, трейти потоків `Stream`,
-  `InputStream` і `OutputStream`, а також `Hash`, який реалізують ключі `HashTable`
+  `InputStream` і `OutputStream`, а також `Hash`, який реалізують ключі `HashTable` з `equal`
 - типи, які згадано в їхніх функціях і змінних
 
 Будь-яке інше ім'я вводять через `use`, наприклад `(use std::net::tcp-connect)`, або пишуть шляхом,
@@ -35,7 +35,7 @@
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -59,7 +59,7 @@
 `(тип-аргументів,...)→тип-результату`.
 
 - Одна велика літера, як-от `T`, `A` або `B`, — це змінна типу.
-- Примітка на кшталт `where Eq A` — це обмеження трейтом, якому має задовольняти змінна типу.
+- Примітка на кшталт `where Equal A` — це обмеження трейтом, якому має задовольняти змінна типу.
 - `Iter<A>` означає «будь-яка реалізація `Iter`, у якої `Item` дорівнює `A`».
 - Аргументи, позначені `&optional` / `&key`, можна пропускати.
 
@@ -71,7 +71,7 @@
 | [sequences.md](sequences.md) | Пара `cons-cell`, S-вирази `Sexpr`, символи, функції над послідовностями, ліниві ітератори `lazy`, функції вищого порядку |
 | [collections.md](collections.md) | Рядки, знаки, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, типи помилок і трейт `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, арифметичні трейти, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, арифметичні трейти, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, змінні керування друком |
 | [format.md](format.md) | Директиви формату |
 | [streams-files.md](streams-files.md) | Потоки, файлові операції, шляхи, readtable |

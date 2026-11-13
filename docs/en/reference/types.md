@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Types
 
 The types typelisp has, and the standard traits each type implements. How to write types is in
@@ -33,7 +33,7 @@ There is no 64-bit integer type. For integers whose width does not matter, use `
 | `Option<T>` | A value that is there or not. `some` / `none` | [Option and Result](functions/option-result.md) |
 | `Result<T,E>` | Success or failure. `ok` / `err` | Same as above |
 | `Vector<T>` | A growable array | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | A hash table. The key type must implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | A hash table. How keys compare is decided by `:test` when it is made, and in an `equal` table the key type must implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 to 12 elements). Elements are read with `t::0` | [Syntax chapter 2](syntax.md#2-writing-types) |
 | `Task<T>` | A handle to a task | [Tasks](functions/concurrency.md#1-taskt--handles-to-tasks) |
 | `Thread<T>` | A handle to a task running on a dedicated OS thread | [Thread](functions/concurrency.md#7-threadt--dedicated-os-threads) |
@@ -103,7 +103,7 @@ Which types implement which traits. The methods of each trait are in
 
 | Trait | Implementing types | Details |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparison) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-comparison) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Same as above |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` and all the built-in error types | [print-object](functions/printing.md#5-print-object-per-type-printed-representation) |
@@ -125,7 +125,7 @@ Details are in [Arithmetic traits](functions/traits.md#3-arithmetic-traits-add--
 | Trait | Implementing types |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` the types of the `lazy` module (`lazy::map-iter<I,A,U>` and so on) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (when the element type implements `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Streams

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 내장 함수
 
 내장 함수, 메서드, 표준 라이브러리의 목록. 문법(특수 형식과 정의 방법)은 [문법 레퍼런스](../syntax.md), 타입 목록은
@@ -22,7 +22,7 @@
 - 기본 타입, `Option`·`Result`·`Vector`, 반복, S 식과 리스트, 열 함수, 제어 매크로, 비교, 산술 트레이트
 - Common Lisp의 `COMMON-LISP` 패키지에 있는 이름과 같은 이름의 것(`length`·`format`·`open` 등)
 - `Error`·`assert`·`print-object`, `HashTable`·`Array`·`BitVector`, 스트림 트레이트
-  `Stream`·`InputStream`·`OutputStream`, `HashTable`의 키가 구현하는 `Hash`
+  `Stream`·`InputStream`·`OutputStream`, `equal` `HashTable`의 키가 구현하는 `Hash`
 - 이것들의 함수·변수의 타입에 나타나는 타입
 
 그 밖의 이름은 `(use std::net::tcp-connect)`처럼 `use`로 가져오거나 `std::net::tcp-connect`와 같이
@@ -34,7 +34,7 @@
 | `std::char` | `digit->char`、`digit-weight`、`name->char` |
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
-| `std::error` | `WrappedError`、`as-dyn-error`、`assert-eq`、`describe-error`、`wrap-error` |
+| `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`、`direction-input`、`direction-output`、`directory-p`、`open-binary`、`open-binary-input`、`open-binary-output`、`open-file`、`open-input`、`open-output`、`read-file-lines`、`read-file-string`、`write-file-string` |
 | `std::hash` | `*sxhash-mask*`、`sxhash-string` |
@@ -57,7 +57,7 @@
 각 장의 표는 "이름, 형식, 타입, 설명"의 열을 가진다. 타입 열은 `(인수-타입,...)→반환-타입`으로 쓴다.
 
 - `T`, `A`, `B` 같은 대문자 한 글자는 타입 변수이다.
-- `where Eq A` 같은 주석은 타입 변수가 만족해야 하는 트레이트 경계이다.
+- `where Equal A` 같은 주석은 타입 변수가 만족해야 하는 트레이트 경계이다.
 - `Iter<A>`는 "`Item`이 `A`인 `Iter`의 어떤 구현"이라는 뜻이다.
 - `&optional` / `&key`가 붙은 인수는 생략할 수 있다.
 
@@ -69,7 +69,7 @@
 | [sequences.md](sequences.md) | 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, 시퀀스 함수, 지연 이터레이터 `lazy`, 고차 함수 |
 | [collections.md](collections.md) | 문자열, 문자, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, 오류 타입과 `Error` 트레이트 |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, 산술 트레이트, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, 산술 트레이트, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, 프리티 프린터, `print-object`, 프린터 제어 변수 |
 | [format.md](format.md) | 서식 지시자 |
 | [streams-files.md](streams-files.md) | 스트림, 파일 조작, 경로명, readtable |

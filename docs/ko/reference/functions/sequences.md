@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.
@@ -118,16 +118,18 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `last` | `(last it)` | `Iter<A>→Option<A>` | 마지막 **요소**(CL처럼 "마지막 셀"이 아니다) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | 마지막 요소를 뺀 나머지 |
 
-`Eq` / `Ord` 경계가 필요한 함수(술어 대신 트레이트로 비교한다. [표준 트레이트](traits.md#2-eq--ord비교)):
+항목을 찾는 함수. `:test`를 쓰지 않으면 CL과 마찬가지로 `eql`로 비교한다. `eql`은 수와 문자를 값으로,
+그 밖을 동일성으로 비교하므로, 따로 만든 같은 내용의 문자열이나 리스트는 같지 않다. 내용으로 비교하려면
+`:test equal`이라고 쓴다(6장):
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | `x`와 같은 요소가 있는지(CL과 달리 리스트의 나머지가 아니라 `bool`) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | `x`와 같은 첫 요소 |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | `x`와 같은 첫 위치 |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | `x`와 같은 요소의 개수 |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | `x`와 같은 요소가 있는지(CL과 달리 리스트의 나머지가 아니라 `bool`) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | `x`와 같은 첫 요소 |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | `x`와 같은 첫 위치 |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | `x`와 같은 요소의 개수 |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL의 `(sort sequence predicate)`. 안정적이고 비파괴적인 정렬. `cmp`는 "첫 번째 인수가 두 번째보다 엄격하게 앞에 온다"일 때 `true` |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | `car`가 `k`와 같은 첫 쌍. 값은 `(cdr p)`로 꺼낸다 |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | `car`가 `k`와 같은 첫 쌍. 값은 `(cdr p)`로 꺼낸다 |
 
 이것들과 5장의 함수 상당수는 CL의 키워드 인수 `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count`도
 받는다(6장).
@@ -184,8 +186,8 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `member`처럼 **`bool`**(이터레이터에는 반환할 꼬리가 없다) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every`의 부정 |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | 긍정판과 같은 타입 | 술어를 부정한 판 |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 값으로 없앤다 |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | 중복을 없앤다. CL처럼 **마지막 것을 남긴다**(`:from-end true`면 첫 것을 남긴다) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | 값으로 없앤다 |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | 중복을 없앤다. CL처럼 **마지막 것을 남긴다**(`:from-end true`면 첫 것을 남긴다) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | 값 / 술어로 바꾼다 |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | `Iter<cons-cell<K,V>>`에 대해 | `assoc`의 술어판과 값 쪽 판 |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | 앞에 쌍을 추가한다 |
@@ -196,14 +198,14 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | 차례로 이어지는 **꼬리**에 대해 사상한다 |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 부작용을 위해 꼬리에 대해 사상한다(`mapc`의 `maplist`판) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 꼬리에 대해 사상하고 잇는다(`mapcan`의 `maplist`판) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | `sub`가 처음 나타나는 위치. 받는 쪽이 `string`이면 `string`의 메서드가 선택된다([문자열](collections.md#1-문자열-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | 처음으로 다른 위치. 같으면 `none` |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub`가 처음 나타나는 위치. 받는 쪽이 `string`이면 `string`의 메서드가 선택된다([문자열](collections.md#1-문자열-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 처음으로 다른 위치. 같으면 `none` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 병합. CL은 정렬된 입력을 요구하지만 이것은 이은 것을 정렬한다 |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | `x`가 없으면 **앞에** 추가한다 |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | 집합 연산. CL은 순서를 정하지 않지만 여기서는 안정적이며 **처음 나타난 순서**이다 |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | 포함 |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | 접미사인지 / 접미사 앞의 부분. CL은 **공유 구조**에 대해 묻지만 공유할 구조가 없으므로 이것은 **값으로서의** 접미사를 묻는다 |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | 요소별 동등. `Vector<T>` 자체는 `Eq`를 구현하지 않는다 |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | `x`가 없으면 **앞에** 추가한다 |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 집합 연산. CL은 순서를 정하지 않지만 여기서는 안정적이며 **처음 나타난 순서**이다 |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | 포함 |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | 접미사인지/접미사를 뺀 앞부분. CL은 **구조의 공유**를 묻지만 공유할 구조가 없으므로, 요소가 `eql`인 접미사인지를 묻는다 |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | 요소별 `equal`. `Vector<T>` 자체에는 `Equal`의 구현이 없다 |
 | `caar`…`cddddr` | `(cadr p)` | 중첩된 쌍에 대해 | CL의 28개 함수. **리스트가 아니라 쌍**을 따라간다. `cadr`는 `cons-cell<A,cons-cell<B,C>>`를 받는다 |
 
 CL에 있고 이 언어에 없는 것: `list*`(꼬리를 바꿔 끼운 부적절한 리스트라는 개념이 없다),
@@ -221,7 +223,7 @@ CL에 있고 이 언어에 없는 것: `list*`(꼬리를 바꿔 끼운 부적절
 | 키워드 | 타입 | 의미 |
 |---|---|---|
 | `:key` | `(fn (A) A)` | 비교나 검사 전에 각 요소에 적용하는 사영 |
-| `:test` | `(fn (A A) bool)` | `Eq` 경계의 `equals` 대신 쓰는 동등 검사. 첫 번째 인수는 **찾는 항목**, 두 번째는 요소(`:key` 적용 후)로, CL과 같은 순서 |
+| `:test` | `(fn (A A) bool)` | 기본 `eql` 대신 쓰는 등가 판정(`:test equal` 등). 첫 번째 인수가 **찾는 항목**, 두 번째 인수가 (`:key` 적용 후의) 요소 — CL과 같은 순서 |
 | `:test-not` | `(fn (A A) bool)` | `:test`의 부정 |
 | `:start` `:end` | `int` | 훑을 창 `[start, end)`. 인덱스는 시퀀스 전체 기준 |
 | `:from-end` | `bool` | 검색은 **마지막** 일치로 답한다. `:count`와 함께 쓰면 영향을 받는 요소를 끝에서부터 고른다 |

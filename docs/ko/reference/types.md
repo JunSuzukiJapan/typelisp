@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -32,7 +32,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 | `Option<T>` | 있거나 없는 값. `some` / `none` | [Option과 Result](functions/option-result.md) |
 | `Result<T,E>` | 성공 또는 실패. `ok` / `err` | 위와 같음 |
 | `Vector<T>` | 늘어나는 배열 | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | 해시 테이블. 키 타입은 `Hash`를 구현해야 한다 | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | 해시 테이블. 키 비교 방법은 만들 때의 `:test`로 정해지고, `equal` 테이블에서는 키 타입이 `Hash`를 구현해야 한다 | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | 튜플(요소 1~12개). 요소는 `t::0`로 읽는다 | [구문 2장](syntax.md#2-타입-표기) |
 | `Task<T>` | 태스크 핸들 | [태스크](functions/concurrency.md#1-taskt--태스크-핸들) |
 | `Thread<T>` | 전용 OS 스레드에서 실행되는 태스크의 핸들 | [Thread](functions/concurrency.md#7-threadt--전용-os-스레드) |
@@ -101,7 +101,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 트레이트 | 구현하는 타입 | 자세히 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord비교) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord비교) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | 위와 같음 |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time`와 모든 내장 오류 타입 | [print-object](functions/printing.md#5-print-object타입별-출력-표현) |
@@ -122,7 +122,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 | 트레이트 | 구현하는 타입 |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` 모듈의 타입(`lazy::map-iter<I,A,U>` 등) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>`(요소 타입이 `Hash`를 구현할 때) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 스트림

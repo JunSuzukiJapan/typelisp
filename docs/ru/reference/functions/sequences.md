@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Пары, S-выражения и последовательности
 
 Обобщённая пара `cons-cell`, данные S-выражений `Sexpr`, символы, функции последовательностей, написанные поверх
@@ -124,17 +124,18 @@
 | `last` | `(last it)` | `Iter<A>→Option<A>` | Последний **элемент** (а не «последняя ячейка», как в CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | Все, кроме последнего элемента |
 
-Функции, требующие ограничения `Eq` / `Ord` (сравнивают через трейт, а не через предикат;
-[Стандартные трейты](traits.md#2-eq--ord-сравнение)):
+Функции, которые ищут элемент. Без `:test` они сравнивают через `eql`, как в CL. `eql` сравнивает числа и
+символы по значению, а остальное по идентичности, поэтому две отдельно созданные строки или списка с
+одинаковым содержимым не равны. Чтобы сравнивать по содержимому, пишут `:test equal` (глава 6):
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | Есть ли элемент, равный `x` (в отличие от CL — `bool`, а не остаток списка) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | Первый элемент, равный `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | Первая позиция, равная `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | Сколько элементов равны `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | Есть ли элемент, равный `x` (в отличие от CL — `bool`, а не остаток списка) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | Первый элемент, равный `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | Первая позиция, равная `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | Сколько элементов равны `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | `(sort sequence predicate)` из CL. Устойчивая сортировка без разрушения. `cmp` равен `true`, когда «первый аргумент строго предшествует второму» |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | Первая пара, `car` которой равен `k`. Значение извлекается через `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | Первая пара, `car` которой равен `k`. Значение извлекается через `(cdr p)` |
 
 Эти функции и многие функции главы 5 также принимают ключевые аргументы CL `:key` / `:test` / `:test-not` / `:start`
 / `:end` / `:from-end` / `:count` (глава 6).
@@ -196,8 +197,8 @@
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Как и `member`, — **`bool`** (у итератора нет хвоста для возврата) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Отрицания `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | Те же типы, что у положительных версий | Версии с отрицанием предиката |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Удаляет по значению |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | Удаляет дубликаты. Как в CL, **сохраняется последнее вхождение** (`:from-end true` сохраняет первое) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | Удаляет по значению |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | Удаляет дубликаты. Как в CL, **сохраняется последнее вхождение** (`:from-end true` сохраняет первое) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | Заменяет по значению / предикату |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | над `Iter<cons-cell<K,V>>` | Версии `assoc` с предикатом и по стороне значения |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | Добавляет пару в начало |
@@ -208,14 +209,14 @@
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | Отображает последовательные **хвосты** |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Отображает хвосты ради побочных эффектов (аналог `mapc` для `maplist`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Отображает хвосты и соединяет (аналог `mapcan` для `maplist`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Позиция первого вхождения `sub`. Если получатель — `string`, выбирается метод `string` ([Строки](collections.md#1-строки-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Первая позиция, где они различаются. `none`, если равны |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Позиция первого вхождения `sub`. Если получатель — `string`, выбирается метод `string` ([Строки](collections.md#1-строки-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Первая позиция, где они различаются. `none`, если равны |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Слияние. CL требует отсортированных входов; здесь сортируется соединение |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Добавляет `x` **в начало**, если его нет |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | Операции над множествами. CL не задаёт порядок; здесь он устойчив, **в порядке первого появления** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | Включение |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Является ли суффиксом / часть до суффикса. CL спрашивает о **разделяемой структуре**, но разделять нечего, поэтому здесь спрашивается о суффиксе **как значениях** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | Поэлементное равенство. Сам `Vector<T>` не реализует `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Добавляет `x` **в начало**, если его нет |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Операции над множествами. CL не задаёт порядок; здесь он устойчив, **в порядке первого появления** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | Включение |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Суффикс ли это / часть до суффикса. CL спрашивает об **общей структуре**, но общей структуры здесь нет, поэтому спрашивается, суффикс ли это из элементов, `eql` друг другу |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | Поэлементный `equal`. У самого `Vector<T>` нет реализации `Equal` |
 | `caar`…`cddddr` | `(cadr p)` | над вложенными парами | 28 функций CL. Обходят **пары, а не списки**: `cadr` принимает `cons-cell<A,cons-cell<B,C>>` |
 
 Что есть в CL и чего нет в этом языке: `list*` (нет понятия несобственного списка с заменяемым хвостом),
@@ -234,7 +235,7 @@
 | Ключевое слово | Тип | Смысл |
 |---|---|---|
 | `:key` | `(fn (A) A)` | Проекция, применяемая к каждому элементу перед сравнением или проверкой |
-| `:test` | `(fn (A A) bool)` | Проверка равенства, используемая вместо `equals` из ограничения `Eq`. Первый аргумент — **искомый объект**, второй — элемент (после `:key`), в том же порядке, что в CL |
+| `:test` | `(fn (A A) bool)` | Проверка равенства вместо `eql` по умолчанию (`:test equal` и т. д.). Первый аргумент — **искомый элемент**, второй — элемент (после `:key`), в том же порядке, что в CL |
 | `:test-not` | `(fn (A A) bool)` | Отрицание `:test` |
 | `:start` `:end` | `int` | Окно `[start, end)` для просмотра. Индексы относятся ко всей последовательности |
 | `:from-end` | `bool` | Поиск отвечает **последним** совпадением. В сочетании с `:count` затрагиваемые элементы берутся с конца |

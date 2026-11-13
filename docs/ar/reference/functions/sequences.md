@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # الأزواج والتعبيرات الرمزية والتسلسلات
 
 الزوج العام `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات المكتوبة فوق `Iter`
@@ -121,17 +121,18 @@
 | `last` | `(last it)` | `Iter<A>→Option<A>` | **العنصر** الأخير (لا "الخلية الأخيرة" كما في CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | كل العناصر عدا الأخير |
 
-الدوال التي تتطلب قيد `Eq` / `Ord` (تقارن عبر سمة بدلًا من محمول؛
-[السمات القياسية](traits.md#2-eq--ord-المقارنة)):
+دوال تبحث عن عنصر. بدون `:test` تقارن بـ `eql` كما في CL. يقارن `eql` الأعداد والمحارف بالقيمة والباقي
+بالهوية، فسلسلتان أو قائمتان بالمحتوى نفسه أُنشئتا كلٌّ على حدة غير متساويتين. للمقارنة بالمحتوى اكتب
+`:test equal` (الفصل 6):
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` حيث `Eq A` | هل يوجد عنصر مساوٍ لـ `x` (بخلاف CL، `bool` لا بقية القائمة) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` حيث `Eq A` | أول عنصر مساوٍ لـ `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` حيث `Eq A` | أول موضع مساوٍ لـ `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` حيث `Eq A` | كم عنصرًا يساوي `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | هل يوجد عنصر مساوٍ لـ `x` (بخلاف CL، `bool` لا بقية القائمة) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | أول عنصر مساوٍ لـ `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | أول موضع مساوٍ لـ `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | كم عنصرًا يساوي `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | `(sort sequence predicate)` في CL. فرز مستقر دون إتلاف. و`cmp` هي `true` عندما "يسبق الوسيط الأول الثاني بدقة" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` حيث `Eq K` | أول زوج يساوي `car` فيه `k`. واستخرج القيمة بـ `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | أول زوج يساوي `car` فيه `k`. واستخرج القيمة بـ `(cdr p)` |
 
 وهذه وكثير من دوال الفصل 5 تأخذ أيضًا وسائط CL بالكلمات المفتاحية `:key` / `:test` / `:test-not` /
 `:start` / `:end` / `:from-end` / `:count` (الفصل 6).
@@ -191,8 +192,8 @@
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | مثل `member`، **`bool`** (فليس للمكرِّر ذيل يُعاد) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | نفي `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | الأنواع نفسها كالنسخ الموجبة | نسخ يُنفى فيها المحمول |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` حيث `Eq A` | يزيل بالقيمة |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` حيث `Eq A` | يزيل المكررات. وكما في CL **يُبقى آخر ظهور** (و`:from-end true` تُبقي الأول) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | يزيل بالقيمة |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | يزيل المكررات. وكما في CL **يُبقى آخر ظهور** (و`:from-end true` تُبقي الأول) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | يستبدل بالقيمة / بالمحمول |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | على `Iter<cons-cell<K,V>>` | نسخ المحمول وجانب القيمة من `assoc` |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | يضيف زوجًا في المقدمة |
@@ -203,14 +204,14 @@
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | يحوّل على **الذيول** المتتابعة |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | يحوّل على الذيول لأجل الآثار الجانبية (نظير `maplist` لـ `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | يحوّل على الذيول ويضم (نظير `maplist` لـ `mapcan`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` حيث `Eq A` | الموضع الذي تظهر فيه `sub` أول مرة. وإذا كان المستقبِل `string` اختير تابع `string` ([السلاسل النصية](collections.md#1-السلاسل-النصية-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` حيث `Eq A` | أول موضع يختلفان فيه. `none` إذا تساويا |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | الموضع الذي تظهر فيه `sub` أول مرة. وإذا كان المستقبِل `string` اختير تابع `string` ([السلاسل النصية](collections.md#1-السلاسل-النصية-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | أول موضع يختلفان فيه. `none` إذا تساويا |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | الدمج. وتشترط CL مدخلات مرتبة؛ أما هذه فتفرز المضموم |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` حيث `Eq A` | يضيف `x` **في المقدمة** إذا لم يكن موجودًا |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` حيث `Eq A` | عمليات المجموعات. ولا تحدد CL الترتيب؛ وهنا مستقر، **بترتيب أول ظهور** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` حيث `Eq A` | الاحتواء |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | هل هو لاحقة / الجزء الذي قبل اللاحقة. وتسأل CL عن **بنية مشتركة**، لكن لا توجد بنية تُشارَك، فهذه تسأل عن لاحقة **بالقيم** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` حيث `Eq A` | مساواة عنصرًا بعنصر. و`Vector<T>` نفسه لا ينفّذ `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | يضيف `x` **في المقدمة** إذا لم يكن موجودًا |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | عمليات المجموعات. ولا تحدد CL الترتيب؛ وهنا مستقر، **بترتيب أول ظهور** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | الاحتواء |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | هل هو لاحقة / الجزء الذي قبل اللاحقة. يسأل CL عن **البنية المشتركة**، ولا بنية هنا تُشارَك، فيُسأل هل هو لاحقة عناصرها `eql` |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` حيث `Equal A` | `equal` عنصرًا عنصرًا. ليس لـ `Vector<T>` نفسه تنفيذ لـ `Equal` |
 | `caar`…`cddddr` | `(cadr p)` | على أزواج متداخلة | دوال CL الـ 28. وهي تمر على **الأزواج لا القوائم**: فـ `cadr` تأخذ `cons-cell<A,cons-cell<B,C>>` |
 
 ما في CL وليس في هذه اللغة: `list*` (فلا مفهوم لقائمة غير سليمة يُستبدل ذيلها)،
@@ -228,7 +229,7 @@
 | الكلمة المفتاحية | النوع | المعنى |
 |---|---|---|
 | `:key` | `(fn (A) A)` | إسقاط (projection) يُطبَّق على كل عنصر قبل المقارنة أو الاختبار |
-| `:test` | `(fn (A A) bool)` | اختبار مساواة يُستخدم بدلًا من `equals` من قيد `Eq`. والوسيط الأول هو **العنصر المبحوث عنه** والثاني هو العنصر (بعد `:key`)، بالترتيب نفسه كما في CL |
+| `:test` | `(fn (A A) bool)` | اختبار مساواة يُستعمل بدل `eql` الافتراضي (`:test equal` وغيره). الوسيط الأول هو **العنصر المبحوث عنه**، والثاني هو العنصر (بعد `:key`)، بالترتيب نفسه كما في CL |
 | `:test-not` | `(fn (A A) bool)` | نفي `:test` |
 | `:start` `:end` | `int` | النافذة `[start, end)` المراد مسحها. والفهارس نسبة إلى التسلسل كله |
 | `:from-end` | `bool` | يجيب البحث بـ**آخر** تطابق. ومع `:count` تؤخذ العناصر المتأثرة من النهاية |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Строки, символы и коллекции
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` и `Deque<T>`.
@@ -78,7 +78,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | Число элементов |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | Удаляет последний элемент и возвращает его. `none`, если пуст (в отличие от `get`/`set`, без panic) (метод трейта [`Pop`](traits.md#5-трейт-pop-извлечение-элементов)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Создаёт итератор, реализующий `Iter` |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Добавляет `x`, если равного элемента нет (`pushnew` из CL. Ему не нужно переписывать место, поэтому это метод, а не макрос) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Добавляет `x` в конец, если нет элемента, `eql` ему (`pushnew` из CL. Переписывать место не нужно, поэтому это метод, а не макрос) |
 
 `map`/`filter` и подобные — это [функции последовательностей](sequences.md#4-функции-последовательностей-над-iter):
 вектор передаётся через `iter`, как в `(map (iter v) f)`. Разрушающие операции (`nreverse`, `delete` и т. д.) — в
@@ -88,7 +88,7 @@
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | Создаёт пустую таблицу |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | Создаёт пустую таблицу. `:test` — способ сравнения ключей (таблица ниже); без него `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | Поиск |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | Вставка или перезапись |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | Удаляет запись и возвращает старое значение, если оно было |
@@ -101,39 +101,50 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | `maphash` из CL |
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` из CL. Для этой таблицы — число занятых записей (равно `count`) |
 
-**Ключом может быть любой тип, реализующий `Hash`**, включая типы `defstruct`/`defenum`. У `get`/`set`/`remove` есть
-`(:where (Hash K))`, поэтому таблица с типом ключа, который его не реализует, — **ошибка типа** (у `f64` нет `Hash` из-за
-`NaN`).
+Способ сравнения ключей выбирают при создании с помощью `:test`, как в `make-hash-table` из CL. `:test`
+принимает одно из `eq`, `eql`, `equal` и `equalp` (можно писать `'equal` или `equal`).
+
+| `:test` | Как сравниваются ключи | Типы ключей |
+|---|---|---|
+| `eql` (по умолчанию) | Числа и символы по значению, остальное по идентичности | Любой тип |
+| `eq` | По идентичности | Любой тип |
+| `equal` | Через `equal` (`Equal`) и хеш `sxhash` (`Hash`) типа ключа | Типы, реализующие `Hash` |
+| `equalp` | Через `equalp` (строки без учёта регистра, структуры по полям) | Любой тип |
+
+По умолчанию `eql`, поэтому две отдельно созданные строки с одинаковым содержимым — это два ключа. Для
+строковых ключей пишут `(HashTable::new :test 'equal)`. Если тип ключей таблицы `equal` не реализует
+`Hash`, это **ошибка типа** в месте создания таблицы (у `f64` нет `Hash` из-за `NaN`).
 
 ```lisp
-(deftrait Hash (Eq)
+(deftrait Hash (Equal)
   (defmethod sxhash (self) int))              ; возвращает неотрицательное значение, помещающееся в fixnum
 ```
 
-Реализовано для: `int` и шести целых фиксированной ширины, `bool`, `char`, `string` и `symbol` (не для чисел с
-плавающей точкой). Для собственных типов делайте результат неотрицательным через `logand` с `*sxhash-mask*`
-(2^30-1). Чтобы хешировать строку, можно вызвать `(sxhash-string s)` (32-битный FNV-1a), который использует
-реализация для `string`.
+`Hash` реализован для: `int` и шести целых фиксированной ширины, `bool`, `char`, `string`, `symbol` (не для
+чисел с плавающей точкой). Для своих типов результат держат неотрицательным, объединяя его через `logand`
+с `*sxhash-mask*` (2^30-1). Чтобы получить хеш строки, можно вызвать `(sxhash-string s)` (FNV-1a 32 бита),
+который использует реализация для `string`.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-Одинаковы ли два ключа, решает **сам тип ключа** (`sxhash` и `equals` из `Eq`, супертрейта `Hash`), а не
-идентичность объектов. Поэтому, как выше, можно искать по ключу, который является «другим значением, но равным».
+В таблице `equal` то, одинаковы ли два ключа, решает **сам тип ключа** (`sxhash` и `equal` из `Equal`,
+супертрейта `Hash`), а не идентичность объектов. Поэтому, как выше, ключ, который «другое значение, но
+равное», находит запись.
 
-Коллизии `sxhash` допустимы (контракт `Hash` действует лишь в одну сторону: равные значения должны иметь одинаковый
-хеш). Ключи с коллизией различаются через `equals`.
+Коллизии `sxhash` допустимы (контракт `Hash` действует в обратную сторону: он говорит лишь, что значения,
+равные по `equal`, имеют один хеш). Сталкивающиеся ключи различаются через `equal`.
 
 ## 5. `Array<T>` (многомерные массивы)
 
@@ -189,12 +200,13 @@
 
 ## 7. `HashSet<T>`
 
-Набор элементов без повторов (`HashSet` из Rust). `defstruct` стандартной библиотеки, содержимое
-которого — `HashTable<T,()>`. Тип элемента должен реализовывать `Hash`, как ключ `HashTable`.
+Набор элементов без повторов (`HashSet` из Rust). `defstruct` стандартной библиотеки, содержимое которого —
+`HashTable<T,()>`. Как сравниваются элементы, определяет `:test`, как для ключей `HashTable`, а во
+множестве `equal` тип элементов должен реализовывать `Hash`.
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | Создаёт пустое множество. Аргумент типа берётся из ожидаемого типа |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | Создаёт пустое множество. Аргумент типа берётся из ожидаемого типа. `:test` как у `HashTable`; без него `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Добавляет `x`. `true`, если его не было, `false`, если уже был |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Есть ли `x` |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Удаляет `x`. `true`, если он был |
@@ -205,7 +217,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 型別一覽
 
 typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的寫法見[語法參考第 2 章](syntax.md#2-型別的寫法)，各型別的函式與方法見
@@ -32,7 +32,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | `Option<T>` | 有值或沒有值。`some` / `none` | [Option 與 Result](functions/option-result.md) |
 | `Result<T,E>` | 成功或失敗。`ok` / `err` | 同上 |
 | `Vector<T>` | 可變長度陣列 | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | 雜湊表。鍵的型別須實作 `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | 雜湊表。鍵的比較方式由建立時的 `:test` 決定，`equal` 表的鍵型別須實作 `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | 元組（元素 1～12 個）。元素用 `t::0` 讀取 | [語法第 2 章](syntax.md#2-型別的寫法) |
 | `Task<T>` | 任務的控制代碼 | [任務](functions/concurrency.md#1-taskt--任務控制代碼) |
 | `Thread<T>` | 在專用 OS 執行緒上執行的任務的控制代碼 | [Thread](functions/concurrency.md#7-threadt--專用-os-執行緒) |
@@ -98,7 +98,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 | trait | 實作的型別 | 詳情 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord比較) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 以及所有內建錯誤型別 | [print-object](functions/printing.md#5-print-object依型別的列印表示) |
@@ -119,7 +119,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | trait | 實作的型別 |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` 模組的型別（`lazy::map-iter<I,A,U>` 等） |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>`（元素型別實作了 `Hash` 時） |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 串流

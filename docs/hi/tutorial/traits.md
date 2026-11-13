@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait
 
 Trait एक वादा है कि "यह टाइप ये ऑपरेशन सपोर्ट करता है"। Trait कई टाइप को एक ही नाम के ऑपरेशन साझा करने देते हैं, ताकि उन्हें इस्तेमाल करने वाले फ़ंक्शन को हर टाइप के लिए अलग-अलग न लिखना पड़े। वे लगभग ठीक Rust के trait की तरह काम करते हैं। यह अध्याय मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -91,19 +91,19 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | Trait | लागू करने वाले मेथड | यह क्या सक्षम करता है |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, `match` का `(:= expr)` पैटर्न, आदि |
-| `Ord` | `less` | `less-equal`, `greater` आदि। `Ord`, `Eq` से विरासत लेता है |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, `match` का `(:= व्यंजक)` पैटर्न, `:test equal` दिया गया `member` आदि |
+| `Ord` | `less` | `less-equal`, `greater` आदि। `Ord`, `Equal` से विरासत लेता है |
 | `print-object` | `print-object` | `println` और उसके साथियों द्वारा मान कैसे दिखाए जाते हैं |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` आदि |
 | `Error` | `message`, `source` | त्रुटि टाइप के रूप में उपयोग ([त्रुटि प्रबंधन](errors.md)) |
 
-आइए पैसे की राशि दर्शाने वाले टाइप के लिए `Eq` और `Ord` लागू करें। चूँकि `Ord`, `Eq` से विरासत लेता है, `Eq` का `impl` पहले आना चाहिए।
+आइए पैसे की राशि दर्शाने वाले टाइप के लिए `Equal` और `Ord` लागू करें। चूँकि `Ord`, `Equal` से विरासत लेता है, `Equal` का `impl` पहले आना चाहिए।
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -176,7 +176,7 @@ total 9
 उपयोग किए जा सकने वाले टाइप की सटीक सूची
 [सिंटैक्स संदर्भ 3.9](../reference/syntax.md#39-deftrait--impl--trait) में है।
 
-कुछ trait `:dyn` के साथ उपयोग नहीं किए जा सकते: वे जिनके मेथड `self` के अलावा किसी आर्ग्युमेंट के लिए या रिटर्न मान के लिए `Self` का उपयोग करते हैं (जैसे `Eq` का `equals`)। चूँकि टाइप रन टाइम तक ज्ञात नहीं होता, "उसी टाइप का मान" बनाने का कोई तरीका नहीं है।
+कुछ trait `:dyn` के साथ उपयोग नहीं किए जा सकते: वे जिनके मेथड `self` के अलावा किसी आर्ग्युमेंट के लिए या रिटर्न मान के लिए `Self` का उपयोग करते हैं (जैसे `Equal` का `equal`)। चूँकि टाइप रन टाइम तक ज्ञात नहीं होता, "उसी टाइप का मान" बनाने का कोई तरीका नहीं है।
 
 ## 6. प्रतिबंध
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Common Lisp Programcıları İçin
 
 typelisp, Common Lisp'in (CL) sözdizimini ve fonksiyon adlarının çoğunu devralır, ancak statik tür
@@ -128,6 +128,21 @@ etkilemez (CL'de bir literali değiştirmenin sonucu tanımsızdır). Boş bir `
 
 `map`, `filter`, `sort` ve `find` gibi dizi fonksiyonları, `Iter` trait'ini gerçekleştiren değerler
 üzerinde çalışır. Bir `Vector`'ü `(iter v)` ile yineleyiciye çevirdikten sonra geçirin.
+
+`eq`, `eql` ve `equalp`, CL'deki gibi her türden değerde kullanılabilir. `equal`, `Equal` trait'inin
+metodudur ve yalnızca onu uygulayan türlerde kullanılabilir. Her yerleşik tür onu uygular ve bir listenin
+`equal`'ı CL'in `equal`'ıdır. Kendi türünüz için `(impl Equal tür ...)` yazmak, nasıl karşılaştırılacağını
+belirler. `member`, `find`, `position`, `remove` ve benzerlerinin varsayılan olarak kullandığı
+karşılaştırma, CL'deki gibi `eql`'dir. Dizgeleri ya da listeleri içeriğe göre aramak için CL'deki gibi
+`:test equal` yazılır (`#'` gerekmez):
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false (ayrı oluşturulmuş dizgeler eql değildir)
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+`HashTable` da CL'in `make-hash-table`'ı gibi anahtarların nasıl karşılaştırılacağını oluşturulurken
+`:test` ile seçer ve varsayılan `eql`'dir. Dizge anahtarlar için `(HashTable::new :test 'equal)` yazılır.
 
 ## 5. Çoklu değerler yoktur
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -34,7 +34,7 @@ Tidak ada tipe bilangan bulat 64 bit. Untuk bilangan bulat yang lebarnya tidak p
 | `Option<T>` | Nilai yang ada atau tidak. `some` / `none` | [Option dan Result](functions/option-result.md) |
 | `Result<T,E>` | Berhasil atau gagal. `ok` / `err` | Sama seperti di atas |
 | `Vector<T>` | Larik yang dapat membesar | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | Tabel hash. Tipe kunci harus mengimplementasikan `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | Tabel hash. Cara kunci dibandingkan ditentukan oleh `:test` saat dibuat, dan dalam tabel `equal` tipe kunci harus mengimplementasikan `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 sampai 12 elemen). Elemen dibaca dengan `t::0` | [Sintaks bab 2](syntax.md#2-menulis-tipe) |
 | `Task<T>` | Handle ke sebuah task | [Task](functions/concurrency.md#1-taskt--handle-ke-task) |
 | `Thread<T>` | Handle ke task yang berjalan di thread OS khusus | [Thread](functions/concurrency.md#7-threadt--thread-os-khusus) |
@@ -105,7 +105,7 @@ Tipe mana yang mengimplementasikan trait mana. Metode tiap trait ada di
 
 | Trait | Tipe yang mengimplementasikan | Rincian |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-perbandingan) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-perbandingan) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Sama seperti di atas |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` dan semua tipe kesalahan bawaan | [print-object](functions/printing.md#5-print-object-representasi-cetak-per-tipe) |
@@ -127,7 +127,7 @@ Rinciannya ada di [Trait aritmetika](functions/traits.md#3-trait-aritmetika-add-
 | Trait | Tipe yang mengimplementasikan |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` tipe-tipe modul `lazy` (`lazy::map-iter<I,A,U>` dan lain-lain) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (jika tipe elemennya mengimplementasikan `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Stream

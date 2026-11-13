@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Hata Mesajları
 
 `typl`'nin başlıca hata mesajlarının ne anlama geldiği ve nasıl düzeltileceği.
@@ -47,7 +47,8 @@ olduğu anlamına gelir.
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Bu adda bir tür yok. Bir türü, onu kullanan ilk formdan önce tanımlayın (türlerin ileri bildirimi yoktur). Bir tür değişkeni kastettiyseniz, onu fonksiyon adından sonraki `<foo>` gibi bir bildirim konumuna yazın ([Sözdizimi Başvurusu 3.6](syntax.md#36-defstruct--structlar-kullanıcı-tanımlı-türler)) |
 | ``cannot infer type argument `t` for `Vector::new` `` | Bir tür bağımsız değişkeni belirlenemiyor. Türü `(the Vector<int> (Vector::new))` gibi `the` ile yazın |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` her varyantı ele almıyor. Eksik varyantlar için kollar ya da bir `_` kolu ekleyin |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Fonksiyon, geçirdiğiniz türün gerçekleştirmediği bir trait istiyor. `(impl Eq pt ...)` yazın ([Standart Trait'ler](functions/traits.md)) |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | Fonksiyon, geçirdiğiniz türün gerçekleştirmediği bir trait istiyor. `(impl Equal pt ...)` yazın ([Standart Trait'ler](functions/traits.md)) |
+| ``equal: `pt` does not implement `Equal` `` | `Equal`'ı uygulamayan bir tür için `equal` yazıldı. `(impl Equal pt ...)` yazın ya da kimliğe göre karşılaştıran `eq`/`eql`'i veya yapıya göre karşılaştıran `equalp`'yi kullanın |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | `:dyn` beklenen yere, trait'i gerçekleştirmeyen bir türün değeri geçirildi. `impl`'i yazın |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Bir türün geleceği yere trait adı yazıldı. `:dyn Error` yazın |
 | ``if: (if cond then else)`` | `if`'in biçimi yanlış. `if` bir else dalı gerektirir. İhtiyacınız yoksa `when` kullanın |

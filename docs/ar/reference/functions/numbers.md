@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -177,7 +177,7 @@
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | يحوّل إلى `f64` ثم يحسب (`(sqrt 1/4)` يساوي `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | كما سبق |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | كما سبق |
-| `sxhash` | `(sxhash x)` | `ratio→int` | تنفيذ `Hash`. يمكن أن يكون `ratio` مفتاحًا في `HashTable` |
+| `sxhash` | `(sxhash x)` | `ratio→int` | تنفيذ `Hash`. يمكن أن يكون `ratio` مفتاحًا في `HashTable` من نوع `equal` |
 
 العدد الصحيح في CL عدد نسبي مقامه 1، لذا لدى `int` أيضًا `numerator` (نفسه) و`denominator` (`1`)
 و`float` و`rational` و`rationalize` والدوال الخمس عشرة من `sqrt` إلى `atanh` أعلاه (`(sqrt 4)` يساوي
@@ -221,7 +221,7 @@
 
 `(as int q)` هو `rational->int` (اقتطاع)، و`(try-as int q)` هو `try-rational->int`، و`(as ratio q)`
 و`(as f64 q)` هما التحويلان المقابلان، و`(as rational x)` توسيع من `int`/`ratio`. كما يطبّق
-`Eq` و`Ord` و`Hash` و`print-object` والسمات الحسابية.
+`Equal` و`Ord` و`Hash` و`print-object` والسمات الحسابية.
 
 ## 6. الأعداد المركبة `complex`
 
@@ -245,7 +245,7 @@
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | القيمة المطلقة. **وهي الـ `abs` الوحيدة التي لا تعيد نوع المستقبِل** (كما في CL، القيمة المطلقة لعدد مركب حقيقية) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | الحساب المركب |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | المساواة مكوِّنًا بمكوِّن. وتُنفَّذ `Eq` أيضًا (ولا توجد `Ord`: فالأعداد المركبة لا ترتيب لها، و`<` في CL ترفضها أيضًا) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | المساواة مكوِّنًا بمكوِّن. وتُنفَّذ `Equal` أيضًا (ولا توجد `Ord`: فالأعداد المركبة لا ترتيب لها، و`<` في CL ترفضها أيضًا) |
 | `zerop` | `(zerop z)` | `complex→bool` | هل المكوِّنان كلاهما 0 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | تعطي `log`/`sqrt` القيم الرئيسية |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. و`(expt 0 0)`=1 |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Fungsi Bawaan
 
 Daftar fungsi bawaan, metode, dan pustaka standar. Untuk sintaks (bentuk khusus dan cara
@@ -26,7 +26,7 @@ Dari nama-nama pustaka standar, yang berikut dapat dipakai di setiap modul tanpa
 - setiap nama yang juga nama paket `COMMON-LISP` milik Common Lisp (`length`, `format`, `open`, dan
   lain-lain)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, trait stream `Stream`,
-  `InputStream`, dan `OutputStream`, serta `Hash`, yang diimplementasikan oleh kunci `HashTable`
+  `InputStream`, dan `OutputStream`, serta `Hash`, yang diimplementasikan oleh kunci `HashTable` `equal`
 - tipe yang disebut oleh fungsi dan variabel semua itu
 
 Nama lain dibawa masuk dengan `use`, seperti `(use std::net::tcp-connect)`, atau ditulis dengan
@@ -38,7 +38,7 @@ path-nya, `std::net::tcp-connect`. Tabel berikut memuat nama-nama itu dan modul 
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -62,7 +62,7 @@ Tabel di setiap bab memiliki kolom "nama, bentuk, tipe, deskripsi". Kolom tipe d
 `(tipe-argumen,...)→tipe-kembalian`.
 
 - Satu huruf kapital seperti `T`, `A`, atau `B` adalah variabel tipe.
-- Catatan seperti `where Eq A` adalah batas trait yang harus dipenuhi variabel tipe.
+- Catatan seperti `where Equal A` adalah batas trait yang harus dipenuhi variabel tipe.
 - `Iter<A>` berarti "implementasi `Iter` apa pun yang `Item`-nya adalah `A`".
 - Argumen bertanda `&optional` / `&key` boleh dihilangkan.
 
@@ -74,7 +74,7 @@ Tabel di setiap bab memiliki kolom "nama, bentuk, tipe, deskripsi". Kolom tipe d
 | [sequences.md](sequences.md) | Pasangan `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens, iterator malas `lazy`, fungsi tingkat tinggi |
 | [collections.md](collections.md) | String, karakter, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, tipe kesalahan, dan trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, trait aritmetika, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, trait aritmetika, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, variabel kendali pencetak |
 | [format.md](format.md) | Direktif format |
 | [streams-files.md](streams-files.md) | Stream, operasi berkas, pathname, readtable |

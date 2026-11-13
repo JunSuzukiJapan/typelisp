@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Hàm dựng sẵn
 
 Danh sách các hàm dựng sẵn, phương thức và thư viện chuẩn. Về cú pháp (các dạng đặc biệt và cách định
@@ -23,7 +23,7 @@ Trong các tên của thư viện chuẩn, những tên sau dùng được trong
   các macro điều khiển, phép so sánh và các trait số học
 - mọi tên cũng là tên trong gói `COMMON-LISP` của Common Lisp (`length`, `format`, `open`, v.v.)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, các trait luồng `Stream`,
-  `InputStream` và `OutputStream`, cùng `Hash`, mà khóa của một `HashTable` cài đặt
+  `InputStream` và `OutputStream`, cùng `Hash`, mà khóa của một `HashTable` `equal` cài đặt
 - các kiểu mà hàm và biến của chúng nhắc tới
 
 Mọi tên khác được đưa vào bằng `use`, như `(use std::net::tcp-connect)`, hoặc viết theo đường dẫn,
@@ -35,7 +35,7 @@ Mọi tên khác được đưa vào bằng `use`, như `(use std::net::tcp-conn
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -59,7 +59,7 @@ Các bảng trong mỗi chương có các cột "tên, dạng, kiểu, mô tả"
 `(kiểu-đối-số,...)→kiểu-trả-về`.
 
 - Một chữ cái viết hoa như `T`, `A` hay `B` là một biến kiểu.
-- Một ghi chú như `where Eq A` là một ràng buộc trait mà biến kiểu phải thỏa mãn.
+- Một ghi chú như `where Equal A` là một ràng buộc trait mà biến kiểu phải thỏa mãn.
 - `Iter<A>` nghĩa là "mọi triển khai của `Iter` có `Item` là `A`".
 - Các đối số được đánh dấu `&optional` / `&key` có thể bỏ qua.
 
@@ -71,7 +71,7 @@ Các bảng trong mỗi chương có các cột "tên, dạng, kiểu, mô tả"
 | [sequences.md](sequences.md) | Cặp `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, hàm trên dãy, iterator lười `lazy`, hàm bậc cao |
 | [collections.md](collections.md) | Chuỗi, ký tự, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, các kiểu lỗi và trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, các trait số học, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, các trait số học, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, các biến điều khiển bộ in |
 | [format.md](format.md) | Các chỉ thị định dạng |
 | [streams-files.md](streams-files.md) | Stream, thao tác tệp, pathname, readtable |

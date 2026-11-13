@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -33,7 +33,7 @@ typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart tr
 | `Option<T>` | Var olan ya da olmayan bir değer. `some` / `none` | [Option ve Result](functions/option-result.md) |
 | `Result<T,E>` | Başarı ya da başarısızlık. `ok` / `err` | Yukarıdakiyle aynı |
 | `Vector<T>` | Büyüyebilen bir dizi | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | Bir karma tablo. Anahtar türü `Hash`'i gerçekleştirmelidir | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | Bir karma tablo. Anahtarların nasıl karşılaştırılacağını oluşturulurken `:test` belirler; `equal` tablosunda anahtar türü `Hash`'i uygulamalıdır | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Demet (1 ile 12 arası öğe). Öğeler `t::0` ile okunur | [Sözdizimi 2. bölüm](syntax.md#2-türlerin-yazımı) |
 | `Task<T>` | Bir task'in tanıtıcısı | [Task'ler](functions/concurrency.md#1-taskt--task-tanıtıcıları) |
 | `Thread<T>` | Ayrılmış bir OS thread'inde çalışan bir task'in tanıtıcısı | [Thread](functions/concurrency.md#7-threadt--ayrılmış-os-threadleri) |
@@ -104,7 +104,7 @@ Hangi türlerin hangi trait'leri gerçekleştirdiği. Her trait'in metotları
 
 | Trait | Gerçekleştiren türler | Ayrıntılar |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-karşılaştırma) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-karşılaştırma) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Yukarıdakiyle aynı |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` ve tüm yerleşik hata türleri | [print-object](functions/printing.md#5-print-object-türe-göre-yazdırılan-gösterim) |
@@ -127,7 +127,7 @@ bölümündedir.
 | Trait | Gerçekleştiren türler |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` modülünün türleri (`lazy::map-iter<I,A,U>` vb.) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (öğe türü `Hash`'i uyguladığında) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Akışlar

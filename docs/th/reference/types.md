@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -33,7 +33,7 @@
 | `Option<T>` | ค่าที่มีอยู่หรือไม่มี `some` / `none` | [Option และ Result](functions/option-result.md) |
 | `Result<T,E>` | สำเร็จหรือล้มเหลว `ok` / `err` | เหมือนข้างบน |
 | `Vector<T>` | อาร์เรย์ที่ขยายได้ | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | ตารางแฮช ชนิดของคีย์ต้อง implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | ตารางแฮช วิธีเปรียบเทียบคีย์กำหนดด้วย `:test` ตอนสร้าง และในตาราง `equal` ชนิดของคีย์ต้อง implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | ทูเพิล (สมาชิก 1 ถึง 12 ตัว) อ่านสมาชิกด้วย `t::0` | [ไวยากรณ์ บทที่ 2](syntax.md#2-การเขียนชนิด) |
 | `Task<T>` | handle ของ task | [Task](functions/concurrency.md#1-taskt--handle-ของ-task) |
 | `Thread<T>` | handle ของ task ที่รันบนเธรด OS เฉพาะ | [Thread](functions/concurrency.md#7-threadt--เธรด-os-เฉพาะ) |
@@ -103,7 +103,7 @@
 
 | Trait | ชนิดที่ implement | รายละเอียด |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-การเปรียบเทียบ) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-การเปรียบเทียบ) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | เหมือนข้างบน |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` และชนิดข้อผิดพลาดที่มีให้ในตัวทั้งหมด | [print-object](functions/printing.md#5-print-object-การแสดงผลของแต่ละชนิด) |
@@ -124,7 +124,7 @@ trait ของ `cons-cell<A,B>` และทูเพิล `#{..}` รวม�
 | Trait | ชนิดที่ implement |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` ชนิดของมอดูล `lazy` (`lazy::map-iter<I,A,U>` เป็นต้น) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (เมื่อชนิดของสมาชิก implement `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 สตรีม

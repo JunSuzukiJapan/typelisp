@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait'ler
 
 Bir trait, "bu tür şu işlemleri destekler" sözüdür. Trait'ler birkaç türün aynı adlı işlemleri
@@ -98,20 +98,20 @@ fonksiyonları türünüz için kullanılabilir kılar.
 
 | Trait | Gerçekleştirilecek metotlar | Neyi mümkün kılar |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, `match`'in `(:= expr)` örüntüsü vb. |
-| `Ord` | `less` | `less-equal`, `greater` vb. `Ord`, `Eq`'ten miras alır |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, `match`'in `(:= ifade)` örüntüsü, `:test equal` verilen `member` vb. |
+| `Ord` | `less` | `less-equal`, `greater` vb. `Ord`, `Equal`'ten miras alır |
 | `print-object` | `print-object` | Değerlerin `println` ve benzerleriyle nasıl gösterileceği |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` vb. |
 | `Error` | `message`, `source` | Hata türü olarak kullanım ([Hata Yönetimi](errors.md)) |
 
-Bir para miktarını temsil eden bir tür için `Eq` ve `Ord`'u gerçekleştirelim. `Ord`, `Eq`'ten miras
-aldığından önce `Eq`'in `impl`'i gelmelidir.
+Bir para miktarını temsil eden bir tür için `Equal` ve `Ord`'u gerçekleştirelim. `Ord`, `Equal`'ten miras
+aldığından önce `Equal`'in `impl`'i gelmelidir.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -190,7 +190,7 @@ Kullanılabilen türlerin kesin listesi
 [Sözdizimi Başvurusu 3.9](../reference/syntax.md#39-deftrait--impl--traitler)'dadır.
 
 Bazı trait'ler `:dyn` ile kullanılamaz: metotları `self` dışındaki bir bağımsız değişken için ya da
-dönüş değeri için `Self` kullananlar (`Eq`'teki `equals` gibi). Tür çalışma zamanına kadar
+dönüş değeri için `Self` kullananlar (`Equal`'teki `equal` gibi). Tür çalışma zamanına kadar
 bilinmediğinden, "aynı türden bir değer" üretmenin bir yolu yoktur.
 
 ## 6. Kısıtlamalar

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # ฟังก์ชันที่มีให้ในตัว
 
 รายการฟังก์ชันที่มีให้ในตัว เมทอด และไลบรารีมาตรฐาน สำหรับไวยากรณ์ (ฟอร์มพิเศษและวิธีนิยามสิ่งต่าง ๆ)
@@ -24,7 +24,7 @@
   การเปรียบเทียบ และ trait ทางคณิตศาสตร์
 - ชื่อทุกชื่อที่เป็นชื่อในแพ็กเกจ `COMMON-LISP` ของ Common Lisp ด้วย (`length` `format` `open` เป็นต้น)
 - `Error` `assert` `print-object` `HashTable` `Array` `BitVector` trait ของสตรีม `Stream`
-  `InputStream` และ `OutputStream` และ `Hash` ซึ่งคีย์ของ `HashTable` ต้อง implement
+  `InputStream` และ `OutputStream` และ `Hash` ซึ่งคีย์ของ `HashTable` แบบ `equal` ต้อง implement
 - ชนิดที่ฟังก์ชันและตัวแปรของสิ่งเหล่านี้กล่าวถึง
 
 ชื่ออื่นใดให้นำเข้าด้วย `use` เช่น `(use std::net::tcp-connect)` หรือเขียนด้วยพาธ
@@ -36,7 +36,7 @@
 | `std::char` | `digit->char` `digit-weight` `name->char` |
 | `std::collections` | `Deque` `HashSet` `Scope` `SortedTable` `hashtable-iter` |
 | `std::env` | `command-line-args` `getenv` `home-directory` |
-| `std::error` | `WrappedError` `as-dyn-error` `assert-eq` `describe-error` `wrap-error` |
+| `std::error` | `WrappedError` `as-dyn-error` `assert-equal` `describe-error` `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append` `direction-input` `direction-output` `directory-p` `open-binary` `open-binary-input` `open-binary-output` `open-file` `open-input` `open-output` `read-file-lines` `read-file-string` `write-file-string` |
 | `std::hash` | `*sxhash-mask*` `sxhash-string` |
@@ -60,7 +60,7 @@
 `(ชนิดของอาร์กิวเมนต์,...)→ชนิดของค่าที่คืน`
 
 - ตัวอักษรพิมพ์ใหญ่ตัวเดียว เช่น `T`, `A` หรือ `B` เป็นตัวแปรชนิด
-- หมายเหตุอย่าง `where Eq A` คือ trait bound ที่ตัวแปรชนิดต้องเป็นไปตาม
+- หมายเหตุอย่าง `where Equal A` คือ trait bound ที่ตัวแปรชนิดต้องเป็นไปตาม
 - `Iter<A>` หมายถึง "การ implement ใดก็ได้ของ `Iter` ที่ `Item` เป็น `A`"
 - อาร์กิวเมนต์ที่ทำเครื่องหมาย `&optional` / `&key` ละได้
 
@@ -72,7 +72,7 @@
 | [sequences.md](sequences.md) | คู่ `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับ อิเทอเรเตอร์แบบขี้เกียจ `lazy` ฟังก์ชันอันดับสูง |
 | [collections.md](collections.md) | สตริง อักขระ `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, ชนิดข้อผิดพลาด และ trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, trait การคำนวณ, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, trait การคำนวณ, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, ตัวแปรควบคุมการพิมพ์ |
 | [format.md](format.md) | คำสั่งรูปแบบ |
 | [streams-files.md](streams-files.md) | สตรีม การดำเนินการกับไฟล์ pathname readtable |

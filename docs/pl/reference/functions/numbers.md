@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Liczby
 
 Operacje na liczbach całkowitych, zmiennoprzecinkowych, wymiernych, zespolonych i wartościach logicznych oraz inne
@@ -188,7 +188,7 @@ konwersji z liczbami całkowitymi o stałej szerokości ani z `f64` (użyj jawne
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Konwertuje do `f64` i oblicza (`(sqrt 1/4)` to `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Jak wyżej |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Jak wyżej |
-| `sxhash` | `(sxhash x)` | `ratio→int` | Implementacja `Hash`. `ratio` może być kluczem `HashTable` |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Implementacja `Hash`. `ratio` może być kluczem `HashTable` typu `equal` |
 
 W CL liczba całkowita jest liczbą wymierną o mianowniku 1, więc `int` także ma `numerator`
 (siebie), `denominator` (`1`), `float`, `rational`, `rationalize` oraz 15 funkcji od `sqrt` do
@@ -235,7 +235,7 @@ wydobywa się przez `as`/`try-as`.
 
 `(as int q)` to `rational->int` (obcięcie), `(try-as int q)` to `try-rational->int`, `(as ratio q)` i
 `(as f64 q)` to odpowiednie konwersje, a `(as rational x)` rozszerza z `int`/`ratio`. Zaimplementowane
-są też `Eq`, `Ord`, `Hash`, `print-object` i cechy arytmetyczne.
+są też `Equal`, `Ord`, `Hash`, `print-object` i cechy arytmetyczne.
 
 ## 6. Liczby zespolone `complex`
 
@@ -259,7 +259,7 @@ Struktura (`defstruct`) w bibliotece standardowej.
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Wartość bezwzględna. **Jedyne `abs`, które nie zwraca typu odbiorcy** (jak w CL, moduł liczby zespolonej jest rzeczywisty) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Arytmetyka zespolona |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Równość składowa po składowej. `Eq` jest także zaimplementowane (nie ma `Ord`: liczby zespolone nie mają porządku, a `<` z CL także ich nie przyjmuje) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Równość składowa po składowej. `Equal` jest także zaimplementowane (nie ma `Ord`: liczby zespolone nie mają porządku, a `<` z CL także ich nie przyjmuje) |
 | `zerop` | `(zerop z)` | `complex→bool` | Czy obie składowe są 0 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` dają wartości główne |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

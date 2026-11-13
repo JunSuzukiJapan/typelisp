@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # String'ler, Karakterler ve Koleksiyonlar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` ve `Deque<T>`.
@@ -78,7 +78,7 @@ Yazdırıldığında da `#(1 2 3)` olur.
 | `len` | `(len v)` | `Vector<T>→int` | Eleman sayısı |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | Son elemanı kaldırır ve döndürür. Boşsa `none` (`get`/`set`'ten farklı olarak panic olmaz) ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`'i gerçekleştiren bir yineleyici yapar |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Eşit bir eleman yoksa `x`'i ekler (CL'nin `pushnew`'i. Bir yeri yeniden yazmasına gerek olmadığından makro değil metottur) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | `x`'e `eql` olan bir eleman yoksa sona ekler (CL'in `pushnew`'u. Bir yeri yeniden yazması gerekmediği için makro değil metottur) |
 
 `map`/`filter` ve benzerleri [dizi fonksiyonlarıdır](sequences.md#4-iter-üzerinde-dizi-fonksiyonları):
 vektörü `(map (iter v) f)` gibi `iter`'den geçirin. Yıkıcı işlemler (`nreverse`, `delete` vb.)
@@ -88,7 +88,7 @@ vektörü `(map (iter v) f)` gibi `iter`'den geçirin. Yıkıcı işlemler (`nre
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | Boş bir tablo yapar |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | Boş bir tablo oluşturur. `:test` anahtarların nasıl karşılaştırılacağıdır (aşağıdaki tablo); verilmezse `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | Arama |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | Ekler ya da üzerine yazar |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | Girdiyi kaldırır ve varsa eski değeri döndürür |
@@ -101,40 +101,51 @@ vektörü `(map (iter v) f)` gibi `iter`'den geçirin. Yıkıcı işlemler (`nre
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL'nin `maphash`'i |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL'nin `hash-table-size`'ı. Bu tabloda dolu girdilerin sayısıdır (`count`'a eşit) |
 
-**`Hash`'i gerçekleştiren her tür anahtar olabilir**; `defstruct`/`defenum` türleri dahil.
-`get`/`set`/`remove` `(:where (Hash K))` taşır; bu yüzden onu gerçekleştirmeyen bir türle anahtarlanan
-bir tablo **tür hatasıdır** (`f64`, `NaN` yüzünden `Hash`'e sahip değildir).
+Anahtarların nasıl karşılaştırılacağı, CL'in `make-hash-table`'ında olduğu gibi tablo oluşturulurken
+`:test` ile seçilir. `:test`, `eq`, `eql`, `equal` ve `equalp`'den birini alır (`'equal` ya da `equal`
+olarak yazılır).
+
+| `:test` | Anahtarların karşılaştırılması | Anahtar türleri |
+|---|---|---|
+| `eql` (varsayılan) | Sayılar ve karakterler değere, geri kalanı kimliğe göre | Her tür |
+| `eq` | Kimliğe göre | Her tür |
+| `equal` | Anahtar türünün `equal`'ı (`Equal`) ve `sxhash` karması (`Hash`) ile | `Hash`'i uygulayan türler |
+| `equalp` | `equalp` ile (dizgeler büyük-küçük harf ayrımı olmadan, struct'lar alan alan) | Her tür |
+
+Varsayılan `eql` olduğundan, ayrı ayrı oluşturulmuş aynı içerikli iki dizge iki ayrı anahtardır. Dizge
+anahtarlar için `(HashTable::new :test 'equal)` yazılır. Bir `equal` tablosunun anahtar türü `Hash`'i
+uygulamıyorsa, tablonun oluşturulduğu yerde **tür hatası** olur (`NaN` yüzünden `f64`'ün `Hash`'i yoktur).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; returns a non-negative value that fits in a fixnum
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; bir fixnum'a sığan negatif olmayan bir değer döndürür
 ```
 
-Gerçekleştirilenler: `int` ve altı sabit genişlikli tamsayı, `bool`, `char`, `string` ve `symbol`
-(kayan noktalı sayılar için değil). Kendi türleriniz için sonucu `*sxhash-mask*` (2^30-1) ile
-`logand`'leyerek negatif olmayan tutun. Bir string'in karmasını almak için, `string` gerçekleştirmesinin
-kullandığı `(sxhash-string s)`'i (32 bit FNV-1a) çağırabilirsiniz.
+`Hash` şunlar için uygulanmıştır: `int` ve sabit genişlikli altı tamsayı, `bool`, `char`, `string`,
+`symbol` (kayan noktalı sayılar için değil). Kendi türlerinizde sonucu `*sxhash-mask*` (2^30-1) ile
+`logand` yaparak negatif olmayan tutun. Bir dizgenin karmasını almak için `string` uygulamasının
+kullandığı `(sxhash-string s)`'i (FNV-1a 32 bit) çağırabilirsiniz.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-İki anahtarın aynı olup olmadığına nesne kimliği değil, **anahtar türünün kendisi** (`sxhash` ve `Hash`'in
-üst trait'i `Eq`'ten `equals`) karar verir. Bu yüzden yukarıdaki gibi "farklı bir değer ama eşit" bir
-anahtarla arama yapabilirsiniz.
+Bir `equal` tablosunda iki anahtarın aynı olup olmadığına nesne kimliği değil, **anahtar türünün
+kendisi** (`sxhash` ve `Hash`'in üst trait'i `Equal`'ın `equal`'ı) karar verir. Bu yüzden yukarıdaki gibi
+"farklı bir değer ama eşit" olan bir anahtar kaydı bulur.
 
-`sxhash`'in çakışması sorun değildir (`Hash` sözleşmesi yalnızca tek yönlüdür: eşit değerlerin karması
-aynı olmalıdır). Çakışan anahtarlar `equals` ile ayırt edilir.
+`sxhash`'in çakışması sorun değildir (`Hash`'in sözleşmesi ters yöndedir: yalnızca `equal` olan değerlerin
+aynı karmaya sahip olduğunu söyler). Çakışan anahtarlar `equal` ile ayırt edilir.
 
 ## 5. `Array<T>` (çok boyutlu diziler)
 
@@ -190,12 +201,13 @@ Sabit uzunluklu bir bit dizisi. Standart kütüphanedeki bir `defstruct`.
 
 ## 7. `HashSet<T>`
 
-Tekrarsız öğeler topluluğu (Rust'ın `HashSet`'i). İçeriği bir `HashTable<T,()>` olan bir standart
-kütüphane `defstruct`'ı. Öğe türü, bir `HashTable` anahtarı gibi `Hash`'i uygulamalıdır.
+Tekrarsız elemanlardan oluşan bir topluluk (Rust'taki `HashSet`). İçeriği bir `HashTable<T,()>` olan,
+standart kütüphanenin bir `defstruct`'ı. Elemanların nasıl karşılaştırılacağını, `HashTable` anahtarlarında
+olduğu gibi `:test` belirler; `equal` kümesinde eleman türü `Hash`'i uygulamalıdır.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | Boş bir küme oluşturur. Tür argümanı beklenen türden gelir |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | Boş bir küme oluşturur. Tür argümanı beklenen türden gelir. `:test` `HashTable`'daki gibidir; verilmezse `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`'i ekler. Yoksa `true`, zaten varsa `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`'in olup olmadığı |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`'i çıkarır. Varsa `true` |
@@ -206,7 +218,7 @@ kütüphane `defstruct`'ı. Öğe türü, bir `HashTable` anahtarı gibi `Hash`'
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

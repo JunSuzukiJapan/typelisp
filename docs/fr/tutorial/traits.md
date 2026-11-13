@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traits
 
 Un trait est une promesse : « ce type prend en charge ces opérations ». Les traits permettent à plusieurs types
@@ -99,20 +99,20 @@ standard qui l'utilisent.
 
 | Trait | Méthodes à implémenter | Ce que cela permet |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, le motif `(:= expr)` de `match`, etc. |
-| `Ord` | `less` | `less-equal`, `greater`, etc. `Ord` hérite de `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, le motif `(:= expr)` de `match`, `member` avec `:test equal`, etc. |
+| `Ord` | `less` | `less-equal`, `greater`, etc. `Ord` hérite de `Equal` |
 | `print-object` | `print-object` | La façon dont `println` et consorts affichent les valeurs |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, etc. |
 | `Error` | `message`, `source` | L'utilisation comme type d'erreur ([Gestion des erreurs](errors.md)) |
 
-Implémentons `Eq` et `Ord` pour un type représentant une somme d'argent. Comme `Ord` hérite de `Eq`, l'`impl` de
-`Eq` doit venir en premier.
+Implémentons `Equal` et `Ord` pour un type représentant une somme d'argent. Comme `Ord` hérite de `Equal`, l'`impl` de
+`Equal` doit venir en premier.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -191,7 +191,7 @@ La liste exacte des types utilisables se trouve dans
 [Référence de la syntaxe 3.9](../reference/syntax.md#39-deftrait--impl--traits).
 
 Certains traits ne peuvent pas s'utiliser avec `:dyn` : ceux dont les méthodes utilisent `Self` pour un argument
-autre que `self` ou pour la valeur de retour (comme `equals` dans `Eq`). Comme le type n'est connu qu'à
+autre que `self` ou pour la valeur de retour (comme `equal` dans `Equal`). Comme le type n'est connu qu'à
 l'exécution, il n'y a aucun moyen de produire « une valeur du même type ».
 
 ## 6. Restrictions

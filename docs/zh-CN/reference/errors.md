@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 错误消息
 
 `typl` 给出的主要错误消息的含义和修正方法。
@@ -45,7 +45,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | 没有该名称的类型。类型要在首次使用它的形式之前定义（类型没有前向声明）。如果本意是类型变量，请写在函数名的 `<foo>` 等声明位置（[语法参考 3.6](syntax.md#36-defstruct--结构体用户定义类型)） |
 | ``cannot infer type argument `t` for `Vector::new` `` | 无法确定类型参数。像 `(the Vector<int> (Vector::new))` 这样用 `the` 写出类型 |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` 没有处理所有变体。添加缺少的变体分支或 `_` 分支 |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | 函数要求某个 trait，但传入的类型没有实现。写 `(impl Eq pt ...)`（[标准 trait](functions/traits.md)） |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | 函数要求某个 trait，但传入的类型没有实现。写 `(impl Equal pt ...)`（[标准 trait](functions/traits.md)） |
+| ``equal: `pt` does not implement `Equal` `` | 对未实现 `Equal` 的类型写了 `equal`。写 `(impl Equal pt ...)`，或使用按同一性比较的 `eq`/`eql`、按结构比较的 `equalp` |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | 在 `:dyn` 的位置传入了没有实现该 trait 的类型的值。写 `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | 在类型的位置写了 trait 名。写成 `:dyn Error` |
 | ``if: (if cond then else)`` | `if` 的形式不对。`if` 必须有 else。不需要 else 时使用 `when` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -129,17 +129,18 @@ Indexering, längd och delning:
 | `last` | `(last it)` | `Iter<A>→Option<A>` | Det sista **elementet** (inte "den sista cellen" som i CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | Allt utom det sista elementet |
 
-Funktioner som kräver en gräns `Eq` / `Ord` (de jämför genom ett trait i stället för ett predikat;
-[Standardtraits](traits.md#2-eq--ord-jämförelse)):
+Funktioner som söker efter ett objekt. Utan `:test` jämför de med `eql`, som i CL. `eql` jämför tal och
+tecken efter värde och allt annat efter identitet, så två separat skapade strängar eller listor med samma
+innehåll är inte lika. För att jämföra efter innehåll skriver man `:test equal` (kapitel 6):
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | Om ett element lika med `x` finns (till skillnad från CL en `bool`, inte resten av listan) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | Det första element som är lika med `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | Den första position som är lika med `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | Hur många element som är lika med `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | Om ett element lika med `x` finns (till skillnad från CL en `bool`, inte resten av listan) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | Det första element som är lika med `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | Den första position som är lika med `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | Hur många element som är lika med `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL:s `(sort sequence predicate)`. En stabil, icke-destruktiv sortering. `cmp` är `true` när "det första argumentet kommer strikt före det andra" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | Det första par vars `car` är lika med `k`. Ta ut värdet med `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | Det första par vars `car` är lika med `k`. Ta ut värdet med `(cdr p)` |
 
 Dessa och många av funktionerna i kapitel 5 tar också CL:s nyckelordsargument `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (kapitel 6).
@@ -201,8 +202,8 @@ Alla är generiska funktioner på `Iter`, som i kapitel 4. Resulterande samlinga
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Som `member`, en **`bool`** (en iterator har ingen svans att returnera) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Negationerna av `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | Samma typer som de positiva versionerna | Versioner med negerat predikat |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Tar bort efter värde |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | Tar bort dubbletter. Som i CL **behålls den sista förekomsten** (`:from-end true` behåller den första) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | Tar bort efter värde |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | Tar bort dubbletter. Som i CL **behålls den sista förekomsten** (`:from-end true` behåller den första) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | Ersätter efter värde / predikat |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | på `Iter<cons-cell<K,V>>` | Predikatversionen och värdesidans versioner av `assoc` |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | Lägger till ett par först |
@@ -213,14 +214,14 @@ Alla är generiska funktioner på `Iter`, som i kapitel 4. Resulterande samlinga
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | Avbildar över på varandra följande **svansar** |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Avbildar över svansar för sidoeffekter (`maplist`-motsvarigheten till `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Avbildar över svansar och konkatenerar (`maplist`-motsvarigheten till `mapcan`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Positionen där `sub` först förekommer. Om mottagaren är en `string` väljs `string`-metoden ([Strängar](collections.md#1-strängar-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Den första position där de skiljer sig. `none` om de är lika |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Positionen där `sub` först förekommer. Om mottagaren är en `string` väljs `string`-metoden ([Strängar](collections.md#1-strängar-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Den första position där de skiljer sig. `none` om de är lika |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Sammanslagning. CL kräver sorterade indata; den här sorterar konkateneringen |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Lägger till `x` **först** om det inte finns där |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | Mängdoperationer. CL specificerar inte ordningen; här är den stabil, **i ordning efter första förekomst** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | Inklusion |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Om det är ett suffix / delen före suffixet. CL frågar om **delad struktur**, men det finns ingen struktur att dela, så den här frågar om ett suffix **som värden** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | Likhet element för element. `Vector<T>` implementerar inte själv `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Lägger till `x` **först** om det inte finns där |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Mängdoperationer. CL specificerar inte ordningen; här är den stabil, **i ordning efter första förekomst** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | Inklusion |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Om det är ett suffix / delen före suffixet. CL frågar efter **delad struktur**, men det finns ingen struktur att dela, så här frågas om det är ett suffix med `eql` element |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | `equal` element för element. `Vector<T>` själv har ingen `Equal`-implementation |
 | `caar`…`cddddr` | `(cadr p)` | på nästlade par | CL:s 28 funktioner. De går igenom **par, inte listor**: `cadr` tar en `cons-cell<A,cons-cell<B,C>>` |
 
 Vad CL har och det här språket inte har: `list*` (det finns ingen föreställning om en oäkta lista vars
@@ -239,7 +240,7 @@ Funktionerna i kapitel 4 och 5 tar CL:s sekvensnyckelord `:key` / `:test` / `:te
 | Nyckelord | Typ | Betydelse |
 |---|---|---|
 | `:key` | `(fn (A) A)` | En projektion som tillämpas på varje element före jämförelse eller test |
-| `:test` | `(fn (A A) bool)` | Ett likhetstest som används i stället för `equals` från gränsen `Eq`. Det första argumentet är **det som söks**, det andra är elementet (efter `:key`), i samma ordning som CL |
+| `:test` | `(fn (A A) bool)` | Ett likhetstest som används i stället för standard-`eql` (`:test equal` och så vidare). Första argumentet är **objektet som söks**, det andra elementet (efter `:key`), i samma ordning som CL |
 | `:test-not` | `(fn (A A) bool)` | Negationen av `:test` |
 | `:start` `:end` | `int` | Fönstret `[start, end)` att genomsöka. Index är relativa till hela sekvensen |
 | `:from-end` | `bool` | En sökning svarar med den **sista** träffen. Kombinerat med `:count` tas de berörda elementen från slutet |

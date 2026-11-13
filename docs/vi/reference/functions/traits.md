@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Các trait chuẩn
 
 Các trait cho việc lặp, so sánh, số học và thêm, lấy ra phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
@@ -24,49 +24,56 @@ Các danh sách `Sexpr` không triển khai `Iter` (kiểu phần tử của ch�
 khai `Iter` cho kiểu của riêng mình, nó có thể được duyệt bằng `doiter` nguyên trạng, và được truyền cho
 [các hàm trên dãy](sequences.md#4-các-hàm-trên-dãy-dựa-trên-iter).
 
-## 2. `Eq` / `Ord` (so sánh)
+## 2. `Equal` / `Ord` (so sánh)
 
-Chúng tương ứng với `PartialEq`/`PartialOrd` của Rust (được đặt tên `Eq`/`Ord`). Chúng được dùng trong
-các ràng buộc `:where` của hàm generic để yêu cầu các kiểu phần tử có thể so sánh được
-(`sort`/`member`/`assoc` v.v.).
+`Equal` là trait mà `equal` dùng, tương ứng với `PartialEq` của Rust. `Ord` tương ứng với `PartialOrd` của
+Rust. Chúng được dùng trong ràng buộc `:where` của hàm generic để yêu cầu kiểu phần tử so sánh được.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; phải được triển khai
-  (defmethod not-equals (self (other Self)) bool             ; triển khai mặc định
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; kế thừa từ Eq
-  (defmethod less (self (other Self)) bool)                  ; phải được triển khai
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; bắt buộc cài đặt
+(deftrait Ord (Equal)                                     ; kế thừa Equal
+  (defmethod less (self (other Self)) bool)                  ; bắt buộc cài đặt
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-Để triển khai `Eq` bạn chỉ viết `equals`, và với `Ord` chỉ viết `less`. Các triển khai mặc định điền phần
-còn lại. `Ord` kế thừa từ `Eq`, nên cần `impl Eq X` trước `impl Ord X`.
+Để cài đặt `Equal` thì viết `equal`, còn `Ord` chỉ cần `less`. Các cài đặt mặc định điền phần còn lại của
+`Ord`. `Ord` kế thừa `Equal`, nên cần `impl Equal X` trước `impl Ord X`.
 
-Mỗi phương thức của trait có thể được gọi như một hàm nguyên trạng (bên trong một ràng buộc
-`where (Eq A)`/`(Ord A)`, hoặc trên một kiểu cụ thể triển khai nó):
+`(equal a b)` gọi cài đặt `Equal` của kiểu của `a`. Viết nó cho một kiểu không cài đặt `Equal` là lỗi kiểu.
+Để so sánh theo định danh dùng `eq`/`eql`, theo cấu trúc dùng `equalp`. Ba hàm này dùng được với giá trị
+thuộc bất kỳ kiểu nào.
+
+Mỗi phương thức của trait có thể gọi trực tiếp như hàm (bên trong ràng buộc `where (Equal A)`/`(Ord A)`,
+hoặc trên một kiểu cụ thể đã cài đặt nó):
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` với `Eq A` | Có bằng nhau không (`==` của Rust) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` với `Eq A` | Có khác nhau không (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` với `Equal A` | Có bằng nhau không (`==` của Rust) |
 | `less` | `(less a b)` | `(A,A)→bool` với `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` với `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` với `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` với `Ord A` | `a >= b` |
 
-`Eq` được triển khai cho: mọi kiểu số (`i8` đến `u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char`
-`string` `symbol` `complex`, `Sexpr` (`eq`, tức là đồng nhất; được dùng bởi các mẫu giá trị của `match`),
-và `cons-cell<A,B>` (đệ quy, khi các phần tử là `Eq`). `Option<T>` và `Result<T,E>` bằng nhau khi cùng biến thể và nội dung bằng nhau theo `equals`; danh sách là `Option<Sexpr>`, nên các ô được so sánh theo định danh của `Sexpr` (để so sánh theo nội dung, dùng `equal`). `Ord` được triển khai cho: mọi kiểu số, `char`
-`string`, và `cons-cell<A,B>` (theo thứ tự từ điển, khi các phần tử là `Ord`).
+`Equal` được cài đặt cho: mọi kiểu số (`i8` đến `u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char`
+`string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` và các tuple (từng phần tử, khi các phần tử là
+`Equal`), cùng `Option<T>` và `Result<T,E>` (khi cùng biến thể và nội dung `equal`). Với các kiểu dựng sẵn,
+phương thức dựng sẵn `equal` của chính kiểu đó là cài đặt `Equal`. Số so sánh bằng `=`, chuỗi so sánh theo
+nội dung, phân biệt hoa thường. `Ord` được cài đặt cho: mọi kiểu số, `char` `string` và `cons-cell<A,B>`
+(theo thứ tự từ điển, khi các phần tử là `Ord`).
 
-Tên các phương thức không trùng với các toán tử dựng sẵn (`= /= < <= > >=`) hay `eq`/`lt` vì các thứ dựng
-sẵn không thể định nghĩa lại, và mỗi triển khai ủy quyền cho chúng. Bản thân các toán tử so sánh vô
-hướng là các phương thức dựng sẵn của từng kiểu bên nhận ([Số](numbers.md),
-[Chuỗi và ký tự](collections.md)). Bên trong một ràng buộc, việc viết các toán tử được hiểu là các
-phương thức của trait (chương 3).
+`equal` của một danh sách (`Sexpr`) là `equal` của CL: cons so sánh theo cấu trúc, chuỗi theo nội dung, và
+mọi atom khác bằng `eql`. Phép so sánh này duyệt các giá trị lúc chạy và không gọi phương thức nào. Vì thế
+một struct nằm trong danh sách được so sánh theo định danh như trong CL, bất kể kiểu của nó có
+`impl Equal` nào.
+
+Tên các phương thức của `Ord` không trùng với các toán tử dựng sẵn (`< <= > >=`) hay `lt` vì không thể định
+nghĩa lại cái dựng sẵn và mỗi cài đặt ủy quyền cho chúng. Bản thân các toán tử so sánh vô hướng là phương
+thức dựng sẵn theo kiểu đối tượng nhận ([Số](numbers.md), [Chuỗi và ký tự](collections.md)). Bên trong ràng
+buộc, toán tử được viết sẽ được đọc là phương thức của trait (chương 3). `=` trở thành `equal`, còn `/=` trở
+thành `(not (equal a b))`.
 
 ## 3. Các trait số học (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -90,7 +97,7 @@ tử dựng sẵn** ([Số](numbers.md)) và không đi qua tầng này.
 
 **Bên trong một ràng buộc, bạn có thể viết toán tử.** Khi bên nhận là một biến kiểu bị ràng buộc bởi
 `:where`, các toán tử được hiểu là phương thức của trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
-`rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -127,7 +134,7 @@ bằng `(:where (Push C (Item T)))` và thêm vào bất kỳ tập hợp nào n
 | `Vector<T>` | Thêm vào cuối |
 | `Deque<T>` | Thêm vào cuối (`push-back`) |
 | `Array<T>` | Thêm tại vị trí fill pointer (`push-extend`). Panic nếu không có fill pointer |
-| `HashSet<T>` | Đưa vào tập (`insert`). Chỉ là `Push` khi kiểu phần tử triển khai `Hash` |
+| `HashSet<T>` | Đưa vào tập hợp (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

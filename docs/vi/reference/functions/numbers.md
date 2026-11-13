@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -183,7 +183,7 @@ literal phân số xem [Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-v�
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Chuyển sang `f64` rồi tính (`(sqrt 1/4)` là `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Như trên |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Như trên |
-| `sxhash` | `(sxhash x)` | `ratio→int` | Cài đặt `Hash`. `ratio` có thể làm khóa của `HashTable` |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Cài đặt `Hash`. `ratio` có thể làm khóa của `HashTable` `equal` |
 
 Trong CL, số nguyên là số hữu tỉ có mẫu bằng 1, nên `int` cũng có `numerator` (chính nó),
 `denominator` (`1`), `float`, `rational`, `rationalize` và 15 hàm từ `sqrt` đến `atanh` ở trên
@@ -226,7 +226,7 @@ cho `(defun f ((q rational)) ...)`). Chiều ngược lại, lấy giá trị ra
 | `float` `rational` `rationalize` `sqrt` `exp` `log` và các hàm lượng giác, hyperbolic | `(op x)` | | Như với `ratio` |
 
 `(as int q)` là `rational->int` (cắt bớt), `(try-as int q)` là `try-rational->int`, `(as ratio q)` và
-`(as f64 q)` là các chuyển đổi tương ứng, còn `(as rational x)` mở rộng từ `int`/`ratio`. `Eq`, `Ord`,
+`(as f64 q)` là các chuyển đổi tương ứng, còn `(as rational x)` mở rộng từ `int`/`ratio`. `Equal`, `Ord`,
 `Hash`, `print-object` và các trait số học cũng được cài đặt.
 
 ## 6. Số phức `complex`
@@ -251,7 +251,7 @@ Một struct (`defstruct`) trong thư viện chuẩn.
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Giá trị tuyệt đối. **`abs` duy nhất không trả về kiểu của bên nhận** (như trong CL, giá trị tuyệt đối của số phức là thực) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Số học phức |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Bằng nhau theo từng thành phần. `Eq` cũng được triển khai (không có `Ord`: số phức không có thứ tự, và `<` của CL cũng từ chối chúng) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Bằng nhau theo từng thành phần. `Equal` cũng được triển khai (không có `Ord`: số phức không có thứ tự, và `<` của CL cũng từ chối chúng) |
 | `zerop` | `(zerop z)` | `complex→bool` | Cả hai thành phần có bằng 0 không |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` cho giá trị chính |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

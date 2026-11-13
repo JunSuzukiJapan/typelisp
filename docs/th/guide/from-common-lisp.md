@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # สำหรับโปรแกรมเมอร์ Common Lisp
 
 typelisp สืบทอดไวยากรณ์และชื่อฟังก์ชันจำนวนมากของ Common Lisp (CL) แต่เป็นภาษาที่มี
@@ -122,6 +122,20 @@ typelisp ไม่แยกเนมสเปซของฟังก์ชั�
 
 ฟังก์ชันของลำดับอย่าง `map`, `filter`, `sort` และ `find` ทำงานกับค่าที่ implement trait
 `Iter` ให้ส่ง `Vector` หลังจากแปลงเป็นตัววนซ้ำด้วย `(iter v)`
+
+`eq`, `eql` และ `equalp` ใช้กับค่าชนิดใดก็ได้เหมือนใน CL ส่วน `equal` เป็นเมธอดของ trait `Equal` และใช้ได้
+เฉพาะกับชนิดที่ implement มัน ชนิดในตัวทุกชนิด implement ไว้ และ `equal` ของลิสต์คือ `equal` ของ CL สำหรับ
+ชนิดของคุณเอง การเขียน `(impl Equal ชนิด ...)` จะกำหนดวิธีเปรียบเทียบ การเปรียบเทียบที่ `member`, `find`,
+`position`, `remove` และอื่นๆ ใช้โดยปริยายคือ `eql` เหมือนใน CL ถ้าจะค้นสตริงหรือลิสต์ตามเนื้อหาให้เขียน
+`:test equal` เหมือนใน CL (ไม่ต้องมี `#'`):
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false (สตริงที่สร้างแยกกันไม่ eql กัน)
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+`HashTable` ก็เลือกวิธีเปรียบเทียบคีย์ด้วย `:test` ตอนสร้าง เหมือน `make-hash-table` ของ CL และค่าปริยาย
+คือ `eql` สำหรับคีย์ที่เป็นสตริงให้เขียน `(HashTable::new :test 'equal)`
 
 ## 5. ไม่มีค่าหลายค่า
 

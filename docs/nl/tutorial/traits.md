@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traits
 
 Een trait is een belofte dat "dit type deze bewerkingen ondersteunt". Met traits kunnen meerdere
@@ -99,20 +99,20 @@ gebruiken beschikbaar voor je type.
 
 | Trait | Te implementeren methoden | Wat het mogelijk maakt |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, het patroon `(:= expr)` van `match`, enzovoort |
-| `Ord` | `less` | `less-equal`, `greater` enzovoort. `Ord` erft van `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, het patroon `(:= expr)` van `match`, `member` met `:test equal`, enzovoort |
+| `Ord` | `less` | `less-equal`, `greater` enzovoort. `Ord` erft van `Equal` |
 | `print-object` | `print-object` | Hoe waarden door `println` en verwanten worden getoond |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` enzovoort |
 | `Error` | `message`, `source` | Gebruik als foutentype ([Foutafhandeling](errors.md)) |
 
-Laten we `Eq` en `Ord` implementeren voor een type dat een geldbedrag voorstelt. Omdat `Ord` van `Eq`
-erft, moet de `impl` van `Eq` eerst komen.
+Laten we `Equal` en `Ord` implementeren voor een type dat een geldbedrag voorstelt. Omdat `Ord` van `Equal`
+erft, moet de `impl` van `Equal` eerst komen.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -194,7 +194,7 @@ De exacte lijst met types die kunnen worden gebruikt staat in
 [Syntaxreferentie 3.9](../reference/syntax.md#39-deftrait--impl--traits).
 
 Sommige traits kunnen niet met `:dyn` worden gebruikt: die waarvan de methoden `Self` gebruiken voor
-een ander argument dan `self` of voor de returnwaarde (zoals `equals` in `Eq`). Omdat het type pas
+een ander argument dan `self` of voor de returnwaarde (zoals `equal` in `Equal`). Omdat het type pas
 tijdens runtime bekend is, is er geen manier om "een waarde van hetzelfde type" te produceren.
 
 ## 6. Beperkingen

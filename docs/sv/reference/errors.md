@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Felmeddelanden
 
 Vad de viktigaste felmeddelandena från `typl` betyder och hur man åtgärdar dem.
@@ -46,7 +46,8 @@ Fel som hittas före körning. Formen körs inte förrän de är åtgärdade.
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Det finns ingen typ med det namnet. Definiera en typ före den första form som använder den (typer har ingen framåtdeklaration). Om du menade en typvariabel, skriv den på en deklarerande plats som `<foo>` efter funktionsnamnet ([Syntaxreferens 3.6](syntax.md#36-defstruct--structs-användardefinierade-typer)) |
 | ``cannot infer type argument `t` for `Vector::new` `` | Ett typargument kan inte avgöras. Skriv typen med `the`, som i `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` hanterar inte alla varianter. Lägg till grenar för de saknade varianterna, eller en `_`-gren |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Funktionen kräver ett trait som typen du skickade inte implementerar. Skriv `(impl Eq pt ...)` ([Standardtraits](functions/traits.md)) |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | Funktionen kräver ett trait som typen du skickade inte implementerar. Skriv `(impl Equal pt ...)` ([Standardtraits](functions/traits.md)) |
+| ``equal: `pt` does not implement `Equal` `` | `equal` skrevs för en typ som inte implementerar `Equal`. Skriv `(impl Equal pt ...)`, eller använd `eq`/`eql`, som jämför efter identitet, eller `equalp`, som jämför efter struktur |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Ett värde av en typ som inte implementerar traitet skickades där en `:dyn` förväntas. Skriv `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Ett traitnamn skrevs där en typ ska stå. Skriv `:dyn Error` |
 | ``if: (if cond then else)`` | `if` har fel form. `if` kräver en else-gren. När du inte behöver någon, använd `when` |

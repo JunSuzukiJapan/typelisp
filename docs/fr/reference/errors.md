@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Messages d'erreur
 
 Ce que signifient les principaux messages d'erreur de `typl` et comment les corriger.
@@ -47,7 +47,8 @@ Les erreurs trouvées avant l'exécution. La forme n'est pas exécutée tant qu'
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Il n'existe pas de type de ce nom. Définissez un type avant la première forme qui l'utilise (les types n'ont pas de déclaration anticipée). Si vous vouliez une variable de type, écrivez-la à une position de déclaration comme `<foo>` après le nom de la fonction ([Référence de la syntaxe 3.6](syntax.md#36-defstruct--structures-types-définis-par-lutilisateur)) |
 | ``cannot infer type argument `t` for `Vector::new` `` | Un argument de type ne peut pas être déterminé. Écrivez le type avec `the`, comme dans `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | Le `match` ne traite pas toutes les variantes. Ajoutez des branches pour les variantes manquantes, ou une branche `_` |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | La fonction exige un trait que le type passé n'implémente pas. Écrivez `(impl Eq pt ...)` ([Traits standard](functions/traits.md)) |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | La fonction exige un trait que le type passé n'implémente pas. Écrivez `(impl Equal pt ...)` ([Traits standard](functions/traits.md)) |
+| ``equal: `pt` does not implement `Equal` `` | `equal` a été écrit pour un type qui n'implémente pas `Equal`. Écrire `(impl Equal pt ...)`, ou utiliser `eq`/`eql`, qui comparent par identité, ou `equalp`, qui compare par structure |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Une valeur d'un type qui n'implémente pas le trait a été passée là où un `:dyn` est attendu. Écrivez l'`impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Un nom de trait a été écrit à la place d'un type. Écrivez `:dyn Error` |
 | ``if: (if cond then else)`` | Le `if` a une mauvaise forme. `if` exige une branche « sinon ». Quand vous n'en avez pas besoin, utilisez `when` |

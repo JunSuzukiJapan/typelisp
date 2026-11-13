@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 字符串、字符与集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -76,7 +76,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | 元素个数 |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉末尾元素并返回。为空时为 `none`（与 `get`/`set` 不同，不会 panic）（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | 创建实现了 `Iter` 的迭代器 |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | 没有与 `x` 相等的元素时追加到末尾（CL 的 `pushnew`。不需要修改位置，所以是方法而不是宏） |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | 若没有与 `x` `eql` 的元素则追加到末尾（CL `pushnew`。无需改写位置，所以是方法而非宏） |
 
 `map`/`filter` 等是[序列函数](sequences.md#4-iter-上的序列函数)——像 `(map (iter v) f)` 这样经 `iter` 传入。破坏性
 操作（`nreverse`、`delete` 等）见[破坏性操作](sequences.md#7-破坏性操作)。
@@ -85,7 +85,7 @@
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | 创建空表 |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | 创建空表。`:test` 是键的比较方式（见下表），省略则为 `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | 查找 |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | 插入或覆盖 |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | 删除，如有旧值则返回 |
@@ -98,36 +98,46 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL 的 `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL 的 `hash-table-size`。在本表中是占用数（等于 `count`） |
 
-**只要实现了 `Hash`，任何类型都可以作为键**——包括 `defstruct`/`defenum`。`get`/`set`/`remove` 带有
-`(:where (Hash K))`，所以以没有实现它的类型为键的表是**类型错误**（`f64` 没有 `Hash` 是因为 `NaN`）。
+键的比较方式与 CL 的 `make-hash-table` 一样，在创建时用 `:test` 选择。`:test` 写 `eq`・`eql`・`equal`・
+`equalp` 之一（写 `'equal` 或 `equal` 均可）。
+
+| `:test` | 键的比较方式 | 可作为键的类型 |
+|---|---|---|
+| `eql`（默认） | 数和字符按值，其余按同一性 | 任何类型 |
+| `eq` | 按同一性 | 任何类型 |
+| `equal` | 用键类型的 `equal`（`Equal`）和哈希 `sxhash`（`Hash`） | 实现了 `Hash` 的类型 |
+| `equalp` | 用 `equalp`（字符串不区分大小写，结构体逐槽比较） | 任何类型 |
+
+默认是 `eql`，所以分别创建的内容相同的字符串是不同的键。以字符串为键时写 `(HashTable::new :test 'equal)`。
+`equal` 表的键类型若未实现 `Hash`，在创建表的地方就是**类型错误**（`f64` 没有 `Hash` 是因为 `NaN`）。
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; 返回非负且放得进 fixnum 的值
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; 返回非负且能放进 fixnum 的值
 ```
 
-已实现：`int` 和 6 种固定宽度整数、`bool`、`char`、`string`、`symbol`（浮点数没有）。在自己的类型中，把结果与
-`*sxhash-mask*`（2^30-1）做 `logand` 以保持非负。想对字符串求哈希时，可以调用 `string` 的实现所使用的
-`(sxhash-string s)`（FNV-1a 32 位）。
+已实现 `Hash` 的：`int` 与 6 种固定宽度整数、`bool`、`char`、`string`、`symbol`（浮点数没有）。自定义类型中，
+把结果与 `*sxhash-mask*`（2^30-1）做 `logand` 以保持非负。要对字符串求哈希，可以调用 `string` 的实现所用的
+`(sxhash-string s)`（FNV-1a 32bit）。
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-键是否相同由**键的类型本身**决定（`sxhash`，以及 `Hash` 的超 trait `Eq` 的 `equals`），而不是对象的同一性。所以像上面
-那样，可以用"不同的值但相等"的键查找。
+在 `equal` 表中，决定键是否相同的是**键的类型自身**（`sxhash`，以及 `Hash` 的超 trait `Equal` 的
+`equal`），而不是对象的同一性。所以如上，可以用"不同的值但相等"的键查到。
 
-`sxhash` 冲突也无妨（`Hash` 的约定是反方向的——只规定 `equals` 相等则哈希相同）。冲突的键由 `equals` 区分。
+`sxhash` 冲突也没关系（`Hash` 的契约是反方向的——只说 `equal` 的值哈希相同）。冲突的键由 `equal` 区分。
 
 ## 5. `Array<T>`（多维数组）
 
@@ -179,11 +189,12 @@
 
 ## 7. `HashSet<T>`
 
-没有重复元素的集合（Rust 的 `HashSet`）。标准库的 `defstruct`，内容是 `HashTable<T,()>`。元素类型与 `HashTable` 的键一样，必须实现 `Hash`。
+无重复元素的集合（Rust 的 `HashSet`）。标准库的 `defstruct`，内部是 `HashTable<T,()>`。元素的比较方式与
+`HashTable` 的键一样由 `:test` 决定，`equal` 集合的元素类型须实现 `Hash`。
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | 创建空集合。类型参数由期望类型决定 |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | 创建空集合。类型参数由期望类型决定。`:test` 与 `HashTable` 相同，省略则为 `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 加入 `x`。新加入时为 `true`，已存在时为 `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | 是否含有 `x` |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 去掉 `x`。原本存在时为 `true` |
@@ -194,7 +205,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

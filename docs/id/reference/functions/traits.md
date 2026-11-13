@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait Standar
 
 Trait untuk iterasi, perbandingan, aritmetika, serta penambahan dan pengambilan elemen. Trait standar lainnya ada di bab masing-masing:
@@ -24,50 +24,57 @@ Daftar `Sexpr` tidak mengimplementasikan `Iter` (tipe elemennya tidak seragam). 
 mengimplementasikan `Iter` untuk tipe Anda sendiri, tipe itu dapat ditelusuri dengan `doiter` apa
 adanya, dan diserahkan ke [fungsi sekuens](sequences.md#4-fungsi-sekuens-pada-iter).
 
-## 2. `Eq` / `Ord` (perbandingan)
+## 2. `Equal` / `Ord` (perbandingan)
 
-Ini sepadan dengan `PartialEq`/`PartialOrd` pada Rust (dinamai `Eq`/`Ord`). Keduanya dipakai pada
-batas `:where` fungsi generik untuk mensyaratkan bahwa tipe elemen dapat dibandingkan
-(`sort`/`member`/`assoc` dan sebagainya).
+`Equal` adalah trait yang dipakai `equal` dan setara dengan `PartialEq` di Rust. `Ord` setara dengan
+`PartialOrd` di Rust. Keduanya dipakai di batasan `:where` fungsi generik untuk mensyaratkan bahwa tipe
+elemen dapat dibandingkan.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; must be implemented
-  (defmethod not-equals (self (other Self)) bool             ; default implementation
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; inherits from Eq
-  (defmethod less (self (other Self)) bool)                  ; must be implemented
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; wajib diimplementasikan
+(deftrait Ord (Equal)                                     ; mewarisi Equal
+  (defmethod less (self (other Self)) bool)                  ; wajib diimplementasikan
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-Untuk mengimplementasikan `Eq` Anda hanya menulis `equals`, dan untuk `Ord` hanya `less`. Implementasi
-bawaan mengisi sisanya. `Ord` mewarisi `Eq`, sehingga `impl Eq X` diperlukan sebelum `impl Ord X`.
+Untuk mengimplementasikan `Equal` tulis `equal`, dan untuk `Ord` cukup `less`. Implementasi bawaan
+melengkapi sisa `Ord`. `Ord` mewarisi `Equal`, jadi `impl Equal X` diperlukan sebelum `impl Ord X`.
 
-Setiap metode trait dapat dipanggil sebagai fungsi apa adanya (di dalam batas `where (Eq A)`/
-`(Ord A)`, atau pada tipe konkret yang mengimplementasikannya):
+`(equal a b)` memanggil implementasi `Equal` dari tipe `a`. Menuliskannya untuk tipe yang tidak
+mengimplementasikan `Equal` adalah galat tipe. Untuk membandingkan berdasarkan identitas gunakan
+`eq`/`eql`, dan berdasarkan struktur gunakan `equalp`. Ketiganya dapat dipakai pada nilai bertipe apa pun.
+
+Setiap metode trait dapat dipanggil langsung sebagai fungsi (di dalam batasan `where (Equal A)`/`(Ord A)`,
+atau pada tipe konkret yang mengimplementasikannya):
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | Apakah keduanya sama (`==` pada Rust) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | Apakah keduanya tidak sama (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Apakah keduanya sama (`==` di Rust) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` diimplementasikan untuk: semua tipe numerik (`i8` sampai `u32` / `f32` / `f64` / `int` /
-`ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, yaitu identitas; dipakai oleh
-pola nilai pada `match`), dan `cons-cell<A,B>` (secara rekursif, ketika elemennya `Eq`). `Option<T>` dan `Result<T,E>` sama bila variannya sama dan isinya `equals`; daftar adalah `Option<Sexpr>`, sehingga sel-selnya dibandingkan dengan identitas `Sexpr` (gunakan `equal` untuk membandingkan isi). `Ord`
-diimplementasikan untuk: semua tipe numerik, `char` `string`, dan `cons-cell<A,B>` (secara
-leksikografis, ketika elemennya `Ord`).
+`Equal` diimplementasikan untuk: semua tipe numerik (`i8` sampai `u32` / `f32` / `f64` / `int` / `ratio`),
+`bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` dan tuple (per elemen, bila elemennya
+`Equal`), serta `Option<T>` dan `Result<T,E>` (bila variannya sama dan isinya `equal`). Untuk tipe bawaan,
+metode bawaan `equal` milik tipe itu sendiri apa adanya adalah implementasi `Equal`. Bilangan dibandingkan
+dengan `=`, string berdasarkan isi dengan membedakan huruf besar dan kecil. `Ord` diimplementasikan untuk:
+semua tipe numerik, `char` `string`, dan `cons-cell<A,B>` (secara leksikografis, bila elemennya `Ord`).
 
-Nama metode tidak tumpang tindih dengan operator bawaan (`= /= < <= > >=`) atau `eq`/`lt` karena
-fungsi bawaan tidak dapat didefinisikan ulang, dan setiap implementasi mendelegasikan kepadanya.
-Operator perbandingan skalar sendiri adalah metode bawaan pada tiap tipe penerima
-([Bilangan](numbers.md), [String dan Karakter](collections.md)). Di dalam sebuah batas, menulis
-operator dibaca sebagai metode trait (bab 3).
+`equal` sebuah list (`Sexpr`) adalah `equal` CL: cons dibandingkan berdasarkan struktur, string berdasarkan
+isi, dan atom lainnya dengan `eql`. Perbandingan ini menelusuri nilai saat runtime dan tidak memanggil
+metode apa pun. Jadi struct di dalam list dibandingkan berdasarkan identitas, seperti di CL, apa pun
+`impl Equal` tipenya.
+
+Nama metode `Ord` tidak bertabrakan dengan operator bawaan (`< <= > >=`) atau `lt` karena yang bawaan tidak
+dapat didefinisikan ulang dan setiap implementasi mendelegasikan kepadanya. Operator perbandingan skalar
+sendiri adalah metode bawaan per tipe penerima ([Bilangan](numbers.md), [String dan karakter](collections.md)).
+Di dalam batasan, operator yang ditulis dibaca sebagai metode trait (bab 3). `=` menjadi `equal`, dan `/=`
+menjadi `(not (equal a b))`.
 
 ## 3. Trait aritmetika (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -91,7 +98,7 @@ konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lap
 
 **Di dalam batas, Anda dapat menulis operator.** Ketika penerimanya adalah variabel tipe yang
 dibatasi oleh `:where`, operator dibaca sebagai metode trait (`+`→`add`, `-`→`sub`, `*`→`mul`,
-`/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+`/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -130,7 +137,7 @@ yang sama.
 | `Vector<T>` | Menambahkan di akhir |
 | `Deque<T>` | Menambahkan di akhir (`push-back`) |
 | `Array<T>` | Menambahkan di posisi fill pointer (`push-extend`). Panic tanpa fill pointer |
-| `HashSet<T>` | Memasukkannya ke himpunan (`insert`). Merupakan `Push` hanya jika tipe elemennya mengimplementasikan `Hash` |
+| `HashSet<T>` | Memasukkannya ke himpunan (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

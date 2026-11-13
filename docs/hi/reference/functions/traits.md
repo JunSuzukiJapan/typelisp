@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # स्टैंडर्ड trait
 
 इटरेशन, तुलना, अंकगणित और तत्व जोड़ने व निकालने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
@@ -13,38 +13,56 @@
 
 `Vector<T>`/`HashTable<K,V>`/`Array<T>` क्रमशः `vector-iter<T>`/`hashtable-iter<K,V>`/`array-iter<T>` के ज़रिए `Iter` लागू करते हैं (इटरेटर `(iter collection)` से पाएँ)। `Chan<T>` स्वयं एक `Iter` है (`recv` `next` की भूमिका निभाता है; [चैनल](concurrency.md#2-chant--चैनल))। `Sexpr` सूचियाँ `Iter` लागू नहीं करतीं (उनके तत्वों के टाइप एकसमान नहीं हैं)। यदि आप अपने टाइप के लिए `Iter` लागू करते हैं, तो उस पर `doiter` से चला जा सकता है, और उसे [अनुक्रम फ़ंक्शन](sequences.md#4-iter-पर-अनुक्रम-फ़ंक्शन) को पास किया जा सकता है।
 
-## 2. `Eq` / `Ord` (तुलना)
+## 2. `Equal` / `Ord` (तुलना)
 
-ये Rust के `PartialEq`/`PartialOrd` के अनुरूप हैं (नाम `Eq`/`Ord`)। इनका उपयोग जेनेरिक फ़ंक्शन के `:where` बाउंड में यह माँगने के लिए होता है कि तत्व टाइप की तुलना हो सके (`sort`/`member`/`assoc` आदि)।
+`Equal` वह trait है जिसे `equal` उपयोग करता है; यह Rust के `PartialEq` के समान है। `Ord` Rust के
+`PartialOrd` के समान है। इनका उपयोग generic फ़ंक्शनों की `:where` सीमाओं में यह माँगने के लिए होता है कि
+तत्वों के टाइप की तुलना की जा सके।
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; लागू करना ज़रूरी
-  (defmethod not-equals (self (other Self)) bool             ; डिफ़ॉल्ट इम्प्लीमेंटेशन
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; Eq से विरासत लेता है
-  (defmethod less (self (other Self)) bool)                  ; लागू करना ज़रूरी
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; लागू करना अनिवार्य
+(deftrait Ord (Equal)                                     ; Equal से विरासत
+  (defmethod less (self (other Self)) bool)                  ; लागू करना अनिवार्य
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-`Eq` लागू करने के लिए आप केवल `equals` लिखते हैं, और `Ord` के लिए केवल `less`। डिफ़ॉल्ट इम्प्लीमेंटेशन बाकी भर देते हैं। `Ord`, `Eq` से विरासत लेता है, इसलिए `impl Ord X` से पहले `impl Eq X` चाहिए।
+`Equal` लागू करने के लिए `equal` लिखें, और `Ord` के लिए केवल `less`। `Ord` का बाकी हिस्सा डिफ़ॉल्ट
+कार्यान्वयन भरते हैं। `Ord` को `Equal` से विरासत मिलती है, इसलिए `impl Ord X` से पहले `impl Equal X` चाहिए।
 
-हर trait मेथड को जस का तस फ़ंक्शन की तरह कॉल किया जा सकता है (`where (Eq A)`/`(Ord A)` बाउंड के भीतर, या उसे लागू करने वाले ठोस टाइप पर):
+`(equal a b)` `a` के टाइप का `Equal` कार्यान्वयन बुलाता है। जो टाइप `Equal` लागू नहीं करता उसके लिए इसे
+लिखना टाइप त्रुटि है। पहचान से तुलना के लिए `eq`/`eql`, और संरचना से तुलना के लिए `equalp` का उपयोग करें।
+ये तीनों किसी भी टाइप के मान पर उपयोग किए जा सकते हैं।
+
+हर trait मेथड को सीधे फ़ंक्शन की तरह बुलाया जा सकता है (`where (Equal A)`/`(Ord A)` सीमा के भीतर, या उसे लागू
+करने वाले ठोस टाइप पर):
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | क्या वे बराबर हैं (Rust का `==`) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | क्या वे बराबर नहीं हैं (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | क्या वे बराबर हैं (Rust का `==`) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` इनके लिए लागू है: सभी संख्यात्मक टाइप (`i8` से `u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr` (`eq`, यानी पहचान; `match` के मान पैटर्न द्वारा उपयोग), और `cons-cell<A,B>` (पुनरावर्ती रूप से, जब तत्व `Eq` हों)। `Option<T>` और `Result<T,E>` तब बराबर हैं जब वे एक ही वेरिएंट हों और उनकी सामग्री `equals` से बराबर हो; सूची `Option<Sexpr>` है, इसलिए उसके सेल `Sexpr` की पहचान से तुलना होते हैं (सामग्री से तुलना के लिए `equal` उपयोग करें)। `Ord` इनके लिए लागू है: सभी संख्यात्मक टाइप, `char` `string`, और `cons-cell<A,B>` (शब्दकोशीय क्रम में, जब तत्व `Ord` हों)।
+`Equal` इनके लिए लागू है: सभी संख्यात्मक टाइप (`i8` से `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
+`char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` और tuple (तत्व-दर-तत्व, जब तत्व `Equal` हों),
+तथा `Option<T>` और `Result<T,E>` (जब वे एक ही वेरिएंट हों और सामग्री `equal` हो)। बिल्ट-इन टाइपों के लिए
+टाइप का अपना बिल्ट-इन `equal` मेथड जैसा है वैसा ही `Equal` का कार्यान्वयन है। संख्याएँ `=` से, स्ट्रिंग
+सामग्री से (बड़े-छोटे अक्षरों में भेद के साथ) तुलना होती हैं। `Ord` इनके लिए लागू है: सभी संख्यात्मक टाइप,
+`char` `string` और `cons-cell<A,B>` (शब्दकोशीय क्रम में, जब तत्व `Ord` हों)।
 
-मेथड के नाम बिल्ट-इन ऑपरेटर (`= /= < <= > >=`) या `eq`/`lt` से नहीं टकराते क्योंकि बिल्ट-इन को दोबारा परिभाषित नहीं किया जा सकता, और हर इम्प्लीमेंटेशन उन्हें सौंप देता है। स्केलर तुलना ऑपरेटर स्वयं हर रिसीवर टाइप के बिल्ट-इन मेथड हैं ([संख्याएँ](numbers.md), [स्ट्रिंग और कैरेक्टर](collections.md))। बाउंड के भीतर, ऑपरेटर लिखने से वे trait मेथड के रूप में पढ़े जाते हैं (अध्याय 3)।
+सूची (`Sexpr`) का `equal` CL का `equal` है: cons संरचना से, स्ट्रिंग सामग्री से, और बाकी हर atom `eql` से
+तुलना होते हैं। यह तुलना रनटाइम पर मानों पर चलती है और कोई मेथड नहीं बुलाती। इसलिए सूची के भीतर का struct,
+उसके टाइप का `impl Equal` कुछ भी हो, CL की तरह पहचान से तुलना होता है।
+
+`Ord` के मेथडों के नाम बिल्ट-इन ऑपरेटरों (`< <= > >=`) या `lt` से नहीं टकराते, क्योंकि बिल्ट-इन को फिर से
+परिभाषित नहीं किया जा सकता और हर कार्यान्वयन उन्हीं को सौंपता है। स्केलर तुलना ऑपरेटर स्वयं receiver टाइप
+के अनुसार बिल्ट-इन मेथड हैं ([संख्याएँ](numbers.md), [स्ट्रिंग और अक्षर](collections.md))। सीमा के भीतर
+लिखा गया ऑपरेटर trait के मेथड के रूप में पढ़ा जाता है (अध्याय 3)। `=` `equal` बनता है, और `/=`
+`(not (equal a b))` बनता है।
 
 ## 3. अंकगणितीय trait (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -65,7 +83,7 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; कोई मेथड नहीं; पाँच का संयोजन
 ```
 
-**बाउंड के भीतर, आप ऑपरेटर लिख सकते हैं।** जब रिसीवर `:where` से बँधा टाइप वेरिएबल हो, तो ऑपरेटर trait मेथड के रूप में पढ़े जाते हैं (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+**बाउंड के भीतर, आप ऑपरेटर लिख सकते हैं।** जब रिसीवर `:where` से बँधा टाइप वेरिएबल हो, तो ऑपरेटर trait मेथड के रूप में पढ़े जाते हैं (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -98,7 +116,7 @@ trait मेथड का नाम `+` नहीं है क्योंक�
 | `Vector<T>` | अंत में जोड़ता है |
 | `Deque<T>` | अंत में जोड़ता है (`push-back`) |
 | `Array<T>` | fill pointer की जगह पर जोड़ता है (`push-extend`)। fill pointer के बिना panic करता है |
-| `HashSet<T>` | सेट में डालता है (`insert`)। तभी `Push` है जब तत्व का टाइप `Hash` लागू करता हो |
+| `HashSet<T>` | सेट में डालता है (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

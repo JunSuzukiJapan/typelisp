@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -137,7 +137,7 @@ No código-fonte, os tipos são escritos como símbolos ou listas comuns.
   exibe, como o resultado de substituir o tipo associado de um trait em uma assinatura.
 - **Tipos tupla**: `#{int string}` (a mesma forma dos valores). Uma tupla tem de 1 a 12 elementos, e
   um tipo tupla também pode ser argumento de tipo (`Vector<#{int string}>`). Os elementos são lidos
-  com `t::0` `t::1` e alterados com `(setf t::0 v)`. `Eq`, `Ord` (comparando a partir do primeiro
+  com `t::0` `t::1` e alterados com `(setf t::0 v)`. `Equal`, `Ord` (comparando a partir do primeiro
   elemento), `Hash` e `print-object` ficam disponíveis quando todos os tipos de elemento os
   implementam.
 - **Nomes de tipo qualificados**: podem ser qualificados com `::`, como em `module::Type`.
@@ -930,17 +930,17 @@ trait simples ou, se esse trait tiver tipos associados, `(Trait (Assoc Type))` c
 associados fixados**.
 
 ```lisp
-(deftrait Eq () ...)                       ; sem supertraits
-(deftrait Ord (Eq) ...)                    ; o trait Ord: Eq do Rust
+(deftrait Equal () ...)                       ; sem supertraits
+(deftrait Ord (Equal) ...)                    ; o trait Ord: PartialEq do Rust
 (deftrait CharSource ((Iter (Item char)))  ; fixar um tipo associado
   (defmethod rewind (self) ()))
 ```
 
-A herança tem três efeitos. (1) `impl Ord X` exige que `impl Eq X` seja escrito **antes** (uma regra sobre a
+A herança tem três efeitos. (1) `impl Ord X` exige que `impl Equal X` seja escrito **antes** (uma regra sobre a
 ordem de escrita: a única forma que pode ser decidida de modo determinístico no REPL e com `load` passo a passo,
-e mais estrita que o Rust). (2) `(:where (Ord T))` sozinho permite chamar também os métodos de `Eq`. (3) Os métodos
-de `Eq` podem ser chamados por meio de um `:dyn Ord`, e um valor `:dyn Ord` pode ser passado como está onde se
-exige um `:dyn Eq` (upcast). Um subtrait redeclarar um método com o mesmo nome do pai, e herdar métodos com o
+e mais estrita que o Rust). (2) `(:where (Ord T))` sozinho permite chamar também os métodos de `Equal`. (3) Os métodos
+de `Equal` podem ser chamados por meio de um `:dyn Ord`, e um valor `:dyn Ord` pode ser passado como está onde se
+exige um `:dyn Equal` (upcast). Um subtrait redeclarar um método com o mesmo nome do pai, e herdar métodos com o
 mesmo nome de dois pais, são ambos erros (uma vtable tem um slot por nome). A herança em diamante se funde em um
 único slot.
 
@@ -1000,7 +1000,7 @@ corpo não pode ter docstring: uma string final seria ela mesma o valor de retor
 então as duas não poderiam ser distinguidas.
 
 Os traits que a biblioteca padrão oferece: **`Iter`** (`next` / tipo associado `Item`; a base de `doiter` e das
-funções de sequência), **`Eq`** (`equals`; `not-equals` é uma implementação padrão), **`Ord`** (herda `Eq`; só
+funções de sequência), **`Equal`** (o trait que `equal` usa), **`Ord`** (herda `Equal`; só
 `less` precisa ser implementado, e `less-equal` / `greater` / `greater-equal` são implementações padrão),
 **`Error`** (`message` / `source`; `:dyn Error` para tratar os tipos de erro de modo uniforme),
 **`print-object`** (uma representação impressa por tipo), **`Pathish`** (designadores de nome de caminho: uma
@@ -1232,10 +1232,10 @@ expandida do corpo). A lista lambda é a mesma de `defmacro`. As regras detalhad
 ### 3.16 `#[test]` — funções de teste
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 Um `defun` marcado com `#[test]` é uma função de teste, que `typl test` chama uma de cada vez (igual ao `#[test]` do Rust). Ela não deve receber argumentos e deve retornar `()` ou `Result<(), E>` (também não pode receber parâmetros de tipo). Não precisa de `pub`. Um teste que retorna um `Result` falha ao retornar um `err`, e o erro é mostrado; por isso `E` precisa implementar `Error` ou `print-object` (assim como o Rust exige `Debug` do tipo de erro de um teste). Um `Error` é mostrado por `describe-error` (a mensagem e sua cadeia de causas), e qualquer outra coisa por `print-object`. `:dyn Error` também é um `Error`, então um teste pode reunir erros diferentes em um só tipo e retorná-lo.
@@ -1251,7 +1251,7 @@ Um `defun` marcado com `#[test]` é uma função de teste, que `typl test` chama
 
 - **Uma execução comum e `compile-file` a ignoram**, sem sequer verificar seu conteúdo (assim como o Rust só compila testes com `--test`). O próprio programa não pode chamar uma função de teste.
 - Um teste pode ser escrito em qualquer arquivo que contenha funções, dentro de qualquer `module`. Os testes também podem ficar separados na pasta `tests/` do projeto.
-- Um teste falha por um `panic`, por um erro em tempo de execução ou ao retornar um `err`. Verifique com `assert`, ou com `assert-eq`, que imprime os dois lados ([Sistema](functions/system.md)). Quando um teste falha, os demais continuam rodando.
+- Um teste falha por um `panic`, por um erro em tempo de execução ou ao retornar um `err`. Verifique com `assert`, ou com `assert-equal`, que imprime os dois lados ([Sistema](functions/system.md)). Quando um teste falha, os demais continuam rodando.
 
 ```sh
 typl test                 # roda todos os testes do projeto desta pasta
@@ -1274,7 +1274,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1392,10 +1392,10 @@ Tipos de padrão:
   em `(circle r)`
 - **Literais imediatos**: inteiros / `true`/`false` / caracteres — comparados como palavras
 - **Literais de valor**: strings / números de ponto flutuante / símbolos (`'foo`) / inteiros bignum / ratios —
-  comparados por valor com o `Eq::equals` desse tipo ([Traits padrão](functions/traits.md#2-eq--ord-comparação)).
+  comparados por valor com o `equal` desse tipo ([Traits padrão](functions/traits.md#2-equal--ord-comparação)).
   As strings são comparadas pelo conteúdo, não pela identidade
-- `(:= expr)` — avalia qualquer expressão e compara com `Eq::equals`. A única forma de comparar tipos que não têm
-  sintaxe literal (instâncias de `defstruct`, globais, resultados calculados), e uma implementação de `Eq`
+- `(:= expr)` — avalia qualquer expressão e compara com `equal`. A única forma de comparar tipos que não têm
+  sintaxe literal (instâncias de `defstruct`, globais, resultados calculados), e uma implementação de `Equal`
   definida pelo usuário vira a regra de comparação como está. `expr` pode se referir a qualquer coisa visível da
   posição do ramo (argumentos, vínculos externos, globais)
 - `(Ctor sub-pattern...)` — padrões de construtor (`(some x)` `(none)` `(cons a d)` `(ok v)` etc.)
@@ -1418,7 +1418,7 @@ Tipos de padrão:
   corpo, então toda alternativa precisa vincular as mesmas variáveis com os mesmos tipos. Também
   pode ser escrito dentro de um padrão de construtor (`(some (:or (circle r) (rect r _)))`)
 
-Comparar um tipo que não implementa `Eq` com um literal de valor / `(:= expr)` é um erro de tipo (esta linguagem
+Comparar um tipo que não implementa `Equal` com um literal de valor / `(:= expr)` é um erro de tipo (esta linguagem
 prefere dizer "não podem ser comparados" a deixar um ramo que silenciosamente nunca casa).
 
 **Guardas**: escrever `:when condição` depois do padrão escolhe o ramo só quando o padrão casa e,
@@ -1439,19 +1439,13 @@ pode ler as variáveis que o padrão vinculou.
 - Padrões ou e guardas se combinam. A guarda é avaliada qualquer que seja a alternativa que casou
   (`((:or 1 2 3) :when on "small")`).
 
-**Literais de valor contra um valor examinado `Sexpr`**: o `Eq` de `sexpr` é `eq` (a identidade do CL), então os
-imediatos (`'foo` (internado) / inteiros / caracteres / `true`/`false`) podem ser escritos como estão e casam pelo
-conteúdo:
+**Literais de valor contra um `Sexpr` examinado**: o `equal` de `Sexpr` é o `equal` de CL, então `'foo` /
+inteiros / caracteres / `true`/`false` / strings / números de ponto flutuante / inteiros grandes / razões
+podem ser escritos como estão e casam pelo conteúdo (strings pelo conteúdo, números por `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Os literais não imediatos (strings / números de ponto flutuante / inteiros bignum / ratios) **não podem ser
-escritos** contra um `Sexpr`. O `eq` deles compara a identidade do objeto, o que daria "um ramo que passa na
-verificação de tipos mas nunca casa", então é um erro que nomeia o padrão de variante: escreva `(str "hi")` e ele
-é desmontado em uma `string` comparada pelo conteúdo. `(:= expr)` pede explicitamente `equals`, então essa
-restrição não se aplica a ele.
 
 **O valor examinado não precisa ser um ADT.** `string`/`symbol`/`i32`/`f64` e afins podem passar por `match`
 diretamente (é ali que entram os padrões de literais de string). Porém, um tipo sem variantes não pode ser coberto
@@ -1861,8 +1855,7 @@ elas e podem ser compiladas normalmente.
 
 O que **pode** ser compilado: E/S de streams e arquivos, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, as funções transcendentes, as
-operações de bits, `catch`/`throw`/`unwind-protect`, os quatro `eq`/`eql`/`equal`/`equalp` (o que permite
-compilar `case` para todo tipo), toda a família de impressão incluindo `print`/`println`/`format`/`pprint` e
+operações de bits, `catch`/`throw`/`unwind-protect`, os quatro `eq`/`eql`/`equal`/`equalp`, toda a família de impressão incluindo `print`/`println`/`format`/`pprint` e
 `pprint-logical-block`, `read` e `eval`. A biblioteca padrão é distribuída já compilada.
 
 Um executável AOT contém só os recursos que o programa usa. Um programa que não imprime não leva o motor de

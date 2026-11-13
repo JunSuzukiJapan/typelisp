@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Трейты
 
 Трейт — это обещание: «этот тип поддерживает такие операции». Трейты позволяют нескольким типам иметь общие
@@ -97,20 +97,20 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | Трейт | Методы для реализации | Что это даёт |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, образец `(:= expr)` в `match` и т. д. |
-| `Ord` | `less` | `less-equal`, `greater` и т. д. `Ord` наследуется от `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, образец `(:= выражение)` в `match`, `member` с `:test equal` и т. д. |
+| `Ord` | `less` | `less-equal`, `greater` и т. д. `Ord` наследуется от `Equal` |
 | `print-object` | `print-object` | То, как значения показывают `println` и подобные |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` и т. д. |
 | `Error` | `message`, `source` | Использование в качестве типа ошибки ([Обработка ошибок](errors.md)) |
 
-Реализуем `Eq` и `Ord` для типа, представляющего денежную сумму. Поскольку `Ord` наследуется от `Eq`, `impl` для `Eq`
+Реализуем `Equal` и `Ord` для типа, представляющего денежную сумму. Поскольку `Ord` наследуется от `Equal`, `impl` для `Equal`
 должен идти первым.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -186,7 +186,7 @@ total 9
 [Справочнике по синтаксису 3.9](../reference/syntax.md#39-deftrait--impl--трейты).
 
 Некоторые трейты нельзя использовать с `:dyn`: те, чьи методы используют `Self` для аргумента, отличного от `self`,
-или для результата (как `equals` в `Eq`). Поскольку тип становится известен только во время выполнения, создать
+или для результата (как `equal` в `Equal`). Поскольку тип становится известен только во время выполнения, создать
 «значение того же типа» невозможно.
 
 ## 6. Ограничения

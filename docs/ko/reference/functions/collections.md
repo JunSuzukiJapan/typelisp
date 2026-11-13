@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
@@ -77,7 +77,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | 요소 수 |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | 마지막 요소를 없애고 반환한다. 비어 있으면 `none`(`get`/`set`과 달리 panic하지 않는다)([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`를 구현한 이터레이터를 만든다 |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | 같은 요소가 없으면 `x`를 추가한다(CL의 `pushnew`. 장소를 고쳐 쓸 필요가 없으므로 매크로가 아니라 메서드) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | `x`와 `eql`인 요소가 없으면 끝에 추가(CL `pushnew`. 장소를 다시 쓸 필요가 없으므로 매크로가 아니라 메서드) |
 
 `map`/`filter` 등은 [시퀀스 함수](sequences.md#4-iter에-대한-시퀀스-함수)이며, `(map (iter v) f)`처럼 벡터를 `iter`에
 통과시켜 넘긴다. 파괴적 연산(`nreverse`, `delete` 등)은 [파괴적 연산](sequences.md#7-파괴적-연산)에 있다.
@@ -86,7 +86,7 @@
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | 빈 테이블을 만든다 |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | 빈 테이블을 만든다. `:test`는 키 비교 방법(아래 표). 생략하면 `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | 조회 |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | 삽입 또는 덮어쓰기 |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | 항목을 없애고, 있었다면 이전 값을 반환한다 |
@@ -99,38 +99,48 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL의 `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL의 `hash-table-size`. 이 테이블에서는 차 있는 항목 수(`count`와 같다) |
 
-**`Hash`를 구현한 타입이라면 무엇이든 키가 될 수 있다.** `defstruct`/`defenum`의 타입도 포함한다. `get`/`set`/`remove`는
-`(:where (Hash K))`를 가지므로, 그것을 구현하지 않은 타입을 키로 하는 테이블은 **타입 오류**이다(`f64`는 `NaN` 때문에
-`Hash`가 없다).
+키 비교 방법은 CL의 `make-hash-table`과 마찬가지로 만들 때 `:test`로 고른다. `:test`에는 `eq`·`eql`·
+`equal`·`equalp` 중 하나를 쓴다(`'equal`로도 `equal`로도 쓸 수 있다).
+
+| `:test` | 키 비교 방법 | 키로 쓸 수 있는 타입 |
+|---|---|---|
+| `eql`(기본) | 수와 문자는 값으로, 그 밖은 동일성으로 | 모든 타입 |
+| `eq` | 동일성으로 | 모든 타입 |
+| `equal` | 키 타입의 `equal`(`Equal`)과 해시 `sxhash`(`Hash`)로 | `Hash`를 구현하는 타입 |
+| `equalp` | `equalp`로(문자열은 대소문자 구별 없이, 구조체는 슬롯별로) | 모든 타입 |
+
+기본은 `eql`이므로 따로 만든 같은 내용의 문자열은 다른 키가 된다. 문자열을 키로 쓰려면
+`(HashTable::new :test 'equal)`이라고 쓴다. `equal` 테이블의 키 타입이 `Hash`를 구현하지 않으면 테이블을
+만드는 곳에서 **타입 오류**가 된다(`f64`에 `Hash`가 없는 것은 `NaN` 때문).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; fixnum에 들어가는 음이 아닌 값을 반환한다
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; 음이 아니고 fixnum에 들어가는 값을 반환
 ```
 
-구현되어 있는 타입: `int`와 고정 폭 정수 6가지, `bool`, `char`, `string`, `symbol`(부동소수점 수에는 없다). 직접 만든
-타입에서는 결과를 `*sxhash-mask*`(2^30-1)와 `logand`해서 음이 아니게 한다. 문자열을 해시하려면 `string`의 구현이 쓰는
-`(sxhash-string s)`(32비트 FNV-1a)를 호출할 수 있다.
+`Hash` 구현 완료: `int`와 6개의 고정 폭 정수, `bool`, `char`, `string`, `symbol`(부동소수점 수에는 없음).
+직접 만든 타입에서는 결과를 `*sxhash-mask*`(2^30-1)로 `logand`해서 음이 아니게 유지한다. 문자열을
+해시하려면 `string`의 구현이 쓰는 `(sxhash-string s)`(FNV-1a 32bit)를 부를 수 있다.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-두 키가 같은지는 객체의 동일성이 아니라 **키 타입 자신**(`sxhash`와, `Hash`의 상위 트레이트 `Eq`의 `equals`)이 정한다.
-그래서 위처럼 "다른 값이지만 같은" 키로 조회할 수 있다.
+`equal` 테이블에서 키가 같은지를 정하는 것은 **키의 타입 자신**(`sxhash`와, `Hash`의 슈퍼트레이트
+`Equal`의 `equal`)이지 객체의 동일성이 아니다. 그래서 위처럼 "다른 값이지만 같은" 키로 찾을 수 있다.
 
-`sxhash`는 충돌해도 된다(`Hash`의 약속은 한 방향뿐이다. 같은 값은 같은 해시를 가져야 한다). 충돌한 키는 `equals`로
-구별된다.
+`sxhash`가 충돌해도 상관없다(`Hash`의 계약은 반대 방향 — `equal`이면 같은 해시라고만 말한다). 충돌한
+키는 `equal`로 구별된다.
 
 ## 5. `Array<T>`(다차원 배열)
 
@@ -183,12 +193,13 @@
 
 ## 7. `HashSet<T>`
 
-중복 없는 요소의 모임(Rust의 `HashSet`). 표준 라이브러리의 `defstruct`이며 내용은 `HashTable<T,()>`이다. 요소 타입은 `HashTable`의
-키와 마찬가지로 `Hash`를 구현해야 한다.
+중복이 없는 요소의 모음(Rust의 `HashSet`). 표준 라이브러리의 `defstruct`로, 내용은
+`HashTable<T,()>`. 요소의 비교 방법은 `HashTable`의 키와 마찬가지로 `:test`로 정해지며, `equal` 집합에서는
+요소 타입이 `Hash`를 구현해야 한다.
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | 빈 집합을 만든다. 타입 인수는 기대 타입에서 정해진다 |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | 빈 집합을 만든다. 타입 인수는 기대 타입에서 정해진다. `:test`는 `HashTable`과 같고, 생략하면 `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`를 추가한다. 새로 들어가면 `true`, 이미 있으면 `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`가 있는지 |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`를 뺀다. 있었으면 `true` |
@@ -199,7 +210,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

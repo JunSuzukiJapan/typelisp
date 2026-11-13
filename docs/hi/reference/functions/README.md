@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # बिल्ट-इन फ़ंक्शन
 
 बिल्ट-इन फ़ंक्शन, मेथड और स्टैंडर्ड लाइब्रेरी की सूची। सिंटैक्स (विशेष फ़ॉर्म और चीज़ें कैसे परिभाषित करें) के लिए [सिंटैक्स संदर्भ](../syntax.md) देखें; टाइप की सूची के लिए [टाइप](../types.md) देखें।
@@ -22,7 +22,7 @@
   नियंत्रण मैक्रो, तुलना और अंकगणितीय trait
 - हर वह नाम जो Common Lisp के `COMMON-LISP` पैकेज का भी नाम है (`length`, `format`, `open` आदि)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, स्ट्रीम trait `Stream`,
-  `InputStream` और `OutputStream`, और `Hash`, जिसे `HashTable` की कुंजियाँ लागू करती हैं
+  `InputStream` और `OutputStream`, और `Hash`, जिसे `equal` `HashTable` की कुंजियाँ लागू करती हैं
 - वे प्रकार जिनका इनके फ़ंक्शनों और चरों में उल्लेख है
 
 कोई भी दूसरा नाम `(use std::net::tcp-connect)` की तरह `use` से लाया जाता है, या उसके पथ
@@ -34,7 +34,7 @@
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -57,7 +57,7 @@
 हर अध्याय की तालिकाओं में स्तंभ "नाम, फ़ॉर्म, टाइप, विवरण" हैं। टाइप स्तंभ `(argument-type,...)→return-type` के रूप में लिखा जाता है।
 
 - `T`, `A` या `B` जैसा एकल बड़ा अक्षर टाइप वेरिएबल है।
-- `where Eq A` जैसा नोट trait बाउंड है जिसे टाइप वेरिएबल को पूरा करना होगा।
+- `where Equal A` जैसा नोट trait बाउंड है जिसे टाइप वेरिएबल को पूरा करना होगा।
 - `Iter<A>` का अर्थ है "`Iter` का कोई भी इम्प्लीमेंटेशन जिसका `Item` `A` है"।
 - `&optional` / `&key` से चिह्नित आर्ग्युमेंट छोड़े जा सकते हैं।
 
@@ -69,7 +69,7 @@
 | [sequences.md](sequences.md) | जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, अनुक्रम फ़ंक्शन, आलसी इटरेटर `lazy`, उच्च-क्रम फ़ंक्शन |
 | [collections.md](collections.md) | स्ट्रिंग, कैरेक्टर, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, त्रुटि टाइप और `Error` trait |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, अंकगणितीय trait, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, अंकगणितीय trait, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, सुंदर प्रिंटर, `print-object`, प्रिंटर नियंत्रण वेरिएबल |
 | [format.md](format.md) | फ़ॉर्मैट निर्देश |
 | [streams-files.md](streams-files.md) | स्ट्रीम, फ़ाइल ऑपरेशन, पाथनेम, readtable |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -192,7 +192,7 @@ positieve noemer bewaard en op de heap gealloceerd. Rekenen dat ze met `int` men
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Zet om naar `f64` en rekent (`(sqrt 1/4)` is `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Als hierboven |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Als hierboven |
-| `sxhash` | `(sxhash x)` | `ratio→int` | De `Hash`-implementatie. Een `ratio` kan een sleutel van een `HashTable` zijn |
+| `sxhash` | `(sxhash x)` | `ratio→int` | De `Hash`-implementatie. Een `ratio` kan de sleutel van een `equal`-`HashTable` zijn |
 
 In CL is een geheel getal een rationaal getal met noemer 1, dus `int` heeft ook `numerator`
 (zichzelf), `denominator` (`1`), `float`, `rational`, `rationalize` en de 15 functies van `sqrt` tot
@@ -240,7 +240,7 @@ waarde eruit met `as`/`try-as`.
 | `float` `rational` `rationalize` `sqrt` `exp` `log` en de goniometrische en hyperbolische functies | `(op x)` | | Als bij `ratio` |
 
 `(as int q)` is `rational->int` (afkappen), `(try-as int q)` is `try-rational->int`, `(as ratio q)` en
-`(as f64 q)` zijn de betreffende conversies, en `(as rational x)` verbreedt vanuit `int`/`ratio`. `Eq`,
+`(as f64 q)` zijn de betreffende conversies, en `(as rational x)` verbreedt vanuit `int`/`ratio`. `Equal`,
 `Ord`, `Hash`, `print-object` en de rekenkundige traits zijn ook geïmplementeerd.
 
 ## 6. Complexe getallen `complex`
@@ -265,7 +265,7 @@ Een struct (`defstruct`) in de standaardbibliotheek.
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Absolute waarde. **De enige `abs` die niet het type van de ontvanger teruggeeft** (zoals in CL is de absolute waarde van een complex getal reëel) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Complexe rekenkunde |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Componentgewijze gelijkheid. `Eq` is ook geïmplementeerd (er is geen `Ord`: complexe getallen hebben geen ordening, en `<` van CL weigert ze ook) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Componentgewijze gelijkheid. `Equal` is ook geïmplementeerd (er is geen `Ord`: complexe getallen hebben geen ordening, en `<` van CL weigert ze ook) |
 | `zerop` | `(zerop z)` | `complex→bool` | Of beide componenten 0 zijn |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` geven hoofdwaarden |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

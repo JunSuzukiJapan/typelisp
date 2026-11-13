@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Pasangan, S-Expression, dan Sekuens
 
 Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens yang ditulis di atas
@@ -133,17 +133,19 @@ Pengindeksan, panjang, dan pengirisan:
 | `last` | `(last it)` | `Iter<A>→Option<A>` | **Elemen** terakhir (bukan "sel terakhir" seperti di CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | Semua kecuali elemen terakhir |
 
-Fungsi yang memerlukan batas `Eq` / `Ord` (membandingkan melalui trait, bukan predikat;
-[Trait Standar](traits.md#2-eq--ord-perbandingan)):
+Fungsi yang mencari suatu item. Tanpa `:test` fungsi-fungsi ini membandingkan dengan `eql`, seperti di CL.
+`eql` membandingkan bilangan dan karakter berdasarkan nilai dan sisanya berdasarkan identitas, jadi dua
+string atau list berisi sama yang dibuat terpisah tidak sama. Untuk membandingkan berdasarkan isi, tulis
+`:test equal` (bab 6):
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | Apakah ada elemen yang sama dengan `x` (tidak seperti CL, berupa `bool`, bukan sisa daftar) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | Elemen pertama yang sama dengan `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | Posisi pertama yang sama dengan `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | Berapa banyak elemen yang sama dengan `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | Apakah ada elemen yang sama dengan `x` (tidak seperti CL, berupa `bool`, bukan sisa daftar) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | Elemen pertama yang sama dengan `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | Posisi pertama yang sama dengan `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | Berapa banyak elemen yang sama dengan `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | `(sort sequence predicate)` pada CL. Pengurutan stabil dan tidak destruktif. `cmp` bernilai `true` ketika "argumen pertama berada tepat sebelum argumen kedua" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | Pasangan pertama yang `car`-nya sama dengan `k`. Ambil nilainya dengan `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | Pasangan pertama yang `car`-nya sama dengan `k`. Ambil nilainya dengan `(cdr p)` |
 
 Fungsi-fungsi ini dan banyak fungsi pada bab 5 juga menerima argumen keyword CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (bab 6).
@@ -206,8 +208,8 @@ Semuanya adalah fungsi generik pada `Iter`, seperti pada bab 4. Koleksi hasil di
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Seperti `member`, berupa **`bool`** (iterator tidak memiliki ekor untuk dikembalikan) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Negasi `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | Tipe sama seperti versi positifnya | Versi dengan predikat dinegasikan |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Menghapus berdasarkan nilai |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | Menghapus duplikat. Seperti di CL, **kemunculan terakhir dipertahankan** (`:from-end true` mempertahankan yang pertama) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | Menghapus berdasarkan nilai |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | Menghapus duplikat. Seperti di CL, **kemunculan terakhir dipertahankan** (`:from-end true` mempertahankan yang pertama) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | Mengganti berdasarkan nilai / predikat |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | pada `Iter<cons-cell<K,V>>` | Versi predikat dan sisi nilai dari `assoc` |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | Menambahkan pasangan di depan |
@@ -218,14 +220,14 @@ Semuanya adalah fungsi generik pada `Iter`, seperti pada bab 4. Koleksi hasil di
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | Memetakan atas **ekor** yang berturut-turut |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Memetakan atas ekor untuk efek samping (padanan `maplist` bagi `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Memetakan atas ekor dan menyambung (padanan `maplist` bagi `mapcan`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Posisi tempat `sub` pertama kali muncul. Jika penerimanya `string`, metode `string` yang dipilih ([String](collections.md#1-string-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Posisi pertama tempat keduanya berbeda. `none` jika sama |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Posisi tempat `sub` pertama kali muncul. Jika penerimanya `string`, metode `string` yang dipilih ([String](collections.md#1-string-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Posisi pertama tempat keduanya berbeda. `none` jika sama |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Penggabungan. CL mensyaratkan masukan terurut; ini mengurutkan hasil sambungan |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Menambahkan `x` **di depan** jika belum ada |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | Operasi himpunan. CL tidak menentukan urutannya; di sini stabil, **berdasarkan urutan kemunculan pertama** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | Inklusi |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Apakah sufiks / bagian sebelum sufiks. CL menanyakan **struktur yang dibagi**, tetapi tidak ada struktur untuk dibagi, sehingga ini menanyakan sufiks **sebagai nilai** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | Kesamaan per elemen. `Vector<T>` sendiri tidak mengimplementasikan `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Menambahkan `x` **di depan** jika belum ada |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Operasi himpunan. CL tidak menentukan urutannya; di sini stabil, **berdasarkan urutan kemunculan pertama** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | Inklusi |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Apakah merupakan sufiks / bagian sebelum sufiks. CL menanyakan **struktur bersama**, tetapi tidak ada struktur untuk dibagi, jadi yang ditanyakan adalah apakah ia sufiks yang elemennya `eql` |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | `equal` per elemen. `Vector<T>` sendiri tidak punya implementasi `Equal` |
 | `caar`…`cddddr` | `(cadr p)` | pada pasangan bersarang | 28 fungsi CL. Menelusuri **pasangan, bukan daftar**: `cadr` menerima `cons-cell<A,cons-cell<B,C>>` |
 
 Yang dimiliki CL dan tidak dimiliki bahasa ini: `list*` (tidak ada gagasan daftar tak patut yang
@@ -245,7 +247,7 @@ Fungsi pada bab 4 dan 5 menerima keyword sekuens CL `:key` / `:test` / `:test-no
 | Keyword | Tipe | Arti |
 |---|---|---|
 | `:key` | `(fn (A) A)` | Proyeksi yang diterapkan pada tiap elemen sebelum membandingkan atau menguji |
-| `:test` | `(fn (A A) bool)` | Uji kesamaan yang dipakai sebagai ganti `equals` dari batas `Eq`. Argumen pertama adalah **item yang dicari**, yang kedua adalah elemen (setelah `:key`), dalam urutan yang sama seperti CL |
+| `:test` | `(fn (A A) bool)` | Uji kesamaan yang dipakai alih-alih `eql` bawaan (`:test equal` dan sebagainya). Argumen pertama adalah **item yang dicari**, yang kedua elemen (setelah `:key`), dalam urutan yang sama dengan CL |
 | `:test-not` | `(fn (A A) bool)` | Negasi `:test` |
 | `:start` `:end` | `int` | Jendela `[start, end)` yang dipindai. Indeks relatif terhadap seluruh sekuens |
 | `:from-end` | `bool` | Pencarian menjawab dengan kecocokan **terakhir**. Dikombinasikan dengan `:count`, elemen yang terpengaruh diambil dari akhir |

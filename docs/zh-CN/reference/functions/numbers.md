@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -165,7 +165,7 @@ CL 的 `integer`，也就是这门语言的**整数**——未注解的整数字
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | 转换为 `f64` 后计算（`(sqrt 1/4)` 为 `0.5`） |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 同上 |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 同上 |
-| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` 的实现。`ratio` 可以作为 `HashTable` 的键 |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` 的实现。可将 `ratio` 作为 `equal` `HashTable` 的键 |
 
 CL 的整数是分母为 1 的有理数，因此 `int` 也有 `numerator`（自身）、`denominator`（`1`）、
 `float`、`rational`、`rationalize`，以及上面从 `sqrt` 到 `atanh` 的 15 个函数（`(sqrt 4)` 为
@@ -207,7 +207,7 @@ CL 的整数是分母为 1 的有理数，因此 `int` 也有 `numerator`（自�
 | `float` `rational` `rationalize` `sqrt` `exp` `log` 以及三角函数和双曲函数 | `(op x)` | | 与 `ratio` 相同 |
 
 `(as int q)` 是 `rational->int`（截断），`(try-as int q)` 是 `try-rational->int`，`(as ratio q)` 和
-`(as f64 q)` 是相应的转换，`(as rational x)` 是从 `int`/`ratio` 的扩展。也实现了 `Eq`、`Ord`、`Hash`、
+`(as f64 q)` 是相应的转换，`(as rational x)` 是从 `int`/`ratio` 的扩展。也实现了 `Equal`、`Ord`、`Hash`、
 `print-object` 和算术 trait。
 
 ## 6. 复数 `complex`
@@ -230,7 +230,7 @@ CL 的整数是分母为 1 的有理数，因此 `int` 也有 `numerator`（自�
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | 绝对值。**唯一不返回接收者类型的 `abs`**（与 CL 一样，复数的绝对值是实数） |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | 复数的四则运算 |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | 按分量判断相等。也实现了 `Eq`（没有 `Ord`——复数没有顺序，CL 的 `<` 也拒绝） |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | 按分量判断相等。也实现了 `Equal`（没有 `Ord`——复数没有顺序，CL 的 `<` 也拒绝） |
 | `zerop` | `(zerop z)` | `complex→bool` | 两个分量是否都为 0 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` 取主值 |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`。`(expt 0 0)`=1 |

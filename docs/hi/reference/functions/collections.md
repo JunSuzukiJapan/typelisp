@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -78,7 +78,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | तत्वों की संख्या |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | अंतिम तत्व हटाकर लौटाता है। खाली हो तो `none` (`get`/`set` के विपरीत, यह panic नहीं करता) ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` लागू करने वाला इटरेटर बनाता है |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | यदि कोई बराबर तत्व मौजूद न हो तो `x` जोड़ता है (CL का `pushnew`। इसे place को दोबारा लिखने की ज़रूरत नहीं, इसलिए यह macro की बजाय मेथड है) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | यदि `x` से `eql` कोई तत्व नहीं है तो अंत में जोड़ता है (CL का `pushnew`। किसी जगह को फिर से लिखना नहीं पड़ता, इसलिए मैक्रो नहीं, मेथड है) |
 
 `map`/`filter` और साथी [अनुक्रम फ़ंक्शन](sequences.md#4-iter-पर-अनुक्रम-फ़ंक्शन) हैं: वेक्टर को `iter` से पास करें, जैसे `(map (iter v) f)`। विनाशकारी ऑपरेशन (`nreverse`, `delete` आदि) [विनाशकारी ऑपरेशन](sequences.md#7-विनाशकारी-ऑपरेशन) में हैं।
 
@@ -86,7 +86,7 @@
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | खाली तालिका बनाता है |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | खाली टेबल बनाता है। `:test` कुंजियों की तुलना का तरीका है (नीचे की तालिका); न देने पर `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | लुकअप |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | जोड़ना या अधिलेखित करना |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | प्रविष्टि हटाता है और, यदि थी, पुराना मान लौटाता है |
@@ -99,32 +99,50 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL का `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL का `hash-table-size`। इस तालिका में यह भरी हुई प्रविष्टियों की संख्या है (`count` के बराबर) |
 
-**कोई भी टाइप जो `Hash` लागू करता है कुंजी हो सकता है**, `defstruct`/`defenum` टाइप सहित। `get`/`set`/`remove` में `(:where (Hash K))` है, इसलिए ऐसे टाइप की कुंजी वाली तालिका जो इसे लागू नहीं करता **टाइप त्रुटि** है (`NaN` के कारण `f64` में `Hash` नहीं है)।
+कुंजियों की तुलना कैसे हो, यह CL के `make-hash-table` की तरह टेबल बनाते समय `:test` से चुना जाता है।
+`:test` `eq`, `eql`, `equal` और `equalp` में से एक लेता है (`'equal` या `equal` लिखा जा सकता है)।
+
+| `:test` | कुंजियों की तुलना | कुंजी के टाइप |
+|---|---|---|
+| `eql` (डिफ़ॉल्ट) | संख्याएँ और अक्षर मान से, बाकी पहचान से | कोई भी टाइप |
+| `eq` | पहचान से | कोई भी टाइप |
+| `equal` | कुंजी के टाइप के `equal` (`Equal`) और हैश `sxhash` (`Hash`) से | `Hash` लागू करने वाले टाइप |
+| `equalp` | `equalp` से (स्ट्रिंग बड़े-छोटे अक्षर के भेद के बिना, struct स्लॉट-दर-स्लॉट) | कोई भी टाइप |
+
+डिफ़ॉल्ट `eql` है, इसलिए अलग-अलग बनाई गई समान सामग्री वाली दो स्ट्रिंग दो कुंजियाँ हैं। स्ट्रिंग कुंजियों के
+लिए `(HashTable::new :test 'equal)` लिखें। यदि `equal` टेबल की कुंजी का टाइप `Hash` लागू नहीं करता, तो टेबल
+बनाने की जगह पर **टाइप त्रुटि** होती है (`NaN` के कारण `f64` के पास `Hash` नहीं है)।
 
 ```lisp
-(deftrait Hash (Eq)
+(deftrait Hash (Equal)
   (defmethod sxhash (self) int))              ; fixnum में समाने वाला गैर-ऋणात्मक मान लौटाता है
 ```
 
-इनके लिए लागू: `int` और छह निश्चित चौड़ाई वाले पूर्णांक, `bool`, `char`, `string` और `symbol` (फ़्लोटिंग-पॉइंट संख्याओं के लिए नहीं)। अपने टाइप के लिए, परिणाम को `*sxhash-mask*` (2^30-1) से `logand` करके गैर-ऋणात्मक रखें। स्ट्रिंग को हैश करने के लिए, आप `(sxhash-string s)` (32-बिट FNV-1a) कॉल कर सकते हैं, जिसे `string` का इम्प्लीमेंटेशन उपयोग करता है।
+`Hash` इनके लिए लागू है: `int` और छह निश्चित-चौड़ाई पूर्णांक, `bool`, `char`, `string`, `symbol`
+(फ़्लोटिंग-पॉइंट संख्याओं के लिए नहीं)। अपने टाइपों में परिणाम को `*sxhash-mask*` (2^30-1) के साथ `logand`
+करके गैर-ऋणात्मक रखें। स्ट्रिंग का हैश लेने के लिए `(sxhash-string s)` (FNV-1a 32bit) बुला सकते हैं, जिसका
+उपयोग `string` का कार्यान्वयन करता है।
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-दो कुंजियाँ समान हैं या नहीं, यह **कुंजी का टाइप स्वयं** तय करता है (`sxhash`, और `Hash` के supertrait `Eq` से `equals`), ऑब्जेक्ट पहचान नहीं। इसीलिए, ऊपर की तरह, आप ऐसी कुंजी से लुकअप कर सकते हैं जो "भिन्न मान है लेकिन बराबर है"।
+`equal` टेबल में दो कुंजियाँ एक हैं या नहीं, यह ऑब्जेक्ट की पहचान नहीं बल्कि **कुंजी का टाइप स्वयं**
+(`sxhash`, और `Hash` के supertrait `Equal` का `equal`) तय करता है। इसलिए ऊपर की तरह "अलग मान पर बराबर"
+कुंजी प्रविष्टि ढूँढ लेती है।
 
-`sxhash` का टकराना ठीक है (`Hash` का अनुबंध केवल एक दिशा में जाता है: बराबर मानों का हैश समान होना चाहिए)। टकराने वाली कुंजियाँ `equals` से अलग पहचानी जाती हैं।
+`sxhash` का टकराना ठीक है (`Hash` का अनुबंध उलटी दिशा में है: यह केवल इतना कहता है कि `equal` मानों का हैश
+एक होता है)। टकराने वाली कुंजियाँ `equal` से अलग की जाती हैं।
 
 ## 5. `Array<T>` (बहुआयामी ऐरे)
 
@@ -172,11 +190,13 @@
 
 ## 7. `HashSet<T>`
 
-बिना दोहराव वाले तत्वों का संग्रह (Rust का `HashSet`)। मानक लाइब्रेरी का `defstruct`, जिसकी सामग्री `HashTable<T,()>` है। तत्व के टाइप को, `HashTable` की कुंजी की तरह, `Hash` लागू करना होगा।
+दोहराव रहित तत्वों का संग्रह (Rust का `HashSet`)। मानक लाइब्रेरी का एक `defstruct`, जिसकी सामग्री
+`HashTable<T,()>` है। तत्वों की तुलना कैसे हो, यह `HashTable` की कुंजियों की तरह `:test` तय करता है, और
+`equal` सेट में तत्व का टाइप `Hash` लागू करे।
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | खाली सेट बनाता है। टाइप आर्ग्युमेंट अपेक्षित टाइप से तय होता है |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | खाली सेट बनाता है। टाइप आर्ग्युमेंट अपेक्षित टाइप से आता है। `:test` `HashTable` जैसा; न देने पर `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x` जोड़ता है। नया हो तो `true`, पहले से हो तो `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` मौजूद है या नहीं |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x` निकालता है। मौजूद था तो `true` |
@@ -187,7 +207,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

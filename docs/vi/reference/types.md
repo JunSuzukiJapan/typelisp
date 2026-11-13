@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -33,7 +33,7 @@ Không có kiểu số nguyên 64 bit. Với các số nguyên mà độ rộng 
 | `Option<T>` | Một giá trị có mặt hoặc không. `some` / `none` | [Option và Result](functions/option-result.md) |
 | `Result<T,E>` | Thành công hoặc thất bại. `ok` / `err` | Như trên |
 | `Vector<T>` | Một mảng có thể tăng trưởng | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | Một bảng băm. Kiểu khóa phải triển khai `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | Bảng băm. Cách so sánh khóa do `:test` quyết định khi tạo, và trong bảng `equal` kiểu khóa phải cài đặt `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 đến 12 phần tử). Phần tử được đọc bằng `t::0` | [Cú pháp chương 2](syntax.md#2-cách-viết-kiểu) |
 | `Task<T>` | Một handle tới một task | [Task](functions/concurrency.md#1-taskt--handle-tới-các-task) |
 | `Thread<T>` | Một handle tới một task chạy trên thread HĐH riêng | [Thread](functions/concurrency.md#7-threadt--các-thread-hđh-riêng) |
@@ -103,7 +103,7 @@ và ở các chương được liệt kê trong cột ngoài cùng bên phải.
 
 | Trait | Các kiểu triển khai | Chi tiết |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-so-sánh) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-so-sánh) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Như trên |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` và mọi kiểu lỗi dựng sẵn | [print-object](functions/printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu) |
@@ -125,7 +125,7 @@ Chi tiết nằm ở [Các trait số học](functions/traits.md#3-các-trait-s�
 | Trait | Các kiểu triển khai |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` các kiểu của module `lazy` (`lazy::map-iter<I,A,U>`, v.v.) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (khi kiểu phần tử triển khai `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Stream

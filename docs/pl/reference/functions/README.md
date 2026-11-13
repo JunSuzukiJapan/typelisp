@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Funkcje wbudowane
 
 Lista funkcji wbudowanych, metod i biblioteki standardowej. Składnię (formy specjalne i sposoby
@@ -25,7 +25,7 @@ Spośród nazw biblioteki standardowej tych można używać w każdym module, ni
 - każda nazwa, która jest też nazwą pakietu `COMMON-LISP` z Common Lisp (`length`, `format`, `open`
   itd.)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, traity strumieni `Stream`,
-  `InputStream` i `OutputStream` oraz `Hash`, który implementują klucze `HashTable`
+  `InputStream` i `OutputStream` oraz `Hash`, który implementują klucze `HashTable` typu `equal`
 - typy, o których mówią ich funkcje i zmienne
 
 Każdą inną nazwę wprowadza się przez `use`, jak `(use std::net::tcp-connect)`, albo pisze się jej
@@ -37,7 +37,7 @@ Każdą inną nazwę wprowadza się przez `use`, jak `(use std::net::tcp-connect
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -61,7 +61,7 @@ Tabele w każdym rozdziale mają kolumny „nazwa, forma, typ, opis". Kolumna ty
 zapisana jako `(typ-argumentu,...)→typ-zwracany`.
 
 - Pojedyncza wielka litera, taka jak `T`, `A` lub `B`, to zmienna typowa.
-- Uwaga w rodzaju `where Eq A` to ograniczenie traitu, które musi spełniać zmienna typowa.
+- Uwaga w rodzaju `where Equal A` to ograniczenie traitu, które musi spełniać zmienna typowa.
 - `Iter<A>` oznacza „dowolną implementację `Iter`, której `Item` to `A`".
 - Argumenty oznaczone `&optional` / `&key` można pominąć.
 
@@ -73,7 +73,7 @@ zapisana jako `(typ-argumentu,...)→typ-zwracany`.
 | [sequences.md](sequences.md) | Para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach, leniwe iteratory `lazy`, funkcje wyższego rzędu |
 | [collections.md](collections.md) | Łańcuchy znaków, znaki, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, typy błędów i trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traity arytmetyczne, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, traity arytmetyczne, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, zmienne sterujące drukarką |
 | [format.md](format.md) | Dyrektywy formatu |
 | [streams-files.md](streams-files.md) | Strumienie, operacje na plikach, nazwy ścieżek, readtable |

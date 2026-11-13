@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Tipos
 
 Os tipos que o typelisp tem e os traits padrão que cada tipo implementa. Como escrever tipos está no
@@ -33,7 +33,7 @@ Não há tipo inteiro de 64 bits. Para inteiros cuja largura não importa, use `
 | `Option<T>` | Um valor que existe ou não. `some` / `none` | [Option e Result](functions/option-result.md) |
 | `Result<T,E>` | Sucesso ou falha. `ok` / `err` | Igual ao acima |
 | `Vector<T>` | Um array que pode crescer | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | Uma tabela hash. O tipo da chave deve implementar `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | Uma tabela hash. Como as chaves são comparadas é decidido por `:test` na criação, e numa tabela `equal` o tipo das chaves deve implementar `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tupla (de 1 a 12 elementos). Os elementos são lidos com `t::0` | [Sintaxe, capítulo 2](syntax.md#2-escrita-de-tipos) |
 | `Task<T>` | Um handle de uma tarefa | [Tarefas](functions/concurrency.md#1-taskt--handles-de-tarefas) |
 | `Thread<T>` | Um handle de uma tarefa executada em uma thread de SO dedicada | [Thread](functions/concurrency.md#7-threadt--threads-de-so-dedicadas) |
@@ -103,7 +103,7 @@ e nos capítulos indicados na coluna da direita.
 
 | Trait | Tipos que o implementam | Detalhes |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparação) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-comparação) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Igual ao acima |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` e todos os tipos de erro embutidos | [print-object](functions/printing.md#5-print-object-representação-impressa-por-tipo) |
@@ -125,7 +125,7 @@ Os detalhes estão em [Traits aritméticos](functions/traits.md#3-traits-aritmé
 | Trait | Tipos que o implementam |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` os tipos do módulo `lazy` (`lazy::map-iter<I,A,U>` etc.) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (quando o tipo dos elementos implementa `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Streams

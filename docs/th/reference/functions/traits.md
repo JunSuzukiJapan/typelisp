@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait มาตรฐาน
 
 trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มและนำสมาชิกออก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
@@ -24,50 +24,54 @@ trait สำหรับการวนซ้ำ การเปรียบเ�
 ให้ชนิดของคุณเอง จะเดินผ่านด้วย `doiter` ได้ทันที และส่งให้
 [ฟังก์ชันของลำดับ](sequences.md#4-ฟังก์ชันของลำดับบน-iter)ได้
 
-## 2. `Eq` / `Ord` (การเปรียบเทียบ)
+## 2. `Equal` / `Ord` (การเปรียบเทียบ)
 
-สอดคล้องกับ `PartialEq`/`PartialOrd` ของ Rust (ตั้งชื่อเป็น `Eq`/`Ord`) ใช้ใน `:where`
-bound ของฟังก์ชัน generic เพื่อกำหนดให้ชนิดของสมาชิกเปรียบเทียบได้ (`sort`/`member`/`assoc`
-และอื่น ๆ)
+`Equal` คือ trait ที่ `equal` ใช้ ตรงกับ `PartialEq` ของ Rust ส่วน `Ord` ตรงกับ `PartialOrd` ของ Rust
+ใช้ในขอบเขต `:where` ของฟังก์ชันแบบ generic เพื่อกำหนดว่าชนิดของสมาชิกต้องเปรียบเทียบได้
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; must be implemented
-  (defmethod not-equals (self (other Self)) bool             ; default implementation
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; inherits from Eq
-  (defmethod less (self (other Self)) bool)                  ; must be implemented
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; ต้อง implement
+(deftrait Ord (Equal)                                     ; สืบทอด Equal
+  (defmethod less (self (other Self)) bool)                  ; ต้อง implement
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-หากต้อง implement `Eq` คุณเขียนเฉพาะ `equals` และสำหรับ `Ord` เฉพาะ `less` การ implement
-เริ่มต้นเติมส่วนที่เหลือ `Ord` สืบทอดจาก `Eq` ดังนั้นต้องมี `impl Eq X` ก่อน `impl Ord X`
+การ implement `Equal` ให้เขียน `equal` ส่วน `Ord` เขียนแค่ `less` ส่วนที่เหลือของ `Ord` มาจาก implementation
+ปริยาย `Ord` สืบทอด `Equal` จึงต้องมี `impl Equal X` ก่อน `impl Ord X`
 
-เมทอดของ trait แต่ละตัวเรียกเป็นฟังก์ชันได้ทันที (ภายใน bound `where (Eq A)`/`(Ord A)` หรือบน
-ชนิดที่เป็นรูปธรรมที่ implement มัน):
+`(equal a b)` เรียก implementation ของ `Equal` ของชนิดของ `a` ถ้าเขียนกับชนิดที่ไม่ได้ implement `Equal`
+จะเป็นข้อผิดพลาดของชนิด ถ้าจะเปรียบเทียบตามเอกลักษณ์ให้ใช้ `eq`/`eql` ถ้าตามโครงสร้างให้ใช้ `equalp`
+ทั้งสามใช้กับค่าชนิดใดก็ได้
+
+เมธอดของ trait แต่ละตัวเรียกเป็นฟังก์ชันได้โดยตรง (ภายในขอบเขต `where (Equal A)`/`(Ord A)` หรือกับชนิดจริงที่
+implement ไว้แล้ว):
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | เท่ากันหรือไม่ (`==` ของ Rust) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | ไม่เท่ากันหรือไม่ (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | เท่ากันหรือไม่ (`==` ของ Rust) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` ถูก implement สำหรับ: ชนิดตัวเลขทั้งหมด (`i8` ถึง `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
-`char` `string` `symbol` `complex`, `Sexpr` (`eq` คือเอกลักษณ์ (identity) ใช้โดยรูปแบบค่าของ
-`match`) และ `cons-cell<A,B>` (แบบเวียนเกิด เมื่อสมาชิกเป็น `Eq`) `Option<T>` และ `Result<T,E>` เท่ากันเมื่อเป็น variant เดียวกันและเนื้อหาเท่ากันตาม `equals` ลิสต์เป็น `Option<Sexpr>` เซลล์จึงเทียบด้วยเอกลักษณ์ของ `Sexpr` (ถ้าจะเทียบด้วยเนื้อหาให้ใช้ `equal`) `Ord` ถูก implement สำหรับ:
-ชนิดตัวเลขทั้งหมด, `char` `string` และ `cons-cell<A,B>` (ตามลำดับพจนานุกรม เมื่อสมาชิกเป็น
-`Ord`)
+`Equal` ถูก implement สำหรับ: ชนิดตัวเลขทั้งหมด (`i8` ถึง `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
+`char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` และ tuple (ทีละสมาชิก เมื่อสมาชิกเป็น `Equal`)
+และ `Option<T>` กับ `Result<T,E>` (เมื่อเป็น variant เดียวกันและเนื้อหาเป็น `equal`) สำหรับชนิดในตัว
+เมธอดในตัว `equal` ของชนิดนั้นเองคือ implementation ของ `Equal` ตามที่เป็น ตัวเลขเปรียบเทียบด้วย `=` สตริง
+เปรียบเทียบตามเนื้อหาโดยแยกตัวพิมพ์ใหญ่เล็ก `Ord` ถูก implement สำหรับ: ชนิดตัวเลขทั้งหมด, `char` `string`
+และ `cons-cell<A,B>` (ตามลำดับพจนานุกรม เมื่อสมาชิกเป็น `Ord`)
 
-ชื่อเมทอดไม่ซ้ำกับตัวดำเนินการที่มีให้ในตัว (`= /= < <= > >=`) หรือ `eq`/`lt` เพราะ
-ของที่มีให้ในตัวนิยามใหม่ไม่ได้ และแต่ละ implementation มอบหมายให้พวกมัน ตัวดำเนินการเปรียบเทียบ
-สเกลาร์เองเป็นเมทอดที่มีให้ในตัวของแต่ละชนิดตัวรับ ([ตัวเลข](numbers.md)
-[สตริงและอักขระ](collections.md)) ภายใน bound การเขียนตัวดำเนินการจะถูกอ่านเป็น
-เมทอดของ trait (บทที่ 3)
+`equal` ของลิสต์ (`Sexpr`) คือ `equal` ของ CL: cons เปรียบเทียบตามโครงสร้าง สตริงตามเนื้อหา และ atom อื่น
+ด้วย `eql` การเปรียบเทียบนี้ไล่ค่าตอนรันและไม่เรียกเมธอดใด ดังนั้น struct ที่อยู่ในลิสต์จึงเปรียบเทียบตาม
+เอกลักษณ์เหมือนใน CL ไม่ว่าชนิดของมันจะมี `impl Equal` แบบใด
+
+ชื่อเมธอดของ `Ord` ไม่ซ้ำกับตัวดำเนินการในตัว (`< <= > >=`) หรือ `lt` เพราะของในตัวนิยามใหม่ไม่ได้และแต่ละ
+implementation ส่งต่อไปยังพวกมัน ตัวดำเนินการเปรียบเทียบสเกลาร์เองเป็นเมธอดในตัวตามชนิดของผู้รับ
+([ตัวเลข](numbers.md), [สตริงและอักขระ](collections.md)) ภายในขอบเขต ตัวดำเนินการที่เขียนจะถูกอ่านเป็นเมธอด
+ของ trait (บทที่ 3) `=` กลายเป็น `equal` และ `/=` กลายเป็น `(not (equal a b))`
 
 ## 3. trait การคำนวณ (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -91,7 +95,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 
 **ภายใน bound คุณเขียนตัวดำเนินการได้** เมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `:where`
 ตัวดำเนินการจะถูกอ่านเป็นเมทอดของ trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -127,7 +131,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 | `Vector<T>` | เพิ่มต่อท้าย |
 | `Deque<T>` | เพิ่มต่อท้าย (`push-back`) |
 | `Array<T>` | เพิ่มที่ตำแหน่ง fill pointer (`push-extend`) panic หากไม่มี fill pointer |
-| `HashSet<T>` | ใส่ลงในเซต (`insert`) เป็น `Push` เฉพาะเมื่อชนิดของสมาชิก implement `Hash` |
+| `HashSet<T>` | ใส่ลงในเซต (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

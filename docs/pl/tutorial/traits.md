@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traity
 
 Trait to obietnica, że „ten typ obsługuje te operacje". Traity pozwalają kilku typom dzielić operacje o
@@ -99,20 +99,20 @@ funkcje standardowe, które z niego korzystają.
 
 | Trait | Metody do zaimplementowania | Co umożliwia |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, wzorzec `(:= expr)` w `match` i tak dalej |
-| `Ord` | `less` | `less-equal`, `greater` i tak dalej. `Ord` dziedziczy z `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, wzorzec `(:= wyrażenie)` w `match`, `member` z `:test equal` itd. |
+| `Ord` | `less` | `less-equal`, `greater` i tak dalej. `Ord` dziedziczy z `Equal` |
 | `print-object` | `print-object` | Sposób pokazywania wartości przez `println` i pokrewne |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` i tak dalej |
 | `Error` | `message`, `source` | Użycie jako typ błędu ([Obsługa błędów](errors.md)) |
 
-Zaimplementujmy `Eq` i `Ord` dla typu reprezentującego kwotę pieniędzy. Ponieważ `Ord` dziedziczy
-z `Eq`, `impl` dla `Eq` musi być pierwszy.
+Zaimplementujmy `Equal` i `Ord` dla typu reprezentującego kwotę pieniędzy. Ponieważ `Ord` dziedziczy
+z `Equal`, `impl` dla `Equal` musi być pierwszy.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -190,7 +190,7 @@ Dokładna lista typów, których można użyć, znajduje się w
 [Referencji składni 3.9](../reference/syntax.md#39-deftrait--impl--traity).
 
 Niektórych traitów nie można używać z `:dyn`: tych, których metody używają `Self` dla argumentu innego niż
-`self` lub dla wartości zwracanej (jak `equals` w `Eq`). Ponieważ typ nie jest znany aż do czasu działania,
+`self` lub dla wartości zwracanej (jak `equal` w `Equal`). Ponieważ typ nie jest znany aż do czasu działania,
 nie ma sposobu na wytworzenie „wartości tego samego typu".
 
 ## 6. Ograniczenia

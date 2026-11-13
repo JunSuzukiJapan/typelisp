@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traits
 
 Ein Trait ist das Versprechen „dieser Typ unterstützt diese Operationen“. Mit Traits können mehrere Typen
@@ -99,20 +99,20 @@ verwenden, für den eigenen Typ zur Verfügung.
 
 | Trait | Zu implementierende Methoden | Was dadurch möglich wird |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, das Muster `(:= expr)` von `match` usw. |
-| `Ord` | `less` | `less-equal`, `greater` usw. `Ord` erbt von `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, das Muster `(:= Ausdruck)` von `match`, `member` mit `:test equal` usw. |
+| `Ord` | `less` | `less-equal`, `greater` usw. `Ord` erbt von `Equal` |
 | `print-object` | `print-object` | Wie `println` und Verwandte Werte anzeigen |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` usw. |
 | `Error` | `message`, `source` | Verwendung als Fehlertyp ([Fehlerbehandlung](errors.md)) |
 
-Implementieren wir `Eq` und `Ord` für einen Typ, der einen Geldbetrag darstellt. Da `Ord` von `Eq` erbt, muss
-das `impl` von `Eq` zuerst kommen.
+Implementieren wir `Equal` und `Ord` für einen Typ, der einen Geldbetrag darstellt. Da `Ord` von `Equal` erbt, muss
+das `impl` von `Equal` zuerst kommen.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -194,7 +194,7 @@ Die genaue Liste der verwendbaren Typen steht in
 [Syntaxreferenz 3.9](../reference/syntax.md#39-deftrait--impl--traits).
 
 Manche Traits lassen sich nicht mit `:dyn` verwenden: solche, deren Methoden `Self` für ein anderes Argument
-als `self` oder für den Rückgabewert verwenden (wie `equals` in `Eq`). Da der Typ erst zur Laufzeit feststeht,
+als `self` oder für den Rückgabewert verwenden (wie `equal` in `Equal`). Da der Typ erst zur Laufzeit feststeht,
 gibt es keine Möglichkeit, „einen Wert desselben Typs“ zu erzeugen.
 
 ## 6. Einschränkungen

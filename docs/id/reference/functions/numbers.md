@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -190,7 +190,7 @@ menghasilkan `rational` (5.1). Tidak ada konversi implisit dengan bilangan bulat
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Mengubah ke `f64` lalu menghitung (`(sqrt 1/4)` adalah `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Sama seperti di atas |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Sama seperti di atas |
-| `sxhash` | `(sxhash x)` | `ratio→int` | Implementasi `Hash`. `ratio` dapat menjadi kunci `HashTable` |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Implementasi `Hash`. `ratio` dapat menjadi kunci `HashTable` `equal` |
 
 Di CL bilangan bulat adalah bilangan rasional berpenyebut 1, jadi `int` juga punya `numerator`
 (dirinya), `denominator` (`1`), `float`, `rational`, `rationalize` dan 15 fungsi dari `sqrt` sampai
@@ -237,7 +237,7 @@ dengan `as`/`try-as`.
 
 `(as int q)` adalah `rational->int` (pemotongan), `(try-as int q)` adalah `try-rational->int`,
 `(as ratio q)` dan `(as f64 q)` adalah konversi masing-masing, dan `(as rational x)` melebarkan dari
-`int`/`ratio`. `Eq`, `Ord`, `Hash`, `print-object` dan trait aritmetika juga diimplementasikan.
+`int`/`ratio`. `Equal`, `Ord`, `Hash`, `print-object` dan trait aritmetika juga diimplementasikan.
 
 ## 6. Bilangan kompleks `complex`
 
@@ -261,7 +261,7 @@ Sebuah struct (`defstruct`) pada pustaka standar.
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Nilai mutlak. **Satu-satunya `abs` yang tidak mengembalikan tipe penerima** (seperti di CL, nilai mutlak bilangan kompleks adalah riil) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Aritmetika kompleks |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Kesamaan per komponen. `Eq` juga diimplementasikan (tidak ada `Ord`: bilangan kompleks tidak memiliki urutan, dan `<` pada CL juga menolaknya) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Kesamaan per komponen. `Equal` juga diimplementasikan (tidak ada `Ord`: bilangan kompleks tidak memiliki urutan, dan `<` pada CL juga menolaknya) |
 | `zerop` | `(zerop z)` | `complex→bool` | Apakah kedua komponen 0 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` memberikan nilai utama |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -31,7 +31,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `Option<T>` | ऐसा मान जो है या नहीं है। `some` / `none` | [Option और Result](functions/option-result.md) |
 | `Result<T,E>` | सफलता या विफलता। `ok` / `err` | ऊपर जैसा |
 | `Vector<T>` | बढ़ने योग्य ऐरे | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | हैश टेबल। कुंजी टाइप को `Hash` लागू करना चाहिए | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | हैश टेबल। कुंजियों की तुलना कैसे हो, यह बनाते समय `:test` तय करता है, और `equal` टेबल में कुंजी का टाइप `Hash` लागू करे | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | टपल (1 से 12 तत्व)। तत्व `t::0` से पढ़े जाते हैं | [सिंटैक्स अध्याय 2](syntax.md#2-टाइप-लिखना) |
 | `Task<T>` | टास्क का हैंडल | [टास्क](functions/concurrency.md#1-taskt--टास्क-के-हैंडल) |
 | `Thread<T>` | समर्पित OS थ्रेड पर चल रहे टास्क का हैंडल | [Thread](functions/concurrency.md#7-threadt--समर्पित-os-थ्रेड) |
@@ -97,7 +97,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | Trait | लागू करने वाले टाइप | विवरण |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-तुलना) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-तुलना) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | ऊपर जैसा |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` और सभी बिल्ट-इन त्रुटि टाइप | [print-object](functions/printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व) |
@@ -118,7 +118,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | Trait | लागू करने वाले टाइप |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` मॉड्यूल के टाइप (`lazy::map-iter<I,A,U>` आदि) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (जब तत्व का टाइप `Hash` लागू करता हो) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 स्ट्रीम

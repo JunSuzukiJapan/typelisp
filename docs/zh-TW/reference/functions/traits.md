@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 標準 trait
 
 用於迭代、比較、算術與存取元素的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`
@@ -18,41 +18,49 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 迭代器）。`Chan<T>` 本身就是 `Iter`（`recv` 相當於 `next`。[通道](concurrency.md#2-chant--通道)）。`Sexpr` 串列沒有實作 `Iter`（元素型別
 不統一）。為自己的型別實作 `Iter` 後，就可以直接用 `doiter` 走訪，也可以傳給[序列函式](sequences.md#4-iter-上的序列函式)。
 
-## 2. `Eq` / `Ord`（比較）
+## 2. `Equal` / `Ord`（比較）
 
-相當於 Rust 的 `PartialEq`/`PartialOrd`（名稱為 `Eq`/`Ord`）。在泛型函式的 `:where` 約束中用來要求元素型別可以比較（`sort`/`member`/`assoc` 等）。
+`Equal` 是 `equal` 所用的 trait，相當於 Rust 的 `PartialEq`。`Ord` 相當於 Rust 的 `PartialOrd`。在泛型函式的
+`:where` 約束中用它們來要求元素型別可比較。
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; 必須實作
-  (defmethod not-equals (self (other Self)) bool             ; 預設實作
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; 繼承 Eq
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; 必須實作
+(deftrait Ord (Equal)                                     ; 繼承 Equal
   (defmethod less (self (other Self)) bool)                  ; 必須實作
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-實作 `Eq` 只需寫 `equals`，實作 `Ord` 只需寫 `less`。其餘由預設實作補齊。`Ord` 繼承 `Eq`，所以 `impl Ord X` 之前需要 `impl Eq X`。
+實作 `Equal` 要寫 `equal`，實作 `Ord` 只需寫 `less`。`Ord` 的其餘部分由預設實作補上。`Ord` 繼承 `Equal`，
+所以 `impl Ord X` 之前需要 `impl Equal X`。
 
-各 trait 方法可以直接作為函式呼叫（在 `where (Eq A)`/`(Ord A)` 約束內，或對已實作的具體型別）：
+`(equal a b)` 呼叫 `a` 的型別的 `Equal` 實作。對未實作 `Equal` 的型別寫它會是型別錯誤。依同一性比較用
+`eq`/`eql`，依結構比較用 `equalp`。這三個可用於任何型別的值。
+
+各 trait 方法可以直接當作函式呼叫（在 `where (Equal A)`/`(Ord A)` 約束內，或對已實作它的具體型別）：
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | 是否相等（Rust 的 `==`） |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | 是否不相等（`!=`） |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 是否相等（Rust 的 `==`） |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-已實作 `Eq` 的：所有數值型別（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）以及 `bool` `char` `string` `symbol` `complex`、`Sexpr`
-（`eq`，即同一性。供 `match` 的值模式使用），以及 `cons-cell<A,B>`（元素為 `Eq` 時遞迴比較）。`Option<T>` 與 `Result<T,E>` 在變體相同且內容依 `equals` 相等時相等；列表是 `Option<Sexpr>`，所以其單元依 `Sexpr` 的同一性比較（依內容比較請用 `equal`）。已實作 `Ord` 的：所有數值型別以及 `char`
-`string`，以及 `cons-cell<A,B>`（字典序，元素為 `Ord` 時）。
+已實作 `Equal` 的：所有數值型別（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）與 `bool` `char` `string`
+`symbol` `complex`、`Sexpr`、`cons-cell<A,B>` 和元組（元素為 `Equal` 時逐元素比較）、`Option<T>` 與
+`Result<T,E>`（變體相同且內容 `equal` 時）。內建型別各自的內建方法 `equal` 原樣就是 `Equal` 的實作。數值用
+`=` 比較，字串區分大小寫依內容比較。已實作 `Ord` 的：所有數值型別以及 `char` `string`，以及
+`cons-cell<A,B>`（元素為 `Ord` 時依字典序）。
 
-方法名稱之所以不與內建運算子（`= /= < <= > >=`）或 `eq`/`lt` 重疊，是因為內建的不能重新定義，各實作會委派給它們。純量的比較運算子本身是
-各接收者型別的內建方法（[數值](numbers.md)、[字串與字元](collections.md)）。在約束內寫運算子，會被解讀為 trait 方法（第 3 章）。
+串列（`Sexpr`）的 `equal` 是 CL 的 `equal`：cons 依結構、字串依內容、其餘原子用 `eql` 比較。這種比較在執行時
+走訪值，不呼叫任何方法。因此串列中的結構體與 CL 一樣依同一性比較，與其型別的 `impl Equal` 無關。
+
+`Ord` 的方法名不與內建運算子（`< <= > >=`）或 `lt` 重名，是因為內建的無法重新定義，而各實作都委派給它們。
+純量比較運算子本身是依接收者型別的內建方法（[數值](numbers.md)・[字串與字元](collections.md)）。在約束內
+寫運算子，會被讀作 trait 的方法（第 3 章）。`=` 變為 `equal`，`/=` 變為 `(not (equal a b))`。
 
 ## 3. 算術 trait（`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`）
 
@@ -74,7 +82,7 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 ```
 
 **在約束內可以用運算子書寫。** 當接收者是由 `:where` 約束的型別變數時，運算子會被解讀為 trait 方法（`+`→`add`、`-`→`sub`、`*`→`mul`、
-`/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equals`、`<`→`less` …）：
+`/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -107,7 +115,7 @@ trait 端的方法名稱不是 `+`，是因為 `+` 是內建方法名稱，`impl
 | `Vector<T>` | 追加到末尾 |
 | `Deque<T>` | 追加到末尾（`push-back`） |
 | `Array<T>` | 在填充指標的位置新增（`push-extend`）。沒有填充指標時 panic |
-| `HashSet<T>` | 放入集合（`insert`）。僅當元素型別實作了 `Hash` 時才是 `Push` |
+| `HashSet<T>` | 放入集合（`insert`） |
 
 ```lisp
 (use std::collections::Deque)

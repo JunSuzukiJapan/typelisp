@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # رسائل الخطأ
 
 معنى أهم رسائل الخطأ الصادرة من `typl` وكيفية إصلاحها.
@@ -46,7 +46,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | لا يوجد نوع بهذا الاسم. عرّف النوع قبل أول صيغة تستخدمه (لا يوجد إعلان مسبق للأنواع). وإذا كنت تقصد متغير نوع فاكتبه في موضع إعلان مثل `<foo>` بعد اسم الدالة ([مرجع الصياغة 3.6](syntax.md#36-defstruct--البنى-أنواع-يعرفها-المستخدم)) |
 | ``cannot infer type argument `t` for `Vector::new` `` | لا يمكن تحديد وسيط نوع. اكتب النوع بـ `the` كما في `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | لا يعالج `match` كل المتغايرات. أضف فروعًا للمتغايرات الناقصة أو فرع `_` |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | تشترط الدالة سمة لا ينفّذها النوع الذي مرّرته. اكتب `(impl Eq pt ...)` ([السمات القياسية](functions/traits.md)) |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | تشترط الدالة سمة لا ينفّذها النوع الذي مرّرته. اكتب `(impl Equal pt ...)` ([السمات القياسية](functions/traits.md)) |
+| ``equal: `pt` does not implement `Equal` `` | كُتب `equal` لنوع لا ينفّذ `Equal`. اكتب `(impl Equal pt ...)`، أو استعمل `eq`/`eql` اللذين يقارنان بالهوية، أو `equalp` الذي يقارن بالبنية |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | مُرِّرت قيمة من نوع لا ينفّذ السمة حيث يُتوقَّع `:dyn`. اكتب `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | كُتب اسم سمة حيث يُوضع نوع. اكتب `:dyn Error` |
 | ``if: (if cond then else)`` | شكل `if` خاطئ. يتطلب `if` فرع else. وعندما لا تحتاج إليه استخدم `when` |

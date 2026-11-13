@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traits padrão
 
 Os traits para iteração, comparação, aritmética e adição e remoção de elementos. Os outros traits padrão estão nos seus próprios capítulos:
@@ -23,48 +23,58 @@ implementam `Iter` (seus tipos de elemento não são uniformes). Se você implem
 ele pode ser percorrido com `doiter` como está e passado às
 [funções de sequência](sequences.md#4-funções-de-sequência-sobre-iter).
 
-## 2. `Eq` / `Ord` (comparação)
+## 2. `Equal` / `Ord` (comparação)
 
-Correspondem a `PartialEq`/`PartialOrd` do Rust (com os nomes `Eq`/`Ord`). São usados nas restrições `:where` das
-funções genéricas para exigir que os tipos dos elementos possam ser comparados (`sort`/`member`/`assoc` etc.).
+`Equal` é o trait que `equal` usa e corresponde ao `PartialEq` de Rust. `Ord` corresponde ao `PartialOrd`
+de Rust. Eles são usados nos limites `:where` de funções genéricas para exigir que o tipo dos elementos
+possa ser comparado.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; precisa ser implementado
-  (defmethod not-equals (self (other Self)) bool             ; implementação padrão
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; herda de Eq
-  (defmethod less (self (other Self)) bool)                  ; precisa ser implementado
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; obrigatório
+(deftrait Ord (Equal)                                     ; herda de Equal
+  (defmethod less (self (other Self)) bool)                  ; obrigatório
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-Para implementar `Eq` você só escreve `equals`, e para `Ord` só `less`. As implementações padrão completam o
-resto. `Ord` herda de `Eq`, então é preciso `impl Eq X` antes de `impl Ord X`.
+Para implementar `Equal` escreve-se `equal`, e para `Ord` apenas `less`. As implementações padrão
+completam o resto de `Ord`. `Ord` herda de `Equal`, então é preciso `impl Equal X` antes de `impl Ord X`.
 
-Cada método de trait pode ser chamado como função como está (dentro de uma restrição `where (Eq A)`/`(Ord A)`,
-ou sobre um tipo concreto que o implementa):
+`(equal a b)` chama a implementação de `Equal` do tipo de `a`. Escrevê-lo para um tipo que não implementa
+`Equal` é um erro de tipo. Para comparar por identidade use `eq`/`eql`, e por estrutura, `equalp`. Esses
+três podem ser usados com um valor de qualquer tipo.
+
+Cada método de trait pode ser chamado diretamente como função (dentro de um limite `where (Equal A)`/
+`(Ord A)`, ou sobre um tipo concreto que o implementa):
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | Se são iguais (o `==` do Rust) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | Se não são iguais (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Se são iguais (o `==` de Rust) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` é implementado para: todos os tipos numéricos (`i8` a `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
-`char` `string` `symbol` `complex`, `Sexpr` (`eq`, isto é, identidade; usado pelos padrões de valor de
-`match`) e `cons-cell<A,B>` (recursivamente, quando os elementos são `Eq`). `Option<T>` e `Result<T,E>` são iguais quando são a mesma variante e o conteúdo é `equals`; uma lista é um `Option<Sexpr>`, então suas células se comparam pela identidade de `Sexpr` (para comparar pelo conteúdo, use `equal`). `Ord` é implementado para: todos os
-tipos numéricos, `char` `string` e `cons-cell<A,B>` (lexicograficamente, quando os elementos são `Ord`).
+`Equal` está implementado para: todos os tipos numéricos (`i8` a `u32` / `f32` / `f64` / `int` / `ratio`),
+`bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` e as tuplas (elemento a elemento,
+quando os elementos são `Equal`), e `Option<T>` e `Result<T,E>` (quando são a mesma variante e o conteúdo
+é `equal`). Nos tipos embutidos, o método embutido `equal` do próprio tipo é, tal como está, a
+implementação de `Equal`. Números comparam com `=`, e strings pelo conteúdo, diferenciando maiúsculas e
+minúsculas. `Ord` está implementado para: todos os tipos numéricos, `char` `string` e `cons-cell<A,B>`
+(lexicograficamente, quando os elementos são `Ord`).
 
-Os nomes dos métodos não coincidem com os operadores embutidos (`= /= < <= > >=`) nem com `eq`/`lt` porque as
-funções embutidas não podem ser redefinidas, e cada implementação delega a elas. Os próprios operadores de
-comparação escalares são métodos embutidos de cada tipo receptor ([Números](numbers.md),
-[Strings e caracteres](collections.md)). Dentro de uma restrição, escrever os operadores os lê como os métodos
-de trait (capítulo 3).
+O `equal` de uma lista (`Sexpr`) é o `equal` de CL: conses comparam por estrutura, strings pelo conteúdo e
+qualquer outro átomo por `eql`. Essa comparação percorre os valores em tempo de execução e não chama
+nenhum método. Por isso um struct dentro de uma lista é comparado por identidade, como em CL, qualquer que
+seja o `impl Equal` do seu tipo.
+
+Os nomes dos métodos de `Ord` não coincidem com os operadores embutidos (`< <= > >=`) nem com `lt` porque
+o que é embutido não pode ser redefinido e cada implementação delega a eles. Os operadores de comparação
+escalares são métodos embutidos por tipo de receptor ([Números](numbers.md),
+[Strings e caracteres](collections.md)). Dentro de um limite, o operador escrito é lido como o método do
+trait (capítulo 3). `=` vira `equal`, e `/=` vira `(not (equal a b))`.
 
 ## 3. Traits aritméticos (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -88,7 +98,7 @@ concretos usa os operadores embutidos** ([Números](numbers.md)) e não passa po
 
 **Dentro de uma restrição, você pode escrever operadores.** Quando o receptor é uma variável de tipo vinculada
 por `:where`, os operadores são lidos como métodos de trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
-`rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -126,7 +136,7 @@ coleções com o mesmo `(push c x)`.
 | `Vector<T>` | Adiciona no final |
 | `Deque<T>` | Adiciona no final (`push-back`) |
 | `Array<T>` | Adiciona no ponteiro de preenchimento (`push-extend`). Panic sem ponteiro de preenchimento |
-| `HashSet<T>` | Coloca no conjunto (`insert`). Só é `Push` quando o tipo dos elementos implementa `Hash` |
+| `HashSet<T>` | Coloca no conjunto (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

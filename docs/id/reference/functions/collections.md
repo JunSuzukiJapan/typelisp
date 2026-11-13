@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # String, Karakter, dan Koleksi
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, dan `Deque<T>`.
@@ -80,7 +80,7 @@ dicetak sebagai `#(1 2 3)`.
 | `len` | `(len v)` | `Vector<T>→int` | Jumlah elemen |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | Menghapus elemen terakhir dan mengembalikannya. `none` jika kosong (tidak seperti `get`/`set`, ia tidak panic) (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Membuat iterator yang mengimplementasikan `Iter` |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Menambahkan `x` jika tidak ada elemen yang sama (`pushnew` pada CL. Tidak perlu menulis ulang sebuah place, sehingga ia adalah metode dan bukan makro) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Menambahkan `x` di akhir bila tidak ada elemen yang `eql` dengannya (`pushnew` CL. Tidak perlu menulis ulang suatu tempat, jadi berupa metode, bukan makro) |
 
 `map`/`filter` dan sejenisnya adalah [fungsi sekuens](sequences.md#4-fungsi-sekuens-pada-iter):
 serahkan vector melalui `iter`, seperti `(map (iter v) f)`. Operasi destruktif (`nreverse`, `delete`,
@@ -90,7 +90,7 @@ dan sebagainya) ada di [Operasi destruktif](sequences.md#7-operasi-destruktif).
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | Membuat tabel kosong |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | Membuat tabel kosong. `:test` adalah cara kunci dibandingkan (tabel di bawah); tanpanya `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | Pencarian |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | Menyisipkan atau menimpa |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | Menghapus entri dan mengembalikan nilai lama, jika ada |
@@ -103,40 +103,50 @@ dan sebagainya) ada di [Operasi destruktif](sequences.md#7-operasi-destruktif).
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | `maphash` pada CL |
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` pada CL. Pada tabel ini ia adalah jumlah entri yang terisi (sama dengan `count`) |
 
-**Tipe apa pun yang mengimplementasikan `Hash` dapat menjadi kunci**, termasuk tipe `defstruct`/
-`defenum`. `get`/`set`/`remove` membawa `(:where (Hash K))`, sehingga tabel dengan kunci bertipe yang
-tidak mengimplementasikannya adalah **kesalahan tipe** (`f64` tidak memiliki `Hash` karena `NaN`).
+Cara kunci dibandingkan dipilih dengan `:test` saat tabel dibuat, seperti `make-hash-table` di CL. `:test`
+menerima salah satu dari `eq`, `eql`, `equal`, dan `equalp` (ditulis `'equal` atau `equal`).
+
+| `:test` | Cara kunci dibandingkan | Tipe kunci |
+|---|---|---|
+| `eql` (bawaan) | Bilangan dan karakter berdasarkan nilai, sisanya berdasarkan identitas | Tipe apa pun |
+| `eq` | Berdasarkan identitas | Tipe apa pun |
+| `equal` | Dengan `equal` (`Equal`) dan hash `sxhash` (`Hash`) milik tipe kunci | Tipe yang mengimplementasikan `Hash` |
+| `equalp` | Dengan `equalp` (string tanpa membedakan huruf besar-kecil, struct per slot) | Tipe apa pun |
+
+Bawaannya `eql`, jadi dua string berisi sama yang dibuat terpisah adalah dua kunci. Untuk kunci string,
+tulis `(HashTable::new :test 'equal)`. Bila tipe kunci tabel `equal` tidak mengimplementasikan `Hash`, itu
+**galat tipe** di tempat tabel dibuat (`f64` tidak punya `Hash` karena `NaN`).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; returns a non-negative value that fits in a fixnum
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; mengembalikan nilai non-negatif yang muat dalam fixnum
 ```
 
-Diimplementasikan untuk: `int` dan enam bilangan bulat berlebar tetap, `bool`, `char`, `string`, dan
-`symbol` (tidak untuk bilangan floating-point). Untuk tipe Anda sendiri, jaga hasilnya tidak negatif
-dengan `logand` terhadap `*sxhash-mask*` (2^30-1). Untuk meng-hash string, Anda dapat memanggil
-`(sxhash-string s)` (FNV-1a 32 bit), yang dipakai oleh implementasi untuk `string`.
+`Hash` diimplementasikan untuk: `int` dan enam bilangan bulat lebar tetap, `bool`, `char`, `string`,
+`symbol` (tidak untuk bilangan titik mengambang). Untuk tipe sendiri, jaga hasilnya non-negatif dengan
+`logand` bersama `*sxhash-mask*` (2^30-1). Untuk menghitung hash sebuah string, Anda dapat memanggil
+`(sxhash-string s)` (FNV-1a 32 bit), yang dipakai implementasi `string`.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-Apakah dua kunci sama ditentukan oleh **tipe kunci itu sendiri** (`sxhash`, dan `equals` dari `Eq`,
-supertrait `Hash`), bukan oleh identitas objek. Itulah sebabnya, seperti di atas, Anda dapat mencari
-dengan kunci yang "bernilai berbeda tetapi sama".
+Dalam tabel `equal`, yang menentukan apakah dua kunci sama adalah **tipe kunci itu sendiri** (`sxhash`, dan
+`equal` dari `Equal`, supertrait `Hash`), bukan identitas objek. Itu sebabnya, seperti di atas, kunci yang
+"nilai lain tetapi sama" menemukan entrinya.
 
-Tidak masalah jika `sxhash` bertabrakan (kontrak `Hash` hanya berlaku satu arah: nilai yang sama
-harus memiliki hash yang sama). Kunci yang bertabrakan dibedakan oleh `equals`.
+Tabrakan `sxhash` tidak masalah (kontrak `Hash` berlaku ke arah sebaliknya: ia hanya menyatakan bahwa
+nilai yang `equal` memiliki hash yang sama). Kunci yang bertabrakan dibedakan dengan `equal`.
 
 ## 5. `Array<T>` (larik multidimensi)
 
@@ -192,13 +202,13 @@ Tidak ada `bit-vector-p` (tipe statis menjawabnya).
 
 ## 7. `HashSet<T>`
 
-Kumpulan elemen tanpa duplikat (`HashSet` milik Rust). Sebuah `defstruct` pustaka standar yang
-isinya `HashTable<T,()>`. Tipe elemen harus mengimplementasikan `Hash`, sama seperti kunci
-`HashTable`.
+Kumpulan elemen tanpa duplikat (`HashSet` di Rust). Sebuah `defstruct` pustaka standar yang isinya adalah
+`HashTable<T,()>`. Cara elemen dibandingkan ditentukan oleh `:test`, sama seperti kunci `HashTable`, dan
+dalam himpunan `equal` tipe elemen harus mengimplementasikan `Hash`.
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | Membuat himpunan kosong. Argumen tipe diambil dari tipe yang diharapkan |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | Membuat himpunan kosong. Argumen tipe berasal dari tipe yang diharapkan. `:test` sama seperti `HashTable`; tanpanya `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Menambahkan `x`. `true` bila belum ada, `false` bila sudah ada |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Apakah `x` ada |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Mengeluarkan `x`. `true` bila tadinya ada |
@@ -209,7 +219,7 @@ isinya `HashTable<T,()>`. Tipe elemen harus mengimplementasikan `Hash`, sama sep
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

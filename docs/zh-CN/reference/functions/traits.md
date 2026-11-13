@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 标准 trait
 
 用于迭代、比较、算术和存取元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
@@ -19,44 +19,49 @@
 `Sexpr` 列表没有实现 `Iter`（元素类型不统一）。为自己的类型实现 `Iter` 后，就可以直接用 `doiter` 遍历，也可以传给
 [序列函数](sequences.md#4-iter-上的序列函数)。
 
-## 2. `Eq` / `Ord`（比较）
+## 2. `Equal` / `Ord`（比较）
 
-相当于 Rust 的 `PartialEq`/`PartialOrd`（名称为 `Eq`/`Ord`）。在泛型函数的 `:where` 约束中用来要求元素类型可比较
-（`sort`/`member`/`assoc` 等）。
+`Equal` 是 `equal` 所用的 trait，相当于 Rust 的 `PartialEq`。`Ord` 相当于 Rust 的 `PartialOrd`。在泛型函数的
+`:where` 约束中用它们来要求元素类型可比较。
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; 必须实现
-  (defmethod not-equals (self (other Self)) bool             ; 默认实现
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; 继承 Eq
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; 必须实现
+(deftrait Ord (Equal)                                     ; 继承 Equal
   (defmethod less (self (other Self)) bool)                  ; 必须实现
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-实现 `Eq` 只需写 `equals`，实现 `Ord` 只需写 `less`。其余由默认实现补全。`Ord` 继承 `Eq`，所以 `impl Ord X` 之前
-需要 `impl Eq X`。
+实现 `Equal` 要写 `equal`，实现 `Ord` 只需写 `less`。`Ord` 的其余部分由默认实现补上。`Ord` 继承 `Equal`，
+所以 `impl Ord X` 之前需要 `impl Equal X`。
 
-各 trait 方法可以直接作为函数调用（在 `where (Eq A)`/`(Ord A)` 约束内，或对已实现的具体类型）：
+`(equal a b)` 调用 `a` 的类型的 `Equal` 实现。对未实现 `Equal` 的类型写它会是类型错误。按同一性比较用
+`eq`/`eql`，按结构比较用 `equalp`。这三个可用于任何类型的值。
+
+各 trait 方法可以直接作为函数调用（在 `where (Equal A)`/`(Ord A)` 约束内，或对已实现它的具体类型）：
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | 是否相等（Rust 的 `==`） |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | 是否不相等（`!=`） |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 是否相等（Rust 的 `==`） |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-已实现 `Eq` 的：所有数值类型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）以及 `bool` `char` `string` `symbol`
-`complex`、`Sexpr`（`eq`，即同一性。供 `match` 的值模式使用），以及 `cons-cell<A,B>`（元素为 `Eq` 时递归比较）。`Option<T>` 与 `Result<T,E>` 在变体相同且内容按 `equals` 相等时相等；列表是 `Option<Sexpr>`，所以其单元按 `Sexpr` 的同一性比较（按内容比较请用 `equal`）。
-已实现 `Ord` 的：所有数值类型以及 `char` `string`，以及 `cons-cell<A,B>`（字典序，元素为 `Ord` 时）。
+已实现 `Equal` 的：所有数值类型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）与 `bool` `char` `string`
+`symbol` `complex`、`Sexpr`、`cons-cell<A,B>` 和元组（元素为 `Equal` 时逐元素比较）、`Option<T>` 与
+`Result<T,E>`（变体相同且内容 `equal` 时）。内置类型的各自内置方法 `equal` 原样就是 `Equal` 的实现。数值用
+`=` 比较，字符串区分大小写按内容比较。已实现 `Ord` 的：所有数值类型以及 `char` `string`，以及
+`cons-cell<A,B>`（元素为 `Ord` 时按字典序）。
 
-方法名之所以不与内置运算符（`= /= < <= > >=`）或 `eq`/`lt` 重合，是因为内置的不能重定义，各实现会委托给它们。标量的
-比较运算符本身是各接收者类型的内置方法（[数值](numbers.md)、[字符串与字符](collections.md)）。在约束内写运算符，会被
-解读为 trait 方法（第 3 章）。
+列表（`Sexpr`）的 `equal` 是 CL 的 `equal`：cons 按结构、字符串按内容、其余原子用 `eql` 比较。这种比较在运行时
+遍历值，不调用任何方法。因此列表中的结构体与 CL 一样按同一性比较，与其类型的 `impl Equal` 无关。
+
+`Ord` 的方法名不与内置运算符（`< <= > >=`）或 `lt` 重名，是因为内置的无法重定义，而各实现都委托给它们。
+标量比较运算符本身是按接收者类型的内置方法（[数值](numbers.md)・[字符串与字符](collections.md)）。在约束内
+写运算符，会被读作 trait 的方法（第 3 章）。`=` 变为 `equal`，`/=` 变为 `(not (equal a b))`。
 
 ## 3. 算术 trait（`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`）
 
@@ -78,7 +83,7 @@
 ```
 
 **在约束内可以用运算符书写。** 当接收者是由 `:where` 约束的类型变量时，运算符被解读为 trait 方法（`+`→`add`、
-`-`→`sub`、`*`→`mul`、`/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equals`、`<`→`less` …）：
+`-`→`sub`、`*`→`mul`、`/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -111,7 +116,7 @@ trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` �
 | `Vector<T>` | 追加到末尾 |
 | `Deque<T>` | 追加到末尾（`push-back`） |
 | `Array<T>` | 在填充指针的位置添加（`push-extend`）。没有填充指针时 panic |
-| `HashSet<T>` | 放入集合（`insert`）。仅当元素类型实现了 `Hash` 时才是 `Push` |
+| `HashSet<T>` | 放入集合（`insert`） |
 
 ```lisp
 (use std::collections::Deque)

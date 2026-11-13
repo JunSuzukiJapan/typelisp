@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -138,7 +138,7 @@ I källkod skrivs typer som vanliga symboler eller listor.
   associerade typ i en signatur.
 - **Tupeltyper**: `#{int string}` (samma form som värdena). En tupel har 1 till 12 element, och en
   tupeltyp kan också vara ett typargument (`Vector<#{int string}>`). Element läses med `t::0` `t::1`
-  och ändras med `(setf t::0 v)`. `Eq`, `Ord` (jämförelse från första elementet), `Hash` och
+  och ändras med `(setf t::0 v)`. `Equal`, `Ord` (jämförelse från första elementet), `Hash` och
   `print-object` finns när alla elementtyper implementerar dem.
 - **Kvalificerade typnamn**: kan kvalificeras med `::`, som i `module::Type`.
 - **Trait-objekttyper**: `:dyn Trait` (två ord åtskilda av mellanslag som bildar en typ). Representerar ett
@@ -936,16 +936,16 @@ bart traitnamn, eller, om det traitet har associerade typer, `(Trait (Assoc Type
 associerade typer fastlagda**.
 
 ```lisp
-(deftrait Eq () ...)                       ; inga supertraits
-(deftrait Ord (Eq) ...)                    ; Rusts trait Ord: Eq
+(deftrait Equal () ...)                       ; inga supertraits
+(deftrait Ord (Equal) ...)                    ; Rusts trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; fastlägga en associerad typ
   (defmethod rewind (self) ()))
 ```
 
-Arv har tre effekter. (1) `impl Ord X` kräver att `impl Eq X` skrivs **först** (en regel om
+Arv har tre effekter. (1) `impl Ord X` kräver att `impl Equal X` skrivs **först** (en regel om
 skrivordning: den enda form som kan avgöras deterministiskt i REPL och med stegvis `load`, och strängare
-än Rust). (2) `(:where (Ord T))` ensamt låter dig anropa också `Eq`s metoder. (3) `Eq`s metoder kan
-anropas genom en `:dyn Ord`, och ett värde av `:dyn Ord` kan skickas som det är där en `:dyn Eq` krävs
+än Rust). (2) `(:where (Ord T))` ensamt låter dig anropa också `Equal`s metoder. (3) `Equal`s metoder kan
+anropas genom en `:dyn Ord`, och ett värde av `:dyn Ord` kan skickas som det är där en `:dyn Equal` krävs
 (uppkastning). Att ett subtrait omdeklarerar en metod med samma namn som sin förälder, och att ärva metoder
 med samma namn från två föräldrar, är båda fel (en vtable har en plats per namn). Diamantarv slås ihop till
 en plats.
@@ -1008,8 +1008,8 @@ dokumentationssträng: en avslutande sträng skulle själv vara returvärdet fö
 de två kunde inte skiljas åt.
 
 De traits standardbiblioteket tillhandahåller: **`Iter`** (`next` / associerad typ `Item`; grunden för
-`doiter` och sekvensfunktionerna), **`Eq`** (`equals`; `not-equals` är en standardimplementation),
-**`Ord`** (ärver `Eq`; bara `less` måste implementeras, och `less-equal` / `greater` /
+`doiter` och sekvensfunktionerna), **`Equal`** (den trait som `equal` använder),
+**`Ord`** (ärver `Equal`; bara `less` måste implementeras, och `less-equal` / `greater` /
 `greater-equal` är standardimplementationer), **`Error`** (`message` / `source`; `:dyn Error` för att
 hantera feltyper enhetligt), **`print-object`** (en utskriftsform per typ), **`Pathish`**
 (pathname-designatorer: en sträng eller ett `pathname`), och strömhierarkin **`Stream`** →
@@ -1238,10 +1238,10 @@ exemplen finns i
 ### 3.16 `#[test]` — testfunktioner
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en i taget (som Rusts `#[test]`). Den får inte ta några argument och måste returnera `()` eller `Result<(), E>` (den kan inte heller ta typparametrar). Den behöver inte `pub`. Ett test som returnerar ett `Result` misslyckas genom att returnera ett `err`, och felet visas, så `E` måste implementera `Error` eller `print-object` (precis som Rust kräver `Debug` av ett tests feltyp). Ett `Error` visas med `describe-error` (meddelandet och kedjan av orsaker), allt annat med `print-object`. Även `:dyn Error` är ett `Error`, så ett test kan samla olika fel i en typ och returnera den.
@@ -1257,7 +1257,7 @@ En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en 
 
 - **En vanlig körning och `compile-file` hoppar över den**, utan att ens kontrollera innehållet (precis som Rust bara kompilerar tester med `--test`). Programmet självt kan inte anropa en testfunktion.
 - Ett test kan skrivas i vilken fil som helst som innehåller funktioner, inuti vilken `module` som helst. Tester kan också ligga separat i projektets mapp `tests/`.
-- Ett test misslyckas genom en `panic`, ett körtidsfel eller genom att returnera ett `err`. Kontrollera med `assert`, eller med `assert-eq`, som skriver ut båda sidorna ([System](functions/system.md)). När ett test misslyckas körs resten ändå.
+- Ett test misslyckas genom en `panic`, ett körtidsfel eller genom att returnera ett `err`. Kontrollera med `assert`, eller med `assert-equal`, som skriver ut båda sidorna ([System](functions/system.md)). När ett test misslyckas körs resten ändå.
 
 ```sh
 typl test                 # kör alla tester i projektet i den här mappen
@@ -1280,7 +1280,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1398,11 +1398,11 @@ Slag av mönster:
   `(circle r)`
 - **Omedelbara literaler**: heltal / `true`/`false` / tecken — jämförs som ord
 - **Värdeliteraler**: strängar / flyttal / symboler (`'foo`) / bignum-heltal / kvoter — jämförs efter värde
-  med den typens `Eq::equals` ([Standardtraits](functions/traits.md#2-eq--ord-jämförelse)). Strängar jämförs
+  med den typens `equal` ([Standardtraits](functions/traits.md#2-equal--ord-jämförelse)). Strängar jämförs
   efter innehåll, inte efter identitet
-- `(:= expr)` — utvärderar vilket uttryck som helst och jämför med `Eq::equals`. Det enda sättet att jämföra
+- `(:= expr)` — utvärderar vilket uttryck som helst och jämför med `equal`. Det enda sättet att jämföra
   typer som saknar literalsyntax (`defstruct`-instanser, globaler, beräknade resultat), och en
-  användardefinierad `Eq`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
+  användardefinierad `Equal`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
   som syns från grenens position (argument, yttre bindningar, globaler)
 - `(Ctor sub-pattern...)` — konstruktormönster (`(some x)` `(none)` `(cons a d)` `(ok v)` och så vidare)
 - `(Type :slot pattern... :slot...)` — structmönster. Skriv platserna efter typnamnet som nyckelord. Följs
@@ -1424,7 +1424,7 @@ Slag av mönster:
   enda kropp, så varje alternativ måste binda samma variabler med samma typer. Det kan också skrivas
   inuti ett konstruktormönster (`(some (:or (circle r) (rect r _)))`)
 
-Att jämföra en typ som inte implementerar `Eq` med en värdeliteral / `(:= expr)` är ett typfel (det här
+Att jämföra en typ som inte implementerar `Equal` med en värdeliteral / `(:= expr)` är ett typfel (det här
 språket väljer att säga "dessa kan inte jämföras" i stället för att lämna en gren som tyst aldrig matchar).
 
 **Vakter**: `:when villkor` efter mönstret väljer grenen bara när mönstret matchar och villkoret
@@ -1445,19 +1445,13 @@ band.
 - Eller-mönster och vakter går att kombinera. Vakten utvärderas vilket alternativ som än matchade
   (`((:or 1 2 3) :when on "small")`).
 
-**Värdeliteraler mot en `Sexpr`-scrutinee**: `Eq` för `sexpr` är `eq` (CL:s identitet), så omedelbara
-värden (`'foo` (internerad) / heltal / tecken / `true`/`false`) kan skrivas som de är och matchar efter
-innehåll:
+**Värdeliteraler mot ett `Sexpr` som granskas**: `equal` för `Sexpr` är CL:s `equal`, så `'foo` /
+heltal / tecken / `true`/`false` / strängar / flyttal / stora heltal / bråk kan skrivas som de är och
+matchar efter innehåll (strängar efter innehåll, tal med `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Icke-omedelbara literaler (strängar / flyttal / bignum-heltal / kvoter) **kan inte skrivas** mot en
-`Sexpr`. Deras `eq` jämför objektidentitet, vilket skulle ge en "gren som typkontrolleras men aldrig
-matchar", så det är ett fel som namnger variantmönstret: skriv `(str "hi")` så plockas den isär till en
-`string` och jämförs efter innehåll. `(:= expr)` ber uttryckligen om `equals`, så den här begränsningen
-gäller inte det.
 
 **Scrutineen behöver inte vara en ADT.** `string`/`symbol`/`i32`/`f64` och liknande kan matchas direkt
 (det är där strängliteralmönster hör hemma). En typ utan varianter kan dock inte täckas genom uppräkning,
@@ -1869,8 +1863,7 @@ anropsvägarna i den tolk som körs; och `disassemble` använder själva kompila
 
 Det som **kan** kompileras: ström- och fil-I/O, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, de transcendenta
-funktionerna, bitoperationer, `catch`/`throw`/`unwind-protect`, alla fyra av `eq`/`eql`/`equal`/`equalp`
-(vilket låter `case` kompileras för varje typ), hela utskriftsfamiljen inklusive `print`/`println`/
+funktionerna, bitoperationer, `catch`/`throw`/`unwind-protect`, alla fyra av `eq`/`eql`/`equal`/`equalp`, hela utskriftsfamiljen inklusive `print`/`println`/
 `format`/`pprint` och `pprint-logical-block`, `read` och `eval`. Standardbiblioteket levereras redan
 kompilerat.
 

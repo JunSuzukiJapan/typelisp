@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # संख्याएँ
 
 पूर्णांक, फ़्लोटिंग-पॉइंट संख्याओं, परिमेय संख्याओं, कॉम्प्लेक्स संख्याओं और बूलियन पर ऑपरेशन, और अन्य संख्या-संबंधित फ़ंक्शन। कॉल के रूप कैसे पढ़ें इसके लिए [बिल्ट-इन फ़ंक्शन](README.md) देखें।
@@ -147,7 +147,7 @@ CL-अनुरूप मनमानी परिशुद्धता वा�
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64` में बदलकर गणना करता है (`(sqrt 1/4)` `0.5` है) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | ऊपर जैसा |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | ऊपर जैसा |
-| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` का कार्यान्वयन। `ratio` को `HashTable` की कुंजी बनाया जा सकता है |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` का कार्यान्वयन। `ratio` किसी `equal` `HashTable` की कुंजी बन सकता है |
 
 CL में पूर्णांक वह परिमेय संख्या है जिसका हर 1 है, इसलिए `int` में भी `numerator` (स्वयं),
 `denominator` (`1`), `float`, `rational`, `rationalize` और ऊपर के `sqrt` से `atanh` तक के 15 फ़ंक्शन
@@ -191,7 +191,7 @@ CL के `rational` के अनुरूप प्रकार। मान `
 | `float` `rational` `rationalize` `sqrt` `exp` `log` और त्रिकोणमितीय व अतिपरवलयिक फ़ंक्शन | `(op x)` | | `ratio` जैसा |
 
 `(as int q)` `rational->int` (काटना) है, `(try-as int q)` `try-rational->int` है, `(as ratio q)` और
-`(as f64 q)` संबंधित रूपांतरण हैं, और `(as rational x)` `int`/`ratio` से विस्तार करता है। `Eq`, `Ord`,
+`(as f64 q)` संबंधित रूपांतरण हैं, और `(as rational x)` `int`/`ratio` से विस्तार करता है। `Equal`, `Ord`,
 `Hash`, `print-object` और अंकगणितीय trait भी लागू हैं।
 
 ## 6. कॉम्प्लेक्स संख्याएँ `complex`
@@ -212,7 +212,7 @@ CL के `rational` के अनुरूप प्रकार। मान `
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | निरपेक्ष मान। **एकमात्र `abs` जो रिसीवर का टाइप नहीं लौटाता** (CL की तरह, कॉम्प्लेक्स संख्या का निरपेक्ष मान वास्तविक है) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | कॉम्प्लेक्स अंकगणित |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | घटक-दर-घटक समानता। `Eq` भी लागू है (`Ord` नहीं है: कॉम्प्लेक्स संख्याओं का कोई क्रम नहीं है, और CL का `<` भी उन्हें अस्वीकार करता है) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | घटक-दर-घटक समानता। `Equal` भी लागू है (`Ord` नहीं है: कॉम्प्लेक्स संख्याओं का कोई क्रम नहीं है, और CL का `<` भी उन्हें अस्वीकार करता है) |
 | `zerop` | `(zerop z)` | `complex→bool` | क्या दोनों घटक 0 हैं |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` मुख्य मान देते हैं |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`। `(expt 0 0)`=1 |

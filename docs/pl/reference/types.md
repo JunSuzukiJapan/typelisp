@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Typy
 
 Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy typ. Sposób zapisu typów opisano w
@@ -33,7 +33,7 @@ Nie ma 64-bitowego typu całkowitego. Dla liczb całkowitych, których szerokoś
 | `Option<T>` | Wartość, która jest albo jej nie ma. `some` / `none` | [Option i Result](functions/option-result.md) |
 | `Result<T,E>` | Sukces lub porażka. `ok` / `err` | Jak wyżej |
 | `Vector<T>` | Rosnąca tablica | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | Tablica mieszająca. Typ klucza musi implementować `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | Tablica haszująca. Sposób porównywania kluczy wyznacza `:test` przy tworzeniu, a w tablicy `equal` typ kluczy musi implementować `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Krotka (od 1 do 12 elementów). Elementy czyta się przez `t::0` | [Składnia, rozdział 2](syntax.md#2-zapis-typów) |
 | `Task<T>` | Uchwyt zadania | [Zadania](functions/concurrency.md#1-taskt--uchwyty-zadań) |
 | `Thread<T>` | Uchwyt zadania uruchomionego na dedykowanym wątku systemu operacyjnego | [Thread](functions/concurrency.md#7-threadt--dedykowane-wątki-systemu-operacyjnego) |
@@ -103,7 +103,7 @@ Które typy implementują które traity. Metody każdego traitu znajdują się w
 
 | Trait | Typy implementujące | Szczegóły |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-porównywanie) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-porównywanie) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Jak wyżej |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` oraz wszystkie wbudowane typy błędów | [print-object](functions/printing.md#5-print-object-reprezentacja-wypisywana-według-typu) |
@@ -125,7 +125,7 @@ Szczegóły znajdują się w [Traitach arytmetycznych](functions/traits.md#3-tra
 | Trait | Typy implementujące |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` typy modułu `lazy` (`lazy::map-iter<I,A,U>` itd.) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (gdy typ elementów implementuje `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Strumienie

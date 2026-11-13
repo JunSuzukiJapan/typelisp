@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Повідомлення про помилки
 
 Що означають основні повідомлення про помилки від `typl` і як їх виправити.
@@ -46,7 +46,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Типу з такою назвою немає. Визначайте тип до першої форми, що його використовує (в типів немає випереджального оголошення). Якщо ви мали на увазі змінну типу, запишіть її на місці оголошення, як-от `<foo>` після назви функції ([Довідник із синтаксису 3.6](syntax.md#36-defstruct--структури-користувацькі-типи)) |
 | ``cannot infer type argument `t` for `Vector::new` `` | Аргумент типу не вдається визначити. Запишіть тип через `the`, як-от `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` не обробляє кожен варіант. Додайте гілки для відсутніх варіантів або гілку `_` |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Функція вимагає трейт, якого не реалізує переданий вами тип. Напишіть `(impl Eq pt ...)` ([Стандартні трейти](functions/traits.md)) |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | Функція вимагає трейт, якого не реалізує переданий вами тип. Напишіть `(impl Equal pt ...)` ([Стандартні трейти](functions/traits.md)) |
+| ``equal: `pt` does not implement `Equal` `` | `equal` написано для типу, який не реалізує `Equal`. Напишіть `(impl Equal pt ...)` або використайте `eq`/`eql`, що порівнюють за ідентичністю, чи `equalp`, що порівнює за структурою |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Значення типу, що не реалізує трейт, передано туди, де очікується `:dyn`. Напишіть `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Назву трейта записано там, де має стояти тип. Напишіть `:dyn Error` |
 | ``if: (if cond then else)`` | `if` має неправильну форму. `if` вимагає гілки else. Коли вона не потрібна, використовуйте `when` |

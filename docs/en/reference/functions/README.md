@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Built-in Functions
 
 The list of built-in functions, methods and the standard library. For syntax (special forms and how
@@ -25,7 +25,7 @@ Of the standard library's names, these can be used from every module without wri
 - every name that is also a name of Common Lisp's `COMMON-LISP` package (`length`, `format`, `open`
   and so on)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, the stream traits `Stream`,
-  `InputStream` and `OutputStream`, and `Hash`, which the keys of a `HashTable` implement
+  `InputStream` and `OutputStream`, and `Hash`, which the keys of an `equal` `HashTable` implement
 - the types the functions and variables of these mention
 
 Any other name is brought in with a `use`, as in `(use std::net::tcp-connect)`, or written as its
@@ -37,7 +37,7 @@ path, `std::net::tcp-connect`. The table lists those names and the module each i
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -61,7 +61,7 @@ The tables in each chapter have the columns "name, form, type, description". The
 written as `(argument-type,...)→return-type`.
 
 - A single capital letter such as `T`, `A` or `B` is a type variable.
-- A note such as `where Eq A` is a trait bound that the type variable must satisfy.
+- A note such as `where Equal A` is a trait bound that the type variable must satisfy.
 - `Iter<A>` means "any implementation of `Iter` whose `Item` is `A`".
 - Arguments marked `&optional` / `&key` can be left out.
 
@@ -73,7 +73,7 @@ written as `(argument-type,...)→return-type`.
 | [sequences.md](sequences.md) | The pair `cons-cell`, S-expression data `Sexpr`, symbols, sequence functions, lazy iterators `lazy`, higher-order functions |
 | [collections.md](collections.md) | Strings, characters, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, error types and the `Error` trait |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetic traits, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, arithmetic traits, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, the pretty printer, `print-object`, printer control variables |
 | [format.md](format.md) | Format directives |
 | [streams-files.md](streams-files.md) | Streams, file operations, pathnames, readtable |

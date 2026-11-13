@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -189,7 +189,7 @@ eller `as`/`try-as`). För syntaxen för bråkliteraler, se [Syntaxreferensen](.
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Konverterar till `f64` och räknar (`(sqrt 1/4)` är `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Som ovan |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Som ovan |
-| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash`-implementationen. En `ratio` kan vara nyckel i en `HashTable` |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash`-implementationen. Ett `ratio` kan vara nyckel i en `equal`-`HashTable` |
 
 I CL är ett heltal ett rationellt tal med nämnaren 1, så även `int` har `numerator` (sig själv),
 `denominator` (`1`), `float`, `rational`, `rationalize` och de 15 funktionerna från `sqrt` till
@@ -234,7 +234,7 @@ skickas till `(defun f ((q rational)) ...)`). Åt andra hållet tar man ut värd
 | `float` `rational` `rationalize` `sqrt` `exp` `log` och de trigonometriska och hyperboliska funktionerna | `(op x)` | | Som för `ratio` |
 
 `(as int q)` är `rational->int` (avkortning), `(try-as int q)` är `try-rational->int`, `(as ratio q)` och
-`(as f64 q)` är respektive konverteringar, och `(as rational x)` breddar från `int`/`ratio`. `Eq`, `Ord`,
+`(as f64 q)` är respektive konverteringar, och `(as rational x)` breddar från `int`/`ratio`. `Equal`, `Ord`,
 `Hash`, `print-object` och de aritmetiska traitsen är också implementerade.
 
 ## 6. Komplexa tal `complex`
@@ -259,7 +259,7 @@ En struct (`defstruct`) i standardbiblioteket.
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Absolutbelopp. **Den enda `abs` som inte returnerar mottagarens typ** (som i CL är absolutbeloppet av ett komplext tal reellt) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Komplex aritmetik |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Likhet komponent för komponent. `Eq` är också implementerat (det finns ingen `Ord`: komplexa tal har ingen ordning, och CL:s `<` avvisar dem också) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Likhet komponent för komponent. `Equal` är också implementerat (det finns ingen `Ord`: komplexa tal har ingen ordning, och CL:s `<` avvisar dem också) |
 | `zerop` | `(zerop z)` | `complex→bool` | Om båda komponenterna är 0 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` ger principalvärden |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

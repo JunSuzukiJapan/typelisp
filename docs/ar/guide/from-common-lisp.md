@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # لمبرمجي Common Lisp
 
 ترث typelisp صياغة Common Lisp (واختصارًا CL) وكثيرًا من أسماء دواله، لكنها لغة ذات أنواع ساكنة. ولهذا
@@ -123,6 +123,20 @@
 
 تعمل دوال التسلسلات مثل `map` و`filter` و`sort` و`find` على القيم التي تنفّذ السمة `Iter`. مرّر
 `Vector` بعد تحويله إلى مكرِّر (iterator) بـ `(iter v)`.
+
+يمكن استعمال `eq` و`eql` و`equalp` مع قيمة من أي نوع، كما في CL. أما `equal` فهو دالة السمة `Equal`، ولا
+يُستعمل إلا مع الأنواع التي تنفّذها. وكل نوع مدمج ينفّذها، و`equal` القائمة هو `equal` في CL. ولنوعك الخاص
+يحدد `(impl Equal النوع ...)` كيفية مقارنته. والمقارنة التي تستعملها `member` و`find` و`position` و`remove`
+وأمثالها افتراضيًا هي `eql`، كما في CL. للبحث عن سلاسل أو قوائم بالمحتوى اكتب `:test equal`، كما في CL (لا
+حاجة إلى `#'`):
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false (السلاسل المُنشأة كلٌّ على حدة ليست eql)
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+ويختار `HashTable` أيضًا كيفية مقارنة المفاتيح بـ `:test` عند إنشائه، كما في `make-hash-table` في CL،
+والافتراضي `eql`. لمفاتيح السلاسل اكتب `(HashTable::new :test 'equal)`.
 
 ## 5. لا توجد قيم متعددة
 

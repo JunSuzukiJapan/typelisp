@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -136,7 +136,7 @@ In source, types are written as ordinary symbols or lists.
   trait's associated type into a signature.
 - **Tuple types**: `#{int string}` (the same shape as the values). A tuple has 1 to 12 elements, and
   a tuple type can also be a type argument (`Vector<#{int string}>`). Elements are read with `t::0`
-  `t::1` and changed with `(setf t::0 v)`. `Eq`, `Ord` (comparing from the first element on), `Hash`
+  `t::1` and changed with `(setf t::0 v)`. `Equal`, `Ord` (comparing from the first element on), `Hash`
   and `print-object` are available when every element type implements them.
 - **Qualified type names**: can be qualified with `::`, as in `module::Type`.
 - **Trait object types**: `:dyn Trait` (two space-separated words forming one type). Represents a value
@@ -938,17 +938,17 @@ trait name, or, if that trait has associated types, `(Trait (Assoc Type))` with 
 types pinned**.
 
 ```lisp
-(deftrait Eq () ...)                       ; no supertraits
-(deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
+(deftrait Equal () ...)                       ; no supertraits
+(deftrait Ord (Equal) ...)                    ; Rust's trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
   (defmethod rewind (self) ()))
 ```
 
-Inheritance has three effects. (1) `impl Ord X` requires `impl Eq X` to be written **first** (a rule
+Inheritance has three effects. (1) `impl Ord X` requires `impl Equal X` to be written **first** (a rule
 about order of writing: the only form that can be decided deterministically in the REPL and with
 step-by-step `load`, and stricter than Rust). (2) `(:where (Ord T))` alone lets you call the methods of
-`Eq` too. (3) The methods of `Eq` can be called through a `:dyn Ord`, and a `:dyn Ord` value can be passed
-as it is where a `:dyn Eq` is required (upcasting). A subtrait redeclaring a method of the same name as
+`Equal` too. (3) The methods of `Equal` can be called through a `:dyn Ord`, and a `:dyn Ord` value can be passed
+as it is where a `:dyn Equal` is required (upcasting). A subtrait redeclaring a method of the same name as
 its parent, and inheriting methods of the same name from two parents, are both errors (a vtable has one
 slot per name). Diamond inheritance merges into one slot.
 
@@ -1009,8 +1009,8 @@ without a body cannot have a docstring: a trailing string would itself be the re
 implementation, so the two could not be told apart.
 
 The traits the standard library provides: **`Iter`** (`next` / associated type `Item`; the basis of
-`doiter` and the sequence functions), **`Eq`** (`equals`; `not-equals` is a default implementation),
-**`Ord`** (inherits `Eq`; only `less` must be implemented, and `less-equal` / `greater` /
+`doiter` and the sequence functions), **`Equal`** (the trait `equal` uses),
+**`Ord`** (inherits `Equal`; only `less` must be implemented, and `less-equal` / `greater` /
 `greater-equal` are default implementations), **`Error`** (`message` / `source`; `:dyn Error` for
 handling error types uniformly), **`print-object`** (a per-type printed representation), **`Pathish`**
 (pathname designators: a string or a `pathname`), and the stream hierarchy **`Stream`** →
@@ -1241,10 +1241,10 @@ examples are in
 ### 3.16 `#[test]` — test functions
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 A `defun` marked `#[test]` is a test function, which `typl test` calls one at a time (the same as Rust's `#[test]`). It must take no arguments and return `()` or `Result<(), E>` (it cannot take type parameters either). It does not need `pub`. A test returning a `Result` fails by returning an `err`, and the error is shown, so `E` must implement `Error` or `print-object` (just as Rust asks a test's error type for `Debug`). An `Error` is shown by `describe-error` (the message and its chain of causes), anything else by `print-object`. `:dyn Error` is an `Error` too, so a test can gather different errors into one type and return it.
@@ -1260,7 +1260,7 @@ A `defun` marked `#[test]` is a test function, which `typl test` calls one at a 
 
 - **An ordinary run and `compile-file` skip it**, without even checking its contents (just as Rust compiles tests only under `--test`). The program itself cannot call a test function.
 - A test can be written in any file that holds functions, inside any `module`. Tests can also be kept separately in the project's `tests/` folder.
-- A test fails by a `panic`, a runtime error, or returning an `err`. Check things with `assert`, or with `assert-eq`, which prints both sides ([System](functions/system.md)). When one test fails, the rest still run.
+- A test fails by a `panic`, a runtime error, or returning an `err`. Check things with `assert`, or with `assert-equal`, which prints both sides ([System](functions/system.md)). When one test fails, the rest still run.
 
 ```sh
 typl test                 # run every test of the project in this folder
@@ -1283,7 +1283,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1400,10 +1400,10 @@ Kinds of patterns:
   variant with fields by its bare name is an arity error, so write it in parentheses, as in `(circle r)`
 - **Immediate literals**: integers / `true`/`false` / characters — compared as words
 - **Value literals**: strings / floating-point numbers / symbols (`'foo`) / bignum integers / ratios —
-  compared by value with that type's `Eq::equals` ([Standard Traits](functions/traits.md#2-eq--ord-comparison)).
+  compared by value with that type's `equal` ([Standard Traits](functions/traits.md#2-equal--ord-comparison)).
   Strings compare by contents, not by identity
-- `(:= expr)` — evaluates any expression and compares with `Eq::equals`. The only way to compare types
-  that have no literal syntax (`defstruct` instances, globals, computed results), and a user-defined `Eq`
+- `(:= expr)` — evaluates any expression and compares with `equal`. The only way to compare types
+  that have no literal syntax (`defstruct` instances, globals, computed results), and a user-defined `Equal`
   implementation becomes the comparison rule as it is. `expr` can refer to anything visible from the
   arm's position (arguments, outer bindings, globals)
 - `(Ctor sub-pattern...)` — constructor patterns (`(some x)` `(none)` `(cons a d)` `(ok v)` and so on)
@@ -1426,7 +1426,7 @@ Kinds of patterns:
   so every alternative must bind the same variables at the same types. It can also be written inside
   a constructor pattern (`(some (:or (circle r) (rect r _)))`)
 
-Comparing a type that does not implement `Eq` with a value literal / `(:= expr)` is a type error (this
+Comparing a type that does not implement `Equal` with a value literal / `(:= expr)` is a type error (this
 language chooses to say "these cannot be compared" rather than leave an arm that silently never matches).
 
 **Guards**: writing `:when condition` after the pattern selects the arm only when the pattern
@@ -1447,19 +1447,13 @@ condition can read the variables the pattern bound.
 - Or-patterns and guards combine. The guard is evaluated whichever alternative matched
   (`((:or 1 2 3) :when on "small")`).
 
-**Value literals against an `Sexpr` scrutinee**: the `Eq` of `sexpr` is `eq` (CL's identity), so
-immediates (`'foo` (interned) / integers / characters / `true`/`false`) can be written as they are and
-match by content:
+**Value literals against an `Sexpr` scrutinee**: the `equal` of `Sexpr` is CL's `equal`, so `'foo` /
+integers / characters / `true`/`false` / strings / floating-point numbers / bignum integers / ratios can be
+written as they are, and match by content (strings by content, numbers by `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Non-immediate literals (strings / floating-point numbers / bignum integers / ratios) **cannot be written**
-against an `Sexpr`. Their `eq` compares object identity, which would make an "arm that type-checks but
-never matches", so it is an error naming the variant pattern: write `(str "hi")` and it is taken apart
-into a `string` and compared by content. `(:= expr)` explicitly asks for `equals`, so this restriction does
-not apply to it.
 
 **The scrutinee does not have to be an ADT.** `string`/`symbol`/`i32`/`f64` and the like can be matched
 directly (that is where string literal patterns go). However, a type without variants cannot be covered
@@ -1872,8 +1866,7 @@ interpreter's environment itself, which an AOT executable does not have; what `t
 
 What **can** be compiled: stream and file I/O, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, the transcendental
-functions, bit operations, `catch`/`throw`/`unwind-protect`, all four of `eq`/`eql`/`equal`/`equalp`
-(which lets `case` compile for every type), the whole printing family including `print`/`println`/
+functions, bit operations, `catch`/`throw`/`unwind-protect`, all four of `eq`/`eql`/`equal`/`equalp`, the whole printing family including `print`/`println`/
 `format`/`pprint` and `pprint-logical-block`, `read`, and `eval`. The standard library ships already
 compiled.
 

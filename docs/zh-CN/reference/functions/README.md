@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 内置函数
 
 内置函数、方法和标准库的一览。语法（特殊形式、定义方法）见[语法参考](../syntax.md)，类型一览见[类型一览](../types.md)。
@@ -20,7 +20,7 @@
 - 基本类型、`Option`・`Result`・`Vector`、迭代、S 表达式与列表、序列函数、控制宏、比较、算术 trait
 - 与 Common Lisp 的 `COMMON-LISP` 包中的名字同名的东西（`length`・`format`・`open` 等）
 - `Error`・`assert`・`print-object`、`HashTable`・`Array`・`BitVector`、流的 trait
-  `Stream`・`InputStream`・`OutputStream`，以及 `HashTable` 的键所实现的 `Hash`
+  `Stream`・`InputStream`・`OutputStream`，以及 `equal` `HashTable` 的键所实现的 `Hash`
 - 这些函数和变量的类型中出现的类型
 
 其他名字要像 `(use std::net::tcp-connect)` 这样用 `use` 引入，或写成路径 `std::net::tcp-connect`。
@@ -32,7 +32,7 @@
 | `std::char` | `digit->char`、`digit-weight`、`name->char` |
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
-| `std::error` | `WrappedError`、`as-dyn-error`、`assert-eq`、`describe-error`、`wrap-error` |
+| `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`、`direction-input`、`direction-output`、`directory-p`、`open-binary`、`open-binary-input`、`open-binary-output`、`open-file`、`open-input`、`open-output`、`read-file-lines`、`read-file-string`、`write-file-string` |
 | `std::hash` | `*sxhash-mask*`、`sxhash-string` |
@@ -55,7 +55,7 @@
 各章的表格有"名称、形式、类型、说明"几列。类型列写成 `(参数类型,...)→返回值类型` 的形式。
 
 - `T`、`A`、`B` 等单个大写字母是类型变量。
-- `where Eq A` 这样的注记是该类型变量必须满足的 trait 约束。
+- `where Equal A` 这样的注记是该类型变量必须满足的 trait 约束。
 - `Iter<A>` 表示"`Item` 为 `A` 的任意 `Iter` 实现类型"。
 - 带有 `&optional` / `&key` 的参数可以省略。
 
@@ -67,7 +67,7 @@
 | [sequences.md](sequences.md) | 序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、序列函数、惰性迭代器 `lazy`、高阶函数 |
 | [collections.md](collections.md) | 字符串、字符、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、错误类型与 `Error` trait |
-| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算术 trait、`Push`、`Pop` |
+| [traits.md](traits.md) | `Iter`、`Equal`/`Ord`、算术 trait、`Push`、`Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、打印控制变量 |
 | [format.md](format.md) | 格式指令 |
 | [streams-files.md](streams-files.md) | 流、文件操作、路径名、readtable |

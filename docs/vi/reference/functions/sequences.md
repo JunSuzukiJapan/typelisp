@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,
@@ -128,17 +128,18 @@ Các hàm nhận một vị từ (tương ứng với họ `-if` của CL):
 | `last` | `(last it)` | `Iter<A>→Option<A>` | **Phần tử** cuối cùng (không phải "ô cuối cùng" như trong CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | Tất cả trừ phần tử cuối |
 
-Các hàm yêu cầu ràng buộc `Eq` / `Ord` (chúng so sánh qua một trait thay vì một vị từ;
-[Các trait chuẩn](traits.md#2-eq--ord-so-sánh)):
+Các hàm tìm một mục. Khi không có `:test`, chúng so sánh bằng `eql`, như trong CL. `eql` so sánh số và ký
+tự theo giá trị, còn lại theo định danh, nên hai chuỗi hay danh sách cùng nội dung được tạo riêng thì không
+bằng nhau. Để so sánh theo nội dung, viết `:test equal` (chương 6):
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` với `Eq A` | Có phần tử nào bằng `x` không (khác CL, là một `bool`, không phải phần còn lại của danh sách) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` với `Eq A` | Phần tử đầu tiên bằng `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` với `Eq A` | Vị trí đầu tiên bằng `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` với `Eq A` | Có bao nhiêu phần tử bằng `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | Có phần tử nào bằng `x` không (khác CL, là một `bool`, không phải phần còn lại của danh sách) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | Phần tử đầu tiên bằng `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | Vị trí đầu tiên bằng `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | Có bao nhiêu phần tử bằng `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | `(sort sequence predicate)` của CL. Sắp xếp ổn định, không phá hủy. `cmp` là `true` khi "đối số đầu đứng trước đối số thứ hai một cách chặt chẽ" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` với `Eq K` | Cặp đầu tiên có `car` bằng `k`. Lấy giá trị ra bằng `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | Cặp đầu tiên có `car` bằng `k`. Lấy giá trị ra bằng `(cdr p)` |
 
 Các hàm này và nhiều hàm của chương 5 cũng nhận các đối số keyword của CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (chương 6).
@@ -201,8 +202,8 @@ Tất cả là các hàm generic trên `Iter`, như ở chương 4. Các tập h
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Như `member`, là một **`bool`** (iterator không có đuôi để trả về) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Phủ định của `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | Cùng kiểu với các phiên bản khẳng định | Các phiên bản với vị từ bị phủ định |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` với `Eq A` | Bỏ theo giá trị |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` với `Eq A` | Bỏ các phần tử trùng. Như trong CL, **lần xuất hiện cuối cùng được giữ** (`:from-end true` giữ lần đầu) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | Bỏ theo giá trị |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | Bỏ các phần tử trùng. Như trong CL, **lần xuất hiện cuối cùng được giữ** (`:from-end true` giữ lần đầu) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | Thay thế theo giá trị / vị từ |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | trên `Iter<cons-cell<K,V>>` | Các phiên bản vị từ và phía giá trị của `assoc` |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | Thêm một cặp vào đầu |
@@ -213,14 +214,14 @@ Tất cả là các hàm generic trên `Iter`, như ở chương 4. Các tập h
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | Ánh xạ trên các **đuôi** liên tiếp |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Ánh xạ trên các đuôi vì tác dụng phụ (đối ứng `maplist` của `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Ánh xạ trên các đuôi và nối (đối ứng `maplist` của `mapcan`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` với `Eq A` | Vị trí `sub` xuất hiện đầu tiên. Nếu bên nhận là một `string`, phương thức của `string` được chọn ([Chuỗi](collections.md#1-chuỗi-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` với `Eq A` | Vị trí đầu tiên mà chúng khác nhau. `none` nếu chúng bằng nhau |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Vị trí `sub` xuất hiện đầu tiên. Nếu bên nhận là một `string`, phương thức của `string` được chọn ([Chuỗi](collections.md#1-chuỗi-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Vị trí đầu tiên mà chúng khác nhau. `none` nếu chúng bằng nhau |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Trộn. CL yêu cầu đầu vào đã sắp xếp; hàm này sắp xếp phần nối |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` với `Eq A` | Thêm `x` **vào đầu** nếu nó chưa có |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` với `Eq A` | Các phép toán tập hợp. CL không quy định thứ tự; ở đây nó ổn định, **theo thứ tự xuất hiện đầu tiên** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` với `Eq A` | Phép bao hàm |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Có phải hậu tố không / phần đứng trước hậu tố. CL hỏi về **cấu trúc dùng chung**, nhưng ở đây không có cấu trúc nào để dùng chung, nên hàm này hỏi về một hậu tố **theo giá trị** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` với `Eq A` | Bằng nhau theo từng phần tử. Bản thân `Vector<T>` không triển khai `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Thêm `x` **vào đầu** nếu nó chưa có |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Các phép toán tập hợp. CL không quy định thứ tự; ở đây nó ổn định, **theo thứ tự xuất hiện đầu tiên** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | Phép bao hàm |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Có phải hậu tố không / phần trước hậu tố. CL hỏi về **cấu trúc dùng chung**, nhưng không có cấu trúc để dùng chung, nên hỏi xem có phải hậu tố gồm các phần tử `eql` không |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` với `Equal A` | `equal` từng phần tử. Bản thân `Vector<T>` không có cài đặt `Equal` |
 | `caar`…`cddddr` | `(cadr p)` | trên các cặp lồng nhau | 28 hàm của CL. Chúng duyệt **các cặp, không phải danh sách**: `cadr` nhận một `cons-cell<A,cons-cell<B,C>>` |
 
 Những gì CL có mà ngôn ngữ này không có: `list*` (không có khái niệm danh sách không chuẩn mà đuôi bị thay
@@ -239,7 +240,7 @@ Các hàm của chương 4 và 5 nhận các keyword dãy của CL `:key` / `:te
 | Keyword | Kiểu | Ý nghĩa |
 |---|---|---|
 | `:key` | `(fn (A) A)` | Một phép chiếu áp dụng cho từng phần tử trước khi so sánh hoặc kiểm tra |
-| `:test` | `(fn (A A) bool)` | Một phép kiểm tra bằng nhau dùng thay cho `equals` từ ràng buộc `Eq`. Đối số đầu là **mục đang tìm**, đối số thứ hai là phần tử (sau `:key`), cùng thứ tự như CL |
+| `:test` | `(fn (A A) bool)` | Phép thử bằng nhau dùng thay cho `eql` mặc định (`:test equal`, v.v.). Đối số đầu là **mục đang tìm**, đối số thứ hai là phần tử (sau `:key`), cùng thứ tự với CL |
 | `:test-not` | `(fn (A A) bool)` | Phủ định của `:test` |
 | `:start` `:end` | `int` | Cửa sổ `[start, end)` để quét. Chỉ số tính so với toàn dãy |
 | `:from-end` | `bool` | Một phép tìm kiếm trả lời bằng lần khớp **cuối cùng**. Kết hợp với `:count`, các phần tử bị tác động được lấy từ cuối |

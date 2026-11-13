@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -183,7 +183,7 @@ argument does not fit a fixnum")
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | แปลงเป็น `f64` แล้วคำนวณ (`(sqrt 1/4)` คือ `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | เช่นเดียวกับข้างบน |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | เช่นเดียวกับข้างบน |
-| `sxhash` | `(sxhash x)` | `ratio→int` | การ implement `Hash` ใช้ `ratio` เป็นคีย์ของ `HashTable` ได้ |
+| `sxhash` | `(sxhash x)` | `ratio→int` | implementation ของ `Hash` ทำให้ `ratio` เป็นคีย์ของ `HashTable` แบบ `equal` ได้ |
 
 ใน CL จำนวนเต็มคือจำนวนตรรกยะที่ส่วนเป็น 1 ดังนั้น `int` ก็มี `numerator` (ตัวเอง)
 `denominator` (`1`) `float` `rational` `rationalize` และฟังก์ชัน 15 ตัวตั้งแต่ `sqrt` ถึง `atanh`
@@ -228,7 +228,7 @@ argument does not fit a fixnum")
 
 `(as int q)` คือ `rational->int` (ตัดทิ้ง) `(try-as int q)` คือ `try-rational->int` `(as ratio q)` และ
 `(as f64 q)` คือการแปลงตามชนิดนั้น และ `(as rational x)` ขยายจาก `int`/`ratio` นอกจากนี้ยัง implement
-`Eq` `Ord` `Hash` `print-object` และ trait ทางเลขคณิตด้วย
+`Equal` `Ord` `Hash` `print-object` และ trait ทางเลขคณิตด้วย
 
 ## 6. จำนวนเชิงซ้อน `complex`
 
@@ -252,7 +252,7 @@ struct (`defstruct`) ในไลบรารีมาตรฐาน
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | ค่าสัมบูรณ์ **`abs` ตัวเดียวที่ไม่คืนชนิดของตัวรับ** (เหมือนใน CL ค่าสัมบูรณ์ของจำนวนเชิงซ้อนเป็นจำนวนจริง) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | การคำนวณจำนวนเชิงซ้อน |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | ความเท่ากันทีละส่วนประกอบ `Eq` ก็ถูก implement ด้วย (ไม่มี `Ord`: จำนวนเชิงซ้อนไม่มีลำดับ และ `<` ของ CL ก็ปฏิเสธมัน) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | ความเท่ากันทีละส่วนประกอบ `Equal` ก็ถูก implement ด้วย (ไม่มี `Ord`: จำนวนเชิงซ้อนไม่มีลำดับ และ `<` ของ CL ก็ปฏิเสธมัน) |
 | `zerop` | `(zerop z)` | `complex→bool` | ทั้งสองส่วนประกอบเป็น 0 หรือไม่ |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` ให้ค่าหลัก (principal value) |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)` `(expt 0 0)`=1 |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -139,7 +139,7 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
   olarak, tür bu biçimde görünebilir.
 - **Demet türleri**: `#{int string}` (değerlerle aynı biçim). Bir demetin 1 ile 12 arasında öğesi
   vardır ve demet türü tür argümanı da olabilir (`Vector<#{int string}>`). Öğeler `t::0` `t::1` ile
-  okunur ve `(setf t::0 v)` ile değiştirilir. `Eq`, `Ord` (ilk öğeden başlayarak karşılaştırır),
+  okunur ve `(setf t::0 v)` ile değiştirilir. `Equal`, `Ord` (ilk öğeden başlayarak karşılaştırır),
   `Hash` ve `print-object`, tüm öğe türleri bunları gerçekleştiriyorsa kullanılabilir.
 - **Nitelikli tür adları**: `module::Type` gibi `::` ile nitelenebilir.
 - **Trait nesnesi türleri**: `:dyn Trait` (tek bir tür oluşturan boşlukla ayrılmış iki sözcük). Somut
@@ -938,16 +938,16 @@ trait adıdır ya da o trait'in ilişkili türleri varsa, **tüm ilişkili türl
 `(Trait (Assoc Type))`'tir.
 
 ```lisp
-(deftrait Eq () ...)                       ; no supertraits
-(deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
+(deftrait Equal () ...)                       ; no supertraits
+(deftrait Ord (Equal) ...)                    ; Rust's trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
   (defmethod rewind (self) ()))
 ```
 
-Mirasın üç etkisi vardır. (1) `impl Ord X`, `impl Eq X`'in **önce** yazılmasını gerektirir (yazma sırasıyla
+Mirasın üç etkisi vardır. (1) `impl Ord X`, `impl Equal X`'in **önce** yazılmasını gerektirir (yazma sırasıyla
 ilgili bir kural: REPL'de ve adım adım `load` ile belirlenimci olarak karara bağlanabilen tek biçim ve
-Rust'tan daha katı). (2) Yalnızca `(:where (Ord T))` bile `Eq`'in metotlarını çağırmanıza izin verir. (3)
-`Eq`'in metotları bir `:dyn Ord` üzerinden çağrılabilir ve bir `:dyn Ord` değeri, bir `:dyn Eq`'in
+Rust'tan daha katı). (2) Yalnızca `(:where (Ord T))` bile `Equal`'in metotlarını çağırmanıza izin verir. (3)
+`Equal`'in metotları bir `:dyn Ord` üzerinden çağrılabilir ve bir `:dyn Ord` değeri, bir `:dyn Equal`'in
 gerektiği yere olduğu gibi geçirilebilir (yukarı dönüşüm). Bir alt trait'in ebeveyniyle aynı adlı bir
 metodu yeniden bildirmesi ve iki ebeveynden aynı adlı metotlar miras alması, ikisi de hatadır (bir
 vtable'ın ad başına bir yuvası vardır). Elmas miras tek bir yuvada birleşir.
@@ -1008,8 +1008,8 @@ Gövdesiz bir imzanın docstring'i olamaz: sondaki bir string, bir varsayılan g
 olurdu; bu yüzden ikisi ayırt edilemezdi.
 
 Standart kütüphanenin sağladığı trait'ler: **`Iter`** (`next` / ilişkili tür `Item`; `doiter` ve dizi
-fonksiyonlarının temeli), **`Eq`** (`equals`; `not-equals` bir varsayılan gerçekleştirmedir), **`Ord`**
-(`Eq`'ten miras alır; yalnızca `less` gerçekleştirilmelidir ve `less-equal` / `greater` /
+fonksiyonlarının temeli), **`Equal`** (`equal`'ın kullandığı trait), **`Ord`**
+(`Equal`'ten miras alır; yalnızca `less` gerçekleştirilmelidir ve `less-equal` / `greater` /
 `greater-equal` varsayılan gerçekleştirmelerdir), **`Error`** (`message` / `source`; hata türlerini
 tekdüze ele almak için `:dyn Error`), **`print-object`** (türe göre yazdırılan gösterim), **`Pathish`**
 (yol adı belirleyicileri: bir string ya da bir `pathname`) ve akış hiyerarşisi **`Stream`** →
@@ -1232,10 +1232,10 @@ bölümündedir.
 ### 3.16 `#[test]` — test fonksiyonları
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 `#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `err` döndürdüğünde başarısız olur ve hata gösterilir; bu yüzden `E`, `Error` ya da `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi). Bir `Error`, `describe-error` ile (mesaj ve nedenler zinciri), diğer her şey `print-object` ile gösterilir. `:dyn Error` de bir `Error` olduğundan, bir test farklı hataları tek bir türde toplayıp döndürebilir.
@@ -1251,7 +1251,7 @@ bölümündedir.
 
 - **Sıradan bir çalıştırma ve `compile-file` onu atlar**; içeriğini denetlemez bile (Rust'ın testleri yalnızca `--test` altında derlemesi gibi). Programın kendisi bir test fonksiyonunu çağıramaz.
 - Bir test, fonksiyon barındıran herhangi bir dosyaya, herhangi bir `module` içine yazılabilir. Testler ayrıca projenin `tests/` klasöründe ayrı tutulabilir.
-- Bir test, `panic`, bir çalışma zamanı hatası ya da `err` döndürmesiyle başarısız olur. Denetim için `assert` ya da iki tarafı da yazdıran `assert-eq` kullanılır ([Sistem](functions/system.md)). Bir test başarısız olduğunda geri kalanlar yine çalışır.
+- Bir test, `panic`, bir çalışma zamanı hatası ya da `err` döndürmesiyle başarısız olur. Denetim için `assert` ya da iki tarafı da yazdıran `assert-equal` kullanılır ([Sistem](functions/system.md)). Bir test başarısız olduğunda geri kalanlar yine çalışır.
 
 ```sh
 typl test                 # bu klasördeki projenin tüm testlerini çalıştır
@@ -1274,7 +1274,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1393,12 +1393,12 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   parantez içinde yazın
 - **Anlık sabitler**: tamsayılar / `true`/`false` / karakterler — sözcük olarak karşılaştırılır
 - **Değer sabitleri**: string'ler / kayan noktalı sayılar / semboller (`'foo`) / bignum tamsayılar /
-  oranlar — o türün `Eq::equals`'ıyla değere göre karşılaştırılır
-  ([Standart Trait'ler](functions/traits.md#2-eq--ord-karşılaştırma)). String'ler kimliğe değil, içeriğe
+  oranlar — o türün `equal`'ıyla değere göre karşılaştırılır
+  ([Standart Trait'ler](functions/traits.md#2-equal--ord-karşılaştırma)). String'ler kimliğe değil, içeriğe
   göre karşılaştırılır
-- `(:= expr)` — herhangi bir ifadeyi değerlendirir ve `Eq::equals` ile karşılaştırır. Sabit sözdizimi
+- `(:= expr)` — herhangi bir ifadeyi değerlendirir ve `equal` ile karşılaştırır. Sabit sözdizimi
   olmayan türleri (`defstruct` örnekleri, globaller, hesaplanan sonuçlar) karşılaştırmanın tek yolu ve
-  kullanıcı tanımlı bir `Eq` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
+  kullanıcı tanımlı bir `Equal` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
 - `(Ctor sub-pattern...)` — yapıcı örüntüleri (`(some x)` `(none)` `(cons a d)` `(ok v)` vb.)
 - `(Type :slot pattern... :slot...)` — yapı desenleri. Yuvaları tür adından sonra anahtar sözcük olarak
@@ -1420,7 +1420,7 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   tektir, bu yüzden her seçenek aynı değişkenleri aynı türlerle bağlamalıdır. Bir yapıcı örüntüsünün
   içine de yazılabilir (`(some (:or (circle r) (rect r _)))`)
 
-`Eq`'i gerçekleştirmeyen bir türü bir değer sabitiyle / `(:= expr)` ile karşılaştırmak tür hatasıdır (bu
+`Equal`'i gerçekleştirmeyen bir türü bir değer sabitiyle / `(:= expr)` ile karşılaştırmak tür hatasıdır (bu
 dil, sessizce asla eşleşmeyen bir kolu bırakmak yerine "bunlar karşılaştırılamaz" demeyi seçer).
 
 **Korumalar**: örüntünün ardından `:when koşul` yazmak, kolu yalnızca örüntü eşleştiğinde ve ayrıca
@@ -1441,19 +1441,13 @@ değişkenleri okuyabilir.
 - Veya-örüntüleri ve korumalar birlikte kullanılabilir. Koruma, hangi seçenek eşleşmiş olursa olsun
   değerlendirilir (`((:or 1 2 3) :when on "small")`).
 
-**Bir `Sexpr` denetlenen değerine karşı değer sabitleri**: `sexpr`'in `Eq`'i `eq`'tir (CL'nin kimliği);
-bu yüzden anlık değerler (`'foo` (intern edilmiş) / tamsayılar / karakterler / `true`/`false`) olduğu
-gibi yazılabilir ve içeriğe göre eşleşir:
+**Bir `Sexpr` incelenen değerine karşı değer literalleri**: `Sexpr`'ın `equal`'ı CL'in `equal`'ıdır;
+bu yüzden `'foo` / tamsayılar / karakterler / `true`/`false` / dizgeler / kayan noktalı sayılar / büyük
+tamsayılar / kesirler olduğu gibi yazılabilir ve içeriğe göre eşleşir (dizgeler içeriğe, sayılar `eql`'e göre):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Anlık olmayan sabitler (string'ler / kayan noktalı sayılar / bignum tamsayılar / oranlar) bir `Sexpr`'e
-karşı **yazılamaz**. Bunların `eq`'i nesne kimliğini karşılaştırır; bu da "tür denetiminden geçen ama asla
-eşleşmeyen bir kol" yapardı; bu yüzden varyant örüntüsünü adlandıran bir hatadır: `(str "hi")` yazın;
-bir `string`'e ayrıştırılır ve içeriğe göre karşılaştırılır. `(:= expr)` açıkça `equals` ister; bu yüzden
-bu kısıtlama ona uygulanmaz.
 
 **Denetlenen değerin bir ADT olması gerekmez.** `string`/`symbol`/`i32`/`f64` ve benzerleri doğrudan
 eşleştirilebilir (string sabiti örüntülerinin gittiği yer burasıdır). Ancak varyantı olmayan bir tür
@@ -1868,8 +1862,7 @@ kendisidir ve bir AOT çalıştırılabilir dosyasında yoktur; `trace`'in izled
 
 **Derlenebilenler**: akış ve dosya G/Ç'si, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, aşkın fonksiyonlar, bit
-işlemleri, `catch`/`throw`/`unwind-protect`, `eq`/`eql`/`equal`/`equalp`'in dördü de (bu, `case`'in her
-tür için derlenmesini sağlar), `print`/`println`/`format`/`pprint` ve `pprint-logical-block` dahil tüm
+işlemleri, `catch`/`throw`/`unwind-protect`, `eq`/`eql`/`equal`/`equalp`'in dördü de, `print`/`println`/`format`/`pprint` ve `pprint-logical-block` dahil tüm
 yazdırma ailesi, `read` ve `eval`. Standart kütüphane önceden derlenmiş olarak gelir.
 
 Bir AOT çalıştırılabilir dosyası yalnızca programın kullandığı özellikleri içerir. Yazdırmayan bir program

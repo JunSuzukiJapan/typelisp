@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Dành cho lập trình viên Common Lisp
 
 typelisp kế thừa cú pháp của Common Lisp (CL) và nhiều tên hàm của nó, nhưng là một ngôn ngữ có kiểu
@@ -125,6 +125,20 @@ nhiều chiều được viết là `#2A((1 2) (3 4))`, giống CL.
 
 Các hàm trên dãy như `map`, `filter`, `sort` và `find` hoạt động trên các giá trị triển khai trait
 `Iter`. Hãy truyền một `Vector` sau khi biến nó thành iterator bằng `(iter v)`.
+
+`eq`, `eql` và `equalp` dùng được với giá trị thuộc bất kỳ kiểu nào, như trong CL. `equal` là phương thức
+của trait `Equal` và chỉ dùng được với các kiểu cài đặt nó. Mọi kiểu dựng sẵn đều cài đặt nó, và `equal`
+của một danh sách là `equal` của CL. Với kiểu của bạn, viết `(impl Equal kiểu ...)` sẽ quyết định cách so
+sánh. Phép so sánh mà `member`, `find`, `position`, `remove` và các hàm tương tự dùng mặc định là `eql`, như
+trong CL. Để tìm chuỗi hay danh sách theo nội dung, viết `:test equal`, như trong CL (không cần `#'`):
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false (các chuỗi tạo riêng không eql)
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+`HashTable` cũng chọn cách so sánh khóa bằng `:test` khi tạo, giống `make-hash-table` của CL, và mặc định
+là `eql`. Với khóa chuỗi, viết `(HashTable::new :test 'equal)`.
 
 ## 5. Không có đa giá trị
 

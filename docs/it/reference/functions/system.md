@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Tempo, ambiente e implementazione
 
 Funzioni per il tempo, interrogazioni sull'ambiente di esecuzione, strumenti di implementazione,
@@ -333,7 +333,7 @@ resta nulla: ciò che viene compilato è la forma espansa del corpo.
 | Nome | Forma | Tipo | Descrizione |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Va in panic se falso. Senza messaggio, `assertion failed: <il test come scritto>` (è una macro, quindi può nominare l'espressione stessa). I restart di CL non esistono in questo linguaggio |
-| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, dove `T` implementa `Eq` e `print-object` | Va in panic se i due non sono uguali secondo `equals`, stampando entrambi i lati (due righe, `  left: ...` / ` right: ...`). La prima riga è `assertion failed: <l'espressione come scritta>` senza messaggio, e `msg` con il messaggio. Usata soprattutto nelle funzioni `#[test]` ([Sintassi](../syntax.md)). L'`assert_eq!` di Rust |
+| `assert-equal` | `(assert-equal left right)` / `(assert-equal left right msg)` | `(T,T[,string])→()`, dove `T` implementa `Equal` e `print-object` | Va in panic se i due non sono uguali secondo `equal`, stampando entrambi i lati (due righe, `  left: ...` / ` right: ...`). La prima riga è `assertion failed: <l'espressione come scritta>` senza messaggio, e `msg` con il messaggio. Usata soprattutto nelle funzioni `#[test]` ([Sintassi](../syntax.md)). L'`assert_eq!` di Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Scrive su `*error-output*` una riga con prefisso `WARNING: ` e **continua**. Un modo di segnalare qualcosa senza restituire un `Result` e senza terminare il programma |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Sostituisce le globali solo durante `body` e le ripristina all'uscita. CL lo scrive come `let`, ma `let` in questo linguaggio associa sempre in modo lessicale, da cui il nome separato (lo stesso ruolo della macro omonima di Emacs Lisp). Le ripristina in qualunque modo si esca dal corpo: completamento normale, `throw`, `panic`, `break`/`return`. **Non è un binding per task** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Esegue `body` con ogni variabile di controllo del printer al suo valore standard e `*read-eval*` impostato a `true` ([Stampa](printing.md#6-controllo-della-quantità-stampata)) |

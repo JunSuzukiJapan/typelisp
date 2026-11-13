@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -77,7 +77,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **函式型別**：`(fn (引數型別...) 回傳值型別)`。帶可變引數的函式型別為 `(fn (引數型別... &rest 元素型別) 回傳值型別)`。
 - **泛型型別**：`Name<T1,T2,...>`。例如：`Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。名稱之後緊接的 `<` 後面跟著型別時，讀取器把直到對應 `>` 的部分作為型別參數讀取。型別參數內部可以用空白或換行分隔（`HashTable<string, int>`），也可以寫 unit 型別 `()`（`Result<(), FileError>`）、`:dyn Trait` 和元組型別。`<` 之後不是型別時，這個 `<` 是名稱的一部分（`<=`、`string<`）。型別參數沒有用 `>` 閉合或不具有型別的形狀時，是讀取錯誤（`(a<b c)` 也作為型別參數 `b c` 的錯誤而成為讀取錯誤）。`()` 也可以作為欄位型別、參數型別使用。
 - **泛型型別的套用形式**：`(Name T1 T2 ...)` —— 指稱與 `Name<T1,T2,...>` 相同型別的串列寫法。例如 `(vector char)` 與 `Vector<char>` 相同。名稱形式是通常的寫法，這種形式**是為型別參數無法寫進名稱的情況準備的**——型別參數本身是型別運算式，但在 `<..>` 中只能寫名稱、`()`、`:dyn` 和元組型別，不能寫函式型別（`Vector<(fn (i32) i32)>` 是讀取錯誤；用 `deftype` 為函式型別命名後可以寫 `Vector<F>`）。實作顯示型別時也可能以這種形式出現，例如把 trait 的關聯型別代入簽名的結果。
-- **元組型別**：`#{int string}`（與值的形狀相同）。元素為 1～12 個，元組型別也可以作為泛型型別的參數（`Vector<#{int string}>`）。元素用 `t::0` `t::1` 讀取，用 `(setf t::0 v)` 修改。當所有元素的型別都實作了 `Eq`、`Ord`（從第一個元素起依序比較）、`Hash`、`print-object` 時，即可使用它們。
+- **元組型別**：`#{int string}`（與值的形狀相同）。元素為 1～12 個，元組型別也可以作為泛型型別的參數（`Vector<#{int string}>`）。元素用 `t::0` `t::1` 讀取，用 `(setf t::0 v)` 修改。當所有元素的型別都實作了 `Equal`、`Ord`（從第一個元素起依序比較）、`Hash`、`print-object` 時，即可使用它們。
 - **限定型別名稱**：可以像 `module::Type` 這樣以 `::` 限定。
 - **trait 物件型別**：`:dyn Trait`（以空白分隔的兩個詞構成一個型別）。表示具體型別在執行期決定的值，trait 方法的呼叫經由 vtable 進行動態分派。
   有關聯型別的 trait 依宣告順序以位置固定（`:dyn Iter<i32>` 把 `Item` 固定為 `i32`）。也可以寫在泛型引數內部：`Vector<:dyn Drawable>`
@@ -736,14 +736,14 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 `(Trait (Assoc Type))`。
 
 ```lisp
-(deftrait Eq () ...)                       ; 沒有繼承
-(deftrait Ord (Eq) ...)                    ; Rust 的 trait Ord: Eq
+(deftrait Equal () ...)                       ; 沒有繼承
+(deftrait Ord (Equal) ...)                    ; Rust 的 trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; 固定關聯型別
   (defmethod rewind (self) ()))
 ```
 
-繼承有 3 個效果。(1) `impl Ord X` 要求**先**寫 `impl Eq X`（關於書寫順序的規則。是在 REPL 與逐一 `load` 中都能確定判斷的唯一形式，比 Rust
-更嚴格）。(2) 只要 `(:where (Ord T))` 就能呼叫 `Eq` 的方法。(3) 可以從 `:dyn Ord` 呼叫 `Eq` 的方法，`:dyn Ord` 的值可以直接傳給要求 `:dyn Eq`
+繼承有 3 個效果。(1) `impl Ord X` 要求**先**寫 `impl Equal X`（關於書寫順序的規則。是在 REPL 與逐一 `load` 中都能確定判斷的唯一形式，比 Rust
+更嚴格）。(2) 只要 `(:where (Ord T))` 就能呼叫 `Equal` 的方法。(3) 可以從 `:dyn Ord` 呼叫 `Equal` 的方法，`:dyn Ord` 的值可以直接傳給要求 `:dyn Equal`
 的位置（向上轉型）。子 trait 重新宣告與父同名的方法，以及從兩個父繼承同名的方法，都是錯誤（vtable 的槽每個名稱一個）。菱形繼承會合併為一個槽。
 
 **預設實作**：在簽章後寫本體，`impl` 省略該方法時就使用它。本體在寫下 trait 的**模組的命名空間**中解析，所以也可以呼叫該模組中非公開的函式。
@@ -786,8 +786,8 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 **文件字串**：`deftrait` 在繼承清單之後、項目清單之前放置字串字面值，整個 trait 就能有一個文件字串（`(deftrait Name () "doc" (:type ...)
 (method ...)...)`）。沒有本體的簽章不能寫文件字串——結尾的字串本身會成為預設實作的回傳值，兩者無法區分。
 
-標準函式庫提供的 trait：**`Iter`**（`next`／關聯型別 `Item`。`doiter`／序列函式的基礎）、**`Eq`**（`equals`。`not-equals` 是預設實作）、
-**`Ord`**（繼承 `Eq`。只有 `less` 必須實作，`less-equal`／`greater`／`greater-equal` 是預設實作）、**`Error`**（`message`／`source`。統一
+標準函式庫提供的 trait：**`Iter`**（`next`／關聯型別 `Item`。`doiter`／序列函式的基礎）、**`Equal`** （`equal` 所用的 trait）、
+**`Ord`**（繼承 `Equal`。只有 `less` 必須實作，`less-equal`／`greater`／`greater-equal` 是預設實作）、**`Error`**（`message`／`source`。統一
 處理錯誤型別的 `:dyn Error`）、**`print-object`**（依型別的列印表示）、**`Pathish`**（路徑名稱指定子＝字串或 `pathname`）、串流的階層
 **`Stream`** → **`InputStream`**／**`OutputStream`** → **`CharInput`**／**`CharOutput`** → **`PeekInput`**。哪些型別實作了哪些 trait 見
 [types.md](types.md)，各 trait 的方法見[標準 trait](functions/traits.md)、[錯誤型別](functions/option-result.md#3-錯誤型別與-error-trait)、
@@ -956,10 +956,10 @@ vtable 進行動態分派：
 ### 3.16 `#[test]` — 測試函式
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()` 或 `Result<(), E>`（也不能有型別參數）。不需要 `pub`。回傳 `Result` 的測試在回傳 `err` 時失敗，並顯示該錯誤，因此 `E` 必須實作 `Error` 或 `print-object`（與 Rust 要求測試的錯誤型別實作 `Debug` 相同）。是 `Error` 時用 `describe-error`（訊息及原因鏈）顯示，否則用 `print-object` 顯示。`:dyn Error` 也是 `Error`，因此可以把各種錯誤歸為一個型別回傳。
@@ -975,7 +975,7 @@ vtable 進行動態分派：
 
 - **一般執行和 `compile-file` 會略過它**，連內容也不檢查（與 Rust 只在 `--test` 時編譯測試相同）。程式本身無法呼叫測試函式。
 - 測試可以寫在任何放置函式的檔案中、任何 `module` 之內。也可以另外寫在專案的 `tests/` 資料夾裡。
-- 失敗指 `panic`、執行時錯誤與回傳 `err`。用 `assert`，或會印出兩邊的 `assert-eq`（[系統](functions/system.md)）來檢查。即使一個測試失敗，其餘測試也會繼續執行。
+- 失敗指 `panic`、執行時錯誤與回傳 `err`。用 `assert`，或會印出兩邊的 `assert-equal`（[系統](functions/system.md)）來檢查。即使一個測試失敗，其餘測試也會繼續執行。
 
 ```sh
 typl test                 # 執行此資料夾中專案的全部測試
@@ -998,7 +998,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1099,10 +1099,10 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 - 變數名稱 —— 繫結模式（一律符合）。但如果被比對值的型別有該名稱的變體，就解析為**下面的裸變體名稱模式**
 - 裸變體名稱 —— 符合不帶引數的變體（`(match c (red 1) (blue 2))`）。以裸名稱寫帶欄位的變體會得到引數個數錯誤，所以像 `(circle r)` 這樣以括號寫
 - **立即值字面值**：整數 / `true`/`false` / 字元 —— 以字比較
-- **值字面值**：字串 / 浮點數 / 符號（`'foo`）/ 多倍精度整數 / ratio —— 以該型別的 `Eq::equals`（[標準 trait](functions/traits.md#2-eq--ord比較)）
+- **值字面值**：字串 / 浮點數 / 符號（`'foo`）/ 多倍精度整數 / ratio —— 以該型別的 `equal`（[標準 trait](functions/traits.md#2-equal--ord比較)）
   依值比較。字串比較的是內容，而不是同一性
-- `(:= expr)` —— 對任意式子求值，以 `Eq::equals` 比較。是比較沒有字面值語法的型別（`defstruct` 實例、全域變數、計算結果）的唯一寫法，使用者定義的
-  `Eq` 實作直接成為比較規則。`expr` 可以參照從該分支位置可見的任何東西（引數、外層繫結、全域變數）
+- `(:= expr)` —— 對任意式子求值，以 `equal` 比較。是比較沒有字面值語法的型別（`defstruct` 實例、全域變數、計算結果）的唯一寫法，使用者定義的
+  `Equal` 實作直接成為比較規則。`expr` 可以參照從該分支位置可見的任何東西（引數、外層繫結、全域變數）
 - `(Ctor sub-pattern...)` —— 建構函式模式（`(some x)` `(none)` `(cons a d)` `(ok v)` 等）
 - `(Type :slot pattern... :slot...)` — 結構的模式。在型別名稱之後以關鍵字寫槽。關鍵字之後是模式時，
   以該模式比對這個槽；之後是關鍵字或結束時，把槽繫結到同名的變數。沒寫的槽不參與比對（不依賴欄位的
@@ -1119,7 +1119,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 - `#{p0 p1 ...}` —— 元組模式。逐個元素用子模式比對。對 `Sexpr` 而言，只符合元素個數相同的 `#{..}` 資料
 - `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(some (:or (circle r) (rect r _)))`）
 
-以值字面值／`(:= expr)` 比較沒有實作 `Eq` 的型別是型別錯誤（比起留下默默不符合的分支，選擇說明無法比較）。
+以值字面值／`(:= expr)` 比較沒有實作 `Equal` 的型別是型別錯誤（比起留下默默不符合的分支，選擇說明無法比較）。
 
 **守衛**：在模式後面寫 `:when 條件`，則只有當模式符合且條件也為真時才選擇該分支。條件為假時嘗試下一個分支。條件可以讀取模式繫結的變數。
 
@@ -1135,15 +1135,12 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 - 帶守衛的分支不計入窮盡性檢查（與 Rust 相同）。其條件可能為假，所以它本應涵蓋的變體還需要一個不帶守衛的分支或 `_`。
 - or 模式與守衛可以組合。無論符合的是哪個選項，都會求值守衛（`((:or 1 2 3) :when on "small")`）。
 
-**對 `Sexpr` 被比對值的值字面值**：`sexpr` 的 `Eq` 是 `eq`（CL 的同一性），所以立即值——`'foo`（已 intern）/ 整數 / 字元 / `true`/`false`——可以
-直接寫，依內容符合：
+**針對 `Sexpr` 被比對值的值字面值**：`Sexpr` 的 `equal` 是 CL 的 `equal`，所以 `'foo` / 整數 / 字元 /
+`true`/`false` / 字串 / 浮點數 / 大整數 / ratio 都可以直接寫，並依內容比對（字串依內容，數用 `eql`）：
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-不是立即值的字面值（字串 / 浮點數 / 多倍精度整數 / ratio）**不能**對 `Sexpr` 書寫。它們的 `eq` 比較物件的同一性，會成為「型別能通過但永遠不
-符合的分支」，所以作為點出變體模式的錯誤——寫 `(str "hi")` 就會拆解為 `string` 進行內容比較。`(:= expr)` 明確要求 `equals`，所以不受這個限制。
 
 **被比對值不必是 ADT。** `string`/`symbol`/`i32`/`f64` 等可以直接 `match`（那正是字串字面值模式派上用場的地方）。但沒有變體的型別無法以列舉
 窮盡，所以 `_`（或者作為萬用字元的繫結模式）是必要的：
@@ -1488,8 +1485,7 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 不是這一類，可以正常編譯。
 
 **可以**編譯的東西：串流與檔案 I/O、`random`、`gensym`、`symbol->string`/`intern`、`parse-int`/`parse-float`、`get-universal-time`/
-`get-internal-real-time`、`exit`、超越函式、位元運算、`catch`/`throw`/`unwind-protect`、`eq`/`eql`/`equal`/`equalp` 全部 4 個（`case` 因此
-也能對所有型別編譯）、包括 `print`/`println`/`format`/`pprint` 與 `pprint-logical-block` 在內的全部列印功能、`read`，以及 `eval`。標準函式庫
+`get-internal-real-time`、`exit`、超越函式、位元運算、`catch`/`throw`/`unwind-protect`、`eq`/`eql`/`equal`/`equalp` 全部 4 個、包括 `print`/`println`/`format`/`pprint` 與 `pprint-logical-block` 在內的全部列印功能、`read`，以及 `eval`。標準函式庫
 以已編譯的狀態隨附。
 
 AOT 執行檔中只包含程式使用的功能。不列印的程式不包含格式引擎，不呼叫 `read` 的程式不包含讀取器，不呼叫 `eval` 的程式不包含檢查器與直譯器。

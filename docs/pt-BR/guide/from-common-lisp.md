@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Para programadores de Common Lisp
 
 typelisp herda a sintaxe do Common Lisp (CL) e muitos dos seus nomes de função, mas é uma linguagem com
@@ -126,6 +126,20 @@ o resultado de modificar um literal é indefinido). Um `#()` vazio precisa do se
 
 As funções de sequência como `map`, `filter`, `sort` e `find` trabalham sobre valores que implementam o trait
 `Iter`. Passe um `Vector` depois de transformá-lo em iterador com `(iter v)`.
+
+`eq`, `eql` e `equalp` podem ser usados com um valor de qualquer tipo, como em CL. `equal` é o método do
+trait `Equal` e só pode ser usado com os tipos que o implementam. Todo tipo embutido o implementa, e o
+`equal` de uma lista é o `equal` de CL. Para um tipo seu, escrever `(impl Equal tipo ...)` decide como ele
+é comparado. A comparação que `member`, `find`, `position`, `remove` e afins usam por padrão é `eql`, como
+em CL. Para procurar strings ou listas pelo conteúdo, escreva `:test equal`, como em CL (não é preciso `#'`):
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false (strings criadas separadamente não são eql)
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+`HashTable` também escolhe como as chaves são comparadas com `:test` na criação, como o `make-hash-table`
+de CL, e o padrão é `eql`. Para chaves string, escreva `(HashTable::new :test 'equal)`.
 
 ## 5. Não existem valores múltiplos
 

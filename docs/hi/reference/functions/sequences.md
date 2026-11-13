@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # जोड़ियाँ, S-एक्सप्रेशन और अनुक्रम
 
 जेनेरिक जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, `Iter` के ऊपर लिखे अनुक्रम फ़ंक्शन, और उच्च-क्रम फ़ंक्शन।
@@ -102,16 +102,18 @@
 | `last` | `(last it)` | `Iter<A>→Option<A>` | अंतिम **तत्व** (CL की तरह "अंतिम सेल" नहीं) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | अंतिम को छोड़कर सब |
 
-वे फ़ंक्शन जिन्हें `Eq` / `Ord` बाउंड चाहिए (वे प्रेडिकेट की जगह trait से तुलना करते हैं; [स्टैंडर्ड trait](traits.md#2-eq--ord-तुलना)):
+किसी आइटम को खोजने वाले फ़ंक्शन। `:test` के बिना ये CL की तरह `eql` से तुलना करते हैं। `eql` संख्याओं और
+अक्षरों की मान से और बाकी की पहचान से तुलना करता है, इसलिए अलग-अलग बनी समान सामग्री वाली दो स्ट्रिंग या सूचियाँ
+बराबर नहीं होतीं। सामग्री से तुलना के लिए `:test equal` लिखें (अध्याय 6):
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | क्या `x` के बराबर तत्व मौजूद है (CL के विपरीत, `bool`, सूची का शेष नहीं) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | `x` के बराबर पहला तत्व |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | `x` के बराबर पहली स्थिति |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | कितने तत्व `x` के बराबर हैं |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | क्या `x` के बराबर तत्व मौजूद है (CL के विपरीत, `bool`, सूची का शेष नहीं) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | `x` के बराबर पहला तत्व |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | `x` के बराबर पहली स्थिति |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | कितने तत्व `x` के बराबर हैं |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL का `(sort sequence predicate)`। स्थिर, अविनाशकारी सॉर्ट। `cmp` तब `true` है जब "पहला आर्ग्युमेंट सख्ती से दूसरे से पहले आता है" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | पहली जोड़ी जिसका `car` `k` के बराबर है। मान `(cdr p)` से निकालें |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | पहली जोड़ी जिसका `car` `k` के बराबर है। मान `(cdr p)` से निकालें |
 
 ये और अध्याय 5 के कई फ़ंक्शन CL के कीवर्ड आर्ग्युमेंट `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count` भी लेते हैं (अध्याय 6)।
 
@@ -164,8 +166,8 @@
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `member` की तरह, **`bool`** (इटरेटर के पास लौटाने को टेल नहीं है) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every` के निषेध |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | सकारात्मक संस्करणों जैसे टाइप | प्रेडिकेट के निषेध वाले संस्करण |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | मान से हटाता है |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | दोहराव हटाता है। CL की तरह, **अंतिम आवृत्ति रखी जाती है** (`:from-end true` पहली रखता है) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | मान से हटाता है |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | दोहराव हटाता है। CL की तरह, **अंतिम आवृत्ति रखी जाती है** (`:from-end true` पहली रखता है) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | मान / प्रेडिकेट से बदलता है |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | `Iter<cons-cell<K,V>>` पर | `assoc` के प्रेडिकेट और मान-पक्ष संस्करण |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | सामने जोड़ी जोड़ता है |
@@ -176,14 +178,14 @@
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | क्रमिक **टेल** पर मैप करता है |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | साइड इफ़ेक्ट के लिए टेल पर मैप करता है (`mapc` का `maplist` समकक्ष) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | टेल पर मैप करता है और जोड़ता है (`mapcan` का `maplist` समकक्ष) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | वह स्थिति जहाँ `sub` पहली बार आता है। यदि रिसीवर `string` है, तो `string` मेथड चुना जाता है ([स्ट्रिंग](collections.md#1-स्ट्रिंग-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | पहली स्थिति जहाँ वे भिन्न हैं। बराबर हों तो `none` |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | वह स्थिति जहाँ `sub` पहली बार आता है। यदि रिसीवर `string` है, तो `string` मेथड चुना जाता है ([स्ट्रिंग](collections.md#1-स्ट्रिंग-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | पहली स्थिति जहाँ वे भिन्न हैं। बराबर हों तो `none` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | मर्ज करना। CL को क्रमबद्ध इनपुट चाहिए; यह जोड़े हुए को सॉर्ट करता है |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | यदि `x` नहीं है तो उसे **सामने** जोड़ता है |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | समुच्चय ऑपरेशन। CL क्रम निर्दिष्ट नहीं करता; यहाँ यह स्थिर है, **पहली आवृत्ति के क्रम में** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | समावेश |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | क्या यह प्रत्यय है / प्रत्यय से पहले का भाग। CL **साझा संरचना** के बारे में पूछता है, लेकिन साझा करने को कोई संरचना नहीं है, इसलिए यह प्रत्यय के बारे में **मानों के रूप में** पूछता है |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | तत्व-दर-तत्व समानता। `Vector<T>` स्वयं `Eq` लागू नहीं करता |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | यदि `x` नहीं है तो उसे **सामने** जोड़ता है |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | समुच्चय ऑपरेशन। CL क्रम निर्दिष्ट नहीं करता; यहाँ यह स्थिर है, **पहली आवृत्ति के क्रम में** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | समावेश |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | क्या यह प्रत्यय है / प्रत्यय से पहले का भाग। CL **साझा संरचना** के बारे में पूछता है, पर साझा करने को संरचना नहीं है, इसलिए यह पूछा जाता है कि क्या यह `eql` तत्वों वाला प्रत्यय है |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | तत्व-दर-तत्व `equal`। `Vector<T>` का स्वयं कोई `Equal` कार्यान्वयन नहीं है |
 | `caar`…`cddddr` | `(cadr p)` | नेस्टेड जोड़ियों पर | CL के 28 फ़ंक्शन। वे **जोड़ियों पर चलते हैं, सूचियों पर नहीं**: `cadr` `cons-cell<A,cons-cell<B,C>>` लेता है |
 
 जो CL में है और इस भाषा में नहीं: `list*` (बदली हुई टेल वाली अनुचित सूची की धारणा नहीं है), `copy-tree`/`copy-alist`/`sublis`/`subst`/`subst-if` (कोई टाइप मनमानी गहराई के विषमजातीय वृक्ष पर चलने का वर्णन नहीं कर सकता; `Sexpr` के वृक्ष के लिए, `equal` `tree-equal` के अनुरूप है), प्रॉपर्टी सूची परिवार `getf`/`get-properties`/`symbol-plist`/`remprop` (कुंजियों और मानों को बारी-बारी रखने वाली बिना टाइप की सूची का प्रतिनिधित्व नहीं है; `assoc` (असोसिएशन सूचियाँ) या `HashTable` वही भूमिका निभाते हैं), और `Vector<T>` तथा `Sexpr` सूचियों के बीच बदलने वाले फ़ंक्शन (`Sexpr` सूची के तत्वों के टाइप हर एक अलग हो सकते हैं, इसलिए उन्हें एकल तत्व टाइप `T` से नहीं लिखा जा सकता)।
@@ -195,7 +197,7 @@
 | कीवर्ड | टाइप | अर्थ |
 |---|---|---|
 | `:key` | `(fn (A) A)` | तुलना या जाँच से पहले हर तत्व पर लगाया जाने वाला प्रक्षेपण |
-| `:test` | `(fn (A A) bool)` | `Eq` बाउंड के `equals` की जगह उपयोग होने वाला समानता परीक्षण। पहला आर्ग्युमेंट **खोजा जा रहा आइटम** है, दूसरा तत्व है (`:key` के बाद), CL के समान क्रम में |
+| `:test` | `(fn (A A) bool)` | डिफ़ॉल्ट `eql` के स्थान पर उपयोग होने वाली समानता जाँच (`:test equal` आदि)। पहला आर्ग्युमेंट **खोजा जा रहा आइटम**, दूसरा (`:key` के बाद) तत्व है — CL वाला ही क्रम |
 | `:test-not` | `(fn (A A) bool)` | `:test` का निषेध |
 | `:start` `:end` | `int` | स्कैन करने की विंडो `[start, end)`। इंडेक्स पूरे अनुक्रम के सापेक्ष हैं |
 | `:from-end` | `bool` | खोज **अंतिम** मेल से उत्तर देती है। `:count` के साथ मिलाने पर, प्रभावित तत्व अंत से लिए जाते हैं |

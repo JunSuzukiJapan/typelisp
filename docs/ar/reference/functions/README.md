@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # الدوال المضمنة
 
 قائمة الدوال المضمنة والتوابع (methods) والمكتبة القياسية. وللصياغة (الصيغ الخاصة وطريقة التعريف) انظر
@@ -23,7 +23,7 @@
   ووحدات الماكرو الضابطة، والمقارنة، والسمات الحسابية
 - كل اسم هو أيضًا اسم في حزمة `COMMON-LISP` الخاصة بـ Common Lisp (`length` و`format` و`open` وغيرها)
 - `Error` و`assert` و`print-object`، و`HashTable` و`Array` و`BitVector`، وسمات التدفق `Stream`
-  و`InputStream` و`OutputStream`، و`Hash` الذي تنفّذه مفاتيح `HashTable`
+  و`InputStream` و`OutputStream`، و`Hash` الذي تنفّذه مفاتيح `HashTable` من نوع `equal`
 - الأنواع التي تذكرها دوال هذه ومتغيراتها
 
 وأي اسم آخر يُدخَل بـ `use`، مثل `(use std::net::tcp-connect)`، أو يُكتب بمساره،
@@ -35,7 +35,7 @@
 | `std::char` | `digit->char`، `digit-weight`، `name->char` |
 | `std::collections` | `Deque`، `HashSet`، `Scope`، `SortedTable`، `hashtable-iter` |
 | `std::env` | `command-line-args`، `getenv`، `home-directory` |
-| `std::error` | `WrappedError`، `as-dyn-error`، `assert-eq`، `describe-error`، `wrap-error` |
+| `std::error` | `WrappedError`، `as-dyn-error`، `assert-equal`، `describe-error`، `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`، `direction-input`، `direction-output`، `directory-p`، `open-binary`، `open-binary-input`، `open-binary-output`، `open-file`، `open-input`، `open-output`، `read-file-lines`، `read-file-string`، `write-file-string` |
 | `std::hash` | `*sxhash-mask*`، `sxhash-string` |
@@ -59,7 +59,7 @@
 `(argument-type,...)→return-type`.
 
 - الحرف الكبير المفرد مثل `T` أو `A` أو `B` متغير نوع.
-- ملاحظة مثل `where Eq A` قيد سمة يجب أن يستوفيه متغير النوع.
+- ملاحظة مثل `where Equal A` قيد سمة يجب أن يستوفيه متغير النوع.
 - تعني `Iter<A>` "أي تنفيذ لـ `Iter` يكون `Item` فيه هو `A`".
 - يمكن حذف الوسائط الموسومة بـ `&optional` / `&key`.
 
@@ -71,7 +71,7 @@
 | [sequences.md](sequences.md) | الزوج `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات والمكرِّرات الكسولة `lazy` والدوال عالية الرتبة |
 | [collections.md](collections.md) | السلاسل النصية والمحارف و`Vector` و`HashTable` و`Array` و`BitVector` و`HashSet` و`SortedTable` و`Deque` |
 | [option-result.md](option-result.md) | `Option` و`Result` وأنواع الأخطاء والسمة `Error` |
-| [traits.md](traits.md) | `Iter` و`Eq`/`Ord` وسمات الحساب و`Push` و`Pop` |
+| [traits.md](traits.md) | `Iter` و`Equal`/`Ord` وسمات الحساب و`Push` و`Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format` والطابعة المنسَّقة (pretty printer) و`print-object` ومتغيرات التحكم بالطباعة |
 | [format.md](format.md) | موجِّهات التنسيق |
 | [streams-files.md](streams-files.md) | التدفقات وعمليات الملفات والمسارات وreadtable |

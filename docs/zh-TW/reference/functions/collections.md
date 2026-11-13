@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 字串、字元與集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -76,7 +76,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | 元素個數 |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉尾端元素並回傳。為空時為 `none`（與 `get`/`set` 不同，不會 panic）（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | 建立實作了 `Iter` 的迭代器 |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | 沒有與 `x` 相等的元素時加到尾端（CL 的 `pushnew`。不需要修改位置，所以是方法而不是巨集） |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | 若沒有與 `x` `eql` 的元素則附加到末尾（CL `pushnew`。不需改寫位置，所以是方法而非巨集） |
 
 `map`/`filter` 等是[序列函式](sequences.md#4-iter-上的序列函式)——像 `(map (iter v) f)` 這樣經 `iter` 傳入。破壞性操作（`nreverse`、
 `delete` 等）見[破壞性操作](sequences.md#7-破壞性操作)。
@@ -85,7 +85,7 @@
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | 建立空表 |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | 建立空表。`:test` 是鍵的比較方式（見下表），省略則為 `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | 查詢 |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | 插入或覆寫 |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | 刪除，如有舊值則回傳 |
@@ -98,35 +98,46 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL 的 `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL 的 `hash-table-size`。在這個表中是占用數（等於 `count`） |
 
-**只要實作了 `Hash`，任何型別都可以當作鍵**——包括 `defstruct`/`defenum`。`get`/`set`/`remove` 帶有 `(:where (Hash K))`，所以以沒有實作它的
-型別為鍵的表是**型別錯誤**（`f64` 沒有 `Hash` 是因為 `NaN`）。
+鍵的比較方式與 CL 的 `make-hash-table` 一樣，在建立時用 `:test` 選擇。`:test` 寫 `eq`・`eql`・`equal`・
+`equalp` 之一（寫 `'equal` 或 `equal` 皆可）。
+
+| `:test` | 鍵的比較方式 | 可作為鍵的型別 |
+|---|---|---|
+| `eql`（預設） | 數與字元依值，其餘依同一性 | 任何型別 |
+| `eq` | 依同一性 | 任何型別 |
+| `equal` | 用鍵型別的 `equal`（`Equal`）和雜湊 `sxhash`（`Hash`） | 實作了 `Hash` 的型別 |
+| `equalp` | 用 `equalp`（字串不區分大小寫，結構體逐槽比較） | 任何型別 |
+
+預設是 `eql`，所以分別建立的內容相同的字串是不同的鍵。以字串為鍵時寫 `(HashTable::new :test 'equal)`。
+`equal` 表的鍵型別若未實作 `Hash`，在建立表的地方就是**型別錯誤**（`f64` 沒有 `Hash` 是因為 `NaN`）。
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; 回傳非負且放得進 fixnum 的值
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; 回傳非負且能放進 fixnum 的值
 ```
 
-已實作：`int` 與 6 種固定寬度整數、`bool`、`char`、`string`、`symbol`（浮點數沒有）。在自己的型別中，把結果與 `*sxhash-mask*`（2^30-1）做
-`logand` 以保持非負。想對字串求雜湊時，可以呼叫 `string` 的實作所使用的 `(sxhash-string s)`（FNV-1a 32 位元）。
+已實作 `Hash` 的：`int` 與 6 種固定寬度整數、`bool`、`char`、`string`、`symbol`（浮點數沒有）。自訂型別中，
+把結果與 `*sxhash-mask*`（2^30-1）做 `logand` 以保持非負。要對字串求雜湊，可以呼叫 `string` 的實作所用的
+`(sxhash-string s)`（FNV-1a 32bit）。
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-鍵是否相同由**鍵的型別本身**決定（`sxhash`，以及 `Hash` 的超 trait `Eq` 的 `equals`），而不是物件的同一性。所以像上面那樣，可以用「不同的
-值但相等」的鍵查詢。
+在 `equal` 表中，決定鍵是否相同的是**鍵的型別本身**（`sxhash`，以及 `Hash` 的超 trait `Equal` 的
+`equal`），而不是物件的同一性。所以如上，可以用「不同的值但相等」的鍵查到。
 
-`sxhash` 衝突也無妨（`Hash` 的約定是反方向的——只規定 `equals` 相等則雜湊相同）。衝突的鍵由 `equals` 區分。
+`sxhash` 衝突也無妨（`Hash` 的約定是反方向的——只說 `equal` 的值雜湊相同）。衝突的鍵由 `equal` 區分。
 
 ## 5. `Array<T>`（多維陣列）
 
@@ -176,11 +187,12 @@
 
 ## 7. `HashSet<T>`
 
-沒有重複元素的集合（Rust 的 `HashSet`）。標準函式庫的 `defstruct`，內容是 `HashTable<T,()>`。元素型別與 `HashTable` 的鍵一樣，必須實作 `Hash`。
+無重複元素的集合（Rust 的 `HashSet`）。標準函式庫的 `defstruct`，內部是 `HashTable<T,()>`。元素的比較方式與
+`HashTable` 的鍵一樣由 `:test` 決定，`equal` 集合的元素型別須實作 `Hash`。
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | 建立空集合。型別引數由期望型別決定 |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | 建立空集合。型別引數由期望型別決定。`:test` 與 `HashTable` 相同，省略則為 `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 加入 `x`。新加入時為 `true`，已存在時為 `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | 是否含有 `x` |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 移除 `x`。原本存在時為 `true` |
@@ -191,7 +203,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

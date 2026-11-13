@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Paren, S-expressies en sequenties
 
 Het generieke paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, de sequentiefuncties die bovenop
@@ -134,17 +134,18 @@ Indexeren, lengte en uitsnijden:
 | `last` | `(last it)` | `Iter<A>→Option<A>` | Het laatste **element** (niet "de laatste cel" zoals in CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | Alles behalve het laatste element |
 
-Functies die een `Eq`- / `Ord`-bound vereisen (ze vergelijken via een trait in plaats van via een
-predicaat; [Standaardtraits](traits.md#2-eq--ord-vergelijking)):
+Functies die een item zoeken. Zonder `:test` vergelijken ze met `eql`, zoals in CL. `eql` vergelijkt
+getallen en tekens op waarde en de rest op identiteit, dus twee apart gemaakte strings of lijsten met
+dezelfde inhoud zijn niet gelijk. Om op inhoud te vergelijken schrijf je `:test equal` (hoofdstuk 6):
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | Of er een element gelijk aan `x` bestaat (anders dan in CL een `bool`, niet de rest van de lijst) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | Het eerste element gelijk aan `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | De eerste positie gelijk aan `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | Hoeveel elementen gelijk zijn aan `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | Of er een element gelijk aan `x` bestaat (anders dan in CL een `bool`, niet de rest van de lijst) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | Het eerste element gelijk aan `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | De eerste positie gelijk aan `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | Hoeveel elementen gelijk zijn aan `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | `(sort sequence predicate)` van CL. Een stabiele, niet-destructieve sortering. `cmp` is `true` wanneer "het eerste argument strikt vóór het tweede komt" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | Het eerste paar waarvan de `car` gelijk is aan `k`. Haal de waarde eruit met `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | Het eerste paar waarvan de `car` gelijk is aan `k`. Haal de waarde eruit met `(cdr p)` |
 
 Deze en veel van de functies uit hoofdstuk 5 nemen ook de keyword-argumenten van CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (hoofdstuk 6).
@@ -207,8 +208,8 @@ Allemaal generieke functies op `Iter`, zoals in hoofdstuk 4. Resulterende collec
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Zoals `member` een **`bool`** (een iterator heeft geen staart om terug te geven) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | De ontkenningen van `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | Dezelfde types als de positieve versies | Versies met het predicaat ontkend |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Verwijdert op waarde |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | Verwijdert duplicaten. Net als in CL **blijft het laatste voorkomen behouden** (`:from-end true` behoudt het eerste) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | Verwijdert op waarde |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | Verwijdert duplicaten. Net als in CL **blijft het laatste voorkomen behouden** (`:from-end true` behoudt het eerste) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | Vervangt op waarde / predicaat |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | op `Iter<cons-cell<K,V>>` | De predicaat- en waardezijdeversies van `assoc` |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | Voegt een paar vooraan toe |
@@ -219,14 +220,14 @@ Allemaal generieke functies op `Iter`, zoals in hoofdstuk 4. Resulterende collec
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | Beeldt af over opeenvolgende **staarten** |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Beeldt af over staarten voor neveneffecten (de `maplist`-tegenhanger van `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Beeldt af over staarten en voegt samen (de `maplist`-tegenhanger van `mapcan`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | De positie waar `sub` het eerst voorkomt. Is de ontvanger een `string`, dan wordt de `string`-methode gekozen ([Strings](collections.md#1-strings-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | De eerste positie waar ze verschillen. `none` als ze gelijk zijn |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | De positie waar `sub` het eerst voorkomt. Is de ontvanger een `string`, dan wordt de `string`-methode gekozen ([Strings](collections.md#1-strings-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | De eerste positie waar ze verschillen. `none` als ze gelijk zijn |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Samenvoegen. CL vereist gesorteerde invoer; dit sorteert de aaneenschakeling |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Voegt `x` **vooraan** toe als het er niet is |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | Verzamelingsbewerkingen. CL specificeert de volgorde niet; hier is ze stabiel, **in volgorde van eerste voorkomen** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | Insluiting |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Of het een suffix is / het deel vóór de suffix. CL vraagt naar **gedeelde structuur**, maar er is geen structuur om te delen, dus dit vraagt naar een suffix **als waarden** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | Elementgewijze gelijkheid. `Vector<T>` zelf implementeert `Eq` niet |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Voegt `x` **vooraan** toe als het er niet is |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Verzamelingsbewerkingen. CL specificeert de volgorde niet; hier is ze stabiel, **in volgorde van eerste voorkomen** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | Insluiting |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Of het een suffix is / het deel vóór het suffix. CL vraagt naar **gedeelde structuur**, maar er is geen structuur om te delen, dus wordt gevraagd of het een suffix is met `eql` elementen |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | `equal` per element. `Vector<T>` zelf heeft geen `Equal`-implementatie |
 | `caar`…`cddddr` | `(cadr p)` | op geneste paren | De 28 functies van CL. Ze doorlopen **paren, geen lijsten**: `cadr` neemt een `cons-cell<A,cons-cell<B,C>>` |
 
 Wat CL heeft en deze taal niet: `list*` (er is geen begrip van een onechte lijst waarvan de staart is
@@ -246,7 +247,7 @@ De functies van hoofdstuk 4 en 5 nemen de sequentiekeywords van CL `:key` / `:te
 | Keyword | Type | Betekenis |
 |---|---|---|
 | `:key` | `(fn (A) A)` | Een projectie die op elk element wordt toegepast vóór het vergelijken of testen |
-| `:test` | `(fn (A A) bool)` | Een gelijkheidstest die wordt gebruikt in plaats van `equals` uit de `Eq`-bound. Het eerste argument is **het item waarnaar wordt gezocht**, het tweede is het element (na `:key`), in dezelfde volgorde als in CL |
+| `:test` | `(fn (A A) bool)` | Een gelijkheidstest die in plaats van de standaard `eql` wordt gebruikt (`:test equal` enzovoort). Het eerste argument is **het gezochte item**, het tweede het element (na `:key`), in dezelfde volgorde als CL |
 | `:test-not` | `(fn (A A) bool)` | De ontkenning van `:test` |
 | `:start` `:end` | `int` | Het venster `[start, end)` dat wordt gescand. Indexen zijn relatief aan de hele sequentie |
 | `:from-end` | `bool` | Een zoekopdracht antwoordt met de **laatste** match. Gecombineerd met `:count` worden de getroffen elementen van het einde af genomen |

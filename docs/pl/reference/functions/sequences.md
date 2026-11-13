@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Pary, S-wyrażenia i sekwencje
 
 Generyczna para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach napisane
@@ -129,17 +129,18 @@ Indeksowanie, długość i wycinanie:
 | `last` | `(last it)` | `Iter<A>→Option<A>` | Ostatni **element** (a nie „ostatnia komórka" jak w CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | Wszystko poza ostatnim elementem |
 
-Funkcje wymagające ograniczenia `Eq` / `Ord` (porównują za pomocą traitu zamiast predykatu;
-[Traity standardowe](traits.md#2-eq--ord-porównywanie)):
+Funkcje, które szukają elementu. Bez `:test` porównują przez `eql`, jak w CL. `eql` porównuje liczby i znaki
+według wartości, a resztę według tożsamości, więc dwa osobno utworzone łańcuchy lub listy o tej samej
+zawartości nie są równe. Aby porównywać według zawartości, pisze się `:test equal` (rozdział 6):
 
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | Czy istnieje element równy `x` (w przeciwieństwie do CL, `bool`, a nie reszta listy) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | Pierwszy element równy `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | Pierwsza pozycja równa `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | Ile elementów jest równych `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | Czy istnieje element równy `x` (w przeciwieństwie do CL, `bool`, a nie reszta listy) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | Pierwszy element równy `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | Pierwsza pozycja równa `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | Ile elementów jest równych `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | `(sort sequence predicate)` z CL. Stabilne, niedestrukcyjne sortowanie. `cmp` to `true`, gdy „pierwszy argument znajduje się ściśle przed drugim" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | Pierwsza para, której `car` jest równe `k`. Wartość wyjmuje się za pomocą `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | Pierwsza para, której `car` jest równe `k`. Wartość wyjmuje się za pomocą `(cdr p)` |
 
 Te funkcje i wiele funkcji z rozdziału 5 przyjmują także argumenty kluczowe z CL: `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (rozdział 6).
@@ -202,8 +203,8 @@ Wszystkie są funkcjami generycznymi na `Iter`, jak w rozdziale 4. Wynikowe kole
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Jak `member`, **`bool`** (iterator nie ma ogona do zwrócenia) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Negacje `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | Te same typy co wersje pozytywne | Wersje z zanegowanym predykatem |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Usuwa według wartości |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | Usuwa duplikaty. Jak w CL, **zachowywane jest ostatnie wystąpienie** (`:from-end true` zachowuje pierwsze) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | Usuwa według wartości |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | Usuwa duplikaty. Jak w CL, **zachowywane jest ostatnie wystąpienie** (`:from-end true` zachowuje pierwsze) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | Zastępuje według wartości / predykatu |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | na `Iter<cons-cell<K,V>>` | Wersje `assoc` z predykatem i po stronie wartości |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | Dodaje parę z przodu |
@@ -214,14 +215,14 @@ Wszystkie są funkcjami generycznymi na `Iter`, jak w rozdziale 4. Wynikowe kole
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | Odwzorowuje po kolejnych **ogonach** |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Odwzorowuje po ogonach dla efektów ubocznych (odpowiednik `maplist` dla `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Odwzorowuje po ogonach i łączy (odpowiednik `maplist` dla `mapcan`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Pozycja, w której `sub` pojawia się po raz pierwszy. Jeśli odbiorcą jest `string`, wybierana jest metoda `string` ([Łańcuchy znaków](collections.md#1-łańcuchy-znaków-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | Pierwsza pozycja, w której się różnią. `none`, jeśli są równe |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Pozycja, w której `sub` pojawia się po raz pierwszy. Jeśli odbiorcą jest `string`, wybierana jest metoda `string` ([Łańcuchy znaków](collections.md#1-łańcuchy-znaków-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Pierwsza pozycja, w której się różnią. `none`, jeśli są równe |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Scalanie. CL wymaga posortowanych wejść; ta funkcja sortuje konkatenację |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Dodaje `x` **z przodu**, jeśli go nie ma |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | Operacje na zbiorach. CL nie określa kolejności; tutaj jest stabilna, **w kolejności pierwszego wystąpienia** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | Zawieranie |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Czy jest sufiksem / część przed sufiksem. CL pyta o **współdzieloną strukturę**, ale nie ma struktury do współdzielenia, więc ta funkcja pyta o sufiks **jako wartości** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | Równość element po elemencie. Sam `Vector<T>` nie implementuje `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Dodaje `x` **z przodu**, jeśli go nie ma |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Operacje na zbiorach. CL nie określa kolejności; tutaj jest stabilna, **w kolejności pierwszego wystąpienia** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | Zawieranie |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Czy to sufiks / część przed sufiksem. CL pyta o **współdzieloną strukturę**, ale nie ma struktury do współdzielenia, więc pyta, czy to sufiks o elementach `eql` |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | `equal` element po elemencie. Sam `Vector<T>` nie ma implementacji `Equal` |
 | `caar`…`cddddr` | `(cadr p)` | na zagnieżdżonych parach | 28 funkcji z CL. Przechodzą po **parach, a nie listach**: `cadr` przyjmuje `cons-cell<A,cons-cell<B,C>>` |
 
 Czego CL ma, a ten język nie: `list*` (nie ma pojęcia listy niewłaściwej z zastąpionym ogonem),
@@ -241,7 +242,7 @@ Funkcje z rozdziałów 4 i 5 przyjmują słowa kluczowe sekwencji z CL: `:key` /
 | Słowo kluczowe | Typ | Znaczenie |
 |---|---|---|
 | `:key` | `(fn (A) A)` | Projekcja stosowana do każdego elementu przed porównaniem lub testem |
-| `:test` | `(fn (A A) bool)` | Test równości używany zamiast `equals` z ograniczenia `Eq`. Pierwszym argumentem jest **poszukiwany element**, drugim element (po `:key`), w tej samej kolejności co w CL |
+| `:test` | `(fn (A A) bool)` | Test równości używany zamiast domyślnego `eql` (`:test equal` itd.). Pierwszym argumentem jest **szukany element**, drugim element (po `:key`), w tej samej kolejności co w CL |
 | `:test-not` | `(fn (A A) bool)` | Negacja `:test` |
 | `:start` `:end` | `int` | Okno `[start, end)` do przeszukania. Indeksy są względne wobec całej sekwencji |
 | `:from-end` | `bool` | Wyszukiwanie odpowiada **ostatnim** dopasowaniem. W połączeniu z `:count` elementy, których dotyczy działanie, są brane od końca |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Zeichenketten, Zeichen und Sammlungen
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` und `Deque<T>`.
@@ -81,7 +81,7 @@ ebenfalls als `#(1 2 3)`.
 | `len` | `(len v)` | `Vector<T>→int` | Anzahl der Elemente |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | Entfernt das letzte Element und gibt es zurück. `none`, wenn leer (anders als `get`/`set` kein Panic) (eine Methode des Traits [`Pop`](traits.md#5-der-trait-pop-elemente-entnehmen)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Erzeugt einen Iterator, der `Iter` implementiert |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Hängt `x` an, wenn kein gleiches Element existiert (CLs `pushnew`. Es muss keinen Ort umschreiben, daher ist es eine Methode statt eines Makros) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Hängt `x` an, wenn kein zu ihm `eql` Element vorhanden ist (CLs `pushnew`. Es muss keinen Ort umschreiben, daher eine Methode statt eines Makros) |
 
 `map`/`filter` und Verwandte sind [Sequenzfunktionen](sequences.md#4-sequenzfunktionen-auf-iter): Man übergibt
 den Vektor über `iter`, wie in `(map (iter v) f)`. Destruktive Operationen (`nreverse`, `delete` usw.) stehen
@@ -91,7 +91,7 @@ unter [Destruktive Operationen](sequences.md#7-destruktive-operationen).
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | Erzeugt eine leere Tabelle |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | Legt eine leere Tabelle an. `:test` ist, wie Schlüssel verglichen werden (Tabelle unten); ohne es `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | Nachschlagen |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | Einfügen oder überschreiben |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | Entfernt den Eintrag und gibt den alten Wert zurück, falls vorhanden |
@@ -104,40 +104,51 @@ unter [Destruktive Operationen](sequences.md#7-destruktive-operationen).
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CLs `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CLs `hash-table-size`. Bei dieser Tabelle die Anzahl der belegten Einträge (gleich `count`) |
 
-**Jeder Typ, der `Hash` implementiert, kann Schlüssel sein**, auch `defstruct`/`defenum`-Typen.
-`get`/`set`/`remove` tragen `(:where (Hash K))`, daher ist eine Tabelle, deren Schlüsseltyp ihn nicht
-implementiert, ein **Typfehler** (`f64` hat wegen `NaN` kein `Hash`).
+Wie Schlüssel verglichen werden, wählt man wie bei CLs `make-hash-table` beim Anlegen mit `:test`.
+`:test` nimmt eines von `eq`, `eql`, `equal` und `equalp` (als `'equal` oder `equal` geschrieben).
+
+| `:test` | Wie Schlüssel verglichen werden | Schlüsseltypen |
+|---|---|---|
+| `eql` (Standard) | Zahlen und Zeichen nach Wert, alles andere nach Identität | Jeder Typ |
+| `eq` | Nach Identität | Jeder Typ |
+| `equal` | Mit `equal` (`Equal`) und dem Hash `sxhash` (`Hash`) des Schlüsseltyps | Typen, die `Hash` implementieren |
+| `equalp` | Mit `equalp` (Strings ohne Groß-/Kleinschreibung, Structs Slot für Slot) | Jeder Typ |
+
+Der Standard ist `eql`, daher sind zwei getrennt erzeugte Strings mit gleichem Inhalt zwei Schlüssel. Für
+String-Schlüssel schreibt man `(HashTable::new :test 'equal)`. Implementiert der Schlüsseltyp einer
+`equal`-Tabelle `Hash` nicht, ist das ein **Typfehler** an der Stelle, an der die Tabelle angelegt wird
+(`f64` hat wegen `NaN` kein `Hash`).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; gibt einen nicht negativen Wert zurück, der in eine Fixnum passt
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; liefert einen nicht-negativen Wert, der in ein Fixnum passt
 ```
 
-Implementiert für: `int` und die sechs Ganzzahltypen fester Breite, `bool`, `char`, `string` und `symbol`
-(nicht für Gleitkommazahlen). Bei eigenen Typen hält man das Ergebnis nicht negativ, indem man es mit
-`*sxhash-mask*` (2^30-1) per `logand` verknüpft. Um eine Zeichenkette zu hashen, kann man
-`(sxhash-string s)` (32-Bit-FNV-1a) aufrufen, das die Implementierung für `string` verwendet.
+`Hash` ist implementiert für: `int` und die sechs Ganzzahlen fester Breite, `bool`, `char`, `string`,
+`symbol` (nicht für Gleitkommazahlen). Bei eigenen Typen hält man das Ergebnis nicht-negativ, indem man es
+mit `*sxhash-mask*` (2^30-1) per `logand` verknüpft. Um einen String zu hashen, kann man
+`(sxhash-string s)` (FNV-1a 32bit) aufrufen, das die `string`-Implementierung verwendet.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-Ob zwei Schlüssel derselbe sind, entscheidet **der Schlüsseltyp selbst** (`sxhash` und `equals` aus `Eq`, dem
-Obertrait von `Hash`), nicht die Identität der Objekte. Deshalb kann man wie oben mit einem Schlüssel
-nachschlagen, der „ein anderer Wert, aber gleich“ ist.
+In einer `equal`-Tabelle entscheidet **der Schlüsseltyp selbst** (`sxhash` und `equal` aus `Equal`, dem
+Supertrait von `Hash`), ob zwei Schlüssel gleich sind, nicht die Objektidentität. Deshalb findet wie oben
+ein Schlüssel, der „ein anderer Wert, aber gleich" ist, den Eintrag.
 
-Kollisionen von `sxhash` sind in Ordnung (der Vertrag von `Hash` gilt nur in eine Richtung: gleiche Werte
-müssen denselben Hash haben). Kollidierende Schlüssel werden durch `equals` unterschieden.
+Kollisionen von `sxhash` sind erlaubt (der Vertrag von `Hash` gilt in die andere Richtung: er sagt nur,
+dass Werte, die `equal` sind, denselben Hash haben). Kollidierende Schlüssel werden durch `equal` unterschieden.
 
 ## 5. `Array<T>` (mehrdimensionale Arrays)
 
@@ -194,13 +205,13 @@ Eine Bitfolge fester Länge. Ein `defstruct` der Standardbibliothek.
 
 ## 7. `HashSet<T>`
 
-Eine Sammlung von Elementen ohne Duplikate (Rusts `HashSet`). Ein `defstruct` der
-Standardbibliothek, dessen Inhalt eine `HashTable<T,()>` ist. Der Elementtyp muss `Hash`
-implementieren, wie ein Schlüssel einer `HashTable`.
+Eine Sammlung von Elementen ohne Duplikate (Rusts `HashSet`). Ein `defstruct` der Standardbibliothek,
+dessen Inhalt eine `HashTable<T,()>` ist. Wie Elemente verglichen werden, bestimmt `:test` wie bei den
+Schlüsseln einer `HashTable`; in einer `equal`-Menge muss der Elementtyp `Hash` implementieren.
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | Erzeugt eine leere Menge. Das Typargument ergibt sich aus dem erwarteten Typ |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | Legt eine leere Menge an. Das Typargument kommt aus dem erwarteten Typ. `:test` wie bei `HashTable`; ohne es `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Fügt `x` hinzu. `true`, wenn es neu war, `false`, wenn es schon da war |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Ob `x` enthalten ist |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Entfernt `x`. `true`, wenn es enthalten war |
@@ -211,7 +222,7 @@ implementieren, wie ein Schlüssel einer `HashTable`.
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

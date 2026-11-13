@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -141,7 +141,7 @@ En el código fuente, los tipos se escriben como símbolos o listas normales.
   firma.
 - **Tipos tupla**: `#{int string}` (la misma forma que los valores). Una tupla tiene de 1 a 12
   elementos, y un tipo tupla también puede ser argumento de tipo (`Vector<#{int string}>`). Los
-  elementos se leen con `t::0` `t::1` y se cambian con `(setf t::0 v)`. `Eq`, `Ord` (comparando
+  elementos se leen con `t::0` `t::1` y se cambian con `(setf t::0 v)`. `Equal`, `Ord` (comparando
   desde el primer elemento), `Hash` y `print-object` están disponibles cuando todos los tipos de
   elemento los implementan.
 - **Nombres de tipo calificados**: se pueden calificar con `::`, como en `module::Type`.
@@ -953,17 +953,17 @@ elemento es un nombre de trait simple o, si ese trait tiene tipos asociados, `(T
 **todos sus tipos asociados fijados**.
 
 ```lisp
-(deftrait Eq () ...)                       ; sin supertraits
-(deftrait Ord (Eq) ...)                    ; el trait Ord: Eq de Rust
+(deftrait Equal () ...)                       ; sin supertraits
+(deftrait Ord (Equal) ...)                    ; el trait Ord: PartialEq de Rust
 (deftrait CharSource ((Iter (Item char)))  ; fijar un tipo asociado
   (defmethod rewind (self) ()))
 ```
 
-La herencia tiene tres efectos. (1) `impl Ord X` exige que `impl Eq X` se escriba **antes** (una regla sobre el
+La herencia tiene tres efectos. (1) `impl Ord X` exige que `impl Equal X` se escriba **antes** (una regla sobre el
 orden de escritura: la única forma que se puede decidir de manera determinista en el REPL y con `load` paso a
-paso, y más estricta que Rust). (2) `(:where (Ord T))` basta para poder llamar también a los métodos de `Eq`.
-(3) Los métodos de `Eq` se pueden llamar a través de un `:dyn Ord`, y un valor `:dyn Ord` se puede pasar tal
-cual donde se exige un `:dyn Eq` (conversión ascendente). Que un subtrait vuelva a declarar un método con el
+paso, y más estricta que Rust). (2) `(:where (Ord T))` basta para poder llamar también a los métodos de `Equal`.
+(3) Los métodos de `Equal` se pueden llamar a través de un `:dyn Ord`, y un valor `:dyn Ord` se puede pasar tal
+cual donde se exige un `:dyn Equal` (conversión ascendente). Que un subtrait vuelva a declarar un método con el
 mismo nombre que su padre, y heredar métodos con el mismo nombre de dos padres, son ambos errores (una vtable
 tiene una ranura por nombre). La herencia en diamante se funde en una sola ranura.
 
@@ -1024,8 +1024,8 @@ Una firma sin cuerpo no puede tener docstring: una cadena final sería ella mism
 implementación por defecto, así que no se podrían distinguir.
 
 Los traits que ofrece la biblioteca estándar: **`Iter`** (`next` / tipo asociado `Item`; la base de `doiter` y
-de las funciones de secuencia), **`Eq`** (`equals`; `not-equals` es una implementación por defecto),
-**`Ord`** (hereda `Eq`; solo hay que implementar `less`, y `less-equal` / `greater` / `greater-equal` son
+de las funciones de secuencia), **`Equal`** (el trait que usa `equal`),
+**`Ord`** (hereda `Equal`; solo hay que implementar `less`, y `less-equal` / `greater` / `greater-equal` son
 implementaciones por defecto), **`Error`** (`message` / `source`; `:dyn Error` para manejar los tipos de error
 de forma uniforme), **`print-object`** (una representación impresa por tipo), **`Pathish`** (designadores de
 nombres de ruta: una cadena o un `pathname`) y la jerarquía de streams **`Stream`** → **`InputStream`** /
@@ -1261,10 +1261,10 @@ ejemplos están en
 ### 3.16 `#[test]` — funciones de prueba
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 Un `defun` marcado con `#[test]` es una función de prueba, que `typl test` llama de una en una (igual que `#[test]` de Rust). No debe recibir argumentos y debe devolver `()` o `Result<(), E>` (tampoco puede recibir parámetros de tipo). No necesita `pub`. Una prueba que devuelve un `Result` falla al devolver un `err`, y el error se muestra, así que `E` debe implementar `Error` o `print-object` (igual que Rust pide `Debug` al tipo de error de una prueba). Un `Error` se muestra con `describe-error` (el mensaje y su cadena de causas), y cualquier otra cosa con `print-object`. `:dyn Error` también es un `Error`, así que una prueba puede reunir errores distintos en un solo tipo y devolverlo.
@@ -1280,7 +1280,7 @@ Un `defun` marcado con `#[test]` es una función de prueba, que `typl test` llam
 
 - **Una ejecución normal y `compile-file` la omiten**, sin siquiera comprobar su contenido (igual que Rust compila las pruebas solo con `--test`). El propio programa no puede llamar a una función de prueba.
 - Una prueba puede escribirse en cualquier archivo que contenga funciones, dentro de cualquier `module`. También pueden guardarse aparte en la carpeta `tests/` del proyecto.
-- Una prueba falla por un `panic`, por un error en tiempo de ejecución o al devolver un `err`. Se comprueba con `assert`, o con `assert-eq`, que imprime ambos lados ([Sistema](functions/system.md)). Aunque una prueba falle, las demás siguen ejecutándose.
+- Una prueba falla por un `panic`, por un error en tiempo de ejecución o al devolver un `err`. Se comprueba con `assert`, o con `assert-equal`, que imprime ambos lados ([Sistema](functions/system.md)). Aunque una prueba falle, las demás siguen ejecutándose.
 
 ```sh
 typl test                 # ejecuta todas las pruebas del proyecto de esta carpeta
@@ -1303,7 +1303,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1422,11 +1422,11 @@ Clases de patrones:
   así que escríbela entre paréntesis, como en `(circle r)`
 - **Literales inmediatos**: enteros / `true`/`false` / caracteres — se comparan como palabras
 - **Literales de valor**: cadenas / números de coma flotante / símbolos (`'foo`) / enteros bignum / ratios — se
-  comparan por valor con el `Eq::equals` de ese tipo ([Traits estándar](functions/traits.md#2-eq--ord-comparación)).
+  comparan por valor con el `equal` de ese tipo ([Traits estándar](functions/traits.md#2-equal--ord-comparación)).
   Las cadenas se comparan por contenido, no por identidad
-- `(:= expr)` — evalúa cualquier expresión y compara con `Eq::equals`. La única forma de comparar tipos que no
+- `(:= expr)` — evalúa cualquier expresión y compara con `equal`. La única forma de comparar tipos que no
   tienen sintaxis literal (instancias de `defstruct`, globales, resultados calculados), y una implementación de
-  `Eq` definida por el usuario se convierte tal cual en la regla de comparación. `expr` se puede referir a
+  `Equal` definida por el usuario se convierte tal cual en la regla de comparación. `expr` se puede referir a
   cualquier cosa visible desde la posición de la rama (argumentos, enlaces exteriores, globales)
 - `(Ctor sub-pattern...)` — patrones de constructor (`(some x)` `(none)` `(cons a d)` `(ok v)`, etc.)
 - `(Type :slot pattern... :slot...)` — patrones de estructura. Escribe las ranuras después del nombre del
@@ -1448,7 +1448,7 @@ Clases de patrones:
   solo cuerpo, así que cada alternativa debe enlazar las mismas variables con los mismos tipos.
   También puede escribirse dentro de un patrón de constructor (`(some (:or (circle r) (rect r _)))`)
 
-Comparar un tipo que no implementa `Eq` con un literal de valor / `(:= expr)` es un error de tipos (este lenguaje
+Comparar un tipo que no implementa `Equal` con un literal de valor / `(:= expr)` es un error de tipos (este lenguaje
 prefiere decir "no se pueden comparar" a dejar una rama que en silencio nunca coincide).
 
 **Guardas**: escribir `:when condición` tras el patrón elige la rama solo cuando el patrón coincide
@@ -1469,19 +1469,13 @@ condición puede leer las variables que enlazó el patrón.
 - Los patrones o y las guardas se combinan. La guarda se evalúa sea cual sea la alternativa que
   coincidió (`((:or 1 2 3) :when on "small")`).
 
-**Literales de valor contra un valor examinado `Sexpr`**: el `Eq` de `sexpr` es `eq` (la identidad de CL), así
-que los inmediatos (`'foo` (internado) / enteros / caracteres / `true`/`false`) se pueden escribir tal cual y
-coinciden por contenido:
+**Literales de valor frente a un `Sexpr` examinado**: el `equal` de `Sexpr` es el `equal` de CL, así que
+`'foo` / enteros / caracteres / `true`/`false` / cadenas / números de coma flotante / enteros grandes /
+fracciones pueden escribirse tal cual y coinciden por contenido (cadenas por contenido, números con `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Los literales no inmediatos (cadenas / números de coma flotante / enteros bignum / ratios) **no se pueden
-escribir** contra un `Sexpr`. Su `eq` compara la identidad del objeto, lo que daría "una rama que supera la
-comprobación de tipos pero nunca coincide", así que es un error que nombra el patrón de variante: escribe
-`(str "hi")` y se desarma en un `string` que se compara por contenido. `(:= expr)` pide explícitamente `equals`,
-así que esta restricción no se le aplica.
 
 **El valor examinado no tiene por qué ser un ADT.** `string`/`symbol`/`i32`/`f64` y similares se pueden pasar
 a `match` directamente (ahí es donde van los patrones de literales de cadena). Sin embargo, un tipo sin
@@ -1902,7 +1896,7 @@ entre ellas y se pueden compilar con normalidad.
 Lo que **sí** se puede compilar: E/S de streams y archivos, `random`, `gensym`, `symbol->string`/
 `intern`, `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, las
 funciones trascendentes, las operaciones de bits, `catch`/`throw`/`unwind-protect`, los cuatro
-`eq`/`eql`/`equal`/`equalp` (lo que permite compilar `case` para cualquier tipo), toda la familia de impresión
+`eq`/`eql`/`equal`/`equalp`, toda la familia de impresión
 incluidos `print`/`println`/`format`/`pprint` y `pprint-logical-block`, `read` y `eval`. La biblioteca estándar
 se distribuye ya compilada.
 

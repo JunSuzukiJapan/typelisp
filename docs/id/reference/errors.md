@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Pesan Kesalahan
 
 Arti pesan kesalahan utama dari `typl` dan cara memperbaikinya.
@@ -47,7 +47,8 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Tidak ada tipe dengan nama itu. Definisikan tipe sebelum bentuk pertama yang memakainya (tipe tidak punya deklarasi maju). Jika yang Anda maksud variabel tipe, tulis di posisi pendeklarasian seperti `<foo>` setelah nama fungsi ([Referensi Sintaks 3.6](syntax.md#36-defstruct--struct-tipe-buatan-pengguna)) |
 | ``cannot infer type argument `t` for `Vector::new` `` | Argumen tipe tidak dapat ditentukan. Tulis tipenya dengan `the`, seperti `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` tidak menangani setiap varian. Tambahkan cabang untuk varian yang kurang, atau cabang `_` |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Fungsi mensyaratkan trait yang tidak diimplementasikan oleh tipe yang Anda berikan. Tulis `(impl Eq pt ...)` ([Trait Standar](functions/traits.md)) |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | Fungsi mensyaratkan trait yang tidak diimplementasikan oleh tipe yang Anda berikan. Tulis `(impl Equal pt ...)` ([Trait Standar](functions/traits.md)) |
+| ``equal: `pt` does not implement `Equal` `` | `equal` ditulis untuk tipe yang tidak mengimplementasikan `Equal`. Tulis `(impl Equal pt ...)`, atau gunakan `eq`/`eql`, yang membandingkan berdasarkan identitas, atau `equalp`, yang membandingkan berdasarkan struktur |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Nilai bertipe yang tidak mengimplementasikan trait diberikan di tempat yang mengharapkan `:dyn`. Tulis `impl`-nya |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Nama trait ditulis di tempat tipe. Tulis `:dyn Error` |
 | ``if: (if cond then else)`` | `if` memiliki bentuk yang salah. `if` mensyaratkan cabang else. Jika tidak memerlukannya, gunakan `when` |

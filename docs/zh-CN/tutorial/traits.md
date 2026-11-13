@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # trait
 
 trait 是"这个类型支持这些操作"的约定。它让多个类型拥有同名的操作，从而使用这些操作的函数不必为每个类型分别编写。
@@ -92,19 +92,19 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | trait | 要实现的方法 | 可以使用的功能 |
 |---|---|---|
-| `Eq` | `equals` | `member`、`find`、`position`、`match` 的 `(:= 式)` 模式等 |
-| `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 继承 `Eq` |
+| `Equal` | `equal` | `equal`、`=`、`assert-equal`、`match` 的 `(:= 表达式)` 模式、传入 `:test equal` 的 `member` 等 |
+| `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 继承 `Equal` |
 | `print-object` | `print-object` | `println` 等显示时的形式 |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` 等 |
 | `Error` | `message`、`source` | 作为错误类型使用（[错误处理](errors.md)） |
 
-为表示金额的类型实现 `Eq` 和 `Ord`。`Ord` 继承 `Eq`，所以要先写 `Eq` 的 `impl`。
+为表示金额的类型实现 `Equal` 和 `Ord`。`Ord` 继承 `Equal`，所以要先写 `Equal` 的 `impl`。
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -177,7 +177,7 @@ total 9
 
 可以放入的类型的准确列表见[语法参考 3.9](../reference/syntax.md#39-deftrait--impl--trait-机制)。
 
-也有不能用于 `:dyn` 的 trait：方法在 `self` 以外的参数或返回值中使用 `Self` 的情况（如 `Eq` 的 `equals`）。
+也有不能用于 `:dyn` 的 trait：方法在 `self` 以外的参数或返回值中使用 `Self` 的情况（如 `Equal` 的 `equal`）。
 因为类型要到运行时才知道，无法准备"同一类型的值"。
 
 ## 6. 限制

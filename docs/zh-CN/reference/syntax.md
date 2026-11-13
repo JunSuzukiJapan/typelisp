@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -77,7 +77,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **函数类型**：`(fn (参数类型...) 返回值类型)`。带可变参数的函数类型为 `(fn (参数类型... &rest 元素类型) 返回值类型)`。
 - **泛型类型**：`Name<T1,T2,...>`。例如：`Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。名字之后紧接的 `<` 后面跟着类型时，读取器把直到对应 `>` 的部分作为类型参数读取。类型参数内部可以用空白或换行分隔（`HashTable<string, int>`），也可以写 unit 类型 `()`（`Result<(), FileError>`）、`:dyn Trait` 和元组类型。`<` 之后不是类型时，这个 `<` 是名字的一部分（`<=`、`string<`）。类型参数没有用 `>` 闭合或不具有类型的形状时，是读取错误（`(a<b c)` 也作为类型参数 `b c` 的错误而成为读取错误）。`()` 也可以作为字段类型、参数类型使用。
 - **泛型类型的应用形式**：`(Name T1 T2 ...)` —— 指代与 `Name<T1,T2,...>` 相同类型的列表写法。例如 `(vector char)` 与 `Vector<char>` 相同。名字形式是通常的写法，这种形式**是为类型参数无法写进名字的情况准备的**——类型参数本身是类型表达式，但在 `<..>` 中只能写名字、`()`、`:dyn` 和元组类型，不能写函数类型（`Vector<(fn (i32) i32)>` 是读取错误；用 `deftype` 给函数类型起名后可以写 `Vector<F>`）。实现显示类型时也可能以这种形式出现，例如把 trait 的关联类型代入签名的结果。
-- **元组类型**：`#{int string}`（与值的形状相同）。元素为 1～12 个，元组类型也可以作为泛型类型的参数（`Vector<#{int string}>`）。元素用 `t::0` `t::1` 读取，用 `(setf t::0 v)` 修改。当所有元素的类型都实现了 `Eq`、`Ord`（从第一个元素起依次比较）、`Hash`、`print-object` 时，即可使用它们。
+- **元组类型**：`#{int string}`（与值的形状相同）。元素为 1～12 个，元组类型也可以作为泛型类型的参数（`Vector<#{int string}>`）。元素用 `t::0` `t::1` 读取，用 `(setf t::0 v)` 修改。当所有元素的类型都实现了 `Equal`、`Ord`（从第一个元素起依次比较）、`Hash`、`print-object` 时，即可使用它们。
 - **限定类型名**：可以像 `module::Type` 这样用 `::` 限定。
 - **trait 对象类型**：`:dyn Trait`（以空白分隔的两个词构成一个类型）。表示具体类型在运行时确定的值，trait 方法的调用经由
   vtable 进行动态分派。有关联类型的 trait 按声明顺序以位置固定（`:dyn Iter<i32>` 把 `Item` 固定为 `i32`）。也可以写在泛型参数
@@ -748,15 +748,15 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 `(Trait (Assoc Type))`。
 
 ```lisp
-(deftrait Eq () ...)                       ; 没有继承
-(deftrait Ord (Eq) ...)                    ; Rust 的 trait Ord: Eq
+(deftrait Equal () ...)                       ; 没有继承
+(deftrait Ord (Equal) ...)                    ; Rust 的 trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; 固定关联类型
   (defmethod rewind (self) ()))
 ```
 
-继承有 3 个效果。(1) `impl Ord X` 要求**先**写 `impl Eq X`（关于书写顺序的规则。是在 REPL 和逐个 `load` 中都能确定地判断的唯一
-形式，比 Rust 更严格）。(2) 只要 `(:where (Ord T))` 就能调用 `Eq` 的方法。(3) 可以从 `:dyn Ord` 调用 `Eq` 的方法，`:dyn Ord` 的值
-可以直接传给要求 `:dyn Eq` 的位置（向上转换）。子 trait 重新声明与父同名的方法，以及从两个父继承同名的方法，都是错误（vtable 的槽
+继承有 3 个效果。(1) `impl Ord X` 要求**先**写 `impl Equal X`（关于书写顺序的规则。是在 REPL 和逐个 `load` 中都能确定地判断的唯一
+形式，比 Rust 更严格）。(2) 只要 `(:where (Ord T))` 就能调用 `Equal` 的方法。(3) 可以从 `:dyn Ord` 调用 `Equal` 的方法，`:dyn Ord` 的值
+可以直接传给要求 `:dyn Equal` 的位置（向上转换）。子 trait 重新声明与父同名的方法，以及从两个父继承同名的方法，都是错误（vtable 的槽
 每个名字一个）。菱形继承会合并为一个槽。
 
 **默认实现**：在签名后写函数体，`impl` 省略该方法时就使用它。函数体在写下 trait 的**模块的命名空间**中解析，所以也可以调用该模块
@@ -802,8 +802,7 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 （`(deftrait Name () "doc" (:type ...) (method ...)...)`）。没有函数体的签名不能写文档字符串——末尾的字符串本身会成为默认实现的
 返回值，两者无法区分。
 
-标准库提供的 trait：**`Iter`**（`next`／关联类型 `Item`。`doiter`／序列函数的基础）、**`Eq`**（`equals`。`not-equals` 是默认
-实现）、**`Ord`**（继承 `Eq`。只有 `less` 必须实现，`less-equal`／`greater`／`greater-equal` 是默认实现）、**`Error`**
+标准库提供的 trait：**`Iter`**（`next`／关联类型 `Item`。`doiter`／序列函数的基础）、**`Equal`** （`equal` 所用的 trait）、**`Ord`**（继承 `Equal`。只有 `less` 必须实现，`less-equal`／`greater`／`greater-equal` 是默认实现）、**`Error`**
 （`message`／`source`。统一处理错误类型的 `:dyn Error`）、**`print-object`**（按类型的打印表示）、**`Pathish`**（路径名指定符＝
 字符串或 `pathname`）、流的层次 **`Stream`** → **`InputStream`**／**`OutputStream`** → **`CharInput`**／**`CharOutput`** →
 **`PeekInput`**。哪些类型实现了哪些 trait 见 [types.md](types.md)，各 trait 的方法见[标准 trait](functions/traits.md)、
@@ -975,10 +974,10 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 ### 3.16 `#[test]` — 测试函数
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()` 或 `Result<(), E>`（也不能有类型参数）。不需要 `pub`。返回 `Result` 的测试在返回 `err` 时失败，并显示该错误，因此 `E` 必须实现 `Error` 或 `print-object`（与 Rust 要求测试的错误类型实现 `Debug` 相同）。是 `Error` 时用 `describe-error`（消息及原因链）显示，否则用 `print-object` 显示。`:dyn Error` 也是 `Error`，因此可以把各种错误归为一个类型返回。
@@ -994,7 +993,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 
 - **普通运行和 `compile-file` 会跳过它**，连内容也不检查（与 Rust 只在 `--test` 时编译测试相同）。程序本身无法调用测试函数。
 - 测试可以写在任何放置函数的文件中、任何 `module` 之内。也可以单独写在项目的 `tests/` 文件夹里。
-- 失败指 `panic`、运行时错误和返回 `err`。用 `assert`，或会打印两边的 `assert-eq`（[系统](functions/system.md)）来检查。即使一个测试失败，其余测试也会继续运行。
+- 失败指 `panic`、运行时错误和返回 `err`。用 `assert`，或会打印两边的 `assert-equal`（[系统](functions/system.md)）来检查。即使一个测试失败，其余测试也会继续运行。
 
 ```sh
 typl test                 # 运行此文件夹中项目的全部测试
@@ -1017,7 +1016,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1121,10 +1120,10 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - 裸变体名 —— 匹配不带参数的变体（`(match c (red 1) (blue 2))`）。用裸名写带字段的变体会得到参数个数错误，所以像 `(circle r)`
   这样用括号写
 - **立即值字面量**：整数 / `true`/`false` / 字符 —— 按字比较
-- **值字面量**：字符串 / 浮点数 / 符号（`'foo`）/ 多精度整数 / ratio —— 用该类型的 `Eq::equals`
-  （[标准 trait](functions/traits.md#2-eq--ord比较)）按值比较。字符串比较的是内容，而不是同一性
-- `(:= expr)` —— 求值任意式子，用 `Eq::equals` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
-  用户定义的 `Eq` 实现直接成为比较规则。`expr` 可以引用从该分支位置可见的任何东西（参数、外层绑定、全局变量）
+- **值字面量**：字符串 / 浮点数 / 符号（`'foo`）/ 多精度整数 / ratio —— 用该类型的 `equal`
+  （[标准 trait](functions/traits.md#2-equal--ord比较)）按值比较。字符串比较的是内容，而不是同一性
+- `(:= expr)` —— 求值任意式子，用 `equal` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
+  用户定义的 `Equal` 实现直接成为比较规则。`expr` 可以引用从该分支位置可见的任何东西（参数、外层绑定、全局变量）
 - `(Ctor sub-pattern...)` —— 构造函数模式（`(some x)` `(none)` `(cons a d)` `(ok v)` 等）
 - `(Type :slot pattern... :slot...)` — 结构体模式。在类型名之后用关键字写槽。关键字后面是模式时，
   用该模式匹配这个槽；后面是关键字或结束时，把槽绑定到同名的变量。没写的槽不参与匹配（不依赖字段的
@@ -1141,7 +1140,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `#{p0 p1 ...}` —— 元组模式。逐个元素用子模式匹配。对 `Sexpr` 而言，只匹配元素个数相同的 `#{..}` 数据
 - `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(some (:or (circle r) (rect r _)))`）
 
-用值字面量／`(:= expr)` 比较没有实现 `Eq` 的类型是类型错误（比起留下悄悄不匹配的分支，选择说明无法比较）。
+用值字面量／`(:= expr)` 比较没有实现 `Equal` 的类型是类型错误（比起留下悄悄不匹配的分支，选择说明无法比较）。
 
 **守卫**：在模式后面写 `:when 条件`，则只有当模式匹配且条件也为真时才选择该分支。条件为假时尝试下一个分支。条件可以读取模式绑定的变量。
 
@@ -1157,16 +1156,12 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - 带守卫的分支不计入穷尽性检查（与 Rust 相同）。其条件可能为假，所以它本应覆盖的变体还需要一个不带守卫的分支或 `_`。
 - or 模式与守卫可以组合。无论匹配的是哪个选项，都会求值守卫（`((:or 1 2 3) :when on "small")`）。
 
-**对 `Sexpr` 被匹配值的值字面量**：`sexpr` 的 `Eq` 是 `eq`（CL 的同一性），所以立即值——`'foo`（已 intern）/ 整数 / 字符 /
-`true`/`false`——可以直接写，按内容匹配：
+**针对 `Sexpr` 被匹配值的值字面量**：`Sexpr` 的 `equal` 是 CL 的 `equal`，所以 `'foo` / 整数 / 字符 /
+`true`/`false` / 字符串 / 浮点数 / 大整数 / ratio 都可以直接写，并按内容匹配（字符串按内容，数用 `eql`）：
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-不是立即值的字面量（字符串 / 浮点数 / 多精度整数 / ratio）**不能**对 `Sexpr` 书写。它们的 `eq` 比较对象的同一性，会成为"类型能
-通过但永远不匹配的分支"，所以作为点出变体模式的错误——写 `(str "hi")` 就会拆解为 `string` 进行内容比较。`(:= expr)` 明确要求
-`equals`，所以不受这个限制。
 
 **被匹配值不必是 ADT。** `string`/`symbol`/`i32`/`f64` 等可以直接 `match`（那正是字符串字面量模式的用武之地）。但没有变体的类型
 无法通过枚举穷尽，所以 `_`（或者作为通配符的绑定模式）是必需的：
@@ -1518,7 +1513,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 
 **可以**编译的东西：流和文件 I/O、`random`、`gensym`、`symbol->string`/`intern`、`parse-int`/`parse-float`、
 `get-universal-time`/`get-internal-real-time`、`exit`、超越函数、位运算、`catch`/`throw`/`unwind-protect`、
-`eq`/`eql`/`equal`/`equalp` 全部 4 个（`case` 因此也能对所有类型编译）、包括 `print`/`println`/`format`/`pprint` 和
+`eq`/`eql`/`equal`/`equalp` 全部 4 个、包括 `print`/`println`/`format`/`pprint` 和
 `pprint-logical-block` 在内的全部打印功能、`read`，以及 `eval`。标准库以已编译的状态附带。
 
 AOT 可执行文件中只包含程序使用的功能。不打印的程序不包含格式引擎，不调用 `read` 的程序不包含读取器，不调用 `eval` 的程序不包含检查器

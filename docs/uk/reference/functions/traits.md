@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Стандартні трейти
 
 Трейти для ітерації, порівняння, арифметики, додавання та вилучення елементів. Інші стандартні трейти описано у власних розділах: `Hash`
@@ -24,50 +24,56 @@
 для власного типу, його можна обходити через `doiter` як є і передавати в
 [функції над послідовностями](sequences.md#4-функції-над-послідовностями-для-iter).
 
-## 2. `Eq` / `Ord` (порівняння)
+## 2. `Equal` / `Ord` (порівняння)
 
-Вони відповідають `PartialEq`/`PartialOrd` з Rust (названі `Eq`/`Ord`). Їх використовують в обмеженнях
-`:where` узагальнених функцій, щоб вимагати, що типи елементів можна порівнювати (`sort`/`member`/`assoc`
-тощо).
+`Equal` — трейт, яким користується `equal`; він відповідає `PartialEq` у Rust. `Ord` відповідає
+`PartialOrd` у Rust. Їх використовують в обмеженнях `:where` узагальнених функцій, щоб вимагати, аби тип
+елементів можна було порівнювати.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; must be implemented
-  (defmethod not-equals (self (other Self)) bool             ; default implementation
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; inherits from Eq
-  (defmethod less (self (other Self)) bool)                  ; must be implemented
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; обов'язковий
+(deftrait Ord (Equal)                                     ; успадковує Equal
+  (defmethod less (self (other Self)) bool)                  ; обов'язковий
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-Щоб реалізувати `Eq`, пишуть лише `equals`, а для `Ord` — лише `less`. Решту заповнюють типові
-реалізації. `Ord` успадковує `Eq`, тож `impl Eq X` потрібен перед `impl Ord X`.
+Щоб реалізувати `Equal`, пишуть `equal`, а для `Ord` лише `less`. Решту `Ord` доповнюють реалізації за
+замовчуванням. `Ord` успадковує `Equal`, тож перед `impl Ord X` потрібен `impl Equal X`.
 
-Кожен метод трейта можна викликати як функцію як є (всередині обмеження `where (Eq A)`/`(Ord A)` або
+`(equal a b)` викликає реалізацію `Equal` для типу `a`. Написати його для типу, який не реалізує `Equal`, —
+помилка типу. Для порівняння за ідентичністю використовують `eq`/`eql`, за структурою — `equalp`. Ці три
+застосовні до значення будь-якого типу.
+
+Кожен метод трейта можна викликати прямо як функцію (усередині обмеження `where (Equal A)`/`(Ord A)` або
 для конкретного типу, що його реалізує):
 
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | Чи рівні вони (`==` у Rust) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | Чи не рівні вони (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Чи рівні вони (`==` у Rust) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` реалізовано для: усіх числових типів (від `i8` до `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
-`char` `string` `symbol` `complex`, `Sexpr` (`eq`, тобто тотожність; використовується в візерунках
-значень `match`) і `cons-cell<A,B>` (рекурсивно, коли елементи є `Eq`). `Option<T>` і `Result<T,E>` рівні, коли це той самий варіант і їхній вміст рівний за `equals`; список має тип `Option<Sexpr>`, тож його комірки порівнюються за ідентичністю `Sexpr` (для порівняння за вмістом використовуйте `equal`). `Ord` реалізовано для:
-усіх числових типів, `char` `string` і `cons-cell<A,B>` (лексикографічно, коли елементи є
-`Ord`).
+`Equal` реалізовано для: усіх числових типів (від `i8` до `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
+`char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` і кортежів (поелементно, якщо елементи
+`Equal`), а також `Option<T>` і `Result<T,E>` (якщо це той самий варіант і вміст `equal`). Для вбудованих
+типів власний вбудований метод `equal` типу і є реалізацією `Equal`. Числа порівнюються через `=`, рядки —
+за вмістом з урахуванням регістру. `Ord` реалізовано для: усіх числових типів, `char` `string` і
+`cons-cell<A,B>` (лексикографічно, якщо елементи `Ord`).
 
-Назви методів не перетинаються із вбудованими операторами (`= /= < <= > >=`) чи `eq`/`lt`, бо
-вбудовані не можна перевизначити, і кожна реалізація делегує їм. Самі оператори скалярного порівняння —
-це вбудовані методи кожного типу одержувача ([Числа](numbers.md),
-[Рядки та знаки](collections.md)). Усередині обмеження запис операторів читається як методи трейта
-(розділ 3).
+`equal` списку (`Sexpr`) — це `equal` з CL: cons-комірки порівнюються за структурою, рядки — за вмістом,
+будь-який інший атом — через `eql`. Це порівняння обходить значення під час виконання і не викликає жодних
+методів. Тому структура всередині списку, як і в CL, порівнюється за ідентичністю, хоч би який `impl Equal`
+мав її тип.
+
+Імена методів `Ord` не перетинаються з вбудованими операторами (`< <= > >=`) і `lt`, бо вбудоване не можна
+перевизначити, а кожна реалізація делегує їм. Самі скалярні оператори порівняння — вбудовані методи для
+кожного типу отримувача ([Числа](numbers.md), [Рядки й символи](collections.md)). Усередині обмеження
+написаний оператор читається як метод трейта (розділ 3). `=` стає `equal`, а `/=` — `(not (equal a b))`.
 
 ## 3. Арифметичні трейти (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -91,7 +97,7 @@
 
 **Всередині обмеження можна писати оператори.** Коли одержувач — змінна типу, обмежена через `:where`,
 оператори читаються як методи трейта (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -130,7 +136,7 @@
 | `Vector<T>` | Додає в кінець |
 | `Deque<T>` | Додає в кінець (`push-back`) |
 | `Array<T>` | Додає за покажчиком заповнення (`push-extend`). Panic без покажчика заповнення |
-| `HashSet<T>` | Додає до множини (`insert`). Є `Push`, лише коли тип елементів реалізує `Hash` |
+| `HashSet<T>` | Кладе в множину (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

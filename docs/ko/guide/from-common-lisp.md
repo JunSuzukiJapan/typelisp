@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로
@@ -116,6 +116,20 @@ CL과 다른 점은 세 가지다. 요소의 타입이 모두 같아야 한다(`
 
 `map`, `filter`, `sort`, `find` 같은 시퀀스 함수는 `Iter` 트레이트를 구현한 값에 동작한다. `Vector`는 `(iter v)`로
 이터레이터로 만든 뒤에 넘긴다.
+
+`eq`·`eql`·`equalp`는 CL과 마찬가지로 어떤 타입의 값에도 쓸 수 있습니다. `equal`은 `Equal` 트레이트의
+메서드로, 그것을 구현한 타입에만 쓸 수 있습니다. 내장 타입은 모두 구현하고 있고, 리스트의 `equal`은 CL의
+`equal`입니다. 직접 만든 타입은 `(impl Equal 타입 ...)`을 쓰면 비교 방법을 정할 수 있습니다. `member`·
+`find`·`position`·`remove` 등이 기본으로 쓰는 비교는 CL과 같은 `eql`입니다. 문자열이나 리스트를 내용으로
+찾을 때는 CL과 마찬가지로 `:test equal`이라고 씁니다(`#'`는 필요 없습니다):
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false(따로 만든 문자열은 eql이 아님)
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+`HashTable`도 CL의 `make-hash-table`과 마찬가지로 만들 때 `:test`로 키 비교 방법을 고르며, 기본은
+`eql`입니다. 문자열을 키로 쓰려면 `(HashTable::new :test 'equal)`이라고 씁니다.
 
 ## 5. 다중 값이 없다
 

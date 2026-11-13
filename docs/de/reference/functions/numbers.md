@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -189,7 +189,7 @@ Umwandlungsmethode oder `as`/`try-as` verwenden). Zur Syntax der Bruchliterale s
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Wandelt in `f64` um und rechnet (`(sqrt 1/4)` ist `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Wie oben |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Wie oben |
-| `sxhash` | `(sxhash x)` | `ratio→int` | Die `Hash`-Implementierung. Ein `ratio` kann Schlüssel einer `HashTable` sein |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Die `Hash`-Implementierung. Ein `ratio` kann Schlüssel einer `equal`-`HashTable` sein |
 
 Eine ganze Zahl ist in CL eine rationale Zahl mit Nenner 1, daher hat auch `int` `numerator`
 (sich selbst), `denominator` (`1`), `float`, `rational`, `rationalize` und die 15 Funktionen von
@@ -236,7 +236,7 @@ holt man den Wert mit `as`/`try-as` heraus.
 
 `(as int q)` ist `rational->int` (Abschneiden), `(try-as int q)` ist `try-rational->int`, `(as ratio q)`
 und `(as f64 q)` sind die jeweiligen Umwandlungen, und `(as rational x)` erweitert von `int`/`ratio`.
-`Eq`, `Ord`, `Hash`, `print-object` und die arithmetischen Traits sind ebenfalls implementiert.
+`Equal`, `Ord`, `Hash`, `print-object` und die arithmetischen Traits sind ebenfalls implementiert.
 
 ## 6. Komplexe Zahlen `complex`
 
@@ -260,7 +260,7 @@ Eine Struktur (`defstruct`) der Standardbibliothek.
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Absolutbetrag. **Das einzige `abs`, das nicht den Typ des Empfängers zurückgibt** (wie in CL ist der Betrag einer komplexen Zahl reell) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Komplexe Arithmetik |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Komponentenweise Gleichheit. Auch `Eq` ist implementiert (kein `Ord`: Komplexe Zahlen haben keine Ordnung, und auch CLs `<` lehnt sie ab) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Komponentenweise Gleichheit. Auch `Equal` ist implementiert (kein `Ord`: Komplexe Zahlen haben keine Ordnung, und auch CLs `<` lehnt sie ab) |
 | `zerop` | `(zerop z)` | `complex→bool` | Ob beide Komponenten 0 sind |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` liefern Hauptwerte |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Strings, tekens en collecties
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` en `Deque<T>`.
@@ -80,7 +80,7 @@ eerste element, en elke evaluatie maakt een nieuwe vector). Ze wordt ook als `#(
 | `len` | `(len v)` | `Vector<T>→int` | Aantal elementen |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | Verwijdert het laatste element en geeft het terug. `none` als leeg (anders dan `get`/`set` geeft het geen panic) (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Maakt een iterator die `Iter` implementeert |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Voegt `x` toe als er geen gelijk element bestaat (`pushnew` van CL. Het hoeft geen plaats te herschrijven, dus het is een methode en geen macro) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Voegt `x` achteraan toe als er geen element is dat er `eql` aan is (CLs `pushnew`. Er hoeft geen plaats herschreven te worden, dus een methode in plaats van een macro) |
 
 `map`/`filter` en verwanten zijn [sequentiefuncties](sequences.md#4-sequentiefuncties-op-iter): geef
 de vector door via `iter`, zoals in `(map (iter v) f)`. Destructieve bewerkingen (`nreverse`, `delete`
@@ -90,7 +90,7 @@ enzovoort) staan in [Destructieve bewerkingen](sequences.md#7-destructieve-bewer
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | Maakt een lege tabel |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | Maakt een lege tabel. `:test` is hoe sleutels vergeleken worden (tabel hieronder); zonder: `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | Opzoeken |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | Invoegen of overschrijven |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | Verwijdert de invoer en geeft de oude waarde terug, als die er was |
@@ -103,40 +103,51 @@ enzovoort) staan in [Destructieve bewerkingen](sequences.md#7-destructieve-bewer
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | `maphash` van CL |
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` van CL. In deze tabel is het het aantal bezette invoeren (gelijk aan `count`) |
 
-**Elk type dat `Hash` implementeert kan een sleutel zijn**, ook `defstruct`/`defenum`-types.
-`get`/`set`/`remove` dragen `(:where (Hash K))`, dus een tabel met een sleutel van een type dat het
-niet implementeert is een **typefout** (`f64` heeft geen `Hash` vanwege `NaN`).
+Hoe sleutels vergeleken worden kies je bij het maken met `:test`, zoals bij CLs `make-hash-table`.
+`:test` neemt een van `eq`, `eql`, `equal` en `equalp` (geschreven als `'equal` of `equal`).
+
+| `:test` | Hoe sleutels vergeleken worden | Sleuteltypen |
+|---|---|---|
+| `eql` (standaard) | Getallen en tekens op waarde, de rest op identiteit | Elk type |
+| `eq` | Op identiteit | Elk type |
+| `equal` | Met `equal` (`Equal`) en de hash `sxhash` (`Hash`) van het sleuteltype | Typen die `Hash` implementeren |
+| `equalp` | Met `equalp` (strings zonder hoofdlettergevoeligheid, structs veld voor veld) | Elk type |
+
+De standaard is `eql`, dus twee apart gemaakte strings met dezelfde inhoud zijn twee sleutels. Voor
+stringsleutels schrijf je `(HashTable::new :test 'equal)`. Implementeert het sleuteltype van een
+`equal`-tabel `Hash` niet, dan is dat een **typefout** op de plek waar de tabel gemaakt wordt (`f64` heeft
+geen `Hash` vanwege `NaN`).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; returns a non-negative value that fits in a fixnum
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; geeft een niet-negatieve waarde die in een fixnum past
 ```
 
-Geïmplementeerd voor: `int` en de zes gehele types met vaste breedte, `bool`, `char`, `string` en
-`symbol` (niet voor drijvendekommagetallen). Houd bij je eigen types het resultaat niet-negatief door
+`Hash` is geïmplementeerd voor: `int` en de zes gehele getallen met vaste breedte, `bool`, `char`,
+`string`, `symbol` (niet voor zwevendekommagetallen). Houd bij eigen typen het resultaat niet-negatief door
 het met `logand` te combineren met `*sxhash-mask*` (2^30-1). Om een string te hashen kun je
-`(sxhash-string s)` (32-bits FNV-1a) aanroepen, dat de implementatie voor `string` gebruikt.
+`(sxhash-string s)` (FNV-1a 32 bit) aanroepen, dat de `string`-implementatie gebruikt.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-Of twee sleutels hetzelfde zijn wordt bepaald door **het sleuteltype zelf** (`sxhash`, en `equals` van
-`Eq`, de supertrait van `Hash`), niet door objectidentiteit. Daarom kun je, zoals hierboven, opzoeken
-met een sleutel die "een andere waarde maar gelijk" is.
+In een `equal`-tabel beslist **het sleuteltype zelf** (`sxhash` en `equal` uit `Equal`, de supertrait van
+`Hash`) of twee sleutels dezelfde zijn, niet de objectidentiteit. Daarom vindt, zoals hierboven, een
+sleutel die "een andere waarde maar gelijk" is de vermelding.
 
-Het is prima dat `sxhash` botst (het contract van `Hash` geldt maar in één richting: gelijke waarden
-moeten dezelfde hash hebben). Botsende sleutels worden met `equals` uit elkaar gehouden.
+Botsingen van `sxhash` zijn toegestaan (het contract van `Hash` werkt andersom: het zegt alleen dat
+waarden die `equal` zijn dezelfde hash hebben). Botsende sleutels worden door `equal` onderscheiden.
 
 ## 5. `Array<T>` (meerdimensionale arrays)
 
@@ -193,13 +204,13 @@ Er is geen `bit-vector-p` (het statische type beantwoordt dat).
 
 ## 7. `HashSet<T>`
 
-Een verzameling elementen zonder dubbelen (Rusts `HashSet`). Een `defstruct` uit de
-standaardbibliotheek waarvan de inhoud een `HashTable<T,()>` is. Het elementtype moet `Hash`
-implementeren, net als een sleutel van een `HashTable`.
+Een verzameling elementen zonder duplicaten (Rusts `HashSet`). Een `defstruct` van de standaardbibliotheek
+waarvan de inhoud een `HashTable<T,()>` is. Hoe elementen vergeleken worden bepaalt `:test`, net als bij de
+sleutels van een `HashTable`, en in een `equal`-verzameling moet het elementtype `Hash` implementeren.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | Maakt een lege verzameling. Het typeargument volgt uit het verwachte type |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | Maakt een lege verzameling. Het typeargument komt uit het verwachte type. `:test` zoals bij `HashTable`; zonder: `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Voegt `x` toe. `true` als het er nog niet was, `false` als het er al was |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Of `x` erin zit |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Haalt `x` eruit. `true` als het erin zat |
@@ -210,7 +221,7 @@ implementeren, net als een sleutel van een `HashTable`.
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

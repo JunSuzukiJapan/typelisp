@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Chuỗi, ký tự và tập hợp
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` và `Deque<T>`.
@@ -79,7 +79,7 @@ in ra là `#(1 2 3)`.
 | `len` | `(len v)` | `Vector<T>→int` | Số phần tử |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | Bỏ phần tử cuối và trả về nó. `none` nếu rỗng (không như `get`/`set`, nó không panic) (một phương thức của trait [`Pop`](traits.md#5-trait-pop-lấy-phần-tử-ra)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Tạo một iterator triển khai `Iter` |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` với `Eq T` | Nối `x` nếu chưa có phần tử bằng nó (`pushnew` của CL. Nó không cần ghi lại một place, nên là một phương thức chứ không phải macro) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Thêm `x` vào cuối nếu không có phần tử nào `eql` với nó (`pushnew` của CL. Không cần ghi lại một vị trí nên là phương thức chứ không phải macro) |
 
 `map`/`filter` và các hàm tương tự là [các hàm trên dãy](sequences.md#4-các-hàm-trên-dãy-dựa-trên-iter): hãy
 truyền vector qua `iter`, như `(map (iter v) f)`. Các thao tác phá hủy (`nreverse`, `delete`, v.v.) nằm ở
@@ -89,7 +89,7 @@ truyền vector qua `iter`, như `(map (iter v) f)`. Các thao tác phá hủy (
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | Tạo một bảng rỗng |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | Tạo bảng rỗng. `:test` là cách so sánh khóa (bảng bên dưới); bỏ qua thì là `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | Tra cứu |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | Chèn hoặc ghi đè |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | Bỏ mục và trả về giá trị cũ, nếu có |
@@ -102,40 +102,50 @@ truyền vector qua `iter`, như `(map (iter v) f)`. Các thao tác phá hủy (
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | `maphash` của CL |
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` của CL. Trong bảng này nó là số mục đang chiếm (bằng `count`) |
 
-**Mọi kiểu triển khai `Hash` đều có thể làm khóa**, gồm cả các kiểu `defstruct`/`defenum`.
-`get`/`set`/`remove` mang `(:where (Hash K))`, nên một bảng có khóa thuộc kiểu không triển khai nó là
-**lỗi kiểu** (`f64` không có `Hash` vì `NaN`).
+Cách so sánh khóa được chọn bằng `:test` khi tạo bảng, giống `make-hash-table` của CL. `:test` nhận một
+trong `eq`, `eql`, `equal` và `equalp` (viết `'equal` hoặc `equal`).
+
+| `:test` | Cách so sánh khóa | Kiểu khóa |
+|---|---|---|
+| `eql` (mặc định) | Số và ký tự theo giá trị, còn lại theo định danh | Mọi kiểu |
+| `eq` | Theo định danh | Mọi kiểu |
+| `equal` | Bằng `equal` (`Equal`) và hàm băm `sxhash` (`Hash`) của kiểu khóa | Các kiểu cài đặt `Hash` |
+| `equalp` | Bằng `equalp` (chuỗi không phân biệt hoa thường, struct theo từng trường) | Mọi kiểu |
+
+Mặc định là `eql`, nên hai chuỗi cùng nội dung được tạo riêng là hai khóa. Với khóa chuỗi, viết
+`(HashTable::new :test 'equal)`. Nếu kiểu khóa của bảng `equal` không cài đặt `Hash`, đó là **lỗi kiểu**
+tại nơi tạo bảng (`f64` không có `Hash` vì `NaN`).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; trả về một giá trị không âm vừa với fixnum
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; trả về giá trị không âm vừa một fixnum
 ```
 
-Được triển khai cho: `int` và sáu số nguyên độ rộng cố định, `bool`, `char`, `string` và `symbol` (không
-cho số dấu phẩy động). Với kiểu của riêng bạn, hãy giữ kết quả không âm bằng cách `logand` nó với
-`*sxhash-mask*` (2^30-1). Để băm một chuỗi, bạn có thể gọi `(sxhash-string s)` (FNV-1a 32 bit), mà triển
-khai cho `string` dùng.
+`Hash` được cài đặt cho: `int` và sáu kiểu số nguyên độ rộng cố định, `bool`, `char`, `string`, `symbol`
+(không có cho số thực dấu phẩy động). Với kiểu của bạn, giữ kết quả không âm bằng cách `logand` với
+`*sxhash-mask*` (2^30-1). Để băm một chuỗi, có thể gọi `(sxhash-string s)` (FNV-1a 32 bit), là thứ cài đặt
+của `string` dùng.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-Việc hai khóa có giống nhau hay không được quyết định bởi **chính kiểu khóa** (`sxhash`, và `equals` từ
-`Eq`, supertrait của `Hash`), không phải bởi đồng nhất đối tượng. Đó là lý do, như trên, bạn có thể tra
-cứu bằng một khóa là "một giá trị khác nhưng bằng nhau".
+Trong bảng `equal`, việc hai khóa có giống nhau hay không do **chính kiểu khóa** quyết định (`sxhash`, và
+`equal` của `Equal`, supertrait của `Hash`), chứ không phải định danh đối tượng. Vì vậy, như ở trên, một
+khóa là "giá trị khác nhưng bằng nhau" vẫn tìm được mục.
 
-`sxhash` va chạm là chấp nhận được (hợp đồng của `Hash` chỉ đi một chiều: các giá trị bằng nhau phải có
-cùng giá trị băm). Các khóa va chạm được phân biệt bằng `equals`.
+`sxhash` bị trùng cũng không sao (hợp đồng của `Hash` đi theo chiều ngược lại: nó chỉ nói các giá trị
+`equal` có cùng giá trị băm). Các khóa trùng giá trị băm được phân biệt bằng `equal`.
 
 ## 5. `Array<T>` (mảng nhiều chiều)
 
@@ -190,12 +200,13 @@ Không có `bit-vector-p` (kiểu tĩnh đã trả lời).
 
 ## 7. `HashSet<T>`
 
-Tập hợp các phần tử không trùng lặp (`HashSet` của Rust). Một `defstruct` của thư viện chuẩn có nội
-dung là `HashTable<T,()>`. Kiểu phần tử phải cài đặt `Hash`, giống như khóa của `HashTable`.
+Một tập các phần tử không trùng lặp (`HashSet` của Rust). Một `defstruct` của thư viện chuẩn có nội dung là
+`HashTable<T,()>`. Cách so sánh phần tử do `:test` quyết định, giống khóa của `HashTable`, và trong tập
+`equal` kiểu phần tử phải cài đặt `Hash`.
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | Tạo một tập rỗng. Đối số kiểu lấy từ kiểu mong đợi |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | Tạo tập hợp rỗng. Đối số kiểu lấy từ kiểu mong đợi. `:test` giống `HashTable`; bỏ qua thì là `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Thêm `x`. `true` nếu chưa có, `false` nếu đã có |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` có trong tập hay không |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Bỏ `x` ra. `true` nếu đã có |
@@ -206,7 +217,7 @@ dung là `HashTable<T,()>`. Kiểu phần tử phải cài đặt `Hash`, giốn
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

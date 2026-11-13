@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # trait
 
 trait 是「這個型別支援這些操作」的約定。它讓多個型別擁有同名的操作，使用這些操作的函式就不必為每個型別分別撰寫。其機制與 Rust 的
@@ -92,19 +92,19 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | trait | 要實作的方法 | 可以使用的功能 |
 |---|---|---|
-| `Eq` | `equals` | `member`、`find`、`position`、`match` 的 `(:= 式)` 模式等 |
-| `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 繼承 `Eq` |
+| `Equal` | `equal` | `equal`、`=`、`assert-equal`、`match` 的 `(:= 運算式)` 模式、傳入 `:test equal` 的 `member` 等 |
+| `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 繼承 `Equal` |
 | `print-object` | `print-object` | `println` 等顯示時的形式 |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` 等 |
 | `Error` | `message`、`source` | 作為錯誤型別使用（[錯誤處理](errors.md)） |
 
-為表示金額的型別實作 `Eq` 與 `Ord`。`Ord` 繼承 `Eq`，所以要先寫 `Eq` 的 `impl`。
+為表示金額的型別實作 `Equal` 與 `Ord`。`Ord` 繼承 `Equal`，所以要先寫 `Equal` 的 `impl`。
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -177,7 +177,7 @@ total 9
 
 可以放入的型別的確切清單見[語法參考 3.9](../reference/syntax.md#39-deftrait--impl--trait-機制)。
 
-也有不能用於 `:dyn` 的 trait：方法在 `self` 以外的引數或回傳值中使用 `Self` 的情況（如 `Eq` 的 `equals`）。因為要到執行期才知道是哪個
+也有不能用於 `:dyn` 的 trait：方法在 `self` 以外的引數或回傳值中使用 `Self` 的情況（如 `Equal` 的 `equal`）。因為要到執行期才知道是哪個
 型別，無法準備「同一型別的值」。
 
 ## 6. 限制

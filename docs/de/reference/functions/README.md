@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Eingebaute Funktionen
 
 Die Liste der eingebauten Funktionen, der Methoden und der Standardbibliothek. Zur Syntax (Spezialformen und
@@ -25,7 +25,7 @@ Von den Namen der Standardbibliothek sind diese in jedem Modul verwendbar, ohne 
 - jeder Name, der auch ein Name des `COMMON-LISP`-Pakets von Common Lisp ist (`length`, `format`,
   `open` usw.)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, die Stream-Traits `Stream`,
-  `InputStream` und `OutputStream` sowie `Hash`, das die Schlüssel einer `HashTable` implementieren
+  `InputStream` und `OutputStream` sowie `Hash`, das die Schlüssel einer `equal`-`HashTable` implementieren
 - die Typen, die die Funktionen und Variablen davon erwähnen
 
 Jeden anderen Namen holt man mit `use` herein, etwa `(use std::net::tcp-connect)`, oder schreibt
@@ -37,7 +37,7 @@ seinen Pfad, `std::net::tcp-connect`. Die Tabelle nennt diese Namen und das Modu
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -61,7 +61,7 @@ Die Tabellen in jedem Kapitel haben die Spalten „Name, Form, Typ, Beschreibung
 `(Argumenttyp,...)→Rückgabetyp` geschrieben.
 
 - Ein einzelner Großbuchstabe wie `T`, `A` oder `B` ist eine Typvariable.
-- Ein Vermerk wie `where Eq A` ist eine Trait-Schranke, die die Typvariable erfüllen muss.
+- Ein Vermerk wie `where Equal A` ist eine Trait-Schranke, die die Typvariable erfüllen muss.
 - `Iter<A>` bedeutet „jede Implementierung von `Iter`, deren `Item` `A` ist“.
 - Mit `&optional` / `&key` markierte Argumente können weggelassen werden.
 
@@ -73,7 +73,7 @@ Die Tabellen in jedem Kapitel haben die Spalten „Name, Form, Typ, Beschreibung
 | [sequences.md](sequences.md) | Das Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, Sequenzfunktionen, lazy Iteratoren `lazy`, Funktionen höherer Ordnung |
 | [collections.md](collections.md) | Zeichenketten, Zeichen, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, Fehlertypen und der Trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetische Traits, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, arithmetische Traits, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, der Pretty Printer, `print-object`, Steuervariablen der Ausgabe |
 | [format.md](format.md) | Formatdirektiven |
 | [streams-files.md](streams-files.md) | Streams, Dateioperationen, Pfadnamen, readtable |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -143,7 +143,7 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
   des assoziierten Typs eines Traits in eine Signatur.
 - **Tupeltypen**: `#{int string}` (dieselbe Form wie die Werte). Ein Tupel hat 1 bis 12 Elemente,
   und ein Tupeltyp kann auch Typargument sein (`Vector<#{int string}>`). Elemente liest man mit
-  `t::0` `t::1` und ändert sie mit `(setf t::0 v)`. `Eq`, `Ord` (Vergleich ab dem ersten Element),
+  `t::0` `t::1` und ändert sie mit `(setf t::0 v)`. `Equal`, `Ord` (Vergleich ab dem ersten Element),
   `Hash` und `print-object` stehen zur Verfügung, wenn alle Elementtypen sie implementieren.
 - **Qualifizierte Typnamen**: lassen sich mit `::` qualifizieren, wie in `module::Type`.
 - **Trait-Objekttypen**: `:dyn Trait` (zwei durch Leerzeichen getrennte Wörter, die einen Typ bilden). Stellt
@@ -967,17 +967,17 @@ Trait-Name oder, wenn dieser Trait assoziierte Typen hat, `(Trait (Assoc Type))`
 assoziierten Typen festgelegt**.
 
 ```lisp
-(deftrait Eq () ...)                       ; keine Obertraits
-(deftrait Ord (Eq) ...)                    ; Rusts trait Ord: Eq
+(deftrait Equal () ...)                       ; keine Obertraits
+(deftrait Ord (Equal) ...)                    ; Rusts trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; einen assoziierten Typ festlegen
   (defmethod rewind (self) ()))
 ```
 
-Vererbung hat drei Wirkungen. (1) `impl Ord X` verlangt, dass `impl Eq X` **vorher** geschrieben ist (eine Regel
+Vererbung hat drei Wirkungen. (1) `impl Ord X` verlangt, dass `impl Equal X` **vorher** geschrieben ist (eine Regel
 über die Schreibreihenfolge: die einzige Form, die sich in der REPL und bei schrittweisem `load`
 deterministisch entscheiden lässt, und strenger als Rust). (2) `(:where (Ord T))` allein erlaubt auch den Aufruf
-der Methoden von `Eq`. (3) Die Methoden von `Eq` lassen sich über ein `:dyn Ord` aufrufen, und ein
-`:dyn Ord`-Wert lässt sich unverändert übergeben, wo ein `:dyn Eq` verlangt wird (Upcast). Dass ein Untertrait
+der Methoden von `Equal`. (3) Die Methoden von `Equal` lassen sich über ein `:dyn Ord` aufrufen, und ein
+`:dyn Ord`-Wert lässt sich unverändert übergeben, wo ein `:dyn Equal` verlangt wird (Upcast). Dass ein Untertrait
 eine gleichnamige Methode seines Elterntraits neu deklariert und dass gleichnamige Methoden von zwei
 Elterntraits geerbt werden, sind beides Fehler (eine vtable hat einen Eintrag pro Name). Rautenvererbung wird zu
 einem Eintrag zusammengeführt.
@@ -1039,8 +1039,8 @@ Signatur ohne Rumpf kann keinen Docstring haben: Eine abschließende Zeichenkett
 einer Standardimplementierung, daher ließen sich beide nicht unterscheiden.
 
 Die Traits, die die Standardbibliothek bereitstellt: **`Iter`** (`next` / assoziierter Typ `Item`; die Grundlage
-von `doiter` und den Sequenzfunktionen), **`Eq`** (`equals`; `not-equals` ist eine Standardimplementierung),
-**`Ord`** (erbt `Eq`; nur `less` muss implementiert werden, und `less-equal` / `greater` / `greater-equal` sind
+von `doiter` und den Sequenzfunktionen), **`Equal`** (der Trait, den `equal` verwendet),
+**`Ord`** (erbt `Equal`; nur `less` muss implementiert werden, und `less-equal` / `greater` / `greater-equal` sind
 Standardimplementierungen), **`Error`** (`message` / `source`; `:dyn Error`, um Fehlertypen einheitlich zu
 behandeln), **`print-object`** (eine typabhängige Druckdarstellung), **`Pathish`** (Pfadnamensbezeichner: eine
 Zeichenkette oder ein `pathname`) sowie die Stream-Hierarchie **`Stream`** → **`InputStream`** /
@@ -1278,10 +1278,10 @@ Beispiele stehen unter
 ### 3.16 `#[test]` — Testfunktionen
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 Ein mit `#[test]` markiertes `defun` ist eine Testfunktion, die `typl test` eine nach der anderen aufruft (wie Rusts `#[test]`). Sie darf keine Argumente nehmen und muss `()` oder `Result<(), E>` zurückgeben (Typparameter kann sie auch nicht nehmen). `pub` braucht sie nicht. Ein Test, der ein `Result` zurückgibt, schlägt fehl, wenn er ein `err` zurückgibt, und der Fehler wird angezeigt; daher muss `E` `Error` oder `print-object` implementieren (so wie Rust für den Fehlertyp eines Tests `Debug` verlangt). Ein `Error` wird mit `describe-error` (die Meldung und die Kette ihrer Ursachen) angezeigt, alles andere mit `print-object`. Auch `:dyn Error` ist ein `Error`, sodass ein Test verschiedene Fehler in einem Typ sammeln und zurückgeben kann.
@@ -1297,7 +1297,7 @@ Ein mit `#[test]` markiertes `defun` ist eine Testfunktion, die `typl test` eine
 
 - **Ein gewöhnlicher Lauf und `compile-file` überspringen sie**, ohne auch nur ihren Inhalt zu prüfen (so wie Rust Tests nur unter `--test` kompiliert). Das Programm selbst kann keine Testfunktion aufrufen.
 - Ein Test kann in jeder Datei stehen, die Funktionen enthält, und in jedem `module`. Tests lassen sich auch getrennt im Ordner `tests/` des Projekts ablegen.
-- Ein Test schlägt durch ein `panic`, einen Laufzeitfehler oder die Rückgabe eines `err` fehl. Geprüft wird mit `assert` oder mit `assert-eq`, das beide Seiten ausgibt ([System](functions/system.md)). Schlägt ein Test fehl, laufen die übrigen trotzdem.
+- Ein Test schlägt durch ein `panic`, einen Laufzeitfehler oder die Rückgabe eines `err` fehl. Geprüft wird mit `assert` oder mit `assert-equal`, das beide Seiten ausgibt ([System](functions/system.md)). Schlägt ein Test fehl, laufen die übrigen trotzdem.
 
 ```sh
 typl test                 # alle Tests des Projekts in diesem Ordner ausführen
@@ -1320,7 +1320,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1441,11 +1441,11 @@ Arten von Mustern:
   in `(circle r)`
 - **Direkte Literale**: Ganzzahlen / `true`/`false` / Zeichen — als Wörter verglichen
 - **Wertliterale**: Zeichenketten / Gleitkommazahlen / Symbole (`'foo`) / Bignum-Ganzzahlen / Brüche — nach
-  Wert mit dem `Eq::equals` dieses Typs verglichen ([Standard-Traits](functions/traits.md#2-eq--ord-vergleich)).
+  Wert mit dem `equal` dieses Typs verglichen ([Standard-Traits](functions/traits.md#2-equal--ord-vergleich)).
   Zeichenketten werden nach Inhalt verglichen, nicht nach Identität
-- `(:= expr)` — wertet einen beliebigen Ausdruck aus und vergleicht mit `Eq::equals`. Die einzige Möglichkeit,
+- `(:= expr)` — wertet einen beliebigen Ausdruck aus und vergleicht mit `equal`. Die einzige Möglichkeit,
   Typen ohne Literalsyntax zu vergleichen (`defstruct`-Instanzen, globale Variablen, berechnete Ergebnisse), und
-  eine benutzerdefinierte `Eq`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
+  eine benutzerdefinierte `Equal`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
   beziehen, was von der Position des Zweigs aus sichtbar ist (Argumente, äußere Bindungen, globale Variablen)
 - `(Ctor sub-pattern...)` — Konstruktormuster (`(some x)` `(none)` `(cons a d)` `(ok v)` usw.)
 - `(Type :slot pattern... :slot...)` — Strukturmuster. Schreibe die Slots nach dem Typnamen als
@@ -1468,7 +1468,7 @@ Arten von Mustern:
   Rumpf, daher muss jede Alternative dieselben Variablen mit denselben Typen binden. Es kann auch
   innerhalb eines Konstruktormusters stehen (`(some (:or (circle r) (rect r _)))`)
 
-Einen Typ, der `Eq` nicht implementiert, mit einem Wertliteral / `(:= expr)` zu vergleichen, ist ein Typfehler
+Einen Typ, der `Equal` nicht implementiert, mit einem Wertliteral / `(:= expr)` zu vergleichen, ist ein Typfehler
 (diese Sprache sagt lieber „diese lassen sich nicht vergleichen“, als einen Zweig stehen zu lassen, der
 stillschweigend nie passt).
 
@@ -1491,19 +1491,13 @@ versucht. Die Bedingung kann die Variablen lesen, die das Muster gebunden hat.
 - Oder-Muster und Guards lassen sich kombinieren. Der Guard wird ausgewertet, egal welche
   Alternative gepasst hat (`((:or 1 2 3) :when on "small")`).
 
-**Wertliterale gegen einen `Sexpr` als untersuchten Wert**: Das `Eq` von `sexpr` ist `eq` (CLs Identität), daher
-lassen sich direkte Werte (`'foo` (interniert) / Ganzzahlen / Zeichen / `true`/`false`) unverändert schreiben und
-passen nach Inhalt:
+**Wertliterale gegen einen `Sexpr`-Prüfling**: das `equal` von `Sexpr` ist CLs `equal`, daher lassen
+sich `'foo` / Ganzzahlen / Zeichen / `true`/`false` / Strings / Gleitkommazahlen / große Ganzzahlen / Brüche
+direkt schreiben und passen nach Inhalt (Strings nach Inhalt, Zahlen mit `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Nicht direkte Literale (Zeichenketten / Gleitkommazahlen / Bignum-Ganzzahlen / Brüche) **lassen sich gegen ein
-`Sexpr` nicht schreiben**. Ihr `eq` vergleicht die Identität der Objekte, was einen „Zweig ergäbe, der die
-Typprüfung besteht, aber nie passt“, daher ist es ein Fehler, der das Variantenmuster nennt: Schreibt man
-`(str "hi")`, wird es in eine `string` zerlegt und nach Inhalt verglichen. `(:= expr)` verlangt ausdrücklich
-`equals`, daher gilt diese Einschränkung dafür nicht.
 
 **Der untersuchte Wert muss kein ADT sein.** `string`/`symbol`/`i32`/`f64` und Ähnliches lassen sich direkt
 vergleichen (dorthin gehören Muster mit Zeichenkettenliteralen). Ein Typ ohne Varianten lässt sich jedoch nicht
@@ -1923,8 +1917,7 @@ anhält, sind die Aufrufwege des laufenden Interpreters; und `disassemble` verwe
 
 Was sich kompilieren **lässt**: Stream- und Datei-E/A, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, die transzendenten Funktionen,
-Bitoperationen, `catch`/`throw`/`unwind-protect`, alle vier von `eq`/`eql`/`equal`/`equalp` (wodurch sich `case`
-für jeden Typ kompilieren lässt), die ganze Ausgabefamilie einschließlich `print`/`println`/`format`/`pprint` und
+Bitoperationen, `catch`/`throw`/`unwind-protect`, alle vier von `eq`/`eql`/`equal`/`equalp`, die ganze Ausgabefamilie einschließlich `print`/`println`/`format`/`pprint` und
 `pprint-logical-block`, `read` und `eval`. Die Standardbibliothek wird bereits kompiliert ausgeliefert.
 
 Ein AOT-Programm enthält nur die Funktionalität, die das Programm verwendet. Ein Programm, das nichts ausgibt,

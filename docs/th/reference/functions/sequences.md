@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # คู่ S-expression และลำดับ
 
 คู่ generic `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับที่เขียนบน
@@ -125,17 +125,18 @@
 | `last` | `(last it)` | `Iter<A>→Option<A>` | **สมาชิก** ตัวสุดท้าย (ไม่ใช่ "เซลล์สุดท้าย" อย่างใน CL) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | ทุกตัวยกเว้นตัวสุดท้าย |
 
-ฟังก์ชันที่ต้องการ bound `Eq` / `Ord` (เปรียบเทียบผ่าน trait แทน predicate;
-[Trait มาตรฐาน](traits.md#2-eq--ord-การเปรียบเทียบ)):
+ฟังก์ชันที่ค้นหารายการ ถ้าไม่ระบุ `:test` จะเปรียบเทียบด้วย `eql` เหมือน CL `eql` เปรียบเทียบตัวเลขและ
+อักขระตามค่า นอกนั้นตามเอกลักษณ์ ดังนั้นสตริงหรือลิสต์เนื้อหาเดียวกันที่สร้างแยกกันจึงไม่เท่ากัน ถ้าจะ
+เปรียบเทียบตามเนื้อหาให้เขียน `:test equal` (บทที่ 6):
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | มีสมาชิกที่เท่ากับ `x` หรือไม่ (ต่างจาก CL เป็น `bool` ไม่ใช่ส่วนที่เหลือของลิสต์) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | สมาชิกแรกที่เท่ากับ `x` |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | ตำแหน่งแรกที่เท่ากับ `x` |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | มีกี่สมาชิกที่เท่ากับ `x` |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | มีสมาชิกที่เท่ากับ `x` หรือไม่ (ต่างจาก CL เป็น `bool` ไม่ใช่ส่วนที่เหลือของลิสต์) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | สมาชิกแรกที่เท่ากับ `x` |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | ตำแหน่งแรกที่เท่ากับ `x` |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | มีกี่สมาชิกที่เท่ากับ `x` |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | `(sort sequence predicate)` ของ CL การเรียงแบบเสถียรและไม่ทำลาย `cmp` เป็น `true` เมื่อ "อาร์กิวเมนต์แรกมาก่อนอาร์กิวเมนต์ที่สองอย่างเคร่งครัด" |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | คู่แรกที่ `car` เท่ากับ `k` ดึงค่าออกด้วย `(cdr p)` |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | คู่แรกที่ `car` เท่ากับ `k` ดึงค่าออกด้วย `(cdr p)` |
 
 ฟังก์ชันเหล่านี้และหลายตัวในบทที่ 5 รับอาร์กิวเมนต์คีย์เวิร์ดของ CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` ด้วย (บทที่ 6)
@@ -190,8 +191,8 @@
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | เหมือน `member` เป็น **`bool`** (ตัววนซ้ำไม่มีหางให้คืน) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | นิเสธของ `any`/`every` |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | ชนิดเดียวกับเวอร์ชันบวก | เวอร์ชันที่ predicate ถูกนิเสธ |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | ลบตามค่า |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | ลบรายการซ้ำ เหมือนใน CL **ตัวที่ปรากฏครั้งสุดท้ายถูกเก็บไว้** (`:from-end true` เก็บตัวแรก) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | ลบตามค่า |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | ลบรายการซ้ำ เหมือนใน CL **ตัวที่ปรากฏครั้งสุดท้ายถูกเก็บไว้** (`:from-end true` เก็บตัวแรก) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | แทนที่ตามค่า / predicate |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | บน `Iter<cons-cell<K,V>>` | เวอร์ชัน predicate และเวอร์ชันฝั่งค่าของ `assoc` |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | เพิ่มคู่ที่ด้านหน้า |
@@ -202,14 +203,14 @@
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | แมปบน **หาง** ที่ต่อเนื่องกัน |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | แมปบนหางเพื่อผลข้างเคียง (คู่ของ `maplist` ที่เทียบกับ `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | แมปบนหางแล้วต่อกัน (คู่ของ `maplist` ที่เทียบกับ `mapcan`) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | ตำแหน่งที่ `sub` ปรากฏครั้งแรก หากตัวรับเป็น `string` จะเลือกเมทอดของ `string` ([สตริง](collections.md#1-สตริง-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | ตำแหน่งแรกที่ต่างกัน `none` หากเท่ากัน |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | ตำแหน่งที่ `sub` ปรากฏครั้งแรก หากตัวรับเป็น `string` จะเลือกเมทอดของ `string` ([สตริง](collections.md#1-สตริง-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | ตำแหน่งแรกที่ต่างกัน `none` หากเท่ากัน |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | การผสาน CL ต้องการอินพุตที่เรียงแล้ว ที่นี่เรียงลำดับผลการต่อกัน |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | เพิ่ม `x` **ที่ด้านหน้า** หากยังไม่มี |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | การดำเนินการเซต CL ไม่กำหนดลำดับ ที่นี่เสถียร **ตามลำดับที่ปรากฏครั้งแรก** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | การเป็นสับเซต |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | เป็นส่วนต่อท้ายหรือไม่ / ส่วนก่อนส่วนต่อท้าย CL ถามเกี่ยวกับ **โครงสร้างที่ใช้ร่วมกัน** แต่ไม่มีโครงสร้างให้ใช้ร่วมกัน จึงถามเกี่ยวกับส่วนต่อท้าย **ในฐานะค่า** |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | ความเท่ากันทีละสมาชิก `Vector<T>` เองไม่ implement `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | เพิ่ม `x` **ที่ด้านหน้า** หากยังไม่มี |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | การดำเนินการเซต CL ไม่กำหนดลำดับ ที่นี่เสถียร **ตามลำดับที่ปรากฏครั้งแรก** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | การเป็นสับเซต |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | เป็นส่วนท้ายหรือไม่ / ส่วนก่อนส่วนท้าย CL ถามถึง **โครงสร้างที่ใช้ร่วมกัน** แต่ไม่มีโครงสร้างให้ใช้ร่วม จึงถามว่าเป็นส่วนท้ายที่สมาชิก `eql` กันหรือไม่ |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | `equal` ทีละสมาชิก `Vector<T>` เองไม่มี implementation ของ `Equal` |
 | `caar`…`cddddr` | `(cadr p)` | บนคู่ที่ซ้อนกัน | 28 ฟังก์ชันของ CL เดินผ่าน **คู่ ไม่ใช่ลิสต์**: `cadr` รับ `cons-cell<A,cons-cell<B,C>>` |
 
 สิ่งที่ CL มีแต่ภาษานี้ไม่มี: `list*` (ไม่มีแนวคิดของลิสต์ไม่สมบูรณ์ที่หางถูกแทนที่),
@@ -228,7 +229,7 @@
 | คีย์เวิร์ด | ชนิด | ความหมาย |
 |---|---|---|
 | `:key` | `(fn (A) A)` | การฉายที่ใช้กับแต่ละสมาชิกก่อนเปรียบเทียบหรือทดสอบ |
-| `:test` | `(fn (A A) bool)` | การทดสอบความเท่ากันที่ใช้แทน `equals` จาก bound `Eq` อาร์กิวเมนต์แรกคือ **รายการที่กำลังค้นหา** อาร์กิวเมนต์ที่สองคือสมาชิก (หลัง `:key`) ลำดับเดียวกับ CL |
+| `:test` | `(fn (A A) bool)` | การทดสอบความเท่ากันที่ใช้แทน `eql` ปริยาย (`:test equal` เป็นต้น) อาร์กิวเมนต์แรกคือ **รายการที่ค้นหา** ตัวที่สองคือสมาชิก (หลัง `:key`) ลำดับเดียวกับ CL |
 | `:test-not` | `(fn (A A) bool)` | นิเสธของ `:test` |
 | `:start` `:end` | `int` | หน้าต่าง `[start, end)` ที่สแกน ดัชนีสัมพัทธ์กับทั้งลำดับ |
 | `:from-end` | `bool` | การค้นหาตอบด้วยรายการที่ตรงกัน **ตัวสุดท้าย** เมื่อรวมกับ `:count` สมาชิกที่ได้รับผลกระทบจะนับจากท้าย |

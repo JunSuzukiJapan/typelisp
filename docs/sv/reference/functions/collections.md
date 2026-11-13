@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Strängar, tecken och samlingar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` och `Deque<T>`.
@@ -80,7 +80,7 @@ vektor). Det skrivs också ut som `#(1 2 3)`.
 | `len` | `(len v)` | `Vector<T>→int` | Antal element |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | Tar bort det sista elementet och returnerar det. `none` om tom (till skillnad från `get`/`set` ger den inte panic) (en metod i traiten [`Pop`](traits.md#5-traiten-pop-ta-ut-element)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Skapar en iterator som implementerar `Iter` |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | Lägger till `x` om inget lika element finns (CL:s `pushnew`. Den behöver inte skriva om en plats, så den är en metod i stället för ett makro) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Lägger till `x` sist om inget element är `eql` med det (CL:s `pushnew`. Den behöver inte skriva om en plats, så den är en metod och inte ett makro) |
 
 `map`/`filter` och liknande är [sekvensfunktioner](sequences.md#4-sekvensfunktioner-på-iter): skicka
 vektorn genom `iter`, som i `(map (iter v) f)`. Destruktiva operationer (`nreverse`, `delete` och så
@@ -90,7 +90,7 @@ vidare) finns i [Destruktiva operationer](sequences.md#7-destruktiva-operationer
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | Skapar en tom tabell |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | Skapar en tom tabell. `:test` är hur nycklar jämförs (tabellen nedan); utan den `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | Uppslagning |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | Infogar eller skriver över |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | Tar bort posten och returnerar det gamla värdet, om det finns |
@@ -103,40 +103,50 @@ vidare) finns i [Destruktiva operationer](sequences.md#7-destruktiva-operationer
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL:s `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL:s `hash-table-size`. I den här tabellen är det antalet upptagna poster (lika med `count`) |
 
-**Vilken typ som helst som implementerar `Hash` kan vara nyckel**, inklusive `defstruct`/`defenum`-typer.
-`get`/`set`/`remove` har `(:where (Hash K))`, så en tabell med en nyckeltyp som inte implementerar det är
-ett **typfel** (`f64` har inget `Hash` på grund av `NaN`).
+Hur nycklar jämförs väljs med `:test` när tabellen skapas, som med CL:s `make-hash-table`. `:test` tar
+en av `eq`, `eql`, `equal` och `equalp` (skrivet `'equal` eller `equal`).
+
+| `:test` | Hur nycklar jämförs | Nyckeltyper |
+|---|---|---|
+| `eql` (standard) | Tal och tecken efter värde, allt annat efter identitet | Alla typer |
+| `eq` | Efter identitet | Alla typer |
+| `equal` | Med nyckeltypens `equal` (`Equal`) och hash `sxhash` (`Hash`) | Typer som implementerar `Hash` |
+| `equalp` | Med `equalp` (strängar utan skiftläge, structar fält för fält) | Alla typer |
+
+Standard är `eql`, så två separat skapade strängar med samma innehåll är två nycklar. För strängnycklar
+skriver man `(HashTable::new :test 'equal)`. Om nyckeltypen i en `equal`-tabell inte implementerar `Hash`
+är det ett **typfel** där tabellen skapas (`f64` har ingen `Hash` på grund av `NaN`).
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; returnerar ett icke-negativt värde som ryms i ett fixnum
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; returnerar ett icke-negativt värde som får plats i ett fixnum
 ```
 
-Implementerat för: `int` och de sex heltalstyperna med fast bredd, `bool`, `char`, `string` och `symbol`
-(inte för flyttal). För dina egna typer håller du resultatet icke-negativt genom att `logand`a det med
-`*sxhash-mask*` (2^30-1). För att hasha en sträng kan du anropa `(sxhash-string s)` (32-bitars FNV-1a),
-som implementationen för `string` använder.
+`Hash` är implementerat för: `int` och de sex heltalen med fast bredd, `bool`, `char`, `string`, `symbol`
+(inte för flyttal). För egna typer håller man resultatet icke-negativt genom att kombinera det med
+`*sxhash-mask*` (2^30-1) med `logand`. För att hasha en sträng kan man anropa `(sxhash-string s)`
+(FNV-1a 32 bitar), som `string`-implementationen använder.
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-Om två nycklar är samma avgörs av **nyckeltypen själv** (`sxhash`, och `equals` från `Eq`, supertraitet
-till `Hash`), inte av objektidentitet. Därför kan man, som ovan, slå upp med en nyckel som är "ett annat
-värde men lika".
+I en `equal`-tabell avgörs om två nycklar är samma av **nyckeltypen själv** (`sxhash` och `equal` från
+`Equal`, supertraiten till `Hash`), inte av objektidentiteten. Därför hittar, som ovan, en nyckel som är
+"ett annat värde men lika" posten.
 
-Det är i sin ordning att `sxhash` kolliderar (kontraktet för `Hash` går bara åt ett håll: lika värden
-måste ha samma hash). Nycklar som kolliderar skiljs åt med `equals`.
+Det gör inget om `sxhash` kolliderar (`Hash`:s kontrakt gäller åt andra hållet: det säger bara att värden
+som är `equal` har samma hash). Kolliderande nycklar skiljs åt med `equal`.
 
 ## 5. `Array<T>` (flerdimensionella arrayer)
 
@@ -192,13 +202,13 @@ Det finns ingen `bit-vector-p` (den statiska typen besvarar det).
 
 ## 7. `HashSet<T>`
 
-En samling element utan dubbletter (Rusts `HashSet`). En `defstruct` i standardbiblioteket vars
-innehåll är en `HashTable<T,()>`. Elementtypen måste implementera `Hash`, liksom en nyckel i en
-`HashTable`.
+En samling element utan dubbletter (Rusts `HashSet`). En `defstruct` i standardbiblioteket vars innehåll är
+en `HashTable<T,()>`. Hur element jämförs avgörs av `:test`, som för nycklarna i en `HashTable`, och i en
+`equal`-mängd måste elementtypen implementera `Hash`.
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | Skapar en tom mängd. Typargumentet kommer från den förväntade typen |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | Skapar en tom mängd. Typargumentet kommer från den förväntade typen. `:test` som för `HashTable`; utan den `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Lägger till `x`. `true` om det inte fanns, `false` om det redan fanns |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Om `x` finns |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Tar bort `x`. `true` om det fanns |
@@ -209,7 +219,7 @@ innehåll är en `HashTable<T,()>`. Elementtypen måste implementera `Hash`, lik
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

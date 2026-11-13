@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -143,7 +143,7 @@ In de broncode worden types als gewone symbolen of lijsten geschreven.
   signatuur.
 - **Tupletypen**: `#{int string}` (dezelfde vorm als de waarden). Een tuple heeft 1 tot 12
   elementen, en een tupletype kan ook een typeargument zijn (`Vector<#{int string}>`). Elementen
-  lees je met `t::0` `t::1` en wijzig je met `(setf t::0 v)`. `Eq`, `Ord` (vergelijkend vanaf het
+  lees je met `t::0` `t::1` en wijzig je met `(setf t::0 v)`. `Equal`, `Ord` (vergelijkend vanaf het
   eerste element), `Hash` en `print-object` zijn beschikbaar als alle elementtypen ze implementeren.
 - **Gekwalificeerde typenamen**: kunnen met `::` worden gekwalificeerd, zoals in `module::Type`.
 - **Trait-objecttypes**: `:dyn Trait` (twee door een spatie gescheiden woorden die één type vormen).
@@ -975,17 +975,17 @@ traitnaam, of, als die trait geassocieerde types heeft, `(Trait (Assoc Type))` m
 types vastgelegd**.
 
 ```lisp
-(deftrait Eq () ...)                       ; no supertraits
-(deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
+(deftrait Equal () ...)                       ; no supertraits
+(deftrait Ord (Equal) ...)                    ; Rust's trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
   (defmethod rewind (self) ()))
 ```
 
-Overerving heeft drie effecten. (1) `impl Ord X` vereist dat `impl Eq X` **eerst** wordt geschreven (een
+Overerving heeft drie effecten. (1) `impl Ord X` vereist dat `impl Equal X` **eerst** wordt geschreven (een
 regel over de volgorde van schrijven: de enige vorm die in de REPL en bij stapsgewijs `load` deterministisch
-kan worden bepaald, en strenger dan Rust). (2) `(:where (Ord T))` alleen laat je ook de methoden van `Eq`
-aanroepen. (3) De methoden van `Eq` kunnen via een `:dyn Ord` worden aangeroepen, en een `:dyn Ord`-waarde
-kan zoals ze is worden doorgegeven waar een `:dyn Eq` wordt vereist (upcasting). Een subtrait die een
+kan worden bepaald, en strenger dan Rust). (2) `(:where (Ord T))` alleen laat je ook de methoden van `Equal`
+aanroepen. (3) De methoden van `Equal` kunnen via een `:dyn Ord` worden aangeroepen, en een `:dyn Ord`-waarde
+kan zoals ze is worden doorgegeven waar een `:dyn Equal` wordt vereist (upcasting). Een subtrait die een
 methode met dezelfde naam als zijn ouder opnieuw declareert, en het erven van methoden met dezelfde naam
 van twee ouders, zijn beide fouten (een vtable heeft één slot per naam). Ruitvormige overerving wordt tot
 één slot samengevoegd.
@@ -1048,8 +1048,8 @@ zonder body kan geen docstring hebben: een afsluitende string zou zelf de return
 standaardimplementatie zijn, dus de twee zouden niet te onderscheiden zijn.
 
 De traits die de standaardbibliotheek biedt: **`Iter`** (`next` / geassocieerd type `Item`; de basis van
-`doiter` en de sequentiefuncties), **`Eq`** (`equals`; `not-equals` is een standaardimplementatie),
-**`Ord`** (erft `Eq`; alleen `less` moet worden geïmplementeerd, en `less-equal` / `greater` /
+`doiter` en de sequentiefuncties), **`Equal`** (de trait die `equal` gebruikt),
+**`Ord`** (erft `Equal`; alleen `less` moet worden geïmplementeerd, en `less-equal` / `greater` /
 `greater-equal` zijn standaardimplementaties), **`Error`** (`message` / `source`; `:dyn Error` om
 foutentypes uniform te behandelen), **`print-object`** (een afgedrukte weergave per type), **`Pathish`**
 (pathname-designators: een string of een `pathname`), en de streamhiërarchie **`Stream`** →
@@ -1289,10 +1289,10 @@ regels en voorbeelden staan in
 ### 3.16 `#[test]` — testfuncties
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` of `Result<(), E>` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig. Een test die een `Result` teruggeeft, faalt door een `err` terug te geven, en de fout wordt getoond; daarom moet `E` `Error` of `print-object` implementeren (zoals Rust `Debug` vraagt van het fouttype van een test). Een `Error` wordt getoond met `describe-error` (het bericht en de keten van oorzaken), al het andere met `print-object`. Ook `:dyn Error` is een `Error`, dus een test kan verschillende fouten in één type verzamelen en teruggeven.
@@ -1308,7 +1308,7 @@ Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één a
 
 - **Een gewone run en `compile-file` slaan haar over**, zonder zelfs de inhoud te controleren (zoals Rust tests alleen onder `--test` compileert). Het programma zelf kan een testfunctie niet aanroepen.
 - Een test kan in elk bestand staan dat functies bevat, binnen elke `module`. Tests kunnen ook apart in de map `tests/` van het project staan.
-- Een test faalt door een `panic`, een runtimefout of het teruggeven van een `err`. Controleer met `assert`, of met `assert-eq`, dat beide kanten afdrukt ([Systeem](functions/system.md)). Als één test faalt, lopen de andere toch.
+- Een test faalt door een `panic`, een runtimefout of het teruggeven van een `err`. Controleer met `assert`, of met `assert-equal`, dat beide kanten afdrukt ([Systeem](functions/system.md)). Als één test faalt, lopen de andere toch.
 
 ```sh
 typl test                 # voer alle tests van het project in deze map uit
@@ -1331,7 +1331,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1453,12 +1453,12 @@ Soorten patronen:
   schrijf hem tussen haakjes, zoals in `(circle r)`
 - **Directe literals**: gehele getallen / `true`/`false` / tekens — als woorden vergeleken
 - **Waardeliterals**: strings / drijvendekommagetallen / symbolen (`'foo`) / bignum-gehele getallen /
-  ratio's — op waarde vergeleken met de `Eq::equals` van dat type
-  ([Standaardtraits](functions/traits.md#2-eq--ord-vergelijking)). Strings worden op inhoud vergeleken,
+  ratio's — op waarde vergeleken met de `equal` van dat type
+  ([Standaardtraits](functions/traits.md#2-equal--ord-vergelijking)). Strings worden op inhoud vergeleken,
   niet op identiteit
-- `(:= expr)` — evalueert een willekeurige expressie en vergelijkt met `Eq::equals`. De enige manier om
+- `(:= expr)` — evalueert een willekeurige expressie en vergelijkt met `equal`. De enige manier om
   types te vergelijken die geen literalsyntaxis hebben (`defstruct`-instanties, globale variabelen,
-  berekende resultaten), en een door de gebruiker gedefinieerde `Eq`-implementatie wordt zoals ze is de
+  berekende resultaten), en een door de gebruiker gedefinieerde `Equal`-implementatie wordt zoals ze is de
   vergelijkingsregel. `expr` kan naar alles verwijzen wat zichtbaar is vanaf de positie van de tak
   (argumenten, buitenste bindingen, globale variabelen)
 - `(Ctor sub-pattern...)` — constructorpatronen (`(some x)` `(none)` `(cons a d)` `(ok v)` enzovoort)
@@ -1481,7 +1481,7 @@ Soorten patronen:
   dus elk alternatief moet dezelfde variabelen met dezelfde typen binden. Het kan ook binnen een
   constructorpatroon staan (`(some (:or (circle r) (rect r _)))`)
 
-Een type dat `Eq` niet implementeert vergelijken met een waardeliteral / `(:= expr)` is een typefout (deze
+Een type dat `Equal` niet implementeert vergelijken met een waardeliteral / `(:= expr)` is een typefout (deze
 taal kiest ervoor te zeggen "deze kunnen niet worden vergeleken" in plaats van een tak achter te laten die
 stilzwijgend nooit overeenkomt).
 
@@ -1503,19 +1503,13 @@ voorwaarde kan de variabelen lezen die het patroon heeft gebonden.
 - Of-patronen en guards zijn te combineren. De guard wordt geëvalueerd welk alternatief er ook paste
   (`((:or 1 2 3) :when on "small")`).
 
-**Waardeliterals tegen een `Sexpr`-scrutinee**: de `Eq` van `sexpr` is `eq` (identiteit van CL), dus
-directe waarden (`'foo` (geïnterneerd) / gehele getallen / tekens / `true`/`false`) kunnen zoals ze zijn
-worden geschreven en komen op inhoud overeen:
+**Waardeliteralen tegen een `Sexpr` als onderzochte waarde**: de `equal` van `Sexpr` is CLs `equal`, dus
+`'foo` / gehele getallen / tekens / `true`/`false` / strings / zwevendekommagetallen / grote gehele getallen /
+breuken kunnen zo geschreven worden en matchen op inhoud (strings op inhoud, getallen met `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Niet-directe literals (strings / drijvendekommagetallen / bignum-gehele getallen / ratio's) **kunnen niet
-worden geschreven** tegen een `Sexpr`. Hun `eq` vergelijkt objectidentiteit, wat een "tak die typecheckt
-maar nooit overeenkomt" zou opleveren, dus het is een fout die het variantpatroon noemt: schrijf
-`(str "hi")` en het wordt in een `string` uit elkaar gehaald en op inhoud vergeleken. `(:= expr)` vraagt
-expliciet om `equals`, dus deze beperking is er niet op van toepassing.
 
 **De scrutinee hoeft geen ADT te zijn.** `string`/`symbol`/`i32`/`f64` en dergelijke kunnen direct worden
 gematcht (daar horen de stringliteralpatronen). Een type zonder varianten kan echter niet door opsomming
@@ -1942,8 +1936,7 @@ de compiler zelf). `room`/`dribble`/`ed` horen er niet bij en kunnen normaal wor
 Wat **wel** kan worden gecompileerd: stream- en bestands-I/O, `random`, `gensym`,
 `symbol->string`/`intern`, `parse-int`/`parse-float`,
 `get-universal-time`/`get-internal-real-time`, `exit`, de transcendente functies, bitbewerkingen,
-`catch`/`throw`/`unwind-protect`, alle vier `eq`/`eql`/`equal`/`equalp` (waardoor `case` voor elk type
-kan compileren), de hele afdrukfamilie inclusief `print`/`println`/`format`/`pprint` en
+`catch`/`throw`/`unwind-protect`, alle vier `eq`/`eql`/`equal`/`equalp`, de hele afdrukfamilie inclusief `print`/`println`/`format`/`pprint` en
 `pprint-logical-block`, `read` en `eval`. De standaardbibliotheek wordt al gecompileerd geleverd.
 
 Een AOT-uitvoerbaar bestand bevat alleen de functies die het programma gebruikt. Een programma dat niet

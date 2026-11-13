@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -131,7 +131,7 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
   kết quả của việc thay kiểu liên kết của một trait vào chữ ký.
 - **Kiểu tuple**: `#{int string}` (cùng dạng với giá trị). Một tuple có từ 1 đến 12 phần tử, và kiểu
   tuple cũng có thể là đối số kiểu (`Vector<#{int string}>`). Phần tử được đọc bằng `t::0` `t::1` và
-  đổi bằng `(setf t::0 v)`. `Eq`, `Ord` (so sánh từ phần tử đầu tiên), `Hash` và `print-object` dùng
+  đổi bằng `(setf t::0 v)`. `Equal`, `Ord` (so sánh từ phần tử đầu tiên), `Hash` và `print-object` dùng
   được khi mọi kiểu phần tử đều triển khai chúng.
 - **Tên kiểu có tiền tố**: có thể được qualify bằng `::`, như `module::Type`.
 - **Kiểu trait object**: `:dyn Trait` (hai từ cách nhau bằng dấu cách tạo thành một kiểu). Biểu diễn một giá
@@ -913,17 +913,17 @@ Khai báo phương thức của `deftrait` và phương thức trong `impl` củ
 hoặc, nếu trait đó có kiểu liên kết, là `(Trait (Assoc Type))` với **mọi kiểu liên kết của nó được cố định**.
 
 ```lisp
-(deftrait Eq () ...)                       ; không có supertrait
-(deftrait Ord (Eq) ...)                    ; trait Ord: Eq của Rust
+(deftrait Equal () ...)                       ; không có supertrait
+(deftrait Ord (Equal) ...)                    ; trait Ord: PartialEq của Rust
 (deftrait CharSource ((Iter (Item char)))  ; cố định một kiểu liên kết
   (defmethod rewind (self) ()))
 ```
 
-Kế thừa có ba tác dụng. (1) `impl Ord X` yêu cầu `impl Eq X` phải được viết **trước** (một quy tắc về thứ tự
+Kế thừa có ba tác dụng. (1) `impl Ord X` yêu cầu `impl Equal X` phải được viết **trước** (một quy tắc về thứ tự
 viết: dạng duy nhất có thể được quyết định một cách xác định trong REPL và với `load` từng bước, và nghiêm
-ngặt hơn Rust). (2) Chỉ riêng `(:where (Ord T))` đã cho phép bạn gọi cả các phương thức của `Eq`. (3) Các phương
-thức của `Eq` có thể được gọi qua một `:dyn Ord`, và một giá trị `:dyn Ord` có thể được truyền nguyên trạng ở
-nơi cần một `:dyn Eq` (upcasting). Một subtrait khai báo lại một phương thức cùng tên với cha của nó, và kế
+ngặt hơn Rust). (2) Chỉ riêng `(:where (Ord T))` đã cho phép bạn gọi cả các phương thức của `Equal`. (3) Các phương
+thức của `Equal` có thể được gọi qua một `:dyn Ord`, và một giá trị `:dyn Ord` có thể được truyền nguyên trạng ở
+nơi cần một `:dyn Equal` (upcasting). Một subtrait khai báo lại một phương thức cùng tên với cha của nó, và kế
 thừa các phương thức cùng tên từ hai cha, đều là lỗi (một vtable có một ô cho mỗi tên). Kế thừa kim cương gộp
 thành một ô.
 
@@ -981,7 +981,7 @@ thân không thể có docstring: một chuỗi ở cuối sẽ tự nó là gi�
 thể phân biệt hai trường hợp.
 
 Các trait mà thư viện chuẩn cung cấp: **`Iter`** (`next` / kiểu liên kết `Item`; nền tảng của `doiter` và các
-hàm trên dãy), **`Eq`** (`equals`; `not-equals` là triển khai mặc định), **`Ord`** (kế thừa `Eq`; chỉ `less` phải
+hàm trên dãy), **`Equal`** (trait mà `equal` dùng), **`Ord`** (kế thừa `Equal`; chỉ `less` phải
 được triển khai, còn `less-equal` / `greater` / `greater-equal` là các triển khai mặc định), **`Error`**
 (`message` / `source`; `:dyn Error` để xử lý các kiểu lỗi một cách đồng nhất), **`print-object`** (biểu diễn in
 theo từng kiểu), **`Pathish`** (pathname designator: một chuỗi hoặc một `pathname`), và hệ phân cấp stream
@@ -1204,10 +1204,10 @@ triển của thân). Danh sách lambda giống như của `defmacro`. Các quy 
 ### 3.16 `#[test]` — hàm kiểm thử
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` hoặc `Result<(), E>` (cũng không thể nhận tham số kiểu). Không cần `pub`. Một kiểm thử trả về `Result` sẽ thất bại khi trả về `err`, và lỗi được hiển thị, nên `E` phải cài đặt `Error` hoặc `print-object` (giống như Rust yêu cầu kiểu lỗi của kiểm thử có `Debug`). `Error` được hiển thị bằng `describe-error` (thông điệp và chuỗi nguyên nhân), còn lại bằng `print-object`. `:dyn Error` cũng là `Error`, nên một kiểm thử có thể gom các lỗi khác nhau vào một kiểu rồi trả về.
@@ -1223,7 +1223,7 @@ Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, đư�
 
 - **Lần chạy thông thường và `compile-file` bỏ qua nó**, thậm chí không kiểm tra nội dung (giống như Rust chỉ biên dịch các kiểm thử khi có `--test`). Bản thân chương trình không thể gọi một hàm kiểm thử.
 - Có thể viết kiểm thử trong bất kỳ tệp nào chứa hàm, bên trong bất kỳ `module` nào. Cũng có thể để kiểm thử riêng trong thư mục `tests/` của dự án.
-- Một kiểm thử thất bại khi có `panic`, lỗi lúc chạy, hoặc khi trả về `err`. Kiểm tra bằng `assert`, hoặc bằng `assert-eq` (in ra cả hai vế) ([Hệ thống](functions/system.md)). Khi một kiểm thử thất bại, các kiểm thử còn lại vẫn chạy.
+- Một kiểm thử thất bại khi có `panic`, lỗi lúc chạy, hoặc khi trả về `err`. Kiểm tra bằng `assert`, hoặc bằng `assert-equal` (in ra cả hai vế) ([Hệ thống](functions/system.md)). Khi một kiểm thử thất bại, các kiểm thử còn lại vẫn chạy.
 
 ```sh
 typl test                 # chạy mọi kiểm thử của dự án trong thư mục này
@@ -1246,7 +1246,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1360,10 +1360,10 @@ Các loại mẫu:
   trường bằng tên trần là lỗi số ngôi, nên hãy viết nó trong ngoặc, như `(circle r)`
 - **Literal tức thời**: số nguyên / `true`/`false` / ký tự — được so sánh như các từ
 - **Literal giá trị**: chuỗi / số dấu phẩy động / symbol (`'foo`) / số nguyên bignum / ratio — được so sánh theo
-  giá trị bằng `Eq::equals` của kiểu đó ([Các trait chuẩn](functions/traits.md#2-eq--ord-so-sánh)). Chuỗi so
+  giá trị bằng `equal` của kiểu đó ([Các trait chuẩn](functions/traits.md#2-equal--ord-so-sánh)). Chuỗi so
   sánh theo nội dung, không theo đồng nhất
-- `(:= expr)` — đánh giá một biểu thức bất kỳ và so sánh bằng `Eq::equals`. Cách duy nhất để so sánh các kiểu
-  không có cú pháp literal (các thể hiện `defstruct`, biến toàn cục, kết quả được tính), và một triển khai `Eq`
+- `(:= expr)` — đánh giá một biểu thức bất kỳ và so sánh bằng `equal`. Cách duy nhất để so sánh các kiểu
+  không có cú pháp literal (các thể hiện `defstruct`, biến toàn cục, kết quả được tính), và một triển khai `Equal`
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
 - `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`(some x)` `(none)` `(cons a d)` `(ok v)`, v.v.)
@@ -1386,7 +1386,7 @@ Các loại mẫu:
   phải gắn cùng các biến với cùng kiểu. Cũng có thể viết bên trong một mẫu hàm khởi tạo
   (`(some (:or (circle r) (rect r _)))`)
 
-So sánh một kiểu không triển khai `Eq` với một literal giá trị / `(:= expr)` là lỗi kiểu (ngôn ngữ này chọn nói
+So sánh một kiểu không triển khai `Equal` với một literal giá trị / `(:= expr)` là lỗi kiểu (ngôn ngữ này chọn nói
 "những thứ này không thể so sánh" thay vì để lại một nhánh âm thầm không bao giờ khớp).
 
 **Điều kiện canh**: viết `:when điều-kiện` sau mẫu sẽ chọn nhánh chỉ khi mẫu khớp và điều kiện cũng
@@ -1406,18 +1406,13 @@ So sánh một kiểu không triển khai `Eq` với một literal giá trị / 
 - Mẫu hoặc và điều kiện canh kết hợp được. Điều kiện canh được đánh giá dù lựa chọn nào đã khớp
   (`((:or 1 2 3) :when on "small")`).
 
-**Literal giá trị với đối tượng `Sexpr`**: `Eq` của `sexpr` là `eq` (đồng nhất của CL), nên các giá trị tức
-thời (`'foo` (đã intern) / số nguyên / ký tự / `true`/`false`) có thể được viết nguyên trạng và khớp theo nội
-dung:
+**Literal giá trị đối với `Sexpr` được xét**: `equal` của `Sexpr` là `equal` của CL, nên `'foo` / số nguyên /
+ký tự / `true`/`false` / chuỗi / số thực dấu phẩy động / số nguyên lớn / phân số có thể viết nguyên dạng và
+khớp theo nội dung (chuỗi theo nội dung, số bằng `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Các literal không tức thời (chuỗi / số dấu phẩy động / số nguyên bignum / ratio) **không thể được viết** với một
-`Sexpr`. `eq` của chúng so sánh đồng nhất đối tượng, điều này sẽ tạo ra một "nhánh qua được kiểm tra kiểu nhưng
-không bao giờ khớp", nên nó là một lỗi nêu tên mẫu variant: hãy viết `(str "hi")` và nó được tách thành một
-`string` và so sánh theo nội dung. `(:= expr)` yêu cầu `equals` tường minh, nên hạn chế này không áp dụng cho nó.
 
 **Đối tượng được so khớp không nhất thiết phải là một ADT.** `string`/`symbol`/`i32`/`f64` và các kiểu tương tự
 có thể được so khớp trực tiếp (đó là nơi các mẫu literal chuỗi đi vào). Tuy nhiên, một kiểu không có variant
@@ -1819,8 +1814,7 @@ dịch bình thường.
 
 Những gì **có thể** biên dịch: vào/ra stream và tệp, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, các hàm siêu việt, phép toán
-bit, `catch`/`throw`/`unwind-protect`, cả bốn `eq`/`eql`/`equal`/`equalp` (cho phép `case` biên dịch được với mọi
-kiểu), toàn bộ họ in gồm `print`/`println`/`format`/`pprint` và `pprint-logical-block`, `read`, và `eval`. Thư
+bit, `catch`/`throw`/`unwind-protect`, cả bốn `eq`/`eql`/`equal`/`equalp`, toàn bộ họ in gồm `print`/`println`/`format`/`pprint` và `pprint-logical-block`, `read`, và `eval`. Thư
 viện chuẩn được phát hành ở dạng đã biên dịch sẵn.
 
 Một tệp thực thi AOT chỉ chứa các tính năng mà chương trình dùng. Một chương trình không in thì không có engine

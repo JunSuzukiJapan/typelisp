@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Funciones incorporadas
 
 La lista de funciones incorporadas, métodos y la biblioteca estándar. Para la sintaxis (formas especiales y
@@ -26,7 +26,7 @@ nada ([referencia de sintaxis 3.10](../syntax.md#310-module--use--espacios-de-no
 - todo nombre que también lo es del paquete `COMMON-LISP` de Common Lisp (`length`, `format`, `open`,
   etc.)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, los traits de flujo `Stream`,
-  `InputStream` y `OutputStream`, y `Hash`, que implementan las claves de una `HashTable`
+  `InputStream` y `OutputStream`, y `Hash`, que implementan las claves de una `HashTable` `equal`
 - los tipos que mencionan sus funciones y variables
 
 Cualquier otro nombre se trae con un `use`, como `(use std::net::tcp-connect)`, o se escribe con su
@@ -38,7 +38,7 @@ ruta, `std::net::tcp-connect`. La tabla da esos nombres y el módulo de cada uno
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -62,7 +62,7 @@ Las tablas de cada capítulo tienen las columnas "nombre, forma, tipo, descripci
 escribe como `(tipo-de-argumento,...)→tipo-de-retorno`.
 
 - Una sola letra mayúscula como `T`, `A` o `B` es una variable de tipo.
-- Una nota como `where Eq A` es una restricción de trait que debe cumplir la variable de tipo.
+- Una nota como `where Equal A` es una restricción de trait que debe cumplir la variable de tipo.
 - `Iter<A>` significa "cualquier implementación de `Iter` cuyo `Item` sea `A`".
 - Los argumentos marcados con `&optional` / `&key` se pueden omitir.
 
@@ -74,7 +74,7 @@ escribe como `(tipo-de-argumento,...)→tipo-de-retorno`.
 | [sequences.md](sequences.md) | El par `cons-cell`, los datos de expresiones S `Sexpr`, símbolos, funciones de secuencia, iteradores perezosos `lazy`, funciones de orden superior |
 | [collections.md](collections.md) | Cadenas, caracteres, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, tipos de error y el trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traits aritméticos, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, traits aritméticos, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, el pretty printer, `print-object`, variables de control de la impresora |
 | [format.md](format.md) | Directivas de formato |
 | [streams-files.md](streams-files.md) | Streams, operaciones con archivos, nombres de ruta, readtable |

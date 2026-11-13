@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Çiftler, S-İfadeler ve Diziler
 
 Jenerik çift `cons-cell`, S-ifade verisi `Sexpr`, semboller, `Iter` üzerine yazılmış dizi fonksiyonları ve
@@ -129,17 +129,18 @@ Bir yüklem alan fonksiyonlar (CL'nin `-if` ailesine karşılık gelir):
 | `last` | `(last it)` | `Iter<A>→Option<A>` | Son **eleman** (CL'deki gibi "son hücre" değil) |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | Sonuncu hariç hepsi |
 
-`Eq` / `Ord` sınırı gerektiren fonksiyonlar (bir yüklem yerine bir trait üzerinden karşılaştırırlar;
-[Standart Trait'ler](traits.md#2-eq--ord-karşılaştırma)):
+Bir öğeyi arayan fonksiyonlar. `:test` verilmezse CL'deki gibi `eql` ile karşılaştırırlar. `eql` sayıları ve
+karakterleri değere, geri kalanı kimliğe göre karşılaştırır; bu yüzden ayrı ayrı oluşturulmuş aynı içerikli
+iki dizge ya da liste eşit değildir. İçeriğe göre karşılaştırmak için `:test equal` yazılır (6. bölüm):
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | `x`'e eşit bir eleman olup olmadığı (CL'den farklı olarak listenin geri kalanı değil, bir `bool`) |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | `x`'e eşit ilk eleman |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | `x`'e eşit ilk konum |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | Kaç elemanın `x`'e eşit olduğu |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | `x`'e eşit bir eleman olup olmadığı (CL'den farklı olarak listenin geri kalanı değil, bir `bool`) |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | `x`'e eşit ilk eleman |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | `x`'e eşit ilk konum |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | Kaç elemanın `x`'e eşit olduğu |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL'nin `(sort sequence predicate)`'i. Kararlı, yıkıcı olmayan bir sıralama. `cmp`, "birinci bağımsız değişken kesin olarak ikinciden önce gelir" olduğunda `true`'dur |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | `car`'ı `k`'ye eşit olan ilk çift. Değeri `(cdr p)` ile çıkarın |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | `car`'ı `k`'ye eşit olan ilk çift. Değeri `(cdr p)` ile çıkarın |
 
 Bunlar ve 5. bölümdeki fonksiyonların çoğu, CL'nin `:key` / `:test` / `:test-not` / `:start` / `:end` /
 `:from-end` / `:count` anahtar sözcüklü bağımsız değişkenlerini de alır (6. bölüm).
@@ -202,8 +203,8 @@ Hepsi 4. bölümdeki gibi `Iter` üzerinde jenerik fonksiyonlardır. Ortaya çı
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `member` gibi bir **`bool`** (bir yineleyicinin döndürülecek bir kuyruğu yoktur) |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every`'nin olumsuzlamaları |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | Olumlu sürümlerle aynı türler | Yüklemi olumsuzlanmış sürümler |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Değere göre kaldırır |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | Yinelenenleri kaldırır. CL'deki gibi **son görünüm korunur** (`:from-end true` ilkini korur) |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | Değere göre kaldırır |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | Yinelenenleri kaldırır. CL'deki gibi **son görünüm korunur** (`:from-end true` ilkini korur) |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | Değere / yükleme göre değiştirir |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | `Iter<cons-cell<K,V>>` üzerinde | `assoc`'un yüklemli ve değer tarafı sürümleri |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | Başa bir çift ekler |
@@ -214,14 +215,14 @@ Hepsi 4. bölümdeki gibi `Iter` üzerinde jenerik fonksiyonlardır. Ortaya çı
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | Ardışık **kuyruklar** üzerinde eşler |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Yan etkiler için kuyruklar üzerinde eşler (`mapc`'nin `maplist` karşılığı) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Kuyruklar üzerinde eşler ve birleştirir (`mapcan`'ın `maplist` karşılığı) |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | `sub`'ın ilk göründüğü konum. Alıcı bir `string` ise `string` metodu seçilir ([String'ler](collections.md#1-stringler-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | İlk farklılaşma konumu. Eşitlerse `none` |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub`'ın ilk göründüğü konum. Alıcı bir `string` ise `string` metodu seçilir ([String'ler](collections.md#1-stringler-string)) |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | İlk farklılaşma konumu. Eşitlerse `none` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Birleştirme. CL sıralı girdiler ister; bu, birleştirmeyi sıralar |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | Orada değilse `x`'i **başa** ekler |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | Küme işlemleri. CL sırayı belirtmez; burada kararlıdır, **ilk görünüm sırasına göre** |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | İçerme |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Bir sonek olup olmadığı / sonekten önceki kısım. CL **paylaşılan yapıyı** sorar, ancak paylaşılacak yapı yoktur; bu yüzden bu, bir soneki **değer olarak** sorar |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | Eleman eleman eşitlik. `Vector<T>`'nin kendisi `Eq`'i gerçekleştirmez |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Orada değilse `x`'i **başa** ekler |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Küme işlemleri. CL sırayı belirtmez; burada kararlıdır, **ilk görünüm sırasına göre** |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | İçerme |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | Bir sonek olup olmadığı / sonekten önceki kısım. CL **paylaşılan yapıyı** sorar, ancak paylaşılacak yapı olmadığından, elemanları `eql` olan bir sonek olup olmadığı sorulur |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | Eleman eleman `equal`. `Vector<T>`'nin kendisinin `Equal` uygulaması yoktur |
 | `caar`…`cddddr` | `(cadr p)` | iç içe çiftler üzerinde | CL'nin 28 fonksiyonu. **Listelerde değil, çiftlerde** gezerler: `cadr`, bir `cons-cell<A,cons-cell<B,C>>` alır |
 
 CL'de olup bu dilde olmayanlar: `list*` (kuyruğu değiştirilmiş düzensiz liste kavramı yoktur),
@@ -240,7 +241,7 @@ her biri farklı türde olabilir; bu yüzden tek bir `T` eleman türüyle yazıl
 | Anahtar sözcük | Tür | Anlamı |
 |---|---|---|
 | `:key` | `(fn (A) A)` | Karşılaştırmadan ya da sınamadan önce her elemana uygulanan bir izdüşüm |
-| `:test` | `(fn (A A) bool)` | `Eq` sınırındaki `equals` yerine kullanılan bir eşitlik sınaması. İlk bağımsız değişken **aranan öğe**, ikincisi (`:key`'den sonraki) elemandır; CL ile aynı sırada |
+| `:test` | `(fn (A A) bool)` | Varsayılan `eql` yerine kullanılan eşitlik sınaması (`:test equal` vb.). İlk argüman **aranan öğe**, ikincisi (`:key` sonrası) elemandır; CL ile aynı sırada |
 | `:test-not` | `(fn (A A) bool)` | `:test`'in olumsuzlaması |
 | `:start` `:end` | `int` | Taranacak `[start, end)` penceresi. İndeksler tüm diziye göredir |
 | `:from-end` | `bool` | Bir arama **son** eşleşmeyle yanıt verir. `:count` ile birleştirildiğinde etkilenen elemanlar sondan alınır |

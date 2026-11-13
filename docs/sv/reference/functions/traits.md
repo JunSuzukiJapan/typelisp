@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Standardtraits
 
 Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut element. De andra standardtraits finns i sina egna kapitel: `Hash`
@@ -24,49 +24,56 @@ Listor av `Sexpr` implementerar inte `Iter` (deras elementtyper är inte enhetli
 `Iter` för din egen typ kan den gås igenom med `doiter` som den är, och skickas till
 [sekvensfunktionerna](sequences.md#4-sekvensfunktioner-på-iter).
 
-## 2. `Eq` / `Ord` (jämförelse)
+## 2. `Equal` / `Ord` (jämförelse)
 
-Dessa motsvarar Rusts `PartialEq`/`PartialOrd` (här kallade `Eq`/`Ord`). De används i
-`:where`-gränser för generiska funktioner för att kräva att elementtyper kan jämföras
-(`sort`/`member`/`assoc` och så vidare).
+`Equal` är den trait som `equal` använder och motsvarar Rusts `PartialEq`. `Ord` motsvarar Rusts
+`PartialOrd`. De används i generiska funktioners `:where`-gränser för att kräva att elementtypen går att
+jämföra.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; måste implementeras
-  (defmethod not-equals (self (other Self)) bool             ; standardimplementation
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; ärver från Eq
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; måste implementeras
+(deftrait Ord (Equal)                                     ; ärver från Equal
   (defmethod less (self (other Self)) bool)                  ; måste implementeras
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-För att implementera `Eq` skriver man bara `equals`, och för `Ord` bara `less`. Standardimplementationerna
-fyller i resten. `Ord` ärver från `Eq`, så `impl Eq X` behövs före `impl Ord X`.
+För att implementera `Equal` skriver man `equal`, och för `Ord` bara `less`. Standardimplementationerna
+fyller i resten av `Ord`. `Ord` ärver från `Equal`, så `impl Equal X` behövs före `impl Ord X`.
 
-Varje trait-metod kan anropas som en funktion som den är (inuti en gräns `where (Eq A)`/`(Ord A)`, eller på
+`(equal a b)` anropar `Equal`-implementationen för typen hos `a`. Att skriva det för en typ som inte
+implementerar `Equal` är ett typfel. För att jämföra efter identitet använder man `eq`/`eql`, efter
+struktur `equalp`. De tre kan användas på ett värde av vilken typ som helst.
+
+Varje traitmetod kan anropas direkt som en funktion (inom en gräns `where (Equal A)`/`(Ord A)`, eller på
 en konkret typ som implementerar den):
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | Om de är lika (Rusts `==`) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | Om de inte är lika (`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Om de är lika (Rusts `==`) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` är implementerat för: alla numeriska typer (`i8` till `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
-`char` `string` `symbol` `complex`, `Sexpr` (`eq`, det vill säga identitet; används av värdemönstren i
-`match`) och `cons-cell<A,B>` (rekursivt, när elementen är `Eq`). `Option<T>` och `Result<T,E>` är lika när de är samma variant och innehållet är `equals`; en lista är en `Option<Sexpr>`, så dess celler jämförs med identiteten hos `Sexpr` (använd `equal` för att jämföra innehåll). `Ord` är implementerat för: alla
-numeriska typer, `char` `string` och `cons-cell<A,B>` (lexikografiskt, när elementen är `Ord`).
+`Equal` är implementerat för: alla numeriska typer (`i8` till `u32` / `f32` / `f64` / `int` / `ratio`),
+`bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` och tuplerna (element för element,
+när elementen är `Equal`), samt `Option<T>` och `Result<T,E>` (när de är samma variant och innehållet är
+`equal`). För de inbyggda typerna är typens egen inbyggda metod `equal` som den är `Equal`-implementationen.
+Tal jämförs med `=`, strängar efter innehåll med skillnad på stora och små bokstäver. `Ord` är implementerat
+för: alla numeriska typer, `char` `string` och `cons-cell<A,B>` (lexikografiskt, när elementen är `Ord`).
 
-Metodnamnen överlappar inte de inbyggda operatorerna (`= /= < <= > >=`) eller `eq`/`lt` eftersom de
-inbyggda inte kan omdefinieras, och varje implementation delegerar till dem. De skalära
-jämförelseoperatorerna är själva inbyggda metoder för varje mottagartyp ([Tal](numbers.md),
-[Strängar och tecken](collections.md)). Inuti en gräns läses operatorerna som trait-metoderna när man
-skriver dem (kapitel 3).
+`equal` för en lista (`Sexpr`) är CL:s `equal`: conses jämförs efter struktur, strängar efter innehåll och
+varje annan atom med `eql`. Jämförelsen går igenom värdena vid körning och anropar ingen metod. En struct i
+en lista jämförs därför efter identitet, som i CL, oavsett vilket `impl Equal` dess typ har.
+
+Namnen på `Ord`:s metoder krockar inte med de inbyggda operatorerna (`< <= > >=`) eller `lt`, eftersom det
+inbyggda inte kan omdefinieras och varje implementation delegerar till dem. De skalära
+jämförelseoperatorerna är själva inbyggda metoder per mottagartyp ([Tal](numbers.md),
+[Strängar och tecken](collections.md)). Inom en gräns läses den skrivna operatorn som traitens metod
+(kapitel 3). `=` blir `equal`, och `/=` blir `(not (equal a b))`.
 
 ## 3. Aritmetiska traits (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -90,7 +97,7 @@ inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 
 **Inuti en gräns kan man skriva operatorer.** När mottagaren är en typvariabel bunden av `:where` läses
 operatorer som trait-metoder (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -129,7 +136,7 @@ läggas till i” med `(:where (Push C (Item T)))` och lägger till i varje såd
 | `Vector<T>` | Lägger till sist |
 | `Deque<T>` | Lägger till sist (`push-back`) |
 | `Array<T>` | Lägger till vid fyllpekaren (`push-extend`). Ger panic utan fyllpekare |
-| `HashSet<T>` | Lägger in det i mängden (`insert`). Är `Push` bara när elementtypen implementerar `Hash` |
+| `HashSet<T>` | Lägger det i mängden (`insert`) |
 
 ```lisp
 (use std::collections::Deque)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # الأنواع
 
 الأنواع الموجودة في typelisp، والسمات القياسية التي ينفّذها كل نوع. وطريقة كتابة الأنواع في
@@ -33,7 +33,7 @@
 | `Option<T>` | قيمة موجودة أو غير موجودة. `some` / `none` | [Option وResult](functions/option-result.md) |
 | `Result<T,E>` | نجاح أو فشل. `ok` / `err` | مثل ما سبق |
 | `Vector<T>` | مصفوفة قابلة للنمو | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | جدول تجزئة. ويجب أن ينفّذ نوع المفتاح `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | جدول تجزئة. تحدد `:test` عند إنشائه كيفية مقارنة المفاتيح، وفي جدول `equal` يجب أن ينفّذ نوع المفاتيح `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | صف (من 1 إلى 12 عنصرًا). تُقرأ العناصر بـ `t::0` | [الصياغة، الفصل 2](syntax.md#2-كتابة-الأنواع) |
 | `Task<T>` | مقبض إلى مهمة | [المهام](functions/concurrency.md#1-taskt--مقابض-المهام) |
 | `Thread<T>` | مقبض إلى مهمة تعمل على خيط OS مخصص | [Thread](functions/concurrency.md#7-threadt--خيوط-نظام-التشغيل-المخصصة) |
@@ -102,7 +102,7 @@
 
 | السمة | الأنواع المنفِّذة | التفاصيل |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-المقارنة) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-المقارنة) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | مثل ما سبق |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` وكل أنواع الأخطاء المضمنة | [print-object](functions/printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع) |
@@ -124,7 +124,7 @@
 | السمة | الأنواع المنفِّذة |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` أنواع الوحدة `lazy` (`lazy::map-iter<I,A,U>` وغيرها) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (حين يطبّق نوع العناصر `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 التدفقات

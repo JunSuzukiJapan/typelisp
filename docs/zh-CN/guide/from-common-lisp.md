@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 写给 Common Lisp 用户
 
 typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名，但它是静态类型语言。因此，CL 的写法并不总能直接通过。
@@ -110,6 +110,19 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 与 CL 的不同有三点。元素类型必须一致（`#(1 "a")` 是类型错误）。每次求值都会创建新的向量，所以修改它不会影响下一次求值（在 CL 中修改字面量的结果是未定义的）。没有元素的 `#()` 要像 `(the Vector<int> #())` 这样加上类型。多维数组 `#2A((1 2) (3 4))` 的写法也与 CL 相同。
 
 `map`、`filter`、`sort`、`find` 等序列函数作用于实现了 `Iter` trait 的值。`Vector` 要用 `(iter v)` 变成迭代器再传入。
+
+`eq`・`eql`・`equalp` 与 CL 一样可用于任何类型的值。`equal` 是 `Equal` trait 的方法，只能用于实现了它的类型。
+内置类型都实现了它，列表的 `equal` 就是 CL 的 `equal`。自定义类型写 `(impl Equal 类型 ...)` 就能决定比较方式。
+`member`・`find`・`position`・`remove` 等默认使用的比较与 CL 一样是 `eql`。按内容查找字符串或列表时，与 CL 一样
+写 `:test equal`（不需要 `#'`）：
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false（分别创建的字符串不 eql）
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
+`HashTable` 也与 CL 的 `make-hash-table` 一样，在创建时用 `:test` 选择键的比较方式，默认是 `eql`。以字符串为键时
+写 `(HashTable::new :test 'equal)`。
 
 ## 5. 没有多值
 

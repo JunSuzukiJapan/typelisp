@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traits
 
 A trait is a promise that "this type supports these operations". Traits let several types share
@@ -99,20 +99,20 @@ available for your type.
 
 | Trait | Methods to implement | What it enables |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, the `(:= expr)` pattern of `match`, and so on |
-| `Ord` | `less` | `less-equal`, `greater` and so on. `Ord` inherits from `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, the `(:= expr)` pattern of `match`, `member` given `:test equal`, and so on |
+| `Ord` | `less` | `less-equal`, `greater` and so on. `Ord` inherits from `Equal` |
 | `print-object` | `print-object` | How values are shown by `println` and friends |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` and so on |
 | `Error` | `message`, `source` | Use as an error type ([Error Handling](errors.md)) |
 
-Let us implement `Eq` and `Ord` for a type representing an amount of money. Since `Ord` inherits
-from `Eq`, the `Eq` `impl` has to come first.
+Let us implement `Equal` and `Ord` for a type representing an amount of money. Since `Ord` inherits
+from `Equal`, the `Equal` `impl` has to come first.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -190,7 +190,7 @@ The exact list of types that can be used is in
 [Syntax Reference 3.9](../reference/syntax.md#39-deftrait--impl--traits).
 
 Some traits cannot be used with `:dyn`: those whose methods use `Self` for an argument other than
-`self` or for the return value (such as `equals` in `Eq`). Since the type is not known until run
+`self` or for the return value (such as `equal` in `Equal`). Since the type is not known until run
 time, there is no way to produce "a value of the same type".
 
 ## 6. Restrictions

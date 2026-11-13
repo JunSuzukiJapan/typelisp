@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -169,7 +169,7 @@ CL 준수 임의 정밀도 유리수. 항상 기약·양의 분모로 유지되�
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64`로 변환해서 계산(`(sqrt 1/4)`는 `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 위와 같다 |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 위와 같다 |
-| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` 구현. `ratio`를 `HashTable`의 키로 쓸 수 있다 |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash`의 구현. `ratio`를 `equal` `HashTable`의 키로 쓸 수 있다 |
 
 CL의 정수는 분모가 1인 유리수이므로 `int`에도 `numerator`(자기 자신), `denominator`(`1`),
 `float`, `rational`, `rationalize`와 위의 `sqrt`부터 `atanh`까지 15개 함수가 있다(`(sqrt 4)`는
@@ -212,7 +212,7 @@ CL의 `rational`에 해당하는 타입. 값은 `int` 또는 `ratio`이며 CL과
 | `float` `rational` `rationalize` `sqrt` `exp` `log`와 삼각·쌍곡선 함수 | `(op x)` | | `ratio`와 같다 |
 
 `(as int q)`는 `rational->int`(버림), `(try-as int q)`는 `try-rational->int`, `(as ratio q)`·`(as f64 q)`는
-각각의 변환, `(as rational x)`는 `int`/`ratio`에서의 확대. `Eq`·`Ord`·`Hash`·`print-object`와 산술
+각각의 변환, `(as rational x)`는 `int`/`ratio`에서의 확대. `Equal`·`Ord`·`Hash`·`print-object`와 산술
 트레이트도 구현되어 있다.
 
 ## 6. 복소수 `complex`
@@ -235,7 +235,7 @@ CL의 `rational`에 해당하는 타입. 값은 `int` 또는 `ratio`이며 CL과
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | 절댓값. **받는 쪽의 타입을 반환하지 않는 유일한 `abs`**(CL처럼 복소수의 절댓값은 실수) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | 복소수 산술 |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | 성분별 동등. `Eq`도 구현되어 있다(`Ord`는 없다. 복소수에는 순서가 없고 CL의 `<`도 거부한다) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | 성분별 동등. `Equal`도 구현되어 있다(`Ord`는 없다. 복소수에는 순서가 없고 CL의 `<`도 거부한다) |
 | `zerop` | `(zerop z)` | `complex→bool` | 두 성분이 모두 0인지 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt`는 주값 |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

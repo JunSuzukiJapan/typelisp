@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 892a97221e7185de27687fe7c93c550f01731064 -->
+<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Fehlermeldungen
 
 Was die wichtigsten Fehlermeldungen von `typl` bedeuten und wie man sie behebt.
@@ -47,7 +47,8 @@ Fehler, die vor der Ausführung gefunden werden. Die Form wird erst ausgeführt,
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Es gibt keinen Typ dieses Namens. Einen Typ definiert man vor der ersten Form, die ihn verwendet (Typen haben keine Vorwärtsdeklaration). War eine Typvariable gemeint, schreibt man sie an eine Deklarationsstelle wie `<foo>` nach dem Funktionsnamen ([Syntaxreferenz 3.6](syntax.md#36-defstruct--strukturen-benutzerdefinierte-typen)) |
 | ``cannot infer type argument `t` for `Vector::new` `` | Ein Typargument lässt sich nicht bestimmen. Man schreibt den Typ mit `the`, wie in `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | Das `match` behandelt nicht alle Varianten. Man ergänzt Zweige für die fehlenden Varianten oder einen `_`-Zweig |
-| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Die Funktion verlangt einen Trait, den der übergebene Typ nicht implementiert. Man schreibt `(impl Eq pt ...)` ([Standard-Traits](functions/traits.md)) |
+| ``type `pt` does not implement trait `std::cmp::Equal` required by `:where` clause on type parameter `T` `` | Die Funktion verlangt einen Trait, den der übergebene Typ nicht implementiert. Man schreibt `(impl Equal pt ...)` ([Standard-Traits](functions/traits.md)) |
+| ``equal: `pt` does not implement `Equal` `` | `equal` wurde für einen Typ geschrieben, der `Equal` nicht implementiert. Schreiben Sie `(impl Equal pt ...)` oder verwenden Sie `eq`/`eql`, die nach Identität vergleichen, oder `equalp`, das nach Struktur vergleicht |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Ein Wert eines Typs, der den Trait nicht implementiert, wurde dort übergeben, wo ein `:dyn` erwartet wird. Man schreibt das `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | An einer Typstelle steht ein Trait-Name. Man schreibt `:dyn Error` |
 | ``if: (if cond then else)`` | Das `if` hat die falsche Form. `if` verlangt einen else-Zweig. Wird keiner gebraucht, verwendet man `when` |

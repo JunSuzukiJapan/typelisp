@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Inbyggda funktioner
 
 Listan över inbyggda funktioner, metoder och standardbiblioteket. För syntax (specialformer och hur man
@@ -25,7 +25,7 @@ Av standardbibliotekets namn kan dessa användas i varje modul utan att skriva n
 - varje namn som också är ett namn i Common Lisps paket `COMMON-LISP` (`length`, `format`, `open`
   med flera)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, ströminterfacen `Stream`,
-  `InputStream` och `OutputStream`, samt `Hash`, som nycklarna i en `HashTable` implementerar
+  `InputStream` och `OutputStream`, samt `Hash`, som nycklarna i en `equal`-`HashTable` implementerar
 - typerna som dessas funktioner och variabler nämner
 
 Alla andra namn tas in med en `use`, som `(use std::net::tcp-connect)`, eller skrivs med sin väg,
@@ -37,7 +37,7 @@ Alla andra namn tas in med en `use`, som `(use std::net::tcp-connect)`, eller sk
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -61,7 +61,7 @@ Tabellerna i varje kapitel har kolumnerna "namn, form, typ, beskrivning". Typkol
 `(argumenttyp,...)→returtyp`.
 
 - En enda stor bokstav som `T`, `A` eller `B` är en typvariabel.
-- En not som `where Eq A` är en trait-gräns som typvariabeln måste uppfylla.
+- En not som `where Equal A` är en trait-gräns som typvariabeln måste uppfylla.
 - `Iter<A>` betyder "vilken implementation av `Iter` som helst vars `Item` är `A`".
 - Argument markerade `&optional` / `&key` kan utelämnas.
 
@@ -73,7 +73,7 @@ Tabellerna i varje kapitel har kolumnerna "namn, form, typ, beskrivning". Typkol
 | [sequences.md](sequences.md) | Paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktioner, lata iteratorer `lazy`, högre ordningens funktioner |
 | [collections.md](collections.md) | Strängar, tecken, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, feltyper och traitet `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetiska traits, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, aritmetiska traits, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, den snygga skrivaren (pretty printer), `print-object`, kontrollvariabler för utskrift |
 | [format.md](format.md) | Formatdirektiv |
 | [streams-files.md](streams-files.md) | Strömmar, filoperationer, pathnames, readtable |

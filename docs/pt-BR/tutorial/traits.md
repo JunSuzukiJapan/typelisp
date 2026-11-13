@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traits
 
 Um trait é uma promessa de que "este tipo suporta estas operações". Os traits permitem que vários tipos
@@ -99,20 +99,20 @@ que o usam.
 
 | Trait | Métodos a implementar | O que ele permite |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, o padrão `(:= expr)` de `match` etc. |
-| `Ord` | `less` | `less-equal`, `greater` etc. `Ord` herda de `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, o padrão `(:= expr)` de `match`, `member` com `:test equal` etc. |
+| `Ord` | `less` | `less-equal`, `greater` etc. `Ord` herda de `Equal` |
 | `print-object` | `print-object` | Como `println` e afins mostram os valores |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` etc. |
 | `Error` | `message`, `source` | Usá-lo como tipo de erro ([Tratamento de erros](errors.md)) |
 
-Vamos implementar `Eq` e `Ord` para um tipo que representa uma quantia de dinheiro. Como `Ord` herda de `Eq`,
-o `impl` de `Eq` tem de vir primeiro.
+Vamos implementar `Equal` e `Ord` para um tipo que representa uma quantia de dinheiro. Como `Ord` herda de `Equal`,
+o `impl` de `Equal` tem de vir primeiro.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -189,7 +189,7 @@ A lista exata de tipos que podem ser usados está em
 [Referência de sintaxe 3.9](../reference/syntax.md#39-deftrait--impl--traits).
 
 Alguns traits não podem ser usados com `:dyn`: aqueles cujos métodos usam `Self` para um argumento que não
-seja `self` ou para o valor de retorno (como `equals` de `Eq`). Como o tipo só é conhecido em tempo de
+seja `self` ou para o valor de retorno (como `equal` de `Equal`). Como o tipo só é conhecido em tempo de
 execução, não há como produzir "um valor do mesmo tipo".
 
 ## 6. Restrições

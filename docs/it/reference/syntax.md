@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -143,7 +143,7 @@ Nel sorgente, i tipi si scrivono come normali simboli o liste.
   mostra, per esempio come risultato della sostituzione del tipo associato di un trait in una firma.
 - **Tipi tupla**: `#{int string}` (la stessa forma dei valori). Una tupla ha da 1 a 12 elementi, e
   un tipo tupla può anche essere un argomento di tipo (`Vector<#{int string}>`). Gli elementi si
-  leggono con `t::0` `t::1` e si modificano con `(setf t::0 v)`. `Eq`, `Ord` (confronto a partire
+  leggono con `t::0` `t::1` e si modificano con `(setf t::0 v)`. `Equal`, `Ord` (confronto a partire
   dal primo elemento), `Hash` e `print-object` sono disponibili quando tutti i tipi degli elementi
   li implementano.
 - **Nomi di tipo qualificati**: possono essere qualificati con `::`, come in `module::Type`.
@@ -972,17 +972,17 @@ un semplice nome di trait, oppure, se quel trait ha tipi associati, `(Trait (Ass
 suoi tipi associati fissati**.
 
 ```lisp
-(deftrait Eq () ...)                       ; no supertraits
-(deftrait Ord (Eq) ...)                    ; Rust's trait Ord: Eq
+(deftrait Equal () ...)                       ; no supertraits
+(deftrait Ord (Equal) ...)                    ; Rust's trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; pinning an associated type
   (defmethod rewind (self) ()))
 ```
 
-L'ereditarietà ha tre effetti. (1) `impl Ord X` richiede che `impl Eq X` sia scritto **per primo** (una
+L'ereditarietà ha tre effetti. (1) `impl Ord X` richiede che `impl Equal X` sia scritto **per primo** (una
 regola sull'ordine di scrittura: l'unica forma che si può decidere in modo deterministico nel REPL e con
 `load` passo per passo, e più severa di Rust). (2) `(:where (Ord T))` da solo permette di chiamare anche i
-metodi di `Eq`. (3) I metodi di `Eq` si possono chiamare attraverso un `:dyn Ord`, e un valore `:dyn Ord`
-può essere passato così com'è dove è richiesto un `:dyn Eq` (upcasting). Un sottotrait che ridichiara un
+metodi di `Equal`. (3) I metodi di `Equal` si possono chiamare attraverso un `:dyn Ord`, e un valore `:dyn Ord`
+può essere passato così com'è dove è richiesto un `:dyn Equal` (upcasting). Un sottotrait che ridichiara un
 metodo con lo stesso nome del genitore, e l'ereditare metodi con lo stesso nome da due genitori, sono
 entrambi errori (una vtable ha uno slot per nome). L'ereditarietà a diamante si fonde in un unico slot.
 
@@ -1044,8 +1044,8 @@ Una firma senza corpo non può avere una docstring: una stringa finale sarebbe e
 ritorno di un'implementazione predefinita, quindi i due casi non si potrebbero distinguere.
 
 I trait forniti dalla libreria standard: **`Iter`** (`next` / tipo associato `Item`; la base di `doiter` e
-delle funzioni sulle sequenze), **`Eq`** (`equals`; `not-equals` è un'implementazione predefinita),
-**`Ord`** (eredita `Eq`; deve essere implementato solo `less`, e `less-equal` / `greater` /
+delle funzioni sulle sequenze), **`Equal`** (il trait che usa `equal`),
+**`Ord`** (eredita `Equal`; deve essere implementato solo `less`, e `less-equal` / `greater` /
 `greater-equal` sono implementazioni predefinite), **`Error`** (`message` / `source`; `:dyn Error` per
 trattare uniformemente i tipi di errore), **`print-object`** (una rappresentazione stampata per tipo),
 **`Pathish`** (designatori di pathname: una stringa o un `pathname`), e la gerarchia degli stream
@@ -1285,10 +1285,10 @@ esempi si trovano in
 ### 3.16 `#[test]` — funzioni di test
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 Un `defun` contrassegnato con `#[test]` è una funzione di test, che `typl test` chiama una alla volta (come il `#[test]` di Rust). Non deve prendere argomenti e deve restituire `()` o `Result<(), E>` (non può nemmeno prendere parametri di tipo). Non serve `pub`. Un test che restituisce un `Result` fallisce restituendo un `err`, e l'errore viene mostrato, quindi `E` deve implementare `Error` o `print-object` (come Rust richiede `Debug` al tipo di errore di un test). Un `Error` viene mostrato con `describe-error` (il messaggio e la catena delle sue cause), tutto il resto con `print-object`. Anche `:dyn Error` è un `Error`, quindi un test può raccogliere errori diversi in un solo tipo e restituirlo.
@@ -1304,7 +1304,7 @@ Un `defun` contrassegnato con `#[test]` è una funzione di test, che `typl test`
 
 - **Un'esecuzione normale e `compile-file` la saltano**, senza nemmeno controllarne il contenuto (come Rust compila i test solo con `--test`). Il programma stesso non può chiamare una funzione di test.
 - Un test può essere scritto in qualsiasi file che contenga funzioni, dentro qualsiasi `module`. I test si possono anche tenere a parte nella cartella `tests/` del progetto.
-- Un test fallisce con un `panic`, un errore a runtime o restituendo un `err`. Si verifica con `assert`, o con `assert-eq`, che stampa entrambi i lati ([Sistema](functions/system.md)). Se un test fallisce, gli altri vengono comunque eseguiti.
+- Un test fallisce con un `panic`, un errore a runtime o restituendo un `err`. Si verifica con `assert`, o con `assert-equal`, che stampa entrambi i lati ([Sistema](functions/system.md)). Se un test fallisce, gli altri vengono comunque eseguiti.
 
 ```sh
 typl test                 # esegue tutti i test del progetto in questa cartella
@@ -1327,7 +1327,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1449,12 +1449,12 @@ Tipi di pattern:
   arità, quindi scrivila tra parentesi, come in `(circle r)`
 - **Letterali immediati**: interi / `true`/`false` / caratteri — confrontati come parole
 - **Letterali di valore**: stringhe / numeri in virgola mobile / simboli (`'foo`) / interi bignum /
-  rapporti — confrontati per valore con l'`Eq::equals` di quel tipo
-  ([Trait standard](functions/traits.md#2-eq--ord-confronto)). Le stringhe si confrontano per contenuto,
+  rapporti — confrontati per valore con l'`equal` di quel tipo
+  ([Trait standard](functions/traits.md#2-equal--ord-confronto)). Le stringhe si confrontano per contenuto,
   non per identità
-- `(:= expr)` — valuta un'espressione qualsiasi e confronta con `Eq::equals`. L'unico modo di confrontare
+- `(:= expr)` — valuta un'espressione qualsiasi e confronta con `equal`. L'unico modo di confrontare
   tipi che non hanno sintassi di letterale (istanze di `defstruct`, globali, risultati calcolati), e
-  un'implementazione `Eq` definita dall'utente diventa la regola di confronto così com'è. `expr` può
+  un'implementazione `Equal` definita dall'utente diventa la regola di confronto così com'è. `expr` può
   fare riferimento a qualsiasi cosa visibile dalla posizione del ramo (argomenti, binding esterni,
   globali)
 - `(Ctor sub-pattern...)` — pattern di costruttore (`(some x)` `(none)` `(cons a d)` `(ok v)` e così via)
@@ -1479,7 +1479,7 @@ Tipi di pattern:
   stessi tipi. Si può scrivere anche dentro un pattern costruttore
   (`(some (:or (circle r) (rect r _)))`)
 
-Confrontare un tipo che non implementa `Eq` con un letterale di valore / `(:= expr)` è un errore di tipo
+Confrontare un tipo che non implementa `Equal` con un letterale di valore / `(:= expr)` è un errore di tipo
 (questo linguaggio sceglie di dire "questi non si possono confrontare" anziché lasciare un ramo che in
 silenzio non corrisponde mai).
 
@@ -1501,20 +1501,13 @@ condizione può leggere le variabili legate dal pattern.
 - Pattern « or » e guardie si combinano. La guardia viene valutata qualunque sia l'alternativa che
   ha corrisposto (`((:or 1 2 3) :when on "small")`).
 
-**Letterali di valore contro uno scrutinee `Sexpr`**: l'`Eq` di `sexpr` è `eq` (l'identità di CL), quindi
-gli immediati (`'foo` (internato) / interi / caratteri / `true`/`false`) si possono scrivere così come
-sono e corrispondono per contenuto:
+**Letterali di valore contro un `Sexpr` esaminato**: l'`equal` di `Sexpr` è l'`equal` di CL, quindi
+`'foo` / interi / caratteri / `true`/`false` / stringhe / numeri in virgola mobile / interi grandi /
+razionali si scrivono così come sono e corrispondono per contenuto (stringhe per contenuto, numeri con `eql`):
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-I letterali non immediati (stringhe / numeri in virgola mobile / interi bignum / rapporti) **non si
-possono scrivere** contro una `Sexpr`. Il loro `eq` confronta l'identità dell'oggetto, il che
-produrrebbe un "ramo che supera il controllo dei tipi ma non corrisponde mai", quindi è un errore che
-nomina il pattern di variante: scrivi `(str "hi")` e viene scomposto in una `string` e confrontato per
-contenuto. `(:= expr)` richiede esplicitamente `equals`, quindi questa restrizione non si applica ad
-esso.
 
 **Lo scrutinee non deve essere necessariamente un ADT.** `string`/`symbol`/`i32`/`f64` e simili si possono
 confrontare direttamente (è lì che vanno i pattern con letterali stringa). Tuttavia, un tipo senza
@@ -1941,8 +1934,7 @@ stesso). `room`/`dribble`/`ed` non ne fanno parte e possono essere compilate nor
 Ciò che **si può** compilare: l'I/O su stream e file, `random`, `gensym`,
 `symbol->string`/`intern`, `parse-int`/`parse-float`,
 `get-universal-time`/`get-internal-real-time`, `exit`, le funzioni trascendenti, le operazioni sui bit,
-`catch`/`throw`/`unwind-protect`, tutti e quattro `eq`/`eql`/`equal`/`equalp` (il che permette di
-compilare `case` per ogni tipo), l'intera famiglia di stampa compresi
+`catch`/`throw`/`unwind-protect`, tutti e quattro `eq`/`eql`/`equal`/`equalp`, l'intera famiglia di stampa compresi
 `print`/`println`/`format`/`pprint` e `pprint-logical-block`, `read` ed `eval`. La libreria standard viene
 distribuita già compilata.
 

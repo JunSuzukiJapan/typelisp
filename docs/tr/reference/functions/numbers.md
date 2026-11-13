@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -188,7 +188,7 @@ Kesir literallerinin sözdizimi için [Sözdizimi Başvurusu](../syntax.md#1-sö
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64`'e dönüştürüp hesaplar (`(sqrt 1/4)` `0.5` olur) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Yukarıdaki gibi |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Yukarıdaki gibi |
-| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` uygulaması. Bir `ratio`, `HashTable` anahtarı olabilir |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` uygulaması. Bir `ratio`, bir `equal` `HashTable`'ın anahtarı olabilir |
 
 CL'de tam sayı paydası 1 olan bir rasyonel sayıdır; bu yüzden `int` de `numerator` (kendisi),
 `denominator` (`1`), `float`, `rational`, `rationalize` ve yukarıdaki `sqrt`'ten `atanh`'a 15
@@ -234,7 +234,7 @@ alınır.
 | `float` `rational` `rationalize` `sqrt` `exp` `log` ile trigonometrik ve hiperbolik fonksiyonlar | `(op x)` | | `ratio` ile aynı |
 
 `(as int q)` `rational->int`'tir (kırpma), `(try-as int q)` `try-rational->int`'tir, `(as ratio q)` ve
-`(as f64 q)` ilgili dönüşümlerdir, `(as rational x)` ise `int`/`ratio`'dan genişletir. `Eq`, `Ord`,
+`(as f64 q)` ilgili dönüşümlerdir, `(as rational x)` ise `int`/`ratio`'dan genişletir. `Equal`, `Ord`,
 `Hash`, `print-object` ve aritmetik trait'ler de uygulanmıştır.
 
 ## 6. Karmaşık sayılar `complex`
@@ -259,7 +259,7 @@ Standart kütüphanedeki bir struct (`defstruct`).
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Mutlak değer. **Alıcının türünü döndürmeyen tek `abs`** (CL'deki gibi, bir karmaşık sayının mutlak değeri gerçektir) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Karmaşık aritmetik |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Bileşen bileşen eşitlik. `Eq` de gerçekleştirilmiştir (`Ord` yoktur: karmaşık sayıların sırası yoktur ve CL'nin `<`'ü de onları reddeder) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Bileşen bileşen eşitlik. `Equal` de gerçekleştirilmiştir (`Ord` yoktur: karmaşık sayıların sırası yoktur ve CL'nin `<`'ü de onları reddeder) |
 | `zerop` | `(zerop z)` | `complex→bool` | Her iki bileşenin de 0 olup olmadığı |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` esas değerleri verir |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

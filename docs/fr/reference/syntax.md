@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ f1398a3594522d46841012a079334c9f70b06925 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -142,7 +142,7 @@ Dans le source, les types s'écrivent comme des symboles ou des listes ordinaire
   type associé d'un trait dans une signature.
 - **Types tuple** : `#{int string}` (la même forme que les valeurs). Un tuple a de 1 à 12 éléments,
   et un type tuple peut aussi être un argument de type (`Vector<#{int string}>`). Les éléments se
-  lisent avec `t::0` `t::1` et se modifient avec `(setf t::0 v)`. `Eq`, `Ord` (comparaison à partir
+  lisent avec `t::0` `t::1` et se modifient avec `(setf t::0 v)`. `Equal`, `Ord` (comparaison à partir
   du premier élément), `Hash` et `print-object` sont disponibles quand tous les types d'élément les
   implémentent.
 - **Noms de types qualifiés** : peuvent être qualifiés avec `::`, comme `module::Type`.
@@ -951,16 +951,16 @@ Les déclarations de méthodes d'un `deftrait` et les méthodes de l'`impl` d'un
 de trait nu ou, si ce trait a des types associés, `(Trait (Assoc Type))` avec **tous ses types associés fixés**.
 
 ```lisp
-(deftrait Eq () ...)                       ; pas de super-traits
-(deftrait Ord (Eq) ...)                    ; le trait Ord: Eq de Rust
+(deftrait Equal () ...)                       ; pas de super-traits
+(deftrait Ord (Equal) ...)                    ; le trait Ord: PartialEq de Rust
 (deftrait CharSource ((Iter (Item char)))  ; fixer un type associé
   (defmethod rewind (self) ()))
 ```
 
-L'héritage a trois effets. (1) `impl Ord X` exige que `impl Eq X` soit écrit **avant** (une règle d'ordre d'écriture :
+L'héritage a trois effets. (1) `impl Ord X` exige que `impl Equal X` soit écrit **avant** (une règle d'ordre d'écriture :
 la seule forme décidable de façon déterministe dans la REPL et avec un `load` pas à pas, et plus stricte que Rust).
-(2) `(:where (Ord T))` seul permet aussi d'appeler les méthodes de `Eq`. (3) Les méthodes de `Eq` peuvent être appelées
-via un `:dyn Ord`, et une valeur `:dyn Ord` peut être passée telle quelle là où un `:dyn Eq` est exigé (transtypage
+(2) `(:where (Ord T))` seul permet aussi d'appeler les méthodes de `Equal`. (3) Les méthodes de `Equal` peuvent être appelées
+via un `:dyn Ord`, et une valeur `:dyn Ord` peut être passée telle quelle là où un `:dyn Equal` est exigé (transtypage
 ascendant). Un sous-trait qui redéclare une méthode de même nom que son parent, et l'héritage de méthodes de même nom
 depuis deux parents, sont tous deux des erreurs (une vtable a une entrée par nom). L'héritage en losange est fusionné
 en une entrée.
@@ -1021,8 +1021,8 @@ signature sans corps ne peut pas avoir de docstring : une chaîne finale serait 
 implémentation par défaut ; les deux ne pourraient donc pas être distingués.
 
 Les traits que fournit la bibliothèque standard : **`Iter`** (`next` / type associé `Item` ; la base de `doiter` et
-des fonctions de séquence), **`Eq`** (`equals` ; `not-equals` est une implémentation par défaut), **`Ord`** (hérite de
-`Eq` ; seule `less` doit être implémentée, et `less-equal` / `greater` / `greater-equal` sont des implémentations par
+des fonctions de séquence), **`Equal`** (le trait qu'utilise `equal`), **`Ord`** (hérite de
+`Equal` ; seule `less` doit être implémentée, et `less-equal` / `greater` / `greater-equal` sont des implémentations par
 défaut), **`Error`** (`message` / `source` ; `:dyn Error` pour traiter uniformément les types d'erreur),
 **`print-object`** (une représentation imprimée par type), **`Pathish`** (désignateurs de noms de chemin : une chaîne
 ou un `pathname`), et la hiérarchie des flux **`Stream`** → **`InputStream`** / **`OutputStream`** →
@@ -1255,10 +1255,10 @@ se trouvent dans
 ### 3.16 `#[test]` — fonctions de test
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 Un `defun` marqué `#[test]` est une fonction de test, que `typl test` appelle une à une (comme le `#[test]` de Rust). Elle ne doit prendre aucun argument et doit renvoyer `()` ou `Result<(), E>` (elle ne peut pas non plus prendre de paramètres de type). Elle n'a pas besoin de `pub`. Un test qui renvoie un `Result` échoue en renvoyant un `err`, et l'erreur est affichée ; `E` doit donc implémenter `Error` ou `print-object` (comme Rust exige `Debug` du type d'erreur d'un test). Un `Error` est affiché par `describe-error` (le message et la chaîne de ses causes), tout le reste par `print-object`. `:dyn Error` est aussi un `Error` : un test peut donc rassembler des erreurs différentes en un seul type et le renvoyer.
@@ -1274,7 +1274,7 @@ Un `defun` marqué `#[test]` est une fonction de test, que `typl test` appelle u
 
 - **Une exécution ordinaire et `compile-file` l'ignorent**, sans même vérifier son contenu (comme Rust ne compile les tests que sous `--test`). Le programme lui-même ne peut pas appeler une fonction de test.
 - Un test peut s'écrire dans n'importe quel fichier contenant des fonctions, à l'intérieur de n'importe quel `module`. Les tests peuvent aussi être rangés à part dans le dossier `tests/` du projet.
-- Un test échoue par un `panic`, une erreur d'exécution ou le renvoi d'un `err`. On vérifie avec `assert`, ou avec `assert-eq`, qui affiche les deux côtés ([Système](functions/system.md)). Quand un test échoue, les autres s'exécutent quand même.
+- Un test échoue par un `panic`, une erreur d'exécution ou le renvoi d'un `err`. On vérifie avec `assert`, ou avec `assert-equal`, qui affiche les deux côtés ([Système](functions/system.md)). Quand un test échoue, les autres s'exécutent quand même.
 
 ```sh
 typl test                 # exécute tous les tests du projet de ce dossier
@@ -1297,7 +1297,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1414,10 +1414,10 @@ Sortes de motifs :
   à champs par son nom nu est une erreur d'arité ; écrivez-la entre parenthèses, comme `(circle r)`
 - **Littéraux immédiats** : entiers / `true`/`false` / caractères — comparés comme des mots
 - **Littéraux de valeur** : chaînes / nombres à virgule flottante / symboles (`'foo`) / entiers bignum / fractions —
-  comparés par valeur avec l'`Eq::equals` de ce type ([Traits standard](functions/traits.md#2-eq--ord-comparaison)).
+  comparés par valeur avec l'`equal` de ce type ([Traits standard](functions/traits.md#2-equal--ord-comparaison)).
   Les chaînes se comparent par contenu, pas par identité
-- `(:= expr)` — évalue une expression quelconque et compare avec `Eq::equals`. Le seul moyen de comparer des types sans
-  syntaxe littérale (instances de `defstruct`, globales, résultats calculés), et une implémentation d'`Eq` définie
+- `(:= expr)` — évalue une expression quelconque et compare avec `equal`. Le seul moyen de comparer des types sans
+  syntaxe littérale (instances de `defstruct`, globales, résultats calculés), et une implémentation d'`Equal` définie
   par l'utilisateur devient telle quelle la règle de comparaison. `expr` peut faire référence à tout ce qui est
   visible depuis la position de la branche (arguments, liaisons extérieures, globales)
 - `(Ctor sub-pattern...)` — motifs de constructeur (`(some x)` `(none)` `(cons a d)` `(ok v)`, etc.)
@@ -1441,7 +1441,7 @@ Sortes de motifs :
   a qu'un corps, donc chaque alternative doit lier les mêmes variables avec les mêmes types. Il peut
   aussi s'écrire à l'intérieur d'un motif de constructeur (`(some (:or (circle r) (rect r _)))`)
 
-Comparer un type qui n'implémente pas `Eq` avec un littéral de valeur / `(:= expr)` est une erreur de type (ce langage
+Comparer un type qui n'implémente pas `Equal` avec un littéral de valeur / `(:= expr)` est une erreur de type (ce langage
 choisit de dire « on ne peut pas les comparer » plutôt que de laisser une branche qui ne correspond silencieusement
 jamais).
 
@@ -1464,19 +1464,13 @@ est essayée. La condition peut lire les variables que le motif a liées.
 - Les motifs « ou » et les gardes se combinent. La garde est évaluée quelle que soit l'alternative
   qui a correspondu (`((:or 1 2 3) :when on "small")`).
 
-**Littéraux de valeur face à une valeur examinée `Sexpr`** : l'`Eq` de `sexpr` est `eq` (l'identité de CL) ; les
-immédiats (`'foo` (interné) / entiers / caractères / `true`/`false`) peuvent donc s'écrire tels quels et correspondent
-par contenu :
+**Littéraux de valeur face à un `Sexpr` examiné** : le `equal` de `Sexpr` est le `equal` de CL, donc
+`'foo` / entiers / caractères / `true`/`false` / chaînes / flottants / grands entiers / rationnels s'écrivent
+tels quels et correspondent par contenu (les chaînes par contenu, les nombres par `eql`) :
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-Les littéraux non immédiats (chaînes / nombres à virgule flottante / entiers bignum / fractions) **ne peuvent pas
-s'écrire** face à un `Sexpr`. Leur `eq` compare l'identité des objets, ce qui donnerait « une branche qui passe la
-vérification mais ne correspond jamais » ; c'est donc une erreur qui nomme le motif de variante : écrivez
-`(str "hi")` et il est décomposé en `string` et comparé par contenu. `(:= expr)` demande explicitement `equals` ; cette
-restriction ne s'y applique donc pas.
 
 **La valeur examinée n'a pas besoin d'être un ADT.** `string`/`symbol`/`i32`/`f64` et semblables peuvent être filtrés
 directement (c'est là que vont les motifs de littéraux chaînes). Cependant, un type sans variantes ne peut pas être
@@ -1891,8 +1885,7 @@ chemins d'appel de l'interpréteur en cours ; et `disassemble` utilise le compil
 
 Ce qui **peut** être compilé : les E/S de flux et de fichiers, `random`, `gensym`, `symbol->string`/`intern`,
 `parse-int`/`parse-float`, `get-universal-time`/`get-internal-real-time`, `exit`, les fonctions transcendantes, les
-opérations sur les bits, `catch`/`throw`/`unwind-protect`, les quatre `eq`/`eql`/`equal`/`equalp` (ce qui permet de
-compiler `case` pour tout type), toute la famille d'affichage y compris `print`/`println`/`format`/`pprint` et
+opérations sur les bits, `catch`/`throw`/`unwind-protect`, les quatre `eq`/`eql`/`equal`/`equalp`, toute la famille d'affichage y compris `print`/`println`/`format`/`pprint` et
 `pprint-logical-block`, `read` et `eval`. La bibliothèque standard est livrée déjà compilée.
 
 Un exécutable AOT ne contient que les fonctionnalités qu'utilise le programme. Un programme qui n'affiche rien n'a pas

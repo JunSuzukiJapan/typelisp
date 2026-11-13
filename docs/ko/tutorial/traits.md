@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 트레이트
 
 트레이트는 "이 타입은 이런 연산을 지원한다"는 약속이다. 트레이트를 쓰면 여러 타입이 같은 이름의 연산을 공유할 수
@@ -94,19 +94,19 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | 트레이트 | 구현할 메서드 | 쓸 수 있게 되는 것 |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, `match`의 `(:= expr)` 패턴 등 |
-| `Ord` | `less` | `less-equal`, `greater` 등. `Ord`는 `Eq`를 상속한다 |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, `match`의 `(:= 식)` 패턴, `:test equal`을 준 `member` 등 |
+| `Ord` | `less` | `less-equal`, `greater` 등. `Ord`는 `Equal`를 상속한다 |
 | `print-object` | `print-object` | `println` 등에서 값이 표시되는 방식 |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` 등 |
 | `Error` | `message`, `source` | 오류 타입으로 쓰기([오류 처리](errors.md)) |
 
-금액을 나타내는 타입에 `Eq`와 `Ord`를 구현해 보자. `Ord`는 `Eq`를 상속하므로 `Eq`의 `impl`을 먼저 써야 한다.
+금액을 나타내는 타입에 `Equal`와 `Ord`를 구현해 보자. `Ord`는 `Equal`를 상속하므로 `Equal`의 `impl`을 먼저 써야 한다.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -180,8 +180,8 @@ total 9
 
 쓸 수 있는 타입의 정확한 목록은 [문법 레퍼런스 3.9](../reference/syntax.md#39-deftrait--impl--트레이트-기구)에 있다.
 
-`:dyn`으로 쓸 수 없는 트레이트도 있다. 메서드가 `self` 이외의 인수나 반환값에 `Self`를 쓰는 트레이트(`Eq`의
-`equals` 등)이다. 실행할 때까지 타입을 알 수 없으므로 "같은 타입의 값"을 만들어 낼 방법이 없다.
+`:dyn`으로 쓸 수 없는 트레이트도 있다. 메서드가 `self` 이외의 인수나 반환값에 `Self`를 쓰는 트레이트(`Equal`의
+`equal` 등)이다. 실행할 때까지 타입을 알 수 없으므로 "같은 타입의 값"을 만들어 낼 방법이 없다.
 
 ## 6. 제한
 

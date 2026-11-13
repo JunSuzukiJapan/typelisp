@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Трейти
 
 Трейт — це обіцянка, що «цей тип підтримує ці операції». Трейти дозволяють кільком типам ділити операції
@@ -99,20 +99,20 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | Трейт | Методи для реалізації | Що вмикає |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, візерунок `(:= expr)` у `match` тощо |
-| `Ord` | `less` | `less-equal`, `greater` тощо. `Ord` успадковує `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, зразок `(:= вираз)` у `match`, `member` з `:test equal` тощо |
+| `Ord` | `less` | `less-equal`, `greater` тощо. `Ord` успадковує `Equal` |
 | `print-object` | `print-object` | Як значення показують `println` та подібні |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` тощо |
 | `Error` | `message`, `source` | Використання як типу помилки ([Обробка помилок](errors.md)) |
 
-Реалізуймо `Eq` і `Ord` для типу, що представляє суму грошей. Оскільки `Ord` успадковує `Eq`, `impl` для
-`Eq` має йти першим.
+Реалізуймо `Equal` і `Ord` для типу, що представляє суму грошей. Оскільки `Ord` успадковує `Equal`, `impl` для
+`Equal` має йти першим.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -192,7 +192,7 @@ total 9
 [Довіднику із синтаксису 3.9](../reference/syntax.md#39-deftrait--impl--трейти).
 
 Деякі трейти не можна використовувати з `:dyn`: ті, чиї методи вживають `Self` для аргументу, відмінного
-від `self`, або для результату (як-от `equals` в `Eq`). Оскільки тип невідомий до часу виконання,
+від `self`, або для результату (як-от `equal` в `Equal`). Оскільки тип невідомий до часу виконання,
 створити «значення того самого типу» неможливо.
 
 ## 6. Обмеження

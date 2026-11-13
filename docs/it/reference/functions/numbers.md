@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Numeri
 
 Operazioni su interi, numeri in virgola mobile, razionali, numeri complessi e booleani, e altre funzioni
@@ -189,7 +189,7 @@ conversione esplicito o `as`/`try-as`). Per la sintassi dei letterali razionali,
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Converte in `f64` e calcola (`(sqrt 1/4)` è `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Come sopra |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Come sopra |
-| `sxhash` | `(sxhash x)` | `ratio→int` | L'implementazione di `Hash`. Un `ratio` può essere chiave di una `HashTable` |
+| `sxhash` | `(sxhash x)` | `ratio→int` | L'implementazione di `Hash`. Un `ratio` può essere la chiave di una `HashTable` `equal` |
 
 In CL un intero è un razionale con denominatore 1, quindi anche `int` ha `numerator` (se stesso),
 `denominator` (`1`), `float`, `rational`, `rationalize` e le 15 funzioni da `sqrt` a `atanh` qui
@@ -236,7 +236,7 @@ estrae con `as`/`try-as`.
 
 `(as int q)` è `rational->int` (troncamento), `(try-as int q)` è `try-rational->int`, `(as ratio q)` e
 `(as f64 q)` sono le rispettive conversioni, e `(as rational x)` allarga da `int`/`ratio`. Sono
-implementati anche `Eq`, `Ord`, `Hash`, `print-object` e i trait aritmetici.
+implementati anche `Equal`, `Ord`, `Hash`, `print-object` e i trait aritmetici.
 
 ## 6. Numeri complessi `complex`
 
@@ -260,7 +260,7 @@ Una struttura (`defstruct`) della libreria standard.
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | Valore assoluto. **L'unico `abs` che non restituisce il tipo del ricevitore** (come in CL, il valore assoluto di un numero complesso è reale) |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | Aritmetica complessa |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Uguaglianza componente per componente. Anche `Eq` è implementato (non c'è `Ord`: i numeri complessi non hanno ordine, e anche il `<` di CL li rifiuta) |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | Uguaglianza componente per componente. Anche `Equal` è implementato (non c'è `Ord`: i numeri complessi non hanno ordine, e anche il `<` di CL li rifiuta) |
 | `zerop` | `(zerop z)` | `complex→bool` | Se entrambe le componenti sono 0 |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` danno i valori principali |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`. `(expt 0 0)`=1 |

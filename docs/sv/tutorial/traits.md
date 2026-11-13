@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Traits
 
 Ett trait är ett löfte om att "den här typen stöder dessa operationer". Med traits kan flera typer dela
@@ -99,20 +99,20 @@ det tillgängliga för din typ.
 
 | Trait | Metoder att implementera | Vad det möjliggör |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, mönstret `(:= expr)` i `match` med flera |
-| `Ord` | `less` | `less-equal`, `greater` med flera. `Ord` ärver från `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, mönstret `(:= uttryck)` i `match`, `member` med `:test equal` och så vidare |
+| `Ord` | `less` | `less-equal`, `greater` med flera. `Ord` ärver från `Equal` |
 | `print-object` | `print-object` | Hur värden visas av `println` och liknande |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` med flera |
 | `Error` | `message`, `source` | Användning som feltyp ([Felhantering](errors.md)) |
 
-Vi implementerar `Eq` och `Ord` för en typ som representerar ett penningbelopp. Eftersom `Ord` ärver
-från `Eq` måste `impl` för `Eq` komma först.
+Vi implementerar `Equal` och `Ord` för en typ som representerar ett penningbelopp. Eftersom `Ord` ärver
+från `Equal` måste `impl` för `Equal` komma först.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -191,7 +191,7 @@ Den exakta listan över typer som kan användas finns i
 [Syntaxreferens 3.9](../reference/syntax.md#39-deftrait--impl--traits).
 
 Vissa traits kan inte användas med `:dyn`: de vars metoder använder `Self` för ett annat argument än
-`self` eller för returvärdet (som `equals` i `Eq`). Eftersom typen inte är känd förrän vid körning går
+`self` eller för returvärdet (som `equal` i `Equal`). Eftersom typen inte är känd förrän vid körning går
 det inte att skapa "ett värde av samma typ".
 
 ## 6. Begränsningar

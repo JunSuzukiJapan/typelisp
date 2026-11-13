@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Funzioni predefinite
 
 L'elenco delle funzioni predefinite, dei metodi e della libreria standard. Per la sintassi (forme
@@ -25,7 +25,7 @@ Dei nomi della libreria standard, questi si usano in ogni modulo senza scrivere 
 - ogni nome che è anche un nome del pacchetto `COMMON-LISP` di Common Lisp (`length`, `format`, `open`
   ecc.)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, i trait di flusso `Stream`,
-  `InputStream` e `OutputStream`, e `Hash`, che implementano le chiavi di una `HashTable`
+  `InputStream` e `OutputStream`, e `Hash`, che implementano le chiavi di una `HashTable` `equal`
 - i tipi che nominano le loro funzioni e variabili
 
 Ogni altro nome si porta dentro con un `use`, come `(use std::net::tcp-connect)`, o si scrive con il
@@ -37,7 +37,7 @@ suo percorso, `std::net::tcp-connect`. La tabella dà questi nomi e il modulo di
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -61,7 +61,7 @@ Le tabelle di ciascun capitolo hanno le colonne "nome, forma, tipo, descrizione"
 scrive come `(tipo-dell-argomento,...)→tipo-di-ritorno`.
 
 - Una singola lettera maiuscola come `T`, `A` o `B` è una variabile di tipo.
-- Una nota come `where Eq A` è un vincolo di trait che la variabile di tipo deve soddisfare.
+- Una nota come `where Equal A` è un vincolo di trait che la variabile di tipo deve soddisfare.
 - `Iter<A>` significa "qualsiasi implementazione di `Iter` il cui `Item` sia `A`".
 - Gli argomenti contrassegnati con `&optional` / `&key` possono essere omessi.
 
@@ -73,7 +73,7 @@ scrive come `(tipo-dell-argomento,...)→tipo-di-ritorno`.
 | [sequences.md](sequences.md) | La coppia `cons-cell`, i dati S-expression `Sexpr`, i simboli, le funzioni sulle sequenze, iteratori pigri `lazy`, le funzioni di ordine superiore |
 | [collections.md](collections.md) | Stringhe, caratteri, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, i tipi di errore e il trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, i trait aritmetici, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, i trait aritmetici, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, il pretty printer, `print-object`, le variabili di controllo della stampa |
 | [format.md](format.md) | Direttive di formato |
 | [streams-files.md](streams-files.md) | Stream, operazioni sui file, pathname, readtable |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -33,7 +33,7 @@ Det finns ingen 64-bitars heltalstyp. För heltal där bredden inte spelar någo
 | `Option<T>` | Ett värde som finns eller inte. `some` / `none` | [Option och Result](functions/option-result.md) |
 | `Result<T,E>` | Lyckat eller misslyckat. `ok` / `err` | Som ovan |
 | `Vector<T>` | En växande array | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | En hashtabell. Nyckeltypen måste implementera `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | En hashtabell. Hur nycklar jämförs avgörs av `:test` när den skapas, och i en `equal`-tabell måste nyckeltypen implementera `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tupel (1 till 12 element). Element läses med `t::0` | [Syntax kapitel 2](syntax.md#2-hur-typer-skrivs) |
 | `Task<T>` | Ett handtag till en task | [Tasks](functions/concurrency.md#1-taskt--handtag-till-tasks) |
 | `Thread<T>` | Ett handtag till en task som körs på en dedikerad OS-tråd | [Thread](functions/concurrency.md#7-threadt--dedikerade-os-trådar) |
@@ -103,7 +103,7 @@ Vilka typer som implementerar vilka traits. Metoderna för varje trait finns i
 
 | Trait | Implementerande typer | Detaljer |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-jämförelse) |
+| `Equal` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` `Option<T>` `Result<T,E>` | [Equal / Ord](functions/traits.md#2-equal--ord-jämförelse) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Som ovan |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` och alla inbyggda feltyper | [print-object](functions/printing.md#5-print-object-utskriftsform-per-typ) |
@@ -125,7 +125,7 @@ Detaljer finns i [Aritmetiska traits](functions/traits.md#3-aritmetiska-traits-a
 | Trait | Implementerande typer |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` typerna i modulen `lazy` (`lazy::map-iter<I,A,U>` m.fl.) |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` (när elementtypen implementerar `Hash`) |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 Strömmar

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait
 
 Trait là một lời hứa rằng "kiểu này hỗ trợ những thao tác này". Trait cho phép nhiều kiểu chia sẻ các
@@ -97,20 +97,20 @@ cho kiểu của bạn.
 
 | Trait | Phương thức cần triển khai | Nó cho phép gì |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, mẫu `(:= expr)` của `match`, v.v. |
-| `Ord` | `less` | `less-equal`, `greater`, v.v. `Ord` kế thừa từ `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, mẫu `(:= biểu thức)` của `match`, `member` với `:test equal`, v.v. |
+| `Ord` | `less` | `less-equal`, `greater`, v.v. `Ord` kế thừa từ `Equal` |
 | `print-object` | `print-object` | Cách `println` và các hàm tương tự hiển thị giá trị |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, v.v. |
 | `Error` | `message`, `source` | Dùng làm kiểu lỗi ([Xử lý lỗi](errors.md)) |
 
-Hãy triển khai `Eq` và `Ord` cho một kiểu biểu diễn một khoản tiền. Vì `Ord` kế thừa từ `Eq`, `impl`
-của `Eq` phải đứng trước.
+Hãy triển khai `Equal` và `Ord` cho một kiểu biểu diễn một khoản tiền. Vì `Ord` kế thừa từ `Equal`, `impl`
+của `Equal` phải đứng trước.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -187,7 +187,7 @@ Danh sách chính xác các kiểu có thể dùng nằm ở
 [Tham chiếu cú pháp 3.9](../reference/syntax.md#39-deftrait--impl--trait).
 
 Một số trait không thể dùng với `:dyn`: những trait có phương thức dùng `Self` cho một đối số khác
-`self` hoặc cho giá trị trả về (như `equals` trong `Eq`). Vì kiểu không được biết cho đến lúc chạy,
+`self` hoặc cho giá trị trả về (như `equal` trong `Equal`). Vì kiểu không được biết cho đến lúc chạy,
 không có cách nào tạo ra "một giá trị cùng kiểu".
 
 ## 6. Hạn chế

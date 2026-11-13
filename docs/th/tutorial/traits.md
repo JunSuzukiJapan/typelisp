@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait
 
 trait คือคำมั่นสัญญาว่า "ชนิดนี้รองรับการดำเนินการเหล่านี้" trait ทำให้หลายชนิดใช้การดำเนินการ
@@ -99,20 +99,20 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | Trait | เมทอดที่ต้อง implement | สิ่งที่เปิดใช้ได้ |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, รูปแบบ `(:= expr)` ของ `match` และอื่น ๆ |
-| `Ord` | `less` | `less-equal`, `greater` และอื่น ๆ `Ord` สืบทอดจาก `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, รูปแบบ `(:= นิพจน์)` ของ `match`, `member` ที่ให้ `:test equal` เป็นต้น |
+| `Ord` | `less` | `less-equal`, `greater` และอื่น ๆ `Ord` สืบทอดจาก `Equal` |
 | `print-object` | `print-object` | วิธีที่ `println` และพวกเดียวกันแสดงค่า |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` และอื่น ๆ |
 | `Error` | `message`, `source` | ใช้เป็นชนิดข้อผิดพลาด ([การจัดการข้อผิดพลาด](errors.md)) |
 
-ลอง implement `Eq` และ `Ord` สำหรับชนิดที่แทนจำนวนเงิน เนื่องจาก `Ord` สืบทอด
-จาก `Eq` `impl` ของ `Eq` จึงต้องมาก่อน
+ลอง implement `Equal` และ `Ord` สำหรับชนิดที่แทนจำนวนเงิน เนื่องจาก `Ord` สืบทอด
+จาก `Equal` `impl` ของ `Equal` จึงต้องมาก่อน
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -190,7 +190,7 @@ total 9
 [เอกสารอ้างอิงไวยากรณ์ 3.9](../reference/syntax.md#39-deftrait--impl--trait)
 
 trait บางตัวใช้กับ `:dyn` ไม่ได้: ตัวที่เมทอดใช้ `Self` กับอาร์กิวเมนต์อื่นนอกจาก
-`self` หรือกับค่าที่คืน (เช่น `equals` ใน `Eq`) เนื่องจากไม่ทราบชนิดจนกว่าจะถึงตอน
+`self` หรือกับค่าที่คืน (เช่น `equal` ใน `Equal`) เนื่องจากไม่ทราบชนิดจนกว่าจะถึงตอน
 รัน จึงไม่มีทางสร้าง "ค่าที่เป็นชนิดเดียวกัน"
 
 ## 6. ข้อจำกัด

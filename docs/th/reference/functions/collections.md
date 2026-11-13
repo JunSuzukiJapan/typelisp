@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # สตริง อักขระ และคอลเลกชัน
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` และ `Deque<T>`
@@ -77,7 +77,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | จำนวนสมาชิก |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | ลบสมาชิกตัวสุดท้ายและคืนค่า `none` หากว่าง (ต่างจาก `get`/`set` ตรงที่ไม่ panic) (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | สร้างตัววนซ้ำที่ implement `Iter` |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | ต่อท้าย `x` หากไม่มีสมาชิกที่เท่ากัน (`pushnew` ของ CL ไม่จำเป็นต้องเขียนทับ place จึงเป็นเมทอดแทนที่จะเป็นแมโคร) |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | เพิ่ม `x` ต่อท้ายถ้าไม่มีสมาชิกที่ `eql` กับมัน (`pushnew` ของ CL ไม่ต้องเขียนทับตำแหน่ง จึงเป็นเมธอดไม่ใช่แมโคร) |
 
 `map`/`filter` และพวกเดียวกันเป็น[ฟังก์ชันของลำดับ](sequences.md#4-ฟังก์ชันของลำดับบน-iter): ส่ง
 เวกเตอร์ผ่าน `iter` เช่น `(map (iter v) f)` การดำเนินการแบบทำลาย (`nreverse`, `delete` และ
@@ -87,7 +87,7 @@
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | สร้างตารางว่าง |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | สร้างตารางว่าง `:test` คือวิธีเปรียบเทียบคีย์ (ตารางด้านล่าง) ถ้าไม่ระบุคือ `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | การค้นหา |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | แทรกหรือเขียนทับ |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | ลบรายการและคืนค่าเดิม หากมี |
@@ -100,40 +100,50 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | `maphash` ของ CL |
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` ของ CL ในตารางนี้คือจำนวนรายการที่ถูกใช้ (เท่ากับ `count`) |
 
-**ชนิดใดก็ตามที่ implement `Hash` เป็นคีย์ได้** รวมถึงชนิด `defstruct`/`defenum` `get`/`set`/
-`remove` มี `(:where (Hash K))` ดังนั้นตารางที่ใช้ชนิดซึ่งไม่ได้ implement เป็นคีย์เป็น **ข้อผิดพลาด
-ของชนิด** (`f64` ไม่มี `Hash` เพราะ `NaN`)
+วิธีเปรียบเทียบคีย์เลือกด้วย `:test` ตอนสร้างตาราง เหมือน `make-hash-table` ของ CL โดย `:test` รับหนึ่งใน
+`eq`, `eql`, `equal` และ `equalp` (เขียนเป็น `'equal` หรือ `equal` ก็ได้)
+
+| `:test` | วิธีเปรียบเทียบคีย์ | ชนิดของคีย์ |
+|---|---|---|
+| `eql` (ปริยาย) | ตัวเลขและอักขระตามค่า นอกนั้นตามเอกลักษณ์ | ชนิดใดก็ได้ |
+| `eq` | ตามเอกลักษณ์ | ชนิดใดก็ได้ |
+| `equal` | ด้วย `equal` (`Equal`) และแฮช `sxhash` (`Hash`) ของชนิดคีย์ | ชนิดที่ implement `Hash` |
+| `equalp` | ด้วย `equalp` (สตริงไม่แยกตัวพิมพ์ใหญ่เล็ก struct เทียบทีละช่อง) | ชนิดใดก็ได้ |
+
+ค่าปริยายคือ `eql` ดังนั้นสตริงเนื้อหาเดียวกันสองตัวที่สร้างแยกกันจึงเป็นสองคีย์ สำหรับคีย์ที่เป็นสตริงให้เขียน
+`(HashTable::new :test 'equal)` ถ้าชนิดของคีย์ของตาราง `equal` ไม่ได้ implement `Hash` จะเป็น
+**ข้อผิดพลาดของชนิด** ที่ตำแหน่งที่สร้างตาราง (`f64` ไม่มี `Hash` เพราะ `NaN`)
 
 ```lisp
-(deftrait Hash (Eq)
-  (defmethod sxhash (self) int))              ; returns a non-negative value that fits in a fixnum
+(deftrait Hash (Equal)
+  (defmethod sxhash (self) int))              ; คืนค่าไม่ติดลบที่ใส่ใน fixnum ได้
 ```
 
-ถูก implement สำหรับ: `int` และจำนวนเต็มความกว้างคงที่ทั้งหกชนิด, `bool`, `char`, `string` และ `symbol` (ไม่ใช่
-จำนวนทศนิยม) สำหรับชนิดของคุณเอง ให้ทำให้ผลลัพธ์ไม่เป็นลบโดย `logand` กับ
-`*sxhash-mask*` (2^30-1) หากต้องการแฮชสตริง เรียก `(sxhash-string s)` (FNV-1a 32 บิต) ได้ ซึ่ง
-การ implement สำหรับ `string` ใช้
+`Hash` ถูก implement สำหรับ: `int` และจำนวนเต็มความกว้างคงที่ 6 ชนิด, `bool`, `char`, `string`, `symbol`
+(ไม่มีสำหรับจำนวนทศนิยม) สำหรับชนิดของคุณเอง ให้รักษาผลลัพธ์ให้ไม่ติดลบด้วยการ `logand` กับ
+`*sxhash-mask*` (2^30-1) ถ้าจะแฮชสตริง เรียก `(sxhash-string s)` (FNV-1a 32bit) ที่ implementation ของ
+`string` ใช้ได้
 
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-คีย์สองตัวเหมือนกันหรือไม่ตัดสินโดย **ชนิดของคีย์เอง** (`sxhash` และ `equals` จาก `Eq`
-ซึ่งเป็น supertrait ของ `Hash`) ไม่ใช่โดยเอกลักษณ์ของออบเจ็กต์ นั่นคือเหตุผลที่อย่างข้างบน คุณค้นหา
-ด้วยคีย์ที่ "เป็นคนละค่าแต่เท่ากัน" ได้
+ในตาราง `equal` สิ่งที่ตัดสินว่าคีย์สองตัวเหมือนกันหรือไม่คือ **ชนิดของคีย์เอง** (`sxhash` และ `equal` ของ
+`Equal` ซึ่งเป็น supertrait ของ `Hash`) ไม่ใช่เอกลักษณ์ของออบเจ็กต์ ดังนั้นคีย์ที่ "เป็นค่าอื่นแต่เท่ากัน"
+จึงค้นเจอรายการได้ดังข้างบน
 
-`sxhash` ชนกันได้ไม่เป็นไร (สัญญาของ `Hash` เป็นทางเดียว: ค่าที่เท่ากันต้องมี
-แฮชเดียวกัน) คีย์ที่ชนกันแยกกันด้วย `equals`
+`sxhash` ชนกันได้ไม่เป็นไร (สัญญาของ `Hash` ไปอีกทิศหนึ่ง: บอกแค่ว่าค่าที่ `equal` กันมีแฮชเดียวกัน) คีย์ที่
+ชนกันจะแยกด้วย `equal`
 
 ## 5. `Array<T>` (อาร์เรย์หลายมิติ)
 
@@ -188,11 +198,13 @@
 
 ## 7. `HashSet<T>`
 
-กลุ่มของสมาชิกที่ไม่ซ้ำกัน (`HashSet` ของ Rust) เป็น `defstruct` ของไลบรารีมาตรฐาน ข้างในคือ `HashTable<T,()>` ชนิดของสมาชิกต้อง implement `Hash` เช่นเดียวกับคีย์ของ `HashTable`
+กลุ่มของสมาชิกที่ไม่ซ้ำกัน (`HashSet` ของ Rust) เป็น `defstruct` ของไลบรารีมาตรฐานที่ข้างในเป็น
+`HashTable<T,()>` วิธีเปรียบเทียบสมาชิกกำหนดด้วย `:test` เหมือนคีย์ของ `HashTable` และในเซตแบบ `equal`
+ชนิดของสมาชิกต้อง implement `Hash`
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | สร้างเซตว่าง อาร์กิวเมนต์ชนิดได้จากชนิดที่คาดหวัง |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | สร้างเซตว่าง อาร์กิวเมนต์ชนิดได้จากชนิดที่คาดหวัง `:test` เหมือนของ `HashTable` ถ้าไม่ระบุคือ `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | เพิ่ม `x` คืน `true` ถ้าเพิ่งใส่เข้าไป `false` ถ้ามีอยู่แล้ว |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | มี `x` อยู่หรือไม่ |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | เอา `x` ออก คืน `true` ถ้ามีอยู่ |
@@ -203,7 +215,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

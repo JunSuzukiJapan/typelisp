@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Trait
 
 Trait adalah janji bahwa "tipe ini mendukung operasi-operasi ini". Dengan trait, beberapa tipe dapat
@@ -100,20 +100,20 @@ tersedia untuk tipe Anda.
 
 | Trait | Metode yang diimplementasikan | Yang diaktifkan |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, pola `(:= expr)` pada `match`, dan sebagainya |
-| `Ord` | `less` | `less-equal`, `greater`, dan sebagainya. `Ord` mewarisi `Eq` |
+| `Equal` | `equal` | `equal`, `=`, `assert-equal`, pola `(:= ekspresi)` pada `match`, `member` dengan `:test equal`, dan sebagainya |
+| `Ord` | `less` | `less-equal`, `greater`, dan sebagainya. `Ord` mewarisi `Equal` |
 | `print-object` | `print-object` | Cara nilai ditampilkan oleh `println` dan sejenisnya |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, dan sebagainya |
 | `Error` | `message`, `source` | Pemakaian sebagai tipe kesalahan ([Penanganan Kesalahan](errors.md)) |
 
-Mari implementasikan `Eq` dan `Ord` untuk tipe yang mewakili sejumlah uang. Karena `Ord` mewarisi
-`Eq`, `impl` untuk `Eq` harus ditulis lebih dulu.
+Mari implementasikan `Equal` dan `Ord` untuk tipe yang mewakili sejumlah uang. Karena `Ord` mewarisi
+`Equal`, `impl` untuk `Equal` harus ditulis lebih dulu.
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -195,7 +195,7 @@ Daftar persis tipe yang dapat dipakai ada di
 [Referensi Sintaks 3.9](../reference/syntax.md#39-deftrait--impl--trait).
 
 Beberapa trait tidak dapat dipakai dengan `:dyn`: yang metodenya memakai `Self` untuk argumen selain
-`self` atau untuk nilai kembalian (seperti `equals` pada `Eq`). Karena tipenya tidak diketahui sampai
+`self` atau untuk nilai kembalian (seperti `equal` pada `Equal`). Karena tipenya tidak diketahui sampai
 saat dijalankan, tidak ada cara menghasilkan "nilai bertipe sama".
 
 ## 6. Batasan

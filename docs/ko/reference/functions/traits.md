@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 93654945ade788731d74b3095a68648f335119da -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 표준 트레이트
 
 반복, 비교, 산술, 요소의 추가와 꺼내기를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
@@ -20,45 +20,53 @@
 [채널](concurrency.md#2-chant--채널)). `Sexpr` 리스트는 `Iter`를 구현하지 않는다(요소 타입이 한결같지 않다). 자신의 타입에
 `Iter`를 구현하면 그대로 `doiter`로 순회할 수 있고 [시퀀스 함수](sequences.md#4-iter에-대한-시퀀스-함수)에 넘길 수 있다.
 
-## 2. `Eq` / `Ord`(비교)
+## 2. `Equal` / `Ord`(비교)
 
-Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네릭 함수의 `:where` 경계에서 요소 타입을 비교할 수 있음을
-요구하는 데 쓴다(`sort`/`member`/`assoc` 등).
+`Equal`은 `equal`이 쓰는 트레이트로, Rust의 `PartialEq`에 해당한다. `Ord`는 Rust의 `PartialOrd`에
+해당한다. 제네릭 함수의 `:where` 경계에서 요소 타입의 비교를 요구하는 데 쓴다.
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; 구현해야 한다
-  (defmethod not-equals (self (other Self)) bool             ; 기본 구현
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; Eq를 상속한다
-  (defmethod less (self (other Self)) bool)                  ; 구현해야 한다
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; 구현 필수
+(deftrait Ord (Equal)                                     ; Equal을 상속
+  (defmethod less (self (other Self)) bool)                  ; 구현 필수
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-`Eq`를 구현하려면 `equals`만, `Ord`는 `less`만 쓴다. 나머지는 기본 구현이 채운다. `Ord`는 `Eq`를 상속하므로
-`impl Ord X` 전에 `impl Eq X`가 필요하다.
+`Equal`을 구현하려면 `equal`을, `Ord`를 구현하려면 `less`만 쓰면 된다. `Ord`의 나머지는 기본 구현이
+채운다. `Ord`는 `Equal`을 상속하므로 `impl Ord X` 앞에 `impl Equal X`가 필요하다.
 
-각 트레이트 메서드는 그대로 함수로 호출할 수 있다(`where (Eq A)`/`(Ord A)` 경계 안에서, 또는 그것을 구현한 구체 타입에
-대해).
+`(equal a b)`는 `a`의 타입의 `Equal` 구현을 호출한다. `Equal`을 구현하지 않은 타입에 쓰면 타입 오류가
+된다. 동일성으로 비교하려면 `eq`/`eql`, 구조로 비교하려면 `equalp`를 쓴다. 이 셋은 어떤 타입의 값에도
+쓸 수 있다.
+
+각 트레이트 메서드는 그대로 함수로 호출할 수 있다(`where (Equal A)`/`(Ord A)` 경계 안, 또는 구현된
+구체 타입에 대해):
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | 같은지(Rust의 `==`) |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | 같지 않은지(`!=`) |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 같은지(Rust의 `==`) |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq`를 구현하는 타입: 모든 수 타입(`i8`~`u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char` `string` `symbol`
-`complex`, `Sexpr`(`eq`, 즉 동일성. `match`의 값 패턴이 쓴다), `cons-cell<A,B>`(요소가 `Eq`일 때 재귀적으로). `Option<T>`와 `Result<T,E>`는 같은 변형이고 내용이 `equals`로 같을 때 같다. 리스트는 `Option<Sexpr>`이므로 셀은 `Sexpr`의 동일성으로 비교한다(내용으로 비교하려면 `equal`). `Ord`를
-구현하는 타입: 모든 수 타입, `char` `string`, `cons-cell<A,B>`(요소가 `Ord`일 때 사전순으로).
+`Equal` 구현 완료: 모든 수치 타입(`i8`~`u32` / `f32` / `f64` / `int` / `ratio`)과 `bool` `char` `string`
+`symbol` `complex`, `Sexpr`, `cons-cell<A,B>`와 튜플(요소가 `Equal`이면 요소별로), `Option<T>`와
+`Result<T,E>`(같은 변형이고 내용이 `equal`일 때). 내장 타입은 타입별 내장 메서드 `equal`이 그대로
+`Equal`의 구현이 된다. 수는 `=`로, 문자열은 대소문자를 구별해 내용으로 비교한다. `Ord` 구현 완료: 모든
+수치 타입과 `char` `string`, 그리고 `cons-cell<A,B>`(요소가 `Ord`이면 사전순).
 
-메서드 이름이 내장 연산자(`= /= < <= > >=`)나 `eq`/`lt`와 겹치지 않는 것은 내장된 것을 다시 정의할 수 없기 때문이며, 각
-구현은 그것들에 위임한다. 스칼라 비교 연산자 자체는 각 받는 쪽 타입의 내장 메서드이다([수](numbers.md),
-[문자열과 문자](collections.md)). 경계 안에서 연산자를 쓰면 트레이트 메서드로 읽힌다(3장).
+리스트(`Sexpr`)의 `equal`은 CL의 `equal`로, 콘스 셀은 구조로, 문자열은 내용으로, 그 밖의 아톰은 `eql`로
+비교한다. 이 비교는 실행 시에 값을 따라가는 것으로 메서드를 호출하지 않는다. 그래서 리스트 안의 구조체는
+그 타입의 `impl Equal`과 관계없이 CL과 마찬가지로 동일성으로 비교한다.
+
+`Ord`의 메서드 이름이 내장 연산자(`< <= > >=`)나 `lt`와 겹치지 않는 것은, 내장은 재정의할 수 없고 각
+구현이 그것들에 위임하기 때문이다. 스칼라 비교 연산자 자체는 수신자 타입별 내장 메서드다
+([수치](numbers.md)·[문자열과 문자](collections.md)). 경계 안에서 연산자로 쓰면 트레이트의 메서드로
+읽힌다(3장). `=`는 `equal`이 되고, `/=`는 `(not (equal a b))`가 된다.
 
 ## 3. 산술 트레이트(`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -81,7 +89,7 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 ```
 
 **경계 안에서는 연산자를 쓸 수 있다.** 받는 쪽이 `:where`로 묶인 타입 변수이면 연산자는 트레이트 메서드로 읽힌다
-(`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …).
+(`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …).
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
@@ -115,7 +123,7 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 | `Vector<T>` | 끝에 추가한다 |
 | `Deque<T>` | 끝에 추가한다(`push-back`) |
 | `Array<T>` | 채움 포인터 위치에 추가한다(`push-extend`). 채움 포인터가 없으면 panic |
-| `HashSet<T>` | 집합에 넣는다(`insert`). 요소 타입이 `Hash`를 구현할 때만 `Push` |
+| `HashSet<T>` | 집합에 넣는다(`insert`) |
 
 ```lisp
 (use std::collections::Deque)

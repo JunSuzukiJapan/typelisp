@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Ingebouwde functies
 
 De lijst met ingebouwde functies, methoden en de standaardbibliotheek. Voor syntaxis (speciale vormen
@@ -27,7 +27,7 @@ Van de namen van de standaardbibliotheek zijn deze in elk module te gebruiken zo
 - elke naam die ook een naam is van het `COMMON-LISP`-pakket van Common Lisp (`length`, `format`,
   `open` enzovoort)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, de stream-traits `Stream`,
-  `InputStream` en `OutputStream`, en `Hash`, dat de sleutels van een `HashTable` implementeren
+  `InputStream` en `OutputStream`, en `Hash`, dat de sleutels van een `equal`-`HashTable` implementeren
 - de typen die de functies en variabelen hiervan noemen
 
 Elke andere naam haal je binnen met een `use`, zoals `(use std::net::tcp-connect)`, of schrijf je als
@@ -39,7 +39,7 @@ pad, `std::net::tcp-connect`. De tabel geeft die namen en het module van elk.
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -63,7 +63,7 @@ De tabellen in elk hoofdstuk hebben de kolommen "naam, vorm, type, beschrijving"
 geschreven als `(argumenttype,...)→returntype`.
 
 - Een enkele hoofdletter zoals `T`, `A` of `B` is een typevariabele.
-- Een aantekening zoals `where Eq A` is een trait bound waaraan de typevariabele moet voldoen.
+- Een aantekening zoals `where Equal A` is een trait bound waaraan de typevariabele moet voldoen.
 - `Iter<A>` betekent "elke implementatie van `Iter` waarvan `Item` gelijk is aan `A`".
 - Argumenten die met `&optional` / `&key` zijn gemarkeerd mogen worden weggelaten.
 
@@ -75,7 +75,7 @@ geschreven als `(argumenttype,...)→returntype`.
 | [sequences.md](sequences.md) | Het paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, sequentiefuncties, luie iterators `lazy`, functies van hogere orde |
 | [collections.md](collections.md) | Strings, tekens, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, foutentypes en de trait `Error` |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, rekenkundige traits, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, rekenkundige traits, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, de pretty printer, `print-object`, besturingsvariabelen van de printer |
 | [format.md](format.md) | Formatdirectieven |
 | [streams-files.md](streams-files.md) | Streams, bestandsbewerkingen, padnamen, readtable |

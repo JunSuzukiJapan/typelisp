@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ d179fbc5112a7c56e11d7cee68e15bbebfafb631 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # 序對、S 運算式與序列
 
 泛型序對 `cons-cell`、S 運算式資料 `Sexpr`、符號、建構在 `Iter` 之上的序列函式，以及高階函式。
@@ -110,16 +110,17 @@
 | `last` | `(last it)` | `Iter<A>→Option<A>` | 最後一個**元素**（不是 CL 的「最後一個單元」） |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | 去掉最後一個元素 |
 
-要求 `Eq` / `Ord` 約束的函式（以 trait 取代述詞進行比較。[標準 trait](traits.md#2-eq--ord比較)）：
+尋找項目的函式。不寫 `:test` 時與 CL 一樣用 `eql` 比較。`eql` 依值比較數與字元，其餘依同一性比較，所以
+分別建立的內容相同的字串或串列不相等。要依內容比較，寫 `:test equal`（第 6 章）：
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | 是否有與 `x` 相等的元素（與 CL 不同，回傳 `bool` 而不是串列的其餘部分） |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | 第一個與 `x` 相等的元素 |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | 第一個與 `x` 相等的位置 |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | 與 `x` 相等的元素個數 |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | 是否有與 `x` 相等的元素（與 CL 不同，回傳 `bool` 而不是串列的其餘部分） |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | 第一個與 `x` 相等的元素 |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | 第一個與 `x` 相等的位置 |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | 與 `x` 相等的元素個數 |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL 的 `(sort sequence predicate)`。穩定的非破壞性排序。`cmp` 在「第 1 個引數嚴格排在第 2 個引數之前」時為 `true` |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | 第一個 `car` 與 `k` 相等的序對。值以 `(cdr p)` 取出 |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | 第一個 `car` 與 `k` 相等的序對。值以 `(cdr p)` 取出 |
 
 這些函式以及第 5 章的許多函式也接受 CL 的關鍵字引數 `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count`（第 6 章）。
 
@@ -172,8 +173,8 @@
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 與 `member` 一樣回傳 **`bool`**（迭代器沒有可回傳的尾部） |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every` 的否定 |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | 與各肯定版同型別 | 述詞取反的版本 |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 依值刪除 |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | 去除重複。依 CL **保留最後一次出現**（要保留第一次出現用 `:from-end true`） |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | 依值刪除 |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | 去除重複。依 CL **保留最後一次出現**（要保留第一次出現用 `:from-end true`） |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | 依值／述詞取代 |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | 作用於 `Iter<cons-cell<K,V>>` | `assoc` 的述詞版、值端版 |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | 在開頭加上序對 |
@@ -184,14 +185,14 @@
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | 對連續的**尾部**映射 |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 對尾部的副作用映射（`maplist` 版的 `mapc`） |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 對尾部映射後串接（`maplist` 版的 `mapcan`） |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | `sub` 第一次出現的位置。接收者是 `string` 時選擇 `string` 的方法（[字串](collections.md#1-字串-string)） |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | 第一個不一致的位置。相等時為 `none` |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub` 第一次出現的位置。接收者是 `string` 時選擇 `string` 的方法（[字串](collections.md#1-字串-string)） |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 第一個不一致的位置。相等時為 `none` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 合併。CL 要求已排序，這裡對串接結果排序 |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 沒有時加到**開頭** |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | 集合運算。CL 不規定順序，這裡依**首次出現順序**保持穩定 |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | 包含關係 |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | 是否為後綴／去掉後綴的前半部分。CL 詢問的是**結構共享**，但這裡沒有可共享的結構，所以詢問的是**依值**的後綴 |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | 逐元素相等。`Vector<T>` 本身沒有實作 `Eq` |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | 沒有時加到**開頭** |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 集合運算。CL 不規定順序，這裡依**首次出現順序**保持穩定 |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | 包含關係 |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | 是否為後綴／去掉後綴的前半部分。CL 問的是**結構的共享**，但沒有可共享的結構，所以問的是元素 `eql` 的後綴 |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | 逐元素的 `equal`。`Vector<T>` 本身沒有 `Equal` 的實作 |
 | `caar`…`cddddr` | `(cadr p)` | 作用於巢狀的序對 | CL 的 28 個函式。走訪的是**序對而不是串列**，`cadr` 接受 `cons-cell<A,cons-cell<B,C>>` |
 
 CL 中有而這裡沒有的：`list*`（沒有替換結尾的不正規串列這個概念）、`copy-tree`/`copy-alist`/`sublis`/`subst`/`subst-if`（無法寫出走訪任意
@@ -206,7 +207,7 @@ CL 中有而這裡沒有的：`list*`（沒有替換結尾的不正規串列這�
 | 關鍵字 | 型別 | 意義 |
 |---|---|---|
 | `:key` | `(fn (A) A)` | 在比較或述詞之前套用於元素的投影 |
-| `:test` | `(fn (A A) bool)` | 取代 `Eq` 約束的 `equals` 使用的相等判斷。第 1 個引數是**要找的項目**，第 2 個引數是（套用 `:key` 後的）元素——與 CL 順序相同 |
+| `:test` | `(fn (A A) bool)` | 代替預設的 `eql` 使用的等價判定（`:test equal` 等）。第1個引數是**要尋找的項目**，第2個引數是（套用 `:key` 後的）元素——與 CL 同序 |
 | `:test-not` | `(fn (A A) bool)` | `:test` 的否定 |
 | `:start` `:end` | `int` | 掃描的視窗 `[start, end)`。索引相對於整個序列 |
 | `:from-end` | `bool` | 搜尋回傳**最後一個**符合項。與 `:count` 一起使用時從尾端開始影響 |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 9a4e7d23b09eb3f3244bfb876df1ec57576d6874 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
 # Yerleşik Fonksiyonlar
 
 Yerleşik fonksiyonların, metotların ve standart kütüphanenin listesi. Sözdizimi (özel formlar ve
@@ -24,7 +24,7 @@ Standart kütüphanenin adlarından bunlar, hiçbir şey yazmadan her modülde k
   denetim makroları, karşılaştırma ve aritmetik trait'ler
 - Common Lisp'in `COMMON-LISP` paketinde de bulunan her ad (`length`, `format`, `open` vb.)
 - `Error`, `assert`, `print-object`, `HashTable`, `Array`, `BitVector`, akış trait'leri `Stream`,
-  `InputStream` ve `OutputStream` ile bir `HashTable`'ın anahtarlarının uyguladığı `Hash`
+  `InputStream` ve `OutputStream` ile bir `equal` `HashTable`'ın anahtarlarının uyguladığı `Hash`
 - bunların fonksiyon ve değişkenlerinin andığı tipler
 
 Başka her ad `(use std::net::tcp-connect)` gibi bir `use` ile içeri alınır ya da yoluyla,
@@ -36,7 +36,7 @@ Başka her ad `(use std::net::tcp-connect)` gibi bir `use` ile içeri alınır y
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
-| `std::error` | `WrappedError`, `as-dyn-error`, `assert-eq`, `describe-error`, `wrap-error` |
+| `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`, `direction-input`, `direction-output`, `directory-p`, `open-binary`, `open-binary-input`, `open-binary-output`, `open-file`, `open-input`, `open-output`, `read-file-lines`, `read-file-string`, `write-file-string` |
 | `std::hash` | `*sxhash-mask*`, `sxhash-string` |
@@ -60,7 +60,7 @@ Her bölümdeki tabloların "ad, biçim, tür, açıklama" sütunları vardır. 
 `(bağımsız-değişken-türü,...)→dönüş-türü` olarak yazılır.
 
 - `T`, `A` ya da `B` gibi tek bir büyük harf bir tür değişkenidir.
-- `where Eq A` gibi bir not, tür değişkeninin sağlaması gereken bir trait sınırıdır.
+- `where Equal A` gibi bir not, tür değişkeninin sağlaması gereken bir trait sınırıdır.
 - `Iter<A>`, "`Item`'ı `A` olan herhangi bir `Iter` gerçekleştirmesi" demektir.
 - `&optional` / `&key` ile işaretlenmiş bağımsız değişkenler atlanabilir.
 
@@ -72,7 +72,7 @@ Her bölümdeki tabloların "ad, biçim, tür, açıklama" sütunları vardır. 
 | [sequences.md](sequences.md) | `cons-cell` çifti, S-ifade verisi `Sexpr`, semboller, dizi fonksiyonları, tembel yineleyiciler `lazy`, yüksek dereceli fonksiyonlar |
 | [collections.md](collections.md) | String'ler, karakterler, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, hata türleri ve `Error` trait'i |
-| [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetik trait'ler, `Push`, `Pop` |
+| [traits.md](traits.md) | `Iter`, `Equal`/`Ord`, aritmetik trait'ler, `Push`, `Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, yazıcı denetim değişkenleri |
 | [format.md](format.md) | Biçim yönergeleri |
 | [streams-files.md](streams-files.md) | Akışlar, dosya işlemleri, yol adları, readtable |
