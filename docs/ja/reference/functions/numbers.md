@@ -176,7 +176,7 @@ CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、�
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64` に変換して計算（`(sqrt 1/4)` は `0.5`） |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 同上 |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 同上 |
-| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` の実装。`ratio` を `HashTable` のキーにできる |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` の実装。`ratio` を `equal` の `HashTable` のキーにできる |
 
 CL の整数は分母 1 の有理数なので、`int` にも `numerator`（自身）・`denominator`（`1`）・
 `float`・`rational`・`rationalize` と、上の `sqrt` から `atanh` までの 15 関数がある

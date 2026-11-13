@@ -40,7 +40,7 @@ fn push_is_a_method_of_each_library_collection() {
     both(
         PUSH_ALL,
         r##"(let ((d (the Deque<int> (Deque::new)))
-                  (s (the HashSet<string> (HashSet::new)))
+                  (s (the HashSet<string> (HashSet::new :test 'equal)))
                   (a (the Array<int> (Array::new (the Vector<int> #(0)) 0 :fill-pointer 0))))
               (push d 1) (push-front d 0) (push d 2)
               (push s "a") (push s "a")
@@ -107,12 +107,12 @@ fn a_type_without_push_is_refused_by_the_bound() {
 /// `Push`, and the call that asks for one is refused — not the generic
 /// function's body once it is specialized.
 #[test]
-fn a_hashset_of_an_unhashable_type_is_not_push() {
+fn an_equal_hashset_of_an_unhashable_type_is_refused() {
     let msg = check_err(&format!(
-        "{}\n(defun f () () (push-all (the HashSet<f64> (HashSet::new)) (the Vector<f64> #(1.0))))",
+        "{}\n(defun f () () (push-all (the HashSet<f64> (HashSet::new :test 'equal)) (the Vector<f64> #(1.0))))",
         PUSH_ALL
     ));
-    assert!(msg.contains("`HashSet<f64>` does not implement trait `std::iter::Push`"), "{}", msg);
+    assert!(msg.contains("type `f64` does not implement trait `std::hash::Hash`"), "{}", msg);
 }
 
 const POP_ALL: &str = r##"(use std::collections::Deque std::collections::HashSet)

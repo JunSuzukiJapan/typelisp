@@ -2189,48 +2189,54 @@ user-visible capacity."
 ;; ---------------------------------------------------------------------------
 ;; `HashTable<K,V>`'s lookup, insert and delete — cl-parity-plan.md Phase 6a.
 ;;
-;; **Prelude methods, not builtins**, and that is the whole of what lets a
-;; `defstruct` be a key. Looking a key up means hashing it and comparing it,
-;; and both are the key type's own methods — `sxhash`, and `Equal`'s `equal`
-;; reached through `Hash`'s supertrait — which are written in typelisp, so no
-;; Rust shim can call them. A builtin `get` would have had to call back into
-;; the interpreter to ask; a prelude method already *is* the interpreter, and
-;; compiles like any other definition.
+;; A table hashes and compares its keys with the two functions it was made
+;; with, which `:test` chose: `(HashTable::new :test 'equal)` is
+;; `(%internal::hashtable-equal)` (`typeck::path_call`), and so on for `eq`,
+;; `eql` (the default) and `equalp`. Only `equal`'s needs the key type's own
+;; methods — `sxhash`, and `Equal`'s `equal` reached through `Hash`'s
+;; supertrait — and asks for them where the table is made. The other three
+;; hash with the runtime's hashes that agree with their test.
 ;;
 ;; What the layer below answers is the part that needs no opinion about keys:
 ;; `bucket-count`/`bucket-key`/`bucket-value` read the entries that share one
 ;; hash, and `bucket-put`/`bucket-delete` write them
-;; (`HashTable`'s definition (`typeck::builtins`)). `Hash`'s contract — `(equal x y)` implies
-;; `(= (sxhash x) (sxhash y))` — is exactly what makes one bucket the right
-;; and only place to look.
-(module %internal (pub defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h int) (k K)) int
+;; (`HashTable`'s definition (`typeck::builtins`)). A table's contract — two
+;; keys its test calls the same have the same hash — is exactly what makes
+;; one bucket the right and only place to look.
+(module %internal
+(pub defun hashtable-eq<K,V> () HashTable<K,V>
+  (HashTable::new (lambda ((k K)) int (sxhash-eq k)) (lambda ((a K) (b K)) bool (eq a b))))
+(pub defun hashtable-eql<K,V> () HashTable<K,V>
+  (HashTable::new (lambda ((k K)) int (sxhash-eql k)) (lambda ((a K) (b K)) bool (eql a b))))
+(pub defun hashtable-equal<K,V> () HashTable<K,V>
   (:where (Hash K))
+  (HashTable::new (lambda ((k K)) int (sxhash k)) (lambda ((a K) (b K)) bool (equal a b))))
+(pub defun hashtable-equalp<K,V> () HashTable<K,V>
+  (HashTable::new (lambda ((k K)) int (sxhash-equalp k)) (lambda ((a K) (b K)) bool (equalp a b))))
+(pub defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h int) (k K)) int
   "Where `k` sits in `h`'s bucket, or -1 when it is not there."
-  (let ((n (bucket-count self h)) (i 0) (found -1))
+  (let ((same (test-function self)) (n (bucket-count self h)) (i 0) (found -1))
     (progn
       (while (if (< found 0) (< i n) false)
         (progn
-          (when (equal (bucket-key self h i) k) (setf found i))
+          (when (same (bucket-key self h i) k) (setf found i))
           (setf i (+ i 1))))
       found))))
 
 (impl<K,V> HashTable<K,V>
   (pub defmethod get (self (k K)) Option<V>
-    (:where (Hash K))
     "The value `k` maps to, or `none`. CL's `gethash`."
-    (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
+    (let* ((hash (hash-function self)) (h (hash k)) (i (%internal::hashtable-bucket-index self h k)))
       (if (< i 0) (Option::none) (Option::some (bucket-value self h i)))))
   (pub defmethod set (self (k K) (v V)) ()
-    (:where (Hash K))
     "Maps `k` to `v`, replacing whatever it mapped to before. CL's
    `(setf (gethash k table) v)`."
-    (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
+    (let* ((hash (hash-function self)) (h (hash k)) (i (%internal::hashtable-bucket-index self h k)))
       (bucket-put self h (if (< i 0) (bucket-count self h) i) k v)))
   (pub defmethod remove (self (k K)) Option<V>
-    (:where (Hash K))
     "Removes `k` and answers the value it held, or `none`. CL's `remhash`
    answers a boolean; answering the value says that and more."
-    (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
+    (let* ((hash (hash-function self)) (h (hash k)) (i (%internal::hashtable-bucket-index self h k)))
       (if (< i 0)
           (Option::none)
           (let ((v (bucket-value self h i)))
@@ -4073,22 +4079,25 @@ user-visible capacity."
 ;; `iter` walks a snapshot, as `HashTable`'s does, so changing the collection
 ;; inside a `doiter` over it is not seen by that loop.
 
-;; A set is a table whose values are `()`.
+;; A set is a table whose values are `()`. `(HashSet::new :test 'equal)` is
+;; `(HashSet::with-table (%internal::hashtable-equal))` (`typeck::path_call`),
+;; and `(HashSet::new)` an `eql` set.
 (module collections
 (pub defstruct HashSet<T> (table HashTable<T,()>))
 (impl<T> HashSet<T>
   (pub defmethod new () HashSet<T> (make-instance 'HashSet :table (the HashTable<T,()> (HashTable::new))))
-  (pub defmethod insert (self (x T)) bool (:where (Hash T))
+  (defmethod with-table ((table HashTable<T,()>)) HashSet<T> (make-instance 'HashSet :table table))
+  (pub defmethod insert (self (x T)) bool
     (if (is-some (get self::table x)) false (progn (set self::table x ()) true)))
-  (pub defmethod contains (self (x T)) bool (:where (Hash T))
+  (pub defmethod contains (self (x T)) bool
     (is-some (get self::table x)))
-  (pub defmethod remove (self (x T)) bool (:where (Hash T))
+  (pub defmethod remove (self (x T)) bool
     (is-some (remove self::table x)))
   (pub defmethod count (self) int (count self::table))
   (pub defmethod clear (self) () (clear self::table))
   (pub defmethod iter (self) vector-iter<T> (iter (keys self::table))))
 ;; `insert`, without its answer of whether `x` was new.
-(impl<T> Push HashSet<T> (:where (Hash T))
+(impl<T> Push HashSet<T>
   (:type Item T)
   (defmethod push (self (x T)) () (insert self x) ()))
 (impl<T> print-object HashSet<T> (:where (print-object T))
@@ -4098,6 +4107,12 @@ user-visible capacity."
         (setf out (append (append out " ") (print-object x escape))))
       (append out ">")))))
 
+;; The sets `(HashSet::new :test ...)` makes (`typeck::path_call`).
+(module %internal
+(pub defun hashset-eq<T> () std::collections::HashSet<T> (std::collections::HashSet::with-table (std::%internal::hashtable-eq)))
+(pub defun hashset-eql<T> () std::collections::HashSet<T> (std::collections::HashSet::with-table (std::%internal::hashtable-eql)))
+(pub defun hashset-equal<T> () std::collections::HashSet<T> (:where (Hash T)) (std::collections::HashSet::with-table (std::%internal::hashtable-equal)))
+(pub defun hashset-equalp<T> () std::collections::HashSet<T> (std::collections::HashSet::with-table (std::%internal::hashtable-equalp))))
 
 ;; Sorted parallel vectors of keys and values, found by binary search on
 ;; `less`. Lookup is a binary search; `set` of a new key and `remove` shift the

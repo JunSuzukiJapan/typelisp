@@ -1236,7 +1236,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         return translate_vector_op(heap, method, &self_repr, ret_type, &args, cx);
     }
     if path_is_builtin(&type_name, typelisp_mem::wk::HASHTABLE) && HASHTABLE_BUILTIN_METHODS.contains(&method.well_known()) {
-        return translate_hashtable_op(heap, method, &self_repr, ret_type, &args, cx);
+        return translate_hashtable_op(heap, method, &self_repr, &ret, ret_type, &args, cx);
     }
     // `(wait t)` — the method-shaped member of the suspending set. Its answer
     // is *typed* (`Task<T>` -> `T`), which is the whole reason suspension is a
@@ -1377,11 +1377,15 @@ fn translate_hashtable_op(
     heap: &mut Heap,
     method: SymRef,
     self_repr: &Repr,
+    ret: &Repr,
     ret_type: Value,
     args: &[Value],
     cx: Ctx,
 ) -> Result<Value, Error> {
     let (kk, vk) = match self_repr {
+        // The table's two functions come back as what the op answers, so
+        // their kind is the result's.
+        Repr::HashTable(k, _) if matches!(method.well_known(), wk::M_HASH_FUNCTION | wk::M_TEST_FUNCTION) => (k.field_kind(), ret.field_kind()),
         Repr::HashTable(k, v) => (k.field_kind(), v.field_kind()),
         _ => (0, 0),
     };
@@ -1397,11 +1401,9 @@ fn translate_hashtable_op(
     let builds_a_box = matches!(method.well_known(), wk::M_NEW | wk::M_KEYS | wk::M_VALUES | wk::M_ENTRIES);
     let result_name = if builds_a_box { type_ref(f.heap(), ret_type)? } else { Value::Empty };
     f.push(result_name);
-    if !method.is(wk::M_NEW) {
-        for a in args {
-            let v = to_island(f.heap(), *a, cx)?;
-            f.push(v);
-        }
+    for a in args {
+        let v = to_island(f.heap(), *a, cx)?;
+        f.push(v);
     }
     f.finish(wk::HASHTABLE_OP)
 }

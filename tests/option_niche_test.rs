@@ -218,10 +218,10 @@ fn builtin_option_results_use_the_niche_in_both_tiers() {
         (defun narrow ((n int)) int (match (try-as u8 n) ((some x) (as int x)) ((none) -1)))
         (defun nested ((h HashTable<string,Option<int>>) (k string)) int
           (match (get h k) ((some (some v)) v) ((some (none)) -2) ((none) -1)))
-        (defun table () HashTable<string,int> (let ((h (the HashTable<string,int> (HashTable::new)))) (set h "a" 1) h))
+        (defun table () HashTable<string,int> (let ((h (the HashTable<string,int> (HashTable::new :test 'equal)))) (set h "a" 1) h))
         (defun vec () Vector<int> (let ((v (the Vector<int> (Vector::new)))) (push v 5) v))
         (defun nested-table () HashTable<string,Option<int>>
-          (let ((h (the HashTable<string,Option<int>> (HashTable::new)))) (set h "a" (Option::some 1)) (set h "b" (Option::none)) h))
+          (let ((h (the HashTable<string,Option<int>> (HashTable::new :test 'equal)))) (set h "a" (Option::some 1)) (set h "b" (Option::none)) h))
     "#;
     const NAMES: &[&str] = &["lookup", "popped", "narrow", "nested", "table", "vec", "nested-table"];
     assert_eq!(both(DEFS, NAMES, "(list (lookup (table) \"a\") (lookup (table) \"z\"))"), "(1 -1)");

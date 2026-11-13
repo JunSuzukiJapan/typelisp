@@ -241,6 +241,12 @@ pub(crate) fn define(reg: &mut Registry) {
     for name in ["eq", "eql", "equalp"] {
         generic_function(reg, cmp, name, &["T"], |[t]| (vec![t.clone(), t], Type::Bool));
     }
+    // The hashes that agree with `eq`, `eql` and `equalp`, for the tables
+    // `(HashTable::new :test 'eq)` and its two siblings make
+    // (`typelisp_rt::equality`).
+    for name in ["sxhash-eq", "sxhash-eql", "sxhash-equalp"] {
+        generic_function(reg, internal, name, &["T"], |[t]| (vec![t], Type::Int));
+    }
     // `symbol->string`/`intern`: the only bridges between the interned
     // `symbol` handle and its textual name. They are Rust builtins
     // (`Interp::eval_builtin`) rather than typelisp because they touch the
@@ -494,7 +500,16 @@ fn hashtable(reg: &mut Registry) {
     let mut def = BuiltinType::new(reg, Path::builtin(wk::HASHTABLE), AdtKind::Sum, &["K", "V"]);
     let [k, v] = def.params();
     let table = Type::Named(Path::builtin(wk::HASHTABLE), vec![k.clone(), v.clone()]);
-    def.associated("new", vec![], table.clone());
+    // `new`: the table that hashes its keys with the first function and
+    // compares them with the second. Only the standard library calls it: a
+    // program's `(HashTable::new :test 'equal)` names one of four prelude
+    // constructors, which pass the functions the test needs
+    // (`typeck::path_call`).
+    let hash_fn = Type::Fn(vec![k.clone()], Default::default(), Box::new(Type::Int));
+    let test_fn = Type::Fn(vec![k.clone(), k.clone()], Default::default(), Box::new(Type::Bool));
+    def.method("new", false, false, vec![hash_fn.clone(), test_fn.clone()], table.clone());
+    def.hidden_instance("hash-function", vec![table.clone()], hash_fn);
+    def.hidden_instance("test-function", vec![table.clone()], test_fn);
     // `get`/`set`/`remove` are **not here**. They are prelude `defmethod`s
     // (`(:where (Hash K))`), written on the five bucket primitives below —
     // because looking a key up means hashing it and comparing it, and both

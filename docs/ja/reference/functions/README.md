@@ -21,7 +21,7 @@
 - 基本型、`Option`・`Result`・`Vector`、反復、S 式とリスト、列の関数、制御のマクロ、比較、算術のトレイト
 - Common Lisp の `COMMON-LISP` パッケージにある名前と同じ名前のもの（`length`・`format`・`open` など）
 - `Error`・`assert`・`print-object`、`HashTable`・`Array`・`BitVector`、ストリームのトレイト
-  `Stream`・`InputStream`・`OutputStream`、`HashTable` のキーが実装する `Hash`
+  `Stream`・`InputStream`・`OutputStream`、`equal` の `HashTable` のキーが実装する `Hash`
 - これらの関数・変数の型に現れる型
 
 それ以外の名前は、`(use std::net::tcp-connect)` のように `use` で取り込むか、`std::net::tcp-connect`

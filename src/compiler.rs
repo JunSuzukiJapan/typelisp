@@ -5428,12 +5428,18 @@ const SOURCE_TEMPLATE: &str = r#"
       (if (equal method "new")
           ;; The table's own runtime identity travels in the name slot: a type
           ;; includes its instantiation, and an empty table has no field to
-          ;; read one off. `rt_hashtable_new` interns what it is given.
+          ;; read one off. `rt_hashtable_new` interns what it is given. The
+          ;; hash function and the test function follow, tagged; each goes to
+          ;; a slot as it is compiled, since compiling the next can call.
           (let* ((name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+                 (hash-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                 (test-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
                  (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup name-form))
-                 (args-ptr (alloca-args builder 1)))
+                 (args-ptr (alloca-args builder 3)))
             (store-arg builder args-ptr 0 name-v)
-            (let ((result (build-call builder (get-function m "rt_hashtable_new") args-ptr 1)))
+            (store-arg builder args-ptr 1 (load-raw builder hash-slot 0))
+            (store-arg builder args-ptr 2 (load-raw builder test-slot 0))
+            (let ((result (build-call builder (get-function m "rt_hashtable_new") args-ptr 3)))
               (push-permanent-sexpr-root builder m result)
               result))
           (let* ((key-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
@@ -5495,6 +5501,13 @@ const SOURCE_TEMPLATE: &str = r#"
              (let ((args-ptr (alloca-args builder 1)))
                (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                (build-call builder (get-function m "rt_hashtable_count") args-ptr 1)))
+            ;; The function the table was made with, tagged, then decoded by
+            ;; the result's kind (`val-kind` carries it here).
+            (("hash-function" "test-function")
+             (let ((args-ptr (alloca-args builder 2)))
+               (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
+               (store-arg builder args-ptr 1 (const-word builder (if (equal method "hash-function") 0 1)))
+               (compile-sexpr-field builder m (build-call builder (get-function m "rt_hashtable_function") args-ptr 2) val-kind 0)))
             ("clear"
              (let ((args-ptr (alloca-args builder 1)))
                (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))

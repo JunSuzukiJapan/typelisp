@@ -41,7 +41,7 @@ fn a_hashset_of_strings_compares_by_content() {
 
 #[test]
 fn a_hashset_element_type_must_implement_hash() {
-    let msg = check_err("(use std::collections::HashSet) (defun f () bool (let ((s (the HashSet<f64> (HashSet::new)))) (insert s 1.0)))");
+    let msg = check_err("(use std::collections::HashSet) (defun f () bool (let ((s (the HashSet<f64> (HashSet::new :test 'equal)))) (insert s 1.0)))");
     assert!(msg.contains("hash"), "{}", msg);
 }
 

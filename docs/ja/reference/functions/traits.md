@@ -125,7 +125,7 @@
 | `Vector<T>` | 末尾に足す |
 | `Deque<T>` | 末尾に足す（`push-back`） |
 | `Array<T>` | fill pointer の位置に足す（`push-extend`）。fill pointer が無ければ panic |
-| `HashSet<T>` | 集合に入れる（`insert`）。要素の型が `Hash` を実装しているときだけ `Push` |
+| `HashSet<T>` | 集合に入れる（`insert`） |
 
 ```lisp
 (use std::collections::Deque)

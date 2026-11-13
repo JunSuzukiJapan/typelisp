@@ -22,6 +22,8 @@
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use typelisp_mem::{FloatBox, Heap, Value};
 
 /// The concrete value inside a trait object, or `v` unchanged. Comparison
@@ -185,6 +187,104 @@ fn equalp_val_here(heap: &Heap, a: Value, b: Value) -> bool {
     }
 }
 
+// ---- Hashes that agree with `eq`, `eql` and `equalp` --------------------
+//
+// What a `HashTable` made with `:test 'eq`/`'eql`/`'equalp` hashes its keys
+// by: two values the test calls the same get the same hash. Like `sxhash`'s,
+// a result is non-negative and fits in 30 bits.
+
+/// The mask that keeps a hash non-negative and fixnum-sized: 2^30-1.
+const SXHASH_MASK: u64 = (1 << 30) - 1;
+
+/// The hash of `v`'s identity: what `eq` compares.
+fn identity_hash(v: Value, h: &mut DefaultHasher) {
+    match v {
+        Value::Empty => 0u8.hash(h),
+        Value::Int(n) => (1u8, n).hash(h),
+        Value::Char(c) => (2u8, c).hash(h),
+        Value::Bool(b) => (3u8, b).hash(h),
+        Value::Symbol(s) => (4u8, s).hash(h),
+        Value::Str(i) => (5u8, i).hash(h),
+        Value::Cons(c) => (6u8, c.addr()).hash(h),
+        Value::Path(p) => (7u8, p).hash(h),
+        Value::Boxed(b) => (8u8, b).hash(h),
+    }
+}
+
+/// A hash that agrees with [`eq_val`].
+pub fn sxhash_eq_val(heap: &Heap, v: Value) -> i64 {
+    let mut h = DefaultHasher::new();
+    identity_hash(strip_dyn(heap, v), &mut h);
+    (h.finish() & SXHASH_MASK) as i64
+}
+
+/// A hash that agrees with [`eql_val`]: a boxed number by its type and
+/// value, everything else by identity.
+pub fn sxhash_eql_val(heap: &Heap, v: Value) -> i64 {
+    let v = strip_dyn(heap, v);
+    let mut h = DefaultHasher::new();
+    match v {
+        Value::Boxed(id) => match heap.float_box(id) {
+            Some(FloatBox::F32(f)) => (9u8, f.to_bits()).hash(&mut h),
+            Some(FloatBox::F64(f)) => (10u8, f.to_bits()).hash(&mut h),
+            None => match heap.narrow_box(id) {
+                Some(n) => (11u8, n.width, n.signed, n.value).hash(&mut h),
+                None if heap.is_bignum(id) => (12u8, heap.bignum_value(id).clone()).hash(&mut h),
+                None if heap.is_ratio(id) => (13u8, heap.ratio_value(id).clone()).hash(&mut h),
+                None => identity_hash(v, &mut h),
+            },
+        },
+        _ => identity_hash(v, &mut h),
+    }
+    (h.finish() & SXHASH_MASK) as i64
+}
+
+/// A hash that agrees with [`equalp_val`]: a number by its value across
+/// types, a string and a character without case, a cons, a struct and an
+/// enum's value by their parts down to a fixed depth, everything else by
+/// identity.
+pub fn sxhash_equalp_val(heap: &Heap, v: Value) -> i64 {
+    let mut h = DefaultHasher::new();
+    equalp_hash(heap, v, 4, &mut h);
+    (h.finish() & SXHASH_MASK) as i64
+}
+
+/// [`sxhash_equalp_val`]'s walk. Below `depth` a part adds nothing, which
+/// keeps two `equalp` values hashing alike however deep they are.
+fn equalp_hash(heap: &Heap, v: Value, depth: u32, h: &mut DefaultHasher) {
+    if depth == 0 {
+        return;
+    }
+    let v = strip_dyn(heap, v);
+    if let Some(r) = numeric_as_ratio(heap, v) {
+        return (14u8, r).hash(h);
+    }
+    match v {
+        Value::Cons(_) => {
+            15u8.hash(h);
+            if let (Ok(a), Ok(d)) = (heap.car(v), heap.cdr(v)) {
+                equalp_hash(heap, a, depth - 1, h);
+                equalp_hash(heap, d, depth - 1, h);
+            }
+        }
+        Value::Str(i) => (16u8, heap.string(i).to_ascii_lowercase()).hash(h),
+        Value::Char(c) => (17u8, c.to_ascii_lowercase()).hash(h),
+        Value::Boxed(id) if heap.is_struct(id) => {
+            (18u8, heap.struct_type_key(id), heap.struct_field_count(id)).hash(h);
+            for i in 0..heap.struct_field_count(id) {
+                equalp_hash(heap, heap.struct_field(id, i), depth - 1, h);
+            }
+        }
+        Value::Boxed(id) if heap.is_enum(id) => {
+            (19u8, heap.enum_type_key(id), heap.enum_variant(id)).hash(h);
+            for i in 0..heap.enum_field_count(id) {
+                equalp_hash(heap, heap.enum_field(id, i), depth - 1, h);
+            }
+        }
+        _ => identity_hash(v, h),
+    }
+}
+
 // ---- The compiled-code edge -------------------------------------------
 //
 // Beside the implementation, for the reason `sys_builtin`'s own edge spells
@@ -194,7 +294,7 @@ fn equalp_val_here(heap: &Heap, a: Value, b: Value) -> bool {
 // belong next to what they call, and the fix if that ever matters is the same
 // one the printer got, a crate of its own.
 
-use crate::{active_heap, decode, fatal};
+use crate::{active_heap, decode, encode, fatal};
 /// The three structural equality predicates for compiled code
 /// ([`crate::equality`]). Each takes two tagged `Sexpr` words and returns a
 /// raw `0`/`1` — a compiled `bool` is the bare machine word, not a tagged
@@ -255,4 +355,44 @@ pub unsafe extern "C" fn rt_sexpr_equalp(args: *const i64, argc: u32) -> i64 {
         fatal("rt_sexpr_equalp: expected 2 arguments");
     }
     i64::from(equalp_val(active_heap(), decode(*args), decode(*args.offset(1))))
+}
+
+/// `(sxhash-eq v)` for compiled code: a tagged word in, a tagged `int` out.
+///
+/// # Safety
+///
+/// `args` must point to 1 valid tagged `i64`; a `Heap` must be registered on
+/// this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_sxhash_eq(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sxhash_eq: expected 1 argument");
+    }
+    encode(Value::Int(sxhash_eq_val(active_heap(), decode(*args))))
+}
+
+/// `(sxhash-eql v)` for compiled code — see [`rt_sxhash_eq`].
+///
+/// # Safety
+///
+/// Same as [`rt_sxhash_eq`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sxhash_eql(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sxhash_eql: expected 1 argument");
+    }
+    encode(Value::Int(sxhash_eql_val(active_heap(), decode(*args))))
+}
+
+/// `(sxhash-equalp v)` for compiled code — see [`rt_sxhash_eq`].
+///
+/// # Safety
+///
+/// Same as [`rt_sxhash_eq`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sxhash_equalp(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sxhash_equalp: expected 1 argument");
+    }
+    encode(Value::Int(sxhash_equalp_val(active_heap(), decode(*args))))
 }

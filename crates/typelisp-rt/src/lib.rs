@@ -1979,24 +1979,44 @@ pub unsafe extern "C" fn rt_struct_pop_field(args: *const i64, argc: u32) -> i64
 // the `rt_struct_*` family above; every key and value crossing them is
 // already tagged, exactly as a struct field is.
 
-/// `(rt-hashtable-new type)` for compiled code — an empty `HashTable<K,V>`
-/// whose type is `type`.
+/// `(rt-hashtable-new type hash test)` for compiled code — an empty
+/// `HashTable<K,V>` whose type is `type`, hashing its keys with the function
+/// `hash` and comparing them with the function `test`.
 ///
 /// # Safety
 ///
-/// A `Heap` must already be registered on this thread, and `args[0]` must be
-/// a type's word.
+/// A `Heap` must already be registered on this thread, `args[0]` must be a
+/// type's word, and `args[1]`/`args[2]` tagged function values.
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_hashtable_new: expected 1 argument (the type)");
+    if argc < 3 {
+        fatal("rt_hashtable_new: expected 3 arguments (the type, the hash function and the test function)");
     }
     // The table's own runtime identity, spelled by the checker and handed
     // down through the island (`typeck::method` -> `hashtable-op`'s name
     // slot): `HashTable<string,i32>` and `HashTable<string,string>` are
     // different types and nothing in an empty table says which this is.
     let key = type_arg(*args, "rt_hashtable_new");
-    encode(active_heap().alloc_hashtable(key))
+    encode(active_heap().alloc_hashtable(key, decode(*args.offset(1)), decode(*args.offset(2))))
+}
+
+/// The hash function (`args[1]` 0) or the test function (1) the table
+/// `args[0]` was made with, tagged.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread, `args[0]` must be a
+/// tagged `HashTable` and `args[1]` a raw `0` or `1`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_function(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_hashtable_function: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_hashtable_function: first argument is not a boxed HashTable"),
+    };
+    encode(active_heap().hashtable_functions(id)[*args.offset(1) as usize])
 }
 
 /// The bucket family: `(rt-hashtable-bucket-* ht hash ...)` for compiled
@@ -5914,7 +5934,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
+        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])]), encode(Value::Empty), encode(Value::Empty)].as_ptr(), 3) };
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "a fresh map is empty");
 
         // Two int->int entries (keys/values as raw tagged `Sexpr` ints). The
@@ -5958,7 +5978,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
+        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])]), encode(Value::Empty), encode(Value::Empty)].as_ptr(), 3) };
         let hash = 5;
         assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 0, "no bucket yet");
 

@@ -31,7 +31,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `Option<T>` | 値があるか無いか。`some` / `none` | [Option と Result](functions/option-result.md) |
 | `Result<T,E>` | 成功か失敗か。`ok` / `err` | 同上 |
 | `Vector<T>` | 可変長配列 | [Vector](functions/collections.md#3-vectort) |
-| `HashTable<K,V>` | ハッシュ表。キーの型は `Hash` を実装していること | [HashTable](functions/collections.md#4-hashtablekv) |
+| `HashTable<K,V>` | ハッシュ表。キーの比べ方は作るときの `:test` で決まり、`equal` の表ではキーの型が `Hash` を実装していること | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | タプル（要素 1〜12 個）。要素は `t::0` で読む | [構文 2 章](syntax.md#2-型の書き方) |
 | `Task<T>` | タスクのハンドル | [タスク](functions/concurrency.md#1-taskt--タスクのハンドル) |
 | `Thread<T>` | 専用 OS スレッドで走るタスクのハンドル | [Thread](functions/concurrency.md#7-threadt--専用の-os-スレッド) |
@@ -121,7 +121,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | トレイト | 実装している型 |
 |---|---|
 | `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` モジュールの型（`lazy::map-iter<I,A,U>` など） |
-| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>`（要素の型が `Hash` を実装しているとき） |
+| `Push` | `Vector<T>` `Deque<T>` `Array<T>` `HashSet<T>` |
 | `Pop` | `Vector<T>` `Deque<T>` `Array<T>` |
 
 ### 6.4 ストリーム

@@ -134,6 +134,9 @@ CL の `equal` です。自前の型は `(impl Equal 型 ...)` を書くと、�
 (member "b" (iter #("a" "b")) :test equal)   ; => true
 ```
 
+`HashTable` も CL の `make-hash-table` と同じく、作るときに `:test` でキーの比べ方を選び、既定は
+`eql` です。文字列をキーにするなら `(HashTable::new :test 'equal)` と書きます。
+
 ## 5. 多値が無い
 
 `values` と `multiple-value-bind` はありません。CL で複数の値を返す関数は、ペアか構造体を返します。

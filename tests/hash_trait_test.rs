@@ -90,8 +90,8 @@ fn a_generic_function_can_require_hash() {
 }
 
 #[test]
-fn hash_inherits_eq() {
-    // `Hash`'s supertrait is `Eq`, so a `(:where (Hash T))` bound already
+fn hash_inherits_equal() {
+    // `Hash`'s supertrait is `Equal`, so a `(:where (Hash T))` bound already
     // obliges `T` to be comparable — no second bound needed.
     let src = "
         (defun same<T> ((a T) (b T)) bool (:where (Hash T)) (equal a b))
@@ -105,7 +105,7 @@ fn hash_inherits_eq() {
 #[test]
 fn a_scalar_key_is_accepted() {
     let src = "
-        (defvar (h HashTable<string,int>) (HashTable::new))
+        (defvar (h HashTable<string,int>) (HashTable::new :test 'equal))
         (progn (set h \"a\" 1) (match (get h \"a\") ((some v) v) ((none) 0)))
     ";
     assert_eq!(eval_ok(src), Value::Int(1));
@@ -113,13 +113,12 @@ fn a_scalar_key_is_accepted() {
 
 #[test]
 fn a_key_type_the_table_cannot_hold_is_a_type_error() {
-    // This used to be a runtime panic out of the mem layer ("HashTable:
-    // unsupported key type"), whose comment said the checker could not
-    // express a hashable bound. It can, and this is the result — and `point`
-    // *can* be a key, once it implements `Hash` (see the tests at the end).
+    // An `equal` table hashes by the key type's own `sxhash`, so a key type
+    // without `Hash` is refused where the table is made — and `point` *can*
+    // be a key, once it implements `Hash` (see the tests at the end).
     let src = "
         (defstruct point (x int) (y int))
-        (defvar (h HashTable<point,int>) (HashTable::new))
+        (defvar (h HashTable<point,int>) (HashTable::new :test 'equal))
         (set h (make-instance 'point :x 1 :y 2) 3)
     ";
     let msg = check_err(src);
@@ -128,10 +127,10 @@ fn a_key_type_the_table_cannot_hold_is_a_type_error() {
 
 #[test]
 fn f64_is_not_a_key_type() {
-    // `f64` has `Eq`, but no `Hash`: `NaN` makes it unusable as a key, which
-    // is exactly what the missing impl says.
+    // `f64` has `Equal`, but no `Hash`: `NaN` makes it unusable as an `equal`
+    // table's key, which is exactly what the missing impl says.
     let src = "
-        (defvar (h HashTable<f64,int>) (HashTable::new))
+        (defvar (h HashTable<f64,int>) (HashTable::new :test 'equal))
         (set h 1.0 3)
     ";
     let msg = check_err(src);
@@ -143,7 +142,7 @@ fn f64_is_not_a_key_type() {
 #[test]
 fn maphash_visits_every_pair() {
     let src = "
-        (defvar (h HashTable<string,int>) (HashTable::new))
+        (defvar (h HashTable<string,int>) (HashTable::new :test 'equal))
         (defvar (total int) 0)
         (progn
           (set h \"a\" 1)
@@ -157,7 +156,7 @@ fn maphash_visits_every_pair() {
 #[test]
 fn size_reports_the_occupancy() {
     let src = "
-        (defvar (h HashTable<string,int>) (HashTable::new))
+        (defvar (h HashTable<string,int>) (HashTable::new :test 'equal))
         (progn (set h \"a\" 1) (set h \"b\" 2) (size h))
     ";
     assert_eq!(eval_ok(src), Value::Int(2));
@@ -165,12 +164,9 @@ fn size_reports_the_occupancy() {
 
 // ---- a user-defined type as a key (cl-parity-plan.md Phase 6a's remainder) --
 //
-// What `Hash` was put in for. The table is stored as hash -> bucket, and
-// neither hashing a key nor comparing two is something the layer below can
-// do: both are the key type's own methods. So `get`/`set`/`remove` are
-// prelude `defmethod`s carrying `(:where (Hash K))`, written on five bucket
-// primitives — and a `defstruct` that implements `Hash` is a key like any
-// other.
+// What `Hash` was put in for. An `equal` table hashes and compares its keys
+// by the key type's own methods, `sxhash` and `equal`, so a `defstruct` that
+// implements `Hash` is a key like any other.
 
 /// The `point` from `a_key_type_the_table_cannot_hold_is_a_type_error`, with
 /// the two impls that make it a key.
@@ -187,7 +183,7 @@ const POINT: &str = r#"(use std::hash::*sxhash-mask*)
 fn a_user_type_that_implements_hash_is_a_key() {
     let src = format!(
         "{}
-         (defvar (h HashTable<point,string>) (HashTable::new))
+         (defvar (h HashTable<point,string>) (HashTable::new :test 'equal))
          (progn
            (set h (make-instance 'point :x 1 :y 2) \"a\")
            (set h (make-instance 'point :x 3 :y 4) \"b\")
@@ -198,12 +194,12 @@ fn a_user_type_that_implements_hash_is_a_key() {
         Value::Str(_) => {}
         other => panic!("expected a string, got {:?}", other),
     }
-    // And a key that is `equals` to a stored one — a *different* object with
+    // And a key that is `equal` to a stored one — a *different* object with
     // the same fields — finds it, which is the whole point of hashing by the
     // type's own methods rather than by identity.
     let src = format!(
         "{}
-         (defvar (h HashTable<point,int>) (HashTable::new))
+         (defvar (h HashTable<point,int>) (HashTable::new :test 'equal))
          (progn (set h (make-instance 'point :x 1 :y 2) 7)
                 (match (get h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) -1)))",
         POINT
@@ -215,7 +211,7 @@ fn a_user_type_that_implements_hash_is_a_key() {
 fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
     let src = format!(
         "{}
-         (defvar (h HashTable<point,int>) (HashTable::new))
+         (defvar (h HashTable<point,int>) (HashTable::new :test 'equal))
          (progn
            (set h (make-instance 'point :x 1 :y 2) 1)
            (set h (make-instance 'point :x 3 :y 4) 2)
@@ -231,7 +227,7 @@ fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
     assert_eq!(eval_ok(&src), Value::Int(2000 + 900 + 10));
 }
 
-/// Two keys that collide — the same `sxhash`, different `equals` — stay two
+/// Two keys that collide — the same `sxhash`, different `equal` — stay two
 /// entries. The bucket is where that is decided, and a hash function is
 /// allowed to collide; `Hash`'s contract only runs the other way.
 #[test]
@@ -241,7 +237,7 @@ fn colliding_keys_stay_separate_entries() {
         (impl Equal k (defmethod equal (self (other Self)) bool (= self::n other::n)))
         ;; Every key hashes to 0.
         (impl Hash k (defmethod sxhash (self) int 0))
-        (defvar (h HashTable<k,int>) (HashTable::new))
+        (defvar (h HashTable<k,int>) (HashTable::new :test 'equal))
         (progn
           (set h (make-instance 'k :n 1) 10)
           (set h (make-instance 'k :n 2) 20)
@@ -273,7 +269,7 @@ fn a_symbol_key_works() {
 fn keys_and_entries_see_user_keys() {
     let src = format!(
         "{}
-         (defvar (h HashTable<point,int>) (HashTable::new))
+         (defvar (h HashTable<point,int>) (HashTable::new :test 'equal))
          (progn (set h (make-instance 'point :x 1 :y 2) 5) (set h (make-instance 'point :x 3 :y 4) 6)
                 (+ (* 10 (len (keys h)))
                    (foldl (iter (values h)) (lambda ((a int) (b int)) int (+ a b)) 0)))",

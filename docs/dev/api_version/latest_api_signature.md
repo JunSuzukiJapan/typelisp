@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.57
+# ABI バージョン 0.3.58
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.57 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.58 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `1d2e4e0143b0e86d`
+内容ハッシュ (FNV-1a 64): `5f11b7e5e5417ad0`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -766,6 +766,11 @@
 | 649 | ` c-store` |
 | 650 | ` ffi-callback-address` |
 | 651 | `pat-dyn` |
+| 652 | `hash-function` |
+| 653 | `test-function` |
+| 654 | `sxhash-eq` |
+| 655 | `sxhash-eql` |
+| 656 | `sxhash-equalp` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -888,6 +893,8 @@
 | `%core::llvm-module` | `%core::llvm-module` | handle | 1 | 0 |
 | `%core::llvm-value` | `%core::llvm-value` | handle | 1 | 0 |
 | `()` | `()` | unit | 100 | 0 |
+| `(fn (K K) bool)` | `(fn (K,K) std::primitive::bool)` | fn | 6 | 2 |
+| `(fn (K) int)` | `(fn (K) std::primitive::int)` | fn | 6 | 2 |
 | `(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)` | `(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)` | fn | 6 | 2 |
 | `E` | `E` | none | 0 | 0 |
 | `K` | `K` | none | 0 | 0 |
@@ -1079,6 +1086,7 @@
 | `rt_hashtable_clear` | `i64 (ptr, i32)` |
 | `rt_hashtable_count` | `i64 (ptr, i32)` |
 | `rt_hashtable_entries` | `i64 (ptr, i32)` |
+| `rt_hashtable_function` | `i64 (ptr, i32)` |
 | `rt_hashtable_keys` | `i64 (ptr, i32)` |
 | `rt_hashtable_new` | `i64 (ptr, i32)` |
 | `rt_hashtable_values` | `i64 (ptr, i32)` |
@@ -1304,6 +1312,9 @@
 | `rt_suspend_thread` | `i64 (ptr, i32)` |
 | `rt_suspend_wait` | `i64 (ptr, i32)` |
 | `rt_suspend_yield` | `i64 (ptr, i32)` |
+| `rt_sxhash_eq` | `i64 (ptr, i32)` |
+| `rt_sxhash_eql` | `i64 (ptr, i32)` |
+| `rt_sxhash_equalp` | `i64 (ptr, i32)` |
 | `rt_sym_name` | `i64 (ptr, i32)` |
 | `rt_symp` | `i64 (ptr, i32)` |
 | `rt_thread_available_parallelism` | `i64 (ptr, i32)` |
@@ -1436,8 +1447,10 @@
 - インスタンス `clear`: `(std::collections::HashTable<K,V>) -> ()`
 - インスタンス `count`: `(std::collections::HashTable<K,V>) -> int`
 - インスタンス `entries`: `(std::collections::HashTable<K,V>) -> std::vec::Vector<std::sexpr::cons-cell<K,V>>`
+- インスタンス `hash-function`: `(std::collections::HashTable<K,V>) -> (fn (K) int)`
 - インスタンス `keys`: `(std::collections::HashTable<K,V>) -> std::vec::Vector<K>`
-- 関連関数 `new`: `() -> std::collections::HashTable<K,V>`
+- 関連関数 `new`: `((fn (K) int), (fn (K K) bool)) -> std::collections::HashTable<K,V>`
+- インスタンス `test-function`: `(std::collections::HashTable<K,V>) -> (fn (K K) bool)`
 - インスタンス `values`: `(std::collections::HashTable<K,V>) -> std::vec::Vector<V>`
 
 ### `std::collections::Scope` (sum, 型引数 [V])
@@ -2194,6 +2207,9 @@
 | `std::%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> std::result::Result<(),std::fs::FileError>` |
 | `std::%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> std::result::Result<(),std::fs::FileError>` |
 | `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> std::result::Result<(),std::fs::FileError>` |
+| `std::%internal::sxhash-eq` | `rt_sxhash_eq` | `<T> (T) -> int` |
+| `std::%internal::sxhash-eql` | `rt_sxhash_eql` | `<T> (T) -> int` |
+| `std::%internal::sxhash-equalp` | `rt_sxhash_equalp` | `<T> (T) -> int` |
 | `std::cmp::eq` | `rt_sexpr_eq` | `<T> (T, T) -> bool` |
 | `std::cmp::eql` | `rt_sexpr_eql` | `<T> (T, T) -> bool` |
 | `std::cmp::equalp` | `rt_sexpr_equalp` | `<T> (T, T) -> bool` |

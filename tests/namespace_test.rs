@@ -164,9 +164,9 @@ fn an_error_types_constructor_is_not_offered_bare() {
 fn use_of_a_type_brings_in_only_its_name() {
     // Two types with a static `new` can both be brought in: `new` stays
     // unbound, and each is written through its type.
-    let src = "(use std::sync::Chan HashTable) (new 1)";
+    let src = "(use std::sync::Chan Vector) (new 1)";
     assert!(program(src).is_err());
-    let src = "(use std::sync::Chan HashTable) (the Chan<int> (Chan::new 1)) (the HashTable<int,int> (HashTable::new))";
+    let src = "(use std::sync::Chan Vector) (the Chan<int> (Chan::new 1)) (the Vector<int> (Vector::new))";
     if let Err(e) = program(src) {
         panic!("{}", e);
     }
@@ -198,10 +198,10 @@ fn use_of_every_member_brings_in_the_constructors_and_static_methods() {
 
 #[test]
 fn two_types_members_of_one_name_cannot_both_come_in() {
-    let err = program("(use std::sync::Chan::* HashTable::*)").expect_err("two `new`s");
+    let err = program("(use std::sync::Chan::* Vector::*)").expect_err("two `new`s");
     assert!(err.to_string().contains("`new` already stands for"), "{}", err);
     // Replacing one on purpose.
-    let src = "(use std::sync::Chan::*) (shadowing-import HashTable::new) (the HashTable<int,int> (new))";
+    let src = "(use std::sync::Chan::*) (shadowing-import Vector::new) (the Vector<int> (new))";
     if let Err(e) = program(src) {
         panic!("{}", e);
     }

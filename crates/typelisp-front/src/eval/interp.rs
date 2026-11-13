@@ -2104,6 +2104,9 @@ impl Interp {
             wk::M_EQ => Some(sexpr_eq(heap, args)),
             wk::M_EQL => Some(sexpr_eql(heap, args)),
             wk::M_EQUALP => Some(sexpr_equalp(heap, args)),
+            wk::F_SXHASH_EQ => Some(Ok(Value::Int(typelisp_rt::equality::sxhash_eq_val(heap, args[0])))),
+            wk::F_SXHASH_EQL => Some(Ok(Value::Int(typelisp_rt::equality::sxhash_eql_val(heap, args[0])))),
+            wk::F_SXHASH_EQUALP => Some(Ok(Value::Int(typelisp_rt::equality::sxhash_equalp_val(heap, args[0])))),
             // `exit`: terminates the process immediately via the OS, never
             // returning — `rt_i64` truncates to `i32` the same way every
             // other `i32`-typed builtin extracts its argument.
@@ -3799,7 +3802,9 @@ pub(crate) fn eval_builtin_method(
             // checker (`typeck::method`): these builders have no field to
             // read an instantiation off, and `Vector<i32>` and `Vector<i64>`
             // share a representation, so nothing here could derive it.
-            wk::M_NEW => Some(Ok(crate::type_key::alloc_hashtable_of(heap, ret_type))),
+            wk::M_NEW => Some(Ok(crate::type_key::alloc_hashtable_of(heap, ret_type, args[0], args[1]))),
+            wk::M_HASH_FUNCTION => Some(expect_struct_box(&args[0]).map(|id| heap.hashtable_functions(id)[0])),
+            wk::M_TEST_FUNCTION => Some(expect_struct_box(&args[0]).map(|id| heap.hashtable_functions(id)[1])),
             // `get`/`set`/`remove` are prelude methods, written on these
             // five — see `HashTable`'s definition (`typeck::builtins`).
             wk::M_BUCKET_COUNT => Some(hashtable_bucket_count(heap, args)),

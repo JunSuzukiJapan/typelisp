@@ -84,7 +84,7 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `new` | `(HashTable::new)` | `()→HashTable<K,V>` | 空のテーブルを作る |
+| `new` | `(HashTable::new)` / `(HashTable::new :test 'equal)` | `()→HashTable<K,V>` | 空のテーブルを作る。`:test` はキーの比べ方（下の表）。省くと `eql` |
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | 検索 |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | 挿入・上書き |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | 削除し、あれば旧値を返す |
@@ -97,17 +97,27 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL `hash-table-size`。この表では占有数（＝`count`） |
 
-**キーの型は `Hash` を実装していれば何でもよい**——`defstruct`/`defenum` も含めて。
-`get`/`set`/`remove` は `(:where (Hash K))` を持つので、実装していない型をキーにした表は
-**型エラー**（`f64` に `Hash` が無いのは `NaN` のため）。
+キーの比べ方は、CL の `make-hash-table` と同じく、作るときに `:test` で選ぶ。`:test` には
+`eq`・`eql`・`equal`・`equalp` のどれかを書く（`'equal` とも `equal` とも書ける）。
+
+| `:test` | キーの比べ方 | キーにできる型 |
+|---|---|---|
+| `eql`（既定） | 数と文字は値で、それ以外は同一性で | どの型でも |
+| `eq` | 同一性で | どの型でも |
+| `equal` | キーの型の `equal`（`Equal`）とハッシュ `sxhash`（`Hash`）で | `Hash` を実装する型 |
+| `equalp` | `equalp` で（文字列は大文字と小文字を区別せず、構造体はスロットごと） | どの型でも |
+
+既定は `eql` なので、別々に作った同じ中身の文字列は別のキーになる。文字列をキーにするなら
+`(HashTable::new :test 'equal)` と書く。`equal` の表のキーの型が `Hash` を実装していなければ、
+表を作る所で**型エラー**になる（`f64` に `Hash` が無いのは `NaN` のため）。
 
 ```lisp
 (deftrait Hash (Equal)
   (defmethod sxhash (self) int))              ; 非負で fixnum に入る値を返す
 ```
 
-実装済み: `int` と 6 つの固定幅整数、`bool`、`char`、`string`、`symbol`（浮動小数点数には無い）。
-自前の型では、結果を `*sxhash-mask*`（2^30-1）で `logand` して非負に保つ。文字列を
+`Hash` の実装済み: `int` と 6 つの固定幅整数、`bool`、`char`、`string`、`symbol`（浮動小数点数には
+無い）。自前の型では、結果を `*sxhash-mask*`（2^30-1）で `logand` して非負に保つ。文字列を
 ハッシュしたいときは `string` の実装が使っている `(sxhash-string s)`（FNV-1a 32bit）を呼べる。
 
 ```lisp
@@ -119,12 +129,12 @@
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
-(let ((h (the HashTable<point,string> (HashTable::new))))
+(let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
          (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
-キーが同じかどうかを決めるのは**キーの型自身**（`sxhash` と、`Hash` のスーパトレイト
+`equal` の表でキーが同じかどうかを決めるのは**キーの型自身**（`sxhash` と、`Hash` のスーパトレイト
 `Equal` の `equal`）で、オブジェクトの同一性ではない。だから上のように「別の値だが等しい」
 キーで引ける。
 
@@ -184,11 +194,12 @@
 ## 7. `HashSet<T>`
 
 重複の無い要素の集まり（Rust の `HashSet`）。標準ライブラリの `defstruct` で、中身は
-`HashTable<T,()>`。要素の型は `HashTable` のキーと同じく `Hash` を実装していること。
+`HashTable<T,()>`。要素の比べ方は `HashTable` のキーと同じく `:test` で決まり、`equal` の集合では
+要素の型が `Hash` を実装していること。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `new` | `(HashSet::new)` | `()→HashSet<T>` | 空の集合を作る。型引数は期待型から決まる |
+| `new` | `(HashSet::new)` / `(HashSet::new :test 'equal)` | `()→HashSet<T>` | 空の集合を作る。型引数は期待型から決まる。`:test` は `HashTable` と同じで、省くと `eql` |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 追加する。新しく入れば `true`、既にあれば `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` があるか |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 取り除く。あれば `true` |
@@ -199,7 +210,7 @@
 
 ```lisp
 (use std::collections::HashSet)
-(let ((seen (the HashSet<string> (HashSet::new))))
+(let ((seen (the HashSet<string> (HashSet::new :test 'equal))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```

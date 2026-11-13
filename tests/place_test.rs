@@ -117,7 +117,7 @@ fn incf_on_a_hashtable_value_type_mismatch_is_rejected() {
     // is a genuine type error, not a bug: this project's `get`/`set`
     // convention has an asymmetric read/write type (unlike CL's untyped
     // `gethash`), so `incf` can never paper over a missing entry.
-    let src = "(defun make-h () HashTable<string,int> (HashTable::new))
+    let src = "(defun make-h () HashTable<string,int> (HashTable::new :test 'equal))
                (let ((h (make-h))) (set h \"a\" 1) (incf (get h \"a\")))";
     assert!(matches!(check_with_prelude(src), Err(Error::TypeError(_))));
 }
@@ -192,7 +192,7 @@ fn rotatef_call_form_places_dedup_shared_subexpressions() {
 
 #[test]
 fn setf_get_writes_through_a_hashtable_entry() {
-    let src = "(defun make-h () HashTable<string,int> (HashTable::new))
+    let src = "(defun make-h () HashTable<string,int> (HashTable::new :test 'equal))
                (let ((h (make-h)))
                  (set h \"a\" 1)
                  (setf (get h \"a\") 41)

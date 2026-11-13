@@ -238,7 +238,7 @@ fn clear_empties_the_table() {
 
 #[test]
 fn string_keys_work() {
-    let src = "(defun make-h () HashTable<string,int> (HashTable::new))
+    let src = "(defun make-h () HashTable<string,int> (HashTable::new :test 'equal))
                (defun f () int
                  (let ((h (make-h)))
                    (set h \"x\" 42)
@@ -265,7 +265,7 @@ fn instance_method_dispatch_substitutes_k_and_v_independently() {
     // other's inferred `K`/`V` (regression for `check_assoc_call`'s `subst`
     // being built fresh per call, from the receiver's own concrete type args).
     let src = "(defun make-ints () HashTable<int,int> (HashTable::new))
-               (defun make-strs () HashTable<string,string> (HashTable::new))
+               (defun make-strs () HashTable<string,string> (HashTable::new :test 'equal))
                (defun f () int
                  (let ((a (make-ints)) (b (make-strs)))
                    (set a 1 100)
@@ -355,3 +355,41 @@ fn sexpr_values_survive_gc_pressure() {
     assert_eq!(sexpr_to_string(&h, v), "(a b c d e)");
 }
 
+
+// ---- :test ------------------------------------------------------------------
+
+/// CL's `make-hash-table`: `eql` without `:test`, so two strings built apart
+/// are two keys; `equal` compares the contents, `equalp` without case, and
+/// `eq` compares a struct by identity.
+#[test]
+fn test_chooses_how_keys_compare() {
+    let src = "(defstruct pt (x int))
+        (let ((a (the HashTable<string,int> (HashTable::new)))
+              (b (the HashTable<string,int> (HashTable::new :test 'equal)))
+              (c (the HashTable<string,int> (HashTable::new :test equalp)))
+              (d (the HashTable<pt,int> (HashTable::new :test 'eq)))
+              (p (make-instance 'pt :x 1)))
+          (set a \"k\" 1) (set b \"k\" 2) (set c \"K\" 3) (set d p 4)
+          (format false \"~a ~a ~a ~a ~a\"
+            (get a (append \"k\" \"\")) (get b (append \"k\" \"\")) (get c \"k\") (get d p)
+            (get d (make-instance 'pt :x 1))))";
+    assert_eq!(eval_string(src), "none (some 2) (some 3) (some 4) none");
+}
+
+/// A set takes the same `:test`.
+#[test]
+fn a_set_takes_the_same_test() {
+    let src = "(use std::collections::HashSet)
+        (let ((s (the HashSet<string> (HashSet::new :test 'equal))) (e (the HashSet<string> (HashSet::new))))
+          (insert s \"x\") (insert e \"x\")
+          (format false \"~a ~a\" (contains s (append \"x\" \"\")) (contains e (append \"x\" \"\"))))";
+    assert_eq!(eval_string(src), "true false");
+}
+
+/// `:test` names one of CL's four, and is the only argument. (An `equal`
+/// table's key type without `Hash` is `hash_trait_test`'s.)
+#[test]
+fn test_names_one_of_the_four() {
+    type_error("(the HashTable<int,int> (HashTable::new :test 'foo))");
+    type_error("(the HashTable<int,int> (HashTable::new 1))");
+}

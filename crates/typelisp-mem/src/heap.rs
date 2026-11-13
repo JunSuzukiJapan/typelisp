@@ -1855,7 +1855,7 @@ impl Heap {
     /// [`is_struct`](Self::is_struct)'s doc comment for why this needs to be
     /// a separate predicate rather than folded into it.
     pub fn is_hashtable(&self, id: BoxId) -> bool {
-        matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Map(_), .. }))
+        matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Map(..), .. }))
     }
 
     // ---- enums ----------------------------------------------------------------
@@ -2316,15 +2316,23 @@ impl Heap {
     /// Stores an empty hash map, returning its `Value::Boxed` —
     /// `HashTable<K,V>`'s runtime representation (see `BoxedObj`/
     /// `StructPayload::Map`'s doc comments).
-    pub fn alloc_hashtable(&mut self, type_key: TypeId) -> Value {
-        self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Map(HashMap::new()) })
+    pub fn alloc_hashtable(&mut self, type_key: TypeId, hash: Value, test: Value) -> Value {
+        self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Map(HashMap::new(), [hash, test]) })
+    }
+
+    /// The hash function and the test function the table `id` was made with.
+    pub fn hashtable_functions(&self, id: BoxId) -> [Value; 2] {
+        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(_, fns), .. }) => *fns,
+            _ => panic!("BoxId does not hold a HashTable"),
+        }
     }
 
     /// The bucket at `hash`, or `&[]` when there is none. Every read below
     /// goes through here.
     fn bucket(&self, id: BoxId, hash: i64) -> parking_lot::MappedRwLockReadGuard<'_, [(Value, Value)]> {
         parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map, _), .. }) => {
                 map.get(&hash).map(Vec::as_slice).unwrap_or(&[])
             }
             _ => panic!("BoxId does not hold a HashTable"),
@@ -2364,7 +2372,7 @@ impl Heap {
     /// call it had to make anyway to answer "was this key already present".
     pub fn hashtable_bucket_put(&mut self, id: BoxId, hash: i64, i: usize, key: Value, val: Value) {
         match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map, _), .. }) => {
                 let bucket = map.entry(hash).or_default();
                 if i < bucket.len() {
                     bucket[i] = (key, val);
@@ -2381,7 +2389,7 @@ impl Heap {
     /// Removes the `i`th entry of `hash`'s bucket, keeping the rest in order.
     pub fn hashtable_bucket_delete(&mut self, id: BoxId, hash: i64, i: usize) {
         match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map, _), .. }) => {
                 let Some(bucket) = map.get_mut(&hash) else {
                     panic!("HashTable: no bucket at hash {}", hash);
                 };
@@ -2401,7 +2409,7 @@ impl Heap {
     /// hold a `BoxedObj::Struct` with a `StructPayload::Map` payload.
     pub fn hashtable_count(&self, id: BoxId) -> usize {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map, _), .. }) => {
                 map.values().map(Vec::len).sum()
             }
             _ => panic!("BoxId does not hold a HashTable"),
@@ -2412,7 +2420,7 @@ impl Heap {
     /// `BoxedObj::Struct` with a `StructPayload::Map` payload.
     pub fn hashtable_clear(&mut self, id: BoxId) {
         match self.shared.boxes.write().slots[id.0 as usize].as_mut() {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.clear(),
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map, _), .. }) => map.clear(),
             _ => panic!("BoxId does not hold a HashTable"),
         }
     }
@@ -2426,7 +2434,7 @@ impl Heap {
     /// payload.
     pub fn hashtable_pairs(&self, id: BoxId) -> Vec<(Value, Value)> {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map, _), .. }) => {
                 map.values().flat_map(|b| b.iter().copied()).collect()
             }
             _ => panic!("BoxId does not hold a HashTable"),
@@ -2862,7 +2870,8 @@ impl Heap {
             // Both halves of every entry: a key is an ordinary `Value` now
             // (it has to be — a `defstruct` can be one), so it is traced the
             // same way its value is.
-            BoxedObj::Struct { payload: StructPayload::Map(map), .. } => {
+            BoxedObj::Struct { payload: StructPayload::Map(map, fns), .. } => {
+                stack.extend_from_slice(fns);
                 for bucket in map.values() {
                     for &(k, v) in bucket {
                         stack.push(k);

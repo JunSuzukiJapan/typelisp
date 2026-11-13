@@ -6,7 +6,8 @@
 
 use crate::typeck::registry::AdtKind;
 use crate::types::{path_spelling, path_target, Path, PathTarget, Type};
-use crate::{Error, Heap, Loc, PathId, Value};
+use crate::{wk, Error, Heap, Loc, PathId, Value};
+use typelisp_mem::symbols::NsId;
 use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::SymRef;
 
@@ -80,6 +81,13 @@ pub(crate) fn check_member_call(
     expected: Option<&Type>,
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
+    if let Some(form) = table_constructor(heap, owner, member, args)? {
+        heap.push_root(form);
+        let written_ty = written.map(|w| Type::Named(owner, w.to_vec()));
+        let checked = check_expr(cx, heap, locals, form, written_ty.as_ref().or(expected), loc);
+        heap.pop_root();
+        return checked;
+    }
     let def = match cx.reg.types.get(&owner) {
         Some(TypeEntry::Type(def)) => def,
         // Which type's implementation is meant, the path does not say.
@@ -205,4 +213,43 @@ pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, expected: Optio
             ))),
         },
     }
+}
+
+/// `(HashTable::new)`, `(HashTable::new :test 'equal)` or
+/// `(HashSet::new :test 'equal)` as the call of the prelude constructor of
+/// that test (`std::%internal::hashtable-equal` and its siblings), which
+/// passes the table the hash and the comparison the test needs. `:test`
+/// takes `eq`, `eql`, `equal` or `equalp`, quoted or not, as CL's
+/// `make-hash-table` does; without it, `eql`. `None` for any other call,
+/// for `(HashSet::new)`, which is a method of its own, and for the standard
+/// library's `(HashTable::new hash test)`.
+fn table_constructor(heap: &mut Heap, owner: Path, member: SymRef, args: &[(Value, Option<Loc>)]) -> Result<Option<Value>, Error> {
+    let table = crate::types::path_is_builtin(&owner, wk::HASHTABLE);
+    let set = owner == Path::in_ns(crate::types::std_module("collections"), "HashSet");
+    if !(table || set) || member.name() != "new" {
+        return Ok(None);
+    }
+    let who = if table { "HashTable::new" } else { "HashSet::new" };
+    let test = match args {
+        [] if set => return Ok(None),
+        [] => "eql",
+        [(key, _), (named, _)] if matches!(key, Value::Symbol(k) if k.is_keyword() && k.name() == "test") => {
+            let named = match heap.list_to_vec(*named) {
+                Ok(elems) if elems.len() == 2 && matches!(elems[0], Value::Symbol(q) if q.is(wk::QUOTE)) => elems[1],
+                _ => *named,
+            };
+            match named {
+                Value::Symbol(s) if ["eq", "eql", "equal", "equalp"].contains(&s.name()) => s.name(),
+                _ => return Err(Error::TypeError(format!("{}: `:test` is one of `eq`, `eql`, `equal` and `equalp`, as in ({} :test 'equal)", who, who))),
+            }
+        }
+        // The standard library's own call, which passes the two functions
+        // (`new` is hidden from everyone else).
+        [(first, _), _] if !matches!(first, Value::Symbol(k) if k.is_keyword()) => return Ok(None),
+        _ => return Err(Error::TypeError(format!("{}: the only argument is `:test`, as in ({} :test 'equal)", who, who))),
+    };
+    let name = format!("{}-{}", if table { "hashtable" } else { "hashset" }, test);
+    let segs = heap.names().read_path(NsId::ROOT, &["std", "%internal", &name]).map_err(Error::ReadError)?;
+    let callee = heap.intern_path(&segs);
+    Ok(Some(crate::check::core::list(heap, &[callee])?))
 }

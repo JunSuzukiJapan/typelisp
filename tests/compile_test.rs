@@ -6950,7 +6950,7 @@ fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
         (impl Hash pt
           (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
         (defun probe ((a int) (b int)) int
-          (let ((h (the HashTable<pt,int> (HashTable::new))))
+          (let ((h (the HashTable<pt,int> (HashTable::new :test 'equal))))
             (progn
               (set h (make-instance 'pt :x a :y b) 7)
               (set h (make-instance 'pt :x b :y a) 9)

@@ -162,11 +162,12 @@ fn is_excluded(name: &str) -> bool {
     let earmuffed = name.len() > 2 && name.starts_with('*') && name.ends_with('*');
 
     // `HashTable<K,V>`'s bucket layer (Phase 6a): registry builtins over the
-    // raw `int`-keyed storage that know nothing about hashing or key
-    // equality. They are what `get`/`set`/`remove` are written in terms of,
-    // which is what a user writes. Methods on the type, so they cannot move
-    // into the internal module the free-function helpers live in.
-    let hashtable_bucket = name.starts_with("bucket-");
+    // raw `int`-keyed storage, and the hash and test functions a table was
+    // made with. They are what `get`/`set`/`remove` are written in terms of,
+    // which is what a user writes; `HashSet`'s `with-table` is what its
+    // `(HashSet::new :test ...)` is. Methods on the types, so they cannot
+    // move into the internal module the free-function helpers live in.
+    let hashtable_bucket = name.starts_with("bucket-") || ["hash-function", "test-function", "with-table"].contains(&name);
 
     operator
         || type_param

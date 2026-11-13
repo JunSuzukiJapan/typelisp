@@ -90,6 +90,9 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         wk::M_EQ => "rt_sexpr_eq",
         wk::M_EQL => "rt_sexpr_eql",
         wk::M_EQUALP => "rt_sexpr_equalp",
+        wk::F_SXHASH_EQ => "rt_sxhash_eq",
+        wk::F_SXHASH_EQL => "rt_sxhash_eql",
+        wk::F_SXHASH_EQUALP => "rt_sxhash_equalp",
         wk::F_PARSE_FLOAT => "rt_parse_float",
         wk::F_GET_UNIVERSAL_TIME => "rt_get_universal_time",
         wk::F_GET_INTERNAL_REAL_TIME => "rt_get_internal_real_time",
@@ -563,11 +566,11 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 341] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 345] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
-    use typelisp_rt::equality::{rt_sexpr_eq, rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
+    use typelisp_rt::equality::{rt_sexpr_eq, rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp, rt_sxhash_eq, rt_sxhash_eql, rt_sxhash_equalp};
     use typelisp_rt::ffi_callback::{
         rt_ffi_callback_address, rt_ffi_callback_enter, rt_ffi_callback_invoke, rt_ffi_callback_leave,
         rt_ffi_callback_register,
@@ -641,7 +644,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 341] {
         rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key, rt_hashtable_bucket_put,
         rt_hashtable_bucket_value,
         rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys,
-        rt_hashtable_new, rt_hashtable_values, rt_int_to_ratio,
+        rt_hashtable_function, rt_hashtable_new, rt_hashtable_values, rt_int_to_ratio,
         rt_intern, rt_intern_path, rt_intern_symbol, rt_keywordp, rt_wk_symbol, rt_list_to_path, rt_list_to_sexpr_vector, rt_lists_to_sexpr_array, rt_list_to_sexpr_tuple, rt_vector_to_sexpr_tuple, rt_sexpr_tuple_items, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_int, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
@@ -691,6 +694,10 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 341] {
         // (`typelisp_rt::equality`). `eq` needs no shim — it is the `icmp eq`
         // the island emits in place.
         ("rt_sexpr_eq", rt_sexpr_eq as *const () as usize),
+        ("rt_sxhash_eq", rt_sxhash_eq as *const () as usize),
+        ("rt_sxhash_eql", rt_sxhash_eql as *const () as usize),
+        ("rt_sxhash_equalp", rt_sxhash_equalp as *const () as usize),
+        ("rt_hashtable_function", rt_hashtable_function as *const () as usize),
         ("rt_sexpr_eql", rt_sexpr_eql as *const () as usize),
         ("rt_sexpr_equal", rt_sexpr_equal as *const () as usize),
         ("rt_sexpr_equalp", rt_sexpr_equalp as *const () as usize),

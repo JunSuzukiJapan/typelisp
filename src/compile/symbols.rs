@@ -107,9 +107,10 @@ pub const VECTOR_BUILTIN_METHODS: [u32; 6] = [wk::M_NEW, wk::M_GET, wk::SET, wk:
 /// methods a Rust shim cannot call. The bucket primitives take the hash the
 /// prelude computed and an index it found, which is the part this layer can
 /// answer on its own.
-pub const HASHTABLE_BUILTIN_METHODS: [u32; 11] = [
+pub const HASHTABLE_BUILTIN_METHODS: [u32; 13] = [
     wk::M_NEW, wk::M_COUNT, wk::M_CLEAR, wk::M_KEYS, wk::M_VALUES, wk::M_ENTRIES,
     wk::M_BUCKET_COUNT, wk::M_BUCKET_KEY, wk::M_BUCKET_VALUE, wk::M_BUCKET_PUT, wk::M_BUCKET_DELETE,
+    wk::M_HASH_FUNCTION, wk::M_TEST_FUNCTION,
 ];
 
 /// The stable operation id compiled code passes as `rt_llvm_call`'s first

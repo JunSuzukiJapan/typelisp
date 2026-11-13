@@ -530,13 +530,10 @@ pub(crate) enum BoxedObj {
 /// (both just "a `Vec<Value>`" at this layer — length-checking a fixed-arity
 /// struct's field count is the caller's job, same as it already is for the
 /// pre-unification `RtValue::Struct`). `Map` is a `HashTable<K,V>`, stored as
-/// **hash -> bucket**: this layer neither hashes a key nor compares two,
-/// because it cannot. Both questions belong to the key's type — `sxhash` and
-/// `equals`, written in typelisp — so the prelude's own `get`/`set`/`remove`
-/// ask them and hand the answers down here as a plain number and an index
-/// into a bucket. That is what lets a `defstruct` be a key at all; before it,
-/// a mem-layer key enum listed the four scalar shapes it knew how to
-/// hash, and no user type could ever join them.
+/// **hash -> bucket**: this layer neither hashes a key nor compares two. The
+/// table holds the two functions that do — chosen by `:test` when it was
+/// made — and the prelude's own `get`/`set`/`remove` call them and hand the
+/// answers down here as a plain number and an index into a bucket.
 ///
 /// The `HashMap`'s own bucket storage is ordinary Rust memory (like
 /// `str_slots`'s `String` buffers), so the mark phase only needs to trace
@@ -560,7 +557,10 @@ pub(crate) enum BoxedObj {
 #[derive(Clone, Debug)]
 pub(crate) enum StructPayload {
     Fields(Vec<Value>),
-    Map(HashMap<i64, Vec<(Value, Value)>>),
+    /// The buckets, then the table's hash function and test function: the
+    /// two function values it was made with (`:test`), which the prelude's
+    /// `get`/`set`/`remove` call.
+    Map(HashMap<i64, Vec<(Value, Value)>>, [Value; 2]),
     Frame(HashMap<String, Value>),
     Frames(Vec<BoxId>),
 }

@@ -135,11 +135,12 @@ pub fn alloc_sexpr_tuple(heap: &mut Heap, elems: Vec<crate::Value>) -> crate::Va
     heap.alloc_struct(ty, elems)
 }
 
-/// A fresh `HashTable<K,V>` of the type `ty` — the map-payload counterpart of
+/// A fresh `HashTable<K,V>` of the type `ty`, hashing with `hash` and
+/// comparing with `test` — the map-payload counterpart of
 /// [`alloc_struct_of`], here for the same reason: writing a type identity is
 /// this module's job.
-pub fn alloc_hashtable_of(heap: &mut Heap, ty: TypeId) -> crate::Value {
-    heap.alloc_hashtable(ty)
+pub fn alloc_hashtable_of(heap: &mut Heap, ty: TypeId, hash: crate::Value, test: crate::Value) -> crate::Value {
+    heap.alloc_hashtable(ty, hash, test)
 }
 
 /// [`alloc_struct_of`]'s enum counterpart.

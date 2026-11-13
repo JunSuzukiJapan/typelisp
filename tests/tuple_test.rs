@@ -63,7 +63,7 @@ fn every_evaluation_is_a_fresh_tuple() {
 #[test]
 fn tuples_compare_and_hash_by_their_elements() {
     both(
-        r##"(let ((h (the HashTable<#{int string},int> (HashTable::new))))
+        r##"(let ((h (the HashTable<#{int string},int> (HashTable::new :test 'equal))))
              (set h (tuple 1 "x") 10)
              (format false "~a ~a ~a ~a"
                (equal (tuple 1 "x") #{1 "x"})

@@ -1098,12 +1098,10 @@ fn is_struct_distinguishes_struct_from_float() {
 // ---- boxed hash tables ---------------------------------------------------
 //
 // The mem-layer representation of `HashTable<K,V>`: **hash -> bucket**, and
-// nothing more. This layer neither hashes a key nor compares two, because it
-// cannot — both are the key type's own `sxhash`/`equals`, written in
-// typelisp, so the prelude's `get`/`set`/`remove` ask them and hand the
-// answers down as a number and an index. That is what lets a `defstruct` be a
-// key; the closed set of scalar shapes a `MemHashKey` used to enumerate never
-// could. These tests exercise the representation itself.
+// the two functions the table was made with. This layer neither hashes a key
+// nor compares two: the prelude's `get`/`set`/`remove` call those functions
+// and hand the answers down as a number and an index. These tests exercise
+// the representation itself.
 
 fn as_boxed(v: Value) -> BoxId {
     match v {
@@ -1120,7 +1118,7 @@ fn as_boxed(v: Value) -> BoxId {
 /// is only an id nobody reads back, so one type serves every test here.
 fn new_hashtable(h: &mut Heap) -> Value {
     let key = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::COLLECTIONS, "HashTable", &[spec::INT, spec::INT]));
-    h.alloc_hashtable(key)
+    h.alloc_hashtable(key, Value::Empty, Value::Empty)
 }
 
 #[test]
