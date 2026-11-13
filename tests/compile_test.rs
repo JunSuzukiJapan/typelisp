@@ -3532,6 +3532,27 @@ fn compile_dispatches_string_equals_and_less() {
     assert_eq!(v, Value::Int(90));
 }
 
+/// `eq`/`eql` on a struct, compiled: the free functions, by identity.
+#[test]
+fn compile_dispatches_eq_and_eql_on_a_struct() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct pt (x int))
+        (defun same-eq ((a pt) (b pt)) bool (eq a b))
+        (defun same-eql ((a pt) (b pt)) bool (eql a b))
+        (compile same-eq)
+        (compile same-eql)
+        (let ((p (make-instance 'pt :x 1)) (q (make-instance 'pt :x 1)))
+          (+ (if (same-eq p p) 1 0)
+             (+ (if (same-eq p q) 10 0)
+                (+ (if (same-eql p p) 100 0)
+                   (if (same-eql p q) 1000 0)))))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, Value::Int(101));
+}
+
 /// `Option<T>`'s `equals`, compiled at `Option<int>` and at a list.
 #[test]
 fn compile_dispatches_option_equals() {

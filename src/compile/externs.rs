@@ -83,10 +83,12 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         // The small system builtins (`sys_builtin`): parsing, the clock, and
         // process exit. Each is a thin edge over one shared implementation
         // the interpreter calls too.
-        // `equal`/`equalp` on `Sexpr` are free *functions*
+        // `eq`/`eql`/`equal`/`equalp` on any type are free *functions*
         // (`registry`'s root `fns`), not methods, so they map here rather
         // than through `native_lowered_primitive_methods`. Both are the same
         // `typelisp_rt::equality` the interpreter calls.
+        wk::M_EQ => "rt_sexpr_eq",
+        wk::M_EQL => "rt_sexpr_eql",
         wk::M_EQUAL => "rt_sexpr_equal",
         wk::M_EQUALP => "rt_sexpr_equalp",
         wk::F_PARSE_FLOAT => "rt_parse_float",
@@ -561,11 +563,11 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 340] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 341] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
-    use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
+    use typelisp_rt::equality::{rt_sexpr_eq, rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     use typelisp_rt::ffi_callback::{
         rt_ffi_callback_address, rt_ffi_callback_enter, rt_ffi_callback_invoke, rt_ffi_callback_leave,
         rt_ffi_callback_register,
@@ -688,6 +690,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 340] {
         // The three structural equality predicates
         // (`typelisp_rt::equality`). `eq` needs no shim — it is the `icmp eq`
         // the island emits in place.
+        ("rt_sexpr_eq", rt_sexpr_eq as *const () as usize),
         ("rt_sexpr_eql", rt_sexpr_eql as *const () as usize),
         ("rt_sexpr_equal", rt_sexpr_equal as *const () as usize),
         ("rt_sexpr_equalp", rt_sexpr_equalp as *const () as usize),

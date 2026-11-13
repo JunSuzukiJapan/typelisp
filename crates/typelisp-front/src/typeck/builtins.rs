@@ -222,12 +222,12 @@ pub(crate) fn define(reg: &mut Registry) {
     function(reg, sexpr_ns, "sexpr-str", vec![s.clone()], Type::Str);
     function(reg, sexpr_ns, "sexpr-sym-name", vec![s.clone()], Type::Str);
     function(reg, sexpr_ns, "sexpr-symp", vec![s], Type::Bool);
-    // `equal`/`equalp`: structural equality (CL `equal`/`equalp`), Rust
-    // builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`). The
-    // per-scalar `equal`/`equalp` *methods* (string/char/int/...) are
-    // separate and resolved first when the receiver is one of those types —
-    // these free ones are for everything else (`case` expands to
-    // `(equal ..)`).
+    // `eq`/`eql`/`equal`/`equalp`: CL's four equivalences, Rust builtins
+    // (`Interp::eval_builtin`'s `sexpr_eq`/`sexpr_eql`/`sexpr_equal`/
+    // `sexpr_equalp`), so every type has them as CL's objects all do. The
+    // per-scalar *methods* (string/char/int/...) are separate and resolved
+    // first when the receiver is one of those types — these free ones are
+    // for everything else (`case` expands to `(equal ..)`).
     //
     // **Generic, not `Sexpr`-typed.** With concrete `Option<Sexpr>`
     // parameters both arguments would widen into S-expression data
@@ -238,7 +238,7 @@ pub(crate) fn define(reg: &mut Registry) {
     // `equal` method and that method demands both sides be `i32`. One type
     // parameter used twice forces the two arguments to agree; the runtime
     // compares `Value`s structurally whatever they hold.
-    for name in ["equal", "equalp"] {
+    for name in ["eq", "eql", "equal", "equalp"] {
         generic_function(reg, cmp, name, &["T"], |[t]| (vec![t.clone(), t], Type::Bool));
     }
     // `symbol->string`/`intern`: the only bridges between the interned

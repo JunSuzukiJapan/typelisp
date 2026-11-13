@@ -2096,11 +2096,13 @@ impl Interp {
             wk::F_EVAL => Some(self.eval_form(heap, &args[0])),
             wk::F_MACROEXPAND_1 => Some(self.macroexpand_1_form(heap, args[0])),
             wk::F_MACROEXPAND => Some(self.macroexpand_form(heap, args[0])),
-            // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
-            // free-function `Sexpr` overloads; the per-scalar-type `equal`
+            // `eq`/`eql`/`equal`/`equalp` on any type: the free functions (the
+            // free-function overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
             // in `eval_builtin_method`). Rust builtins since Phase 5 fenced
             // `match` off `Sexpr`; see `sexpr_equal`/`sexpr_equalp`.
+            wk::M_EQ => Some(sexpr_eq(heap, args)),
+            wk::M_EQL => Some(sexpr_eql(heap, args)),
             wk::M_EQUAL => Some(sexpr_equal(heap, args)),
             wk::M_EQUALP => Some(sexpr_equalp(heap, args)),
             // `exit`: terminates the process immediately via the OS, never

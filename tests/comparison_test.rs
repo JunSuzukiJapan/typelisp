@@ -109,6 +109,20 @@ fn option_and_result_compare_their_variant_and_contents() {
     assert!(!b("(equals '() '(1))"));
 }
 
+/// `eq`/`eql` take a value of any type, as CL's do: a struct, an enum's
+/// value or a tuple is the same object or not.
+#[test]
+fn eq_and_eql_compare_any_type_by_identity() {
+    let defs = "(defstruct pt (x int)) (defenum color (red) (rgb int))";
+    for op in ["eq", "eql"] {
+        assert!(!b(&format!("{defs} ({op} (make-instance 'pt :x 1) (make-instance 'pt :x 1))")));
+        assert!(b(&format!("{defs} (let ((p (make-instance 'pt :x 1))) ({op} p p))")));
+        assert!(!b(&format!("{defs} ({op} (color::rgb 1) (color::rgb 1))")));
+        assert!(b(&format!("{defs} (let ((c (color::rgb 1))) ({op} c c))")));
+        assert!(!b(&format!("({op} #{{1 2}} #{{1 2}})")));
+    }
+}
+
 // ---- expanded Ord trait (less-equal / greater / greater-equal) --------------
 
 #[test]

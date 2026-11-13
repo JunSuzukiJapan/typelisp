@@ -216,6 +216,21 @@ pub unsafe extern "C" fn rt_sexpr_eql(args: *const i64, argc: u32) -> i64 {
     i64::from(eql_val(active_heap(), decode(*args), decode(*args.offset(1))))
 }
 
+/// `(eq a b)` on a value of any type for compiled code — the free function;
+/// `Sexpr`'s own `eq` method is an `icmp eq` the island emits in place. See
+/// [`rt_sexpr_eql`].
+///
+/// # Safety
+///
+/// Same as [`rt_sexpr_eql`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_eq(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_sexpr_eq: expected 2 arguments");
+    }
+    i64::from(eq_val(active_heap(), decode(*args), decode(*args.offset(1))))
+}
+
 /// `(equal a b)` for compiled code — see [`rt_sexpr_eql`].
 ///
 /// # Safety

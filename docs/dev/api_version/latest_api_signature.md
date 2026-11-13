@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.55
+# ABI バージョン 0.3.56
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.55 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.56 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `3eae5133d0489c16`
+内容ハッシュ (FNV-1a 64): `73cc73566fd0be52`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1233,6 +1233,7 @@
 | `rt_set_sexpr_root` | `i64 (ptr, i32)` |
 | `rt_sexpr_bool` | `i64 (ptr, i32)` |
 | `rt_sexpr_char` | `i64 (ptr, i32)` |
+| `rt_sexpr_eq` | `i64 (ptr, i32)` |
 | `rt_sexpr_eql` | `i64 (ptr, i32)` |
 | `rt_sexpr_equal` | `i64 (ptr, i32)` |
 | `rt_sexpr_equalp` | `i64 (ptr, i32)` |
@@ -2191,6 +2192,8 @@
 | `std::%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> std::result::Result<(),std::fs::FileError>` |
 | `std::%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> std::result::Result<(),std::fs::FileError>` |
 | `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> std::result::Result<(),std::fs::FileError>` |
+| `std::cmp::eq` | `rt_sexpr_eq` | `<T> (T, T) -> bool` |
+| `std::cmp::eql` | `rt_sexpr_eql` | `<T> (T, T) -> bool` |
 | `std::cmp::equal` | `rt_sexpr_equal` | `<T> (T, T) -> bool` |
 | `std::cmp::equalp` | `rt_sexpr_equalp` | `<T> (T, T) -> bool` |
 | `std::compile-file` |  | `(string, string) -> bool` |
