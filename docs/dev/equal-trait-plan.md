@@ -1,6 +1,11 @@
 # Eq を Equal に、equals を equal にする計画
 
-2026-11-13 にユーザーと決めたこと。
+2026-11-13 にユーザーと決めたこと。同じ日に全段階を終えた(段階 5 の改名は段階 3 と一緒に入れた)。
+
+計画と違えたところ:
+
+- `Sexpr` の組み込みメソッド `equal` は `(Sexpr, Sexpr)` を取る。受け手が `Option<Sexpr>` のときは、残りの引数も `Option<Sexpr>` として検査する(`method::check_method_call`)。受け手が `Option<Sexpr>` のときは、`Option` 自身のメソッドより `Sexpr` のメソッドを先に探す。`Option` の `impl Equal` は prelude にあり、prelude に依存しない島のソースの `(equal x y)` がそれを選ぶとリンクできないため。
+- `Sexpr` を `match` するときに、文字列や浮動小数点数のリテラルを断る制限を外した。`equal` は中身で比べるので、腕は一致できる。
 
 ## 決めたこと
 
