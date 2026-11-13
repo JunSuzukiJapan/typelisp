@@ -1626,8 +1626,8 @@ fn an_aot_executable_calls_a_generic_prelude_function() {
 /// A value pattern — a `string` literal in a `match` — inside an AOT
 /// executable.
 ///
-/// It is the pattern whose test is a *call*: `(equals $match-scrut "add")`,
-/// resolved to the prelude's `impl Eq string`. So this is the case where a
+/// It is the pattern whose test is a *call*: `(equal $match-scrut "add")`,
+/// resolved to the prelude's `impl Equal string`. So this is the case where a
 /// pattern drags a prelude method into the executable, and it says the
 /// dependency is followed from inside a pattern the same way it is from a
 /// body (`core_bridge::collect_targets` walks a pattern's fields like any

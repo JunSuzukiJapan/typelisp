@@ -54,10 +54,11 @@ pub(crate) fn check_method_call(
     let instance = receiver.is_some();
     let mut args = Vec::with_capacity(sig.params.len());
     let mut rational_op = false;
+    // An `Option<Sexpr>` is the type an S-expression has: it is the
+    // receiver of `Sexpr`'s methods as it is (`resolve::receiver_method`),
+    // and then a `Sexpr` the method takes besides is one too.
+    let sexpr_receiver = receiver.as_ref().is_some_and(|r| path_is_builtin(&owner, wk::SEXPR) && is_option_of_sexpr(&cx.resolve(&r.ty)));
     if let Some(receiver) = receiver {
-        // An `Option<Sexpr>` is the type an S-expression has: it is the
-        // receiver of `Sexpr`'s methods as it is (`resolve::receiver_method`).
-        let sexpr_receiver = path_is_builtin(&owner, wk::SEXPR) && is_option_of_sexpr(&cx.resolve(&receiver.ty));
         if !sexpr_receiver {
             agree(cx, &receiver.ty, Some(&subst.apply(&sig.params[0])))?;
         }
@@ -67,6 +68,7 @@ pub(crate) fn check_method_call(
     let (fixed, tail) = rest.split_at(required - args.len());
     for ((arg, arg_loc), param) in fixed.iter().zip(&sig.params[args.len()..]) {
         let param = subst.apply(param);
+        let param = if sexpr_receiver && param == crate::typeck::sexpr_value::sexpr_ty() { crate::typeck::sexpr_value::option_of_sexpr() } else { param };
         if !rational_op {
             args.push(check_expr(cx, heap, locals, *arg, Some(&param), arg_loc.clone())?);
             continue;

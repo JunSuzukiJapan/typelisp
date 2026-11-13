@@ -13,12 +13,12 @@ use common::{check_err, eval_string, eval_string_compiled};
 const DEFS: &str = r##"
 (defenum Shape (circle f64) (rect f64 f64) (dot))
 (defstruct P (x int))
-(impl Eq P (defmethod equals (self (other P)) bool (= self::x other::x)))
+(impl Equal P (defmethod equal (self (other P)) bool (= self::x other::x)))
 (defun classify ((n int)) string
   (match n
     (0 "zero")
     (_ :when (< n 0) "negative")
-    (_ :when (equals (mod n 2) 0) "even")
+    (_ :when (equal (mod n 2) 0) "even")
     (_ "odd")))
 (defun kind ((s Shape)) string
   (match s

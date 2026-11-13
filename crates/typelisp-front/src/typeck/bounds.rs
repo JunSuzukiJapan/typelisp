@@ -443,7 +443,7 @@ fn trait_at(reg: &Registry, from: Path, at: Vec<Option<Type>>, want: &Path, dept
 /// the table is passed through unchanged, and so is one a bound declares
 /// itself.
 pub(crate) fn trait_operator_method(op: SymRef) -> Option<SymRef> {
-    const TABLE: [(&str, &str); 15] = [
+    const TABLE: [(&str, &str); 14] = [
         ("+", "add"),
         ("-", "sub"),
         ("*", "mul"),
@@ -453,10 +453,10 @@ pub(crate) fn trait_operator_method(op: SymRef) -> Option<SymRef> {
         ("logior", "bit-or"),
         ("logxor", "bit-xor"),
         ("lognot", "bit-not"),
-        // `Eq`/`Ord` predate the arithmetic traits and already had these four
-        // under spelled-out names; the operators reach them the same way.
-        ("=", "equals"),
-        ("/=", "not-equals"),
+        // `=` is `Equal`'s `equal`; `/=` is its negation
+        // (`expr::check_call`). `Ord` predates the arithmetic traits and
+        // already had these four under spelled-out names.
+        ("=", "equal"),
         ("<", "less"),
         ("<=", "less-equal"),
         (">", "greater"),

@@ -66,7 +66,7 @@ fn tuples_compare_and_hash_by_their_elements() {
         r##"(let ((h (the HashTable<#{int string},int> (HashTable::new))))
              (set h (tuple 1 "x") 10)
              (format false "~a ~a ~a ~a"
-               (equals (tuple 1 "x") #{1 "x"})
+               (equal (tuple 1 "x") #{1 "x"})
                (less (tuple 1 "b") (tuple 1 "c"))
                (less (tuple 2 "a") (tuple 1 "z"))
                (unwrap (get h (tuple 1 "x")))))"##,

@@ -123,16 +123,18 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `last` | `(last it)` | `Iter<A>→Option<A>` | 最後の**要素**（CL の「最後のセル」ではない） |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | 最後の要素を除く |
 
-`Eq` / `Ord` 境界を要求する関数（述語の代わりにトレイトで比較する。[トレイト](traits.md#2-eq--ord比較)）:
+項目を探す関数。`:test` を書かなければ、CL と同じく `eql` で比べる。`eql` は数と文字を値で、
+それ以外を同一性で比べるので、別々に作った同じ中身の文字列やリストは等しくない。中身で比べるなら
+`:test equal` と書く（6 章）:
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | `x` と等しい要素があるか（CL と違い残りリストではなく `bool`） |
-| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | `x` と等しい最初の要素 |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | `x` と等しい最初の位置 |
-| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | `x` と等しい要素の個数 |
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` | `x` と等しい要素があるか（CL と違い残りリストではなく `bool`） |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` | `x` と等しい最初の要素 |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` | `x` と等しい最初の位置 |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` | `x` と等しい要素の個数 |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL の `(sort sequence predicate)`。安定な非破壊ソート。`cmp` は「第1引数が第2引数より真に前」で `true` |
-| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | `car` が `k` と等しい最初のペア。値は `(cdr p)` で取り出す |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` | `car` が `k` と等しい最初のペア。値は `(cdr p)` で取り出す |
 
 これらと 5 章の関数の多くは、CL のキーワード引数 `:key` / `:test` / `:test-not` /
 `:start` / `:end` / `:from-end` / `:count` も取る（6 章）。
@@ -191,8 +193,8 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `member` と同じく **`bool`**（イテレータに返すべき tail が無い） |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every` の否定 |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | 各正版と同型 | 述語を否定した版 |
-| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 値で削除 |
-| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` where `Eq A` | 重複除去。CL どおり**最後の出現を残す**（最初の出現を残すには `:from-end true`） |
+| `remove` | `(remove x it)` | `(A,Iter<A>)→Vector<A>` | 値で削除 |
+| `remove-duplicates` | `(remove-duplicates it)` | `Iter<A>→Vector<A>` | 重複除去。CL どおり**最後の出現を残す**（最初の出現を残すには `:from-end true`） |
 | `substitute` `substitute-if` | `(substitute new old it)` | `(A,A,Iter<A>)→Vector<A>` | 値／述語で置換 |
 | `assoc-if` `rassoc` `rassoc-if` | `(rassoc v it)` | `Iter<cons-cell<K,V>>` 上 | `assoc` の述語版・値側版 |
 | `acons` | `(acons k v it)` | `(K,V,Iter<cons-cell<K,V>>)→Vector<cons-cell<K,V>>` | 先頭にペアを足す |
@@ -203,14 +205,14 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `maplist` | `(maplist it f)` | `(Iter<A>,(fn (Vector<A>) U))→Vector<U>` | 連続する**末尾**への写像 |
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 末尾への副作用のための写像（`maplist` 版の `mapc`） |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 末尾へ写像して連結（`maplist` 版の `mapcan`） |
-| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | `sub` が最初に現れる位置。受け手が `string` なら `string` のメソッドが選ばれる（[文字列](collections.md#1-文字列-string)） |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` where `Eq A` | 最初に食い違う位置。等しければ `none` |
+| `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub` が最初に現れる位置。受け手が `string` なら `string` のメソッドが選ばれる（[文字列](collections.md#1-文字列-string)） |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 最初に食い違う位置。等しければ `none` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 併合。CL は整列済みを要求するが、これは連結を整列する |
-| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` where `Eq A` | 無ければ**先頭に**足す |
-| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` where `Eq A` | 集合演算。CL は順序を規定しないが、ここは**初出順**で安定 |
-| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` where `Eq A` | 包含 |
-| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | 接尾辞か／接尾辞を除いた前半。CL は**構造の共有**を問うが、共有すべき構造が無いので**値として**の接尾辞を問う |
-| `seq-equals` | `(seq-equals a b)` | `(Vector<A>,Vector<A>)→bool` where `Eq A` | 要素ごとの等価。`Vector<T>` 自身に `Eq` の実装は無い |
+| `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | 無ければ**先頭に**足す |
+| `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 集合演算。CL は順序を規定しないが、ここは**初出順**で安定 |
+| `subsetp` | `(subsetp a b)` | `(Iter<A>,Iter<A>)→bool` | 包含 |
+| `tailp` `ldiff` | `(tailp tail whole)` | `(Iter<A>,Iter<A>)→bool` / `→Vector<A>` | 接尾辞か／接尾辞を除いた前半。CL は**構造の共有**を問うが、共有すべき構造が無いので、要素が `eql` な接尾辞かを問う |
+| `seq-equal` | `(seq-equal a b)` | `(Vector<A>,Vector<A>)→bool` where `Equal A` | 要素ごとの `equal`。`Vector<T>` 自身に `Equal` の実装は無い |
 | `caar`…`cddddr` | `(cadr p)` | ネストしたペア上 | CL の 28 個。**リストではなくペア**の走査で、`cadr` は `cons-cell<A,cons-cell<B,C>>` を取る |
 
 CL にあってここに無いもの: `list*`（末尾を差し替えた不完全リストという概念が無い）、
@@ -229,7 +231,7 @@ CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-no
 | キーワード | 型 | 意味 |
 |---|---|---|
 | `:key` | `(fn (A) A)` | 比較・述語にかける前に要素へ適用する射影 |
-| `:test` | `(fn (A A) bool)` | `Eq` 境界の `equals` の代わりに使う等価判定。第1引数が**探している項目**、第2引数が（`:key` 適用後の）要素——CL と同じ順 |
+| `:test` | `(fn (A A) bool)` | 既定の `eql` の代わりに使う等価判定（`:test equal` など）。第1引数が**探している項目**、第2引数が（`:key` 適用後の）要素——CL と同じ順 |
 | `:test-not` | `(fn (A A) bool)` | `:test` の否定 |
 | `:start` `:end` | `int` | 走査する窓 `[start, end)`。添字は列全体に対するもの |
 | `:from-end` | `bool` | 探索は**最後の**一致を答える。`:count` と併せると影響を受けるのは末尾側から |

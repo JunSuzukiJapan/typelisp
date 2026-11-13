@@ -75,7 +75,7 @@
 | `len` | `(len v)` | `Vector<T>→int` | 要素数 |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `none`（`get`/`set` と異なり panic しない）（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` を実装するイテレータを作る |
-| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | `x` と等しい要素が無ければ末尾に追加（CL `pushnew`。場所を書き換える必要が無いのでマクロではなくメソッド） |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | `x` と `eql` な要素が無ければ末尾に追加（CL `pushnew`。場所を書き換える必要が無いのでマクロではなくメソッド） |
 
 `map`/`filter` などは [シーケンス関数](sequences.md#4-iter-上のシーケンス関数)——`(map (iter v) f)` の
 ように `iter` で渡す。破壊的な操作（`nreverse`、`delete` など）は [破壊的操作](sequences.md#7-破壊的操作)。
@@ -102,7 +102,7 @@
 **型エラー**（`f64` に `Hash` が無いのは `NaN` のため）。
 
 ```lisp
-(deftrait Hash (Eq)
+(deftrait Hash (Equal)
   (defmethod sxhash (self) int))              ; 非負で fixnum に入る値を返す
 ```
 
@@ -113,8 +113,8 @@
 ```lisp
 (use std::hash::*sxhash-mask*)
 (defstruct point (x int) (y int))
-(impl Eq point
-  (defmethod equals (self (other Self)) bool
+(impl Equal point
+  (defmethod equal (self (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
   (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
@@ -125,11 +125,11 @@
 ```
 
 キーが同じかどうかを決めるのは**キーの型自身**（`sxhash` と、`Hash` のスーパトレイト
-`Eq` の `equals`）で、オブジェクトの同一性ではない。だから上のように「別の値だが等しい」
+`Equal` の `equal`）で、オブジェクトの同一性ではない。だから上のように「別の値だが等しい」
 キーで引ける。
 
-`sxhash` が衝突しても構わない（`Hash` の契約は逆向き——`equals` なら同じハッシュ、としか
-言っていない）。衝突したキーは `equals` で区別される。
+`sxhash` が衝突しても構わない（`Hash` の契約は逆向き——`equal` なら同じハッシュ、としか
+言っていない）。衝突したキーは `equal` で区別される。
 
 ## 5. `Array<T>`（多次元配列）
 

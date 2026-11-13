@@ -48,17 +48,17 @@ fn typl(dir: &Path, args: &[&str]) -> (i32, String, String) {
     )
 }
 
-const MATH: &str = r#"(use std::error::assert-eq) 
+const MATH: &str = r#"(use std::error::assert-equal) 
 (shadow add)
 (pub defun add ((a int) (b int)) int (+ a b))
 
 #[test]
 (defun adds () ()
-  (assert-eq (add 1 2) 3))
+  (assert-equal (add 1 2) 3))
 
 #[test]
 (defun adds-wrong () ()
-  (assert-eq (add 1 2) 4))
+  (assert-equal (add 1 2) 4))
 "#;
 
 #[test]
@@ -92,14 +92,14 @@ fn typl_test_runs_every_test_and_reports_each_failure() {
     write(
         &dir,
         "tests/more.typl",
-        r#"(use std::error::assert-eq) 
+        r#"(use std::error::assert-equal) 
 (use math)
 #[test]
 (defun boom () () (panic "boom"))
 #[test]
 (defun out-of-range () () (println "~a" (get #(1 2) 10)))
 #[test]
-(defun after-the-failures () () (assert-eq (math::add 2 2) 4 "still runs"))
+(defun after-the-failures () () (assert-equal (math::add 2 2) 4 "still runs"))
 "#,
     );
     let (code, out, err) = typl(&dir, &["test"]);
@@ -116,7 +116,7 @@ fn typl_test_runs_every_test_and_reports_each_failure() {
     ] {
         assert!(out.lines().any(|l| l == line), "missing `{}` in:\n{}", line, out);
     }
-    assert!(out.contains("assertion failed: (assert-eq (add 1 2) 4)\n  left: 3\n right: 4"), "{}", out);
+    assert!(out.contains("assertion failed: (assert-equal (add 1 2) 4)\n  left: 3\n right: 4"), "{}", out);
     assert!(out.contains("panic: boom"), "{}", out);
     assert!(out.contains("index 10 out of bounds"), "{}", out);
 }
@@ -148,9 +148,9 @@ fn a_test_in_a_module_of_the_file_is_found_there() {
         "geo.typl",
         r#"(pub defun area ((w int) (h int)) int (* w h))
 (module tests
-  (use std::error::assert-eq)
+  (use std::error::assert-equal)
   #[test]
-  (defun square () () (assert-eq (geo::area 3 3) 9)))
+  (defun square () () (assert-equal (geo::area 3 3) 9)))
 "#,
     );
     let (code, out, err) = typl(&dir, &["test", file.to_str().unwrap()]);
@@ -179,10 +179,10 @@ fn a_misplaced_attribute_is_an_error() {
 }
 
 #[test]
-fn assert_eq_wants_eq_and_print_object() {
-    let err = check_err("(use std::error::assert-eq) (defstruct P (x int))\n(assert-eq (make-instance 'P :x 1) (make-instance 'P :x 1))");
-    assert!(err.contains("does not implement trait `std::cmp::Eq`"), "{}", err);
-    assert_eq!(eval_string("(use std::error::assert-eq) (progn (assert-eq #{1 \"a\"} #{1 \"a\"}) \"same\")"), "same");
+fn assert_equal_wants_equal_and_print_object() {
+    let err = check_err("(use std::error::assert-equal) (defstruct P (x int))\n(assert-equal (make-instance 'P :x 1) (make-instance 'P :x 1))");
+    assert!(err.contains("does not implement trait `std::cmp::Equal`"), "{}", err);
+    assert_eq!(eval_string("(use std::error::assert-equal) (progn (assert-equal #{1 \"a\"} #{1 \"a\"}) \"same\")"), "same");
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn compile_file_leaves_a_test_out() {
     let file = write(
         &dir,
         "app.typl",
-        "(use std::error::assert-eq) (defun twice ((x int)) int (* 2 x))\n#[test]\n(defun twice-works () () (assert-eq (twice 2) 4))\n(defun main () () (println \"~a\" (twice 21)))\n",
+        "(use std::error::assert-equal) (defun twice ((x int)) int (* 2 x))\n#[test]\n(defun twice-works () () (assert-equal (twice 2) 4))\n(defun main () () (println \"~a\" (twice 21)))\n",
     );
     let exe = dir.join("app");
     let (code, _, err) = typl(&dir, &["-c", file.to_str().unwrap(), "-o", exe.to_str().unwrap()]);

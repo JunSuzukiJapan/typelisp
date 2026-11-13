@@ -157,14 +157,6 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
         Value::Bool(_) if cx.resolve(expected) == Type::Bool => Ok(Pat::Lit { tag: wk::BOOL, value: v }),
         Value::Char(_) if cx.resolve(expected) == Type::Char => Ok(Pat::Lit { tag: wk::CHAR, value: v }),
         Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => tuple_pattern(cx, heap, locals, expected, id, binds),
-        // Against a `Sexpr`, comparing would be `eq`: identity, which a
-        // separately built string or boxed number never has.
-        Value::Str(_) | Value::Boxed(_) if is_sexpr_expectation(&cx.resolve(expected)) => Err(Error::TypeError(format!(
-            "pattern: `{}` against a `Sexpr` scrutinee would compare by identity — `Eq` on `sexpr` is `eq`, so this arm could never match a separately built value. Write `({} {})` to destructure it and compare by value instead",
-            crate::check::core::print(heap, v),
-            sexpr_variant_for_literal(heap, v),
-            crate::check::core::print(heap, v)
-        ))),
         Value::Int(_) | Value::Bool(_) | Value::Char(_) | Value::Str(_) | Value::Boxed(_) => value_pattern(cx, heap, locals, expected, v),
         other => Err(Error::TypeError(format!("pattern does not match `{}`: `{:?}`", cx.resolve(expected), other))),
     }
@@ -443,28 +435,28 @@ fn symbol_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, sy
     value_pattern(cx, heap, locals, expected, expr?)
 }
 
-/// The pattern that matches a value `equals` to `expr`'s: a test
-/// `(equals $match-scrut expr)`, checked where the arm is, with
-/// `$match-scrut` the value matched. So a type's own `Eq` compares it, and
-/// a type nothing can compare is refused here.
+/// The pattern that matches a value `equal` to `expr`'s: a test
+/// `(equal $match-scrut expr)`, checked where the arm is, with
+/// `$match-scrut` the value matched. So a type's own `Equal` compares it,
+/// and a type nothing can compare is refused here.
 fn value_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, expr: Value) -> Result<Pat, Error> {
     let ty = cx.with_default(expected);
-    let equals = member_symbol("equals");
+    let equal = member_symbol("equal");
     let comparable = match &ty {
-        Type::Param(p) => bound_method(cx.reg, cx.scope, *p, equals).is_some(),
-        Type::Dyn(t, _) => super::dyn_trait::has_method(cx.reg, t, equals),
-        _ => cx.receiver_method(&ty, equals)?.is_some(),
+        Type::Param(p) => bound_method(cx.reg, cx.scope, *p, equal).is_some(),
+        Type::Dyn(t, _) => super::dyn_trait::has_method(cx.reg, t, equal),
+        _ => cx.receiver_method(&ty, equal)?.is_some(),
     };
     if !comparable {
         return Err(Error::TypeError(format!(
-            "pattern: `{}` cannot be compared by value — its type `{}` does not implement `Eq`",
+            "pattern: `{}` cannot be compared by value — its type `{}` does not implement `Equal`",
             crate::check::core::print(heap, expr),
             ty
         )));
     }
     let scrut = intern(MATCH_SCRUT);
     heap.push_root(expr);
-    let call = Value::Symbol(heap.names().read(NsId::STD, "equals"));
+    let call = Value::Symbol(heap.names().read(NsId::STD, "equal"));
     let form = crate::check::core::list(heap, &[call, Value::Symbol(scrut), expr]);
     heap.pop_root();
     let form = form?;
@@ -479,19 +471,3 @@ fn value_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, exp
 /// can write a name that starts with `$`.
 const MATCH_SCRUT: &str = "$match-scrut";
 
-/// The `Sexpr` variant that destructures a literal of `v`'s kind —
-/// `check_pattern`'s suggestion when a by-identity literal is written
-/// against a `Sexpr` scrutinee. Only the four kinds that reach it (a
-/// `Str` literal, and the three boxed numbers) are named; anything else
-/// falls back to the variant that binds without destructuring, which is
-/// always true and always available.
-pub(crate) fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
-    match v {
-        Value::Str(_) => "str",
-        Value::Boxed(id) if heap.is_f64(id) => "f64",
-        Value::Boxed(id) if heap.is_f32(id) => "f32",
-        Value::Boxed(id) if heap.is_bignum(id) => "int",
-        Value::Boxed(id) if heap.is_ratio(id) => "ratio",
-        _ => "the sexpr",
-    }
-}

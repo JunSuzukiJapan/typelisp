@@ -232,7 +232,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; equality
     "eq" "eql" "equal" "equalp"
     ;; Iter-based sequence library (§6).  `find'/`position'/`count' are CL's
-    ;; own item-based (`Eq'-bounded) versions; `find-if'/`position-if'/
+    ;; own item-based versions; `find-if'/`position-if'/
     ;; `count-if'/`remove-if' take a predicate instead.
     "length" "append" "nth" "elt" "take" "subseq" "last" "butlast"
     "member" "every" "any" "sort" "assoc" "map" "filter" "foldl" "foldr"
@@ -281,7 +281,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "member-if" "member-if-not" "merge" "notany" "notevery" "pairlis"
     "position-if-not" "rassoc" "rassoc-if" "remove-duplicates" "remove-if-not"
     "rest" "revappend"
-    "seq-equals" "set-difference" "set-exclusive-or" "subsetp" "substitute" "substitute-if"
+    "seq-equal" "set-difference" "set-exclusive-or" "subsetp" "substitute" "substitute-if"
     "tailp" "union"
     ;; the 28 `c*r' pair accessors (§6.1)
     "caaaar" "caaadr" "caaar" "caadar" "caaddr" "caadr"
@@ -295,8 +295,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "nreverse" "nconc" "nreconc" "nbutlast" "nsubstitute" "nsubstitute-if"
     "delete" "delete-if" "delete-if-not" "delete-duplicates" "fill" "replace"
     "map-into" "set-contents" "rplaca" "rplacd"
-    ;; Eq / Ord trait methods
-    "equals" "not-equals" "less" "less-equal" "greater" "greater-equal"
+    ;; Ord trait methods
+    "less" "less-equal" "greater" "greater-equal"
     ;; the `Hash' trait and the hash-table methods that came with it (Phase 6a)
     "sxhash" "sxhash-string" "maphash" "size"
     ;; complex numbers (Phase 1d).  `complex' is both the type and CL's
@@ -317,11 +317,11 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "bit" "sbit" "set-bit" "set-sbit"
     "bit-ior" "bit-eqv" "bit-nand" "bit-nor"
     "bit-andc1" "bit-andc2" "bit-orc1" "bit-orc2"
-    ;; errors and dynamic rebinding (Phase 7).  `assert'/`assert-eq'/`warn'/
+    ;; errors and dynamic rebinding (Phase 7).  `assert'/`assert-equal'/`warn'/
     ;; `dlet'/`with-standard-io-syntax' are macros, not functions, but they
     ;; read as ordinary calls.
     "simple-error" "wrap-error" "describe-error"
-    "assert" "assert-eq" "warn" "dlet" "with-standard-io-syntax"
+    "assert" "assert-equal" "warn" "dlet" "with-standard-io-syntax"
     ;; the one-object printers (Phase 8a).  Macros over `format', so they
     ;; read as ordinary calls too.
     "prin1" "princ" "write"
@@ -427,7 +427,7 @@ PRNG stream (CLHS 12.1.6).
     ;; the second within the day, `internal-time' into seconds and microseconds.
     "universal-time" "internal-time"
     ;; builtin traits
-    "Iter" "Eq" "Ord" "Error" "Hash"
+    "Iter" "Equal" "Ord" "Error" "Hash"
     ;; the arithmetic traits (Phase 1a)
     "Add" "Sub" "Mul" "Div" "Rem" "Bits" "Number")
   "Builtin generic/abstract type names and traits.")

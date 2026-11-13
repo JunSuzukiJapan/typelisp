@@ -248,7 +248,7 @@ fn the_bitwise_trait_is_reachable_through_a_bound_too() {
 fn an_operator_without_the_bound_is_still_an_error() {
     let msg = check_error(
         r#"
-        (defun bad<T> ((a T) (b T)) T (:where (Eq T))
+        (defun bad<T> ((a T) (b T)) T (:where (Equal T))
           (+ a b))
         "#,
     );

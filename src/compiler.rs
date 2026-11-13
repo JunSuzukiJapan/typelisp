@@ -1300,7 +1300,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; the receiver-type methods that lower to LLVM instructions (i64/i32) or
 ;; `rt_str_*` primitive calls (string) rather than a real function call?
 ;; Anything *not* on these lists — a user-defined method on a primitive
-;; receiver, e.g. the prelude's `impl Eq i32` → `equals` — falls through to
+;; receiver, e.g. the prelude's `impl Ord i32` → `less` — falls through to
 ;; `compile-assoc-user`'s ordinary call by symbol. (Chained `if`s: the
 ;; prelude's `or` macro isn't loaded under `run_with_compiler`.)
 ;; Which receiver type names go to `int-native-method?`/`float-native-method?`
@@ -1428,15 +1428,14 @@ const SOURCE_TEMPLATE: &str = r#"
     (("int->c-long" "int->c-ulong") true)
     (:else false)))
 
-;; `sexpr`'s natively-compilable methods (`registry::sexpr_assoc` registers
-;; exactly these two). `eq` is an `icmp eq` on the tagged handle; `eql` is the
-;; `rt_sexpr_eql` shim, since it has to see inside float/narrow-integer/
-;; `bignum`/`ratio`
-;; boxes. The structural `equal`/`equalp` are free *functions*, not methods,
-;; so they reach their own shims through `rt_builtin_symbol` instead of here.
+;; `sexpr`'s natively-compilable methods. `eq` is an `icmp eq` on the tagged
+;; handle; `eql` is the `rt_sexpr_eql` shim, since it has to see inside
+;; float/narrow-integer/`bignum`/`ratio` boxes; `equal` is the
+;; `rt_sexpr_equal` shim. `equalp` is a free *function*, not a method, so it
+;; reaches its shim through `rt_builtin_symbol` instead of here.
 (defun sexpr-native-method? ((method string)) bool
   (case method
-    (("eq" "eql") true)
+    (("eq" "eql" "equal") true)
     (:else false)))
 
 (defun string-native-method? ((method string)) bool
@@ -2593,8 +2592,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; without it `(< 1.0 2.0)` would quietly compile as
 ;; an integer comparison. Everything else — any other
 ;; `type-name`, and also a *user-defined* method on a
-;; primitive receiver (the prelude's `impl Eq i32` →
-;; `i32::equals`) — is a call to a user-defined method
+;; primitive receiver (the prelude's `impl Ord i32` →
+;; `i32::less`) — is a call to a user-defined method
 ;; (a `defmethod`/`defstruct` accessor or setter),
 ;; handled by `compile-assoc-user` below. The
 ;; native-method predicates must be consulted *before*
@@ -2682,7 +2681,7 @@ const SOURCE_TEMPLATE: &str = r#"
                (let ((args-ptr (alloca-args builder 2)))
                  (store-arg builder args-ptr 0 a)
                  (store-arg builder args-ptr 1 b)
-                 (build-call builder (get-function m "rt_sexpr_eql") args-ptr 2)))))
+                 (build-call builder (get-function m (if (equal method "eql") "rt_sexpr_eql" "rt_sexpr_equal")) args-ptr 2)))))
         ((if (equal type-name (quote string)) (string-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (if (equal method "length")
@@ -2711,8 +2710,8 @@ const SOURCE_TEMPLATE: &str = r#"
                     (build-icmp-eq builder a b))
                    ("equal"
                     ;; `equal`: case-sensitive *content* comparison
-                    ;; (`rt_str_eq`) — the prelude's `impl Eq string`
-                    ;; body.
+                    ;; (`rt_str_eq`) — the method the prelude's
+                    ;; `impl Equal string` takes as the trait's.
                     (let ((args-ptr (alloca-args builder 2)))
                       (store-arg builder args-ptr 0 a)
                       (store-arg builder args-ptr 1 b)
@@ -4547,7 +4546,7 @@ const SOURCE_TEMPLATE: &str = r#"
       ;; `ratio` literal pattern and an explicit `(:= expr)` both lower to:
       ;; their equality is a call, not a word comparison, so there is nothing
       ;; for `pat-lit` to compare. The test is an ordinary expression --
-      ;; `(equals NAME ...)`, already resolved to a concrete method by the
+      ;; `(equal NAME ...)`, already resolved to a concrete method by the
       ;; checker -- so `compile-value` handles the whole of it, including
       ;; rooting whatever it allocates. `KIND` is `pat-bind`'s trailing
       ;; field, for the same reason: the test can call, and a call can

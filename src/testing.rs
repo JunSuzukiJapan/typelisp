@@ -4,7 +4,7 @@
 //! is the driver around it — which files make up the suite, and running the
 //! tests one at a time so that one failing does not stop the rest.
 //!
-//! A test fails by `panic` (`assert`, `assert-eq`) or by any other runtime
+//! A test fails by `panic` (`assert`, `assert-equal`) or by any other runtime
 //! error. Both come back from `Interp::exec` as an `Err`, as they do at the
 //! REPL, after which the next form runs normally — the same recovery the REPL
 //! relies on after an error at its prompt.

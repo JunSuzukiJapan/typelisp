@@ -123,6 +123,17 @@ CL との違いは 3 つあります。要素の型がそろっていなけれ�
 `map`・`filter`・`sort`・`find` などのシーケンス関数は `Iter` トレイトを実装した値に働きます。
 `Vector` は `(iter v)` でイテレータにして渡します。
 
+`eq`・`eql`・`equalp` は CL と同じく、どの型の値にも使えます。`equal` は `Equal` トレイトの
+メソッドで、それを実装した型にだけ使えます。組み込みの型はどれも実装していて、リストの `equal` は
+CL の `equal` です。自前の型は `(impl Equal 型 ...)` を書くと、比べ方を決められます。
+`member`・`find`・`position`・`remove` などが既定で使う比較は、CL と同じ `eql` です。文字列や
+リストを中身で探すときは、CL と同じく `:test equal` と書きます（`#'` は要りません）:
+
+```lisp
+(member "b" (iter #("a" "b")))               ; => false（別々に作った文字列は eql でない）
+(member "b" (iter #("a" "b")) :test equal)   ; => true
+```
+
 ## 5. 多値が無い
 
 `values` と `multiple-value-bind` はありません。CL で複数の値を返す関数は、ペアか構造体を返します。

@@ -33,7 +33,7 @@
 | `std::char` | `digit->char`、`digit-weight`、`name->char` |
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
-| `std::error` | `WrappedError`、`as-dyn-error`、`assert-eq`、`describe-error`、`wrap-error` |
+| `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`、`direction-input`、`direction-output`、`directory-p`、`open-binary`、`open-binary-input`、`open-binary-output`、`open-file`、`open-input`、`open-output`、`read-file-lines`、`read-file-string`、`write-file-string` |
 | `std::hash` | `*sxhash-mask*`、`sxhash-string` |
@@ -56,7 +56,7 @@
 各章の表は「名前・形式・型・説明」の列を持つ。型の列は `(引数の型,...)→戻り値の型` の形で書く。
 
 - `T` `A` `B` などの 1 文字の大文字は型変数。
-- `where Eq A` のような注記は、その型変数が満たすべきトレイト境界。
+- `where Equal A` のような注記は、その型変数が満たすべきトレイト境界。
 - `Iter<A>` は「`Item` が `A` の任意の `Iter` 実装型」。
 - `&optional` / `&key` の付いた引数は省略できる。
 
@@ -68,7 +68,7 @@
 | [sequences.md](sequences.md) | ペア `cons-cell`、S 式データ `Sexpr`、シンボル、シーケンス関数、遅延イテレータ `lazy`、高階関数 |
 | [collections.md](collections.md) | 文字列、文字、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、エラー型と `Error` トレイト |
-| [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算術トレイト、`Push`、`Pop` |
+| [traits.md](traits.md) | `Iter`、`Equal`/`Ord`、算術トレイト、`Push`、`Pop` |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、印字の制御変数 |
 | [format.md](format.md) | 書式ディレクティブ |
 | [streams-files.md](streams-files.md) | ストリーム、ファイル操作、パス名、readtable |

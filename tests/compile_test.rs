@@ -3446,9 +3446,9 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
     assert_eq!(v, Value::Int(9));
 }
 
-/// A user-defined method on a *primitive* receiver — the prelude's `impl Eq
-/// int` registers `i32::equals` as an ordinary user method whose body
-/// `(= self other)` lowers natively. Two former gates blocked this path:
+/// A user-defined method on a *primitive* receiver — the prelude's `impl
+/// Equal symbol` registers `symbol::equal` as an ordinary user method whose
+/// body `(eq self other)` lowers natively. Two former gates blocked this path:
 /// `Interp::compile_function` excluded every integer/`string` assoc
 /// target from forward-declaration wholesale, and `compile-assoc`'s int
 /// branch dead-ended any method outside its fixed operator list into a
@@ -3458,11 +3458,11 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
 fn compile_dispatches_a_user_method_on_a_primitive_receiver() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile i32::equals)
-        (defun both-equal ((a int) (b int) (c int)) bool
-          (if (equals a b) (equals b c) false))
+        (compile symbol::equal)
+        (defun both-equal ((a symbol) (b symbol) (c symbol)) bool
+          (if (equal a b) (equal b c) false))
         (compile both-equal)
-        (if (both-equal 3 3 3) (if (both-equal 3 3 4) false true) false)
+        (if (both-equal 'x 'x 'x) (if (both-equal 'x 'x 'y) false true) false)
         "#,
     )
     .expect("eval failed");
@@ -3487,40 +3487,39 @@ fn compile_dispatches_less_on_a_primitive_receiver() {
     assert_eq!(v, Value::Bool(true));
 }
 
-/// A user method on a *primitive* receiver (the prelude's `impl Eq int` ->
-/// `i32::equals`) is transitively compiled too (Stage B): `(compile run)`
-/// pulls in `i32::equals` on demand. `i32::equals`'s own body delegates to
-/// the native `=` (lowered in-place by `compile-assoc`, no further call), so
-/// the recursion bottoms out immediately. (A *builtin* method with no body —
+/// A user method on a *primitive* receiver (the prelude's `impl Ord int` ->
+/// `int::less`) is transitively compiled too (Stage B): `(compile run)`
+/// pulls in `int::less` on demand. Its own body delegates to the native `<`
+/// (lowered in-place by `compile-assoc`, no further call), so the recursion
+/// bottoms out immediately. (A *builtin* method with no body —
 /// e.g. an `f64`/`char` builtin — still errors clearly; only methods with a
 /// real registered body are auto-compiled.)
 #[test]
 fn compile_transitively_compiles_a_called_primitive_receiver_method() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun eq2 ((a int) (b int)) bool (equals a b))
-        (defun run () int (if (eq2 5 5) (if (eq2 5 6) 0 1) 0))
+        (defun lt2 ((a int) (b int)) bool (less a b))
+        (defun run () int (if (lt2 5 6) (if (lt2 5 5) 0 1) 0))
         (compile run)
         (run)
         "#,
     )
-    .expect("transitive compile of `i32::equals` should succeed");
-    assert_eq!(v, Value::Int(1), "eq2(5,5) true and eq2(5,6) false, with `i32::equals` auto-compiled");
+    .expect("transitive compile of `int::less` should succeed");
+    assert_eq!(v, Value::Int(1), "lt2(5,6) true and lt2(5,5) false, with `int::less` auto-compiled");
 }
 
-/// The `string` counterpart: `string::equals`'s body is `(equal self
-/// other)` (content comparison, `rt_str_eq`) and `string::less`'s is
-/// `(lt self other)` (lexicographic, the new `rt_str_lt` shim) — both now
-/// on `string-native-method?`'s list, so the impl bodies themselves compile
-/// and a compiled caller reaches them through `compile-assoc-user`.
+/// The `string` counterpart: `string`'s builtin `equal` (content
+/// comparison, `rt_str_eq`) is `Equal`'s, and `string::less`'s body is
+/// `(< self other)` (lexicographic, `rt_str_lt`) — both on
+/// `string-native-method?`'s list, so the impl body compiles and a compiled
+/// caller reaches both.
 #[test]
-fn compile_dispatches_string_equals_and_less() {
+fn compile_dispatches_string_equal_and_less() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile string::equals)
         (compile string::less)
         (defun str-cmp ((a string) (b string)) int
-          (if (equals a b) 0 (if (less a b) -1 1)))
+          (if (equal a b) 0 (if (less a b) -1 1)))
         (compile str-cmp)
         (+ (str-cmp (append "ab" "c") "abc")
            (+ (* (str-cmp "abc" "abd") 10)
@@ -3558,9 +3557,9 @@ fn compile_dispatches_eq_and_eql_on_a_struct() {
 fn compile_dispatches_option_equals() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun same ((a Option<int>) (b Option<int>)) bool (equals a b))
+        (defun same ((a Option<int>) (b Option<int>)) bool (equal a b))
         (compile same)
-        (defun same-list ((a Option<Sexpr>) (b Option<Sexpr>)) bool (equals a b))
+        (defun same-list ((a Option<Sexpr>) (b Option<Sexpr>)) bool (equal a b))
         (compile same-list)
         (let ((l '(1 2)))
           (+ (if (same (Option::some 3) (Option::some 3)) 1 0)
@@ -3573,18 +3572,16 @@ fn compile_dispatches_option_equals() {
     assert_eq!(v, Value::Int(1101));
 }
 
-/// And `char`: a compiled `char` is a raw `i64` code point, so
-/// `char::equals` (body `(equal self other)`) and `char::less` (body
-/// `(lt self other)`) lower to plain integer `icmp`s via the char-native
-/// branch.
+/// And `char`: a compiled `char` is a raw `i64` code point, so `char`'s
+/// builtin `equal` and `char::less` (body `(< self other)`) lower to plain
+/// integer `icmp`s via the char-native branch.
 #[test]
-fn compile_dispatches_char_equals_and_less() {
+fn compile_dispatches_char_equal_and_less() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile char::equals)
         (compile char::less)
         (defun char-cmp ((a char) (b char)) int
-          (if (equals a b) 0 (if (less a b) -1 1)))
+          (if (equal a b) 0 (if (less a b) -1 1)))
         (compile char-cmp)
         (+ (char-cmp (ref "xa" 1) (ref "ya" 1))
            (+ (* (char-cmp (ref "a" 0) (ref "b" 0)) 10)
@@ -4797,7 +4794,7 @@ fn compile_transitively_compiles_a_doiter_loop_over_a_vector() {
     assert_eq!(compiled, interpreted, "the transitively-compiled doiter loop agrees with the interpreter");
 }
 
-/// The `member` combinator (`where (Iter I (Item A)) (Eq A)`) over a
+/// The `member` combinator (`where (Iter I (Item A)) (Equal A)`) over a
 /// `Vector<int>`: transitively compiling it drags in `vector-iter::next`
 /// *and* the element type's `Eq` instance (`i32::equals`). Returns the
 /// membership result via an `if` so the JIT boundary sees a plain `i64`.
@@ -6947,8 +6944,8 @@ fn a_compiled_int_to_char_raises_on_a_bad_code_point() {
 fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
     let prog = r#"(use std::hash::*sxhash-mask*) 
         (defstruct pt (x int) (y int))
-        (impl Eq pt
-          (defmethod equals (self (other Self)) bool
+        (impl Equal pt
+          (defmethod equal (self (other Self)) bool
             (if (= self::x other::x) (= self::y other::y) false)))
         (impl Hash pt
           (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))

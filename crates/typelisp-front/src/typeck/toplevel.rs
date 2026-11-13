@@ -1062,7 +1062,7 @@ mod tests {
     }
 
     /// A literal of the value's own type is matched by its word, any other
-    /// value by `equals` (the prelude's, not loaded here); `true` and
+    /// value by `equal` (the `Equal` trait is the prelude's, not loaded here); `true` and
     /// `false` cover a `bool`.
     #[test]
     fn value_patterns() {
@@ -1071,7 +1071,7 @@ mod tests {
         let msg = check_err("(defun b ((x bool)) int (match x (true 1)))");
         assert!(msg.contains("`false` is not covered"), "{}", msg);
         let msg = check_err("(defstruct p (k int))\n(defun s ((x p)) int (match x (1 1) (_ 0)))");
-        assert!(msg.contains("cannot be compared by value — its type `p` does not implement `Eq`"), "{}", msg);
+        assert!(msg.contains("cannot be compared by value — its type `p` does not implement `Equal`"), "{}", msg);
     }
 
     /// A value is boxed as a trait object where one is expected, and its

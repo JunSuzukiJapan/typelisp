@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.56
+# ABI バージョン 0.3.57
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.56 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.57 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `73cc73566fd0be52`
+内容ハッシュ (FNV-1a 64): `1d2e4e0143b0e86d`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -952,6 +952,7 @@
 | `std::result::Result<std::vec::Vector<string>,std::fs::FileError>` | `std::result::Result<std::vec::Vector<std::primitive::string>,std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<string,std::fs::FileError>` | `std::result::Result<std::primitive::string,std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<string,std::net::NetError>` | `std::result::Result<std::primitive::string,std::net::NetError>` | enum | 6 | 2 |
+| `std::sexpr::Sexpr` | `std::sexpr::Sexpr` | sexpr | 6 | 2 |
 | `std::sync::Chan<T>` | `std::sync::Chan<T>` | struct | 6 | 2 |
 | `std::thread::Task<T>` | `std::thread::Task<T>` | struct | 6 | 2 |
 | `std::thread::Thread<T>` | `std::thread::Thread<T>` | struct | 6 | 2 |
@@ -2088,6 +2089,7 @@
 - 変種 20 `tuple`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
 - インスタンス `eq`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
 - インスタンス `eql`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
+- インスタンス `equal`: `(std::sexpr::Sexpr, std::sexpr::Sexpr) -> bool`
 
 ### `std::sync::Chan` (struct, 型引数 [T])
 
@@ -2194,7 +2196,6 @@
 | `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> std::result::Result<(),std::fs::FileError>` |
 | `std::cmp::eq` | `rt_sexpr_eq` | `<T> (T, T) -> bool` |
 | `std::cmp::eql` | `rt_sexpr_eql` | `<T> (T, T) -> bool` |
-| `std::cmp::equal` | `rt_sexpr_equal` | `<T> (T, T) -> bool` |
 | `std::cmp::equalp` | `rt_sexpr_equalp` | `<T> (T, T) -> bool` |
 | `std::compile-file` |  | `(string, string) -> bool` |
 | `std::dump` |  | `(string) -> bool` |

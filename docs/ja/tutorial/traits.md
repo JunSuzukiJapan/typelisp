@@ -94,20 +94,20 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | トレイト | 実装するメソッド | 使えるようになるもの |
 |---|---|---|
-| `Eq` | `equals` | `member`、`find`、`position`、`match` の `(:= 式)` パターンなど |
-| `Ord` | `less` | `less-equal`、`greater` など。`Ord` は `Eq` を継承する |
+| `Equal` | `equal` | `equal`、`=`、`assert-equal`、`match` の `(:= 式)` パターン、`:test equal` を渡した `member` など |
+| `Ord` | `less` | `less-equal`、`greater` など。`Ord` は `Equal` を継承する |
 | `print-object` | `print-object` | `println` などでの表示のしかた |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` など |
 | `Error` | `message`、`source` | エラー型として扱う（[エラー処理](errors.md)） |
 
-金額を表す型に `Eq` と `Ord` を実装してみます。`Ord` は `Eq` を継承しているので、`Eq` の `impl` を
-先に書きます。
+金額を表す型に `Equal` と `Ord` を実装してみます。`Ord` は `Equal` を継承しているので、`Equal` の
+`impl` を先に書きます。
 
 ```lisp
 (defstruct money (yen int))
 
-(impl Eq money
-  (defmethod equals (self (other Self)) bool (= self::yen other::yen)))
+(impl Equal money
+  (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
   (defmethod less (self (other Self)) bool (< self::yen other::yen)))
@@ -182,7 +182,7 @@ total 9
 入れられる型の正確な一覧は [構文リファレンス 3.9](../reference/syntax.md#39-deftrait--impl--トレイト機構) にあります。
 
 `:dyn` にできないトレイトもあります。メソッドが `self` 以外の引数や戻り値に `Self` を使う場合
-（`Eq` の `equals` など）です。どの型か実行時まで分からないので、「同じ型の値」を用意できない
+（`Equal` の `equal` など）です。どの型か実行時まで分からないので、「同じ型の値」を用意できない
 ためです。
 
 ## 6. 制約

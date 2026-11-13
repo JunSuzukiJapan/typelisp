@@ -14,7 +14,7 @@
 //!   arm is now always a variant; only `_` matches every value.
 //!
 //! The first two lower to the same `Pattern::Guard`: a checked `bool`
-//! expression, `(equals $match-scrut EXPR)`, resolved through the ordinary
+//! expression, `(equal $match-scrut EXPR)`, resolved through the ordinary
 //! instance-method path. So the comparison is the *type's own* `Eq` impl —
 //! a user type compares the way its author said it does, and a type with no
 //! `Eq` is a type error rather than an arm that silently never matches.
@@ -147,20 +147,17 @@ fn immediate_literals_match_a_sexpr_scrutinee_directly() {
     );
 }
 
-/// The literals that are *not* immediates are refused there instead.
-///
-/// A `string`/`f64`/`bignum`/`ratio` reaches compiled code as a pointer or a
-/// box id, so `eq` on one is the identity of that object: the arm would
-/// type-check and never match anything built separately. The error names the
-/// variant pattern, which destructures to the scalar's own type and compares
-/// *that* by value.
+/// The literals that are *not* immediates match by content too: the test is
+/// `Sexpr`'s `equal`, CL's, which compares a string by its contents and a
+/// boxed number by `eql`.
 #[test]
-fn a_by_identity_literal_against_a_sexpr_scrutinee_is_refused() {
-    let e = err(r#"(defun f ((s Sexpr)) int (match s ("hi" 1) (_ 0)))
-                   (f "hi")"#);
-    assert!(e.contains("compare by identity"), "{}", e);
-    assert!(e.contains(r#"(str "hi")"#), "{}", e);
-    // And the named spelling does match, by content.
+fn a_boxed_literal_against_a_sexpr_scrutinee_matches_by_content() {
+    both(
+        r#"(defun f ((s Sexpr)) int (match s ("hi" 1) (1.5 2) (_ 0)))"#,
+        r#"(+ (* 100 (f (append "h" "i"))) (+ (* 10 (f 1.5)) (f "no")))"#,
+        120,
+    );
+    // The variant spelling still destructures and compares the `string`.
     both(
         r#"(defun f ((s Sexpr)) int (match s ((str "hi") 1) (_ 0)))"#,
         r#"(+ (* 10 (f "hi")) (f "no"))"#,
@@ -168,11 +165,9 @@ fn a_by_identity_literal_against_a_sexpr_scrutinee_is_refused() {
     );
 }
 
-/// `(:= expr)` against a `Sexpr` scrutinee is *not* refused: identity is what
-/// `eq` means, and an author who wrote `equals` in as many words is asking
-/// for exactly that.
+/// `(:= expr)` against a `Sexpr` scrutinee compares by `equal` as well.
 #[test]
-fn an_equals_pattern_against_a_sexpr_scrutinee_is_allowed() {
+fn an_equal_pattern_against_a_sexpr_scrutinee_is_allowed() {
     both(
         "(defvar (target Sexpr) 42)\
          \n(defun f ((s Sexpr)) int (match s ((:= target) 1) (_ 0)))",
@@ -214,7 +209,7 @@ fn bignum_and_ratio_literal_patterns_compare_by_value() {
 fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
     both(
         "(defstruct point (x int) (y int))\
-         \n(impl Eq point (defmethod equals (self (other Self)) bool\
+         \n(impl Equal point (defmethod equal (self (other Self)) bool\
          \n  (and (= self::x other::x) (= self::y other::y))))\
          \n(defvar (origin point) (make-instance 'point :x 0 :y 0))\
          \n(defun f ((p point)) int\
@@ -224,7 +219,7 @@ fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
     );
 }
 
-/// A generic body can use a value pattern under a `where (Eq A)` bound.
+/// A generic body can use a value pattern under a `where (Equal A)` bound.
 ///
 /// The body is checked once with `A` still a type variable, where there is
 /// no `AdtDef` to ask for an `equals` — the bound is the promise, and the
@@ -234,7 +229,7 @@ fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
 #[test]
 fn a_value_pattern_works_in_a_generic_body_under_an_eq_bound() {
     both(
-        "(defun same<A> ((x A) (y A)) int (:where (Eq A))\
+        "(defun same<A> ((x A) (y A)) int (:where (Equal A))\
          \n  (match x ((:= y) 1) (_ 0)))\
          \n(defun f ((a string) (b string)) int (same a b))",
         r#"(+ (* 10 (f "a" "a")) (f "a" "b"))"#,
@@ -242,7 +237,7 @@ fn a_value_pattern_works_in_a_generic_body_under_an_eq_bound() {
     );
 }
 
-/// A type with no `Eq` impl cannot be compared, and says so at the pattern
+/// A type with no `Equal` impl cannot be compared, and says so at the pattern
 /// rather than accepting an arm that never matches.
 #[test]
 fn a_type_without_eq_is_refused_at_the_pattern() {
@@ -252,7 +247,7 @@ fn a_type_without_eq_is_refused_at_the_pattern() {
          \n(defun f ((p opaque)) int (match p ((:= o) 1) (_ 0)))\
          \n(f o)",
     );
-    assert!(e.contains("does not implement `Eq`"), "{}", e);
+    assert!(e.contains("does not implement `Equal`"), "{}", e);
 }
 
 // ---- bare variant names ---------------------------------------------------

@@ -219,7 +219,7 @@ CL の `rational` にあたる型。値は `int` か `ratio` のどちらかで�
 
 `(as int q)` は `rational->int`（切り捨て）、`(try-as int q)` は `try-rational->int`、
 `(as ratio q)`・`(as f64 q)` はそれぞれの変換、`(as rational x)` は `int`/`ratio` からの拡大。
-`Eq`・`Ord`・`Hash`・`print-object` と算術トレイトも実装している。
+`Equal`・`Ord`・`Hash`・`print-object` と算術トレイトも実装している。
 
 ## 6. 複素数 `complex`
 
@@ -243,7 +243,7 @@ CL の `rational` にあたる型。値は `int` か `ratio` のどちらかで�
 | `cis` | `(cis theta)` | `f64→complex` | `e^(i*theta)` |
 | `abs` | `(abs z)` | `complex→f64` | 絶対値。**唯一、受け手の型を返さない `abs`**（CL 同様、複素数の絶対値は実数） |
 | `+` `-` `*` `/` | `(op z w)` | `(complex,complex)→complex` | 複素数の四則 |
-| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | 成分ごとの一致。`Eq` も実装済み（`Ord` は無い——複素数に順序は無く、CL の `<` も拒む） |
+| `=` `/=` | `(op z w)` | `(complex,complex)→bool` | 成分ごとの一致。`Equal` も実装済み（`Ord` は無い——複素数に順序は無く、CL の `<` も拒む） |
 | `zerop` | `(zerop z)` | `complex→bool` | 両成分が 0 か |
 | `exp` `log` `sqrt` | `(op z)` | `complex→complex` | `log`/`sqrt` は主値 |
 | `expt` | `(expt z w)` | `(complex,complex)→complex` | `exp(w log z)`。`(expt 0 0)`=1 |

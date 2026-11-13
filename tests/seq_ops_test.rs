@@ -2,8 +2,8 @@
 //! — the typed rebuild of the `Sexpr` list operations removed in Phase 5, as
 //! generic `Iter` `defun`s (`length`/`append`/`nth`/`elt`/`take`/`subseq`/
 //! `last`/`butlast`/`every`/`any`) plus the `Eq`-bounded pair
-//! (`member`: `(:where (Eq A))`, `assoc`: `(:where (Iter I (Item
-//! cons-cell<K,V>)) (Eq K))`) and `sort`, which — matching CL's own
+//! (`member`: `(:where (Equal A))`, `assoc`: `(:where (Iter I (Item
+//! cons-cell<K,V>)) (Equal K))`) and `sort`, which — matching CL's own
 //! `(sort sequence predicate)` — takes an explicit comparator instead of an
 //! `Ord` bound. Also covers the `Eq`/`Ord` traits themselves: scalar impls,
 //! user-type impls, and the rejection of unimplemented element types at
@@ -303,15 +303,15 @@ fn sort_is_stable_for_equal_keys() {
 #[test]
 fn member_works_over_a_user_type_with_an_eq_impl() {
     let src = "(defstruct point (x int) (y int))
-               (impl Eq point
-                 (defmethod equals (self (other Self)) bool
+               (impl Equal point
+                 (defmethod equal (self (other Self)) bool
                    (if (= self::x other::x) (= self::y other::y) false)))
                (defun make-v () Vector<point> (Vector::new))
                (let ((v (make-v)))
                  (push v (make-instance 'point :x 1 :y 2))
                  (push v (make-instance 'point :x 3 :y 4))
-                 (if (member (make-instance 'point :x 3 :y 4) (iter v) :test equals)
-                     (if (member (make-instance 'point :x 3 :y 5) (iter v) :test equals) 0 1)
+                 (if (member (make-instance 'point :x 3 :y 4) (iter v) :test equal)
+                     (if (member (make-instance 'point :x 3 :y 5) (iter v) :test equal) 0 1)
                      0))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -354,23 +354,23 @@ fn assoc_works_over_a_hashtable_iterator() {
 
 #[test]
 fn pairs_compare_structurally_with_equals() {
-    let src = "(+ (if (equals (cons 1 2) (cons 1 2)) 1 0)
-                  (if (equals (cons 1 2) (cons 1 3)) 10 0))";
+    let src = "(+ (if (equal (cons 1 2) (cons 1 2)) 1 0)
+                  (if (equal (cons 1 2) (cons 1 3)) 10 0))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
 fn mixed_type_pairs_compare_fieldwise() {
-    let src = "(if (equals (cons \"a\" 1) (cons \"a\" 1))
-                   (if (equals (cons \"a\" 1) (cons \"b\" 1)) 0 1)
+    let src = "(if (equal (cons \"a\" 1) (cons \"a\" 1))
+                   (if (equal (cons \"a\" 1) (cons \"b\" 1)) 0 1)
                    0)";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
 fn nested_pairs_recurse_through_the_impl() {
-    let src = "(+ (if (equals (cons (cons 1 2) 3) (cons (cons 1 2) 3)) 1 0)
-                  (if (equals (cons (cons 1 2) 3) (cons (cons 1 9) 3)) 10 0))";
+    let src = "(+ (if (equal (cons (cons 1 2) 3) (cons (cons 1 2) 3)) 1 0)
+                  (if (equal (cons (cons 1 2) 3) (cons (cons 1 9) 3)) 10 0))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
@@ -393,8 +393,8 @@ fn member_and_sort_work_over_a_vector_of_pairs() {
                  (push v (cons 1 3))
                  (let ((sorted (sort (iter v) (lambda ((a cons-cell<int,int>) (b cons-cell<int,int>)) bool (less a b)))))
                    (let ((first (get sorted 0)))
-                     (+ (if (member (cons 1 5) (iter v) :test equals) 1000 0)
-                        (+ (if (member (cons 9 9) (iter v) :test equals) 100 0)
+                     (+ (if (member (cons 1 5) (iter v) :test equal) 1000 0)
+                        (+ (if (member (cons 9 9) (iter v) :test equal) 100 0)
                            (+ (* first::car 10) first::cdr))))))";
     // member hit -> 1000, miss -> 0, sorted head (1 . 3) -> 13
     assert_eq!(eval_ok(src), Value::Int(1013));
@@ -405,7 +405,7 @@ fn pair_equals_rejects_an_element_type_without_eq() {
     // `point` has no `Eq` impl, so `cons-cell<point,int>`'s bounded `equals`
     // must fail at the call site with a real trait error.
     let src = "(defstruct point (x int))
-               (equals (cons (make-instance 'point :x 1) 2) (cons (make-instance 'point :x 1) 2))";
+               (equal (cons (make-instance 'point :x 1) 2) (cons (make-instance 'point :x 1) 2))";
     let err = check(src).expect_err("must fail to check");
     let msg = format!("{:?}", err);
     assert!(

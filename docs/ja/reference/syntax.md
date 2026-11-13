@@ -125,7 +125,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   トレイトの関連型を署名に代入した結果など、処理系が型を表示するときにもこの形で出ることがある。
 - **タプル型**: `#{int string}`（値と同じ形）。要素は 1〜12 個で、ジェネリック型の引数にも
   書ける（`Vector<#{int string}>`）。要素は `t::0` `t::1` で読み、`(setf t::0 v)` で書き換える。
-  `Eq`・`Ord`（先頭の要素から順に比べる）・`Hash`・`print-object` は、すべての要素の型が
+  `Equal`・`Ord`（先頭の要素から順に比べる）・`Hash`・`print-object` は、すべての要素の型が
   それを実装していれば使える。
 - **修飾型名**: `module::Type` のように `::` で修飾できる。
 - **trait オブジェクト型**: `:dyn Trait`（空白区切りの2語で1つの型）。実行時に具象型が決まる値を
@@ -890,16 +890,16 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 関連型を持つ場合は `(Trait (Assoc Type))` の形で**全ての関連型をピン留めした**もの。
 
 ```lisp
-(deftrait Eq () ...)                       ; 継承なし
-(deftrait Ord (Eq) ...)                    ; Rust の trait Ord: Eq
+(deftrait Equal () ...)                    ; 継承なし
+(deftrait Ord (Equal) ...)                 ; Rust の trait Ord: PartialEq
 (deftrait CharSource ((Iter (Item char)))  ; 関連型のピン留め
   (defmethod rewind (self) ()))
 ```
 
-継承の効果は3つ。(1) `impl Ord X` は `impl Eq X` を**先に**書くことを要求する（記述順の規則。
+継承の効果は3つ。(1) `impl Ord X` は `impl Equal X` を**先に**書くことを要求する（記述順の規則。
 REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust より制限が強い）。
-(2) `(:where (Ord T))` だけで `Eq` のメソッドも呼べる。(3) `:dyn Ord` から `Eq` のメソッドを呼べ、
-`:dyn Ord` の値をそのまま `:dyn Eq` を要求する場所に渡せる（アップキャスト）。
+(2) `(:where (Ord T))` だけで `Equal` のメソッドも呼べる。(3) `:dyn Ord` から `Equal` のメソッドを
+呼べ、`:dyn Ord` の値をそのまま `:dyn Equal` を要求する場所に渡せる（アップキャスト）。
 サブトレイトが親と同名のメソッドを再宣言することと、2つの親から同名のメソッドを継承することは
 どちらもエラー（vtable のスロットは名前ごとに1つ）。ダイヤモンド継承は合流して1スロットになる。
 
@@ -955,7 +955,7 @@ docstring を持てる（`(deftrait Name () "doc" (:type ...) (method ...)...)`�
 docstring は書けない——末尾の文字列はそれ自体がデフォルト実装の戻り値になるので、両者を区別できない。
 
 標準ライブラリが提供するトレイト: **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の
-基盤）・**`Eq`**（`equals`。`not-equals` はデフォルト実装）・**`Ord`**（`Eq` を継承。`less` のみ
+基盤）・**`Equal`**（`equal` が使うトレイト）・**`Ord`**（`Equal` を継承。`less` のみ
 実装必須で `less-equal`／`greater`／`greater-equal` はデフォルト実装）・**`Error`**（`message`／
 `source`。エラー型を一様に扱うための `:dyn Error`）・**`print-object`**（型ごとの印字表現）・
 **`Pathish`**（パス名指定子＝文字列 or `pathname`）・ストリーム階層 **`Stream`** →
@@ -1165,10 +1165,10 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ### 3.16 `#[test]` — テスト関数
 
 ```lisp
-(use std::error::assert-eq)
+(use std::error::assert-equal)
 #[test]
 (defun adds () ()
-  (assert-eq (+ 1 2) 3))
+  (assert-equal (+ 1 2) 3))
 ```
 
 `#[test]` を付けた `defun` はテスト関数になり、`typl test` が 1 つずつ呼ぶ（Rust の `#[test]` と
@@ -1191,7 +1191,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   `--test` のときだけコンパイルするのと同じ）。プログラムの側からテスト関数は呼べない。
 - テストは、関数を置くどのファイルにも、どの `module` の中にも書ける。プロジェクトの `tests/`
   フォルダに分けて書いてもよい。
-- 失敗は `panic`・実行時エラー・`err` を返すこと。`assert`、両辺を印字する `assert-eq`
+- 失敗は `panic`・実行時エラー・`err` を返すこと。`assert`、両辺を印字する `assert-equal`
   （[システム](functions/system.md)）で確かめる。1 つが失敗しても残りのテストは走る。
 
 ```sh
@@ -1221,7 +1221,7 @@ test math::adds-wrong ... FAILED
 failures:
 
 ---- math::adds-wrong ----
-src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+src/math.typl:9:3: panic: assertion failed: (assert-equal (add 1 2) 4)
   left: 3
  right: 4
 
@@ -1336,10 +1336,10 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   裸名で書くとアリティエラーになるので、`(circle r)` のように括弧で書く
 - **即値リテラル**: 整数 / `true`/`false` / 文字 — 語の比較
 - **値リテラル**: 文字列 / 浮動小数点 / シンボル（`'foo`）/ 多倍長の整数 / ratio — その型の
-  `Eq::equals`（[トレイト](functions/traits.md#2-eq--ord比較)）による値比較。文字列は内容比較であって同一性比較ではない
-- `(:= expr)` — 任意の式を評価し、`Eq::equals` で比較する。リテラル構文を持たない型
+  `equal`（[`Equal` トレイト](functions/traits.md#2-equal--ord比較)）による値比較。文字列は内容比較であって同一性比較ではない
+- `(:= expr)` — 任意の式を評価し、`equal` で比較する。リテラル構文を持たない型
   （`defstruct` インスタンス、グローバル、計算結果）を比較する唯一の書き方であり、
-  ユーザ定義の `Eq` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
+  ユーザ定義の `Equal` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
   参照できる（引数、外側の束縛、グローバル）
 - `(Ctor sub-pattern...)` — コンストラクタパターン（`(some x)` `(none)` `(cons a d)` `(ok v)` など）
 - `(Type :slot pattern... :slot...)` — 構造体のパターン。型名の後にスロットをキーワードで書く。
@@ -1361,7 +1361,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   選択肢も同じ名前の変数を同じ型で束縛しなければならない。コンストラクタパターンの中にも書ける
   （`(some (:or (circle r) (rect r _)))`）
 
-`Eq` を実装しない型を値リテラル／`(:= expr)` で比較しようとすると型エラーになる
+`Equal` を実装しない型を値リテラル／`(:= expr)` で比較しようとすると型エラーになる
 （マッチしない腕が黙って残るより、比較できないと言うほうを選んでいる）。
 
 **ガード**: パターンの後ろに `:when 条件` を書くと、パターンがマッチし、さらに条件が真のときだけ
@@ -1381,17 +1381,13 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - or パターンとガードは組み合わせられる。ガードは、どの選択肢でマッチしたときにも評価される
   （`((:or 1 2 3) :when on "small")`）。
 
-**`Sexpr` スクルーティニーに対する値リテラル**: `sexpr` の `Eq` は `eq`（CL の同一性）なので、
-即値——`'foo`（intern 済み）/ 整数 / 文字 / `true`/`false`——はそのまま書けて内容どおりにマッチする:
+**`Sexpr` スクルーティニーに対する値リテラル**: `Sexpr` の `equal` は CL の `equal` なので、
+`'foo` / 整数 / 文字 / `true`/`false` / 文字列 / 浮動小数点 / 多倍長の整数 / ratio をそのまま書けて、
+内容どおりにマッチする（文字列は中身で、数は `eql` で比べる）:
 
 ```lisp
-(match s ('add 1) (42 2) (#\a 3) (_ 0))
+(match s ('add 1) (42 2) (#\a 3) ("hi" 4) (_ 0))
 ```
-
-即値でないリテラル（文字列 / 浮動小数点 / 多倍長の整数 / ratio）は `Sexpr` に対して**書けない**。
-それらの `eq` はオブジェクトの同一性を比べるので「型は通るが決してマッチしない腕」になるため、
-変種パターンを名指すエラーにしてある——`(str "hi")` と書けば `string` に分解されて内容比較になる。
-`(:= expr)` は明示的に `equals` を求めているので、この制限は掛からない。
 
 **スクルーティニーは ADT でなくてよい**。`string`/`symbol`/`i32`/`f64` などをそのまま `match`
 できる（それが文字列リテラルパターンの置き場所になる）。ただし変種を持たない型は列挙で網羅できない
@@ -1783,7 +1779,7 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 コンパイル**できる**もの: ストリーム・ファイル I/O、`random`、`gensym`、
 `symbol->string`/`intern`、`parse-int`/`parse-float`、`get-universal-time`/
 `get-internal-real-time`、`exit`、超越関数、ビット演算、`catch`/`throw`/`unwind-protect`、
-`eq`/`eql`/`equal`/`equalp` の4つ全部（`case` もこれで全型でコンパイルできる）、
+`eq`/`eql`/`equal`/`equalp` の4つ全部、
 `print`/`println`/`format`/`pprint` と `pprint-logical-block` を含む印字一式、`read`、
 そして `eval`。標準ライブラリはコンパイル済みの状態で同梱されている。
 

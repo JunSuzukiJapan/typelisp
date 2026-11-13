@@ -71,7 +71,7 @@ fn a_chars_hash_is_its_code_point() {
 fn a_user_type_can_implement_hash() {
     let src = "(use std::hash::*sxhash-mask*) 
         (defstruct point (x int) (y int))
-        (impl Eq point (defmethod equals (self (other Self)) bool
+        (impl Equal point (defmethod equal (self (other Self)) bool
           (and (= self::x other::x) (= self::y other::y))))
         (impl Hash point (defmethod sxhash (self) int
           (logand (+ (* (as int self::x) 31) (as int self::y)) *sxhash-mask*)))
@@ -94,7 +94,7 @@ fn hash_inherits_eq() {
     // `Hash`'s supertrait is `Eq`, so a `(:where (Hash T))` bound already
     // obliges `T` to be comparable — no second bound needed.
     let src = "
-        (defun same<T> ((a T) (b T)) bool (:where (Hash T)) (equals a b))
+        (defun same<T> ((a T) (b T)) bool (:where (Hash T)) (equal a b))
         (same 3 3)
     ";
     assert_eq!(eval_ok(src), Value::Bool(true));
@@ -176,8 +176,8 @@ fn size_reports_the_occupancy() {
 /// the two impls that make it a key.
 const POINT: &str = r#"(use std::hash::*sxhash-mask*) 
     (defstruct point (x int) (y int))
-    (impl Eq point
-      (defmethod equals (self (other Self)) bool
+    (impl Equal point
+      (defmethod equal (self (other Self)) bool
         (if (= self::x other::x) (= self::y other::y) false)))
     (impl Hash point
       (defmethod sxhash (self) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
@@ -238,7 +238,7 @@ fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
 fn colliding_keys_stay_separate_entries() {
     let src = r#"
         (defstruct k (n int))
-        (impl Eq k (defmethod equals (self (other Self)) bool (= self::n other::n)))
+        (impl Equal k (defmethod equal (self (other Self)) bool (= self::n other::n)))
         ;; Every key hashes to 0.
         (impl Hash k (defmethod sxhash (self) int 0))
         (defvar (h HashTable<k,int>) (HashTable::new))

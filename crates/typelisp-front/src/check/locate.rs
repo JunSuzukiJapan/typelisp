@@ -45,7 +45,7 @@ use crate::{Loc, Path, SymRef, TopLevelForm};
 /// evaluated at that position, and a pattern binds rather than refers.
 ///
 /// `pat-guard` is opaque for the same reason even though its field *is* an
-/// expression: it is one the checker synthesized (`(equals $match-scrut
+/// expression: it is one the checker synthesized (`(equal $match-scrut
 /// EXPR)`), every node of it carries the whole pattern's span rather than
 /// its own, and its receiver names a variable no user wrote. Descending
 /// would offer hovers positioned at the pattern for nodes half of which are

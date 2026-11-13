@@ -303,7 +303,7 @@ fn a_blanket_impl_satisfies_a_supertrait() {
 fn a_value_pattern_uses_a_blanket_eq() {
     let src = "
 (deftrait Key () (defmethod key (self) int))
-(impl<T> Eq T (:where (Key T)) (defmethod equals (self (other Self)) bool (= (key self) (key other))))
+(impl<T> Equal T (:where (Key T)) (defmethod equal (self (other Self)) bool (= (key self) (key other))))
 (defstruct P (x int))
 (impl Key P (defmethod key (self) int self::x))
 (let ((a (make-instance 'P :x 1)) (b (make-instance 'P :x 1)))

@@ -1,6 +1,6 @@
 //! Tests for the `char`/`string` comparison operators (`< <= > >=`, overloaded
 //! by receiver type like the numeric ones) and the expanded Rust-modelled
-//! comparison traits — `Eq` (`equals`/`not-equals`, ≈ `PartialEq`) and `Ord`
+//! comparison traits — `Equal` (`equal`, ≈ `PartialEq`) and `Ord`
 //! (`less`/`less-equal`/`greater`/`greater-equal`, ≈ `PartialOrd`).
 //!
 //! The operators are builtin instance methods (`registry::char_assoc`/
@@ -77,36 +77,37 @@ fn string_less_equal_and_greater_equal() {
     assert!(!b(r#"(>= "a" "b")"#));
 }
 
-// ---- expanded Eq trait (equals / not-equals) --------------------------------
+// ---- Equal trait (equal) ----------------------------------------------------
 
+/// `/=` on a type variable bounded by `Equal` is the negation of `equal`.
 #[test]
-fn not_equals_negates_equality_per_type() {
-    assert!(b("(not-equals 1 2)"));
-    assert!(!b("(not-equals 3 3)"));
-    assert!(!b(r"(not-equals #\a #\a)"));
-    assert!(b(r"(not-equals #\a #\b)"));
-    assert!(!b(r#"(not-equals "x" "x")"#));
-    assert!(b(r#"(not-equals "x" "y")"#));
+fn not_equal_on_a_type_variable_negates_equal() {
+    let def = "(defun ne<T> ((a T) (b T)) bool (:where (Equal T)) (/= a b))";
+    assert!(b(&format!("{def} (ne 1 2)")));
+    assert!(!b(&format!("{def} (ne 3 3)")));
+    assert!(!b(&format!(r"{def} (ne #\a #\a)")));
+    assert!(b(&format!(r"{def} (ne #\a #\b)")));
+    assert!(!b(&format!(r#"{def} (ne "x" "x")"#)));
+    assert!(b(&format!(r#"{def} (ne "x" "y")"#)));
 }
 
 /// `Option<T>` and `Result<T,E>` compare as Rust's `PartialEq` does: the
-/// same variant, and contents `equals` by their own type. A list is an
-/// `Option<Sexpr>`: `Option`'s `equals` takes it, and its cells compare by
-/// `Sexpr`'s identity.
+/// same variant, and contents `equal` by their own type. A list is an
+/// `Option<Sexpr>`, compared as CL's `equal` compares one.
 #[test]
 fn option_and_result_compare_their_variant_and_contents() {
-    assert!(b("(equals (Option::some 1) (Option::some 1))"));
-    assert!(!b("(equals (Option::some 1) (Option::some 2))"));
-    assert!(!b("(equals (Option::some 1) (Option::none))"));
-    assert!(b("(equals (the Option<int> (Option::none)) (Option::none))"));
-    assert!(b(r#"(not-equals (Option::some "a") (Option::some "b"))"#));
-    assert!(b("(equals (the Result<int,string> (Result::ok 1)) (Result::ok 1))"));
-    assert!(b(r#"(equals (the Result<int,string> (Result::err "e")) (Result::err "e"))"#));
-    assert!(!b(r#"(equals (the Result<int,string> (Result::ok 1)) (Result::err "e"))"#));
-    assert!(b("(let ((l '(1 2))) (equals l l))"));
-    assert!(!b("(equals '(1 2) '(1 2))"));
-    assert!(b("(equals '() '())"));
-    assert!(!b("(equals '() '(1))"));
+    assert!(b("(equal (Option::some 1) (Option::some 1))"));
+    assert!(!b("(equal (Option::some 1) (Option::some 2))"));
+    assert!(!b("(equal (Option::some 1) (Option::none))"));
+    assert!(b("(equal (the Option<int> (Option::none)) (Option::none))"));
+    assert!(!b(r#"(equal (Option::some "a") (Option::some "b"))"#));
+    assert!(b("(equal (the Result<int,string> (Result::ok 1)) (Result::ok 1))"));
+    assert!(b(r#"(equal (the Result<int,string> (Result::err "e")) (Result::err "e"))"#));
+    assert!(!b(r#"(equal (the Result<int,string> (Result::ok 1)) (Result::err "e"))"#));
+    assert!(b("(let ((l '(1 2))) (equal l l))"));
+    assert!(b("(equal '(1 2) '(1 2))"));
+    assert!(b("(equal '() '())"));
+    assert!(!b("(equal '() '(1))"));
 }
 
 /// `eq`/`eql` take a value of any type, as CL's do: a struct, an enum's

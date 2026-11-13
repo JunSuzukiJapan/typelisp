@@ -20,49 +20,53 @@
 `Sexpr` のリストには `Iter` を実装していない（要素型が一様でないため）。自前の型に `Iter` を
 実装すれば、そのまま `doiter` で回せ、[シーケンス関数](sequences.md#4-iter-上のシーケンス関数)にも渡せる。
 
-## 2. `Eq` / `Ord`（比較）
+## 2. `Equal` / `Ord`（比較）
 
-Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジェネリック関数の `:where` 境界で
-要素型の比較を要求するのに使う（`sort`/`member`/`assoc` 等）。
+`Equal` は `equal` が使うトレイトで、Rust の `PartialEq` に当たる。`Ord` は Rust の `PartialOrd`
+に当たる。ジェネリック関数の `:where` 境界で、要素型の比較を要求するのに使う。
 
 ```lisp
-(deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)                ; 実装必須
-  (defmethod not-equals (self (other Self)) bool             ; デフォルト実装
-    (not (equals self other))))
-(deftrait Ord (Eq)                                        ; Eq を継承
+(deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))                ; 実装必須
+(deftrait Ord (Equal)                                     ; Equal を継承
   (defmethod less (self (other Self)) bool)                  ; 実装必須
   (defmethod less-equal (self (other Self)) bool (not (less other self)))
   (defmethod greater (self (other Self)) bool (less other self))
   (defmethod greater-equal (self (other Self)) bool (not (less self other))))
 ```
 
-`Eq` を実装するには `equals` だけ、`Ord` を実装するには `less` だけ書けばよい。残りはデフォルト
-実装が埋める。`Ord` は `Eq` を継承するので、`impl Ord X` の前に `impl Eq X` が必要。
+`Equal` を実装するには `equal` を、`Ord` を実装するには `less` だけを書けばよい。`Ord` の残りは
+デフォルト実装が埋める。`Ord` は `Equal` を継承するので、`impl Ord X` の前に `impl Equal X` が要る。
 
-各トレイトメソッドはそのまま関数として呼べる（`where (Eq A)`/`(Ord A)` 境界内、または実装済みの
+`(equal a b)` は、`a` の型の `Equal` の実装を呼ぶ。`Equal` を実装しない型に書くと型エラーになる。
+同一性で比べるなら `eq`/`eql`、構造で比べるなら `equalp` を使う。この 3 つはどの型にも使える。
+
+各トレイトメソッドはそのまま関数として呼べる（`where (Equal A)`/`(Ord A)` 境界内、または実装済みの
 具体型に対して）:
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | 等しいか（Rust の `==`） |
-| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | 等しくないか（`!=`） |
+| `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 等しいか（Rust の `==`） |
 | `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
 | `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
 | `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
-`Eq` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）と `bool` `char`
-`string` `symbol` `complex`、`Sexpr`（`eq`、つまり同一性。`match` の値パターンが使う）、
-`cons-cell<A,B>`（要素が `Eq` なら再帰的に）、`Option<T>` と `Result<T,E>`（同じ変種で、中身が
-`Eq` で等しいとき。リストは `Option<Sexpr>` なので、セルは `Sexpr` の同一性で比べる。中身で
-比べるなら `equal`）。`Ord` 実装済み: 全数値型と `char` `string`、
-および `cons-cell<A,B>`（辞書順、要素が `Ord` なら）。
+`Equal` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）と `bool` `char`
+`string` `symbol` `complex`、`Sexpr`、`cons-cell<A,B>` とタプル（要素が `Equal` なら要素ごとに）、
+`Option<T>` と `Result<T,E>`（同じ変種で、中身が `equal` のとき）。組み込みの型は、型ごとの組み込み
+メソッド `equal` がそのまま `Equal` の実装になる。数値は `=` で、文字列は大文字と小文字を区別して
+中身で比べる。`Ord` 実装済み: 全数値型と `char` `string`、および `cons-cell<A,B>`（辞書順、要素が
+`Ord` なら）。
 
-メソッド名が組み込みの演算子（`= /= < <= > >=`）や `eq`/`lt` と重ならないのは、組み込みは
-再定義できず、各実装がそれらへ委譲するため。スカラの比較演算子そのものは受け手の型ごとの
-組み込みメソッド（[数値](numbers.md)・[文字列と文字](collections.md)）。境界内では演算子で
-書けば、トレイトのメソッドに読み替えられる（3 章）。
+リスト（`Sexpr`）の `equal` は CL の `equal` で、コンスセルは構造で、文字列は中身で、それ以外の
+アトムは `eql` で比べる。この比較は実行時に値をたどるもので、メソッドを呼ばない。そのため、リストの
+中の構造体は、その型の `impl Equal` にかかわらず、CL と同じく同一性で比べる。
+
+`Ord` のメソッド名が組み込みの演算子（`< <= > >=`）や `lt` と重ならないのは、組み込みは再定義
+できず、各実装がそれらへ委譲するため。スカラの比較演算子そのものは受け手の型ごとの組み込み
+メソッド（[数値](numbers.md)・[文字列と文字](collections.md)）。境界内では演算子で書けば、
+トレイトのメソッドに読み替えられる（3 章）。`=` は `equal` に、`/=` は `(not (equal a b))` になる。
 
 ## 3. 算術トレイト（`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`）
 
@@ -86,7 +90,7 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 
 **境界内では演算子で書ける。** `:where` で束縛された型変数が受け手のとき、演算子は
 トレイトメソッドへ読み替えられる（`+`→`add`、`-`→`sub`、`*`→`mul`、`/`→`div`、
-`rem`→`remainder`、`logand`→`bit-and`、`=`→`equals`、`<`→`less` …）:
+`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))

@@ -588,8 +588,8 @@ pub fn add_compiled_global_init(
 /// natively with no external call (`compile-assoc`'s own dispatch, which
 /// panics clearly on its own for any one of *their* methods it doesn't
 /// actually implement, e.g. `string::upcase`). But a *user-defined*
-/// method on a primitive receiver (e.g. the prelude's `impl Eq i32` →
-/// `i32::equals`) is registered like any other `defstruct` method and
+/// method on a primitive receiver (e.g. the prelude's `impl Ord i32` →
+/// `i32::less`) is registered like any other `defstruct` method and
 /// takes the normal three steps — `compile-assoc`'s dispatch falls
 /// through to the same mangled-name call for it. Anything else
 /// (`f64`/`char` builtins — still out of scope) panics clearly right

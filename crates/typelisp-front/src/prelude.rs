@@ -101,7 +101,7 @@ pub static SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
 });
 
 /// The tuple types `#{T0 T1 ...}`, one `defstruct` per arity from 1 to
-/// [`TUPLE_MAX_ARITY`](crate::TUPLE_MAX_ARITY), each with `Eq`, `Ord`
+/// [`TUPLE_MAX_ARITY`](crate::TUPLE_MAX_ARITY), each with `Equal`, `Ord`
 /// (lexicographic), `Hash` and `print-object` — and the `tuple` macro that
 /// builds one from evaluated arguments. Generated because the twelve copies
 /// differ only in their arity.
@@ -132,15 +132,15 @@ fn tuple_source() -> String {
             new_slots.join(" ")
         )
         .unwrap();
-        // `equals`: every element, left to right.
-        let eqs: Vec<String> = fields.iter().map(|f| format!("(equals self::{f} other::{f})")).collect();
+        // `equal`: every element, left to right.
+        let eqs: Vec<String> = fields.iter().map(|f| format!("(equal self::{f} other::{f})")).collect();
         let eq_body = if n == 1 { eqs[0].clone() } else { format!("(and {})", eqs.join(" ")) };
         writeln!(
             out,
-            "(impl<{}> Eq {} (:where {}) (defmethod equals (self (other Self)) bool {}))",
+            "(impl<{}> Equal {} (:where {}) (defmethod equal (self (other Self)) bool {}))",
             params.join(","),
             generic,
-            bound("Eq"),
+            bound("Equal"),
             eq_body
         )
         .unwrap();
@@ -1983,7 +1983,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; correct way to walk a `Sexpr` list.
 
 ;; `HashTable<K,V>` iteration. (Its `get`/`set`/`remove` are further down,
-;; with `Hash` — they need the key type's own `sxhash` and `equals`, so they
+;; with `Hash` — they need the key type's own `sxhash` and `equal`, so they
 ;; cannot be written before the trait that supplies them.)
 ;;
 ;; `keys`/`values`/`entries` are Rust builtins (`HashTable`'s definition (`typeck::builtins`),
@@ -2026,33 +2026,24 @@ language reports as the occupancy — a Rust `HashMap` has no separate
 user-visible capacity."
     (count self)))
 
-;; `Eq`/`Ord` (redesign Phase 6.5): user-visible equality/ordering *traits*, so
-;; `member`/`assoc`/`find`/`position`/`count` below can require `(:where (Eq A))`
-;; instead of taking a predicate — CL's own item-based searches, alongside
-;; `find-if`/`position-if`/`count-if`/`remove-if` above, which keep their
-;; predicate form. `sort` takes an explicit comparator (CL's own required
-;; `predicate` argument) instead of an `Ord` bound, so any strict-weak-order
-;; function works, not just a type's natural `Ord` impl.
+;; `Equal`/`Ord`: user-visible equality/ordering *traits*. `Equal` is what
+;; `equal` uses: a type that implements it answers `(equal a b)`, and one
+;; that does not is refused there. `=` on a type variable bounded by
+;; `Equal` is `equal`, and `/=` is its negation. The searches below compare by
+;; `eql` unless given `:test`, which is CL's default. `sort` takes an explicit
+;; comparator (CL's own required `predicate` argument) instead of an `Ord`
+;; bound, so any strict-weak-order function works, not just a type's natural
+;; `Ord` impl.
 ;;
-;; Modelled on Rust's `PartialEq`/`PartialOrd`, kept under the names `Eq`/`Ord`
-;; (renaming would churn every `where (Ord T)`/`(Eq T)` bound below). `Eq` is
-;; Rust's `PartialEq` (`equals`=`==`, `not-equals`=`!=`); `Ord` is Rust's
-;; `PartialOrd` (`less`=`<`, `less-equal`=`<=`, `greater`=`>`, `greater-equal`=
-;; `>=`), and `Ord` inherits `Eq` exactly as `PartialOrd: PartialEq` does.
-;; Only the core method of each is left to the implementor — `not-equals`,
-;; `less-equal`, `greater` and `greater-equal` all have default bodies here —
-;; so the scalar impls below just delegate `equals`/`less` to the builtin
-;; per-type operators (`=`/`<`, `equal`/`eq`, all overloaded by receiver type,
-;; see `registry.rs`). Method names avoid the builtin operator/
-;; `eq`/`lt` names on purpose: builtins cannot be redefined, and `?`/`!` name
-;; suffixes are banned project-wide (so no `eq?`/`less?`).
+;; `Ord` is Rust's `PartialOrd` (`less`=`<`, `less-equal`=`<=`, `greater`=`>`,
+;; `greater-equal`=`>=`), and inherits `Equal` as `PartialOrd: PartialEq`
+;; does. Only `less` is left to the implementor; the other three have default
+;; bodies. Method names avoid the builtin operator/`lt` names on purpose:
+;; builtins cannot be redefined.
 (module cmp
-(pub deftrait Eq ()
-  (defmethod equals (self (other Self)) bool)
-  (defmethod not-equals (self (other Self)) bool
-    "The negation of `equals` — Rust's `PartialEq::ne` default."
-    (not (equals self other))))
-(pub deftrait Ord (Eq)
+(pub deftrait Equal ()
+  (defmethod equal (self (other Self)) bool))
+(pub deftrait Ord (Equal)
   (defmethod less (self (other Self)) bool)
   (defmethod less-equal (self (other Self)) bool
     "`a<=b` iff not `b<a`."
@@ -2064,66 +2055,48 @@ user-visible capacity."
     "`a>=b` iff not `a<b`."
     (not (less self other)))))
 
-;; Scalar `Eq` impls. Numbers delegate to `=`/`/=`; `string`/`char`/`bool` to
-;; `equal` (content comparison — a `string`'s `eq` is `Rc` identity, which
-;; would make `(member "x" ...)` fail on separately built equal-content
-;; strings); `symbol` to `eq` (interned, identity *is* content equality).
-;; `not-equals` comes from `Eq`'s default body, so each impl supplies only the
-;; core `equals`. The narrow integer widths and `f32` are further down, with
-;; the arithmetic traits: they had no `=`/`<` to delegate to until Phase 1a
-;; gave every width the same built-in catalog `i32` had.
-(impl Eq i32    (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq f64    (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq int (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq ratio  (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq rational (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq bool   (defmethod equals (self (other Self)) bool (equal self other)))
-(impl Eq char   (defmethod equals (self (other Self)) bool (equal self other)))
-(impl Eq string (defmethod equals (self (other Self)) bool (equal self other)))
-(impl Eq symbol (defmethod equals (self (other Self)) bool (eq self other)))
+;; Scalar `Equal` impls. A type whose builtin `equal` method has the trait's
+;; signature needs no body: that method is the trait's. The numbers' `equal`
+;; is `=`; `string`'s compares the contents, case-sensitively; `char`'s and
+;; `bool`'s compare the values. `symbol` has no `equal` of its own, and its
+;; `eq` is content equality (symbols are interned). The narrow integer widths
+;; and `f32` are further down, with the arithmetic traits.
+(impl Equal i32)
+(impl Equal f64)
+(impl Equal int)
+(impl Equal ratio)
+(impl Equal rational)
+(impl Equal bool)
+(impl Equal char)
+(impl Equal string)
+(impl Equal symbol (defmethod equal (self (other Self)) bool (eq self other)))
 
-;; `sexpr` is `eq`, deliberately — CL's identity, not `equal`'s recursive
-;; descent. The type is a *union* of everything, so "compare two of these"
-;; has no single right answer: `equal` would walk two cons trees and fold a
-;; `Str`'s content, `eq` asks whether they are the same object. Picking `eq`
-;; keeps `equals` on `sexpr` from being a third name for `equal` (`eq`/`eql`/
-;; `equal`/`equalp` are already all four callable on it) and keeps the cost
-;; of a comparison a constant.
-;;
-;; What this buys, since `match`'s value patterns compare through `Eq`:
-;; a literal pattern against a `Sexpr` scrutinee now
-;; type-checks, and *matches* for every immediate — `'foo` (interned, so
-;; identity is content equality), an integer, a `char`, a `bool`. What it
-;; does not buy: `"a"`, a float, a bignum/ratio or a quoted list, whose
-;; `eq` is the identity of a `Str`/box/cons cell. `(str "a")` — the
-;; variant pattern, which destructures to a `string` and compares *that* by
-;; content — is the spelling for those, and `docs/ja/reference/syntax.md`'s
-;; `match` section (§4.3) says so.
-;; `Self` here is `Sexpr` — the *non-empty* S-expression — while `eq` takes
-;; `Option<Sexpr>`, the type an S-expression datum has. Wrapping is what
-;; bridges the two, and it is free: under the niche `(Option::some x)` is `x`.
-(impl Eq Sexpr  (defmethod equals (self (other Self)) bool (eq (Option::some self) (Option::some other))))
+;; `Sexpr`'s builtin `equal` is CL's `equal`: conses by structure, strings by
+;; content, every other atom by `eql`. A struct inside is compared as CL
+;; compares one, by identity, whatever `impl Equal` its type has: the
+;; comparison walks values at run time and calls no method.
+(impl Equal Sexpr)
 
 ;; Rust's `PartialEq` for `Option<T>`/`Result<T,E>`: the same variant, and
-;; contents that are `equals` by their own type's `Eq`. A list is an
-;; `Option<Sexpr>`, so two lists compare their first cells by `Sexpr`'s `eq`.
-(impl<T> Eq Option<T> (:where (Eq T))
-  (defmethod equals (self (other Self)) bool
+;; contents that are `equal` by their own type's `Equal`. A list is an
+;; `Option<Sexpr>`, so two lists compare by `Sexpr`'s `equal`.
+(impl<T> Equal Option<T> (:where (Equal T))
+  (defmethod equal (self (other Self)) bool
     (match self
-      ((some x) (match other ((some y) (equals x y)) ((none) false)))
+      ((some x) (match other ((some y) (equal x y)) ((none) false)))
       ((none) (is-none other)))))
-(impl<T,E> Eq Result<T,E> (:where (Eq T) (Eq E))
-  (defmethod equals (self (other Self)) bool
+(impl<T,E> Equal Result<T,E> (:where (Equal T) (Equal E))
+  (defmethod equal (self (other Self)) bool
     (match self
-      ((ok x) (match other ((ok y) (equals x y)) ((err _) false)))
-      ((err e) (match other ((ok _) false) ((err f) (equals e f)))))))
+      ((ok x) (match other ((ok y) (equal x y)) ((err _) false)))
+      ((err e) (match other ((ok _) false) ((err f) (equal e f)))))))
 
 ;; Scalar `Ord` impls — only the core `less`; the other three come from `Ord`'s
 ;; default bodies. Every scalar here has the overloaded `<` builtin (numbers
 ;; always had it; `char`/`string` gained one alongside these expanded traits —
 ;; code-point / lexicographic order). `bool`/`symbol` carry no meaningful
-;; order, so no `Ord` for them. Each also needs its `Eq` impl above, since
-;; `Ord` inherits `Eq`.
+;; order, so no `Ord` for them. Each also needs its `Equal` impl above, since
+;; `Ord` inherits `Equal`.
 (impl Ord i32    (defmethod less (self (other Self)) bool (< self other)))
 (impl Ord f64    (defmethod less (self (other Self)) bool (< self other)))
 (impl Ord int (defmethod less (self (other Self)) bool (< self other)))
@@ -2132,16 +2105,13 @@ user-visible capacity."
 (impl Ord char   (defmethod less (self (other Self)) bool (< self other)))
 (impl Ord string (defmethod less (self (other Self)) bool (< self other)))
 
-;; The widths that had no methods at all until Phase 1a — every integer
-;; other than `i32`, plus `f32` — joining `Eq`/`Ord`. The comment
-;; above used to end "...so they stay outside `Eq`/`Ord` until they grow
-;; real arithmetic": they have, so they do.
-(impl Eq i8    (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq i16   (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq u8    (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq u16   (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq u32   (defmethod equals (self (other Self)) bool (= self other)))
-(impl Eq f32   (defmethod equals (self (other Self)) bool (= self other)))
+;; The other integer widths and `f32`.
+(impl Equal i8)
+(impl Equal i16)
+(impl Equal u8)
+(impl Equal u16)
+(impl Equal u32)
+(impl Equal f32)
 
 (impl Ord i8    (defmethod less (self (other Self)) bool (< self other)))
 (impl Ord i16   (defmethod less (self (other Self)) bool (< self other)))
@@ -2154,7 +2124,7 @@ user-visible capacity."
 ;; `Hash` — CL's `sxhash`, as a trait.
 ;;
 ;; CL states the contract as an implication: `(equal x y)` implies
-;; `(= (sxhash x) (sxhash y))`. Making it a trait with `Eq` as its supertrait
+;; `(= (sxhash x) (sxhash y))`. Making it a trait with `Equal` as its supertrait
 ;; says the same thing in this language's own terms — a type that can be
 ;; hashed is a type whose values can be compared, and `sxhash` must agree
 ;; with that comparison. The reverse does not hold: two different values may
@@ -2168,7 +2138,7 @@ user-visible capacity."
 ;; docstring (`take_leading_docstring`'s rule), and this method has no
 ;; default body. Its contract is the paragraph above.
 (module hash
-(pub deftrait Hash (Eq)
+(pub deftrait Hash (Equal)
   (defmethod sxhash (self) int))
 
 ;; The mask that keeps a hash non-negative and fixnum-sized: 2^30-1.
@@ -2221,7 +2191,7 @@ user-visible capacity."
 ;;
 ;; **Prelude methods, not builtins**, and that is the whole of what lets a
 ;; `defstruct` be a key. Looking a key up means hashing it and comparing it,
-;; and both are the key type's own methods — `sxhash`, and `Eq`'s `equals`
+;; and both are the key type's own methods — `sxhash`, and `Equal`'s `equal`
 ;; reached through `Hash`'s supertrait — which are written in typelisp, so no
 ;; Rust shim can call them. A builtin `get` would have had to call back into
 ;; the interpreter to ask; a prelude method already *is* the interpreter, and
@@ -2230,7 +2200,7 @@ user-visible capacity."
 ;; What the layer below answers is the part that needs no opinion about keys:
 ;; `bucket-count`/`bucket-key`/`bucket-value` read the entries that share one
 ;; hash, and `bucket-put`/`bucket-delete` write them
-;; (`HashTable`'s definition (`typeck::builtins`)). `Hash`'s contract — `(equals x y)` implies
+;; (`HashTable`'s definition (`typeck::builtins`)). `Hash`'s contract — `(equal x y)` implies
 ;; `(= (sxhash x) (sxhash y))` — is exactly what makes one bucket the right
 ;; and only place to look.
 (module %internal (pub defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h int) (k K)) int
@@ -2240,7 +2210,7 @@ user-visible capacity."
     (progn
       (while (if (< found 0) (< i n) false)
         (progn
-          (when (equals (bucket-key self h i) k) (setf found i))
+          (when (equal (bucket-key self h i) k) (setf found i))
           (setf i (+ i 1))))
       found))))
 
@@ -2514,8 +2484,8 @@ user-visible capacity."
   (bit-and (shift n (* -1 (byte-position spec))) (std::%internal::bits-mask n (byte-size spec))))
 ;; `(ldb-test integer bytespec)`: does that field have any 1 bits?
 (pub defun ldb-test<T> ((n T) (spec cons-cell<int,int>)) bool
-  (:where (Bits T) (Eq T))
-  (not-equals (ldb n spec) (bit-xor n n)))
+  (:where (Bits T) (Equal T))
+  (not (equal (ldb n spec) (bit-xor n n))))
 ;; `(mask-field integer bytespec)`: like `ldb`, but left in place rather than
 ;; right-justified.
 (pub defun mask-field<T> ((n T) (spec cons-cell<int,int>)) T
@@ -2584,28 +2554,26 @@ user-visible capacity."
   (if (= op boole-orc2) (bit-or a (bit-not b))
       (panic "boole: unknown op code")))))))))))))))))))
 
-;; `cons-cell<A,B>`'s Eq/Ord: recursive (structural) comparison. The field
+;; `cons-cell<A,B>`'s Equal/Ord: recursive (structural) comparison. The field
 ;; comparisons go through the methods' own `where` bounds — checked as
 ;; diagnostics-only `TraitCall`s while `A`/`B` are open, then resolved to the
-;; field types' real `equals`/`less` when the owner monomorphizes (nesting,
+;; field types' real `equal`/`less` when the owner monomorphizes (nesting,
 ;; e.g. `cons-cell<cons-cell<i32,i32>,i32>`, just recurses one level per
 ;; instantiation). Note the bound names must be the *owner's* declared type
 ;; parameters (`A`/`B`, exactly as written on the `defstruct`) — a method's
 ;; signature can only be generic through them.
-(impl<A,B> Eq cons-cell<A,B> (:where (Eq A) (Eq B))
-  (defmethod equals (self (other Self)) bool
-    (if (equals self::car other::car)
-        (equals self::cdr other::cdr)
+(impl<A,B> Equal cons-cell<A,B> (:where (Equal A) (Equal B))
+  (defmethod equal (self (other Self)) bool
+    (if (equal self::car other::car)
+        (equal self::cdr other::cdr)
         false)))
 
 ;; Ord: lexicographic, `car` first, then `cdr`. The double-`less` form (car
 ;; strictly less → true; car strictly greater → false; otherwise cars are
 ;; equivalent, compare cdrs) keeps `less`'s own body free of any appeal to
 ;; equality, so the recursion needs `(Ord A)`/`(Ord B)` and nothing more.
-;; `Ord` inheriting `Eq` does oblige the *impl as a whole* to have an
-;; `impl Eq cons-cell<A,B>` — which is right above — so nothing is lost;
-;; before supertraits existed this shape additionally avoided writing
-;; `(Eq A)` in the bound list.
+;; `Ord` inheriting `Equal` does oblige the *impl as a whole* to have an
+;; `impl Equal cons-cell<A,B>` — which is right above.
 ;; `less-equal`/`greater`/`greater-equal` come from `Ord`'s default bodies.
 (impl<A,B> Ord cons-cell<A,B> (:where (Ord A) (Ord B))
   (defmethod less (self (other Self)) bool
@@ -3210,17 +3178,16 @@ user-visible capacity."
 ;; Phase 3e gave them `:key`/`:test`/`:test-not`. Unlike the item searches
 ;; above, `:key` here projects *both* sides of every comparison: both are
 ;; sequence elements.
-(pub defun seq-equals<A> ((a Vector<A>) (b Vector<A>)) bool (:where (Eq A))
-  "Element-wise equality of two vectors. `Vector<T>` has no `Eq` impl of its
-   own (that would need a bound on `T` an `impl` cannot express here), so the
-   tail relations below compare through this instead."
+(pub defun seq-equal<A> ((a Vector<A>) (b Vector<A>)) bool (:where (Equal A))
+  "Element-wise `equal` of two vectors. `Vector<T>` has no `Equal` impl of its
+   own."
   (if (/= (len a) (len b))
       false
       (let ((i 0) (ok true))
         (progn
           (while (and (< i (len a)) ok)
             (progn
-              (if (equals (get a i) (get b i)) () (progn (setf ok false) ()))
+              (if (equal (get a i) (get b i)) () (progn (setf ok false) ()))
               (setf i (+ i 1))))
           ok))))
 ;; CL's `adjoin`: `x` prepended unless it is already there. CL conses onto the
@@ -4162,18 +4129,18 @@ user-visible capacity."
     (make-instance 'SortedTable :ks (the Vector<K> (Vector::new)) :vs (the Vector<V> (Vector::new))))
   (pub defmethod get (self (k K)) Option<V> (:where (Ord K))
     (let ((i (std::%internal::sorted-position self::ks k)))
-      (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+      (if (and (< i (len self::ks)) (equal (get self::ks i) k))
           (Option::some (get self::vs i))
           (Option::none))))
   (pub defmethod set (self (k K) (v V)) () (:where (Ord K))
     (let ((i (std::%internal::sorted-position self::ks k)))
-      (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+      (if (and (< i (len self::ks)) (equal (get self::ks i) k))
           (set self::vs i v)
           (progn (std::%internal::vector-insert-at self::ks i k)
                  (std::%internal::vector-insert-at self::vs i v)))))
   (pub defmethod remove (self (k K)) Option<V> (:where (Ord K))
     (let ((i (std::%internal::sorted-position self::ks k)))
-      (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+      (if (and (< i (len self::ks)) (equal (get self::ks i) k))
           (progn (std::%internal::vector-remove-at self::ks i)
                  (Option::some (std::%internal::vector-remove-at self::vs i)))
           (Option::none))))
@@ -4546,7 +4513,7 @@ user-visible capacity."
   (pub defmethod = (self (other complex)) bool
     (if (= self::re other::re) (= self::im other::im) false))
   (pub defmethod /= (self (other complex)) bool (not (= self other))))
-(impl Eq complex (defmethod equals (self (other Self)) bool (= self other)))
+(impl Equal complex (defmethod equal (self (other Self)) bool (= self other)))
 ;; No `Ord`: the complex numbers are not ordered, and CL's `<` rejects them
 ;; for the same reason.
 
@@ -7366,19 +7333,19 @@ user-visible capacity."
 
 ;; Rust's `assert_eq!`, for `#[test]` functions above all: when the two sides
 ;; differ, the panic shows both. The comparison and the printing are a generic
-;; function's, so a type with no `Eq` or no `print-object` is refused where
+;; function's, so a type with no `Equal` or no `print-object` is refused where
 ;; the assertion is written. The macro only supplies the first line of the
 ;; message -- the assertion as written, or the second argument.
-(module %internal (pub defun check-assert-eq<T> ((left T) (right T) (header string)) ()
-  (:where (Eq T) (print-object T))
-  (if (equals left right)
+(module %internal (pub defun check-assert-equal<T> ((left T) (right T) (header string)) ()
+  (:where (Equal T) (print-object T))
+  (if (equal left right)
       ()
       (panic (format false "~a~%  left: ~a~% right: ~a" header (print-object left true) (print-object right true))))))
 (module error
-(pub defmacro assert-eq (left right &rest msg)
+(pub defmacro assert-equal (left right &rest msg)
   (if (sexpr-null msg)
-      `(std::%internal::check-assert-eq ,left ,right ,(format false "assertion failed: ~s" `(assert-eq ,left ,right)))
-      `(std::%internal::check-assert-eq ,left ,right ,(sexpr-car msg))))
+      `(std::%internal::check-assert-equal ,left ,right ,(format false "assertion failed: ~s" `(assert-equal ,left ,right)))
+      `(std::%internal::check-assert-equal ,left ,right ,(sexpr-car msg))))
 
 ;; CL's `warn`: say something on `*error-output*` and carry on. The only
 ;; thing in this language that reports without either returning a `Result` or

@@ -83,13 +83,12 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         // The small system builtins (`sys_builtin`): parsing, the clock, and
         // process exit. Each is a thin edge over one shared implementation
         // the interpreter calls too.
-        // `eq`/`eql`/`equal`/`equalp` on any type are free *functions*
+        // `eq`/`eql`/`equalp` on any type are free *functions*
         // (`registry`'s root `fns`), not methods, so they map here rather
         // than through `native_lowered_primitive_methods`. Both are the same
         // `typelisp_rt::equality` the interpreter calls.
         wk::M_EQ => "rt_sexpr_eq",
         wk::M_EQL => "rt_sexpr_eql",
-        wk::M_EQUAL => "rt_sexpr_equal",
         wk::M_EQUALP => "rt_sexpr_equalp",
         wk::F_PARSE_FLOAT => "rt_parse_float",
         wk::F_GET_UNIVERSAL_TIME => "rt_get_universal_time",
@@ -489,10 +488,11 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
         // cannot be that instruction (two separately boxed but equal
         // `Float`/`bignum`/`ratio` values are `eql` and not `eq`), so it
         // lowers to the `rt_sexpr_eql` shim over the same
-        // `typelisp_rt::equality` the interpreter uses. The free-function
-        // `equal`/`equalp` reach their shims through `rt_builtin_symbol`
-        // instead, being calls rather than methods.
-        wk::SEXPR => &[wk::M_EQ, wk::M_EQL],
+        // `typelisp_rt::equality` the interpreter uses, and `equal` to the
+        // `rt_sexpr_equal` shim. The free-function `eq`/`eql`/`equalp` reach
+        // their shims through `rt_builtin_symbol` instead, being calls rather
+        // than methods.
+        wk::SEXPR => &[wk::M_EQ, wk::M_EQL, wk::M_EQUAL],
         // `bool`'s four comparison names are one operation
         // (`registry::bool_assoc`: two immediate values, nothing to fold or
         // recurse into), and a compiled `bool` is a raw `0`/`1`, so all four

@@ -829,6 +829,23 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         return method::check_method_call(cx, heap, locals, owner, member, def, Some(first), &[], rest, expected, loc);
     }
     if let Type::Param(p) = cx.resolve(&first.ty) {
+        // `/=` on a type variable is `(not (= a b))`: `Equal` has `equal`
+        // alone, which `=` spells.
+        if spelling == "/=" && bound_method(cx.reg, cx.scope, p, member).is_none() && bound_method(cx.reg, cx.scope, p, member_symbol("=")).is_some() {
+            let not = Value::Symbol(heap.names().read(NsId::STD, "not"));
+            let eq = Value::Symbol(heap.names().read(NsId::STD, "="));
+            let mut elems = vec![eq, written.0];
+            elems.extend(rest.iter().map(|(v, _)| *v));
+            let inner = crate::check::core::list(heap, &elems)?;
+            heap.push_root(inner);
+            let form = crate::check::core::list(heap, &[not, inner]);
+            heap.pop_root();
+            let form = form?;
+            heap.push_root(form);
+            let checked = check_expr(cx, heap, locals, form, expected, loc);
+            heap.pop_root();
+            return checked;
+        }
         if let Some(bound) = bound_method(cx.reg, cx.scope, p, member) {
             let method = bound.method;
             return method::check_trait_call(cx, heap, locals, bound, method, first, rest, expected, loc);
@@ -854,6 +871,16 @@ fn no_method(cx: &Cx, recv: &Type, member: SymRef) -> Option<Error> {
     // A number literal nothing decided is the type its methods are looked
     // up in.
     let recv_ty = cx.with_default(recv);
+    if member == member_symbol("equal") {
+        let fix = match recv_ty {
+            Type::Param(_) => "bound it by `Equal` in a `:where` clause",
+            _ => "write `(impl Equal ...)` for it",
+        };
+        return Some(Error::TypeError(format!(
+            "equal: `{}` does not implement `Equal` — {}, or compare by identity with `eq`/`eql` or by structure with `equalp`",
+            recv_ty, fix
+        )));
+    }
     if let Type::Param(_) = recv_ty {
         return Some(Error::TypeError(format!(
             "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",

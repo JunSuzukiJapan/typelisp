@@ -1022,6 +1022,6 @@ fn a_quoted_symbol_is_a_symbol() {
 /// generic inference — with both sides `Symbol` there is nothing to widen.
 #[test]
 fn equality_between_a_built_and_a_quoted_symbol_is_order_independent() {
-    assert!(program(r#"(equal (intern "foo") (quote foo))"#).is_ok());
-    assert!(program(r#"(equal (quote foo) (intern "foo"))"#).is_ok());
+    assert!(program(r#"(eql (intern "foo") (quote foo))"#).is_ok());
+    assert!(program(r#"(eql (quote foo) (intern "foo"))"#).is_ok());
 }

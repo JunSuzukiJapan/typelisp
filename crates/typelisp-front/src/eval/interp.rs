@@ -2096,14 +2096,13 @@ impl Interp {
             wk::F_EVAL => Some(self.eval_form(heap, &args[0])),
             wk::F_MACROEXPAND_1 => Some(self.macroexpand_1_form(heap, args[0])),
             wk::F_MACROEXPAND => Some(self.macroexpand_form(heap, args[0])),
-            // `eq`/`eql`/`equal`/`equalp` on any type: the free functions (the
+            // `eq`/`eql`/`equalp` on any type: the free functions (the
             // free-function overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
             // in `eval_builtin_method`). Rust builtins since Phase 5 fenced
             // `match` off `Sexpr`; see `sexpr_equal`/`sexpr_equalp`.
             wk::M_EQ => Some(sexpr_eq(heap, args)),
             wk::M_EQL => Some(sexpr_eql(heap, args)),
-            wk::M_EQUAL => Some(sexpr_equal(heap, args)),
             wk::M_EQUALP => Some(sexpr_equalp(heap, args)),
             // `exit`: terminates the process immediately via the OS, never
             // returning — `rt_i64` truncates to `i32` the same way every
@@ -4026,12 +4025,11 @@ pub(crate) fn eval_builtin_method(
             // history (see `sexpr_eql`'s doc comment): `Sexpr::f64` became
             // heap-boxed (`Value::Boxed`, see `BoxedObj`) for the `Sexpr`/
             // `RtValue` unification plan, the "boxed numeric representation"
-            // this comment used to say didn't exist yet. `equal`/`equalp`
-            // are `prelude.rs` free functions (structural recursion via
-            // `match`), not registered here, the same as `length`/`append`
-            // for `Sexpr` lists.
+            // this comment used to say didn't exist yet. `equal` is CL's
+            // `equal`, the method `impl Equal Sexpr` takes as the trait's.
             wk::M_EQ => Some(sexpr_eq(heap, args)),
             wk::M_EQL => Some(sexpr_eql(heap, args)),
+            wk::M_EQUAL => Some(sexpr_equal(heap, args)),
             _ => None,
         };
     }

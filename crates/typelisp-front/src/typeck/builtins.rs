@@ -222,12 +222,12 @@ pub(crate) fn define(reg: &mut Registry) {
     function(reg, sexpr_ns, "sexpr-str", vec![s.clone()], Type::Str);
     function(reg, sexpr_ns, "sexpr-sym-name", vec![s.clone()], Type::Str);
     function(reg, sexpr_ns, "sexpr-symp", vec![s], Type::Bool);
-    // `eq`/`eql`/`equal`/`equalp`: CL's four equivalences, Rust builtins
-    // (`Interp::eval_builtin`'s `sexpr_eq`/`sexpr_eql`/`sexpr_equal`/
-    // `sexpr_equalp`), so every type has them as CL's objects all do. The
-    // per-scalar *methods* (string/char/int/...) are separate and resolved
-    // first when the receiver is one of those types — these free ones are
-    // for everything else (`case` expands to `(equal ..)`).
+    // `eq`/`eql`/`equalp`: CL's equivalences that every type has, as CL's
+    // objects all do — Rust builtins (`Interp::eval_builtin`'s `sexpr_eq`/
+    // `sexpr_eql`/`sexpr_equalp`). The per-scalar *methods* (string/char/
+    // int/...) are separate and resolved first when the receiver is one of
+    // those types. `equal` is not among them: it is the `Equal` trait's, and
+    // a type without an `impl Equal` has none.
     //
     // **Generic, not `Sexpr`-typed.** With concrete `Option<Sexpr>`
     // parameters both arguments would widen into S-expression data
@@ -238,7 +238,7 @@ pub(crate) fn define(reg: &mut Registry) {
     // `equal` method and that method demands both sides be `i32`. One type
     // parameter used twice forces the two arguments to agree; the runtime
     // compares `Value`s structurally whatever they hold.
-    for name in ["eq", "eql", "equal", "equalp"] {
+    for name in ["eq", "eql", "equalp"] {
         generic_function(reg, cmp, name, &["T"], |[t]| (vec![t.clone(), t], Type::Bool));
     }
     // `symbol->string`/`intern`: the only bridges between the interned
@@ -411,6 +411,12 @@ fn sexpr(reg: &mut Registry) -> Vec<Variant> {
     for name in ["eq", "eql"] {
         def.instance(name, vec![s.clone(), s.clone()], Type::Bool);
     }
+    // `equal`: CL's `equal` — conses by structure, strings by content,
+    // every other atom by `eql` — and the method `impl Equal Sexpr` takes as
+    // the trait's, so it is written in `Self`. A list, an `Option<Sexpr>`,
+    // is its receiver as it is, and then so is its argument
+    // (`method::check_method_call`).
+    def.instance("equal", vec![sexpr_ty(), sexpr_ty()], Type::Bool);
     variants
 }
 
