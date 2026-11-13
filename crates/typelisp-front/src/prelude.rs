@@ -1569,11 +1569,9 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; (there is no generic "rebuild the original container" facility; the lazy
 ;; versions are the `lazy` module's, further down); `foldr`/`reverse` first buffer the whole input into a
 ;; `Vector` because an `Iter` is forward-only. `find-if`/`position-if`/
-;; `count-if`/`remove-if` take a predicate, not an element: `A` carries no
-;; `Eq`-style bound here, so there is no generic equality available to them —
-;; matching CL's own `-if` family. The plain, `Eq`-bounded `find`/`position`/
-;; `count` (CL's own item-based versions, alongside `member`/`sort` below)
-;; live further down, past the scalar `Eq`/`Ord` impls they need. A freshly
+;; `count-if`/`remove-if` take a predicate, not an element, matching CL's
+;; own `-if` family. The item-based `find`/`position`/`count` (CL's own
+;; versions, alongside `member`/`sort` below) live further down. A freshly
 ;; built result vector is pinned with `the`, since a bare `(Vector::new)` has
 ;; nothing to infer its element type from.
 (module iter
@@ -2740,11 +2738,10 @@ user-visible capacity."
         (push out (get buf i))
         (setf i (+ i 1)))
       out)))
-;; `member`/`assoc` require `Eq` (defined below with the scalar impls)
-;; The item-based searches. `:test`/`:test-not` replace the `Eq` bound's
-;; `equals` when given (CL's default test is `eql`; the one generic equality
-;; here is `Eq`), and `:key` projects the *element* before the comparison —
-;; never the item being searched for, which is CL's rule for this family.
+;; The item-based searches. Without `:test`/`:test-not` they compare by
+;; `eql`, CL's default, which every type has; `:test equal` compares by
+;; content. `:key` projects the *element* before the comparison — never the
+;; item being searched for, which is CL's rule for this family.
 ;;
 ;; `same` is built as a local closure rather than a shared helper because a
 ;; helper would have to declare `Option<(fn (A A) bool)>`, which is not
@@ -2752,27 +2749,27 @@ user-visible capacity."
 (pub defun member<I,A> ((x A) (it I)
                     &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
     bool
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (is-some (std::%internal::seq-find-core it (lambda ((i int) (y A)) bool (same x y)) false)))))
 (pub defun find<I,A> ((x A) (it I)
                   &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                        (start int) (end int) (from-end bool))
     Option<A>
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (std::%internal::seq-find-core it
         (lambda ((i int) (y A)) bool
           (if (std::%internal::seq-in-bounds i start end) (same x y) false))
@@ -2781,14 +2778,14 @@ user-visible capacity."
                       &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                            (start int) (end int) (from-end bool))
     Option<int>
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (std::%internal::seq-position-core it
         (lambda ((i int) (y A)) bool
           (if (std::%internal::seq-in-bounds i start end) (same x y) false))
@@ -2797,14 +2794,14 @@ user-visible capacity."
                    &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                         (start int) (end int))
     int
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (std::%internal::seq-count-core it
         (lambda ((i int) (y A)) bool
           (if (std::%internal::seq-in-bounds i start end) (same x y) false))))))
@@ -2829,14 +2826,14 @@ user-visible capacity."
 (pub defun assoc<I,K,V> ((k K) (it I)
                      &key (key (fn (K) K)) (test (fn (K K) bool)) (test-not (fn (K K) bool)))
     Option<cons-cell<K,V>>
-  (:where (Iter I (Item cons-cell<K,V>)) (Eq K))
+  (:where (Iter I (Item cons-cell<K,V>)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y K)) K y)))))
     (let ((same (lambda ((p K) (q K)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (std::%internal::seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same k (car p))) false))))
 ;; ---------------------------------------------------------------------------
 ;; The rest of CL's list/sequence catalog — cl-parity-plan.md Phase 3a/3b/3c.
@@ -2906,14 +2903,14 @@ user-visible capacity."
                            (test-not (fn (A A) bool)) (from-end bool)
                            (start int) (end int) (sub-start int) (sub-end int))
     Option<int>
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (hay (copy-seq it))
           (pat (copy-seq sub)))
       (let ((e (std::%internal::seq-window-end end (len hay)))
@@ -2934,14 +2931,14 @@ user-visible capacity."
                              (test-not (fn (A A) bool)) (from-end bool)
                              (start1 int) (end1 int) (start2 int) (end2 int))
     Option<int>
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (a (copy-seq it))
           (b (copy-seq other)))
       (let ((s1 (std::%internal::seq-window-start start1)) (e1 (std::%internal::seq-window-end end1 (len a)))
@@ -3066,14 +3063,14 @@ user-visible capacity."
                     &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                          (start int) (end int) (from-end bool) (count int))
     Vector<A>
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (std::%internal::seq-edit-core it
         (lambda ((i int) (y A)) bool
           (if (std::%internal::seq-in-bounds i start end) (same x y) false))
@@ -3089,27 +3086,27 @@ user-visible capacity."
                                     (test-not (fn (A A) bool))
                                     (start int) (end int) (from-end bool))
     Vector<A>
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q)))))))))
+                              ((none) (eql (proj p) (proj q)))))))))
       (std::%internal::seq-dedup-core it same start end (std::%internal::seq-flag from-end)))))
 (pub defun substitute<I,A> ((new A) (old A) (it I)
                         &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                              (start int) (end int) (from-end bool) (count int))
     Vector<A>
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (std::%internal::seq-edit-core it
         (lambda ((i int) (y A)) bool
           (if (std::%internal::seq-in-bounds i start end) (same old y) false))
@@ -3134,14 +3131,14 @@ user-visible capacity."
 (pub defun rassoc<I,K,V> ((v V) (it I)
                       &key (key (fn (V) V)) (test (fn (V V) bool)) (test-not (fn (V V) bool)))
     Option<cons-cell<K,V>>
-  (:where (Iter I (Item cons-cell<K,V>)) (Eq V))
+  (:where (Iter I (Item cons-cell<K,V>)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y V)) V y)))))
     (let ((same (lambda ((p V) (q V)) bool
                   (match test
                     ((some f) (f p (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+                              ((none) (eql p (proj q)))))))))
       (std::%internal::seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same v (cdr p))) false))))
 (pub defun rassoc-if<I,K,V> ((it I) (pred (fn (V) bool)) &key (key (fn (V) V)))
     Option<cons-cell<K,V>>
@@ -3205,7 +3202,8 @@ user-visible capacity."
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (std::%internal::seq-sort-core (iter (append a b)) less proj)))
 ;; --- Phase 3c: set operations, and the list-tail relations ---
-;; All `Eq`-bounded and quadratic, like CL's own list-based versions. `union`
+;; All quadratic, like CL's own list-based versions, and `eql` unless told
+;; otherwise. `union`
 ;; and friends return elements in first-appearance order rather than CL's
 ;; unspecified one — a stable answer is worth more than the freedom.
 ;;
@@ -3230,14 +3228,14 @@ user-visible capacity."
 (pub defun adjoin<I,A> ((x A) (it I)
                     &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
     Vector<A>
-  (:where (Iter I (Item A)) (Eq A))
+  (:where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (v (copy-seq it)))
       (if (std::%internal::seq-any-core v (lambda ((z A)) bool (same x z)))
           v
@@ -3246,14 +3244,14 @@ user-visible capacity."
 (pub defun union<I,J,A> ((a I) (b J)
                      &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
     Vector<A>
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x a)
@@ -3264,14 +3262,14 @@ user-visible capacity."
 (pub defun intersection<I,J,A> ((a I) (b J)
                             &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
     Vector<A>
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x a)
@@ -3283,14 +3281,14 @@ user-visible capacity."
 (pub defun set-difference<I,J,A> ((a I) (b J)
                               &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
     Vector<A>
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x a)
@@ -3303,14 +3301,14 @@ user-visible capacity."
                                 &key (key (fn (A) A)) (test (fn (A A) bool))
                                      (test-not (fn (A A) bool)))
     Vector<A>
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (av (copy-seq a)) (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x (iter av))
@@ -3327,26 +3325,27 @@ user-visible capacity."
 (pub defun subsetp<I,J,A> ((a I) (b J)
                        &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
     bool
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
     (let ((same (lambda ((p A) (q A)) bool
                   (match test
                     ((some f) (f (proj p) (proj q)))
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q))))))))
+                              ((none) (eql (proj p) (proj q))))))))
           (bv (copy-seq b)))
       (every a (lambda ((x A)) bool (std::%internal::seq-any-core bv (lambda ((z A)) bool (same x z))))))))
 ;; CL's `tailp`/`ldiff`. CL asks about shared *structure* (`tail` must be one
 ;; of `whole`'s own conses); with no shared structure to ask about, this asks
-;; the observable question instead — is `tail` a suffix of `whole` by value.
+;; the observable question instead — is `tail` a suffix of `whole`, its
+;; elements `eql` to the end of `whole`'s.
 (pub defun tailp<I,J,A> ((tail I) (whole J)) bool
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((tv (copy-seq tail)) (wv (copy-seq whole)))
     (let ((k (- (len wv) (len tv))))
-      (if (< k 0) false (seq-equals (subseq (iter wv) k (len wv)) tv)))))
+      (if (< k 0) false (is-none (mismatch (iter (subseq (iter wv) k (len wv))) (iter tv)))))))
 (pub defun ldiff<I,J,A> ((whole I) (tail J)) Vector<A>
-  (:where (Iter I (Item A)) (Iter J (Item A)) (Eq A))
+  (:where (Iter I (Item A)) (Iter J (Item A)))
   (let ((wv (copy-seq whole)) (tv (copy-seq tail)))
     (if (tailp (iter tv) (iter wv))
         (subseq (iter wv) 0 (- (len wv) (len tv)))
@@ -3410,14 +3409,14 @@ user-visible capacity."
                      &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
                           (start int) (end int) (from-end bool) (count int))
       Vector<T>
-    (:where (Eq T))
+    
     (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
       (let ((same (lambda ((p T) (q T)) bool
                     (match test
                       ((some f) (f p (proj q)))
                       ((none) (match test-not
                                 ((some g) (not (g p (proj q))))
-                                ((none) (equals p (proj q)))))))))
+                                ((none) (eql p (proj q)))))))))
         (set-contents self
           (%internal::seq-edit-core (iter self)
             (lambda ((i int) (y T)) bool
@@ -3449,28 +3448,28 @@ user-visible capacity."
                                      (test-not (fn (T T) bool))
                                      (start int) (end int) (from-end bool))
       Vector<T>
-    (:where (Eq T))
+    
     (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
       (let ((same (lambda ((p T) (q T)) bool
                     (match test
                       ((some f) (f (proj p) (proj q)))
                       ((none) (match test-not
                                 ((some g) (not (g (proj p) (proj q))))
-                                ((none) (equals (proj p) (proj q)))))))))
+                                ((none) (eql (proj p) (proj q)))))))))
         (set-contents self
           (%internal::seq-dedup-core (iter self) same start end (%internal::seq-flag from-end))))))
   (pub defmethod nsubstitute (self (new T) (old T)
                           &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
                                (start int) (end int) (from-end bool) (count int))
       Vector<T>
-    (:where (Eq T))
+    
     (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
       (let ((same (lambda ((p T) (q T)) bool
                     (match test
                       ((some f) (f p (proj q)))
                       ((none) (match test-not
                                 ((some g) (not (g p (proj q))))
-                                ((none) (equals p (proj q)))))))))
+                                ((none) (eql p (proj q)))))))))
         (set-contents self
           (%internal::seq-edit-core (iter self)
             (lambda ((i int) (y T)) bool
@@ -3847,7 +3846,7 @@ user-visible capacity."
 ;; CL needs a macro because its `place` must be re-written, and a `Vector<T>`
 ;; mutates in place instead.
 (impl<T> Vector<T>
-  (pub defmethod pushnew (self (x T)) () (:where (Eq T))
+  (pub defmethod pushnew (self (x T)) ()
     (if (member x (iter self)) () (push self x))))
 
 ;; ---------------------------------------------------------------------------

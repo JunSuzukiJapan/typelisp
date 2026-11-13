@@ -135,7 +135,7 @@ fn the_alist_catalog_searches_by_key_value_and_predicate() {
         with_fixtures("(assoc-if (iter al) (lambda ((k int)) bool (= k 2)))"),
         "(some #<cons-cell<int,string> car: 2 cdr: two>)"
     );
-    assert_eq!(with_fixtures("(rassoc \"two\" (iter al))"), "(some #<cons-cell<int,string> car: 2 cdr: two>)");
+    assert_eq!(with_fixtures("(rassoc \"two\" (iter al) :test equal)"), "(some #<cons-cell<int,string> car: 2 cdr: two>)");
     assert_eq!(
         with_fixtures("(rassoc-if (iter al) (lambda ((s string)) bool (equal s \"one\")))"),
         "(some #<cons-cell<int,string> car: 1 cdr: one>)"

@@ -81,7 +81,7 @@ fn key_reaches_the_predicate_variants_and_the_alist_searches() {
         "(some #<cons-cell<int,string> car: 2 cdr: two>)"
     );
     assert_eq!(
-        with_fixtures("(rassoc \"ONE\" (iter al) :key (lambda ((s string)) string (upcase s)))"),
+        with_fixtures("(rassoc \"ONE\" (iter al) :key (lambda ((s string)) string (upcase s)) :test equal)"),
         "(some #<cons-cell<int,string> car: 1 cdr: one>)"
     );
 }

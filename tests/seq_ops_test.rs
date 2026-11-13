@@ -181,23 +181,27 @@ fn member_finds_and_misses_by_equality() {
 }
 
 #[test]
-fn member_on_strings_compares_content_not_identity() {
-    // The needle is built at runtime (`(append "a" "b")`), so it can never be
-    // `eq` (Rc-identical) to the stored "ab" — `Eq string` must delegate to
-    // `equal` for this to hold.
+fn member_on_strings_compares_by_eql_unless_told_equal() {
+    // The needle is built at runtime (`(append "a" "b")`), so it is never
+    // the stored "ab" itself: CL's default `eql` misses it, and
+    // `:test equal` compares the contents.
     let src = "(defun make-v () Vector<string> (Vector::new))
                (let ((v (make-v)))
                  (push v \"ab\")
-                 (member (append \"a\" \"b\") (iter v)))";
-    assert_eq!(eval_ok(src), Value::Bool(true));
+                 (+ (if (member (append \"a\" \"b\") (iter v)) 1 0)
+                    (if (member (append \"a\" \"b\") (iter v) :test equal) 10 0)))";
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
-fn member_over_an_element_type_without_eq_is_a_type_error() {
+fn member_compares_a_struct_by_identity_by_default() {
     let src = "(defstruct point (x int))
                (defun make-v () Vector<point> (Vector::new))
-               (member (make-instance 'point :x 1) (iter (make-v)))";
-    assert!(check(src).is_err());
+               (let ((v (make-v)) (p (make-instance 'point :x 1)))
+                 (push v p)
+                 (+ (if (member p (iter v)) 1 0)
+                    (if (member (make-instance 'point :x 1) (iter v)) 10 0)))";
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 // ---- every / any ------------------------------------------------------------
@@ -306,8 +310,8 @@ fn member_works_over_a_user_type_with_an_eq_impl() {
                (let ((v (make-v)))
                  (push v (make-instance 'point :x 1 :y 2))
                  (push v (make-instance 'point :x 3 :y 4))
-                 (if (member (make-instance 'point :x 3 :y 4) (iter v))
-                     (if (member (make-instance 'point :x 3 :y 5) (iter v)) 0 1)
+                 (if (member (make-instance 'point :x 3 :y 4) (iter v) :test equals)
+                     (if (member (make-instance 'point :x 3 :y 5) (iter v) :test equals) 0 1)
                      0))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -320,7 +324,7 @@ fn assoc_finds_the_pair_in_an_alist_and_projects_with_cdr() {
                (let ((al (make-alist)))
                  (push al (cons \"one\" 1))
                  (push al (cons \"two\" 2))
-                 (cdr (unwrap (assoc \"two\" (iter al)))))";
+                 (cdr (unwrap (assoc \"two\" (iter al) :test equal))))";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
@@ -342,7 +346,7 @@ fn assoc_works_over_a_hashtable_iterator() {
                (let ((h (make-h)))
                  (set h \"a\" 10)
                  (set h \"b\" 20)
-                 (cdr (unwrap (assoc \"b\" (iter h)))))";
+                 (cdr (unwrap (assoc \"b\" (iter h) :test equal))))";
     assert_eq!(eval_ok(src), Value::Int(20));
 }
 
@@ -389,8 +393,8 @@ fn member_and_sort_work_over_a_vector_of_pairs() {
                  (push v (cons 1 3))
                  (let ((sorted (sort (iter v) (lambda ((a cons-cell<int,int>) (b cons-cell<int,int>)) bool (less a b)))))
                    (let ((first (get sorted 0)))
-                     (+ (if (member (cons 1 5) (iter v)) 1000 0)
-                        (+ (if (member (cons 9 9) (iter v)) 100 0)
+                     (+ (if (member (cons 1 5) (iter v) :test equals) 1000 0)
+                        (+ (if (member (cons 9 9) (iter v) :test equals) 100 0)
                            (+ (* first::car 10) first::cdr))))))";
     // member hit -> 1000, miss -> 0, sorted head (1 . 3) -> 13
     assert_eq!(eval_ok(src), Value::Int(1013));
@@ -420,7 +424,7 @@ fn member_specializes_at_two_element_types_in_one_program() {
                (let ((vi (make-i)) (vs (make-s)))
                  (push vi 7)
                  (push vs \"x\")
-                 (if (member 7 (iter vi)) (if (member \"x\" (iter vs)) 1 0) 0))";
+                 (if (member 7 (iter vi)) (if (member \"x\" (iter vs) :test equal) 1 0) 0))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 

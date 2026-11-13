@@ -40,7 +40,7 @@
 
 `member`、`find`、`position`、`count`、`assoc`、`rassoc`、`search`、`mismatch`、`remove`、`remove-duplicates`、`substitute`、`adjoin`、`union`、`intersection`、`set-difference`、`set-exclusive-or`、`subsetp`、`tailp`、`ldiff`、`Vector` の `delete`/`delete-duplicates`/`nsubstitute`/`pushnew`。
 
-文字列を探すときなどは `:test #'equal` が要るようになる。テストと文書の例を合わせる。
+文字列を探すときなどは `:test equal` が要るようになる。テストと文書の例を合わせる。
 
 ### 段階 3: Eq を Equal に
 
