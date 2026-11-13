@@ -28,11 +28,12 @@ runs:
         # A runner's network fails now and then (a DNS lookup, once); three
         # tries, a little apart, before the job does.
         retry() { for i in 1 2 3; do "$@" && return 0; if [ "$i" -lt 3 ]; then echo "retrying in $((i * 20))s: $*" >&2; sleep $((i * 20)); fi; done; return 1; }
-        # The runner image comes with an older LLVM linked (llvm@18, llvm@20).
-        # Homebrew will not link llvm@22 over it and warns, and the warning
-        # shows up as an annotation on every run. Unlink the old ones first.
+        # The runner image comes with an older LLVM (llvm@18, llvm@20). While
+        # another version is installed, Homebrew warns that llvm@22 was not
+        # linked, and the warning shows up as an annotation on every run.
+        # Nothing here uses the old ones, so remove them first.
         for f in $(brew list --formula | grep -E '^llvm(@[0-9]+)?$'); do
-          if [ "$f" != llvm@22 ]; then brew unlink "$f"; fi
+          if [ "$f" != llvm@22 ]; then brew uninstall --ignore-dependencies "$f"; fi
         done
         retry brew install llvm@22 coreutils
 
