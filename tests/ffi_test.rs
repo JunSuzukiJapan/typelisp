@@ -678,8 +678,12 @@ fn a_local_macro_passes_a_callback() {
 /// local is refused.
 #[test]
 fn a_callback_may_be_the_first_argument() {
-    let e = err(r#"(defffi (c-atexit "atexit") ((fn () ())) i32)
-                   (defun f ((k i32)) i32 (unsafe (c-atexit (lambda () () (let ((x k)) ())))))"#);
+    // glibc does not export `atexit` from libc.so (it lives in
+    // libc_nonshared.a), so the symbol is `__cxa_atexit`, which both glibc
+    // and macOS export.
+    let e = err(r#"(defffi (c-atexit "__cxa_atexit") ((fn (ptr) ()) ptr ptr) i32)
+                   (defun f ((k i32) (p ptr)) i32
+                     (unsafe (c-atexit (lambda ((a ptr)) () (let ((x k)) ())) p p)))"#);
     assert!(e.contains("refers to `k`"), "unexpected error: {}", e);
 }
 
