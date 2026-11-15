@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Çiftler, S-İfadeler ve Diziler
 
 Jenerik çift `cons-cell`, S-ifade verisi `Sexpr`, semboller, `Iter` üzerine yazılmış dizi fonksiyonları ve
@@ -21,6 +21,12 @@ erişimci sözdizimi) ya da `(car variable)`/`(cdr variable)` olarak okunabilir.
 `cons-cell` ayrıca bir demet sözdiziminin yerine de geçer. Çoklu değerler döndüren CL fonksiyonları
 (`floor`'un bölümü ve kalanı, `read-from-string`'in değeri ve konumu vb.) bu dilde bir `cons-cell`
 döndürür.
+
+Birbirine bağlanmış `cons-cell`'ler bir listedir ve türü liste türü `(T U ...)` olarak yazılabilir
+(`(int string)` `cons-cell<int,cons-cell<string,()>>`'dir; [Sözdizimi Başvurusu 2. bölüm](../syntax.md#2-türlerin-yazımı)). Yazdırılışları da CL'nin
+cons'larıyla aynıdır: `(cons 1 (cons "a" ()))` `(1 "a")`, `(cons 3 1)` ise `(3 . 1)` olarak yazdırılır.
+`cdr`'ın türü `Option<Sexpr>` ise o S-ifadesi verisinin devamı olarak yazdırılır
+(`(cons 'a '(b c))` `(a b c)` olur).
 
 ## 2. S-ifade verisi `Sexpr`
 

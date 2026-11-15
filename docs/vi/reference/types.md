@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -39,8 +39,8 @@ Không có kiểu số nguyên 64 bit. Với các số nguyên mà độ rộng 
 | `Thread<T>` | Một handle tới một task chạy trên thread HĐH riêng | [Thread](functions/concurrency.md#7-threadt--các-thread-hđh-riêng) |
 | `Chan<T>` | Một kênh | [Kênh](functions/concurrency.md#2-chant--kênh) |
 
-Kiểu hàm được viết `(fn (các-kiểu-đối-số...) kiểu-trả-về)`, và trait object là `:dyn Trait`
-([Tham chiếu cú pháp chương 2](syntax.md#2-cách-viết-kiểu)).
+Kiểu hàm được viết `(fn (các-kiểu-đối-số...) kiểu-trả-về)`, đối tượng trait `:dyn Trait`, và kiểu danh
+sách `(T U ...)` (cùng kiểu với `cons-cell<T,cons-cell<U,()>>`) ([Tham chiếu cú pháp chương 2](syntax.md#2-cách-viết-kiểu)).
 
 ## 3. Dữ liệu S-expression
 

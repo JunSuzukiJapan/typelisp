@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 型別一覽
 
 typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的寫法見[語法參考第 2 章](syntax.md#2-型別的寫法)，各型別的函式與方法見
@@ -38,7 +38,8 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | `Thread<T>` | 在專用 OS 執行緒上執行的任務的控制代碼 | [Thread](functions/concurrency.md#7-threadt--專用-os-執行緒) |
 | `Chan<T>` | 通道 | [通道](functions/concurrency.md#2-chant--通道) |
 
-函式型別寫成 `(fn (引數型別...) 回傳值型別)`，trait 物件寫成 `:dyn Trait`（[語法參考第 2 章](syntax.md#2-型別的寫法)）。
+函式型別寫作 `(fn (參數型別...) 回傳值型別)`，trait 物件寫作 `:dyn Trait`，串列型別寫作 `(T U ...)`
+（與 `cons-cell<T,cons-cell<U,()>>` 是同一個型別）（[語法參考第 2 章](syntax.md#2-型別的寫法)）。
 
 ## 3. S 運算式資料
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Affichage
 
 `print`/`println`/`format`, les fonctions d'affichage à un argument, le pretty printer, `print-object` et les
@@ -233,6 +233,7 @@ s'affichent comme dans SBCL. Quand la REPL montre un résultat, elle utilise la 
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>` (types liste `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Idem |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (le nombre est un numéro de série interne) | Idem |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

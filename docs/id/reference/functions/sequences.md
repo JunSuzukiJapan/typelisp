@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Pasangan, S-Expression, dan Sekuens
 
 Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens yang ditulis di atas
@@ -22,6 +22,12 @@ Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens 
 `cons-cell` juga berfungsi sebagai pengganti sintaks tuple. Fungsi CL yang mengembalikan nilai ganda
 (hasil bagi dan sisa pada `floor`, nilai dan posisi pada `read-from-string`, dan sebagainya)
 mengembalikan `cons-cell` di bahasa ini.
+
+`cons-cell` yang disambung-sambung adalah list, dan tipenya dapat ditulis sebagai tipe list `(T U ...)`
+(`(int string)` adalah `cons-cell<int,cons-cell<string,()>>`; [Referensi Sintaks bab 2](../syntax.md#2-menulis-tipe)). Pencetakannya pun sama
+dengan cons CL: `(cons 1 (cons "a" ()))` dicetak `(1 "a")` dan `(cons 3 1)` dicetak `(3 . 1)`. Bila tipe
+`cdr`-nya `Option<Sexpr>`, ia dicetak sebagai lanjutan data S-expression itu
+(`(cons 'a '(b c))` menjadi `(a b c)`).
 
 ## 2. Data S-expression `Sexpr`
 

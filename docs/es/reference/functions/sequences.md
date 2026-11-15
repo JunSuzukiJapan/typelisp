@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Pares, expresiones S y secuencias
 
 El par genérico `cons-cell`, los datos de expresiones S `Sexpr`, los símbolos, las funciones de secuencia
@@ -21,6 +21,12 @@ escritas sobre `Iter` y las funciones de orden superior.
 `cons-cell` también sirve en lugar de una sintaxis de tuplas. Las funciones de CL que devuelven valores
 múltiples (el cociente y el resto de `floor`, el valor y la posición de `read-from-string`, etc.) devuelven
 un `cons-cell` en este lenguaje.
+
+Varias `cons-cell` encadenadas forman una lista, cuyo tipo puede escribirse como tipo lista `(T U ...)`
+(`(int string)` es `cons-cell<int,cons-cell<string,()>>`; [capítulo 2 de la Referencia de sintaxis](../syntax.md#2-escritura-de-tipos)). También se imprimen como los
+cons de CL: `(cons 1 (cons "a" ()))` se imprime `(1 "a")` y `(cons 3 1)`, `(3 . 1)`. Si el tipo del
+`cdr` es `Option<Sexpr>`, se imprime como la continuación de esos datos de S-expresión
+(`(cons 'a '(b c))` es `(a b c)`).
 
 ## 2. Datos de expresiones S `Sexpr`
 

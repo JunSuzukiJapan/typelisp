@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -39,8 +39,8 @@
 | `Thread<T>` | handle ของ task ที่รันบนเธรด OS เฉพาะ | [Thread](functions/concurrency.md#7-threadt--เธรด-os-เฉพาะ) |
 | `Chan<T>` | channel | [Channel](functions/concurrency.md#2-chant--channel) |
 
-ชนิดฟังก์ชันเขียนเป็น `(fn (ชนิดของอาร์กิวเมนต์...) ชนิดของค่าที่คืน)` และ trait object เขียนเป็น `:dyn Trait`
-([เอกสารอ้างอิงไวยากรณ์ บทที่ 2](syntax.md#2-การเขียนชนิด))
+ชนิดฟังก์ชันเขียนเป็น `(fn (ชนิดอาร์กิวเมนต์...) ชนิดค่าที่คืน)` ออบเจกต์ trait เขียนเป็น `:dyn Trait` และชนิด
+ลิสต์เขียนเป็น `(T U ...)` (ชนิดเดียวกับ `cons-cell<T,cons-cell<U,()>>`) ([เอกสารอ้างอิงไวยากรณ์ บทที่ 2](syntax.md#2-การเขียนชนิด))
 
 ## 3. ข้อมูล S-expression
 

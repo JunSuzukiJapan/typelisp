@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Довідник із синтаксису typelisp
 
 typelisp — це Лісп зі статичною типізацією, що записується S-виразами. Перелік вбудованих функцій і
@@ -121,19 +121,19 @@ typelisp — це Лісп зі статичною типізацією, що з
 - **Узагальнені типи**: `Name<T1,T2,...>`. Наприклад `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. Якщо за `<`, що стоїть одразу після імені, іде тип, читач
   читає до парної `>` як аргументи типу. Усередині них частини можуть розділятися пробілами та
-  переходами рядка (`HashTable<string, int>`), і можна писати unit-тип `()`
-  (`Result<(), FileError>`), `:dyn Trait` та типи кортежів. Якщо за `<` не іде тип, цей `<` —
+  переходами рядка (`HashTable<string, int>`), і можна писати unit-тип `()` (`Result<(), FileError>`), `:dyn Trait`, типи кортежів і типи, записані в дужках (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`). Якщо за `<` не іде тип, цей `<` —
   частина імені (`<=`, `string<`). Аргументи типу, не закриті `>` або такі, що не мають вигляду
   типів, — помилка читання (`(a<b c)` теж помилка, в аргументах типу `b c`). `()` можна
   використовувати й як тип поля чи аргументу.
-- **Форма застосування узагальнених типів**: `(Name T1 T2 ...)` — запис у вигляді списку, що
-  позначає той самий тип, що й `Name<T1,T2,...>`. Наприклад, `(vector char)` — те саме, що
-  `Vector<char>`. Звичайний запис — форма імені; ця форма **існує для випадку, коли аргумент типу не
-  можна записати всередині імені**: аргумент типу сам є виразом типу, але всередині `<..>` можна
-  писати лише імена, `()`, `:dyn` і типи кортежів, а не типи функцій (`Vector<(fn (i32) i32)>` —
-  помилка читання; якщо дати типу функції ім'я через `deftype`, можна написати `Vector<F>`). У цій
-  формі тип може з'явитися й тоді, коли його показує реалізація, наприклад як результат підстановки
-  асоційованого типу трейту в сигнатуру.
+- **Спискові типи**: `(T U ...)`. Тип списку з двох елементів, `T` і `U`; це той самий тип, що
+  `cons-cell<T,cons-cell<U,()>>`. `(T)` — список з одного елемента, `()` — порожній список (unit-тип).
+  Завершальне `. V` задає тип `cdr` останньої комірки (`(T . U)` — це `cons-cell<T,U>`, а
+  `(int . Option<Sexpr>)` починаючи з другого елемента — дані S-виразів). Тип у дужках з головою `fn`,
+  `ptr` або `:dyn` — це відповідно тип функції, тип вказівника або тип trait-об'єкта; будь-який інший тип у
+  дужках читається як списковий. Узагальнений тип завжди пишеться `Name<...>`: `(Vector int)` — тип
+  списку з `Vector` та `int`, і це помилка, бо `Vector` не має аргументу типу. Значення спискового типу
+  будуються й розбираються за допомогою `cons`/`car`/`cdr`, а будувати їх можна також через `list`, quote
+  або quasiquote ([розділ 7](#7-інші-спеціальні-форми)). Реалізація теж показує типи в цій формі.
 - **Типи кортежів**: `#{int string}` (такий самий вигляд, як у значень). У кортежі від 1 до 12
   елементів, і тип кортежу може бути аргументом типу (`Vector<#{int string}>`). Елементи читаються
   як `t::0` `t::1` і змінюються через `(setf t::0 v)`. `Equal`, `Ord` (порівняння починаючи з першого
@@ -404,7 +404,7 @@ C дивився б лише до нього, тож мовчки було б п
 (defstruct handle (p ptr))          ; a struct field
 (defenum maybe (none) (some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
-(defffi f ((vector ptr)) i32)       ; inside a type argument
+(defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
 
 Для всіх них одна причина: **слот позначає те, що містить**, тегом. Тегування відкинуло б старші біти
@@ -1716,13 +1716,16 @@ CL пише слова-клаузи як голі символи (`(loop for i f
                                      ; symbol) are wrapped in the matching Sexpr variant, and defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> and the like go in as they are
                                      ; (at no conversion cost). the same for &rest/format arguments.
+                                     ; там, де очікується списковий тип, будує список цього типу (див. нижче)
 (source-file)                       ; the name of the file this form was read from (string). fixed as a
                                      ; constant at check time. corresponds to CL's *load-pathname*, but is
                                      ; not a variable: module bodies run after checking, so "currently
                                      ; loading" cannot be relied on, while at check time it is always known.
                                      ; for sources that are not files, the reader's name for them (<stdin>/<input>)
 (quote datum)                       ; the same as 'datum. returns it as Sexpr data without evaluating
+                                     ; там, де очікується списковий тип, будує список цього типу (див. нижче)
 (quasiquote template)               ; the same as `template. embeds expressions in the template with ,/,@
+                                     ; там, де очікується списковий тип, будує список цього типу (див. нижче)
 (documentation name)                ; returns the docstring of name (a bare name or Type::method) as Option<string>
 (panic message)                     ; message: string. ends abnormally with an unrecoverable error. type !
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
@@ -1738,6 +1741,25 @@ CL пише слова-клаузи як голі символи (`(loop for i f
 (pprint-tabular x [colinc])         ; tabular layout (16 columns by default)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; build a logical block yourself
 ```
+
+Там, де очікується списковий тип ([розділ 2](#2-запис-типів)), — у типі повернення, у типі аргументу, у `the` тощо —
+`list`, `quote` і `quasiquote` будують не дані S-виразів, а список цього типу. Кожен елемент перевіряється
+за типом елемента на своїй позиції, тож підходить і значення, тип якого все ще аргумент типу:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; те саме, що (list t u) або (cons t (cons u ()))
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; вміст quote не обчислюється. елементи — літерали свого типу
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; вкладений список будується з типом елемента
+```
+
+- Кількість елементів задає тип. Забагато чи замало — помилка.
+- `,@x` можна писати й посередині, якщо тип `x` — списковий тип фіксованої довжини (що закінчується на
+  `()`). `,@x` у кінці шаблону робить сам `x` рештою списку (досить, щоб тип `x` був типом решти).
+- Якщо тип закінчується даними S-виразів (`(int . Option<Sexpr>)`), решта шаблону будується як дані
+  S-виразів.
+- Там, де списковий тип не очікується, результатом, як і раніше, будуть дані S-виразів (`Option<Sexpr>`).
 
 Родина `print`/`println`/`format`/`pprint` — це спеціальні форми, тож їхні аргументи зі змінною кількістю
 (один об'єкт для родини `pprint`) перед передаванням загортаються в `Sexpr` із власними типами: саме тому

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Types
 
 The types typelisp has, and the standard traits each type implements. How to write types is in
@@ -39,8 +39,8 @@ There is no 64-bit integer type. For integers whose width does not matter, use `
 | `Thread<T>` | A handle to a task running on a dedicated OS thread | [Thread](functions/concurrency.md#7-threadt--dedicated-os-threads) |
 | `Chan<T>` | A channel | [Channels](functions/concurrency.md#2-chant--channels) |
 
-Function types are written `(fn (argument-types...) return-type)`, and trait objects `:dyn Trait`
-([Syntax Reference chapter 2](syntax.md#2-writing-types)).
+Function types are written `(fn (argument-types...) return-type)`, trait objects `:dyn Trait`, and list
+types `(T U ...)` (the same type as `cons-cell<T,cons-cell<U,()>>`) ([Syntax Reference chapter 2](syntax.md#2-writing-types)).
 
 ## 3. S-expression data
 

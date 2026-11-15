@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Печать
 
 `print`/`println`/`format`, функции печати с одним аргументом, красивая печать, `print-object` и переменные,
@@ -229,6 +229,7 @@ REPL показывает результат, она использует то �
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Кортеж `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>` (списочные типы `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | То же |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (число — внутренний порядковый номер) | То же |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Typy
 
 Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy typ. Sposób zapisu typów opisano w
@@ -39,8 +39,8 @@ Nie ma 64-bitowego typu całkowitego. Dla liczb całkowitych, których szerokoś
 | `Thread<T>` | Uchwyt zadania uruchomionego na dedykowanym wątku systemu operacyjnego | [Thread](functions/concurrency.md#7-threadt--dedykowane-wątki-systemu-operacyjnego) |
 | `Chan<T>` | Kanał | [Kanały](functions/concurrency.md#2-chant--kanały) |
 
-Typy funkcyjne zapisuje się `(fn (typy-argumentów...) typ-zwracany)`, a obiekty traitów `:dyn Trait`
-([Referencja składni, rozdział 2](syntax.md#2-zapis-typów)).
+Typy funkcji zapisuje się `(fn (typy-argumentów...) typ-zwracany)`, obiekty traitów `:dyn Trait`, a typy
+list `(T U ...)` (ten sam typ co `cons-cell<T,cons-cell<U,()>>`) ([Referencja składni, rozdział 2](syntax.md#2-zapis-typów)).
 
 ## 3. Dane w postaci S-wyrażeń
 

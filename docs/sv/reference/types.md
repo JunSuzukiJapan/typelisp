@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -39,8 +39,8 @@ Det finns ingen 64-bitars heltalstyp. För heltal där bredden inte spelar någo
 | `Thread<T>` | Ett handtag till en task som körs på en dedikerad OS-tråd | [Thread](functions/concurrency.md#7-threadt--dedikerade-os-trådar) |
 | `Chan<T>` | En kanal | [Kanaler](functions/concurrency.md#2-chant--kanaler) |
 
-Funktionstyper skrivs `(fn (argumenttyper...) returtyp)`, och trait-objekt `:dyn Trait`
-([Syntaxreferens kapitel 2](syntax.md#2-hur-typer-skrivs)).
+Funktionstyper skrivs `(fn (argumenttyper...) returtyp)`, trait-objekt `:dyn Trait` och listtyper
+`(T U ...)` (samma typ som `cons-cell<T,cons-cell<U,()>>`) ([Syntaxreferens kapitel 2](syntax.md#2-hur-typer-skrivs)).
 
 ## 3. S-uttrycksdata
 

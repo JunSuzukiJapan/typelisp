@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Yazdırma
 
 `print`/`println`/`format`, tek bağımsız değişkenli yazıcılar, pretty printer, `print-object` ve
@@ -233,6 +233,7 @@ yazdırılır. REPL bir sonuç gösterdiğinde `~s` ile aynı gösterimi kullan�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Demet `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>` (liste türleri `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Aynısı |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (sayı bir iç seri numarasıdır) | Aynısı |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

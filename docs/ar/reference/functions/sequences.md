@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # الأزواج والتعبيرات الرمزية والتسلسلات
 
 الزوج العام `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات المكتوبة فوق `Iter`
@@ -19,6 +19,11 @@
 
 ويقوم `cons-cell` أيضًا مقام صياغة الصف (tuple). فدوال CL التي تعيد قيمًا متعددة (الخارج والباقي في
 `floor`، والقيمة والموضع في `read-from-string` وهكذا) تعيد في هذه اللغة `cons-cell`.
+
+خلايا `cons-cell` المتصلة قائمةٌ، ويمكن كتابة نوعها نوعَ قائمة `(T U ...)`
+(`(int string)` هو `cons-cell<int,cons-cell<string,()>>`؛ [الفصل 2 من مرجع الصياغة](../syntax.md#2-كتابة-الأنواع)). وطباعتها أيضًا كطباعة
+cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` تُطبع `(3 . 1)`. وإذا كان نوع
+`cdr` هو `Option<Sexpr>` طُبع تتمةً لبيانات تعابير S تلك (`(cons 'a '(b c))` هي `(a b c)`).
 
 ## 2. بيانات التعبيرات الرمزية `Sexpr`
 

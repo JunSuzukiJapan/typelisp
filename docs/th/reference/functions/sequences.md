@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # คู่ S-expression และลำดับ
 
 คู่ generic `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับที่เขียนบน
@@ -20,6 +20,11 @@
 
 `cons-cell` ยังใช้แทนไวยากรณ์ tuple ด้วย ฟังก์ชัน CL ที่คืนค่าหลายค่า (ผลหารและเศษของ `floor`
 ค่าและตำแหน่งของ `read-from-string` และอื่น ๆ) คืน `cons-cell` ในภาษานี้
+
+`cons-cell` ที่ต่อกันคือลิสต์ และเขียนชนิดของมันเป็นชนิดลิสต์ `(T U ...)` ได้
+(`(int string)` คือ `cons-cell<int,cons-cell<string,()>>` — [เอกสารอ้างอิงไวยากรณ์ บทที่ 2](../syntax.md#2-การเขียนชนิด)) การพิมพ์ก็เหมือน cons ของ CL:
+`(cons 1 (cons "a" ()))` พิมพ์เป็น `(1 "a")` และ `(cons 3 1)` พิมพ์เป็น `(3 . 1)` ถ้าชนิดของ `cdr` เป็น
+`Option<Sexpr>` จะพิมพ์เป็นส่วนต่อของข้อมูล S-expression นั้น (`(cons 'a '(b c))` คือ `(a b c)`)
 
 ## 2. ข้อมูล S-expression (`Sexpr`)
 

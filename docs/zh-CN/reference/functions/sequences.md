@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 序对、S 表达式与序列
 
 泛型序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、构建在 `Iter` 之上的序列函数，以及高阶函数。
@@ -17,6 +17,11 @@
 
 `cons-cell` 也用来代替元组语法。返回多值的 CL 函数（`floor` 的商和余数、`read-from-string` 的值和位置等）在本语言中
 返回 `cons-cell`。
+
+把 `cons-cell` 连起来就是列表，其类型可以写成列表类型 `(T U ...)`
+（`(int string)` 是 `cons-cell<int,cons-cell<string,()>>`。[语法参考第 2 章](../syntax.md#2-类型的写法)）。打印也与 CL 的 cons 相同：
+`(cons 1 (cons "a" ()))` 打印为 `(1 "a")`，`(cons 3 1)` 打印为 `(3 . 1)`。`cdr` 的类型是 `Option<Sexpr>`
+时，作为该 S 表达式数据的后续打印（`(cons 'a '(b c))` 是 `(a b c)`）。
 
 ## 2. S 表达式数据 `Sexpr`
 

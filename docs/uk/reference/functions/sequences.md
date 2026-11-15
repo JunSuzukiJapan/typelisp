@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Пари, S-вирази та послідовності
 
 Узагальнена пара `cons-cell`, дані у вигляді S-виразів `Sexpr`, символи, функції над послідовностями,
@@ -20,6 +20,12 @@
 
 `cons-cell` також слугує замість синтаксису кортежів. Функції CL, що повертають множинні значення (частка й
 остача `floor`, значення й позиція `read-from-string` тощо), у цій мові повертають `cons-cell`.
+
+Зчеплені `cons-cell` утворюють список, тип якого можна записати як списковий тип `(T U ...)`
+(`(int string)` — це `cons-cell<int,cons-cell<string,()>>`; [Довідник із синтаксису, розділ 2](../syntax.md#2-запис-типів)). Друкуються вони теж як
+cons-комірки CL: `(cons 1 (cons "a" ()))` друкується як `(1 "a")`, а `(cons 3 1)` — як `(3 . 1)`. Якщо
+тип `cdr` — `Option<Sexpr>`, він друкується як продовження цих даних S-виразів
+(`(cons 'a '(b c))` — це `(a b c)`).
 
 ## 2. Дані у вигляді S-виразів `Sexpr`
 

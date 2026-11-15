@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.
@@ -17,6 +17,11 @@
 
 `cons-cell`은 튜플 구문의 대신이기도 하다. 다중 값을 반환하는 CL 함수(`floor`의 몫과 나머지, `read-from-string`의 값과 위치
 등)는 이 언어에서는 `cons-cell`을 반환한다.
+
+`cons-cell`을 이은 것은 리스트이며, 그 타입은 리스트 타입 `(T U ...)`로 쓸 수 있다
+(`(int string)`은 `cons-cell<int,cons-cell<string,()>>`. [문법 레퍼런스 2장](../syntax.md#2-타입-표기)). 출력도 CL의 cons와 같아서,
+`(cons 1 (cons "a" ()))`는 `(1 "a")`, `(cons 3 1)`은 `(3 . 1)`로 나온다. `cdr`의 타입이 `Option<Sexpr>`이면
+그 S 식 데이터의 연속으로 출력한다(`(cons 'a '(b c))`는 `(a b c)`).
 
 ## 2. S 식 데이터 `Sexpr`
 

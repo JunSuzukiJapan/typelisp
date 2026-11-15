@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -75,8 +75,14 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **Unit 型別**：`()`
 - **Never 型別**：`!`（`panic`/`unreachable`/`todo`/不回傳的迴圈等發散運算式的型別。適合任何期望型別）
 - **函式型別**：`(fn (引數型別...) 回傳值型別)`。帶可變引數的函式型別為 `(fn (引數型別... &rest 元素型別) 回傳值型別)`。
-- **泛型型別**：`Name<T1,T2,...>`。例如：`Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。名稱之後緊接的 `<` 後面跟著型別時，讀取器把直到對應 `>` 的部分作為型別參數讀取。型別參數內部可以用空白或換行分隔（`HashTable<string, int>`），也可以寫 unit 型別 `()`（`Result<(), FileError>`）、`:dyn Trait` 和元組型別。`<` 之後不是型別時，這個 `<` 是名稱的一部分（`<=`、`string<`）。型別參數沒有用 `>` 閉合或不具有型別的形狀時，是讀取錯誤（`(a<b c)` 也作為型別參數 `b c` 的錯誤而成為讀取錯誤）。`()` 也可以作為欄位型別、參數型別使用。
-- **泛型型別的套用形式**：`(Name T1 T2 ...)` —— 指稱與 `Name<T1,T2,...>` 相同型別的串列寫法。例如 `(vector char)` 與 `Vector<char>` 相同。名稱形式是通常的寫法，這種形式**是為型別參數無法寫進名稱的情況準備的**——型別參數本身是型別運算式，但在 `<..>` 中只能寫名稱、`()`、`:dyn` 和元組型別，不能寫函式型別（`Vector<(fn (i32) i32)>` 是讀取錯誤；用 `deftype` 為函式型別命名後可以寫 `Vector<F>`）。實作顯示型別時也可能以這種形式出現，例如把 trait 的關聯型別代入簽名的結果。
+- **泛型型別**：`Name<T1,T2,...>`。例如：`Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。名稱之後緊接的 `<` 後面跟著型別時，讀取器把直到對應 `>` 的部分作為型別參數讀取。型別參數內部可以用空白或換行分隔（`HashTable<string, int>`），也可以寫 unit 型別 `()`（`Result<(), FileError>`）、`:dyn Trait`、元組型別和用括號寫的型別（`Vector<(int string)>`、`Vector<(fn (i32) i32)>`）。`<` 之後不是型別時，這個 `<` 是名稱的一部分（`<=`、`string<`）。型別參數沒有用 `>` 閉合或不具有型別的形狀時，是讀取錯誤（`(a<b c)` 也作為型別參數 `b c` 的錯誤而成為讀取錯誤）。`()` 也可以作為欄位型別、參數型別使用。
+- **串列型別**：`(T U ...)`。由 `T` 和 `U` 兩個元素組成的串列的型別，與 `cons-cell<T,cons-cell<U,()>>`
+  是同一個型別。`(T)` 有 1 個元素，`()` 是空串列（unit 型別）。在末尾寫 `. V`，就是最後一個單元的 `cdr`
+  的型別（`(T . U)` 是 `cons-cell<T,U>`，`(int . Option<Sexpr>)` 從第 2 個起是 S 運算式資料）。括號的開頭是
+  `fn`、`ptr`、`:dyn` 的，分別是函式型別、指標型別、trait 物件型別，其他括號都讀作串列型別。泛型型別
+  必須寫成 `Name<...>`——`(Vector int)` 是 `Vector` 和 `int` 的串列的型別，由於 `Vector` 沒有型別參數而
+  成為錯誤。串列型別的值用 `cons`/`car`/`cdr` 建構和分解，也可以用 `list`、quote、quasiquote 建構
+  （[第 7 章](#7-其他特殊形式)）。實作顯示型別時也以這種形式輸出。
 - **元組型別**：`#{int string}`（與值的形狀相同）。元素為 1～12 個，元組型別也可以作為泛型型別的參數（`Vector<#{int string}>`）。元素用 `t::0` `t::1` 讀取，用 `(setf t::0 v)` 修改。當所有元素的型別都實作了 `Equal`、`Ord`（從第一個元素起依序比較）、`Hash`、`print-object` 時，即可使用它們。
 - **限定型別名稱**：可以像 `module::Type` 這樣以 `::` 限定。
 - **trait 物件型別**：`:dyn Trait`（以空白分隔的兩個詞構成一個型別）。表示具體型別在執行期決定的值，trait 方法的呼叫經由 vtable 進行動態分派。
@@ -286,7 +292,7 @@ C 的符號名稱。
 (defstruct handle (p ptr))          ; 結構的欄位
 (defenum maybe (none) (some ptr))   ; 列舉的欄位
 (defvar (block ptr) ...)            ; 全域變數
-(defffi f ((vector ptr)) i32)       ; 型別引數內部
+(defffi f (Vector<ptr>) i32)        ; 型別引數內部
 ```
 
 理由只有一個：這些都是**槽會為內容加上標籤**的地方。加上標籤，指標的最高位元就會遺失——與去掉 64 位元整數型別的理由相同，所以即使在 `unsafe`
@@ -1375,13 +1381,16 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
                                      ; symbol）包裝為對應的 Sexpr 變體，defstruct/defenum/
                                      ; Vector<T>/HashTable<K,V> 等原樣放入（沒有轉換的
                                      ; 成本）。&rest/format 的引數也一樣。
+                                     ; 在期待串列型別的位置，建構該型別的串列（見下文）
 (source-file)                       ; 讀取這個形式的檔案名稱（string）。在檢查時
                                      ; 作為常數決定。相當於 CL 的 *load-pathname*，但不是變數
                                      ; ——模組的本體在檢查之後執行，所以「現在
                                      ; 正在載入」靠不住，而在檢查時一律是已知的。
                                      ; 不是檔案的原始碼為讀取器的稱呼（<stdin>/<input>）
 (quote datum)                       ; 與 'datum 相同。不求值，以 Sexpr 資料回傳
+                                     ; 在期待串列型別的位置，建構該型別的串列（見下文）
 (quasiquote template)               ; 與 `template 相同。以 ,/,@ 把式子嵌入範本
+                                     ; 在期待串列型別的位置，建構該型別的串列（見下文）
 (documentation name)                ; 以 Option<string> 回傳 name（裸名稱或 Type::method）的文件字串
 (panic message)                     ; message: string。以不可恢復的錯誤異常結束。型別為 !
 (unreachable)                       ; 展開為 (panic "unreachable")。defmacro
@@ -1397,6 +1406,24 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 (pprint-tabular x [colinc])         ; 表格版面（預設 16 欄）
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; 自己建構邏輯區塊
 ```
+
+`list`、`quote`、`quasiquote` 在期待串列型別（[第 2 章](#2-型別的寫法)）的位置——回傳值型別、參數型別、`the`
+等——建構的不是 S 運算式資料，而是該型別的串列。每個元素依其位置的元素型別檢查，因此型別仍是型別參數的
+值也能放進去：
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; 與 (list t u) 或 (cons t (cons u ())) 相同
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; quote 的內容不求值。元素是該型別的字面值
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; 巢狀的串列依元素的型別建構
+```
+
+- 元素個數由型別決定。多了或少了都是錯誤。
+- 當 `x` 的型別是長度確定的串列型別（以 `()` 結尾）時，`,@x` 也可以寫在中間。範本最後的 `,@x` 直接把
+  `x` 作為串列的其餘部分（只要 `x` 的型別是其餘部分的型別即可）。
+- 型別以 S 運算式資料結尾（`(int . Option<Sexpr>)`）時，範本的其餘部分建構為 S 運算式資料。
+- 在不期待串列型別的位置，結果和以前一樣是 S 運算式資料（`Option<Sexpr>`）。
 
 `print`/`println`/`format`/`pprint` 系列是特殊形式，所以可變引數（`pprint` 系列是一個對象）以各自的型別包裝進 `Sexpr` 傳遞——
 `(println "~a" my-struct)` 能直接運作就是這個原因。格式指令與 pretty printer 的詳情見[格式指令](functions/format.md)與

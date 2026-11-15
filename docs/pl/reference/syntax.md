@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -123,19 +123,19 @@ W kodzie źródłowym typy zapisuje się jako zwykłe symbole lub listy.
 - **Typy generyczne**: `Name<T1,T2,...>`. Na przykład `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. Gdy po `<` stojącym tuż za nazwą następuje typ, czytnik czyta
   do odpowiadającego `>` jako argumenty typu. W ich wnętrzu części mogą oddzielać spacje i znaki
-  nowego wiersza (`HashTable<string, int>`), można też zapisać typ unit `()`
-  (`Result<(), FileError>`), `:dyn Trait` i typy krotek. Jeśli po `<` nie następuje typ, to `<` jest
+  nowego wiersza (`HashTable<string, int>`), można też zapisać typ unit `()` (`Result<(), FileError>`), `:dyn Trait`, typy krotek i typy zapisane w nawiasach (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`). Jeśli po `<` nie następuje typ, to `<` jest
   częścią nazwy (`<=`, `string<`). Argumenty typu niezamknięte przez `>` albo niemające postaci
   typów są błędem odczytu (także `(a<b c)` jest błędem, w argumentach typu `b c`). `()` można też
   używać jako typu pola lub argumentu.
-- **Forma aplikacji typów generycznych**: `(Name T1 T2 ...)`, zapis w postaci listy oznaczający ten
-  sam typ co `Name<T1,T2,...>`. Na przykład `(vector char)` to to samo co `Vector<char>`. Forma
-  nazwy jest zwykłym zapisem; ta forma **istnieje na wypadek, gdy argumentu typu nie da się zapisać
-  w nazwie**: argument typu sam jest wyrażeniem typu, ale wewnątrz `<..>` można zapisać tylko nazwy,
-  `()`, `:dyn` i typy krotek, a nie typy funkcji (`Vector<(fn (i32) i32)>` jest błędem odczytu; po
-  nazwaniu typu funkcji przez `deftype` można zapisać `Vector<F>`). W tej postaci typ może też
-  pojawić się, gdy implementacja go pokazuje, na przykład jako wynik podstawienia typu powiązanego
-  traitu do sygnatury.
+- **Typy list**: `(T U ...)`. Typ dwuelementowej listy złożonej z `T` i `U`; ten sam typ co
+  `cons-cell<T,cons-cell<U,()>>`. `(T)` ma jeden element, a `()` to lista pusta (typ unit). Końcowe `. V`
+  podaje typ `cdr` ostatniej komórki (`(T . U)` to `cons-cell<T,U>`, a `(int . Option<Sexpr>)` od drugiego
+  elementu to dane S-wyrażeń). Typ w nawiasach, którego głową jest `fn`, `ptr` lub `:dyn`, to odpowiednio
+  typ funkcji, typ wskaźnika lub typ obiektu traitu; każdy inny typ w nawiasach jest czytany jako typ
+  listy. Typ generyczny zawsze zapisuje się jako `Name<...>`: `(Vector int)` to typ listy złożonej z
+  `Vector` i `int` i jest błędem, bo `Vector` nie ma argumentu typu. Wartości typu listy buduje się i
+  rozkłada za pomocą `cons`/`car`/`cdr`, można je też zbudować przez `list`, quote lub quasiquote
+  ([rozdział 7](#7-pozostałe-formy-specjalne)). Implementacja także pokazuje typy w tej postaci.
 - **Typy krotek**: `#{int string}` (ta sama postać co wartości). Krotka ma od 1 do 12 elementów, a
   typ krotki może też być argumentem typu (`Vector<#{int string}>`). Elementy czyta się przez `t::0`
   `t::1`, a zmienia przez `(setf t::0 v)`. `Equal`, `Ord` (porównanie od pierwszego elementu), `Hash` i
@@ -405,7 +405,7 @@ Każde z poniższych jest błędem:
 (defstruct handle (p ptr))          ; pole struktury
 (defenum maybe (none) (some ptr))   ; pole enumeracji
 (defvar (block ptr) ...)            ; zmienna globalna
-(defffi f ((vector ptr)) i32)       ; wewnątrz argumentu typu
+(defffi f (Vector<ptr>) i32)        ; wewnątrz argumentu typu
 ```
 
 Jest jeden powód dla wszystkich: **slot taguje to, co przechowuje**. Tagowanie odrzuciłoby najwyższe bity
@@ -1726,13 +1726,16 @@ dalej).
                                      ; symbol) są opakowywane w odpowiedni wariant Sexpr, a defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> i podobne wchodzą bez zmian
                                      ; (bez kosztu konwersji). to samo dla argumentów &rest/format.
+                                     ; tam, gdzie oczekiwany jest typ listy, buduje listę tego typu (zob. niżej)
 (source-file)                       ; nazwa pliku, z którego odczytano tę formę (łańcuch znaków). ustalana jako
                                      ; stała w czasie sprawdzania. odpowiada *load-pathname* z CL, ale nie
                                      ; jest zmienną: ciała modułów działają po sprawdzeniu, więc na „aktualnie
                                      ; ładowane" nie można polegać, podczas gdy w czasie sprawdzania zawsze jest znane.
                                      ; dla źródeł niebędących plikami nazwa nadana przez czytnik (<stdin>/<input>)
 (quote datum)                       ; to samo co 'datum. zwraca je jako dane Sexpr bez obliczania
+                                     ; tam, gdzie oczekiwany jest typ listy, buduje listę tego typu (zob. niżej)
 (quasiquote template)               ; to samo co `template. osadza wyrażenia w szablonie za pomocą ,/,@
+                                     ; tam, gdzie oczekiwany jest typ listy, buduje listę tego typu (zob. niżej)
 (documentation name)                ; zwraca docstring name (gołą nazwę lub Type::method) jako Option<string>
 (panic message)                     ; message: string. kończy się nieprawidłowo nieodwracalnym błędem. typ !
 (unreachable)                       ; rozwija się do (panic "unreachable"). defmacro
@@ -1748,6 +1751,26 @@ dalej).
 (pprint-tabular x [colinc])         ; układ tabelaryczny (domyślnie 16 kolumn)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; zbuduj blok logiczny samodzielnie
 ```
+
+W miejscu, w którym oczekiwany jest typ listy ([rozdział 2](#2-zapis-typów)) — typ zwracany, typ argumentu, `the`
+itd. — `list`, `quote` i `quasiquote` budują listę tego typu, a nie dane S-wyrażeń. Każdy element jest
+sprawdzany względem typu elementu na swojej pozycji, więc zmieści się też wartość, której typ jest
+nadal argumentem typu:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; to samo co (list t u) lub (cons t (cons u ()))
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; zawartość quote nie jest wartościowana. elementy są literałami swojego typu
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; zagnieżdżona lista jest budowana z typem elementu
+```
+
+- Liczbę elementów wyznacza typ. Za dużo lub za mało to błąd.
+- `,@x` można zapisać także w środku, gdy typ `x` jest typem listy o stałej długości (kończącym się na
+  `()`). `,@x` na końcu szablonu czyni samo `x` resztą listy (wystarczy, że typ `x` jest typem reszty).
+- Gdy typ kończy się danymi S-wyrażeń (`(int . Option<Sexpr>)`), reszta szablonu jest budowana jako dane
+  S-wyrażeń.
+- W miejscu, w którym nie oczekuje się typu listy, wynikiem są jak dotąd dane S-wyrażeń (`Option<Sexpr>`).
 
 Rodzina `print`/`println`/`format`/`pprint` to formy specjalne, więc ich argumenty o zmiennej liczbie (pojedynczy
 obiekt dla rodziny `pprint`) są opakowywane w `Sexpr` z własnymi typami, zanim zostaną przekazane: dlatego

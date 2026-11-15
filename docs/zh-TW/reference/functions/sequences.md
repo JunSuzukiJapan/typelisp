@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 序對、S 運算式與序列
 
 泛型序對 `cons-cell`、S 運算式資料 `Sexpr`、符號、建構在 `Iter` 之上的序列函式，以及高階函式。
@@ -16,6 +16,11 @@
 | `cdr` | `(cdr p)` | `cons-cell<A,B>→B` | 其餘部分 |
 
 `cons-cell` 也用來取代元組語法。回傳多值的 CL 函式（`floor` 的商與餘數、`read-from-string` 的值與位置等）在這個語言中回傳 `cons-cell`。
+
+把 `cons-cell` 連起來就是串列，其型別可以寫成串列型別 `(T U ...)`
+（`(int string)` 是 `cons-cell<int,cons-cell<string,()>>`。[語法參考第 2 章](../syntax.md#2-型別的寫法)）。印出也與 CL 的 cons 相同：
+`(cons 1 (cons "a" ()))` 印成 `(1 "a")`，`(cons 3 1)` 印成 `(3 . 1)`。`cdr` 的型別是 `Option<Sexpr>`
+時，作為該 S 運算式資料的後續印出（`(cons 'a '(b c))` 是 `(a b c)`）。
 
 ## 2. S 運算式資料 `Sexpr`
 

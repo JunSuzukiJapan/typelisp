@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -38,8 +38,8 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 | `Thread<T>` | 전용 OS 스레드에서 실행되는 태스크의 핸들 | [Thread](functions/concurrency.md#7-threadt--전용-os-스레드) |
 | `Chan<T>` | 채널 | [채널](functions/concurrency.md#2-chant--채널) |
 
-함수 타입은 `(fn (인수-타입...) 반환-타입)`, 트레이트 객체는 `:dyn Trait`으로 쓴다
-([문법 레퍼런스 2장](syntax.md#2-타입-표기)).
+함수 타입은 `(fn (인수 타입...) 반환 타입)`, 트레이트 객체는 `:dyn Trait`, 리스트 타입은 `(T U ...)`
+(`cons-cell<T,cons-cell<U,()>>`와 같은 타입)로 쓴다([문법 레퍼런스 2장](syntax.md#2-타입-표기)).
 
 ## 3. S 식 데이터
 
