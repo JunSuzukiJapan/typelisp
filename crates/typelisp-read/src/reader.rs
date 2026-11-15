@@ -245,17 +245,9 @@ impl Reader {
     /// reader reports for empty input; a `start` inside a datum reads
     /// whatever begins there, which is the caller's business, not this
     /// function's.
-    pub fn read_from(
-        &self,
-        heap: &mut Heap,
-        src: &str,
-        start: usize,
-        preserve_whitespace: bool,
-    ) -> Result<(Value, usize), Error> {
-        self.read_from_with(heap, src, start, preserve_whitespace, NsId::ROOT, None)
-    }
-
-    /// [`Reader::read_from`] with an evaluator — see [`Reader::read_in_with`].
+    ///
+    /// Names are read in the module `ns`, and `#.` runs through `eval` — see
+    /// [`Reader::read_in_with`].
     pub fn read_from_with(
         &self,
         heap: &mut Heap,
@@ -430,7 +422,7 @@ impl Forms<'_> {
     }
 
     /// How far into the source the reader has got, as a **character** index
-    /// (the unit [`Reader::read_from`] uses too).
+    /// (the unit [`Reader::read_from_with`] uses too).
     ///
     /// Read one form at a time and the text splits in two at this point: what
     /// has been read, and what has not. An interactive driver needs the
@@ -441,7 +433,7 @@ impl Forms<'_> {
     ///
     /// A datum ends where it ends: the whitespace that separated it from the
     /// next one has not been consumed and is part of the tail. (Only
-    /// [`Reader::read_from`] eats that one character, because CL's
+    /// [`Reader::read_from_with`] eats that one character, because CL's
     /// `read-from-string` does.)
     pub fn pos(&self) -> usize {
         self.cur.pos()

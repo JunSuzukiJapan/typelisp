@@ -3195,8 +3195,7 @@ fn ratio_rt(heap: &mut Heap, r: BigRational) -> Value {
 
 /// A `string` value: `s` allocated onto the GC heap. The one constructor.
 ///
-/// `Heap::alloc_string` deliberately does *not* dedupe (unlike
-/// `intern_string`, which the symbol/path tables use), so two separately
+/// `Heap::alloc_string` deliberately does *not* dedupe, so two separately
 /// evaluated literals with equal content get distinct `StrId`s — which is
 /// what keeps `eq` a genuine identity test rather than collapsing to content
 /// comparison. See [`string_identity_eq`].

@@ -666,10 +666,10 @@ fn non_keyword_feature_expression_is_a_read_error() {
 fn a_closing_bracket_or_brace_ends_a_token() {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
-    let (v, end) = r.read_from(&mut h, "abc]def", 0, true).expect("read failed");
+    let (v, end) = r.read_from_with(&mut h, "abc]def", 0, true, typelisp::mem::NsId::ROOT, None).expect("read failed");
     assert_eq!(show(&h, v), "abc");
     assert_eq!(end, 3, "the `]` is left for whoever opened it");
-    let (v, end) = r.read_from(&mut h, "abc}def", 0, true).expect("read failed");
+    let (v, end) = r.read_from_with(&mut h, "abc}def", 0, true, typelisp::mem::NsId::ROOT, None).expect("read failed");
     assert_eq!(show(&h, v), "abc");
     assert_eq!(end, 3);
 }

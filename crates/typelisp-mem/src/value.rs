@@ -475,9 +475,9 @@ pub(crate) enum BoxedObj {
     /// `Enum`/`Struct` field — `(Option::some symbol->string)` had to fall back to
     /// the heap-invisible `RtValue::Data`. Giving them a box closes it.
     ///
-    /// `name` is a [`super::heap::Heap::intern_string`] id and `recv_type` an
-    /// interned [`PathId`], so both are permanent and low-cardinality (there
-    /// are finitely many built-ins) — nothing here is per-value allocation.
+    /// `name` and `recv_type` are symbols, so both are permanent and
+    /// low-cardinality (there are finitely many built-ins) — nothing here is
+    /// per-value allocation.
     /// A built-in is *not* callable from compiled code: the `rt_closure_*`
     /// shims all test `is_compiled_closure` and refuse anything else, and the
     /// interpreter refuses to marshal one across the boundary, so this box

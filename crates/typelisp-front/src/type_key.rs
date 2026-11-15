@@ -58,13 +58,6 @@ pub fn type_key_id(p: &Path, args: Vec<TypeId>) -> TypeId {
     typelisp_mem::intern_type(TypeShape::Named(p.ns(), p.name_symbol(), args))
 }
 
-/// The interned identity of the type `p` names, or `None` if no value has
-/// ever been of that type — which answers "is `id` one of those?"
-/// on its own, without minting anything.
-fn existing_type_key_id(p: &Path) -> Option<TypeId> {
-    typelisp_mem::find_type(&TypeShape::Named(p.ns(), p.name_symbol(), Vec::new()))
-}
-
 /// The interned identity of the type `ty`, minting it if it has not been seen
 /// before. The one place a checker type becomes a runtime one; the shape is
 /// the one `core::type_form` writes for the same type.
@@ -93,15 +86,8 @@ pub fn type_id(ty: &Type) -> TypeId {
     typelisp_mem::intern_type(shape)
 }
 
-/// Allocate a boxed struct of the type `p` names — `Heap::alloc_struct` with
-/// the identity resolved for you. The one place a struct's key is written.
-pub fn alloc_typed_struct(heap: &mut Heap, p: &Path, fields: Vec<crate::Value>) -> crate::Value {
-    let key = type_key_id(p, Vec::new());
-    heap.alloc_struct(key, fields)
-}
-
-/// Allocate a boxed enum value of the type `p` names — the enum counterpart of
-/// [`alloc_typed_struct`]. The one place an enum's key is written.
+/// Allocate a boxed enum value of the type `p` names — `Heap::alloc_enum`
+/// with the identity resolved for you. The one place an enum's key is written.
 pub fn alloc_typed_enum(
     heap: &mut Heap,
     p: &Path,
@@ -114,9 +100,7 @@ pub fn alloc_typed_enum(
 
 /// Allocate a boxed struct whose runtime identity is `ty` — the type the
 /// construction site wrote, carried through the core IR's `construct` node.
-///
-/// The [`Path`]-taking [`alloc_typed_struct`] answers the same question for a
-/// caller that has no instantiation to speak of (a non-generic type).
+/// The one place a struct's key is written.
 pub fn alloc_struct_of(heap: &mut Heap, ty: TypeId, fields: Vec<crate::Value>) -> crate::Value {
     heap.alloc_struct(ty, fields)
 }
@@ -157,19 +141,6 @@ pub fn heap_type_id(heap: &Heap, id: BoxId) -> Option<TypeId> {
         Some(heap.enum_type_key(id)) // type-identity-ok: this is the reader
     } else {
         None
-    }
-}
-
-/// Whether boxed value `id` is an instance of the type `p` names. The one
-/// place a type identity is compared.
-///
-/// Deliberately indifferent to struct-vs-enum: a path names one or the other,
-/// never both, so the key comparison alone settles it. Callers that go on to
-/// *decode fields* still test `is_struct`/`is_enum` for their own reasons.
-pub fn heap_type_is(heap: &Heap, id: BoxId, p: &Path) -> bool {
-    match heap_type_id(heap, id) {
-        Some(k) => existing_type_key_id(p) == Some(k),
-        None => false,
     }
 }
 

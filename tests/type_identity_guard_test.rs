@@ -29,7 +29,7 @@
 //! | question | use |
 //! |---|---|
 //! | "is this path the built-in `X`?" | `types::path_is_builtin` / `path_is_builtin_any` |
-//! | "which type is this heap value?" | `type_key::type_key_of` / `heap_type_is` / `heap_type_path` |
+//! | "which type is this heap value?" | `type_key::type_key_of` / `heap_type_is_id` / `heap_type_path` |
 //!
 //! A site that is genuinely neither (a stored key compared to another stored
 //! key, a root built-in assembled from a literal) opts out with a
@@ -170,8 +170,6 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
                 "intern_type(",
                 "struct_type_key(",
                 "enum_type_key(",
-                "struct_type_name(",
-                "enum_type_name(",
             ]
             .iter()
             .any(|needle| line.contains(needle))
@@ -183,8 +181,8 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
         "The interned key is the value's identity, and compiled code, the interpreter, the \
          printer and `equalp` all have to agree on the name it is interned under — they did \
          not, twice (2dd5171). Mint it with `type_key::type_key_id`, write it with \
-         `type_key::alloc_typed_struct`/`alloc_typed_enum`, compare it with \
-         `type_key::heap_type_is`, read it back with `type_key::heap_type_path`.",
+         `type_key::alloc_struct_of`/`alloc_typed_enum`, compare it with \
+         `type_key::heap_type_is_id`, read it back with `type_key::heap_type_path`.",
     );
 }
 
