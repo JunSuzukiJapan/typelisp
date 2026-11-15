@@ -6,6 +6,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "README_JP.md"
+# `cargo run` starts `typl`; the other binaries are tools, named with `--bin`.
+default-run = "typl"
 keywords = ["lisp", "language", "compiler", "interpreter", "static-typing"]
 categories = ["compilers", "command-line-utilities"]
 # What goes into the package published to crates.io: the sources this crate
