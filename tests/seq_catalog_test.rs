@@ -133,22 +133,22 @@ fn substitute_replaces_by_value_and_by_predicate() {
 fn the_alist_catalog_searches_by_key_value_and_predicate() {
     assert_eq!(
         with_fixtures("(assoc-if (iter al) (lambda ((k int)) bool (= k 2)))"),
-        "(some #<cons-cell<int,string> car: 2 cdr: two>)"
+        "(some (2 . two))"
     );
-    assert_eq!(with_fixtures("(rassoc \"two\" (iter al) :test equal)"), "(some #<cons-cell<int,string> car: 2 cdr: two>)");
+    assert_eq!(with_fixtures("(rassoc \"two\" (iter al) :test equal)"), "(some (2 . two))");
     assert_eq!(
         with_fixtures("(rassoc-if (iter al) (lambda ((s string)) bool (equal s \"one\")))"),
-        "(some #<cons-cell<int,string> car: 1 cdr: one>)"
+        "(some (1 . one))"
     );
     // `acons` puts the new pair in front, as CL's cons does.
     assert_eq!(
         with_fixtures("(acons 3 \"three\" (iter al))"),
-        "#(#<cons-cell<int,string> car: 3 cdr: three> #<cons-cell<int,string> car: 1 cdr: one> #<cons-cell<int,string> car: 2 cdr: two>)"
+        "#((3 . three) (1 . one) (2 . two))"
     );
     // `pairlis` stops at the shorter of the two.
     assert_eq!(
         with_fixtures("(pairlis (iter a) (iter b))"),
-        "#(#<cons-cell<int,int> car: 1 cdr: 2> #<cons-cell<int,int> car: 2 cdr: 3> #<cons-cell<int,int> car: 2 cdr: 4>)"
+        "#((1 . 2) (2 . 3) (2 . 4))"
     );
 }
 
@@ -276,8 +276,8 @@ fn nconc_appends_into_the_receiver_and_nreconc_reverses_first() {
 /// `cons-cell`'s own `set-car`/`set-cdr` return `()`.
 #[test]
 fn rplaca_and_rplacd_return_the_mutated_cell() {
-    assert_eq!(show("(rplaca (cons 1 2) 9)"), "#<cons-cell<int,int> car: 9 cdr: 2>");
-    assert_eq!(show("(rplacd (rplaca (cons 1 2) 9) 8)"), "#<cons-cell<int,int> car: 9 cdr: 8>");
+    assert_eq!(show("(rplaca (cons 1 2) 9)"), "(9 . 2)");
+    assert_eq!(show("(rplacd (rplaca (cons 1 2) 9) 8)"), "(9 . 8)");
 }
 
 // ------------------------------------------- filled in on 2026-09-25

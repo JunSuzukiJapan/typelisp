@@ -555,15 +555,13 @@ pub(crate) fn hole_form(heap: &mut Heap, loc: Option<Loc>) -> Result<Value, Erro
     f.finish_at(wk::PANIC, loc)
 }
 
-/// Emit a [`Type`] as the type *syntax* that parses back to it — the inverse
-/// of [`crate::types::parse_type`], and the reason
-/// [`crate::types::parse_applied_type`]'s list spelling of a generic exists.
+/// Emit a [`Type`] as the type *syntax* that reads back to it — the inverse
+/// of `typeck::type_syntax::parse_type`.
 ///
-/// A generic comes out applied (`(vector char)`) rather than as the name
-/// `Vector<char>`, because the arguments here are arbitrary `Type`s and the
-/// name grammar cannot spell all of them: `Vector<(fn (i32) i32)>` has no
-/// written form at all. Emitting the list form makes the round trip total,
-/// which is what `typeck::subst` needs to substitute a trait's
+/// A generic comes out as the reader's own structure for `Name<Arg,...>`,
+/// `(%type-apply Name Arg...)`, which holds any argument — including one
+/// that is a list, `(fn (i32) i32)` or `(int string)`. That makes the round
+/// trip total, which is what `typeck::subst` needs to substitute a trait's
 /// associated type into a signature no matter what the `impl` bound it to.
 ///
 /// Every nested result is rooted as it is produced: each sibling's emission
@@ -590,7 +588,7 @@ pub(crate) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         }
         // The reader's joined `(:dyn Trait)` form. The associated-type pins
         // ride along as the head's arguments, which is where
-        // `types::parse_dyn_type` reads them back out of.
+        // `typeck::type_syntax` reads them back out of.
         Type::Dyn(p, pins) => {
             let head = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::DYN));
             let mut s = RootScope::new(heap);

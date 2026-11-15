@@ -751,13 +751,13 @@ fn read_datum_here(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Va
         Some('#') => read_hash(cur, heap, ctx),
         Some(_) => {
             let start = cur.loc();
-            let v = read_atom(cur, heap, ctx.ns, ctx.paths)?;
+            let v = read_atom(cur, heap, ctx)?;
             // `:dyn Trait` (the trait-object type) is written as two
             // whitespace-separated words, so the reader joins them into the
             // single datum `(:dyn Trait)` — exactly the treatment `'x` gets.
             // Every type position (parameter/field pairs, return types, `(fn
             // ...)` types) can then keep its "a type is one `Value`"
-            // assumption unchanged; `types::parse_type` recognizes the
+            // assumption unchanged; `typeck::type_syntax` recognizes the
             // resulting list. Inside a generic argument the same spelling is
             // read by `read_type_arg`, which builds the same list.
             if matches!(v, Value::Symbol(id) if id.is(wk::DYN)) {
@@ -1728,7 +1728,8 @@ fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
 // Atoms: numbers & symbols
 // ----------------------------------------------------------------------
 
-fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId, paths: PathMode) -> Result<Value, Error> {
+fn read_atom(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
+    let (ns, paths) = (ctx.ns, ctx.paths);
     let start = cur.loc();
     let (tok, escaped) = lex_token(cur, false)?;
     if paths != PathMode::Resolve && !escaped && tok.contains("::") && !tok.starts_with(':') {
@@ -1752,7 +1753,7 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId, paths: PathMode) -> Re
         return Err(Error::ReadError(format!("`{}` is not a type name, so it takes no `<..>`", tok)));
     }
     let head_loc = start.clone().with_end(cur.line, cur.col);
-    let applied = read_type_application(cur, heap, ns, (head, head_loc), start.clone())?;
+    let applied = read_type_application(cur, heap, ctx, (head, head_loc), start.clone())?;
     // `Name<A>::member` — a member of that instantiation.
     if cur.peek() == Some(':') && cur.peek2() == Some(':') {
         let applied_loc = start.clone().with_end(cur.line, cur.col);
@@ -1923,8 +1924,8 @@ fn token_value(heap: &mut Heap, ns: NsId, tok: &str, escaped: bool) -> Result<Va
     }
 }
 
-/// Whether `c` can begin a type: a name, `#{` (a tuple type), `()` (the
-/// unit type), `:dyn`, or `!`.
+/// Whether `c` can begin a type: a name, `#{` (a tuple type), `(` (a type
+/// in parentheses), `:dyn`, or `!`.
 fn starts_type(c: char) -> bool {
     c.is_alphabetic() || matches!(c, '_' | '%' | '*' | '#' | '(' | ':' | '!')
 }
@@ -1935,14 +1936,14 @@ fn starts_type(c: char) -> bool {
 ///
 /// A malformed argument list is a read error, not a reason to read the text
 /// some other way: once a name is followed by `<` and a type, it is a type.
-fn read_type_application(cur: &mut Cursor, heap: &mut Heap, ns: NsId, head: (Value, Loc), start: Loc) -> Result<Value, Error> {
+fn read_type_application(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: (Value, Loc), start: Loc) -> Result<Value, Error> {
     let mark = heap.root_count();
     let marker_loc = head.1.clone();
     let mut elems = vec![(Value::Symbol(symbols::well_known_symbol(wk::TYPE_APPLY)), marker_loc), head];
     cur.next(); // '<'
     let result = (|| loop {
         skip_type_ws(cur);
-        let arg = read_type_arg(cur, heap, ns)?;
+        let arg = read_type_arg(cur, heap, ctx)?;
         heap.push_root(arg.0);
         elems.push(arg);
         skip_type_ws(cur);
@@ -1963,22 +1964,20 @@ fn read_type_application(cur: &mut Cursor, heap: &mut Heap, ns: NsId, head: (Val
     built
 }
 
-/// One type inside `<..>`, as data, with where it was written: `()`,
-/// `#{T ...}`, `:dyn T` (as `(:dyn T)`), or a name with its own optional
-/// `<..>`. A parenthesized type other than `()` is refused: a function type
-/// is given a name with `deftype`.
-fn read_type_arg(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<(Value, Loc), Error> {
+/// One type inside `<..>`, as data, with where it was written: a type in
+/// parentheses (`()`, a list type `(T U)`, `(fn (A) R)`), `#{T ...}`,
+/// `:dyn T` (as `(:dyn T)`), or a name with its own optional `<..>`.
+///
+/// A parenthesized type is read as the list it is anywhere else, so its
+/// insides follow the ordinary grammar: nothing in it is a `,` or a `>` of
+/// this argument list.
+fn read_type_arg(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<(Value, Loc), Error> {
+    let ns = ctx.ns;
     let start = cur.loc();
     match cur.peek() {
         Some('(') => {
-            if cur.peek2() != Some(')') {
-                return Err(type_args_error(
-                    "the only type written in parentheses inside `<..>` is `()`; give a function type a name with `deftype`",
-                ));
-            }
-            cur.next();
-            cur.next();
-            Ok((Value::Empty, start.with_end(cur.line, cur.col)))
+            let v = read_list(cur, heap, Ctx { paths: PathMode::Resolve, toplevel: false, ..ctx })?;
+            Ok((v, start.with_end(cur.line, cur.col)))
         }
         Some('#') if cur.peek2() == Some('{') => {
             cur.next();
@@ -1993,7 +1992,7 @@ fn read_type_arg(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<(Value, 
                         return Ok(());
                     }
                     Some(_) => {
-                        let (e, _) = read_type_arg(cur, heap, ns)?;
+                        let (e, _) = read_type_arg(cur, heap, ctx)?;
                         heap.push_root(e);
                         elems.push(e);
                     }
@@ -2024,14 +2023,14 @@ fn read_type_arg(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<(Value, 
                 if !skip_type_ws(cur) {
                     return Err(type_args_error("`:dyn` needs a space before its trait"));
                 }
-                let inner = read_type_arg(cur, heap, ns)?;
+                let inner = read_type_arg(cur, heap, ctx)?;
                 heap.push_root(inner.0);
                 let r = located_list(heap, &[(head, head_loc), inner], start.clone().with_end(cur.line, cur.col));
                 heap.pop_root();
                 return Ok((r?, start.with_end(cur.line, cur.col)));
             }
             if cur.peek() == Some('<') {
-                let v = read_type_application(cur, heap, ns, (head, head_loc), start.clone())?;
+                let v = read_type_application(cur, heap, ctx, (head, head_loc), start.clone())?;
                 return Ok((v, start.with_end(cur.line, cur.col)));
             }
             Ok((head, head_loc))

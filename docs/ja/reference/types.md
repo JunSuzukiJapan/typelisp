@@ -37,8 +37,8 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `Thread<T>` | 専用 OS スレッドで走るタスクのハンドル | [Thread](functions/concurrency.md#7-threadt--専用の-os-スレッド) |
 | `Chan<T>` | チャネル | [チャネル](functions/concurrency.md#2-chant--チャネル) |
 
-関数型は `(fn (引数型...) 戻り値型)`、トレイトオブジェクトは `:dyn Trait` と書く
-（[構文リファレンス 2 章](syntax.md#2-型の書き方)）。
+関数型は `(fn (引数型...) 戻り値型)`、トレイトオブジェクトは `:dyn Trait`、リスト型は `(T U ...)`
+（`cons-cell<T,cons-cell<U,()>>` と同じ型）と書く（[構文リファレンス 2 章](syntax.md#2-型の書き方)）。
 
 ## 3. S 式データ
 

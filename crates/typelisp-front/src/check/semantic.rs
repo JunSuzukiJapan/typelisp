@@ -10,7 +10,7 @@
 //!
 //! The server does neither. The checker records a [`TypeUse`] at every
 //! position its *grammar* put a type name — annotations (through
-//! `types::parse_type_spanned`, which keeps each written name's exact source
+//! `typeck::type_syntax`, which keeps each written name's exact source
 //! span), definition headers, `Type::member` heads, ctor patterns — and
 //! resolves each against the registry before recording. A position is only
 //! ever highlighted because the checker knows a type is named there, so:

@@ -1,4 +1,5 @@
-//! `(list item...)`: a list of S-expressions, itself one.
+//! `(list item...)`: a list of S-expressions, itself one — or, where a list
+//! type is expected, that type's cells (`typed_list`).
 //!
 //! Each item is expected to be an `Option<Sexpr>`, so any value with a
 //! `Sexpr` encoding may be one ([`super::widen`]). The list is built from
@@ -15,7 +16,10 @@ use super::locals::Locals;
 use super::tree::{Node, Typed};
 
 /// `(list item...)` — `args` without the `list`.
-pub(crate) fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+pub(crate) fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&crate::types::Type>, loc: Option<Loc>) -> Result<Typed, Error> {
+    if let Some(expected) = expected.filter(|e| super::typed_list::expected_cell(cx, Some(e)).is_some()) {
+        return super::typed_list::check_list(cx, heap, locals, args, expected, loc);
+    }
     let list_ty = option_of_sexpr();
     let sexpr = Path::builtin(typelisp_mem::wk::SEXPR);
     let cons_tys = cx.reg.type_def(&sexpr).expect("`Sexpr` is defined").variants[CONS].fields.clone();

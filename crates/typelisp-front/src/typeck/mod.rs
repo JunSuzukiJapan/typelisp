@@ -115,6 +115,7 @@ pub(crate) mod toplevel;
 pub(crate) mod trait_impl;
 pub(crate) mod tree;
 pub(crate) mod type_syntax;
+pub(crate) mod typed_list;
 pub(crate) mod unify;
 pub(crate) mod use_form;
 pub(crate) mod variant;

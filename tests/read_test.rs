@@ -501,12 +501,21 @@ fn malformed_type_arguments_are_a_read_error() {
         ("(a<b c)", "expected `,` or `>`, found `c`"),
         ("(f a<b)", "expected `,` or `>`, found `)`"),
         ("(f Vector<a", "end of input before the closing `>`"),
-        ("Vector<(fn (int) int)>", "give a function type a name with `deftype`"),
+        ("Vector<(int string>", "end of input"),
         ("Vector<#{int string>", "expected a type"),
     ] {
         let err = r.read_all(&mut h, src).unwrap_err().to_string();
         assert!(err.contains(says), "reading {:?}: {}", src, err);
     }
+}
+
+/// A type in parentheses inside `<..>` — a list type or a function type —
+/// is read as the list it is anywhere else.
+#[test]
+fn a_parenthesized_type_argument_is_read_as_a_list() {
+    roundtrip("Vector<(int string)>", "Vector<(int string)>");
+    roundtrip("Vector<(fn (int) int)>", "Vector<(fn (int) int)>");
+    roundtrip("HashTable<string, (int . int)>", "HashTable<string,(int . int)>");
 }
 
 /// Inside `<..>` whitespace — newlines too — separates tokens and is

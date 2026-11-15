@@ -51,7 +51,9 @@ fn a_vector_echo_names_its_element_type() {
 #[test]
 fn a_generic_struct_echo_names_its_type_arguments() {
     assert_echo("(defstruct pair<A,B> (left A) (right B))", "(make-instance 'pair :left 1 :right \"one\")", "#<pair<int,string> left: 1 right: \"one\">");
-    assert_echo("", "(cons 1 \"a\")", "#<cons-cell<int,string> car: 1 cdr: \"a\">");
+    assert_echo("", "(cons 1 \"a\")", "(1 . \"a\")");
+    // A `cons-cell` is the list it begins, as a cons is in CL.
+    assert_echo("", "(the (int string) (list 1 \"a\"))", "(1 \"a\")");
 }
 
 #[test]

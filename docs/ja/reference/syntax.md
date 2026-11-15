@@ -112,17 +112,18 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   例: `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。
   名前の直後の `<` に型が続くと、リーダーは対応する `>` までを型引数として読む。型引数の中は
   空白や改行で区切ってよく（`HashTable<string, int>`）、unit 型 `()`（`Result<(), FileError>`）、
-  `:dyn Trait`、タプル型も書ける。`<` の直後に型が来なければ、その `<` は名前の一部になる
+  `:dyn Trait`、タプル型、括弧で書く型（`Vector<(int string)>`、`Vector<(fn (i32) i32)>`）も書ける。`<` の直後に型が来なければ、その `<` は名前の一部になる
   （`<=` や `string<`）。型引数が `>` で閉じていなかったり型の形をしていなかったりすると、
   読み取りエラーになる（`(a<b c)` も、型引数 `b c` の誤りとしてエラー）。`()` は
   フィールド型・引数型としても使える。
-- **ジェネリック型の適用形**: `(Name T1 T2 ...)` — `Name<T1,T2,...>` と同じ型を指す
-  リスト形式の綴り。例: `(vector char)` は `Vector<char>` と同一。
-  名前形が普通の書き方で、こちらは**型引数が名前で綴れない場合のためにある**——
-  型引数はそれ自体が型式だが、`<..>` の中に書けるのは名前・`()`・`:dyn`・タプル型だけで、
-  関数型は書けない（`Vector<(fn (i32) i32)>` は読み取りエラー。`deftype` で名前を付ければ
-  `Vector<F>` と書ける）。
-  トレイトの関連型を署名に代入した結果など、処理系が型を表示するときにもこの形で出ることがある。
+- **リスト型**: `(T U ...)`。`T` と `U` の 2 要素のリストの型で、`cons-cell<T,cons-cell<U,()>>`
+  と同じ型を指す。`(T)` は要素 1 つ、`()` は空リスト（unit 型）。末尾に `. V` を書くと、最後のセルの
+  `cdr` の型になる（`(T . U)` は `cons-cell<T,U>`、`(int . Option<Sexpr>)` は 2 つめ以降が S 式
+  データ）。括弧の先頭が `fn`・`ptr`・`:dyn` のものはそれぞれ関数型・ポインタ型・trait オブジェクト型で、
+  それ以外の括弧はすべてリスト型として読む。ジェネリック型は必ず `Name<...>` と書く——`(Vector int)` は
+  `Vector` と `int` のリストの型になり、`Vector` に型引数が無いのでエラーになる。
+  リスト型の値は `cons`/`car`/`cdr` で作って分解するほか、`list`・クォート・準クォートでも作れる
+  （[7 章](#7-その他の特殊形)）。処理系が型を表示するときもこの形で出る。
 - **タプル型**: `#{int string}`（値と同じ形）。要素は 1〜12 個で、ジェネリック型の引数にも
   書ける（`Vector<#{int string}>`）。要素は `t::0` `t::1` で読み、`(setf t::0 v)` で書き換える。
   `Equal`・`Ord`（先頭の要素から順に比べる）・`Hash`・`print-object` は、すべての要素の型が
@@ -376,7 +377,7 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 (defstruct handle (p ptr))          ; 構造体のフィールド
 (defenum maybe (none) (some ptr))   ; 列挙型のフィールド
 (defvar (block ptr) ...)            ; グローバル
-(defffi f ((vector ptr)) i32)       ; 型引数の内側
+(defffi f (Vector<ptr>) i32)        ; 型引数の内側
 ```
 
 理由は1つで、どれも**スロットが中身にタグを付ける**から。タグを付ければポインタの最上位
@@ -1651,13 +1652,16 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
                                      ; symbol）は対応する Sexpr の変種に包まれ、defstruct/defenum/
                                      ; Vector<T>/HashTable<K,V> などはそのまま入る（変換の
                                      ; コストは無い）。&rest/format の引数も同様。
+                                     ; リスト型が期待される位置では、その型のリストを作る（下記）
 (source-file)                       ; このフォームが読まれたファイル名（string）。チェック時に
                                      ; 定数として決まる。CL の *load-pathname* に当たるが変数では
                                      ; ない——モジュールの本体は検査の後に実行されるので「いま
                                      ; ロード中」は当てにならず、検査の時点なら常に分かっている。
                                      ; ファイルでないソースはリーダの呼び名（<stdin>/<input>）
 (quote datum)                       ; 'datum と同義。評価せず Sexpr データとして返す
+                                     ; リスト型が期待される位置では、その型のリストを作る（下記）
 (quasiquote template)               ; `template と同義。,/,@ でテンプレート内に式を埋め込む
+                                     ; リスト型が期待される位置では、その型のリストを作る（下記）
 (documentation name)                ; name（裸名または Type::method）の docstring を Option<string> で返す
 (panic message)                     ; message: string。回復不能なエラーで異常終了。型は !
 (unreachable)                       ; (panic "unreachable") に展開。defmacro
@@ -1673,6 +1677,24 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 (pprint-tabular x [colinc])         ; 表形式レイアウト（既定 16 桁）
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; 論理ブロックを自分で組む
 ```
+
+`list`・`quote`・`quasiquote` は、リスト型（[2 章](#2-型の書き方)）が期待される位置——戻り値の型、
+引数の型、`the` など——では S 式データではなく、その型のリストを作る。各要素はその位置の要素型で
+検査されるので、型引数のままの値も入る:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; (list t u) や (cons t (cons u ())) と同じ
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; クォートの中身は評価しない。要素はその型のリテラル
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; 入れ子のリストは要素の型で作る
+```
+
+- 要素の数は型が決める。多すぎても少なすぎてもエラー。
+- `,@x` は、`x` の型が長さの決まったリスト型（末尾が `()`）なら途中にも書ける。テンプレートの
+  最後の `,@x` は、`x` をそのままリストの残りにする（`x` の型が残りの型であればよい）。
+- 型の末尾が S 式データ（`(int . Option<Sexpr>)`）なら、テンプレートの残りは S 式データとして作る。
+- リスト型が期待されていない位置では、これまでどおり S 式データ（`Option<Sexpr>`）になる。
 
 `print`/`println`/`format`/`pprint` 系は特殊形なので、可変長引数（`pprint` 系は1つの対象）は
 各自の型のまま `Sexpr` へ包まれて渡る——`(println "~a" my-struct)` がそのまま動くのはこのため。

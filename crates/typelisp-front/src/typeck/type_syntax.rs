@@ -28,9 +28,9 @@ pub(crate) struct TypeCx<'a> {
 /// A bare name is first a declared type parameter, then `Self`, then a
 /// built-in scalar type, then a type the module sees. Writing a name never declares it
 /// (`docs/dev/checker-rebuild-plan.md` 7.5). `Name<A, B>` reads as
-/// `(%type-apply Name A B)`, and `(Name A B)` is the same type. A `::` path
-/// names a type in a module. `(fn (A B &rest C) R)` is a function's type
-/// and `#{A B}` a tuple's. A C word (`ptr`, `c-long`, `c-ulong`) is the
+/// `(%type-apply Name A B)`. A `::` path names a type in a module.
+/// `(fn (A B &rest C) R)` is a function's type, `#{A B}` a tuple's, and any
+/// other list a list type ([`list_type`]). A C word (`ptr`, `c-long`, `c-ulong`) is the
 /// whole type or nothing: every slot inside another type tags what it holds,
 /// which would drop the word's top three bits. A C pointer `(ptr T)` is not
 /// read so far.
@@ -98,6 +98,7 @@ pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value, at: Option<&Loc>) ->
                 None => at_path(cx, path, Vec::new(), at),
             }
         }
+        Value::Cons(_) if !is_list_typed_form(heap, v) => list_type(heap, cx, v),
         Value::Cons(_) if is_dyn_form(heap, v) => dyn_type(heap, cx, v),
         // `(ptr T)`: a typed pointer.
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR)) => {
@@ -110,12 +111,15 @@ pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value, at: Option<&Loc>) ->
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
             Err(Error::TypeError("`Name<Args>::member` names a member of a type, not a type".to_string()))
         }
+        // The last of [`LIST_WRITTEN_TYPE_HEADS`]: `(%type-apply Name A B)`,
+        // what `Name<A, B>` reads as.
         Value::Cons(_) => {
-            // `(%type-apply Name A B)`, or the list spelling `(Name A B)`.
             let parts = heap.list_to_vec_locs(v)?;
-            let ((head, head_at), args) = if is_type_application(heap, v) { (&parts[1], &parts[2..]) } else { (&parts[0], &parts[1..]) };
+            let [_, (head, head_at), args @ ..] = &parts[..] else {
+                return Err(Error::TypeError("a generic type is written Name<Arg,...>, with at least one argument".to_string()));
+            };
             if args.is_empty() {
-                return Err(Error::TypeError("a type application must be (Name Arg...), with at least one argument".to_string()));
+                return Err(Error::TypeError("a generic type is written Name<Arg,...>, with at least one argument".to_string()));
             }
             let args = args.iter().map(|(a, a_at)| parse_raw(heap, cx, *a, a_at.as_ref())).collect::<Result<Vec<_>, _>>()?;
             let head_at = head_at.as_ref();
@@ -134,6 +138,61 @@ pub(crate) fn parse_raw(heap: &Heap, cx: &TypeCx, v: Value, at: Option<&Loc>) ->
         }
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
     }
+}
+
+/// `(T U)`: the list of a `T` and a `U`, `cons-cell<T,cons-cell<U,()>>`.
+/// A dotted tail is the last cell's cdr, `(T . U)` being `cons-cell<T,U>`;
+/// with none it is `()`, the empty list. A tail that is a type written as a
+/// list — `(T . Option<U>)`, `(T . (fn (A) R))` — reads as that list's
+/// elements, `(T %type-apply Option U)`: its head, which no element type
+/// can be, is where the tail begins.
+///
+/// The cells are the standard library's `cons-cell`, which a module sees
+/// wherever the library is loaded.
+fn list_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
+    let cons = crate::types::cons_cell_path();
+    if cx.reg.types.get(&cons).is_none() {
+        return Err(Error::TypeError(format!("the list type `{}` is made of `cons-cell`s, and the standard library that defines them is not loaded", crate::check::core::print(heap, v))));
+    }
+    let mut elems = Vec::new();
+    let mut cur = v;
+    while let Value::Cons(cell) = cur {
+        if is_list_typed_form(heap, cur) {
+            break;
+        }
+        let elem = parse_raw(heap, cx, heap.car(cur)?, heap.elem_loc(cell).as_ref());
+        // `(Vector int)` was once the generic type `Vector<int>`.
+        let elem = match elem {
+            Err(Error::TypeError(m)) if elems.is_empty() && matches!(heap.car(cur)?, Value::Symbol(_) | Value::Path(_)) && heap.cdr(cur)? != Value::Empty => {
+                let head = crate::check::core::print(heap, heap.car(cur)?);
+                Err(Error::TypeError(format!(
+                    "{} — `{}` is a list type, each element a type of its own; a generic type takes its arguments in angle brackets, `{}<...>`",
+                    m,
+                    crate::check::core::print(heap, v),
+                    head
+                )))
+            }
+            other => other,
+        };
+        elems.push(elem?);
+        cur = heap.cdr(cur)?;
+    }
+    // The reader keeps no place for a dotted tail.
+    let mut ty = parse_raw(heap, cx, cur, None)?;
+    for elem in elems.into_iter().rev() {
+        ty = Type::Named(cons.clone(), vec![elem, ty]);
+    }
+    Ok(ty)
+}
+
+/// The heads of the types written as a list that are no list type:
+/// `Name<A>`, `Name<A>::member`, `(fn ...)`, `(ptr T)` and `:dyn T`. Every
+/// other list is a list type ([`list_type`]).
+const LIST_WRITTEN_TYPE_HEADS: [u32; 5] = [wk::TYPE_APPLY, wk::TYPE_MEMBER, wk::FN, wk::PTR, wk::DYN];
+
+/// Whether `v` is a type that is written as a list but is no list type.
+fn is_list_typed_form(heap: &Heap, v: Value) -> bool {
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if LIST_WRITTEN_TYPE_HEADS.contains(&id.well_known()))
 }
 
 /// `(fn (A B &rest C) R)`: a function's type.
