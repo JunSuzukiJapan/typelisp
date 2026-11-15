@@ -225,15 +225,8 @@ impl ModuleScope {
         self.module(type_name.ns())?.methods.get(&(type_name.name_symbol(), method)).cloned()
     }
 
-    /// Whether `path`'s `FnDef` already has a JIT/AOT-compiled form — the
-    /// direct replacement for the old `Interp::compiled: HashMap<Path, _>`'s
-    /// `contains_key` check (see [`super::interp::FnDef::compiled`]'s doc
-    /// comment for why this now lives on the definition itself).
-    pub fn fn_compiled(&self, path: &Path) -> bool {
-        self.get_fn(path).is_some_and(|f| f.compiled.borrow().is_some())
-    }
-
-    /// [`Self::fn_compiled`]'s twin for a `(type, method)` pair.
+    /// Whether the method `method` of `type_name` already has a JIT/AOT-compiled
+    /// form, which lives on its definition ([`super::interp::FnDef::compiled`]).
     pub fn method_compiled(&self, type_name: &Path, method: SymRef) -> bool {
         self.get_method(type_name, method).is_some_and(|f| f.compiled.borrow().is_some())
     }

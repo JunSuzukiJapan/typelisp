@@ -232,7 +232,7 @@ fn a_struct_reachable_only_through_a_cons_car_survives_gc() {
     h.gc();
     assert_eq!(h.box_count(), 1, "only the struct reachable through the rooted cons survives");
     let Value::Boxed(id) = h.car(list).unwrap() else { panic!("expected the struct back") };
-    assert_eq!(&*h.struct_type_name(id), "point");
+    assert_eq!(&*typelisp::type_name(h.struct_type_key(id)), "point");
     assert_eq!(h.struct_field(id, 0), Value::Int(1));
     assert_eq!(h.struct_field(id, 1), Value::Int(2));
     assert_accounting(&h);
@@ -930,7 +930,7 @@ fn string_slots_are_recycled() {
 
 // ---- boxed structs (Sexpr/RtValue unification, Stage 1) -----------------
 //
-// `alloc_struct`/`struct_type_name`/`struct_field`/`struct_set_field` are
+// `alloc_struct`/`struct_type_key`/`struct_field`/`struct_set_field` are
 // the mem-layer representation `defstruct`/`Vector<T>`/`cons-cell<K,V>` are
 // all meant to share once the interpreter/compiler are wired up to them
 // (Stage 2/3) — see `docs/dev/implementation-log.md`'s "Sexpr/RtValue
@@ -943,7 +943,7 @@ fn structs_store_and_read_back_fields() {
     let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     match s {
         Value::Boxed(id) => {
-            assert_eq!(&*h.struct_type_name(id), "point");
+            assert_eq!(&*typelisp::type_name(h.struct_type_key(id)), "point");
             assert_eq!(h.struct_field_count(id), 2);
             assert_eq!(h.struct_field(id, 0), Value::Int(1));
             assert_eq!(h.struct_field(id, 1), Value::Int(2));
@@ -997,7 +997,7 @@ fn struct_accessor_on_a_boxed_float_panics() {
         Value::Boxed(id) => id,
         other => panic!("expected a boxed float, got {:?}", other),
     };
-    let _ = h.struct_type_name(id);
+    let _ = typelisp::type_name(h.struct_type_key(id));
 }
 
 #[test]
@@ -1019,7 +1019,7 @@ fn struct_reachable_via_rooted_cons_survives() {
     h.gc();
     assert_eq!(h.box_count(), 1); // only "keep" survives
     match h.car(cell).unwrap() {
-        Value::Boxed(id) => assert_eq!(&*h.struct_type_name(id), "keep"),
+        Value::Boxed(id) => assert_eq!(&*typelisp::type_name(h.struct_type_key(id)), "keep"),
         other => panic!("expected a boxed struct in car, got {:?}", other),
     }
 }
@@ -1755,7 +1755,7 @@ fn a_dyn_box_keeps_the_value_it_wraps_alive() {
     assert!(!h.is_struct(id), "boxing must not make the wrapper look like the struct inside");
     assert_eq!(h.dyn_vtable_id(id), 7);
     let Value::Boxed(inner) = h.dyn_value(id) else { panic!("expected the struct back") };
-    assert_eq!(&*h.struct_type_name(inner), "point");
+    assert_eq!(&*typelisp::type_name(h.struct_type_key(inner)), "point");
     assert_eq!(h.struct_field(inner, 1), Value::Int(2));
     assert_accounting(&h);
 }
@@ -2337,13 +2337,14 @@ fn gc_from_a_second_view_preserves_the_first_views_roots() {
     assert_eq!(h.free_count(), h2.free_count());
 }
 
-/// Interned strings, boxed objects, and permanent roots all moved into
-/// `HeapShared` in Phase 1c — a second view must read back exactly what the
-/// first one wrote, with no `attach`-time copy or resync step.
+/// Strings, boxed objects, and permanent roots all live in `HeapShared` — a
+/// second view must read back exactly what the first one wrote, with no
+/// `attach`-time copy or resync step.
 #[test]
 fn a_second_view_reads_back_what_the_first_view_allocated() {
     let mut h = Heap::with_capacity(16);
-    let s = h.intern_string("shared-across-views");
+    let s = h.alloc_string("shared-across-views".to_string());
+    h.push_permanent_root(s);
     let obj = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     let Value::Boxed(id) = obj else { panic!("boxed") };
     h.push_permanent_root(obj);

@@ -524,12 +524,10 @@ impl<T> SlotStore<T> {
     }
 }
 
-/// The string store plus the identity-preserving intern index for
-/// [`Heap::intern_string`], under the one lock: interning allocates.
+/// The string store.
 #[derive(Default)]
 struct StrStore {
     store: SlotStore<String>,
-    intern: HashMap<String, StrId>,
 }
 
 // ---- stop-the-world (`docs/dev/os-threads-design.md` §4) -------------------
@@ -1450,46 +1448,6 @@ impl Heap {
         })
     }
 
-    /// Stores a string with content-based deduplication, returning its
-    /// `Value::Str` — unlike [`alloc_string`](Self::alloc_string) (a fresh,
-    /// independently-identified allocation every call, preserving `Sexpr`'s
-    /// `eq`-by-identity semantics for ordinary strings), a repeated call
-    /// with equal content always returns the *same* `StrId`. This is what
-    /// is what a `Sexpr` symbol name and a quoted string literal share, and
-    /// it is not meant as a general-purpose string constructor. (A
-    /// `HashTable<K,V>` string key no longer relies on it: keys are compared
-    /// with the key type's own `equals`, which for `string` is content
-    /// equality, so nothing has to be interned to be found.)
-    ///
-    /// Interned strings are rooted permanently (never swept, like
-    /// [`push_permanent_root`](Self::push_permanent_root)): a `str_intern`
-    /// entry pointing at a since-freed slot would let a later call silently
-    /// hand back a dangling/reused `StrId`, so this trades "a key string
-    /// leaks for the heap's lifetime once interned" for that correctness —
-    /// the same leak-forever trade-off already accepted elsewhere for
-    /// low-cardinality, long-lived heap-external data (e.g. interned
-    /// symbols, compiled code's box fields).
-    pub fn intern_string(&mut self, s: &str) -> Value {
-        // Copied out of the guard (rather than matched on directly) so the
-        // read lock is not still held past this statement — `if let Some(&id)
-        // = self.shared.strings.read_recursive().intern.get(s)` would keep it alive for
-        // the whole `if`/`else` (temporary lifetime extension), including the
-        // `alloc_string` call below that needs the write half of this same
-        // lock.
-        let existing = self.shared.strings.read_recursive().intern.get(s).copied();
-        if let Some(id) = existing {
-            return Value::Str(id);
-        }
-        let v = self.alloc_string(s.to_string());
-        let id = match v {
-            Value::Str(id) => id,
-            _ => unreachable!("alloc_string always returns Value::Str"),
-        };
-        self.shared.strings.write().intern.insert(s.to_string(), id);
-        self.shared.permanent_roots.lock().unwrap().push(Some(v));
-        v
-    }
-
     // ---- boxed objects ------------------------------------------------------
 
     /// Store a [`BoxedObj`], returning its `Value::Boxed`. Boxed objects are
@@ -1751,11 +1709,6 @@ impl Heap {
         }
     }
 
-    /// The *name* of a boxed struct's type, for printing and diagnostics.
-    /// Comparisons use [`struct_type_key`](Self::struct_type_key) instead.
-    pub fn struct_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'static, str> {
-        crate::type_name(self.struct_type_key(id))
-    }
 
     /// The number of fields a boxed struct holds — e.g. `Vector<T>::length`
     /// reads this directly, unlike a `defstruct` instance's fixed arity
@@ -1889,11 +1842,6 @@ impl Heap {
         }
     }
 
-    /// The *name* of a boxed enum value's type, for printing and diagnostics.
-    /// Comparisons use [`enum_type_key`](Self::enum_type_key) instead.
-    pub fn enum_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'static, str> {
-        crate::type_name(self.enum_type_key(id))
-    }
 
     /// The variant index of a boxed enum value — what a `match` arm's tag
     /// test compares against. Panics if `id` doesn't hold a `BoxedObj::Enum`.

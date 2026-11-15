@@ -1144,8 +1144,8 @@ mod scc_tests {
 
         crate::compile::driver::compile_function(&interp, &mut heap, &crate::CompileTarget::Fn(Path::root("a")))
             .expect("mutual recursion across separate top-level functions should now compile");
-        assert!(interp.root.borrow().fn_compiled(&Path::root("a")), "\"a\" should have ended up compiled");
-        assert!(interp.root.borrow().fn_compiled(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");
+        assert!(interp.root.borrow().get_fn(&Path::root("a")).is_some_and(|f| f.compiled.borrow().is_some()), "\"a\" should have ended up compiled");
+        assert!(interp.root.borrow().get_fn(&Path::root("b")).is_some_and(|f| f.compiled.borrow().is_some()), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");
     }
 }
 
