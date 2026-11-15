@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -126,19 +126,20 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
 - **Tipe generik**: `Name<T1,T2,...>`. Contohnya `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. Bila sebuah tipe mengikuti `<` tepat setelah nama, pembaca
   membaca sampai `>` yang berpasangan sebagai argumen tipe. Di dalamnya, spasi dan baris baru boleh
-  memisahkan bagian-bagiannya (`HashTable<string, int>`), dan tipe unit `()`
-  (`Result<(), FileError>`), `:dyn Trait`, serta tipe tuple dapat ditulis. Bila tidak ada tipe
+  memisahkan bagian-bagiannya (`HashTable<string, int>`), dan tipe unit `()` (`Result<(), FileError>`), `:dyn Trait`, tipe tuple, serta tipe yang ditulis dalam kurung (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`) dapat ditulis. Bila tidak ada tipe
   setelah `<`, maka `<` itu bagian dari nama (`<=`, `string<`). Argumen tipe yang tidak ditutup
   dengan `>`, atau tidak berbentuk tipe, adalah kesalahan baca (`(a<b c)` juga kesalahan, pada
   argumen tipe `b c`). `()` juga dapat dipakai sebagai tipe field atau tipe argumen.
-- **Bentuk penerapan tipe generik**: `(Name T1 T2 ...)`, penulisan berbentuk list yang menamai tipe
-  yang sama dengan `Name<T1,T2,...>`. Contohnya `(vector char)` sama dengan `Vector<char>`. Bentuk
-  nama adalah penulisan yang biasa; bentuk ini **ada untuk saat argumen tipe tidak dapat ditulis di
-  dalam nama**: argumen tipe sendiri adalah ekspresi tipe, tetapi di dalam `<..>` hanya nama, `()`,
-  `:dyn`, dan tipe tuple yang dapat ditulis, bukan tipe fungsi (`Vector<(fn (i32) i32)>` adalah
-  kesalahan baca; bila tipe fungsi diberi nama dengan `deftype`, `Vector<F>` dapat ditulis). Tipe
-  juga bisa muncul dalam bentuk ini ketika implementasi menampilkannya, misalnya sebagai hasil
-  menyubstitusikan tipe terkait sebuah trait ke dalam signature.
+- **Tipe list**: `(T U ...)`. Tipe list dua elemen berisi sebuah `T` dan sebuah `U`; tipe yang sama dengan
+  `cons-cell<T,cons-cell<U,()>>`. `(T)` berisi satu elemen, dan `()` adalah list kosong (tipe unit).
+  `. V` di akhir memberi tipe `cdr` sel terakhir (`(T . U)` adalah `cons-cell<T,U>`, dan
+  `(int . Option<Sexpr>)` adalah data S-expression mulai elemen kedua). Tipe dalam kurung yang kepalanya
+  `fn`, `ptr`, atau `:dyn` masing-masing adalah tipe fungsi, tipe pointer, atau tipe objek trait; setiap
+  tipe dalam kurung lainnya dibaca sebagai tipe list. Tipe generik selalu ditulis `Name<...>`:
+  `(Vector int)` adalah tipe list berisi `Vector` dan `int`, dan merupakan galat karena `Vector` tidak
+  punya argumen tipe. Nilai bertipe list dibangun dan diurai dengan `cons`/`car`/`cdr`, dan juga dapat
+  dibangun dengan `list`, quote, atau quasiquote ([bab 7](#7-bentuk-khusus-lainnya)). Implementasi juga menampilkan tipe
+  dalam bentuk ini.
 - **Tipe tuple**: `#{int string}` (bentuk yang sama dengan nilainya). Tuple memiliki 1 sampai 12
   elemen, dan tipe tuple juga dapat menjadi argumen tipe (`Vector<#{int string}>`). Elemen dibaca
   dengan `t::0` `t::1` dan diubah dengan `(setf t::0 v)`. `Equal`, `Ord` (membandingkan mulai dari
@@ -424,7 +425,7 @@ berikut adalah kesalahan:
 (defstruct handle (p ptr))          ; a struct field
 (defenum maybe (none) (some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
-(defffi f ((vector ptr)) i32)       ; inside a type argument
+(defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
 
 Alasannya satu untuk semuanya: **slot memberi tag pada apa yang disimpannya**. Pemberian tag akan
@@ -1785,13 +1786,16 @@ dan sebagainya).
                                      ; symbol) are wrapped in the matching Sexpr variant, and defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> and the like go in as they are
                                      ; (at no conversion cost). the same for &rest/format arguments.
+                                     ; di posisi yang mengharapkan tipe list, membangun list bertipe itu (lihat di bawah)
 (source-file)                       ; the name of the file this form was read from (string). fixed as a
                                      ; constant at check time. corresponds to CL's *load-pathname*, but is
                                      ; not a variable: module bodies run after checking, so "currently
                                      ; loading" cannot be relied on, while at check time it is always known.
                                      ; for sources that are not files, the reader's name for them (<stdin>/<input>)
 (quote datum)                       ; the same as 'datum. returns it as Sexpr data without evaluating
+                                     ; di posisi yang mengharapkan tipe list, membangun list bertipe itu (lihat di bawah)
 (quasiquote template)               ; the same as `template. embeds expressions in the template with ,/,@
+                                     ; di posisi yang mengharapkan tipe list, membangun list bertipe itu (lihat di bawah)
 (documentation name)                ; returns the docstring of name (a bare name or Type::method) as Option<string>
 (panic message)                     ; message: string. ends abnormally with an unrecoverable error. type !
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
@@ -1807,6 +1811,28 @@ dan sebagainya).
 (pprint-tabular x [colinc])         ; tabular layout (16 columns by default)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; build a logical block yourself
 ```
+
+Di posisi yang mengharapkan tipe list ([bab 2](#2-menulis-tipe)) — tipe kembalian, tipe argumen, `the`, dan
+sebagainya — `list`, `quote`, dan `quasiquote` membangun list bertipe itu, bukan data S-expression.
+Setiap elemen diperiksa terhadap tipe elemen di posisinya, sehingga nilai yang tipenya masih berupa
+argumen tipe pun bisa masuk:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; sama dengan (list t u) atau (cons t (cons u ()))
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; isi quote tidak dievaluasi. elemen adalah literal bertipe elemennya
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; list bersarang dibangun dengan tipe elemennya
+```
+
+- Jumlah elemen ditentukan oleh tipenya. Terlalu banyak atau terlalu sedikit adalah galat.
+- `,@x` juga boleh ditulis di tengah bila tipe `x` adalah tipe list yang panjangnya tetap (berakhir dengan
+  `()`). `,@x` di akhir templat menjadikan `x` itu sendiri sisa list (cukup tipe `x` sama dengan tipe
+  sisanya).
+- Bila tipenya berakhir dengan data S-expression (`(int . Option<Sexpr>)`), sisa templat dibangun sebagai
+  data S-expression.
+- Di posisi yang tidak mengharapkan tipe list, hasilnya tetap data S-expression (`Option<Sexpr>`) seperti
+  sebelumnya.
 
 Keluarga `print`/`println`/`format`/`pprint` adalah bentuk khusus, sehingga argumen variadiknya
 (satu objek untuk keluarga `pprint`) dibungkus menjadi `Sexpr` dengan tipenya sendiri sebelum

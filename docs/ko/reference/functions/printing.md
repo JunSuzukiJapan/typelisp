@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 출력
 
 `print`/`println`/`format`, 인수 하나의 출력 함수, 프리티 프린터, `print-object`, 출력을 제어하는 변수. 서식 지시자 목록은
@@ -212,6 +212,7 @@ CL에서 `pprint-exit-if-list-exhausted`는 `pprint-logical-block`에서의 비�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | 튜플 `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>`(리스트 타입 `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | 같다 |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>`(수는 내부 일련번호) | 같다 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

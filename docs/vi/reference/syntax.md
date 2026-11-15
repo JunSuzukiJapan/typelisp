@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -117,18 +117,19 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
 - **Kiểu generic**: `Name<T1,T2,...>`. Ví dụ `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. Khi một kiểu theo sau dấu `<` đứng ngay sau một tên, bộ đọc
   đọc đến `>` tương ứng như các đối số kiểu. Bên trong chúng, khoảng trắng và xuống dòng có thể ngăn
-  cách các phần (`HashTable<string, int>`), và có thể viết kiểu unit `()` (`Result<(), FileError>`),
-  `:dyn Trait` và các kiểu tuple. Nếu sau `<` không có kiểu nào, dấu `<` đó là một phần của tên
+  cách các phần (`HashTable<string, int>`), và có thể viết kiểu unit `()` (`Result<(), FileError>`), `:dyn Trait`, các kiểu tuple và các kiểu viết trong ngoặc (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`). Nếu sau `<` không có kiểu nào, dấu `<` đó là một phần của tên
   (`<=`, `string<`). Đối số kiểu không được đóng bằng `>`, hoặc không có dạng kiểu, là lỗi đọc
   (`(a<b c)` cũng là lỗi, ở các đối số kiểu `b c`). `()` cũng có thể dùng làm kiểu trường hoặc kiểu
   đối số.
-- **Dạng áp dụng của kiểu generic**: `(Name T1 T2 ...)`, cách viết dạng danh sách chỉ cùng kiểu với
-  `Name<T1,T2,...>`. Ví dụ `(vector char)` giống `Vector<char>`. Dạng tên là cách viết thông thường;
-  dạng này **có cho trường hợp đối số kiểu không thể viết bên trong tên**: đối số kiểu tự nó là biểu
-  thức kiểu, nhưng bên trong `<..>` chỉ viết được tên, `()`, `:dyn` và các kiểu tuple, không viết
-  được kiểu hàm (`Vector<(fn (i32) i32)>` là lỗi đọc; đặt tên cho kiểu hàm bằng `deftype` thì viết
-  được `Vector<F>`). Kiểu cũng có thể xuất hiện ở dạng này khi phần cài đặt hiển thị nó, chẳng hạn
-  kết quả của việc thay kiểu liên kết của một trait vào chữ ký.
+- **Kiểu danh sách**: `(T U ...)`. Kiểu của danh sách hai phần tử gồm một `T` và một `U`; cùng kiểu với
+  `cons-cell<T,cons-cell<U,()>>`. `(T)` có một phần tử, còn `()` là danh sách rỗng (kiểu unit). `. V` ở
+  cuối cho kiểu `cdr` của ô cuối cùng (`(T . U)` là `cons-cell<T,U>`, còn `(int . Option<Sexpr>)` từ phần
+  tử thứ hai trở đi là dữ liệu S-expression). Kiểu trong ngoặc có đầu là `fn`, `ptr` hoặc `:dyn` lần lượt
+  là kiểu hàm, kiểu con trỏ hoặc kiểu đối tượng trait; mọi kiểu trong ngoặc khác đều được đọc là kiểu danh
+  sách. Kiểu generic luôn được viết `Name<...>`: `(Vector int)` là kiểu của danh sách gồm `Vector` và
+  `int`, và là lỗi vì `Vector` không có đối số kiểu. Giá trị kiểu danh sách được dựng và tách bằng
+  `cons`/`car`/`cdr`, và cũng có thể dựng bằng `list`, quote hoặc quasiquote ([chương 7](#7-các-dạng-đặc-biệt-khác)). Bản cài
+  đặt cũng hiển thị kiểu ở dạng này.
 - **Kiểu tuple**: `#{int string}` (cùng dạng với giá trị). Một tuple có từ 1 đến 12 phần tử, và kiểu
   tuple cũng có thể là đối số kiểu (`Vector<#{int string}>`). Phần tử được đọc bằng `t::0` `t::1` và
   đổi bằng `(setf t::0 v)`. `Equal`, `Ord` (so sánh từ phần tử đầu tiên), `Hash` và `print-object` dùng
@@ -389,7 +390,7 @@ sau là lỗi:
 (defstruct handle (p ptr))          ; một trường struct
 (defenum maybe (none) (some ptr))   ; một trường enum
 (defvar (block ptr) ...)            ; một biến toàn cục
-(defffi f ((vector ptr)) i32)       ; bên trong một đối số kiểu
+(defffi f (Vector<ptr>) i32)        ; bên trong một đối số kiểu
 ```
 
 Tất cả có chung một lý do: **ô nhớ gắn tag cho thứ nó giữ**. Việc gắn tag sẽ làm rơi các bit cao của con trỏ,
@@ -1680,13 +1681,16 @@ Các hàm có tên cũng có thể được truyền như giá trị nguyên tr�
                                      ; symbol) được bọc vào variant Sexpr tương ứng, còn defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> và tương tự đi vào nguyên trạng
                                      ; (không tốn chi phí chuyển đổi). tương tự với các đối số &rest/format.
+                                     ; ở vị trí mong đợi kiểu danh sách, dựng danh sách của kiểu đó (xem bên dưới)
 (source-file)                       ; tên tệp mà dạng này được đọc từ đó (chuỗi). được cố định như một
                                      ; hằng số lúc kiểm tra. tương ứng với *load-pathname* của CL, nhưng không
                                      ; phải một biến: thân module chạy sau khi kiểm tra, nên "đang nạp"
                                      ; không thể dựa vào, còn lúc kiểm tra thì luôn biết.
                                      ; với các nguồn không phải tệp, là tên mà reader đặt cho chúng (<stdin>/<input>)
 (quote datum)                       ; giống 'datum. trả về nó như dữ liệu Sexpr mà không đánh giá
+                                     ; ở vị trí mong đợi kiểu danh sách, dựng danh sách của kiểu đó (xem bên dưới)
 (quasiquote template)               ; giống `template. nhúng các biểu thức vào mẫu bằng ,/,@
+                                     ; ở vị trí mong đợi kiểu danh sách, dựng danh sách của kiểu đó (xem bên dưới)
 (documentation name)                ; trả về docstring của name (một tên trần hoặc Type::method) dưới dạng Option<string>
 (panic message)                     ; message: string. kết thúc bất thường với một lỗi không thể khôi phục. kiểu !
 (unreachable)                       ; khai triển thành (panic "unreachable"). defmacro
@@ -1702,6 +1706,27 @@ Các hàm có tên cũng có thể được truyền như giá trị nguyên tr�
 (pprint-tabular x [colinc])         ; bố cục dạng bảng (mặc định 16 cột)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; tự dựng một khối logic
 ```
+
+Ở vị trí mong đợi một kiểu danh sách ([chương 2](#2-cách-viết-kiểu)) — kiểu trả về, kiểu đối số, `the`, v.v. —
+`list`, `quote` và `quasiquote` dựng danh sách của kiểu đó chứ không phải dữ liệu S-expression. Mỗi phần
+tử được kiểm tra theo kiểu phần tử ở vị trí của nó, nên cả giá trị có kiểu vẫn là đối số kiểu cũng đặt
+vào được:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; giống (list t u) hay (cons t (cons u ()))
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; nội dung của quote không được đánh giá. phần tử là literal của kiểu của nó
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; danh sách lồng được dựng theo kiểu của phần tử
+```
+
+- Số phần tử do kiểu quyết định. Thừa hay thiếu đều là lỗi.
+- `,@x` cũng có thể viết ở giữa khi kiểu của `x` là kiểu danh sách có độ dài cố định (kết thúc bằng `()`).
+  `,@x` ở cuối mẫu biến chính `x` thành phần còn lại của danh sách (chỉ cần kiểu của `x` là kiểu của phần
+  còn lại).
+- Khi kiểu kết thúc bằng dữ liệu S-expression (`(int . Option<Sexpr>)`), phần còn lại của mẫu được dựng
+  thành dữ liệu S-expression.
+- Ở vị trí không mong đợi kiểu danh sách, kết quả vẫn là dữ liệu S-expression (`Option<Sexpr>`) như trước.
 
 Họ `print`/`println`/`format`/`pprint` là các dạng đặc biệt, nên các đối số biến đổi của chúng (một đối tượng
 đơn với họ `pprint`) được bọc vào `Sexpr` cùng kiểu của chính chúng trước khi truyền: đó là lý do

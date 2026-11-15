@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -230,6 +230,7 @@ SBCL. Khi REPL hiển thị một kết quả, nó dùng cùng biểu diễn nh�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>` (kiểu danh sách `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Giống vậy |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (con số là một số thứ tự nội bộ) | Giống vậy |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

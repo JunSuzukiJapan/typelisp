@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,
@@ -20,6 +20,12 @@ hoặc bằng `(car variable)`/`(cdr variable)`. Để thay đổi chúng, hãy 
 
 `cons-cell` cũng đóng vai trò thay cho cú pháp tuple. Các hàm CL trả về nhiều giá trị (thương và số dư của
 `floor`, giá trị và vị trí của `read-from-string`, v.v.) trả về một `cons-cell` trong ngôn ngữ này.
+
+Các `cons-cell` nối với nhau là một danh sách, và kiểu của nó có thể viết thành kiểu danh sách
+`(T U ...)` (`(int string)` là `cons-cell<int,cons-cell<string,()>>`; [Tham chiếu cú pháp chương 2](../syntax.md#2-cách-viết-kiểu)). Cách in cũng
+giống cons của CL: `(cons 1 (cons "a" ()))` in ra `(1 "a")` và `(cons 3 1)` in ra `(3 . 1)`. Khi kiểu
+của `cdr` là `Option<Sexpr>`, nó được in như phần tiếp theo của dữ liệu S-expression đó
+(`(cons 'a '(b c))` là `(a b c)`).
 
 ## 2. Dữ liệu S-expression `Sexpr`
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Impressão
 
 `print`/`println`/`format`, as impressoras de um argumento, o pretty printer, `print-object` e as variáveis que
@@ -232,6 +232,7 @@ mesmo jeito que no SBCL. Quando o REPL mostra um resultado, usa a mesma represen
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tupla `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>` (tipos lista `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Igual |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (o número é um número de série interno) | Igual |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

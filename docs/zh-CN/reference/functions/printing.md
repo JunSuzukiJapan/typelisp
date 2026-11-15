@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见
@@ -203,6 +203,7 @@ CLHS 22.1.3 的打印函数。不做格式展开，直接打印一个值。流�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`、`#("a" "b")` | `#(1 2 3)`、`#(a b)` |
 | 元组 `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>`（列表类型 `(T U ...)`） | `(1 "a")`、`(3 . 1)` | `(1 a)`、`(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | 同左 |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>`（数字是实现内部的编号） | 同左 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

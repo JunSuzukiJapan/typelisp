@@ -1,14 +1,5 @@
-//! typelisp's type representation and parsing of type expressions.
-//!
-//! Types appear in source as `Sexpr`: a symbol such as `i32`, `bool`, `String`,
-//! or a generic written without spaces like `Option<i32>` / `Vec<String>` /
-//! `Pair<K,V>` (read as a *single* symbol token, so generics are split out of
-//! the symbol's name here), the empty list `()` for the unit type, a list
-//! `(fn (param-types...) ret-type)` for a function type, or the *applied*
-//! spelling of a generic, `(pair k v)` — see [`parse_applied_type`] for why
-//! that second spelling exists.
-//!
-//! Symbols are case-folded by the reader, so all type names are lowercase here.
+//! typelisp's type representation, and the names a written type is
+//! resolved through. Reading a written type is `typeck::type_syntax`'s.
 
 use std::fmt;
 
@@ -602,6 +593,23 @@ impl fmt::Display for Type {
                 }
                 write!(f, "}}")
             }
+            // A cell is written as the list it begins, `(int string)`, and
+            // one whose cdr is no list as a dotted pair, `(int . string)`.
+            Type::Named(..) if cons_cell_parts(self).is_some() => {
+                write!(f, "(")?;
+                let mut cell = self;
+                while let Some((car, cdr)) = cons_cell_parts(cell) {
+                    if !std::ptr::eq(cell, self) {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", car)?;
+                    cell = cdr;
+                }
+                match cell {
+                    Type::Unit => write!(f, ")"),
+                    tail => write!(f, " . {})", tail),
+                }
+            }
             Type::Named(p, ts) => {
                 write!(f, "{}", view.definition(p.ns(), p.name_symbol()))?;
                 if ts.is_empty() { Ok(()) } else { args(f, ts) }
@@ -641,8 +649,6 @@ impl fmt::Display for Type {
     }
 }
 
-/// The documented spelling of a built-in type whose name the reader has
-/// lowercased, or `None` for every other name.
 /// The type behind the tuple type `#{T0 T1 ...}` of `arity` elements (at most
 /// [`typelisp_mem::TUPLE_MAX_ARITY`]): the
 /// prelude's `std::%internal::tupleN<T0,...>`, a `defstruct` whose fields are
@@ -663,6 +669,26 @@ pub fn tuple_arity(path: &Path) -> Option<usize> {
     let name = path.last_segment();
     let n: usize = name.strip_prefix("tuple")?.parse().ok()?;
     (1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&n).then_some(n)
+}
+
+/// The pair `cons-cell<A,B>`, the standard library's `defstruct`. A list
+/// type `(T U)` is `cons-cell<T,cons-cell<U,()>>`: the written spelling and
+/// the printed one, of the same type. The path is the one the runtime's type
+/// table has from birth ([`typelisp_mem::TypeId::CONS_CELL`]).
+pub fn cons_cell_path() -> Path {
+    let (ns, sym) = typelisp_mem::type_shape(typelisp_mem::TypeId::CONS_CELL)
+        .named_definition()
+        .expect("`cons-cell` is a named type");
+    Path::of_symbol(ns, sym)
+}
+
+/// The car and cdr types of `ty` when it is a `cons-cell<A,B>` — a cell of
+/// a list type — or `None`.
+pub fn cons_cell_parts(ty: &Type) -> Option<(&Type, &Type)> {
+    match ty {
+        Type::Named(p, args) if args.len() == 2 && *p == cons_cell_path() => Some((&args[0], &args[1])),
+        _ => None,
+    }
 }
 
 /// The struct field holding a tuple's element `index`, which a program
@@ -838,232 +864,9 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
     }
 }
 
-/// One written type/trait *name* occurrence inside a type expression, with
-/// the exact source span of its final segment (the name proper — the module
-/// prefix of a qualified spelling and any `<...>` argument punctuation are
-/// not part of it). Produced by [`parse_type_spanned`]; consumed by the
-/// checker, which resolves each written path against the registry and — when
-/// it names a user-defined type or trait — records the span for the LSP's
-/// semantic tokens. This is what makes type highlighting *resolution*-driven:
-/// a function that shares a type's name can never be mistaken for it, because
-/// only positions the type grammar actually parsed are ever recorded.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TypeNameSpan {
-    /// The name as written (still relative — not resolved).
-    pub path: Path,
-    /// True when the name is a `:dyn` head, i.e. names a *trait*.
-    pub dyn_head: bool,
-    /// Span of the final segment.
-    pub loc: Loc,
-}
-
-/// Parse a type expression (a read `Value`) into a [`Type`]. `ns` is the
-/// module it is written in: a name in it is that module's ([`written_path`]).
-pub fn parse_type(heap: &Heap, ns: NsId, v: Value) -> Result<Type, Error> {
-    parse_type_spanned(heap, ns, v, None, &mut Vec::new())
-}
-
-/// [`parse_type`], additionally recording a [`TypeNameSpan`] for every
-/// nominal name it parses. `loc` is the span of `v` *itself* and is only
-/// needed when `v` is a bare atom (a symbol/path token has no heap identity,
-/// so its span must travel alongside it — the same rule as
-/// `Checker::check_form_at`'s `loc_hint`); a list form's elements carry their
-/// own recorded spans (`Heap::list_to_vec_locs`). With no span available the
-/// parse still succeeds — the names just go unrecorded.
-pub fn parse_type_spanned(
-    heap: &Heap,
-    ns: NsId,
-    v: Value,
-    loc: Option<&Loc>,
-    out: &mut Vec<TypeNameSpan>,
-) -> Result<Type, Error> {
-    match v {
-        Value::Empty => Ok(Type::Unit),
-        Value::Symbol(sym) => match scalar_of_symbol(sym) {
-            Some(t) => Ok(t),
-            None => Ok(Type::Named(record_name(Path::of_symbol(ns, sym), loc, false, out), Vec::new())),
-        },
-        Value::Path(_) => {
-            let path = written_path(heap, ns, v)?;
-            match scalar_type(&path) {
-                Some(t) => Ok(t),
-                None => Ok(Type::Named(record_name(path, loc, false, out), Vec::new())),
-            }
-        }
-        // `(:dyn Trait)` — the reader's joined form of the two-word `:dyn
-        // Trait` spelling (`read::reader::read_datum`). Checked before
-        // the `(fn ...)` case since both are lists.
-        Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, ns, v, out),
-        Value::Cons(_) if is_fn_form(heap, v) => parse_fn_type(heap, ns, v, out),
-        Value::Cons(_) if is_ptr_form(heap, v) => parse_ptr_type(heap, ns, v, out),
-        Value::Cons(_) if is_type_application(heap, v) => parse_type_application(heap, ns, v, out),
-        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
-            Err(Error::TypeError("`Name<Args>::member` names a member of a type, not a type".to_string()))
-        }
-        Value::Cons(_) => parse_applied_type(heap, ns, v, out),
-        // `#{int string}` — the tuple type, written the way its values are.
-        // The reader hands the elements over as a `#{..}` datum, whose
-        // elements carry no source positions of their own.
-        Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
-            let n = heap.struct_field_count(id);
-            let args = (0..n)
-                .map(|i| parse_type_spanned(heap, ns, heap.struct_field(id, i), None, out))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(Type::Named(tuple_path(n), args))
-        }
-        other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
-    }
-}
-
 /// Whether `v` is a `(:dyn ...)` list.
 pub fn is_dyn_form(heap: &Heap, v: Value) -> bool {
     matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::DYN))
-}
-
-/// Whether `v` is a `(fn ...)` list. Only the head is examined, so a
-/// malformed function type still reaches [`parse_fn_type`] and is reported as
-/// one rather than as a mis-shaped type application.
-fn is_fn_form(heap: &Heap, v: Value) -> bool {
-    matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::FN))
-}
-
-/// Whether `v` is a `(ptr ...)` list — a typed C pointer.
-fn is_ptr_form(heap: &Heap, v: Value) -> bool {
-    matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR))
-}
-
-/// Parse `(ptr T)` into [`Type::PtrTo`]. What `T` may be is the checker's
-/// question (it needs the `def-c-struct` table); this only reads the shape.
-fn parse_ptr_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
-    let elems = heap.list_to_vec_locs(v)?;
-    if elems.len() != 2 {
-        return Err(Error::TypeError("a typed pointer is written (ptr T), with exactly one type".to_string()));
-    }
-    let pointee = parse_type_spanned(heap, ns, elems[1].0, elems[1].1.as_ref(), out)?;
-    Ok(Type::PtrTo(Box::new(pointee)))
-}
-
-/// Parse the *applied* spelling of a generic type — `(vector char)`, the
-/// list form of `Vector<char>`.
-///
-/// The two spell the same type and parse to the same [`Type`]. The name form
-/// is what a program is normally written in; this one exists because a type
-/// *argument* is a whole type expression, and the name grammar
-/// ([`parse_qualified_generic`]) can only spell arguments that are themselves
-/// names, `()`, or `:dyn` — never a `(fn ...)`. Substituting a trait's
-/// associated type into a signature has to be able to produce whatever the
-/// `impl` bound it to, so `typeck::subst` emits this form (see
-/// `check::forms::type_to_form`) instead of splicing text into a symbol's
-/// name.
-///
-/// The head is parsed as an ordinary type expression so a qualified spelling
-/// (`geo::pair`) works and its span is recorded like any other name; it must
-/// come out as a nominal type with no arguments of its own, since its
-/// arguments are exactly what the list supplies.
-fn parse_applied_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
-    let elems = heap.list_to_vec_locs(v)?;
-    if elems.len() < 2 {
-        return Err(Error::TypeError(
-            "a type application must be (Name Arg...), with at least one argument".to_string(),
-        ));
-    }
-    let head = match parse_type_spanned(heap, ns, elems[0].0, elems[0].1.as_ref(), out)? {
-        Type::Named(p, args) if args.is_empty() => p,
-        other => {
-            return Err(Error::TypeError(format!(
-                "a type application's head must be a plain type name, found `{:?}`",
-                other
-            )))
-        }
-    };
-    let mut args = Vec::with_capacity(elems.len() - 1);
-    for (a, l) in &elems[1..] {
-        args.push(parse_type_spanned(heap, ns, *a, l.as_ref(), out)?);
-    }
-    Ok(Type::Named(head, args))
-}
-
-/// Parse the reader-joined `(:dyn Trait)` / `(:dyn Trait<Pin,...>)` form. The
-/// trait name is parsed with the ordinary type-name grammar, so a qualified
-/// and/or generic-looking spelling works; its "generic arguments" are the
-/// associated-type pins, not type arguments (see [`Type::Dyn`]).
-fn parse_dyn_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
-    let elems = heap.list_to_vec_locs(v)?;
-    if elems.len() != 2 {
-        return Err(Error::TypeError("`:dyn` must be followed by exactly one trait name".to_string()));
-    }
-    // Parse into a scratch vector first: the recorder writes the trait head
-    // *before* any associated-type pins (see `parse_type_application`), so
-    // its first entry — recorded as an ordinary `Named` head — is exactly the
-    // name the `:dyn` reinterprets as a trait.
-    let mut tmp = Vec::new();
-    match parse_type_spanned(heap, ns, elems[1].0, elems[1].1.as_ref(), &mut tmp)? {
-        Type::Named(trait_path, pins) => {
-            if let Some(head) = tmp.first_mut() {
-                head.dyn_head = true;
-            }
-            out.extend(tmp);
-            Ok(Type::Dyn(trait_path, pins))
-        }
-        other => Err(Error::TypeError(format!("`:dyn` must be followed by a trait name, found `{:?}`", other))),
-    }
-}
-
-/// Parse a `(fn (param-types...) ret-type)` list. The parameter-type list may
-/// end in `&rest elem-type` to write a variadic function type, mirroring
-/// `typeck::lambda_list`'s `defun`/`lambda` parameter syntax.
-fn parse_fn_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
-    let elems = heap.list_to_vec_locs(v)?;
-    if elems.len() != 3 {
-        return Err(Error::TypeError("fn type must be (fn (params) ret)".to_string()));
-    }
-    match elems[0].0 {
-        Value::Symbol(id) if id.is(wk::FN) => {}
-        _ => return Err(Error::TypeError("expected fn type".to_string())),
-    }
-    let (params, rest) = match elems[1].0 {
-        Value::Empty => (Vec::new(), None),
-        Value::Cons(_) => parse_fn_params(heap, ns, &heap.list_to_vec_locs(elems[1].0)?, out)?,
-        _ => return Err(Error::TypeError("fn parameter list must be a list".to_string())),
-    };
-    let ret = parse_type_spanned(heap, ns, elems[2].0, elems[2].1.as_ref(), out)?;
-    Ok(Type::Fn(params, rest, Box::new(ret)))
-}
-
-/// Split a `(fn ...)` type's parameter-type list into fixed types and an
-/// optional trailing `&rest elem-type` (the type of each variadic argument) —
-/// the type-expression counterpart of `typeck::lambda_list`.
-fn parse_fn_params(
-    heap: &Heap,
-    ns: NsId,
-    ps: &[(Value, Option<Loc>)],
-    out: &mut Vec<TypeNameSpan>,
-) -> Result<(Vec<Type>, Option<Box<Type>>), Error> {
-    let rest_marker = ps
-        .iter()
-        .position(|(p, _)| matches!(p, Value::Symbol(id) if id.is(wk::REST)));
-    match rest_marker {
-        Some(i) => {
-            if i + 2 != ps.len() {
-                return Err(Error::TypeError(
-                    "fn type: &rest must be followed by exactly one type, as the last item in the parameter list".to_string(),
-                ));
-            }
-            let params = ps[..i]
-                .iter()
-                .map(|(p, l)| parse_type_spanned(heap, ns, *p, l.as_ref(), out))
-                .collect::<Result<_, _>>()?;
-            let rest = parse_type_spanned(heap, ns, ps[i + 1].0, ps[i + 1].1.as_ref(), out)?;
-            Ok((params, Some(Box::new(rest))))
-        }
-        None => {
-            let params = ps
-                .iter()
-                .map(|(p, l)| parse_type_spanned(heap, ns, *p, l.as_ref(), out))
-                .collect::<Result<_, _>>()?;
-            Ok((params, None))
-        }
-    }
 }
 
 /// Where a `::` path leads: its last segment as read in the module the
@@ -1114,16 +917,6 @@ pub fn written_path(heap: &Heap, ns: NsId, v: Value) -> Result<Path, Error> {
     }
 }
 
-/// Records where a written type name's last segment is — the name proper;
-/// gives the path back. `loc` is the whole name's span; the last segment is
-/// its tail on the same line.
-fn record_name(path: Path, loc: Option<&Loc>, dyn_head: bool, out: &mut Vec<TypeNameSpan>) -> Path {
-    if let Some(loc) = loc.and_then(|l| last_segment_span(&path, l)) {
-        out.push(TypeNameSpan { path, dyn_head, loc });
-    }
-    path
-}
-
 /// Where the last segment of `path` is, in a name written at `l` that ends
 /// with it: none when `l` is not one line long enough to hold it.
 pub(crate) fn last_segment_span(path: &Path, l: &Loc) -> Option<Loc> {
@@ -1138,25 +931,8 @@ pub fn is_type_application(heap: &Heap, v: Value) -> bool {
     matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_APPLY))
 }
 
-/// Parse `(%type-apply Name Arg...)` — `Name<Arg,...>` — into a generic
-/// type. The name is recorded ahead of its arguments, so a recorded sequence
-/// lists an outer name before everything nested in it (`parse_dyn_type`
-/// relies on that).
-fn parse_type_application(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
-    let elems = heap.list_to_vec_locs(v)?;
-    if elems.len() < 3 {
-        return Err(Error::TypeError("a generic type is written Name<Arg,...>, with at least one argument".to_string()));
-    }
-    let head = record_name(written_path(heap, ns, elems[1].0)?, elems[1].1.as_ref(), false, out);
-    let mut args = Vec::with_capacity(elems.len() - 2);
-    for (a, l) in &elems[2..] {
-        args.push(parse_type_spanned(heap, ns, *a, l.as_ref(), out)?);
-    }
-    Ok(Type::Named(head, args))
-}
-
 /// The primitive type the symbol `sym` names, if any — the one authoritative
-/// table behind [`parse_type`]'s "is this a nominal name at all" test, told
+/// table behind a type reader's "is this a nominal name at all" test, told
 /// by the vocabulary symbol and never by its spelling: a module that
 /// `shadow`s `int` has a symbol of its own, which names no primitive.
 pub fn scalar_of_symbol(sym: SymRef) -> Option<Type> {

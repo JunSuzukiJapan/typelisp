@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Afdrukken
 
 `print`/`println`/`format`, de printers met één argument, de pretty printer, `print-object` en de
@@ -238,6 +238,7 @@ weergave als `~s`.
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>` (lijsttypen `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | Hetzelfde |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (het getal is een intern volgnummer) | Hetzelfde |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

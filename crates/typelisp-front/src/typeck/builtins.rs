@@ -144,7 +144,7 @@ pub(crate) fn define(reg: &mut Registry) {
     // `read-from-string-preserving-whitespace` are this with the two
     // `preserve` settings and a default `start`; the primitive keeps a name
     // of its own because the CL one is the prelude's.
-    let datum_and_end = Type::Named(Path::in_ns(sexpr_ns, "cons-cell"), vec![option_of(sexpr_ty()), Type::Int]);
+    let datum_and_end = Type::Named(crate::types::cons_cell_path(), vec![option_of(sexpr_ty()), Type::Int]);
     function(reg, internal, "read-datum-at", vec![Type::Str, Type::Int, Type::Bool], result_of(datum_and_end, error_ty(wk::READ_ERROR)));
     // `eval`: type-checks and runs a runtime `Sexpr` against the current
     // global environment, CL-style (`Interp::eval_form`). Sees all globals
@@ -540,7 +540,7 @@ fn hashtable(reg: &mut Registry) {
     // `vector-iter<T>` walks `Vector<T>`.
     def.instance("keys", vec![table.clone()], vector_of(k.clone()));
     def.instance("values", vec![table.clone()], vector_of(v.clone()));
-    let entry = Type::Named(Path::in_ns(StdModule::SEXPR.ns(), "cons-cell"), vec![k, v]);
+    let entry = Type::Named(crate::types::cons_cell_path(), vec![k, v]);
     def.instance("entries", vec![table], vector_of(entry));
 }
 

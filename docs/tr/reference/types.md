@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -39,8 +39,8 @@ typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart tr
 | `Thread<T>` | Ayrılmış bir OS thread'inde çalışan bir task'in tanıtıcısı | [Thread](functions/concurrency.md#7-threadt--ayrılmış-os-threadleri) |
 | `Chan<T>` | Bir kanal | [Kanallar](functions/concurrency.md#2-chant--kanallar) |
 
-Fonksiyon türleri `(fn (bağımsız-değişken-türleri...) dönüş-türü)` olarak, trait nesneleri ise
-`:dyn Trait` olarak yazılır ([Sözdizimi Başvurusu 2. bölüm](syntax.md#2-türlerin-yazımı)).
+Fonksiyon türleri `(fn (argüman-türleri...) dönüş-türü)`, trait nesneleri `:dyn Trait`, liste türleri ise
+`(T U ...)` (`cons-cell<T,cons-cell<U,()>>` ile aynı tür) biçiminde yazılır ([Sözdizimi Başvurusu 2. bölüm](syntax.md#2-türlerin-yazımı)).
 
 ## 3. S-ifade verisi
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -200,6 +200,7 @@ CLHS 22.1.3 的列印函式。不做格式展開，直接列印一個值。串�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`、`#("a" "b")` | `#(1 2 3)`、`#(a b)` |
 | 元組 `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>`（串列型別 `(T U ...)`） | `(1 "a")`、`(3 . 1)` | `(1 a)`、`(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | 同左 |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>`（數字是實作內部的編號） | 同左 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

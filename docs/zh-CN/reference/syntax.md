@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -75,8 +75,14 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **Unit 类型**：`()`
 - **Never 类型**：`!`（`panic`/`unreachable`/`todo`/不返回的循环等发散表达式的类型。适合任何期望类型）
 - **函数类型**：`(fn (参数类型...) 返回值类型)`。带可变参数的函数类型为 `(fn (参数类型... &rest 元素类型) 返回值类型)`。
-- **泛型类型**：`Name<T1,T2,...>`。例如：`Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。名字之后紧接的 `<` 后面跟着类型时，读取器把直到对应 `>` 的部分作为类型参数读取。类型参数内部可以用空白或换行分隔（`HashTable<string, int>`），也可以写 unit 类型 `()`（`Result<(), FileError>`）、`:dyn Trait` 和元组类型。`<` 之后不是类型时，这个 `<` 是名字的一部分（`<=`、`string<`）。类型参数没有用 `>` 闭合或不具有类型的形状时，是读取错误（`(a<b c)` 也作为类型参数 `b c` 的错误而成为读取错误）。`()` 也可以作为字段类型、参数类型使用。
-- **泛型类型的应用形式**：`(Name T1 T2 ...)` —— 指代与 `Name<T1,T2,...>` 相同类型的列表写法。例如 `(vector char)` 与 `Vector<char>` 相同。名字形式是通常的写法，这种形式**是为类型参数无法写进名字的情况准备的**——类型参数本身是类型表达式，但在 `<..>` 中只能写名字、`()`、`:dyn` 和元组类型，不能写函数类型（`Vector<(fn (i32) i32)>` 是读取错误；用 `deftype` 给函数类型起名后可以写 `Vector<F>`）。实现显示类型时也可能以这种形式出现，例如把 trait 的关联类型代入签名的结果。
+- **泛型类型**：`Name<T1,T2,...>`。例如：`Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。名字之后紧接的 `<` 后面跟着类型时，读取器把直到对应 `>` 的部分作为类型参数读取。类型参数内部可以用空白或换行分隔（`HashTable<string, int>`），也可以写 unit 类型 `()`（`Result<(), FileError>`）、`:dyn Trait`、元组类型和用括号写的类型（`Vector<(int string)>`、`Vector<(fn (i32) i32)>`）。`<` 之后不是类型时，这个 `<` 是名字的一部分（`<=`、`string<`）。类型参数没有用 `>` 闭合或不具有类型的形状时，是读取错误（`(a<b c)` 也作为类型参数 `b c` 的错误而成为读取错误）。`()` 也可以作为字段类型、参数类型使用。
+- **列表类型**：`(T U ...)`。由 `T` 和 `U` 两个元素组成的列表的类型，与 `cons-cell<T,cons-cell<U,()>>`
+  是同一个类型。`(T)` 有 1 个元素，`()` 是空列表（unit 类型）。在末尾写 `. V`，就是最后一个单元的 `cdr`
+  的类型（`(T . U)` 是 `cons-cell<T,U>`，`(int . Option<Sexpr>)` 从第 2 个起是 S 表达式数据）。括号的头部是
+  `fn`、`ptr`、`:dyn` 的，分别是函数类型、指针类型、trait 对象类型，其他括号都读作列表类型。泛型类型
+  必须写成 `Name<...>`——`(Vector int)` 是 `Vector` 和 `int` 的列表的类型，由于 `Vector` 没有类型参数而
+  成为错误。列表类型的值用 `cons`/`car`/`cdr` 构造和分解，也可以用 `list`、quote、quasiquote 构造
+  （[第 7 章](#7-其他特殊形式)）。实现显示类型时也以这种形式输出。
 - **元组类型**：`#{int string}`（与值的形状相同）。元素为 1～12 个，元组类型也可以作为泛型类型的参数（`Vector<#{int string}>`）。元素用 `t::0` `t::1` 读取，用 `(setf t::0 v)` 修改。当所有元素的类型都实现了 `Equal`、`Ord`（从第一个元素起依次比较）、`Hash`、`print-object` 时，即可使用它们。
 - **限定类型名**：可以像 `module::Type` 这样用 `::` 限定。
 - **trait 对象类型**：`:dyn Trait`（以空白分隔的两个词构成一个类型）。表示具体类型在运行时确定的值，trait 方法的调用经由
@@ -288,7 +294,7 @@ CL 中对应的是 `(declaim (ftype (function (i32) bool) even2))`，但那伴�
 (defstruct handle (p ptr))          ; 结构体的字段
 (defenum maybe (none) (some ptr))   ; 枚举的字段
 (defvar (block ptr) ...)            ; 全局变量
-(defffi f ((vector ptr)) i32)       ; 类型参数内部
+(defffi f (Vector<ptr>) i32)        ; 类型参数内部
 ```
 
 理由只有一个：这些都是**槽会给内容加标签**的地方。加上标签，指针的最高位就会丢失——与去掉 64 位整数类型的理由相同，所以即使在
@@ -1399,13 +1405,16 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
                                      ; symbol）包装为对应的 Sexpr 变体，defstruct/defenum/
                                      ; Vector<T>/HashTable<K,V> 等原样放入（没有转换的
                                      ; 开销）。&rest/format 的参数也一样。
+                                     ; 在期待列表类型的位置，构造该类型的列表（见下文）
 (source-file)                       ; 读取这个形式的文件名（string）。在检查时
                                      ; 作为常量确定。相当于 CL 的 *load-pathname*，但不是变量
                                      ; ——模块的函数体在检查之后执行，所以"现在
                                      ; 正在加载"靠不住，而在检查时总是已知的。
                                      ; 不是文件的源代码为读取器的称呼（<stdin>/<input>）
 (quote datum)                       ; 与 'datum 相同。不求值，作为 Sexpr 数据返回
+                                     ; 在期待列表类型的位置，构造该类型的列表（见下文）
 (quasiquote template)               ; 与 `template 相同。用 ,/,@ 把式子嵌入模板
+                                     ; 在期待列表类型的位置，构造该类型的列表（见下文）
 (documentation name)                ; 以 Option<string> 返回 name（裸名或 Type::method）的文档字符串
 (panic message)                     ; message: string。以不可恢复的错误异常终止。类型为 !
 (unreachable)                       ; 展开为 (panic "unreachable")。defmacro
@@ -1421,6 +1430,24 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 (pprint-tabular x [colinc])         ; 表格布局（默认 16 列）
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; 自己构建逻辑块
 ```
+
+`list`、`quote`、`quasiquote` 在期待列表类型（[第 2 章](#2-类型的写法)）的位置——返回值类型、参数类型、`the`
+等——构造的不是 S 表达式数据，而是该类型的列表。每个元素按其位置的元素类型检查，因此类型仍是类型参数的
+值也能放进去：
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; 与 (list t u) 或 (cons t (cons u ())) 相同
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; quote 的内容不求值。元素是该类型的字面量
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; 嵌套的列表按元素的类型构造
+```
+
+- 元素个数由类型决定。多了或少了都是错误。
+- 当 `x` 的类型是长度确定的列表类型（以 `()` 结尾）时，`,@x` 也可以写在中间。模板最后的 `,@x` 直接把
+  `x` 作为列表的其余部分（只要 `x` 的类型是其余部分的类型即可）。
+- 类型以 S 表达式数据结尾（`(int . Option<Sexpr>)`）时，模板的其余部分构造为 S 表达式数据。
+- 在不期待列表类型的位置，结果和以前一样是 S 表达式数据（`Option<Sexpr>`）。
 
 `print`/`println`/`format`/`pprint` 系列是特殊形式，所以可变参数（`pprint` 系列是一个对象）以各自的类型包装进 `Sexpr` 传递——
 `(println "~a" my-struct)` 能直接工作就是这个原因。格式指令和 pretty printer 的详情见[格式指令](functions/format.md)和

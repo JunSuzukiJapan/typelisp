@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Wypisywanie
 
 `print`/`println`/`format`, drukarki jednoargumentowe, pretty printer, `print-object` oraz
@@ -232,6 +232,7 @@ jak w SBCL. Gdy REPL pokazuje wynik, używa tej samej reprezentacji co `~s`.
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | Krotka `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>` (typy list `(T U ...)`) | `(1 "a")`, `(3 . 1)` | `(1 a)`, `(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | To samo |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>` (liczba to wewnętrzny numer seryjny) | To samo |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

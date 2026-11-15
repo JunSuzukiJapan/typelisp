@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Pary, S-wyrażenia i sekwencje
 
 Generyczna para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach napisane
@@ -20,6 +20,12 @@ na bazie `Iter` oraz funkcje wyższego rzędu.
 
 `cons-cell` pełni także rolę składni krotek. Funkcje CL zwracające wiele wartości (iloraz i reszta z `floor`,
 wartość i pozycja z `read-from-string` i tak dalej) zwracają w tym języku `cons-cell`.
+
+Połączone `cons-cell` tworzą listę, której typ można zapisać jako typ listy `(T U ...)`
+(`(int string)` to `cons-cell<int,cons-cell<string,()>>`; [Referencja składni, rozdział 2](../syntax.md#2-zapis-typów)). Są też wypisywane tak jak
+consy CL: `(cons 1 (cons "a" ()))` wypisuje się jako `(1 "a")`, a `(cons 3 1)` jako `(3 . 1)`. Gdy typem
+`cdr` jest `Option<Sexpr>`, jest on wypisywany jako ciąg dalszy tych danych S-wyrażeń
+(`(cons 'a '(b c))` to `(a b c)`).
 
 ## 2. Dane w postaci S-wyrażeń `Sexpr`
 

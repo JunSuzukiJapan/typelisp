@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -97,8 +97,15 @@ typelisp เป็น Lisp ที่มีระบบชนิดแบบส�
   ไม่คืนค่า เข้ากับชนิดที่คาดหวังใดก็ได้)
 - **ชนิดฟังก์ชัน**: `(fn (ชนิดของอาร์กิวเมนต์...) ชนิดที่คืน)` ชนิดของฟังก์ชันที่มีอาร์กิวเมนต์ variadic
   คือ `(fn (ชนิดของอาร์กิวเมนต์... &rest ชนิดของสมาชิก) ชนิดที่คืน)`
-- **ชนิด generic**: `Name<T1,T2,...>` ตัวอย่าง: `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>` เมื่อมีชนิดตามหลัง `<` ที่อยู่ติดหลังชื่อ ตัวอ่านจะอ่านจนถึง `>` ที่คู่กันเป็นอาร์กิวเมนต์ชนิด ภายในนั้นใช้ช่องว่างและการขึ้นบรรทัดใหม่คั่นได้ (`HashTable<string, int>`) และเขียนชนิด unit `()` (`Result<(), FileError>`) `:dyn Trait` และชนิดทูเพิลได้ ถ้าไม่มีชนิดตามหลัง `<` ตัว `<` นั้นจะเป็นส่วนของชื่อ (`<=` หรือ `string<`) อาร์กิวเมนต์ชนิดที่ไม่ปิดด้วย `>` หรือไม่มีรูปแบบของชนิดเป็นข้อผิดพลาดในการอ่าน (`(a<b c)` ก็เป็นข้อผิดพลาดของอาร์กิวเมนต์ชนิด `b c`) `()` ใช้เป็นชนิดของฟิลด์หรืออาร์กิวเมนต์ได้ด้วย
-- **รูปแบบการประยุกต์ของชนิด generic**: `(Name T1 T2 ...)` — การเขียนแบบรายการที่ระบุชนิดเดียวกับ `Name<T1,T2,...>` เช่น `(vector char)` เหมือนกับ `Vector<char>` การเขียนแบบชื่อเป็นวิธีปกติ ส่วนรูปแบบนี้ **มีไว้สำหรับกรณีที่เขียนอาร์กิวเมนต์ชนิดไว้ในชื่อไม่ได้** อาร์กิวเมนต์ชนิดเป็นนิพจน์ชนิดในตัวเอง แต่ภายใน `<..>` เขียนได้เพียงชื่อ `()` `:dyn` และชนิดทูเพิล เขียนชนิดฟังก์ชันไม่ได้ (`Vector<(fn (i32) i32)>` เป็นข้อผิดพลาดในการอ่าน ถ้าตั้งชื่อให้ชนิดฟังก์ชันด้วย `deftype` ก็เขียน `Vector<F>` ได้) ชนิดอาจปรากฏในรูปแบบนี้ด้วยเมื่อ implementation แสดงชนิด เช่น ผลของการแทนชนิดที่เกี่ยวข้องของ trait ลงในลายเซ็น
+- **ชนิด generic**: `Name<T1,T2,...>` ตัวอย่าง: `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>` เมื่อมีชนิดตามหลัง `<` ที่อยู่ติดหลังชื่อ ตัวอ่านจะอ่านจนถึง `>` ที่คู่กันเป็นอาร์กิวเมนต์ชนิด ภายในนั้นใช้ช่องว่างและการขึ้นบรรทัดใหม่คั่นได้ (`HashTable<string, int>`) และเขียนชนิด unit `()` (`Result<(), FileError>`) `:dyn Trait` ชนิดทูเพิล และชนิดที่เขียนในวงเล็บ (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`) ได้ ถ้าไม่มีชนิดตามหลัง `<` ตัว `<` นั้นจะเป็นส่วนของชื่อ (`<=` หรือ `string<`) อาร์กิวเมนต์ชนิดที่ไม่ปิดด้วย `>` หรือไม่มีรูปแบบของชนิดเป็นข้อผิดพลาดในการอ่าน (`(a<b c)` ก็เป็นข้อผิดพลาดของอาร์กิวเมนต์ชนิด `b c`) `()` ใช้เป็นชนิดของฟิลด์หรืออาร์กิวเมนต์ได้ด้วย
+- **ชนิดลิสต์**: `(T U ...)` ชนิดของลิสต์สองสมาชิกคือ `T` และ `U` เป็นชนิดเดียวกับ
+  `cons-cell<T,cons-cell<U,()>>` ส่วน `(T)` มีสมาชิกตัวเดียว และ `()` คือลิสต์ว่าง (ชนิด unit) ถ้าเขียน `. V`
+  ไว้ท้าย จะเป็นชนิดของ `cdr` ของเซลล์สุดท้าย (`(T . U)` คือ `cons-cell<T,U>` และ `(int . Option<Sexpr>)`
+  ตั้งแต่สมาชิกตัวที่สองเป็นข้อมูล S-expression) ชนิดในวงเล็บที่หัวเป็น `fn` `ptr` หรือ `:dyn` คือชนิดฟังก์ชัน
+  ชนิดพอยน์เตอร์ หรือชนิดออบเจกต์ trait ตามลำดับ ส่วนวงเล็บอื่นทั้งหมดอ่านเป็นชนิดลิสต์ ชนิดเจเนอริกต้อง
+  เขียนเป็น `Name<...>` เสมอ — `(Vector int)` คือชนิดของลิสต์ของ `Vector` และ `int` และเป็นข้อผิดพลาด
+  เพราะ `Vector` ไม่มีอาร์กิวเมนต์ชนิด ค่าของชนิดลิสต์สร้างและแยกด้วย `cons`/`car`/`cdr` และสร้างด้วย `list`
+  quote หรือ quasiquote ก็ได้ ([บทที่ 7](#7-ฟอร์มพิเศษอื่น-ๆ)) ตัวระบบเองก็แสดงชนิดในรูปนี้
 - **ชนิดทูเพิล**: `#{int string}` (รูปเดียวกับค่า) ทูเพิลมีสมาชิก 1 ถึง 12 ตัว และชนิดทูเพิลเป็นอาร์กิวเมนต์ชนิดได้ด้วย (`Vector<#{int string}>`) อ่านสมาชิกด้วย `t::0` `t::1` และเปลี่ยนด้วย `(setf t::0 v)` ใช้ `Equal` `Ord` (เปรียบเทียบตั้งแต่สมาชิกตัวแรก) `Hash` และ `print-object` ได้เมื่อชนิดของสมาชิกทุกตัว implement สิ่งเหล่านั้น
 - **ชื่อชนิดที่มีตัวกำกับ**: กำกับด้วย `::` ได้ เช่น `module::Type`
 - **ชนิด trait object**: `:dyn Trait` (สองคำที่คั่นด้วยช่องว่างเป็นชนิดเดียว) แทนค่า
@@ -363,7 +370,7 @@ literal ที่เกินช่วงถูกปฏิเสธเหมื
 (defstruct handle (p ptr))          ; a struct field
 (defenum maybe (none) (some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
-(defffi f ((vector ptr)) i32)       ; inside a type argument
+(defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
 
 มีเหตุผลเดียวสำหรับทั้งหมด: **ช่องนั้นติดแท็กสิ่งที่มันเก็บ** การติดแท็กจะทิ้งบิตบนของ
@@ -1630,13 +1637,16 @@ CL เขียนคำของอนุประโยคเป็นสั�
                                      ; symbol) are wrapped in the matching Sexpr variant, and defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> and the like go in as they are
                                      ; (at no conversion cost). the same for &rest/format arguments.
+                                     ; ในตำแหน่งที่คาดหวังชนิดลิสต์ จะสร้างลิสต์ของชนิดนั้น (ดูด้านล่าง)
 (source-file)                       ; the name of the file this form was read from (string). fixed as a
                                      ; constant at check time. corresponds to CL's *load-pathname*, but is
                                      ; not a variable: module bodies run after checking, so "currently
                                      ; loading" cannot be relied on, while at check time it is always known.
                                      ; for sources that are not files, the reader's name for them (<stdin>/<input>)
 (quote datum)                       ; the same as 'datum. returns it as Sexpr data without evaluating
+                                     ; ในตำแหน่งที่คาดหวังชนิดลิสต์ จะสร้างลิสต์ของชนิดนั้น (ดูด้านล่าง)
 (quasiquote template)               ; the same as `template. embeds expressions in the template with ,/,@
+                                     ; ในตำแหน่งที่คาดหวังชนิดลิสต์ จะสร้างลิสต์ของชนิดนั้น (ดูด้านล่าง)
 (documentation name)                ; returns the docstring of name (a bare name or Type::method) as Option<string>
 (panic message)                     ; message: string. ends abnormally with an unrecoverable error. type !
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
@@ -1652,6 +1662,25 @@ CL เขียนคำของอนุประโยคเป็นสั�
 (pprint-tabular x [colinc])         ; tabular layout (16 columns by default)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; build a logical block yourself
 ```
+
+ในตำแหน่งที่คาดหวังชนิดลิสต์ ([บทที่ 2](#2-การเขียนชนิด)) — ชนิดค่าที่คืน ชนิดอาร์กิวเมนต์ `the` ฯลฯ — `list`
+`quote` และ `quasiquote` จะสร้างลิสต์ของชนิดนั้น ไม่ใช่ข้อมูล S-expression สมาชิกแต่ละตัวถูกตรวจด้วยชนิด
+สมาชิกของตำแหน่งนั้น จึงใส่ค่าที่ชนิดยังเป็นอาร์กิวเมนต์ชนิดได้ด้วย:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; เหมือน (list t u) หรือ (cons t (cons u ()))
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; ไม่ประเมินเนื้อหาของ quote สมาชิกเป็นลิเทอรัลของชนิดนั้น
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; ลิสต์ซ้อนสร้างด้วยชนิดของสมาชิก
+```
+
+- ชนิดเป็นตัวกำหนดจำนวนสมาชิก มากไปหรือน้อยไปเป็นข้อผิดพลาด
+- ถ้าชนิดของ `x` เป็นชนิดลิสต์ที่ความยาวแน่นอน (ลงท้ายด้วย `()`) จะเขียน `,@x` ไว้ตรงกลางก็ได้ ส่วน `,@x`
+  ท้ายเทมเพลตจะใช้ `x` เป็นส่วนที่เหลือของลิสต์โดยตรง (ขอเพียงชนิดของ `x` เป็นชนิดของส่วนที่เหลือ)
+- ถ้าชนิดลงท้ายด้วยข้อมูล S-expression (`(int . Option<Sexpr>)`) ส่วนที่เหลือของเทมเพลตจะสร้างเป็นข้อมูล
+  S-expression
+- ในตำแหน่งที่ไม่ได้คาดหวังชนิดลิสต์ ผลลัพธ์ยังเป็นข้อมูล S-expression (`Option<Sexpr>`) เหมือนเดิม
 
 ตระกูล `print`/`println`/`format`/`pprint` เป็นฟอร์มพิเศษ ดังนั้นอาร์กิวเมนต์ variadic ของมัน (ออบเจ็กต์
 เดียวสำหรับตระกูล `pprint`) ถูกห่อเป็น `Sexpr` ด้วยชนิดของตัวเองก่อนส่ง: นี่คือ

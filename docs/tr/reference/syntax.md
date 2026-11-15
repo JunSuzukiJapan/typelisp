@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -124,19 +124,19 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
 - **Jenerik türler**: `Name<T1,T2,...>`. Örneğin `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. Bir adın hemen ardından gelen `<`'nin ardında bir tür varsa,
   okuyucu eşleşen `>`'ye kadar olanı tür argümanları olarak okur. Bunların içinde parçaları
-  boşluklar ve satır sonları ayırabilir (`HashTable<string, int>`), ve unit türü `()`
-  (`Result<(), FileError>`), `:dyn Trait` ve demet türleri yazılabilir. `<`'nin ardında tür yoksa o
+  boşluklar ve satır sonları ayırabilir (`HashTable<string, int>`), ve unit türü `()` (`Result<(), FileError>`), `:dyn Trait`, demet türleri ve parantez içinde yazılan türler (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`) yazılabilir. `<`'nin ardında tür yoksa o
   `<` adın parçasıdır (`<=`, `string<`). `>` ile kapanmayan ya da tür biçiminde olmayan tür
   argümanları okuma hatasıdır (`(a<b c)` de `b c` tür argümanlarındaki bir hatadır). `()` alan türü
   ya da argüman türü olarak da kullanılabilir.
-- **Jenerik türlerin uygulama biçimi**: `(Name T1 T2 ...)` — `Name<T1,T2,...>` ile aynı türü
-  adlandıran liste biçimli yazım. Örneğin `(vector char)`, `Vector<char>` ile aynıdır. Olağan yazım
-  ad biçimidir; bu biçim **bir tür argümanı bir adın içine yazılamadığında kullanılmak için
-  vardır**: tür argümanı kendisi bir tür ifadesidir, ama `<..>` içine yalnızca adlar, `()`, `:dyn`
-  ve demet türleri yazılabilir, işlev türleri yazılamaz (`Vector<(fn (i32) i32)>` bir okuma
-  hatasıdır; işlev türüne `deftype` ile bir ad verilirse `Vector<F>` yazılabilir). Gerçekleştirme
-  bir türü gösterirken de, örneğin bir trait'in ilişkili türünü bir imzaya yerleştirmenin sonucu
-  olarak, tür bu biçimde görünebilir.
+- **Liste türleri**: `(T U ...)`. Bir `T` ve bir `U`'dan oluşan iki elemanlı listenin türü;
+  `cons-cell<T,cons-cell<U,()>>` ile aynı türdür. `(T)` tek elemanlıdır, `()` boş listedir (unit türü).
+  Sona yazılan `. V` son hücrenin `cdr`'ının türünü verir (`(T . U)` `cons-cell<T,U>`'dur,
+  `(int . Option<Sexpr>)` ise ikinci elemandan itibaren S-ifadesi verisidir). Başı `fn`, `ptr` veya `:dyn`
+  olan parantezli tür sırasıyla fonksiyon türü, işaretçi türü veya trait nesnesi türüdür; diğer bütün
+  parantezli türler liste türü olarak okunur. Jenerik tür her zaman `Name<...>` biçiminde yazılır:
+  `(Vector int)` `Vector` ve `int`'ten oluşan bir listenin türüdür ve `Vector`'ın tür argümanı olmadığı
+  için hatadır. Liste türündeki değerler `cons`/`car`/`cdr` ile kurulur ve ayrıştırılır; `list`, quote
+  veya quasiquote ile de kurulabilir ([bölüm 7](#7-diğer-özel-formlar)). Gerçekleştirim de türleri bu biçimde gösterir.
 - **Demet türleri**: `#{int string}` (değerlerle aynı biçim). Bir demetin 1 ile 12 arasında öğesi
   vardır ve demet türü tür argümanı da olabilir (`Vector<#{int string}>`). Öğeler `t::0` `t::1` ile
   okunur ve `(setf t::0 v)` ile değiştirilir. `Equal`, `Ord` (ilk öğeden başlayarak karşılaştırır),
@@ -407,7 +407,7 @@ değişkenler. Aşağıdakilerin her biri hatadır:
 (defstruct handle (p ptr))          ; a struct field
 (defenum maybe (none) (some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
-(defffi f ((vector ptr)) i32)       ; inside a type argument
+(defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
 
 Hepsinin tek bir nedeni vardır: **yuva, tuttuğu şeyi etiketler**. Etiketleme işaretçinin üst bitlerini
@@ -1723,13 +1723,16 @@ bağımsız değişken olarak vb.).
                                      ; symbol) are wrapped in the matching Sexpr variant, and defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> and the like go in as they are
                                      ; (at no conversion cost). the same for &rest/format arguments.
+                                     ; liste türü beklenen yerde o türden bir liste kurar (aşağıya bakın)
 (source-file)                       ; the name of the file this form was read from (string). fixed as a
                                      ; constant at check time. corresponds to CL's *load-pathname*, but is
                                      ; not a variable: module bodies run after checking, so "currently
                                      ; loading" cannot be relied on, while at check time it is always known.
                                      ; for sources that are not files, the reader's name for them (<stdin>/<input>)
 (quote datum)                       ; the same as 'datum. returns it as Sexpr data without evaluating
+                                     ; liste türü beklenen yerde o türden bir liste kurar (aşağıya bakın)
 (quasiquote template)               ; the same as `template. embeds expressions in the template with ,/,@
+                                     ; liste türü beklenen yerde o türden bir liste kurar (aşağıya bakın)
 (documentation name)                ; returns the docstring of name (a bare name or Type::method) as Option<string>
 (panic message)                     ; message: string. ends abnormally with an unrecoverable error. type !
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
@@ -1745,6 +1748,26 @@ bağımsız değişken olarak vb.).
 (pprint-tabular x [colinc])         ; tabular layout (16 columns by default)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; build a logical block yourself
 ```
+
+Liste türünün ([bölüm 2](#2-türlerin-yazımı)) beklendiği bir yerde — dönüş türü, argüman türü, `the` vb. — `list`,
+`quote` ve `quasiquote` S-ifadesi verisi değil, o türden bir liste kurar. Her eleman bulunduğu konumun
+eleman türüne göre denetlenir; bu yüzden türü hâlâ bir tür argümanı olan değer de girebilir:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; (list t u) ya da (cons t (cons u ())) ile aynı
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; quote'un içi değerlendirilmez. elemanlar kendi türlerinin sabitleridir
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; iç içe liste elemanın türüyle kurulur
+```
+
+- Eleman sayısını tür belirler. Fazlası da eksiği de hatadır.
+- `x`'in türü sabit uzunlukta (sonu `()` olan) bir liste türüyse `,@x` ortaya da yazılabilir. Şablonun
+  sonundaki `,@x`, `x`'in kendisini listenin geri kalanı yapar (`x`'in türünün geri kalanın türü olması
+  yeterlidir).
+- Tür S-ifadesi verisiyle bitiyorsa (`(int . Option<Sexpr>)`), şablonun geri kalanı S-ifadesi verisi
+  olarak kurulur.
+- Liste türü beklenmeyen bir yerde sonuç, eskisi gibi S-ifadesi verisidir (`Option<Sexpr>`).
 
 `print`/`println`/`format`/`pprint` ailesi özel formlardır; bu yüzden değişken sayılı bağımsız
 değişkenleri (`pprint` ailesi için tek bir nesne) geçirilmeden önce kendi türleriyle `Sexpr` içine

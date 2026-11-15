@@ -1269,11 +1269,15 @@ mod tests {
     #[test]
     fn the_spellings_of_a_type() {
         assert_eq!(check_ok("(defun f ((g (fn (i32 &rest u8) bool)) (p #{i32 string})) i32 1)\n2"), Type::Int);
-        assert_eq!(check_ok("(defun h ((v std::vec::Vector<u8>)) u8 1)\n(h (the (Vector u8) (Vector::new)))"), Type::U8);
+        assert_eq!(check_ok("(defun h ((v std::vec::Vector<u8>)) u8 1)\n(h (the Vector<u8> (Vector::new)))"), Type::U8);
         let msg = check_err("(defun f ((g (fn i32))) i32 1)");
         assert!(msg.contains("fn type must be (fn (params) ret)"), "{}", msg);
-        let msg = check_err("(defun f ((v (Vector))) i32 1)");
-        assert!(msg.contains("a type application must be (Name Arg...)"), "{}", msg);
+        let msg = check_err("(defun f ((v Vector)) i32 1)");
+        assert!(msg.contains("takes 1 type argument(s), got 0"), "{}", msg);
+        // A list type is made of the standard library's cells, which this
+        // checker has not loaded.
+        let msg = check_err("(defun f ((v (u8 u8))) i32 1)");
+        assert!(msg.contains("is made of `cons-cell`s"), "{}", msg);
     }
 
     /// A module's forms are checked in it; what it does not make `pub` is

@@ -225,6 +225,7 @@ pretty printer とも合成される（4 章）。`*print-pretty*` が真なら�
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`、`#("a" "b")` | `#(1 2 3)`、`#(a b)` |
 | タプル `#{..}` | `#{1 "a"}` | `#{1 a}` |
+| `cons-cell<A,B>`（リスト型 `(T U ...)`） | `(1 "a")`、`(3 . 1)` | `(1 a)`、`(3 . 1)` |
 | `HashTable<K,V>` | `#<HashTable<string,int> count=1>` | 同左 |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<Chan<int> 0>`（数字は処理系内の番号） | 同左 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

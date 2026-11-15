@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Pares, expressões S e sequências
 
 O par genérico `cons-cell`, os dados de expressões S `Sexpr`, os símbolos, as funções de sequência escritas
@@ -21,6 +21,12 @@ acessores de `defstruct` da
 `cons-cell` também serve no lugar de uma sintaxe de tuplas. As funções do CL que devolvem valores múltiplos (o
 quociente e o resto de `floor`, o valor e a posição de `read-from-string` etc.) devolvem um `cons-cell` nesta
 linguagem.
+
+`cons-cell`s encadeadas formam uma lista, cujo tipo pode ser escrito como tipo lista `(T U ...)`
+(`(int string)` é `cons-cell<int,cons-cell<string,()>>`; [capítulo 2 da Referência de sintaxe](../syntax.md#2-escrita-de-tipos)). A impressão também é a dos
+conses de CL: `(cons 1 (cons "a" ()))` imprime `(1 "a")` e `(cons 3 1)`, `(3 . 1)`. Quando o tipo do
+`cdr` é `Option<Sexpr>`, ele é impresso como a continuação desses dados de S-expressão
+(`(cons 'a '(b c))` é `(a b c)`).
 
 ## 2. Dados de expressões S `Sexpr`
 

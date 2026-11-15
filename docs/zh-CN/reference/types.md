@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # 类型一览
 
 typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的写法见[语法参考第 2 章](syntax.md#2-类型的写法)，各类型的
@@ -38,7 +38,8 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 | `Thread<T>` | 在专用 OS 线程上运行的任务的句柄 | [Thread](functions/concurrency.md#7-threadt--专用-os-线程) |
 | `Chan<T>` | 通道 | [通道](functions/concurrency.md#2-chant--通道) |
 
-函数类型写成 `(fn (参数类型...) 返回值类型)`，trait 对象写成 `:dyn Trait`（[语法参考第 2 章](syntax.md#2-类型的写法)）。
+函数类型写作 `(fn (参数类型...) 返回值类型)`，trait 对象写作 `:dyn Trait`，列表类型写作 `(T U ...)`
+（与 `cons-cell<T,cons-cell<U,()>>` 是同一个类型）（[语法参考第 2 章](syntax.md#2-类型的写法)）。
 
 ## 3. S 表达式数据
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -37,7 +37,8 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `Thread<T>` | समर्पित OS थ्रेड पर चल रहे टास्क का हैंडल | [Thread](functions/concurrency.md#7-threadt--समर्पित-os-थ्रेड) |
 | `Chan<T>` | चैनल | [चैनल](functions/concurrency.md#2-chant--चैनल) |
 
-फ़ंक्शन टाइप `(fn (argument-types...) return-type)` के रूप में लिखे जाते हैं, और trait ऑब्जेक्ट `:dyn Trait` के रूप में ([सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना))।
+फ़ंक्शन टाइप `(fn (आर्ग्युमेंट-टाइप...) रिटर्न-टाइप)`, trait ऑब्जेक्ट `:dyn Trait`, और लिस्ट टाइप
+`(T U ...)` (`cons-cell<T,cons-cell<U,()>>` जैसा ही टाइप) लिखे जाते हैं ([सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना))।
 
 ## 3. S-एक्सप्रेशन डेटा
 

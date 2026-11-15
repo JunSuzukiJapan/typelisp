@@ -2963,6 +2963,9 @@ impl Renderer {
                     out.push(')');
                     return Ok(());
                 }
+                if typelisp_mem::type_shape(ty).named_definition() == typelisp_mem::type_shape(typelisp_mem::TypeId::CONS_CELL).named_definition() {
+                    return self.render_cons_cells(heap, ctx, id, ty, standard, depth, out);
+                }
                 // A tuple prints as `#{..}`, which reads back as one: a datum
                 // read from `#{..}` has no `print-object` made for it, and a
                 // typed one whose elements have none would otherwise fall to
@@ -3136,46 +3139,123 @@ impl Renderer {
             }
             Value::Cons(_) => {
                 out.push('(');
-                let mut cur = v;
-                let mut printed = 0usize;
-                loop {
-                    match cur {
-                        Value::Cons(_) => {
-                            // A later cell that is itself shared has to be
-                            // printed as a *tail* (`. #1=(...)` / `. #1#`)
-                            // rather than spliced into this list — that is
-                            // what stops a circular list, whose last cdr
-                            // points back at a cell already printed. The first
-                            // cell is skipped: `prologue` labelled it, and
-                            // re-entering here would loop.
-                            if printed > 0 && ctx.print_vars.circle && self.is_shared(heap, cur) {
-                                out.push_str(" . ");
-                                self.render(heap, ctx, cur, standard, depth, out)?;
-                                break;
-                            }
-                            if Self::length_reached(ctx, printed) {
-                                out.push_str(if printed == 0 { "..." } else { " ..." });
-                                break;
-                            }
-                            if printed > 0 {
-                                out.push(' ');
-                            }
-                            let head = heap.car(cur).expect("cons car");
-                            self.render(heap, ctx, head, standard, depth + 1, out)?;
-                            printed += 1;
-                            cur = heap.cdr(cur).expect("cons cdr");
-                        }
-                        Value::Empty => break,
-                        other => {
-                            out.push_str(" . ");
-                            self.render(heap, ctx, other, standard, depth + 1, out)?;
-                            break;
-                        }
-                    }
-                }
+                self.render_data_tail(heap, ctx, v, 0, standard, depth, out)?;
                 out.push(')');
             }
         }
+        Ok(())
+    }
+
+    /// The elements of the data list `cur` on, `printed` of the list's
+    /// elements already written, and its dotted tail: everything of a list
+    /// but its parentheses.
+    #[allow(clippy::too_many_arguments)]
+    fn render_data_tail(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        mut cur: Value,
+        mut printed: usize,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
+        loop {
+            match cur {
+                Value::Cons(_) => {
+                    // A later cell that is itself shared has to be
+                    // printed as a *tail* (`. #1=(...)` / `. #1#`)
+                    // rather than spliced into this list — that is
+                    // what stops a circular list, whose last cdr
+                    // points back at a cell already printed. The first
+                    // cell is skipped: `prologue` labelled it, and
+                    // re-entering here would loop.
+                    if printed > 0 && ctx.print_vars.circle && self.is_shared(heap, cur) {
+                        out.push_str(" . ");
+                        self.render(heap, ctx, cur, standard, depth, out)?;
+                        break;
+                    }
+                    if Self::length_reached(ctx, printed) {
+                        out.push_str(if printed == 0 { "..." } else { " ..." });
+                        break;
+                    }
+                    if printed > 0 {
+                        out.push(' ');
+                    }
+                    let head = heap.car(cur).expect("cons car");
+                    self.render(heap, ctx, head, standard, depth + 1, out)?;
+                    printed += 1;
+                    cur = heap.cdr(cur).expect("cons cdr");
+                }
+                Value::Empty => break,
+                other => {
+                    out.push_str(" . ");
+                    self.render(heap, ctx, other, standard, depth + 1, out)?;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The `cons-cell` `id`, of the type `ty`, as the list it begins: CL's
+    /// printing of a cons. A cell's cdr goes on the list when its type is
+    /// another cell, ends it when it is `()`, goes on as the data list it is
+    /// when it is `Option<Sexpr>`, and is a dotted tail otherwise. Its type
+    /// decides, not its value: an `Option` field's `none` is the same word
+    /// as the empty list.
+    #[allow(clippy::too_many_arguments)]
+    fn render_cons_cells(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        mut id: typelisp_mem::BoxId,
+        mut ty: typelisp_mem::TypeId,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
+        let cons = typelisp_mem::type_shape(typelisp_mem::TypeId::CONS_CELL).named_definition();
+        out.push('(');
+        let mut printed = 0usize;
+        loop {
+            if Self::length_reached(ctx, printed) {
+                out.push_str(if printed == 0 { "..." } else { " ..." });
+                break;
+            }
+            if printed > 0 {
+                out.push(' ');
+            }
+            let car = heap.struct_field(id, 0);
+            self.render_field(heap, ctx, ty, None, 0, car, standard, depth + 1, out)?;
+            printed += 1;
+            let typelisp_mem::TypeShape::Named(_, _, args) = typelisp_mem::type_shape(ty) else {
+                return Err(format!("print: a `cons-cell` of the type `{}`, which is not one", crate::shared::name_view().type_name(ty)));
+            };
+            let cdr_ty = args[1];
+            let cdr = heap.struct_field(id, 1);
+            let cdr_shape = typelisp_mem::type_shape(cdr_ty);
+            if cdr_shape == typelisp_mem::TypeShape::Unit {
+                break;
+            }
+            if cdr_ty == typelisp_mem::TypeId::OPTION_SEXPR {
+                self.render_data_tail(heap, ctx, cdr, printed, standard, depth, out)?;
+                break;
+            }
+            match cdr {
+                // A shared cell goes on as a tail, as a data list's does.
+                Value::Boxed(next) if cdr_shape.named_definition() == cons && !(ctx.print_vars.circle && self.is_shared(heap, cdr)) => {
+                    id = next;
+                    ty = cdr_ty;
+                }
+                _ => {
+                    out.push_str(" . ");
+                    self.render_field(heap, ctx, ty, None, 1, cdr, standard, depth + 1, out)?;
+                    break;
+                }
+            }
+        }
+        out.push(')');
         Ok(())
     }
 

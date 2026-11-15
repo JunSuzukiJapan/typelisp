@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -121,19 +121,19 @@ In source, types are written as ordinary symbols or lists.
 - **Generic types**: `Name<T1,T2,...>`. For example `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. When a type follows a `<` right after a name, the reader
   reads up to the matching `>` as type arguments. Inside them, spaces and newlines may separate the
-  parts (`HashTable<string, int>`), and the unit type `()` (`Result<(), FileError>`), `:dyn Trait`
-  and tuple types can be written. If no type follows the `<`, that `<` is part of the name (`<=`,
+  parts (`HashTable<string, int>`), and the unit type `()` (`Result<(), FileError>`), `:dyn Trait`, tuple types and types written in parentheses (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`) can be written. If no type follows the `<`, that `<` is part of the name (`<=`,
   `string<`). Type arguments that are not closed with `>`, or that are not shaped like types, are a
   read error (`(a<b c)` too is an error, in the type arguments `b c`). `()` can also be used as a
   field type or an argument type.
-- **The application form of generic types**: `(Name T1 T2 ...)`, a list spelling that names the same
-  type as `Name<T1,T2,...>`. For example `(vector char)` is the same as `Vector<char>`. The name
-  form is the usual way to write it; this form **exists for when a type argument cannot be spelled
-  inside a name**: a type argument is itself a type expression, but inside `<..>` only names, `()`,
-  `:dyn` and tuple types can be written, not function types (`Vector<(fn (i32) i32)>` is a read
-  error; give the function type a name with `deftype` and `Vector<F>` can be written). It may also
-  appear in this form when the implementation shows a type, such as the result of substituting a
-  trait's associated type into a signature.
+- **List types**: `(T U ...)`. The type of a two-element list of a `T` and a `U`, the same type as
+  `cons-cell<T,cons-cell<U,()>>`. `(T)` has one element, and `()` is the empty list (the unit type). A
+  trailing `. V` gives the type of the last cell's `cdr` (`(T . U)` is `cons-cell<T,U>`, and
+  `(int . Option<Sexpr>)` is S-expression data from the second element on). A parenthesized type whose
+  head is `fn`, `ptr` or `:dyn` is a function type, a pointer type or a trait object type; every other
+  parenthesized type is read as a list type. A generic type is always written `Name<...>`: `(Vector int)`
+  is the type of a list of `Vector` and `int`, and is an error because `Vector` has no type argument.
+  Values of a list type are built and taken apart with `cons`/`car`/`cdr`, and can also be built with
+  `list`, a quote or a quasiquote ([chapter 7](#7-other-special-forms)). The implementation also shows types in this form.
 - **Tuple types**: `#{int string}` (the same shape as the values). A tuple has 1 to 12 elements, and
   a tuple type can also be a type argument (`Vector<#{int string}>`). Elements are read with `t::0`
   `t::1` and changed with `(setf t::0 v)`. `Equal`, `Ord` (comparing from the first element on), `Hash`
@@ -403,7 +403,7 @@ Each of the following is an error:
 (defstruct handle (p ptr))          ; a struct field
 (defenum maybe (none) (some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
-(defffi f ((vector ptr)) i32)       ; inside a type argument
+(defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
 
 There is one reason for all of them: **the slot tags what it holds**. Tagging would drop the top bits of
@@ -1729,13 +1729,16 @@ on).
                                      ; symbol) are wrapped in the matching Sexpr variant, and defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> and the like go in as they are
                                      ; (at no conversion cost). the same for &rest/format arguments.
+                                     ; in a position where a list type is expected, builds a list of that type (below)
 (source-file)                       ; the name of the file this form was read from (string). fixed as a
                                      ; constant at check time. corresponds to CL's *load-pathname*, but is
                                      ; not a variable: module bodies run after checking, so "currently
                                      ; loading" cannot be relied on, while at check time it is always known.
                                      ; for sources that are not files, the reader's name for them (<stdin>/<input>)
 (quote datum)                       ; the same as 'datum. returns it as Sexpr data without evaluating
+                                     ; in a position where a list type is expected, builds a list of that type (below)
 (quasiquote template)               ; the same as `template. embeds expressions in the template with ,/,@
+                                     ; in a position where a list type is expected, builds a list of that type (below)
 (documentation name)                ; returns the docstring of name (a bare name or Type::method) as Option<string>
 (panic message)                     ; message: string. ends abnormally with an unrecoverable error. type !
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
@@ -1751,6 +1754,28 @@ on).
 (pprint-tabular x [colinc])         ; tabular layout (16 columns by default)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; build a logical block yourself
 ```
+
+`list`, `quote` and `quasiquote` build a list of that type, not S-expression data, in a position where a
+list type ([chapter 2](#2-writing-types)) is expected: a return type, an argument type, `the` and so on. Each
+element is checked against the element type of its position, so a value whose type is still a type
+argument can go in:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; the same as (list t u) or (cons t (cons u ()))
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; a quote's contents are not evaluated. elements are literals of their type
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; a nested list is built with the element's type
+```
+
+- The type decides the number of elements. Too many or too few is an error.
+- `,@x` can also be written in the middle when the type of `x` is a list type of fixed length (ending in
+  `()`). A `,@x` at the end of the template makes `x` itself the rest of the list (the type of `x` only
+  has to be the type of the rest).
+- When the type ends in S-expression data (`(int . Option<Sexpr>)`), the rest of the template is built
+  as S-expression data.
+- In a position where no list type is expected, the result is S-expression data (`Option<Sexpr>`) as
+  before.
 
 The `print`/`println`/`format`/`pprint` family are special forms, so their variadic arguments (a single
 object for the `pprint` family) are wrapped into `Sexpr` with their own types before being passed: this is

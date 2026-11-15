@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -90,14 +90,16 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   `(fn (인수-타입... &rest 요소-타입) 반환-타입)`이다.
 - **제네릭 타입**: `Name<T1,T2,...>`. 예: `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. 이름 바로 뒤의 `<`에 타입이 이어지면, 리더는 대응하는 `>`까지를 타입 인수로 읽는다. 타입 인수 안은
-  공백이나 줄바꿈으로 구분해도 되고(`HashTable<string, int>`), unit 타입 `()`(`Result<(), FileError>`), `:dyn Trait`,
-  튜플 타입도 쓸 수 있다. `<` 바로 뒤에 타입이 오지 않으면 그 `<`는 이름의 일부가 된다(`<=`나 `string<`). 타입 인수가 `>`로 닫히지 않거나 타입 모양이
+  공백이나 줄바꿈으로 구분해도 되고(`HashTable<string, int>`), unit 타입 `()`(`Result<(), FileError>`), `:dyn Trait`, 튜플 타입, 괄호로 쓰는 타입(`Vector<(int string)>`, `Vector<(fn (i32) i32)>`)도 쓸 수 있다. `<` 바로 뒤에 타입이 오지 않으면 그 `<`는 이름의 일부가 된다(`<=`나 `string<`). 타입 인수가 `>`로 닫히지 않거나 타입 모양이
   아니면 읽기 오류다(`(a<b c)`도 타입 인수 `b c`의 오류로 읽기 오류). `()`는 필드 타입이나 인수 타입으로도 쓸 수 있다.
-- **제네릭 타입의 적용 형식**: `(Name T1 T2 ...)` — `Name<T1,T2,...>`와 같은 타입을 가리키는 리스트 표기. 예를 들어
-  `(vector char)`는 `Vector<char>`와 같다. 이름 형식이 보통의 표기이며, 이 형식은 **타입 인수를 이름 안에 쓸 수 없을 때를 위해 있다**. 타입
-  인수 자체는 타입 식이지만 `<..>` 안에는 이름, `()`, `:dyn`, 튜플 타입만 쓸 수 있고 함수 타입은 쓸 수 없다(`Vector<(fn (i32) i32)>`는
-  읽기 오류. `deftype`으로 이름을 붙이면 `Vector<F>`로 쓸 수 있다). 트레이트의 연관 타입을 시그니처에 대입한 결과처럼, 구현이 타입을 보일 때 이 형식으로
-  나오기도 한다.
+- **리스트 타입**: `(T U ...)`. `T`와 `U` 두 요소로 된 리스트의 타입으로, `cons-cell<T,cons-cell<U,()>>`와
+  같은 타입을 가리킨다. `(T)`는 요소 1개, `()`는 빈 리스트(unit 타입). 끝에 `. V`를 쓰면 마지막 셀의
+  `cdr`의 타입이 된다(`(T . U)`는 `cons-cell<T,U>`, `(int . Option<Sexpr>)`는 두 번째부터 S 식 데이터).
+  괄호의 머리가 `fn`·`ptr`·`:dyn`인 것은 각각 함수 타입·포인터 타입·trait 객체 타입이고, 그 밖의 괄호는
+  모두 리스트 타입으로 읽는다. 제네릭 타입은 반드시 `Name<...>`으로 쓴다——`(Vector int)`는 `Vector`와
+  `int`의 리스트 타입이 되며, `Vector`에 타입 인수가 없으므로 오류가 된다. 리스트 타입의 값은
+  `cons`/`car`/`cdr`로 만들고 분해하며, `list`·quote·quasiquote로도 만들 수 있다([7장](#7-기타-특수-형식)).
+  처리계가 타입을 표시할 때도 이 형태로 나온다.
 - **튜플 타입**: `#{int string}`(값과 같은 모양). 요소는 1~12개이며 제네릭 타입의 인수로도 쓸 수 있다(`Vector<#{int string}>`).
   요소는 `t::0` `t::1`로 읽고 `(setf t::0 v)`로 바꾼다. `Equal`, `Ord`(첫 요소부터 차례로 비교), `Hash`, `print-object`는 모든
   요소의 타입이 그것을 구현하면 쓸 수 있다.
@@ -333,7 +335,7 @@ typelisp 쪽 이름과 C의 심볼 이름을 따로 쓸 수 있는 것은 typeli
 (defstruct handle (p ptr))          ; 구조체의 필드
 (defenum maybe (none) (some ptr))   ; 열거형의 필드
 (defvar (block ptr) ...)            ; 전역 변수
-(defffi f ((vector ptr)) i32)       ; 타입 인수 안
+(defffi f (Vector<ptr>) i32)        ; 타입 인수 안
 ```
 
 이유는 하나이다. 모두 **슬롯이 담는 것에 태그를 붙이는** 곳이다. 태그를 붙이면 포인터의 최상위 비트가 사라진다. 64비트 정수
@@ -1504,13 +1506,16 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
                                      ; symbol)는 대응하는 Sexpr 변형에 감싸지고, defstruct/defenum/
                                      ; Vector<T>/HashTable<K,V> 등은 그대로 들어간다(변환
                                      ; 비용 없음). &rest/format의 인수도 같다.
+                                     ; 리스트 타입이 기대되는 위치에서는 그 타입의 리스트를 만든다(아래)
 (source-file)                       ; 이 형식을 읽은 파일 이름(string). 검사 시에
                                      ; 상수로 정해진다. CL의 *load-pathname*에 해당하지만 변수가 아니다.
                                      ; 모듈의 본체는 검사 뒤에 실행되므로 "지금 읽는 중"은
                                      ; 믿을 수 없지만, 검사 시에는 항상 알려져 있다.
                                      ; 파일이 아닌 소스는 리더가 부르는 이름(<stdin>/<input>)
 (quote datum)                       ; 'datum과 같다. 평가하지 않고 Sexpr 데이터로 반환한다
+                                     ; 리스트 타입이 기대되는 위치에서는 그 타입의 리스트를 만든다(아래)
 (quasiquote template)               ; `template과 같다. ,/,@로 식을 템플릿에 넣는다
+                                     ; 리스트 타입이 기대되는 위치에서는 그 타입의 리스트를 만든다(아래)
 (documentation name)                ; name(맨 이름 또는 Type::method)의 문서 문자열을 Option<string>으로 반환한다
 (panic message)                     ; message: string. 복구할 수 없는 오류로 비정상 종료한다. 타입은 !
 (unreachable)                       ; (panic "unreachable")로 전개된다. defmacro
@@ -1526,6 +1531,24 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 (pprint-tabular x [colinc])         ; 표 레이아웃(기본 16열)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; 논리 블록을 직접 만든다
 ```
+
+`list`·`quote`·`quasiquote`는 리스트 타입([2장](#2-타입-표기))이 기대되는 위치——반환 타입, 인수 타입,
+`the` 등——에서는 S 식 데이터가 아니라 그 타입의 리스트를 만든다. 각 요소는 그 위치의 요소 타입으로
+검사되므로, 타입이 아직 타입 인수인 값도 들어간다:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; (list t u)나 (cons t (cons u ()))와 같다
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; quote의 내용은 평가하지 않는다. 요소는 그 타입의 리터럴
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; 중첩된 리스트는 요소의 타입으로 만든다
+```
+
+- 요소의 수는 타입이 정한다. 너무 많아도 너무 적어도 오류.
+- `,@x`는 `x`의 타입이 길이가 정해진 리스트 타입(끝이 `()`)이면 중간에도 쓸 수 있다. 템플릿 마지막의
+  `,@x`는 `x`를 그대로 리스트의 나머지로 삼는다(`x`의 타입이 나머지의 타입이면 된다).
+- 타입의 끝이 S 식 데이터(`(int . Option<Sexpr>)`)이면 템플릿의 나머지는 S 식 데이터로 만든다.
+- 리스트 타입이 기대되지 않는 위치에서는 지금까지처럼 S 식 데이터(`Option<Sexpr>`)가 된다.
 
 `print`/`println`/`format`/`pprint` 계열은 특수 형식이므로 가변 인수(`pprint` 계열은 대상 하나)는 각자의 타입으로 `Sexpr`에
 감싸져 넘겨진다. `(println "~a" my-struct)`가 그대로 동작하는 것은 이 때문이다. 서식 지시자와 프리티 프린터의 자세한

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Typen
 
 Die Typen, die typelisp hat, und die Standard-Traits, die jeder Typ implementiert. Wie man Typen schreibt,
@@ -39,8 +39,8 @@ Einen 64-Bit-Ganzzahltyp gibt es nicht. Für Ganzzahlen, deren Breite keine Roll
 | `Thread<T>` | Ein Handle auf einen Task, der auf einem eigenen OS-Thread läuft | [Thread](functions/concurrency.md#7-threadt--eigene-os-threads) |
 | `Chan<T>` | Ein Kanal | [Kanäle](functions/concurrency.md#2-chant--kanäle) |
 
-Funktionstypen schreibt man `(fn (Argumenttypen...) Rückgabetyp)`, Trait-Objekte `:dyn Trait`
-([Kapitel 2 der Syntaxreferenz](syntax.md#2-typen-schreiben)).
+Funktionstypen schreibt man `(fn (Argumenttypen...) Rückgabetyp)`, Trait-Objekte `:dyn Trait` und
+Listentypen `(T U ...)` (derselbe Typ wie `cons-cell<T,cons-cell<U,()>>`) ([Kapitel 2 der Syntaxreferenz](syntax.md#2-typen-schreiben)).
 
 ## 3. S-Ausdrucksdaten
 

@@ -2,9 +2,10 @@
 //! `quasiquote`, a template whose `,x` and `,@x` are filled in.
 //!
 //! A quoted symbol is a `Symbol`: the quote is its only literal syntax, as
-//! `42` is an integer's. Any other datum is S-expression data,
-//! `Option<Sexpr>`, since `'()` is one and the empty list is `none`. A
-//! quasiquote's value is always S-expression data.
+//! `42` is an integer's. A quoted list where a list type is expected is
+//! that type's cells (`typed_list`), and so is a quasiquoted one. Any other
+//! datum is S-expression data, `Option<Sexpr>`, since `'()` is one and the
+//! empty list is `none`.
 
 use crate::typeck::sexpr_value::option_of_sexpr;
 use crate::sexpr_variant::CONS;
@@ -19,10 +20,13 @@ use super::resolve::value_named;
 use super::tree::{Node, Typed};
 
 /// `(quote datum)` — `args` without the `quote`.
-pub(crate) fn check_quote(heap: &mut Heap, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+pub(crate) fn check_quote(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let [(datum, _)] = args else {
         return Err(Error::TypeError("quote: (quote datum)".into()));
     };
+    if let (Value::Cons(_), Some(expected)) = (datum, expected.filter(|e| super::typed_list::expected_cell(cx, Some(e)).is_some())) {
+        return super::typed_list::check_template(cx, heap, locals, *datum, false, expected, loc);
+    }
     let ty = match datum {
         Value::Symbol(_) => Type::Symbol,
         _ => option_of_sexpr(),
@@ -32,10 +36,13 @@ pub(crate) fn check_quote(heap: &mut Heap, args: &[(Value, Option<Loc>)], loc: O
 }
 
 /// `(quasiquote template)` — `args` without the `quasiquote`.
-pub(crate) fn check_quasiquote(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+pub(crate) fn check_quasiquote(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let [(template, _)] = args else {
         return Err(Error::TypeError("quasiquote: (quasiquote template)".into()));
     };
+    if let (Value::Cons(_), Some(expected)) = (template, expected.filter(|e| super::typed_list::expected_cell(cx, Some(e)).is_some())) {
+        return super::typed_list::check_template(cx, heap, locals, *template, true, expected, loc);
+    }
     let mut t = template_of(cx, heap, locals, *template)?;
     t.loc = loc;
     Ok(t)

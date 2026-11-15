@@ -439,7 +439,7 @@ fn each_directive_checks_its_argument_type() {
         (r#"(format false "~[a~;b~]" "s")"#, "~[ needs an integer, but argument 1 is `string`"),
         (r#"(format false "~:[a~;b~]" 3)"#, "~:[ needs a bool, but argument 1 is `int`"),
         (r#"(format false "~{~a~}" 5)"#, "~{ needs a list (`Option<Sexpr>`), but argument 1 is `int`"),
-        (r#"(format false "~{~a~}" (cons 1 2))"#, "~{ needs a list (`Option<Sexpr>`), but argument 1 is `cons-cell<int,int>`"),
+        (r#"(format false "~{~a~}" (cons 1 2))"#, "~{ needs a list (`Option<Sexpr>`), but argument 1 is `(int . int)`"),
         (r#"(format false "~<~a~:>" 1)"#, "~<…~:> needs a list (`Option<Sexpr>`), but argument 1 is `int`"),
         (r#"(format false "~va" "w" 1)"#, "~a's `v` parameter needs an integer, but argument 1 is `string`"),
         (r#"(format false "~5,,,va" 1 1)"#, "~a's `v` parameter needs a char, but argument 1 is `int`"),

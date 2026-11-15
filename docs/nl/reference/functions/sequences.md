@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Paren, S-expressies en sequenties
 
 Het generieke paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, de sequentiefuncties die bovenop
@@ -22,6 +22,12 @@ Het generieke paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, de sequentief
 `cons-cell` dient ook in plaats van een tuple-syntaxis. CL-functies die meerdere waarden teruggeven
 (het quotiënt en de rest van `floor`, de waarde en positie van `read-from-string` enzovoort) geven in
 deze taal een `cons-cell` terug.
+
+Aan elkaar gekoppelde `cons-cell`s vormen een lijst, waarvan het type als lijsttype `(T U ...)` te
+schrijven is (`(int string)` is `cons-cell<int,cons-cell<string,()>>`; [Syntaxreferentie hoofdstuk 2](../syntax.md#2-types-schrijven)). Ze worden ook
+afgedrukt zoals de conses van CL: `(cons 1 (cons "a" ()))` geeft `(1 "a")` en `(cons 3 1)` geeft
+`(3 . 1)`. Is het type van de `cdr` `Option<Sexpr>`, dan wordt die afgedrukt als vervolg van die
+S-expressiedata (`(cons 'a '(b c))` is `(a b c)`).
 
 ## 2. S-expressiedata `Sexpr`
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # الأنواع
 
 الأنواع الموجودة في typelisp، والسمات القياسية التي ينفّذها كل نوع. وطريقة كتابة الأنواع في
@@ -39,8 +39,8 @@
 | `Thread<T>` | مقبض إلى مهمة تعمل على خيط OS مخصص | [Thread](functions/concurrency.md#7-threadt--خيوط-نظام-التشغيل-المخصصة) |
 | `Chan<T>` | قناة | [القنوات](functions/concurrency.md#2-chant--القنوات) |
 
-وتُكتب أنواع الدوال `(fn (أنواع-الوسائط...) النوع-الراجع)`، وكائنات السمات `:dyn Trait`
-([الفصل 2 من مرجع الصياغة](syntax.md#2-كتابة-الأنواع)).
+تُكتب أنواع الدوال `(fn (أنواع-الوسائط...) نوع-القيمة-المعادة)`، وكائنات السمات `:dyn Trait`، وأنواع
+القوائم `(T U ...)` (النوع نفسه `cons-cell<T,cons-cell<U,()>>`) ([الفصل 2 من مرجع الصياغة](syntax.md#2-كتابة-الأنواع)).
 
 ## 3. بيانات التعبيرات الرمزية (S-expression)
 

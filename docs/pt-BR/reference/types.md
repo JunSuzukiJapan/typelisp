@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Tipos
 
 Os tipos que o typelisp tem e os traits padrão que cada tipo implementa. Como escrever tipos está no
@@ -39,8 +39,8 @@ Não há tipo inteiro de 64 bits. Para inteiros cuja largura não importa, use `
 | `Thread<T>` | Um handle de uma tarefa executada em uma thread de SO dedicada | [Thread](functions/concurrency.md#7-threadt--threads-de-so-dedicadas) |
 | `Chan<T>` | Um canal | [Canais](functions/concurrency.md#2-chant--canais) |
 
-Os tipos de função são escritos `(fn (tipos-dos-argumentos...) tipo-de-retorno)`, e os objetos trait
-`:dyn Trait` ([capítulo 2 da Referência de sintaxe](syntax.md#2-escrita-de-tipos)).
+Tipos função são escritos `(fn (tipos-dos-argumentos...) tipo-de-retorno)`, objetos trait `:dyn Trait`
+e tipos lista `(T U ...)` (o mesmo tipo que `cons-cell<T,cons-cell<U,()>>`) ([capítulo 2 da Referência de sintaxe](syntax.md#2-escrita-de-tipos)).
 
 ## 3. Dados de expressões S
 

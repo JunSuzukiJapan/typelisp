@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -21,6 +21,12 @@ Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunkti
 `cons-cell` fungerar också i stället för en tupelsyntax. CL-funktioner som returnerar flera värden
 (kvoten och resten från `floor`, värdet och positionen från `read-from-string` och så vidare) returnerar en
 `cons-cell` i det här språket.
+
+Sammanlänkade `cons-cell` är en lista, vars typ kan skrivas som listtypen `(T U ...)`
+(`(int string)` är `cons-cell<int,cons-cell<string,()>>`; [Syntaxreferens kapitel 2](../syntax.md#2-hur-typer-skrivs)). De skrivs också ut som CL:s
+conses: `(cons 1 (cons "a" ()))` skrivs ut som `(1 "a")` och `(cons 3 1)` som `(3 . 1)`. Är typen för
+`cdr` `Option<Sexpr>` skrivs den ut som fortsättningen på de S-uttrycksdata
+(`(cons 'a '(b c))` blir `(a b c)`).
 
 ## 2. S-uttrycksdata `Sexpr`
 

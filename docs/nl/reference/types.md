@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -40,8 +40,8 @@ Er is geen 64-bits geheel type. Gebruik voor gehele getallen waarvan de breedte 
 | `Thread<T>` | Een handle naar een taak die op een eigen OS-thread draait | [Thread](functions/concurrency.md#7-threadt--eigen-os-threads) |
 | `Chan<T>` | Een kanaal | [Kanalen](functions/concurrency.md#2-chant--kanalen) |
 
-Functietypes worden geschreven als `(fn (argumenttypes...) returntype)`, en trait-objecten als
-`:dyn Trait` ([Syntaxreferentie hoofdstuk 2](syntax.md#2-types-schrijven)).
+Functietypen schrijf je `(fn (argumenttypen...) returntype)`, trait-objecten `:dyn Trait` en lijsttypen
+`(T U ...)` (hetzelfde type als `cons-cell<T,cons-cell<U,()>>`) ([Syntaxreferentie hoofdstuk 2](syntax.md#2-types-schrijven)).
 
 ## 3. S-expressiedata
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -40,8 +40,8 @@ Tidak ada tipe bilangan bulat 64 bit. Untuk bilangan bulat yang lebarnya tidak p
 | `Thread<T>` | Handle ke task yang berjalan di thread OS khusus | [Thread](functions/concurrency.md#7-threadt--thread-os-khusus) |
 | `Chan<T>` | Kanal | [Kanal](functions/concurrency.md#2-chant--kanal) |
 
-Tipe fungsi ditulis `(fn (tipe-argumen...) tipe-kembalian)`, dan objek trait `:dyn Trait`
-([Referensi Sintaks bab 2](syntax.md#2-menulis-tipe)).
+Tipe fungsi ditulis `(fn (tipe-argumen...) tipe-kembalian)`, objek trait `:dyn Trait`, dan tipe list
+`(T U ...)` (tipe yang sama dengan `cons-cell<T,cons-cell<U,()>>`) ([Referensi Sintaks bab 2](syntax.md#2-menulis-tipe)).
 
 ## 3. Data S-expression
 

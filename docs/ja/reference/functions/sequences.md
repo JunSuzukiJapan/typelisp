@@ -19,6 +19,11 @@
 `cons-cell` はタプル構文の代わりにも使われる。多値を返す CL の関数（`floor` の商と剰余、
 `read-from-string` の値と位置など）は、この言語では `cons-cell` を返す。
 
+`cons-cell` をつないだものはリストで、その型はリスト型 `(T U ...)` と書ける
+（`(int string)` は `cons-cell<int,cons-cell<string,()>>`。[構文リファレンス 2 章](../syntax.md#2-型の書き方)）。
+印字も CL の cons と同じで、`(cons 1 (cons "a" ()))` は `(1 "a")`、`(cons 3 1)` は `(3 . 1)` と出る。
+`cdr` の型が `Option<Sexpr>` なら、その S 式データの続きとして印字する（`(cons 'a '(b c))` は `(a b c)`）。
+
 ## 2. S 式データ `Sexpr`
 
 `read` が返すデータ型 `Sexpr` は 19 の変種を持つ:

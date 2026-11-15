@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -123,19 +123,19 @@ I källkod skrivs typer som vanliga symboler eller listor.
 - **Generiska typer**: `Name<T1,T2,...>`. Till exempel `Option<i32>` `Result<i32,ParseIntError>`
   `HashTable<string,i32>` `Vector<T>`. När en typ följer ett `<` direkt efter ett namn läser läsaren
   fram till motsvarande `>` som typargument. Inuti dem får mellanslag och radbrytningar skilja
-  delarna åt (`HashTable<string, int>`), och unit-typen `()` (`Result<(), FileError>`), `:dyn Trait`
-  och tupeltyper kan skrivas. Följer ingen typ efter `<` är det `<` en del av namnet (`<=`,
+  delarna åt (`HashTable<string, int>`), och unit-typen `()` (`Result<(), FileError>`), `:dyn Trait`, tupeltyper och typer skrivna inom parentes (`Vector<(int string)>`, `Vector<(fn (i32) i32)>`) kan skrivas. Följer ingen typ efter `<` är det `<` en del av namnet (`<=`,
   `string<`). Typargument som inte stängs med `>`, eller som inte har formen av typer, är ett läsfel
   (även `(a<b c)` är ett fel, i typargumenten `b c`). `()` kan också användas som fälttyp eller
   argumenttyp.
-- **Tillämpningsformen för generiska typer**: `(Name T1 T2 ...)`, en listskrivning som anger samma
-  typ som `Name<T1,T2,...>`. Till exempel är `(vector char)` detsamma som `Vector<char>`. Namnformen
-  är det vanliga skrivsättet; den här formen **finns för när ett typargument inte kan skrivas inuti
-  ett namn**: ett typargument är självt ett typuttryck, men inuti `<..>` kan bara namn, `()`, `:dyn`
-  och tupeltyper skrivas, inte funktionstyper (`Vector<(fn (i32) i32)>` är ett läsfel; ger man
-  funktionstypen ett namn med `deftype` kan man skriva `Vector<F>`). En typ kan också dyka upp i den
-  här formen när implementationen visar den, till exempel som resultatet av att sätta in ett traits
-  associerade typ i en signatur.
+- **Listtyper**: `(T U ...)`. Typen för en lista med två element, ett `T` och ett `U`; samma typ som
+  `cons-cell<T,cons-cell<U,()>>`. `(T)` har ett element, och `()` är den tomma listan (unit-typen). Ett
+  avslutande `. V` anger typen för den sista cellens `cdr` (`(T . U)` är `cons-cell<T,U>`, och
+  `(int . Option<Sexpr>)` är S-uttrycksdata från det andra elementet). En typ inom parentes vars huvud är
+  `fn`, `ptr` eller `:dyn` är en funktionstyp, en pekartyp respektive en trait-objekttyp; varje annan typ
+  inom parentes läses som en listtyp. En generisk typ skrivs alltid `Name<...>`: `(Vector int)` är typen
+  för en lista av `Vector` och `int`, och är ett fel eftersom `Vector` saknar typargument. Värden av en
+  listtyp byggs och tas isär med `cons`/`car`/`cdr`, och kan också byggas med `list`, en quote eller en
+  quasiquote ([kapitel 7](#7-övriga-specialformer)). Även implementationen visar typer i den här formen.
 - **Tupeltyper**: `#{int string}` (samma form som värdena). En tupel har 1 till 12 element, och en
   tupeltyp kan också vara ett typargument (`Vector<#{int string}>`). Element läses med `t::0` `t::1`
   och ändras med `(setf t::0 v)`. `Equal`, `Ord` (jämförelse från första elementet), `Hash` och
@@ -407,7 +407,7 @@ Vart och ett av följande är ett fel:
 (defstruct handle (p ptr))          ; ett struct-fält
 (defenum maybe (none) (some ptr))   ; ett enum-fält
 (defvar (block ptr) ...)            ; en global
-(defffi f ((vector ptr)) i32)       ; inuti ett typargument
+(defffi f (Vector<ptr>) i32)        ; inuti ett typargument
 ```
 
 Det finns ett skäl för alla: **platsen taggar det den håller**. Att tagga skulle tappa pekarens översta
@@ -1727,13 +1727,16 @@ och så vidare).
                                      ; symbol) omsluts i den matchande Sexpr-varianten, och defstruct/
                                      ; defenum/Vector<T>/HashTable<K,V> och liknande går in som de är
                                      ; (utan konverteringskostnad). samma för &rest/format-argument.
+                                     ; bygger, där en listtyp väntas, en lista av den typen (se nedan)
 (source-file)                       ; namnet på filen den här formen lästes från (sträng). fast som en
                                      ; konstant vid kontrolltillfället. motsvarar CL:s *load-pathname*, men är
                                      ; inte en variabel: modulkroppar körs efter kontrollen, så "läses in just nu"
                                      ; kan inte förlitas på, medan det vid kontrolltillfället alltid är känt.
                                      ; för källor som inte är filer, läsarens namn för dem (<stdin>/<input>)
 (quote datum)                       ; samma som 'datum. returnerar det som Sexpr-data utan att utvärdera
+                                     ; bygger, där en listtyp väntas, en lista av den typen (se nedan)
 (quasiquote template)               ; samma som `template. bäddar in uttryck i mallen med ,/,@
+                                     ; bygger, där en listtyp väntas, en lista av den typen (se nedan)
 (documentation name)                ; returnerar dokumentationssträngen för name (ett bart namn eller Type::method) som Option<string>
 (panic message)                     ; message: string. avslutar onormalt med ett icke återhämtningsbart fel. typ !
 (unreachable)                       ; expanderar till (panic "unreachable"). defmacro
@@ -1749,6 +1752,25 @@ och så vidare).
 (pprint-tabular x [colinc])         ; tabelllayout (16 kolumner som standard)
 (pprint-logical-block (obj :prefix p :suffix s) body...)  ; bygg ett logiskt block själv
 ```
+
+På en plats där en listtyp ([kapitel 2](#2-hur-typer-skrivs)) väntas – en returtyp, en argumenttyp, `the` och så vidare –
+bygger `list`, `quote` och `quasiquote` en lista av den typen i stället för S-uttrycksdata. Varje element
+kontrolleras mot elementtypen på sin position, så även ett värde vars typ fortfarande är ett typargument
+får plats:
+
+```lisp
+(defun two<T,U> ((t T) (u U)) (T U)
+  `(,t ,u))                         ; samma som (list t u) eller (cons t (cons u ()))
+(two 1 "a")                         ; => (1 "a")
+(the (int string) '(1 "a"))         ; innehållet i en quote evalueras inte. elementen är literaler av sin typ
+(the ((int int) symbol) `((1 ,(+ 1 1)) foo))  ; en nästlad lista byggs med elementets typ
+```
+
+- Typen bestämmer antalet element. För många eller för få är ett fel.
+- `,@x` får också stå i mitten när typen för `x` är en listtyp med fast längd (som slutar på `()`). Ett
+  `,@x` sist i mallen gör `x` självt till resten av listan (typen för `x` behöver bara vara restens typ).
+- Slutar typen i S-uttrycksdata (`(int . Option<Sexpr>)`) byggs resten av mallen som S-uttrycksdata.
+- På en plats där ingen listtyp väntas blir resultatet som förut S-uttrycksdata (`Option<Sexpr>`).
 
 Familjen `print`/`println`/`format`/`pprint` är specialformer, så deras variadiska argument (ett enda
 objekt för `pprint`-familjen) omsluts i `Sexpr` med sina egna typer innan de skickas: det är därför

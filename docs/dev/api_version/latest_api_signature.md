@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.58
+# ABI バージョン 0.3.59
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.58 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.59 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `5f11b7e5e5417ad0`
+内容ハッシュ (FNV-1a 64): `bf1d58131af7aa92`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -937,6 +937,7 @@
 | `std::repl::heap-info` | `std::repl::heap-info` | none | 0 | 0 |
 | `std::result::Result<(),std::fs::FileError>` | `std::result::Result<(),std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<(),std::net::NetError>` | `std::result::Result<(),std::net::NetError>` | enum | 6 | 2 |
+| `std::result::Result<(std::option::Option<std::sexpr::Sexpr> . int),std::reader::ReadError>` | `std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,std::primitive::int>,std::reader::ReadError>` | enum | 6 | 2 |
 | `std::result::Result<bool,std::fs::FileError>` | `std::result::Result<std::primitive::bool,std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<bool,std::net::NetError>` | `std::result::Result<std::primitive::bool,std::net::NetError>` | enum | 6 | 2 |
 | `std::result::Result<f64,std::num::ParseFloatError>` | `std::result::Result<std::primitive::f64,std::num::ParseFloatError>` | enum | 6 | 2 |
@@ -954,7 +955,6 @@
 | `std::result::Result<std::option::Option<std::vec::Vector<string>>,std::net::NetError>` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::string>>,std::net::NetError>` | enum | 6 | 2 |
 | `std::result::Result<std::option::Option<string>,std::fs::FileError>` | `std::result::Result<std::option::Option<std::primitive::string>,std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<std::option::Option<string>,std::net::NetError>` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` | enum | 6 | 2 |
-| `std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,int>,std::reader::ReadError>` | `std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,std::primitive::int>,std::reader::ReadError>` | enum | 6 | 2 |
 | `std::result::Result<std::time::universal-time,std::fs::FileError>` | `std::result::Result<std::time::universal-time,std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<std::vec::Vector<string>,std::fs::FileError>` | `std::result::Result<std::vec::Vector<std::primitive::string>,std::fs::FileError>` | enum | 6 | 2 |
 | `std::result::Result<string,std::fs::FileError>` | `std::result::Result<std::primitive::string,std::fs::FileError>` | enum | 6 | 2 |
@@ -965,12 +965,12 @@
 | `std::thread::Thread<T>` | `std::thread::Thread<T>` | struct | 6 | 2 |
 | `std::time::internal-time` | `std::time::internal-time` | none | 0 | 0 |
 | `std::time::universal-time` | `std::time::universal-time` | none | 0 | 0 |
+| `std::vec::Vector<(K . V)>` | `std::vec::Vector<std::sexpr::cons-cell<K,V>>` | vector | 6 | 2 |
 | `std::vec::Vector<K>` | `std::vec::Vector<K>` | vector | 6 | 2 |
 | `std::vec::Vector<T>` | `std::vec::Vector<T>` | vector | 6 | 2 |
 | `std::vec::Vector<V>` | `std::vec::Vector<V>` | vector | 6 | 2 |
 | `std::vec::Vector<int>` | `std::vec::Vector<std::primitive::int>` | vector | 6 | 2 |
 | `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>` | `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>` | vector | 6 | 2 |
-| `std::vec::Vector<std::sexpr::cons-cell<K,V>>` | `std::vec::Vector<std::sexpr::cons-cell<K,V>>` | vector | 6 | 2 |
 | `std::vec::Vector<string>` | `std::vec::Vector<std::primitive::string>` | vector | 6 | 2 |
 | `string` | `std::primitive::string` | str | 6 | 2 |
 | `symbol` | `std::primitive::symbol` | sym | 6 | 0 |
@@ -1446,7 +1446,7 @@
 - インスタンス `bucket-value`: `(std::collections::HashTable<K,V>, int, int) -> V`
 - インスタンス `clear`: `(std::collections::HashTable<K,V>) -> ()`
 - インスタンス `count`: `(std::collections::HashTable<K,V>) -> int`
-- インスタンス `entries`: `(std::collections::HashTable<K,V>) -> std::vec::Vector<std::sexpr::cons-cell<K,V>>`
+- インスタンス `entries`: `(std::collections::HashTable<K,V>) -> std::vec::Vector<(K . V)>`
 - インスタンス `hash-function`: `(std::collections::HashTable<K,V>) -> (fn (K) int)`
 - インスタンス `keys`: `(std::collections::HashTable<K,V>) -> std::vec::Vector<K>`
 - 関連関数 `new`: `((fn (K) int), (fn (K K) bool)) -> std::collections::HashTable<K,V>`
@@ -2185,7 +2185,7 @@
 | `std::%internal::net-wait-for` | `rt_suspend_io_for` | `(i32, int, f64) -> bool` |
 | `std::%internal::random-state-copy` | `rt_random_state_copy` | `(random-state) -> random-state` |
 | `std::%internal::random-state-next` | `rt_random_state_next` | `(random-state, int) -> int` |
-| `std::%internal::read-datum-at` | `rt_read_datum_at` | `(string, int, bool) -> std::result::Result<std::sexpr::cons-cell<std::option::Option<std::sexpr::Sexpr>,int>,std::reader::ReadError>` |
+| `std::%internal::read-datum-at` | `rt_read_datum_at` | `(string, int, bool) -> std::result::Result<(std::option::Option<std::sexpr::Sexpr> . int),std::reader::ReadError>` |
 | `std::%internal::stream-at-line-start` | `rt_stream_at_line_start` | `(i32) -> std::result::Result<bool,std::fs::FileError>` |
 | `std::%internal::stream-close` | `rt_stream_close` | `(i32) -> std::result::Result<(),std::fs::FileError>` |
 | `std::%internal::stream-describe` | `rt_stream_describe` | `(i32) -> string` |

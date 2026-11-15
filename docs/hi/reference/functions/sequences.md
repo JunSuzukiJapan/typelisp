@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
 # जोड़ियाँ, S-एक्सप्रेशन और अनुक्रम
 
 जेनेरिक जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, `Iter` के ऊपर लिखे अनुक्रम फ़ंक्शन, और उच्च-क्रम फ़ंक्शन।
@@ -14,6 +14,12 @@
 | `cdr` | `(cdr p)` | `cons-cell<A,B>→B` | शेष |
 
 `cons-cell` ट्यूपल सिंटैक्स की जगह भी काम करता है। CL के जो फ़ंक्शन कई मान लौटाते हैं (`floor` का भागफल और शेषफल, `read-from-string` का मान और स्थिति आदि) वे इस भाषा में `cons-cell` लौटाते हैं।
+
+जुड़े हुए `cons-cell` एक लिस्ट हैं, जिसका टाइप लिस्ट टाइप `(T U ...)` के रूप में लिखा जा सकता है
+(`(int string)` `cons-cell<int,cons-cell<string,()>>` है; [सिंटैक्स संदर्भ अध्याय 2](../syntax.md#2-टाइप-लिखना))। प्रिंट भी CL के cons जैसा
+होता है: `(cons 1 (cons "a" ()))` `(1 "a")` छपता है और `(cons 3 1)` `(3 . 1)`। अगर `cdr` का टाइप
+`Option<Sexpr>` हो, तो वह उस S-एक्सप्रेशन डेटा की निरंतरता के रूप में छपता है
+(`(cons 'a '(b c))` `(a b c)` है)।
 
 ## 2. S-एक्सप्रेशन डेटा `Sexpr`
 
