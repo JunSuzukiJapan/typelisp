@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Traits
 
 Un trait est une promesse : « ce type prend en charge ces opérations ». Les traits permettent à plusieurs types
@@ -139,12 +139,12 @@ Combiné à une borne de trait, on peut écrire une fonction qui marche pour tou
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-Avec un `Vector` contenant dans cet ordre des valeurs `money` de 300, 900 et 100, elle renvoie `(some 900 yen)`.
+Avec un `Vector` contenant dans cet ordre des valeurs `money` de 300, 900 et 100, elle renvoie `(Some 900 yen)`.
 
 ## 5. `:dyn` : traiter ensemble des valeurs de types différents
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Pesan Kesalahan
 
 Arti pesan kesalahan utama dari `typl` dan cara memperbaikinya.
@@ -101,8 +101,8 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | Pesan | Arti dan perbaikan |
 |---|---|
 | `panic: divide by zero` | Pembagian dengan nol pada bilangan bulat atau rasio. Pembagian floating-point dengan nol tidak melakukan panic; hasilnya `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` diterapkan pada `none`. Tangani kasus `none` dengan `match` atau `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | Indeks di luar rentang. Periksa panjang dengan `len`, atau gunakan fungsi yang mengembalikan `none` saat di luar rentang (`nth`, `pop`, dan sebagainya) |
+| `panic: unwrap: called on None` | `unwrap` diterapkan pada `None`. Tangani kasus `None` dengan `match` atau `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | Indeks di luar rentang. Periksa panjang dengan `len`, atau gunakan fungsi yang mengembalikan `None` saat di luar rentang (`nth`, `pop`, dan sebagainya) |
 | `panic: an integer argument does not fit a fixnum` | `int` yang tidak muat dalam 63 bit diberikan ke argumen yang menerima indeks atau jumlah |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` dijalankan tanpa `catch` bertag sama yang melingkupinya |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Sebuah `throw` mencapai `catch` dengan tag yang sama yang membawa tipe lain |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Módulos y organización de archivos
 
 Esta guía explica cómo montar un programa formado por varios archivos. Las reglas detalladas están en las
@@ -133,7 +133,7 @@ Cuando decidas que el módulo use tu propia definición, escribe `shadow` antes 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; el first de este módulo => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; el first de la biblioteca estándar => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; el first de la biblioteca estándar => (Some 1)
 ```
 
 Después de `shadow`, escribir `first` en ese módulo se refiere a tu propia definición. Para usar el

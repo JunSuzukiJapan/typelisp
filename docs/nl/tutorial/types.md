@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Basis van types
 
 typelisp is een statisch getypeerde taal. Dit hoofdstuk legt uit wat de typechecker voor je doet, de
@@ -48,42 +48,42 @@ Er is geen manier om tijdens runtime naar het type van een waarde te vragen (gee
 ## 2. `Option<T>`: een waarde die kan ontbreken
 
 typelisp heeft geen `nil`. "Er is misschien geen waarde" wordt uitgedrukt met het type `Option<T>`.
-Een waarde van `Option<T>` is ofwel `some`, met één waarde van `T`, ofwel `none`, die niets bevat.
+Een waarde van `Option<T>` is ofwel `Some`, met één waarde van `T`, ofwel `None`, die niets bevat.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` is niet `int`, dus hij kan niet zoals hij is in rekenkunde worden gebruikt.
-`(+ (safe-div 10 2) 1)` is een typefout. Om te gebruiken wat erin zit, scheid je `some` van `none`
+`(+ (safe-div 10 2) 1)` is een typefout. Om te gebruiken wat erin zit, scheid je `Some` van `None`
 met `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- In de `(some q)`-tak wordt de inhoud aan de variabele `q` gebonden.
-- `match` controleert dat zijn takken **elk geval dekken**. De `(none)`-tak vergeten is een typefout.
+- In de `(Some q)`-tak wordt de inhoud aan de variabele `q` gebonden.
+- `match` controleert dat zijn takken **elk geval dekken**. De `(None)`-tak vergeten is een typefout.
 
 ### Waarom er geen nil is
 
 In veel talen kan `nil` (`null`) voor een waarde van elk type staan. Daardoor blijft het vergeten van
 het geval "geen waarde" onopgemerkt totdat het programma draait. In typelisp heeft een plek waar een
 waarde kan ontbreken het type `Option<T>`, en de code komt niet door de typechecker tenzij `match` het
-geval `none` afhandelt. Een vergeten geval wordt gevonden voordat het programma draait.
+geval `None` afhandelt. Een vergeten geval wordt gevonden voordat het programma draait.
 
 Voorwaarden volgen hetzelfde idee: alleen een `bool` kan de voorwaarde van `if` zijn. Er is geen regel
 zoals die van Common Lisp dat "alles behalve `nil` waar is".
@@ -92,12 +92,12 @@ zoals die van Common Lisp dat "alles behalve `nil` waar is".
 
 | Vorm | Betekenis |
 |---|---|
-| `(unwrap-or opt default)` | De inhoud bij `some`; de standaardwaarde bij `none` |
-| `(unwrap opt)` | Haalt de inhoud eruit. Stopt het programma bij `none` |
+| `(unwrap-or opt default)` | De inhoud bij `Some`; de standaardwaarde bij `None` |
+| `(unwrap opt)` | Haalt de inhoud eruit. Stopt het programma bij `None` |
 | `(is-some opt)` / `(is-none opt)` | Test welke van de twee het is |
 
 Veel functies van de standaardbibliotheek geven `Option` terug. `position` geeft bijvoorbeeld de
-positie in `some` terug als het element is gevonden en `none` als dat niet zo is.
+positie in `Some` terug als het element is gevonden en `None` als dat niet zo is.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -105,25 +105,25 @@ positie in `some` terug als het element is gevonden en `none` als dat niet zo is
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: een bewerking die kan mislukken
 
-Een bewerking die kan mislukken geeft `Result<T,E>` terug: `ok` met een waarde van `T` bij succes, of
-`err` met een fout `E` bij mislukking.
+Een bewerking die kan mislukken geeft `Result<T,E>` terug: `Ok` met een waarde van `T` bij succes, of
+`Err` met een fout `E` bij mislukking.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -132,8 +132,8 @@ Je eigen functies kunnen ook `Result` teruggeven.
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Gebruik `Option` wanneer een ontbrekende waarde geen uitleg nodig heeft, en `Result` wanneer je wilt

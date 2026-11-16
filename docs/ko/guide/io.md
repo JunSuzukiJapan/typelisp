@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 파일 입출력, 스트림, 네트워크
 
 이 가이드에서는 파일 읽기와 쓰기, 경로명, 소켓 통신의 기본을 보인다. 함수 목록은
@@ -12,13 +12,13 @@
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; 파일이 없으면:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
-실패하지 않는다는 것을 알고 있을 때나, 실패하면 멈춰도 괜찮은 작은 스크립트에서는 `unwrap`으로 값을 꺼낸다. `err`이면
+실패하지 않는다는 것을 알고 있을 때나, 실패하면 멈춰도 괜찮은 작은 스크립트에서는 `unwrap`으로 값을 꺼낸다. `Err`이면
 panic한다.
 
 ## 2. 파일 전체를 읽고 쓰기
@@ -28,8 +28,8 @@ panic한다.
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. 스트림으로 읽고 쓰기
@@ -44,23 +44,23 @@ panic한다.
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; 한 줄씩 읽기
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - 파일을 여는 방향은 `direction-input`(읽기), `direction-output`(쓰기. 기존 내용은 버려진다),
   `direction-append`(끝에 추가)의 세 가지이다.
-- `read-line`은 파일 끝에서 `none`을 반환한다.
+- `read-line`은 파일 끝에서 `None`을 반환한다.
 - `with-open-file` 대신 `open-file`로 열었다면 반드시 `close`를 호출한다. GC는 스트림을 닫지 않는다.
 
 바이트를 읽고 쓰려면 `open-binary-input` / `open-binary-output`으로 열고 `read-byte` / `write-byte`를 쓴다. 문자
@@ -74,7 +74,7 @@ panic한다.
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### 표준 입출력
@@ -91,8 +91,8 @@ panic한다.
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -104,8 +104,8 @@ panic한다.
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; 확장자만 바꾸기
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -143,14 +143,14 @@ panic한다.
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; 상대가 닫았다
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; 상대가 닫았다
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"`은 이 기기에서 오는 연결만, `"0.0.0.0"`은 모든 인터페이스에서 오는 연결을 받는다. 태스크에 대해서는
@@ -165,8 +165,8 @@ panic한다.
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 연산에 시간 제한을 두려면 `:timeout`(초)을 넘긴다.
@@ -175,12 +175,12 @@ panic한다.
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; 다음 읽기에 시계를 붙인다
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; 다음 읽기에 시계를 붙인다
 ```
 
 ### 상대가 끊었을 때
 
-상대가 연결을 리셋하거나 도중에 끊어도 `panic`하지 않는다. 이후의 읽기는 `none`을 반환하고, 쓰기는 조용히 버려진다.
+상대가 연결을 리셋하거나 도중에 끊어도 `panic`하지 않는다. 이후의 읽기는 `None`을 반환하고, 쓰기는 조용히 버려진다.
 깨끗하게 닫혔는지 실패했는지 구별하려면 `(socket-error c)`를 확인한다.
 
 ## 6. 이름 해석(DNS)
@@ -188,13 +188,13 @@ panic한다.
 이름 해석 전용 함수는 없다. `tcp-connect`, `tls-connect`, `send-to`에 호스트 이름을 넘기면 그 안에서 해석된다. 해석은
 다른 스레드에서 일어나므로 기다리는 동안에도 다른 태스크는 계속 실행된다. 이름에 주소가 여러 개 있으면 차례로 시도한다.
 
-이름을 해석하지 못하면 `err`이 반환된다.
+이름을 해석하지 못하면 `Err`이 반환된다.
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -206,12 +206,12 @@ panic한다.
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 TLS 서버는 `tls-listen`에 인증서와 개인 키 파일(PEM)을 넘겨 만든다.
@@ -220,8 +220,8 @@ TLS 서버는 `tls-listen`에 인증서와 개인 키 파일(PEM)을 넘겨 만�
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; TCP의 serve가 그대로 동작한다
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; TCP의 serve가 그대로 동작한다
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 자체 서명 인증서로 시험할 때는 클라이언트 쪽에 `:ca-file "cert.pem"`을 넘겨 그 인증서를 신뢰하게 한다. 상호 TLS와
@@ -239,8 +239,8 @@ UDP는 스트림이 아니며 데이터그램을 하나씩 보내고 받는다. 
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -249,4 +249,4 @@ UDP는 스트림이 아니며 데이터그램을 하나씩 보내고 받는다. 
 ## 9. Unix 도메인 소켓
 
 `unix-listen` / `unix-connect`에 소켓 파일의 경로를 넘긴다. 얻는 값은 TCP와 같은 `socket-stream`이다. `unix-listen`은
-파일이 이미 있으면 `err`을 반환한다. 리스너를 닫으면 파일이 지워진다.
+파일이 이미 있으면 `Err`을 반환한다. 리스너를 닫으면 파일이 지워진다.

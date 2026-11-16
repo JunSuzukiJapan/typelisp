@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Impresión
 
 `print`/`println`/`format`, las impresoras de un argumento, el pretty printer, `print-object` y las variables
@@ -43,18 +43,18 @@ salida en cada llamada (para que una petición de entrada sea visible antes de l
 incluso a través de una tubería).
 
 **`Option<Sexpr>` se imprime de forma transparente.** El tipo de los datos de expresiones S es
-`Option<Sexpr>`, así que el envoltorio `(some x)` no aparece en la salida y el contenido se imprime tal cual.
-La lista vacía se imprime como `()`. Los demás `Option<T>` se imprimen como `(some ...)` / `none`. Lo mismo
+`Option<Sexpr>`, así que el envoltorio `(Some x)` no aparece en la salida y el contenido se imprime tal cual.
+La lista vacía se imprime como `()`. Los demás `Option<T>` se imprimen como `(Some ...)` / `None`. Lo mismo
 vale para los campos `Option<T>` dentro de estructuras, enumeraciones y `Vector`. Un
-`Result<Option<Sexpr>,…>` de `(eval ...)` se imprime como `(ok 42)`, o `(ok ())` para `none`.
+`Result<Option<Sexpr>,…>` de `(eval ...)` se imprime como `(Ok 42)`, o `(Ok ())` para `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -313,10 +313,10 @@ no se pueden cambiar tras crearse, así que una lista como `'(1 2 3)` nunca pued
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a apunta al propio a
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a apunta al propio a
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Las etiquetas **vuelven a empezar desde 1 en cada cosa que se imprime** (como en CL). Incluso sin ciclo, si

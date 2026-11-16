@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Paare, S-Ausdrücke und Sequenzen
 
 Das generische Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, die auf `Iter` aufgebauten
@@ -45,14 +45,14 @@ Funktionen `sexpr-*`. Sie werden hauptsächlich in `defmacro`-Rümpfen verwendet
 zerlegen.
 
 **Der Typ von S-Ausdrucksdaten ist `Option<Sexpr>`.** Die leere Liste ist keine Variante von `Sexpr`, sondern
-das `none` von `Option`, und `Sexpr` selbst bedeutet „ein nicht leerer S-Ausdruck“. Daher nehmen und liefern
+das `None` von `Option`, und `Sexpr` selbst bedeutet „ein nicht leerer S-Ausdruck“. Daher nehmen und liefern
 die Funktionen `sexpr-*` `Option<Sexpr>`.
 
-- `()` ist die leere Liste, wo ein `Option<Sexpr>` erwartet wird (auch als `(Option::none)` schreibbar)
+- `()` ist die leere Liste, wo ein `Option<Sexpr>` erwartet wird (auch als `(Option::None)` schreibbar)
 - `Sexpr` wird implizit erweitert, wo ein `Option<Sexpr>` erwartet wird (ohne Umwandlung zur Laufzeit). Die
   umgekehrte Richtung, ein `Option<Sexpr>` als `Sexpr` zu verwenden, behauptet „das ist nicht die leere
   Liste“ und muss daher ausdrücklich mit `match` oder `unwrap` angegeben werden
-- In `match` lassen sich die 19 Varianten von `Sexpr` und `none` **flach in derselben Liste von Zweigen**
+- In `match` lassen sich die 19 Varianten von `Sexpr` und `None` **flach in derselben Liste von Zweigen**
   schreiben ([Syntaxreferenz](../syntax.md#43-match--mustervergleich))
 
 | Name | Form | Typ | Beschreibung |
@@ -119,7 +119,7 @@ Funktionen, die ein Prädikat nehmen (entsprechen CLs `-if`-Familie):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Die erste Position, die das Prädikat erfüllt |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Wie viele das Prädikat erfüllen |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Ob jedes Element das Prädikat erfüllt |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Ob irgendein Element das Prädikat erfüllt (entspricht CLs `some`; ein Name, der nicht mit dem Konstruktor `some` kollidiert) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Ob irgendein Element das Prädikat erfüllt (entspricht CLs `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Linksfaltung |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Rechtsfaltung |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Sammelt alle verbleibenden Elemente. Damit macht man aus dem Ergebnis einer `lazy`-Funktion unten einen `Vector` |
@@ -132,7 +132,7 @@ Indizierung, Länge und Ausschnitte:
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Verkettet Iteratoren. Auch drei oder mehr sind möglich |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CLs `concatenate`. Der Ergebnistyp wird als **quotiertes Symbolliteral** geschrieben (CL verwendet einen Typspezifikator zur Laufzeit). `'vector` nimmt eines oder mehr, `'string` null oder mehr (`""` bei null). `Sexpr`-Listen sind nicht abgedeckt (man verwendet `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Umkehrung (nicht destruktiv) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` außerhalb des Bereichs) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` außerhalb des Bereichs) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` mit umgekehrten Argumenten |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | Die ersten `n` Elemente |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` wird auf die Länge begrenzt) |
@@ -227,7 +227,7 @@ zurückgegeben.
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Bildet um der Seiteneffekte willen über Enden ab (das `maplist`-Gegenstück zu `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Bildet über Enden ab und verkettet (das `maplist`-Gegenstück zu `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Die Position, an der `sub` zuerst vorkommt. Ist der Empfänger eine `string`, wird die `string`-Methode gewählt ([Zeichenketten](collections.md#1-zeichenketten-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Die erste Position, an der sie sich unterscheiden. `none`, wenn sie gleich sind |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Die erste Position, an der sie sich unterscheiden. `None`, wenn sie gleich sind |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Zusammenführen. CL verlangt sortierte Eingaben; dies sortiert die Verkettung |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Fügt `x` **vorn** hinzu, wenn es nicht da ist |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Mengenoperationen. CL legt die Reihenfolge nicht fest; hier ist sie stabil, **in der Reihenfolge des ersten Auftretens** |
@@ -280,7 +280,7 @@ Welche Funktion welche nimmt, folgt CL:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; entfernt nur eines, vom Ende her
 (position 3 (iter v) :start 1)                          ; der Index ist relativ zur ganzen Sequenz
 ```

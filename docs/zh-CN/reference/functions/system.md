@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -49,20 +49,20 @@
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | 命令行。**第 0 个元素是程序名** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | 环境变量。未设置或不是 UTF-8 时为 `none` |
+| `getenv` | `(getenv name)` | `string→Option<string>` | 环境变量。未设置或不是 UTF-8 时为 `None` |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`。`user-homedir-pathname`（[路径名](streams-files.md#92-函数)）的基础 |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | 实现的版本号 |
 | `machine-type` | `(machine-type)` | `()→string` | CPU 架构（`x86_64` / `aarch64` …）。是**构建目标**的值 |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | 主机名 |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | **正在运行**的硬件名（`Apple M1` / `Intel(R) Xeon(R) …`）。无法得知的环境中为 `none` |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | **正在运行**的硬件名（`Apple M1` / `Intel(R) Xeon(R) …`）。无法得知的环境中为 `None` |
 | `software-type` | `(software-type)` | `()→string` | OS（`macos` / `linux` …） |
 | `software-version` | `(software-version)` | `()→Option<string>` | OS 的发行版本（`uname -r`，例如 `24.6.0`） |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | 安装地点的简称。**总是 `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | 同样，全称。**总是 `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | 安装地点的简称。**总是 `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | 同样，全称。**总是 `None`** |
 
 返回 `Option` 的是 CL 允许 `NIL` 的项目（*or nil if no such name can be determined*）。POSIX 没有记录站点名的地方，所以总是
-`none`——SBCL 也返回同样的结果。注意 `machine-type` 与 `machine-version` 的区别：前者是这个二进制**被构建**时的架构，后者是
+`None`——SBCL 也返回同样的结果。注意 `machine-type` 与 `machine-version` 的区别：前者是这个二进制**被构建**时的架构，后者是
 现在**正在运行**的芯片。
 
 `command-line-args` 的第 0 个元素，对 `typl script.typl a b` 是脚本的路径，对 AOT 可执行文件 `./prog a b` 是可执行文件自身。
@@ -116,7 +116,7 @@
 `step` 的命令是 `s`（进入这次调用；空行也一样）、`n`（跳过这次调用）、`c`（之后不再询问）、`q`（中止）。**标准输入不是终端时，
 `step` 只是求值 `form`**——这是 CLHS 明确允许的退化，以免脚本或测试在无法回答的提示处卡住。
 
-`ed` 的 `$VISUAL`／`$EDITOR` 按空白分割，所以也可以写 `EDITOR="code -w"`。两者都未设置时为 `err`——不会猜测 `vi`。行号以
+`ed` 的 `$VISUAL`／`$EDITOR` 按空白分割，所以也可以写 `EDITOR="code -w"`。两者都未设置时为 `Err`——不会猜测 `vi`。行号以
 `+N` 的形式放在最前面传入。
 
 `dribble` 记录会话输出离开进程的全部 3 条途径：`print`/`println`/`format` 写出的内容、写到连接标准输出的流的内容，以及在 REPL
@@ -124,14 +124,14 @@
 
 ## 6. 解析与求值
 
-这些都处理运行时的（程序本身无法控制的）文本和数据，所以失败时不 panic，而是返回 `Result` 的 `err`。错误类型是每种操作各自的
+这些都处理运行时的（程序本身无法控制的）文本和数据，所以失败时不 panic，而是返回 `Result` 的 `Err`。错误类型是每种操作各自的
 具体类型（[错误类型](option-result.md#3-错误类型与-error-trait)）。
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL 的 `parse-integer`。跳过前后空白（与 `trim` 相同的集合），读取至多一个符号 `+`/`-`，再读取 `radix` 进制（默认 10，2〜36。10 以上的数字大小写均可）的数字。位数没有上限（`int`）。剩下其他字符时为 `err`。`:junk-allowed true` 时在第一个非数字处停止并忽略其余——但一个数字都没有时为 `err`（相当于 CL 的 `nil`）。不返回 CL 的第 2 个值（读取结束位置）。超出范围的 `radix` 会 panic（是调用方的错误，不是文本的） |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL 的 `parse-integer`。跳过前后空白（与 `trim` 相同的集合），读取至多一个符号 `+`/`-`，再读取 `radix` 进制（默认 10，2〜36。10 以上的数字大小写均可）的数字。位数没有上限（`int`）。剩下其他字符时为 `Err`。`:junk-allowed true` 时在第一个非数字处停止并忽略其余——但一个数字都没有时为 `Err`（相当于 CL 的 `nil`）。不返回 CL 的第 2 个值（读取结束位置）。超出范围的 `radix` 会 panic（是调用方的错误，不是文本的） |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮点数。也接受 `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | 从 `s` 读取一个 `Sexpr`（与读取源代码的是同一个读取器）。括号不完整、字符串未结束等为 `err`。从流读取用 `read-sexpr`（[流](streams-files.md#6-泛型函数与文件操作)） |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | 从 `s` 读取一个 `Sexpr`（与读取源代码的是同一个读取器）。括号不完整、字符串未结束等为 `Err`。从流读取用 `read-sexpr`（[流](streams-files.md#6-泛型函数与文件操作)） |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | 在 `read` 的基础上附上**读取结束的位置**。`(car r)` 是值，`(cdr r)` 是下一个要读的字符位置。`start` 省略时为 0 |
 | `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上，但不消耗结束 datum 的空白。区别体现在返回的位置上 |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 在运行时对 `form` 进行类型检查并求值。遵循 CL 的 `eval` |
@@ -143,9 +143,9 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 `preserving-whitespace` 的区别只是**一个空白字符**——CL 的 `read` 消耗结束 datum 的空白，`read-preserving-whitespace` 保留它。
@@ -161,11 +161,11 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 永久地注册到全局环境。
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; 能看到全局的 x
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; 返回定义的名字
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; 能看到刚才的定义
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; 能看到全局的 x
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; 返回定义的名字
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; 能看到刚才的定义
 ```
 
 - **返回值**：表达式时以 `Option<Sexpr>` 返回求值结果，定义时返回所定义名字的符号（与 CL 相同）。要使用结果，用 `match`
@@ -174,7 +174,7 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
   **静态书写的代码不能前向引用 `eval` 在运行时定义的名字**——直接写在文件中的 `(sq 9)` 会在定义 `sq` 的 `eval` 运行之前被检查，
   成为"未定义"。不过**之后的 `eval` 能看到它**（那个 `eval` 的类型检查在运行时、定义之后进行）。REPL 逐行检查和执行，所以用
   `eval` 定义的名字可以从下一行直接调用。
-- **错误的处理**：类型错误、语法错误返回 `err`（不会 panic）。求值的代码中的**运行时 panic**（除以零等）与直接书写的代码一样原样
+- **错误的处理**：类型错误、语法错误返回 `Err`（不会 panic）。求值的代码中的**运行时 panic**（除以零等）与直接书写的代码一样原样
   传播。中途的 `unwind-protect` 的 cleanup 会执行（[语法参考第 8 章](../syntax.md#8-非局部退出catch--throw--unwind-protect)）。
 - **命名空间**：在 `typl file.typl` 的运行中以及 AOT 可执行文件中，`eval` 在该脚本模块的命名空间中求值（能看到脚本自身的全局
   变量）。REPL 在根命名空间中求值。
@@ -217,7 +217,7 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 (unwrap-or (documentation point) "no docs")    ; => "A 2D point."
 ```
 
-**值在检查时确定**：名字无法解析到任何定义时是检查时的错误（与引用未定义的变量等相同）。能解析但没有文档字符串时为 `Option::none`。
+**值在检查时确定**：名字无法解析到任何定义时是检查时的错误（与引用未定义的变量等相同）。能解析但没有文档字符串时为 `Option::None`。
 
 **不在对象之内**：
 
@@ -235,17 +235,17 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 新的符号。名字是 `" <prefix><n>"`，`n` 是 `*gensym-counter*`。开头的空格在源代码中写不出来，所以生成的绑定不会与写出的名字冲突 |
 | `*gensym-counter*` | 变量 | `int` | `gensym` 下次使用的编号。与 CL 一样可以读取和设置 |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 把宏调用展开一层。`none` 表示"不是宏调用" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 把宏调用展开一层。`None` 表示"不是宏调用" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 反复展开，直到不再是宏 |
 
-`macroexpand-1` 返回的是 `Option`——CL 用第 2 个返回值传达"是否展开了"，但没有多值，所以由 `none` 承担这一点。**展开为自身调用
+`macroexpand-1` 返回的是 `Option`——CL 用第 2 个返回值传达"是否展开了"，但没有多值，所以由 `None` 承担这一点。**展开为自身调用
 的宏与非宏不可能被混淆。** 展开的一层与类型检查使用的是同一个，程序看到的与检查看到的不会出现偏差。
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none 作为空列表输出（Option<Sexpr> 是透明的）
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none 作为空列表输出（Option<Sexpr> 是透明的）
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 CL 中有而这里没有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` 总是一致，没有可选择的区别）、

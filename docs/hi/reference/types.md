@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -28,8 +28,8 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | टाइप | सामग्री | विवरण |
 |---|---|---|
-| `Option<T>` | ऐसा मान जो है या नहीं है। `some` / `none` | [Option और Result](functions/option-result.md) |
-| `Result<T,E>` | सफलता या विफलता। `ok` / `err` | ऊपर जैसा |
+| `Option<T>` | ऐसा मान जो है या नहीं है। `Some` / `None` | [Option और Result](functions/option-result.md) |
+| `Result<T,E>` | सफलता या विफलता। `Ok` / `Err` | ऊपर जैसा |
 | `Vector<T>` | बढ़ने योग्य ऐरे | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | हैश टेबल। कुंजियों की तुलना कैसे हो, यह बनाते समय `:test` तय करता है, और `equal` टेबल में कुंजी का टाइप `Hash` लागू करे | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | टपल (1 से 12 तत्व)। तत्व `t::0` से पढ़े जाते हैं | [सिंटैक्स अध्याय 2](syntax.md#2-टाइप-लिखना) |
@@ -45,7 +45,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | टाइप | सामग्री | विवरण |
 |---|---|---|
 | `Sexpr` | एक गैर-खाली S-एक्सप्रेशन। 19 variant: `int`, `i8` से `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-एक्सप्रेशन डेटा](functions/sequences.md#2-s-एक्सप्रेशन-डेटा-sexpr) |
-| `Option<Sexpr>` | सामान्य रूप से S-एक्सप्रेशन डेटा। खाली सूची `()` `none` है | ऊपर जैसा |
+| `Option<Sexpr>` | सामान्य रूप से S-एक्सप्रेशन डेटा। खाली सूची `()` `None` है | ऊपर जैसा |
 
 ## 4. स्टैंडर्ड लाइब्रेरी के टाइप
 
@@ -69,7 +69,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | स्ट्रीम | [स्ट्रीम](functions/streams-files.md#3-ठोस-स्ट्रीम-टाइप) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | संयुक्त स्ट्रीम | [संयुक्त स्ट्रीम](functions/streams-files.md#4-संयुक्त-स्ट्रीम) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | नेटवर्किंग | [नेटवर्किंग](functions/network.md#1-टाइप) |
-| `ReadOutcome` | `read-sexpr` का परिणाम। `datum` / `eof` | [स्ट्रीम](functions/streams-files.md#6-जेनेरिक-फ़ंक्शन-और-फ़ाइल-ऑपरेशन) |
+| `ReadOutcome` | `read-sexpr` का परिणाम। `Datum` / `Eof` | [स्ट्रीम](functions/streams-files.md#6-जेनेरिक-फ़ंक्शन-और-फ़ाइल-ऑपरेशन) |
 | `universal-time` `internal-time` `decoded-time` | समय | [समय](functions/system.md#1-समय) |
 | `heap-info` | हीप की वर्तमान अवस्था | [इम्प्लीमेंटेशन उपकरण](functions/system.md#51-heap-info-के-फ़ील्ड) |
 

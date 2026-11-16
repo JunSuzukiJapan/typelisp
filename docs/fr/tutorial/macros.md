@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Macros
 
 Une macro est une fonction qui prend un programme et renvoie un programme. Les macros permettent de créer une
@@ -45,7 +45,7 @@ le moyen le plus rapide d'avancer.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Les expansions sont elles aussi vérifiées
@@ -123,14 +123,14 @@ De la même façon, une macro qui répète son corps un nombre donné de fois pe
 
 Le corps d'une macro est du code typelisp ordinaire ; il peut donc examiner ses arguments avec `if` ou `match` et
 construire une expansion différente. Les arguments sont des données S-expression (`Option<Sexpr>`), et la liste
-vide est `none`.
+vide est `None`.
 
 Créons `my-and`, qui renvoie `true` si toutes ses conditions sont vraies.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; pas d'arguments
+    ((None) 'true)                                    ; pas d'arguments
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; un seul

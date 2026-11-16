@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # السلاسل النصية والمحارف والمجموعات
 
 `string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.
@@ -25,12 +25,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | ترتيب غير حساس لحالة الأحرف (`string-lessp` وأخواتها في CL). ومع بادئة مشتركة تكون الأقصر هي الأصغر |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | سلسلة من `n` نسخة من `c` (`make-string` في CL) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | الموضع الذي تظهر فيه `sub` أول مرة. **وفي `search` في CL ترتيب الوسائط معكوس** (`(search pattern sequence)`). والسلسلة الفارغة تُوجَد عند 0. وللكلمات المفتاحية انظر [وسائط الكلمات المفتاحية للتسلسلات](sequences.md#6-وسائط-الكلمات-المفتاحية) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | أول موضع يختلفان فيه. `none` فقط عندما تكونان `equal`. وإذا كانت إحداهما بادئة للأخرى فنهاية الأقصر. والكلمات المفتاحية كما سبق |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | أول موضع يختلفان فيه. `None` فقط عندما تكونان `equal`. وإذا كانت إحداهما بادئة للأخرى فنهاية الأقصر. والكلمات المفتاحية كما سبق |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | يزيل المحارف الموجودة في `bag` من الطرفين / اليسار / اليمين (`string-trim` وأخواتها في CL). وبدون `bag` المسافات البيضاء `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | يقسّم عند `sep`. ولا مقابل له في CL. والفواصل المتتالية تنتج عناصر فارغة. ويحدث `panic` إذا كانت `sep` فارغة |
 | `to-string` | `(to-string x)` | `T→string` | يحوّل إلى سلسلة كما يفعل `~a`. منفَّذ لـ `int`/`i32`/`f64`/`bool`/`char`/`string` (`princ-to-string` في CL) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | يرمّز بـ UTF-8 (كل عنصر 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | يفك الترميز. `none` إذا لم يكن UTF-8 صالحًا |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | يفك الترميز. `None` إذا لم يكن UTF-8 صالحًا |
 
 ## 2. المحارف `char`
 
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | يقرأ العنصر `i`. ويحدث `panic` خارج النطاق |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | يغيّر العنصر `i`. ويحدث `panic` خارج النطاق. ويمكن كتابته أيضًا `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | عدد العناصر |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | يزيل العنصر الأخير ويعيده. `none` إذا كان فارغًا (وبخلاف `get`/`set` لا يحدث `panic`) (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | يزيل العنصر الأخير ويعيده. `None` إذا كان فارغًا (وبخلاف `get`/`set` لا يحدث `panic`) (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | يصنع مكرِّرًا ينفّذ `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | يضيف `x` في الآخر إن لم يوجد عنصر `eql` له (`pushnew` في CL. لا يحتاج إلى إعادة كتابة موضع، لذا هو دالة وليس ماكرو) |
 
@@ -134,7 +134,7 @@
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 في جدول `equal` يقرر **نوع المفتاح نفسه** (`sxhash`، و`equal` من `Equal`، السمة الأم لـ `Hash`) هل المفتاحان
@@ -164,8 +164,8 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` في CL. لا يمكن أن تتغير الرتبة. وتبقى العناصر التي تظل داخل النطاق عند فهارسها، وتأخذ الخلايا الجديدة `init`. وبخلاف CL لا تعيد المصفوفة (فكل مصفوفة في هذه اللغة قابلة للتعديل، فلا توجد مصفوفة ثانية لإعادتها) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` في CL. ويحدث `panic` بدون مؤشر ملء |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | مثل `push-extend` (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` في CL. `none` إذا كانت فارغة (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | مؤشر الملء (`none` إذا لم يوجد). ويمكن كتابته بـ `(setf a::fill-pointer …)` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` في CL. `None` إذا كانت فارغة (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | مؤشر الملء (`None` إذا لم يوجد). ويمكن كتابته بـ `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | مكرِّر بترتيب الصفوف (row-major). ويتوقف عند مؤشر الملء إن وُجد |
 
 - **الفهارس `Vector<int>`.** فلا يستطيع التابع أن يعلن "الوسيط من النوع نفسه مكررًا أي عدد من المرات في
@@ -257,10 +257,10 @@
 | `new` | `(Deque::new)` | `()→Deque<T>` | تنشئ تسلسلًا فارغًا |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | تضيف في المقدمة / المؤخرة |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | مثل `push-back` (تابع من توابع السمة [`Push`](traits.md#4-السمة-push-إضافة-العناصر)) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | تُخرج عنصر المقدمة / المؤخرة وتُرجعه. `none` إن كان فارغًا |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | تُخرج عنصر المقدمة / المؤخرة وتُرجعه. `None` إن كان فارغًا |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | مثل `pop-back` (تابع من توابع السمة [`Pop`](traits.md#5-السمة-pop-إخراج-العناصر)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | تنظر إلى عنصر المقدمة / المؤخرة (دون إخراجه) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | العنصر رقم `i` من المقدمة. `none` خارج النطاق |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | العنصر رقم `i` من المقدمة. `None` خارج النطاق |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | تكتب فوق العنصر رقم `i`. panic خارج النطاق |
 | `count` | `(count d)` | `Deque<T>→int` | عدد العناصر |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | تحذف كل شيء |
@@ -270,5 +270,5 @@
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

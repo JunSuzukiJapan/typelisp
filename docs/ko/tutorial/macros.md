@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 매크로
 
 매크로는 프로그램을 받아 프로그램을 반환하는 함수이다. 매크로를 쓰면 함수로는 표현할 수 없는 새로운 구문을 만들 수
@@ -40,7 +40,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. 전개 결과도 타입 검사된다
@@ -116,14 +116,14 @@ Common Lisp와 마찬가지로 typelisp의 매크로는 이름 충돌을 자동�
 ## 5. 인수에 따라 다르게 전개하기
 
 매크로 본체는 보통의 typelisp 코드이므로 `if`나 `match`로 인수를 살펴보고 다른 전개 결과를 만들 수 있다. 인수는 S 식
-데이터(`Option<Sexpr>`)이고, 빈 리스트는 `none`이다.
+데이터(`Option<Sexpr>`)이고, 빈 리스트는 `None`이다.
 
 모든 조건이 참이면 `true`를 반환하는 `my-and`를 만들어 보자.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; 인수 없음
+    ((None) 'true)                                    ; 인수 없음
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; 하나뿐

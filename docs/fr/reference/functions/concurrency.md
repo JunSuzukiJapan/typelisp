@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tâches et canaux
 
 Le vocabulaire des tâches (threads légers). `task` et `thread`, qui les lancent, et `select`, qui attend plusieurs
@@ -37,7 +37,7 @@ threads). Où elles changent et en quoi cela diffère de Go se trouve dans
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | Un canal de capacité `n`. `0` est un rendez-vous (sans tampon) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Attend qu'il y ait de la place, puis transmet la valeur |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Attend qu'une valeur arrive. `none` une fois le canal fermé et vide |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Attend qu'une valeur arrive. `None` une fois le canal fermé et vide |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Le ferme |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Combien de valeurs sont actuellement dans le tampon |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | La capacité |
@@ -63,7 +63,7 @@ s'écrivent `(Chan::new 0)` et `(Chan::new 16)`.
   des bogues du programme, pas des échecs récupérables ; ce ne sont donc pas des `Result`.
 - **Fermer un canal sur lequel une tâche attend pour faire `send` fait déclencher un panic à cette tâche** (la
   règle de Go).
-- `recv` sur un canal fermé renvoie ce qui reste dans le tampon, puis, une fois vide, continue de renvoyer `none`.
+- `recv` sur un canal fermé renvoie ce qui reste dans le tampon, puis, une fois vide, continue de renvoyer `None`.
 - `close` est résolu selon le type du receveur ; c'est donc autre chose que le `close` du trait `Stream`.
   `Chan<T>` n'implémente pas `Stream`.
 - **Une capacité négative déclenche un panic** (elle n'est pas silencieusement arrondie à 0).
@@ -196,8 +196,8 @@ vérifiant lui-même `is-cancelled` ou en recevant sur `done`.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -211,7 +211,7 @@ vérifiant lui-même `is-cancelled` ou en recevant sur `done`.
 - **L'annulation atteint les enfants.** Un contexte créé avec `with-cancel`/`with-timeout` est
   annulé en même temps que son parent. Elle ne remonte pas (de l'enfant au parent).
 - Un enfant créé à partir d'un contexte déjà annulé est annulé dès le départ.
-- `done` est seulement fermé ; aucune valeur n'est envoyée. Une réception renvoie `none`.
+- `done` est seulement fermé ; aucune valeur n'est envoyée. Une réception renvoie `None`.
 - Chaque appel de `(Context::background)` crée une racine distincte. Le `Background()` de Go est
   unique et ne peut pas être annulé ; ici une racine peut l'être aussi, et cela n'affecte que ce qui
   en a été créé.

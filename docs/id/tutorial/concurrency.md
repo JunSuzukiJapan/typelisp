@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Konkurensi
 
 Di typelisp Anda menjalankan pekerjaan secara konkuren dengan memulai **task** (thread ringan), dan
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` mengirim. Jika kanal penuh, ia menunggu sampai ada ruang.
 - `(recv ch)` menerima. Ia menunggu sampai ada nilai tiba. Hasilnya adalah `Option<T>`; setelah kanal
-  ditutup dan kosong, ia mengembalikan `none`.
+  ditutup dan kosong, ia mengembalikan `None`.
 - Mengiterasi kanal dengan `doiter` terus menerima nilai sampai kanal ditutup. Kanal juga dapat
   langsung diserahkan ke `map` atau `filter`.
 - `send` pada kanal yang sudah ditutup melakukan panic.

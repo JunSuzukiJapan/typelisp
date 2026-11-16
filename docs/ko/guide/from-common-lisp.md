@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로
@@ -16,13 +16,13 @@ typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지
 - **조건이 될 수 있는 것은 `bool`뿐이다.** `0`이나 빈 리스트를 조건으로 쓰면 타입 오류이다. "nil 이외에는 모두 참"
   이라는 규칙은 없다.
 - **`if`의 else는 생략할 수 없다.** `(if c x)`는 오류이다. else가 필요 없으면 `when` / `unless`를 쓴다.
-- **"값이 없음"은 `Option<T>`로 나타낸다.** CL에서 "찾지 못함"을 뜻하는 nil을 반환하던 함수는 여기서는 `(some x)`나
-  `none`을 반환한다.
+- **"값이 없음"은 `Option<T>`로 나타낸다.** CL에서 "찾지 못함"을 뜻하는 nil을 반환하던 함수는 여기서는 `(Some x)`나
+  `None`을 반환한다.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - 빈 리스트 `()`는 문맥에 따라 Unit 타입의 값(아무것도 반환하지 않는 함수의 반환값)이거나 S 식 데이터의 빈 리스트이다.
@@ -88,7 +88,7 @@ typelisp는 함수와 변수의 이름공간을 나누지 않는다. 함수 이�
 
 ## 4. 리스트와 Vector
 
-CL의 리스트에 해당하는 것은 **S 식 데이터**이며 그 타입은 `Option<Sexpr>`이다(빈 리스트는 `none`). `(list 1 2 3)`과
+CL의 리스트에 해당하는 것은 **S 식 데이터**이며 그 타입은 `Option<Sexpr>`이다(빈 리스트는 `None`). `(list 1 2 3)`과
 `'(a b c)`가 이 타입이다. S 식 데이터는 매크로와 `read`가 다루는 것이며, 보통의 데이터 그릇에는 **`Vector<T>`**를
 쓴다.
 
@@ -167,17 +167,17 @@ CL과 다른 점은 세 가지다. 요소의 타입이 모두 같아야 한다(`
 `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error`, `signal`은 없다. 정적 타입과 잘 맞지
 않기 때문이다. 대신 다음 두 가지를 용도에 따라 나누어 쓴다.
 
-- **복구할 수 있는 실패는 `Result<T,E>`를 반환한다.** 호출한 쪽은 `match`로 `ok` / `err`를 나눈다. Rust의 `?` 같은
+- **복구할 수 있는 실패는 `Result<T,E>`를 반환한다.** 호출한 쪽은 `match`로 `Ok` / `Err`를 나눈다. Rust의 `?` 같은
   줄임 표기는 없다.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **복구할 수 없는 실패(버그)는 `panic`이다.** `(panic "message")`, `unwrap`에 `none`을 넘기기, 0으로 나누기, 범위를
+- **복구할 수 없는 실패(버그)는 `panic`이다.** `(panic "message")`, `unwrap`에 `None`을 넘기기, 0으로 나누기, 범위를
   벗어난 인덱스가 이 부류이며 프로그램이 멈춘다. 멈추기 전에 `unwind-protect`의 뒷정리는 실행된다.
 
 오류 타입은 `Error` 트레이트로 통일되며 `(message e)`로 메시지를 얻는다. 자신만의 오류 타입을 만드는 방법은

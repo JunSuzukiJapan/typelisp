@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Option وResult وأنواع الأخطاء
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-المُنشِئات: لـ `Option<T>` الصيغتان `(some T)` / `none`. ولـ `Result<T,E>` الصيغتان `(ok T)` / `(err E)`. ويمكن
+المُنشِئات: لـ `Option<T>` الصيغتان `(Some T)` / `None`. ولـ `Result<T,E>` الصيغتان `(Ok T)` / `(Err E)`. ويمكن
 أن يكون `E` أي نوع: أنواع الأخطاء الملموسة المضمنة، والأنواع التي تكتبها بنفسك بـ
 `defstruct`/`defenum`، كلها تصلح هناك على حد سواء (الفصل 3).
 
 | الاسم | الصيغة | Option | Result | الوصف |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | يستخرج القيمة. ويحدث `panic` عند `none`/`err` |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | يستخرج القيمة. ويحدث `panic` عند `None`/`Err` |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | القيمة أو القيمة الافتراضية |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | هل هي `some` |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | هل هي `none` |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | هل هي `ok` |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | هل هي `err` |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | تُخرج القيمة. عند `none`/`err` تُطلق panic بالرسالة `msg` |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | القيمة، أو نتيجة `f`. لا تُستدعى `f` إلا عند `none`/`err` |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | تطبّق `f` على محتوى `some`/`ok` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | تطبّق `f` على محتوى `err` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | عند `some`/`ok` تمرّر المحتوى إلى `f` وتُرجع نتيجتها |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | عند `none`/`err` تُرجع نتيجة `f` |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | تحوّل `(some v)` إلى `(ok v)` و`none` إلى `(err e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | هل هي `Some` |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | هل هي `None` |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | هل هي `Ok` |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | هل هي `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | تُخرج القيمة. عند `None`/`Err` تُطلق panic بالرسالة `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | القيمة، أو نتيجة `f`. لا تُستدعى `f` إلا عند `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | تطبّق `f` على محتوى `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | تطبّق `f` على محتوى `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | عند `Some`/`Ok` تمرّر المحتوى إلى `f` وتُرجع نتيجتها |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | عند `None`/`Err` تُرجع نتيجة `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | تحوّل `(Some v)` إلى `(Ok v)` و`None` إلى `(Err e)` |
 
-يمكن استخدام المُنشِئات `some`/`none`/`ok`/`err` كأسماء مجردة في أي وحدة دون `use`.
-ويمكن أيضًا كتابتها مع اسم النوع، مثل `Option::some`.
+يمكن استخدام المُنشِئات `Some`/`None`/`Ok`/`Err` كأسماء مجردة في أي وحدة دون `use`.
+ويمكن أيضًا كتابتها مع اسم النوع، مثل `Option::Some`.
 
 يُكتب التفرع صراحة بـ `match`، أو يُسلسَل بـ `map`/`and-then` وغيرهما مما سبق. ولا توجد صياغة تقابل
 `?` في Rust.
@@ -39,12 +39,12 @@
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
+  (if (= 0 (mod n 2)) (Option::Some (truncate n 2)) (Option::None)))
 
-(-> (Option::some 8)
-    (and-then half)                          ; (some 4)
-    (and-then half)                          ; (some 2)
-    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+(-> (Option::Some 8)
+    (and-then half)                          ; (Some 4)
+    (and-then half)                          ; (Some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (Some 20)
     (unwrap-or 0))                           ; => 20
 
 (-> (parse-int "x")
@@ -54,26 +54,26 @@
 
 ## 2. التمثيل وقت التشغيل لنوع `Option<T>`
 
-كما في Rust، **لا يصنع `Option<T>` صندوقًا عادةً**. فـ `some v` هي `v` نفسها و`none` هي قيمة القائمة
-الفارغة، دون حجز ودون مستوى غير مباشر. وكل من `Option<Sexpr>` (حيث القائمة الفارغة هي `none`) و
+كما في Rust، **لا يصنع `Option<T>` صندوقًا عادةً**. فـ `Some v` هي `v` نفسها و`None` هي قيمة القائمة
+الفارغة، دون حجز ودون مستوى غير مباشر. وكل من `Option<Sexpr>` (حيث القائمة الفارغة هي `None`) و
 `Option<int>` و`Option<string>` و`Option<my-struct>` و`Option<f64>` و`Option<(fn ...)>` يتخذ هذه الصورة.
 
 ولا يُستخدم صندوق إلا عندما لا يمكن تمييز قيمة من `T` عن قيمة القائمة الفارغة:
 
 | `T` | التمثيل | السبب |
 |---|---|---|
-| `Option<U>` (متداخل) | صندوق | ستكون `none` الداخلية القيمة نفسها كـ `none` الخارجية |
+| `Option<U>` (متداخل) | صندوق | ستكون `None` الداخلية القيمة نفسها كـ `None` الخارجية |
 | `()` | صندوق | قيمة `()` هي قيمة القائمة الفارغة نفسها |
 | `ptr` / `c-long` / `c-ulong` | صندوق | كل البتات الـ 64 قيمة، فلا يبقى مجال للتمييز |
 | أي شيء آخر | بلا صندوق | — |
 
-يتحدد التمثيل بالنوع وحده ولا يمكن قراءته من قيمة. وعند الطباعة تُعاد بناء `(some ...)`/`none` من النوع
-الساكن، فتطبع `(format false "~a" opt)` القيمة `(some 1)`. وثمة قيدان:
+يتحدد التمثيل بالنوع وحده ولا يمكن قراءته من قيمة. وعند الطباعة تُعاد بناء `(Some ...)`/`None` من النوع
+الساكن، فتطبع `(format false "~a" opt)` القيمة `(Some 1)`. وثمة قيدان:
 
 - **لا يمكن وضعه في `:dyn Trait`** (فتمرير قيمة من `Option<int>` كتبتَ لها
   `(impl Speak Option<int> ...)` إلى `:dyn Speak` خطأ).
 - التحويل الهابط `(the Option<T> ...)` من `Sexpr` **يسمّي مُنشِئًا**:
-  `(the Option<int> (some x))` / `(the Option<int> (none))`. أما الصيغة التي تربط القيمة كلها،
+  `(the Option<int> (Some x))` / `(the Option<int> (None))`. أما الصيغة التي تربط القيمة كلها،
   `(the Option<int> o)`، فخطأ.
 
 ## 3. أنواع الأخطاء والسمة `Error`
@@ -100,7 +100,7 @@
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | رسالة الخطأ (تابع من السمة `Error`) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | السبب الذي يغلّفه هذا الخطأ، أو `none` إن لم يوجد (`Error::source` في Rust) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | السبب الذي يغلّفه هذا الخطأ، أو `None` إن لم يوجد (`Error::source` في Rust) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` ينفّذ `Error`) | يوسّع نوع خطأ ملموسًا إلى كائن السمة |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` ينفّذ `Error`) | الرسالة وسلسلة الأسباب التي يُعثر عليها باتباع `source`، سببًا واحدًا في كل سطر. ولا مقابل له في CL ("caused by" في Rust) |
 
@@ -111,10 +111,10 @@
 (defstruct io-err (path string))
 (impl Error io-err
   (defmethod message (self) string (append "io failed: " self::path))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; يدخل النوع الملموس في E كما هو
-  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
+  (if (equal p "") (Result::Err (make-instance 'io-err :path "<empty>")) (Result::Ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; تعامل مع أي نوع بالتساوي
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -128,8 +128,8 @@ Rust)، ووسّع الأخطاء الملموسة بـ `as-dyn-error`. ولأن
 (use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
-    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((Err e) (Result::Err e))))
 ```
 
 **تشترك الأنواع والسمات في مساحة أسماء واحدة** (كما في Rust). ففي وحدة واحدة لا يمكن أن يكون لـ

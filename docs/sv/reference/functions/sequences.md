@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -42,15 +42,15 @@ S-uttrycksceller hanteras inte med de allmänna `cons`/`car`/`cdr` i kapitel 1 u
 `sexpr-*`-funktionerna. De används främst i `defmacro`-kroppar för att bygga och plocka isär former.
 
 **Typen för S-uttrycksdata är `Option<Sexpr>`.** Den tomma listan är inte en variant av `Sexpr` utan
-`none` i `Option`, och `Sexpr` självt betyder "ett icke-tomt S-uttryck". Så `sexpr-*`-funktionerna tar
+`None` i `Option`, och `Sexpr` självt betyder "ett icke-tomt S-uttryck". Så `sexpr-*`-funktionerna tar
 och returnerar `Option<Sexpr>`.
 
 - `()` är den tomma listan där en `Option<Sexpr>` förväntas (den kan också skrivas
-  `(Option::none)`)
+  `(Option::None)`)
 - `Sexpr` vidgas implicit där en `Option<Sexpr>` förväntas (utan konvertering vid körning). Den motsatta
   riktningen, att använda en `Option<Sexpr>` som en `Sexpr`, påstår "det här är inte den tomma listan",
   så det måste anges explicit med `match` eller `unwrap`
-- I `match` kan de 19 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar**
+- I `match` kan de 19 varianterna av `Sexpr` och `None` skrivas **platt i samma lista av grenar**
   ([Syntaxreferens](../syntax.md#43-match--mönstermatchning))
 
 | Namn | Form | Typ | Beskrivning |
@@ -115,7 +115,7 @@ Funktioner som tar ett predikat (motsvarar CL:s `-if`-familj):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Den första position som uppfyller predikatet |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Hur många som uppfyller predikatet |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om varje element uppfyller predikatet |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om något element uppfyller predikatet (motsvarar CL:s `some`; ett namn som inte krockar med konstruktorn `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om något element uppfyller predikatet (motsvarar CL:s `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Vänstervikning |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Högervikning |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Samlar alla återstående element. Används för att göra en `Vector` av resultatet från en `lazy`-funktion nedan |
@@ -128,7 +128,7 @@ Indexering, längd och delning:
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Konkatenerar iteratorer. Tre eller fler kan anges |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL:s `concatenate`. Resultattypen skrivs som **en citerad symbolliteral** (CL använder en typspecificerare vid körning). `'vector` tar en eller fler, `'string` noll eller fler (`""` för noll). `Sexpr`-listor omfattas inte (använd `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Omvändning (icke-destruktiv) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` utanför intervallet) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` utanför intervallet) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` med argumenten tvärtom |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | De första `n` elementen |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` begränsas till längden) |
@@ -221,7 +221,7 @@ Alla är generiska funktioner på `Iter`, som i kapitel 4. Resulterande samlinga
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Avbildar över svansar för sidoeffekter (`maplist`-motsvarigheten till `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Avbildar över svansar och konkatenerar (`maplist`-motsvarigheten till `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Positionen där `sub` först förekommer. Om mottagaren är en `string` väljs `string`-metoden ([Strängar](collections.md#1-strängar-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Den första position där de skiljer sig. `none` om de är lika |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Den första position där de skiljer sig. `None` om de är lika |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Sammanslagning. CL kräver sorterade indata; den här sorterar konkateneringen |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Lägger till `x` **först** om det inte finns där |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Mängdoperationer. CL specificerar inte ordningen; här är den stabil, **i ordning efter första förekomst** |
@@ -273,7 +273,7 @@ Vilken funktion som tar vilka följer CL:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; tar bara bort ett, från slutet
 (position 3 (iter v) :start 1)                          ; indexet är relativt hela sekvensen
 ```

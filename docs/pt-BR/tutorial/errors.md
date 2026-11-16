@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tratamento de erros
 
 O tratamento de erros no typelisp divide as falhas em dois tipos.
@@ -6,7 +6,7 @@ O tratamento de erros no typelisp divide as falhas em dois tipos.
 | Tipo de falha | Exemplos | Como é expressa |
 |---|---|---|
 | Falhas que podem acontecer (recuperáveis) | Um arquivo não existe, a entrada não é um número | Devolver um `Result<T,E>` |
-| Erros no programa (irrecuperáveis) | Um índice fora do intervalo, `unwrap` de `none`, divisão por zero | Parar com `panic` |
+| Erros no programa (irrecuperáveis) | Um índice fora do intervalo, `unwrap` de `None`, divisão por zero | Parar com `panic` |
 
 Além disso existem `catch` / `throw`, que saem de muitas chamadas de função de uma vez, e `unwind-protect`,
 que executa uma limpeza qualquer que seja a forma de sair do corpo. Este capítulo pressupõe que você leu a
@@ -21,22 +21,22 @@ número, ou está fora do intervalo.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 Quem chama separa o sucesso da falha com `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- O valor de uma função que devolve `Result` não pode ser usado a menos que `match` trate o caso `err`.
+- O valor de uma função que devolve `Result` não pode ser usado a menos que `match` trate o caso `Err`.
   Esquecer de tratar a falha é um erro de tipo.
 - O erro de `parse-int` é um valor do tipo `ParseIntError`. `(message e)` dá a string da mensagem.
 
@@ -48,17 +48,17 @@ Não existe uma forma abreviada como o `?` do Rust. Ao chamar em sequência vár
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 Quando você sabe que uma operação não pode falhar, ou em um script pequeno em que parar na falha não tem
-problema, `unwrap` tira o conteúdo. Se o valor for um `err`, ocorre um panic. Se um valor padrão bastar, use
+problema, `unwrap` tira o conteúdo. Se o valor for um `Err`, ocorre um panic. Se um valor padrão bastar, use
 `unwrap-or`.
 
 ## 3. Criar seu próprio tipo de erro
@@ -76,16 +76,16 @@ erro. Um tipo de erro é um `defenum` ou `defstruct` comum que implementa o trai
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::invalid "workers" n))))
 ```
 
 - `message` devolve uma descrição do erro.
-- `source` devolve outro erro que causou este. Sem causa, é `none`.
+- `source` devolve outro erro que causou este. Sem causa, é `None`.
 
 ## 4. Combinar tipos diferentes de erros
 
@@ -97,8 +97,8 @@ erro de qualquer tipo que implemente `Error`). Converta cada erro com `as-dyn-er
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 Dados `"4"`, `"-1"` e `"abc"`, os resultados são:
@@ -128,7 +128,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - O tipo de `panic` é `!` (não retorna), então pode ser escrito onde quer que se espere qualquer tipo. É por
   isso que os dois ramos do `if` acima se encaixam.
-- Estas operações também causam panic: `unwrap` de `none` ou `err`, `get` com índice fora do intervalo e
+- Estas operações também causam panic: `unwrap` de `None` ou `Err`, `get` com índice fora do intervalo e
   divisão inteira por zero.
 - `panic` para o programa. Mesmo quando acontece dentro de uma tarefa, o programa inteiro para.
 - No REPL, um `panic` não encerra o REPL; ele espera a próxima entrada.
@@ -195,8 +195,8 @@ Se você só quer retornar mais cedo dentro de uma função, use `return-from` e
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: limpar sempre

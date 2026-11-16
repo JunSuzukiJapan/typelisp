@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Пари, S-вирази та послідовності
 
 Узагальнена пара `cons-cell`, дані у вигляді S-виразів `Sexpr`, символи, функції над послідовностями,
@@ -40,15 +40,15 @@ cons-комірки CL: `(cons 1 (cons "a" ()))` друкується як `(1 "
 використовують насамперед у тілах `defmacro` для побудови та розбору форм.
 
 **Тип даних у вигляді S-виразів — це `Option<Sexpr>`.** Порожній список — це не варіант `Sexpr`, а
-`none` з `Option`, а сам `Sexpr` означає «непорожній S-вираз». Тож функції `sexpr-*` приймають і
+`None` з `Option`, а сам `Sexpr` означає «непорожній S-вираз». Тож функції `sexpr-*` приймають і
 повертають `Option<Sexpr>`.
 
 - `()` — це порожній список там, де очікується `Option<Sexpr>` (його можна також писати
-  `(Option::none)`)
+  `(Option::None)`)
 - `Sexpr` неявно розширюється там, де очікується `Option<Sexpr>` (без перетворення під час виконання).
   Зворотний напрямок, використання `Option<Sexpr>` як `Sexpr`, стверджує «це не порожній список», тож це
   слід указати явно через `match` або `unwrap`
-- У `match` 19 варіантів `Sexpr` і `none` можна писати **плоско, в одному списку гілок**
+- У `match` 19 варіантів `Sexpr` і `None` можна писати **плоско, в одному списку гілок**
   ([Довідник із синтаксису](../syntax.md#43-match--зіставлення-з-візерунком))
 
 | Назва | Форма | Тип | Опис |
@@ -114,7 +114,7 @@ cons-комірки CL: `(cons 1 (cons "a" ()))` друкується як `(1 "
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Перша позиція, що задовольняє предикат |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Скільки задовольняють предикат |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Чи кожен елемент задовольняє предикат |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Чи будь-який елемент задовольняє предикат (відповідає `some` з CL; назва, що не конфліктує з конструктором `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Чи будь-який елемент задовольняє предикат (відповідає `some` з CL) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Лівий згортальний вираз |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Правий згортальний вираз |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Збирає всі решту елементів. Нею результат функції `lazy` нижче перетворюють на `Vector` |
@@ -127,7 +127,7 @@ cons-комірки CL: `(cons 1 (cons "a" ()))` друкується як `(1 "
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | З'єднує ітератори. Можна передати три й більше |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` з CL. Тип результату записується як **цитований літерал-символ** (CL використовує специфікатор типу часу виконання). `'vector` приймає один і більше, `'string` — нуль і більше (`""` для нуля). Списки `Sexpr` не охоплені (використовуйте `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Розворот (недеструктивний) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Елемент `n` (`none` поза межами) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Елемент `n` (`None` поза межами) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` з аргументами в зворотному порядку |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | Перші `n` елементів |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` обмежується довжиною) |
@@ -221,7 +221,7 @@ Result](option-result.md)).
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Відображає над хвостами заради побічних ефектів (відповідник `mapc` для `maplist`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Відображає над хвостами й з'єднує (відповідник `mapcan` для `maplist`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Позиція, де `sub` з'являється вперше. Якщо одержувач — `string`, вибирається метод `string` ([Рядки](collections.md#1-рядки-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Перша позиція, де вони відрізняються. `none`, якщо вони рівні |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Перша позиція, де вони відрізняються. `None`, якщо вони рівні |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Злиття. CL вимагає відсортованих вхідних даних; ця функція сортує конкатенацію |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Додає `x` **на початок**, якщо його немає |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Операції над множинами. CL не визначає порядок; тут він стабільний, **у порядку першої появи** |
@@ -273,7 +273,7 @@ Result](option-result.md)).
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; removes only one, from the end
 (position 3 (iter v) :start 1)                          ; the index is relative to the whole sequence
 ```

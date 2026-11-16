@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # String, Karakter, dan Koleksi
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, dan `Deque<T>`.
@@ -25,12 +25,12 @@ String tidak dapat diubah.
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | Urutan yang tidak peka huruf besar-kecil (`string-lessp` pada CL dan sebagainya). Jika prefiksnya sama, yang lebih pendek lebih kecil |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | String berisi `n` salinan `c` (`make-string` pada CL) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | Posisi tempat `sub` pertama kali muncul. **`search` pada CL memiliki urutan argumen yang terbalik** (`(search pattern sequence)`). String kosong ditemukan di 0. Untuk keyword, lihat [argumen keyword pada sekuens](sequences.md#6-argumen-keyword) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | Posisi pertama tempat keduanya berbeda. `none` hanya jika keduanya `equal`. Jika yang satu adalah prefiks yang lain, akhir yang lebih pendek. Keyword seperti di atas |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | Posisi pertama tempat keduanya berbeda. `None` hanya jika keduanya `equal`. Jika yang satu adalah prefiks yang lain, akhir yang lebih pendek. Keyword seperti di atas |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | Menghapus karakter yang terkandung dalam `bag` dari kedua ujung / kiri / kanan (`string-trim` pada CL dan sebagainya). Tanpa `bag`, spasi putih `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | Memecah pada `sep`. CL tidak memiliki padanannya. Pemisah berurutan menghasilkan elemen kosong. Panic jika `sep` kosong |
 | `to-string` | `(to-string x)` | `T→string` | Mengubah menjadi string seperti `~a`. Diimplementasikan untuk `int`/`i32`/`f64`/`bool`/`char`/`string` (`princ-to-string` pada CL) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | Mengodekan sebagai UTF-8 (tiap elemen 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Mendekode. `none` jika bukan UTF-8 yang sah |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Mendekode. `None` jika bukan UTF-8 yang sah |
 
 ## 2. Karakter `char`
 
@@ -78,7 +78,7 @@ dicetak sebagai `#(1 2 3)`.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Membaca elemen `i`. Panic jika di luar rentang |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Mengubah elemen `i`. Panic jika di luar rentang. Dapat juga ditulis `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Jumlah elemen |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Menghapus elemen terakhir dan mengembalikannya. `none` jika kosong (tidak seperti `get`/`set`, ia tidak panic) (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Menghapus elemen terakhir dan mengembalikannya. `None` jika kosong (tidak seperti `get`/`set`, ia tidak panic) (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Membuat iterator yang mengimplementasikan `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Menambahkan `x` di akhir bila tidak ada elemen yang `eql` dengannya (`pushnew` CL. Tidak perlu menulis ulang suatu tempat, jadi berupa metode, bukan makro) |
 
@@ -138,7 +138,7 @@ tulis `(HashTable::new :test 'equal)`. Bila tipe kunci tabel `equal` tidak mengi
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 Dalam tabel `equal`, yang menentukan apakah dua kunci sama adalah **tipe kunci itu sendiri** (`sxhash`, dan
@@ -170,8 +170,8 @@ Nilainya dapat ditulis `#2A((1 2) (3 4))` ([Referensi Sintaks](../syntax.md#1-un
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` pada CL. Rank tidak dapat berubah. Elemen yang tetap dalam rentang dipertahankan pada indeksnya, dan sel baru mendapat `init`. Tidak seperti CL, ia tidak mengembalikan larik (setiap larik di bahasa ini dapat disesuaikan, sehingga tidak ada larik kedua untuk dikembalikan) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` pada CL. Panic tanpa fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Sama dengan `push-extend` (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` pada CL. `none` jika kosong (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Fill pointer (`none` jika tidak ada). Dapat ditulis dengan `(setf a::fill-pointer …)` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` pada CL. `None` jika kosong (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Fill pointer (`None` jika tidak ada). Dapat ditulis dengan `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Iterator dalam urutan row-major. Berhenti pada fill pointer jika ada |
 
 - **Indeks berupa `Vector<int>`.** Metode tidak dapat mendeklarasikan "argumen bertipe sama yang
@@ -266,10 +266,10 @@ Barisan yang bisa ditambah dan diambil dari kedua ujungnya (`VecDeque` milik Rus
 | `new` | `(Deque::new)` | `()→Deque<T>` | Membuat barisan kosong |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Menambah di depan / belakang |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Sama dengan `push-back` (metode trait [`Push`](traits.md#4-trait-push-menambahkan-elemen)) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Mengambil elemen depan / belakang dan mengembalikannya. `none` bila kosong |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Mengambil elemen depan / belakang dan mengembalikannya. `None` bila kosong |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | Sama dengan `pop-back` (metode trait [`Pop`](traits.md#5-trait-pop-mengambil-elemen)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Melihat elemen depan / belakang (tanpa mengambilnya) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Elemen ke-`i` dari depan. `none` bila di luar jangkauan |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Elemen ke-`i` dari depan. `None` bila di luar jangkauan |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Menimpa elemen ke-`i`. Panic bila di luar jangkauan |
 | `count` | `(count d)` | `Deque<T>→int` | Jumlah elemen |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | Menghapus semuanya |
@@ -279,5 +279,5 @@ Barisan yang bisa ditambah dan diambil dari kedua ujungnya (`VecDeque` milik Rus
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

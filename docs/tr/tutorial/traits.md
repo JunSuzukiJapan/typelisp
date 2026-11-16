@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Trait'ler
 
 Bir trait, "bu tür şu işlemleri destekler" sözüdür. Trait'ler birkaç türün aynı adlı işlemleri
@@ -139,12 +139,12 @@ yazabilirsiniz.
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-Sırasıyla 300, 900 ve 100 değerli `money` içeren bir `Vector` verildiğinde `(some 900 yen)` döndürür.
+Sırasıyla 300, 900 ve 100 değerli `money` içeren bir `Vector` verildiğinde `(Some 900 yen)` döndürür.
 
 ## 5. `:dyn`: farklı türlerin değerlerini birlikte ele alma
 

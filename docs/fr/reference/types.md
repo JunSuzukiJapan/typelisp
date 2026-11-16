@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Types
 
 Les types de typelisp et les traits standard que chaque type implémente. La façon d'écrire les types se trouve au
@@ -30,8 +30,8 @@ Il n'existe pas de type entier sur 64 bits. Pour les entiers dont la largeur imp
 
 | Type | Contenu | Détails |
 |---|---|---|
-| `Option<T>` | Une valeur présente ou non. `some` / `none` | [Option et Result](functions/option-result.md) |
-| `Result<T,E>` | Succès ou échec. `ok` / `err` | Idem |
+| `Option<T>` | Une valeur présente ou non. `Some` / `None` | [Option et Result](functions/option-result.md) |
+| `Result<T,E>` | Succès ou échec. `Ok` / `Err` | Idem |
 | `Vector<T>` | Un tableau extensible | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Une table de hachage. La comparaison des clés est fixée par `:test` à la création, et dans une table `equal` le type des clés doit implémenter `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 à 12 éléments). Les éléments se lisent avec `t::0` | [Syntaxe, chapitre 2](syntax.md#2-écrire-les-types) |
@@ -47,7 +47,7 @@ et les types liste `(T U ...)` (le même type que `cons-cell<T,cons-cell<U,()>>`
 | Type | Contenu | Détails |
 |---|---|---|
 | `Sexpr` | Une S-expression non vide. 19 variantes : `int`, `i8` à `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Données S-expression](functions/sequences.md#2-données-s-expression-sexpr) |
-| `Option<Sexpr>` | Les données S-expression en général. La liste vide `()` est `none` | Idem |
+| `Option<Sexpr>` | Les données S-expression en général. La liste vide `()` est `None` | Idem |
 
 ## 4. Types de la bibliothèque standard
 
@@ -72,7 +72,7 @@ types que vous écrivez vous-même, et tout ce qu'on peut faire avec un `defstru
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Flux | [Flux](functions/streams-files.md#3-types-de-flux-concrets) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Flux composites | [Flux composites](functions/streams-files.md#4-flux-composites) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Réseau | [Réseau](functions/network.md#1-types) |
-| `ReadOutcome` | Le résultat de `read-sexpr`. `datum` / `eof` | [Flux](functions/streams-files.md#6-fonctions-génériques-et-opérations-sur-les-fichiers) |
+| `ReadOutcome` | Le résultat de `read-sexpr`. `Datum` / `Eof` | [Flux](functions/streams-files.md#6-fonctions-génériques-et-opérations-sur-les-fichiers) |
 | `universal-time` `internal-time` `decoded-time` | Temps | [Temps](functions/system.md#1-temps) |
 | `heap-info` | L'état actuel du tas | [Outils de l'implémentation](functions/system.md#51-champs-de-heap-info) |
 

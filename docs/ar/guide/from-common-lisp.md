@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # لمبرمجي Common Lisp
 
 ترث typelisp صياغة Common Lisp (واختصارًا CL) وكثيرًا من أسماء دواله، لكنها لغة ذات أنواع ساكنة. ولهذا
@@ -19,12 +19,12 @@
 - **لا يمكن حذف فرع else في `if`.** `(if c x)` خطأ. وعندما لا تحتاج إلى فرع else استخدم
   `when` / `unless`.
 - **يُعبَّر عن "لا قيمة" بـ `Option<T>`.** والدالة التي كانت تعيد nil في CL بمعنى "لم يُعثر عليه"
-  تعيد هنا `(some x)` أو `none`.
+  تعيد هنا `(Some x)` أو `None`.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - القائمة الفارغة `()` هي بحسب السياق إما قيمة النوع Unit (القيمة الراجعة من دالة لا تعيد شيئًا) أو
@@ -94,7 +94,7 @@
 ## 4. القوائم و Vector
 
 ما يقابل قائمة CL هو **بيانات التعبيرات الرمزية (S-expression)** ونوعها `Option<Sexpr>` (والقائمة الفارغة
-هي `none`). ولـ `(list 1 2 3)` و`'(a b c)` هذا النوع. وبيانات التعبيرات الرمزية هي ما تعمل عليه الماكرو
+هي `None`). ولـ `(list 1 2 3)` و`'(a b c)` هذا النوع. وبيانات التعبيرات الرمزية هي ما تعمل عليه الماكرو
 و`read`؛ أما لحاوية بيانات عادية فاستخدم **`Vector<T>`**.
 
 | ما تريده | CL | typelisp |
@@ -174,17 +174,17 @@
 لا يوجد `define-condition` ولا `handler-case` ولا `handler-bind` ولا `restart-case` ولا `error` ولا
 `signal`. فهي لا تتلاءم جيدًا مع الأنواع الساكنة. وبدلًا منها يُستخدم هذان لغرضين مختلفين:
 
-- **الإخفاقات القابلة للتعافي تعيد `Result<T,E>`.** يفصل المستدعي بين `ok` / `err` بـ `match`. ولا يوجد
+- **الإخفاقات القابلة للتعافي تعيد `Result<T,E>`.** يفصل المستدعي بين `Ok` / `Err` بـ `match`. ولا يوجد
   اختصار مثل `?` في Rust.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **الإخفاقات غير القابلة للتعافي (الأخطاء البرمجية) هي `panic`.** `(panic "message")` وتمرير `none` إلى
+- **الإخفاقات غير القابلة للتعافي (الأخطاء البرمجية) هي `panic`.** `(panic "message")` وتمرير `None` إلى
   `unwrap` والقسمة على 0 وفهرس خارج النطاق كلها من هذا النوع، ويتوقف البرنامج. وتُنفَّذ عمليات التنظيف في
   `unwind-protect` قبل أن يتوقف.
 

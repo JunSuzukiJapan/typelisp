@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # معالجة الأخطاء
 
 تقسم معالجة الأخطاء في typelisp الإخفاقات إلى نوعين.
@@ -6,7 +6,7 @@
 | نوع الإخفاق | أمثلة | كيف يُعبَّر عنه |
 |---|---|---|
 | إخفاقات يمكن أن تحدث (قابلة للتعافي) | ملف غير موجود، مُدخَل ليس عددًا | إعادة `Result<T,E>` |
-| أخطاء في البرنامج (غير قابلة للتعافي) | فهرس خارج النطاق، `unwrap` على `none`، قسمة على صفر | التوقف بـ `panic` |
+| أخطاء في البرنامج (غير قابلة للتعافي) | فهرس خارج النطاق، `unwrap` على `None`، قسمة على صفر | التوقف بـ `panic` |
 
 وفوق هذين توجد `catch` / `throw` اللتان تغادران استدعاءات دوال كثيرة دفعة واحدة، و`unwind-protect` التي
 تنفّذ التنظيف مهما كانت طريقة مغادرة جسمها. يفترض هذا الفصل أنك قرأت قسم `Result` في
@@ -20,22 +20,22 @@
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 يفصل المستدعي بين النجاح والفشل بـ `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- لا يمكن استخدام قيمة دالة تعيد `Result` ما لم يعالج `match` حالة `err`. ونسيان معالجة الفشل خطأ في
+- لا يمكن استخدام قيمة دالة تعيد `Result` ما لم يعالج `match` حالة `Err`. ونسيان معالجة الفشل خطأ في
   الأنواع.
 - الخطأ الصادر من `parse-int` قيمة من النوع `ParseIntError`. و`(message e)` تعطي سلسلة رسالته.
 
@@ -47,17 +47,17 @@
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 وعندما تعلم أن عملية لا يمكن أن تفشل، أو في سكربت صغير لا بأس فيه بالتوقف عند الفشل، يستخرج `unwrap`
-المحتوى. وإذا كانت القيمة `err` فإنه يحدث `panic`. وإذا كانت قيمة افتراضية تكفي فاستخدم `unwrap-or`.
+المحتوى. وإذا كانت القيمة `Err` فإنه يحدث `panic`. وإذا كانت قيمة افتراضية تكفي فاستخدم `unwrap-or`.
 
 ## 3. صنع نوع خطأ خاص بك
 
@@ -74,16 +74,16 @@
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::invalid "workers" n))))
 ```
 
 - تعيد `message` وصفًا للخطأ.
-- تعيد `source` خطأً آخر تسبب في هذا الخطأ. ومع عدم وجود سبب تكون `none`.
+- تعيد `source` خطأً آخر تسبب في هذا الخطأ. ومع عدم وجود سبب تكون `None`.
 
 ## 4. الجمع بين أنواع مختلفة من الأخطاء
 
@@ -95,8 +95,8 @@
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 وعند إعطاء `"4"` و`"-1"` و`"abc"` تكون النتائج:
@@ -125,7 +125,7 @@ error: main.typl:4:7: panic: index 3 out of range
 ```
 
 - نوع `panic` هو `!` (لا تعود)، فيمكن كتابتها حيثما يُتوقَّع أي نوع. ولهذا يتلاءم فرعا `if` أعلاه.
-- تُحدث هذه العمليات `panic` أيضًا: `unwrap` على `none` أو `err`، و`get` بفهرس خارج النطاق، والقسمة
+- تُحدث هذه العمليات `panic` أيضًا: `unwrap` على `None` أو `Err`، و`get` بفهرس خارج النطاق، والقسمة
   الصحيحة على صفر.
 - يوقف `panic` البرنامج. وحتى عندما يحدث داخل مهمة (task) يتوقف البرنامج كله.
 - في الـ REPL لا ينهي `panic` الـ REPL؛ بل ينتظر المُدخَل التالي.
@@ -190,8 +190,8 @@ error: main.typl:4:7: panic: index 3 out of range
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: نظّف دائمًا

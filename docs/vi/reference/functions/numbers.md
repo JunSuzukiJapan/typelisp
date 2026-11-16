@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -32,9 +32,9 @@ nhất ở đâu đó. `int` trở thành bignum khi vượt qua 63 bit đó, n�
 | `int->int` | `(int->int x)` | `T→int` | Chuyển đổi mở rộng sang `int` (luôn chính xác). Việc `(as int x)` làm |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Chuyển đổi mở rộng sang `ratio` (luôn chính xác) |
 | `int->char` | `(int->char x)` | `T→char` | Diễn giải giá trị như một giá trị vô hướng Unicode. Panic với giá trị không hợp lệ |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Một phiên bản của `int->char` trả về `none` khi thất bại |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Một phiên bản của `int->char` trả về `None` khi thất bại |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Chuyển đổi độ rộng. Các giá trị không vừa bị cắt cụt (như `as` của Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `none` nếu giá trị không vừa độ rộng đó |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `None` nếu giá trị không vừa độ rộng đó |
 
 Các phép chuyển đổi này cũng là những gì các dạng đặc biệt `(as Type x)`/`(try-as Type x)`
 ([Tham chiếu cú pháp](../syntax.md#7-các-dạng-đặc-biệt-khác)) làm. Các phép toán bit (`logand`/`ash`/`ldb`, v.v.)
@@ -140,7 +140,7 @@ not fit a fixnum").
 | `float->int` | `(float->int x)` | `f64→int` | Chuyển thành `int` bằng cách cắt về phía không (`truncate` của CL; chính xác với các giá trị hữu hạn ở mọi cỡ). Panic với vô cực và NaN. Với độ rộng cố định, hãy dùng `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Chuyển thành một `ratio` dưới dạng số hữu tỉ nhị phân chính xác (`rational` của CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Chuyển đổi giữa các độ rộng dấu phẩy động. `float->f32` làm tròn đến gần nhất, `float->f64` luôn chính xác. Việc `(as f32 x)` làm |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `none` nếu việc làm tròn thay đổi giá trị (mở rộng sang `f64` luôn là `some`). Việc `(try-as f32 x)` làm |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `None` nếu việc làm tròn thay đổi giá trị (mở rộng sang `f64` luôn là `Some`). Việc `(try-as f32 x)` làm |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | Các hàm cùng tên của CL. Là bí danh của `floor`/`ceiling`/`round`/`truncate` ở trên: trong CL các hàm không có tiền tố trả về số nguyên, nên các hàm có tiền tố `f` khớp với hành vi của ngôn ngữ này |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | Lần lượt là 2 / 53 / 53 (chỉ độ chính xác của `0.0` là 0). `f64` luôn là IEEE-754 binary64, nên đây là các hằng số |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` hoặc `-1.0` |
@@ -219,7 +219,7 @@ cho `(defun f ((q rational)) ...)`). Chiều ngược lại, lấy giá trị ra
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | So sánh |
 | `numerator` `denominator` | `(op x)` | `rational→int` | Tử số và mẫu số tối giản |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Cắt về phía không, dưới dạng `ratio`, sang `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` với số nguyên, ngược lại `none` (`integerp` của CL) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` với số nguyên, ngược lại `None` (`integerp` của CL) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Như với `ratio` (số mũ của `expt` là `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Như với `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Như với `ratio` |

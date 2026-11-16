@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Yazdırma
 
 `print`/`println`/`format`, tek bağımsız değişkenli yazıcılar, pretty printer, `print-object` ve
@@ -43,18 +43,18 @@ program standart çıktıya bunları çağırarak yazar. `print`/`println`/`form
 dışarı gönderir (böylece bir istem, standart girdi okunmadan önce, bir boru üzerinden bile görünür).
 
 **`Option<Sexpr>` saydam olarak yazdırılır.** S-ifade verisinin türü `Option<Sexpr>`'dir; bu yüzden
-`(some x)` sarmalayıcısı çıktıda görünmez ve içerik olduğu gibi yazdırılır. Boş liste `()` olarak
-yazdırılır. Diğer `Option<T>`'ler `(some ...)` / `none` olarak yazdırılır. Aynısı struct'ların,
+`(Some x)` sarmalayıcısı çıktıda görünmez ve içerik olduğu gibi yazdırılır. Boş liste `()` olarak
+yazdırılır. Diğer `Option<T>`'ler `(Some ...)` / `None` olarak yazdırılır. Aynısı struct'ların,
 enum'ların ve `Vector`'lerin içindeki `Option<T>` alanları için de geçerlidir. `(eval ...)`'ten gelen bir
-`Result<Option<Sexpr>,…>`, `(ok 42)` olarak ya da `none` için `(ok ())` olarak yazdırılır.
+`Result<Option<Sexpr>,…>`, `(Ok 42)` olarak ya da `None` için `(Ok ())` olarak yazdırılır.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -312,10 +312,10 @@ hücreleri oluşturulduktan sonra değiştirilemez; bu yüzden `'(1 2 3)` gibi b
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a points to a itself
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a points to a itself
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Etiketler **yazdırılan her şey için 1'den yeniden başlar** (CL'deki gibi). Döngü olmasa bile aynı nesne iki

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Стандартные трейты
 
 Трейты итерации, сравнения, арифметики, добавления и извлечения элементов. Остальные стандартные трейты описаны в собственных главах: `Hash`
@@ -158,7 +158,7 @@
   (defmethod pop (self) Option<Item>))
 ```
 
-Коллекция, из которой можно извлечь элемент, добавленный `push` последним. `none`, если она пуста.
+Коллекция, из которой можно извлечь элемент, добавленный `push` последним. `None`, если она пуста.
 Обобщённая функция требует её через `(:where (Pop C (Item T)))`.
 
 | Тип | Что делает `pop` |
@@ -175,8 +175,8 @@
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

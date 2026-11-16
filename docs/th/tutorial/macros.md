@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # แมโคร
 
 แมโครคือฟังก์ชันที่รับโปรแกรมและคืนโปรแกรม แมโครทำให้คุณสร้างไวยากรณ์ใหม่
@@ -42,7 +42,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. การขยายก็ถูกตรวจสอบชนิดเช่นกัน
@@ -120,14 +120,14 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 
 ตัวเนื้อหาของแมโครเป็นโค้ด typelisp ธรรมดา จึงตรวจสอบอาร์กิวเมนต์ด้วย `if` หรือ `match` และ
 สร้างการขยายที่ต่างกันได้ อาร์กิวเมนต์เป็นข้อมูล S-expression (`Option<Sexpr>`) และลิสต์ว่าง
-คือ `none`
+คือ `None`
 
 ลองสร้าง `my-and` ที่คืน `true` หากทุกเงื่อนไขเป็นจริง
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
+    ((None) 'true)                                    ; no arguments
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; just one

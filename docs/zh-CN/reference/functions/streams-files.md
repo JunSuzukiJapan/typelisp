@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 流与文件
 
 流的 trait 与方法、具体流类型、文件操作、路径名。网络套接字也是流的一员，见[网络](network.md)。
@@ -27,18 +27,18 @@ CL 用类层次表示的东西，在这里用 **trait 层次**表示。方向（
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | 下一个元素。到末尾时为 `none`。**唯一必须实现的方法** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | 下一个元素。到末尾时为 `None`。**唯一必须实现的方法** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | 下一个字符 |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | 到下一个换行为止（换行被消耗并去掉）。不以换行结尾的最后一行也会返回 |
 | `read-all` | `(read-all s)` | `(S)→string` | 剩余的全部 |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | 只取已经在手边的一个字符。与其等待不如返回 `none` |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | 只取已经在手边的一个字符。与其等待不如返回 `None` |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | 最多把 `n` 个字符 push 到 `v`，返回实际读到的数量。只有到末尾时才会少于 `n` |
 
 `listen` 在 `InputStream`（`CharInput` 的父 trait）中：
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | 下一次读取能否不等待就得到回答。默认是 `false`——**绝不会成为谎言的一侧**。`true` 是推测，猜错的话 `read-char-no-hang` 会阻塞。所有内置流都已覆盖它。**对于没有覆盖它的用户定义流，`read-char-no-hang` 总是返回 `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | 下一次读取能否不等待就得到回答。默认是 `false`——**绝不会成为谎言的一侧**。`true` 是推测，猜错的话 `read-char-no-hang` 会阻塞。所有内置流都已覆盖它。**对于没有覆盖它的用户定义流，`read-char-no-hang` 总是返回 `None`** |
 
 `PeekInput`（继承 `CharInput`）增加了**退回一个字符**。放置退回字符的地方只有流自身才有，所以无法有默认实现，作为单独的
 trait。`file-stream`/`string-input-stream`/`standard-stream` 已实现，其他的用 `make-peek-stream` 包装即可得到（第 4 章）。
@@ -83,7 +83,7 @@ trait。`file-stream`/`string-input-stream`/`standard-stream` 已实现，其他
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` 是 `direction-input` / `direction-output` / `direction-append` 三个常量。`open-file` 打不开时返回
-`(err FileError)`（不存在的文件是普通的结果，不是 panic）。文件名可以是字符串也可以是 `pathname`（第 9 章的 `Pathish`）。
+`(Err FileError)`（不存在的文件是普通的结果，不是 panic）。文件名可以是字符串也可以是 `pathname`（第 9 章的 `Pathish`）。
 
 `(get-output-stream-string s)` 返回写入 `string-output-stream` 的内容并清空。与 CL 一样，`close` 之后也能取出。
 
@@ -92,7 +92,7 @@ trait。`file-stream`/`string-input-stream`/`standard-stream` 已实现，其他
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | 下一个字节。文件末尾时为 `none` |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | 下一个字节。文件末尾时为 `None` |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | 写一个字节。0..255 以外是错误 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | 字符版本的字节版 |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | 同上 |
@@ -127,18 +127,18 @@ CL 在**调用**中决定元素类型，如 `(open name :element-type '(unsigned
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部转送 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 剩余的所有行 |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | 读取一个 `Sexpr`（CL 的 `read`）。输入末尾为 `(ok eof)`，读到时为 `(ok (datum d))`，不是数据时为 `err`。**消耗结束该 datum 的一个空白字符**（与 CL 相同）。`ReadOutcome` 不是 `Option<Sexpr>`，是为了不让"读到空列表 `()`"与"输入末尾"用同一个值表示 |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | 读取一个 `Sexpr`（CL 的 `read`）。输入末尾为 `(Ok eof)`，读到时为 `(Ok (Datum d))`，不是数据时为 `Err`。**消耗结束该 datum 的一个空白字符**（与 CL 相同）。`ReadOutcome` 不是 `Option<Sexpr>`，是为了不让"读到空列表 `()`"与"输入末尾"用同一个值表示 |
 | `read-sexpr-preserving-whitespace` | 同上 | 同上 | 同上，但保留空白（CL 的 `read-preserving-whitespace`） |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | 读到 `ch` 为止并组成列表。`ch` 被消耗。输入用尽时为 `err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | 读到 `ch` 为止并组成列表。`ch` 被消耗。输入用尽时为 `Err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 逐行写出 |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 全部内容 |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 所有行 |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | 写出 |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 是否存在 |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 删除、重命名（参数是 `Pathish`） |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | 解析了符号链接和 `.`/`..` 的绝对路径。不存在时为 `err` |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | 解析了符号链接和 `.`/`..` 的绝对路径。不存在时为 `Err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 最后修改时间。是**世界时**，所以 `decode-universal-time`（[时间](system.md#2-日期的分解与合成)）可以读取 |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者的登录名。文件不存在时为 `err`，所有者的 uid 在密码数据库中没有条目时为 `(ok none)`——把 CL 区分的两种情况原样区分 |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者的登录名。文件不存在时为 `Err`，所有者的 uid 在密码数据库中没有条目时为 `(Ok none)`——把 CL 区分的两种情况原样区分 |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | 是否为目录。**不存在时也为 `false`**——区分两者用 `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 以 truename（与 `truename` 一样是解析了符号链接的绝对路径）列出内容。没有目标的符号链接不包括在内。`.`/`..` 不包括在内。顺序为 OS 给出的顺序 |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 连同父目录一起创建。已存在时成功 |
@@ -188,8 +188,8 @@ trait 解析（第 9 章）。
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   在最后一个点处切分
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   在最后一个点处切分
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -214,10 +214,10 @@ trait 解析（第 9 章）。
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | 拆分字符串。末尾的 `/`（或空名）表示"没有名称"＝目录 |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | 只用给出的成分组装（全部是 `&key`）。省略的名称、类型保持"没有"，是 `merge-pathnames` 要填补的对象 |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | 从外到内的目录成分 |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | 去掉类型的名称。目录时为 `none` |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | 去掉类型的名称。目录时为 `None` |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | 最后一个点之后的部分。开头的点不算（`.gitignore` 整个是名称） |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | 是否从根开始 |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | 主目录。没有 `$HOME` 时为 `none`（CL 也允许 `NIL`） |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | 主目录。没有 `$HOME` 时为 `None`（CL 也允许 `NIL`） |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | 到最后一个 `/` 为止的部分 |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | 只有 `name.type` 部分 |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | 用 `default` 补全 `p` 中没有的成分。相对的 `p` 放在 `default` 的目录下，绝对的 `p` 保持自己的目录 |

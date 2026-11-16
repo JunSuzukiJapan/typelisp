@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # ข้อความแสดงข้อผิดพลาด
 
 ความหมายของข้อความแสดงข้อผิดพลาดหลักจาก `typl` และวิธีแก้ไข
@@ -100,8 +100,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ข้อความ | ความหมายและวิธีแก้ไข |
 |---|---|
 | `panic: divide by zero` | การหารด้วยศูนย์ด้วยจำนวนเต็มหรือ ratio การหารทศนิยมด้วยศูนย์ไม่ panic แต่ให้ `inf`/`NaN` |
-| `panic: unwrap: called on none` | ใช้ `unwrap` กับ `none` ให้จัดการกรณี `none` ด้วย `match` หรือ `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | ดัชนีเกินช่วง ตรวจสอบความยาวด้วย `len` หรือใช้ฟังก์ชันที่คืน `none` เมื่อเกินช่วง (`nth`, `pop` และอื่น ๆ) |
+| `panic: unwrap: called on None` | ใช้ `unwrap` กับ `None` ให้จัดการกรณี `None` ด้วย `match` หรือ `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | ดัชนีเกินช่วง ตรวจสอบความยาวด้วย `len` หรือใช้ฟังก์ชันที่คืน `None` เมื่อเกินช่วง (`nth`, `pop` และอื่น ๆ) |
 | `panic: an integer argument does not fit a fixnum` | ส่ง `int` ที่ไม่พอดีใน 63 บิตให้อาร์กิวเมนต์ที่รับดัชนีหรือจำนวนนับ |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` รันโดยไม่มี `catch` แท็กเดียวกันห่อหุ้มอยู่ |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` ไปถึง `catch` แท็กเดียวกันที่พาชนิดอื่น |

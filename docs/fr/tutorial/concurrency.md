@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Concurrence
 
 En typelisp, on exécute du travail de façon concurrente en lançant des **tâches** (des threads légers), et les
@@ -60,7 +60,7 @@ got 30
 
 - `(send ch v)` envoie. Si le canal est plein, il attend qu'il y ait de la place.
 - `(recv ch)` reçoit. Il attend qu'une valeur arrive. Le résultat est une `Option<T>` ; une fois le canal fermé
-  et vide, il renvoie `none`.
+  et vide, il renvoie `None`.
 - Parcourir un canal avec `doiter` continue de recevoir des valeurs jusqu'à sa fermeture. On peut aussi le passer
   directement à `map` ou `filter`.
 - `send` sur un canal fermé déclenche un panic.

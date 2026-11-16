@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Moduler och filuppdelning
 
 Den här guiden förklarar hur man sätter ihop ett program som består av flera filer. De detaljerade
@@ -131,7 +131,7 @@ När du bestämmer att modulen ska använda din egen definition skriver du `shad
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; den här modulens first => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; standardbibliotekets first => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; standardbibliotekets first => (Some 1)
 ```
 
 Efter `shadow` syftar `first` i den modulen på din egen definition. För att använda

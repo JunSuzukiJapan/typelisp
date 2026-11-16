@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Hata Mesajları
 
 `typl`'nin başlıca hata mesajlarının ne anlama geldiği ve nasıl düzeltileceği.
@@ -101,8 +101,8 @@ olduğu anlamına gelir.
 | Mesaj | Anlamı ve düzeltme |
 |---|---|
 | `panic: divide by zero` | Tamsayılarla ya da oranlarla sıfıra bölme. Kayan noktalı sıfıra bölme panic olmaz; `inf`/`NaN` verir |
-| `panic: unwrap: called on none` | `none`'a `unwrap` uygulandı. `none` durumunu `match` ya da `unwrap-or` ile ele alın |
-| `panic: Vector: index 5 out of bounds` | Aralık dışı bir indeks. Uzunluğu `len` ile kontrol edin ya da aralık dışında `none` döndüren bir fonksiyon kullanın (`nth`, `pop` vb.) |
+| `panic: unwrap: called on None` | `None`'a `unwrap` uygulandı. `None` durumunu `match` ya da `unwrap-or` ile ele alın |
+| `panic: Vector: index 5 out of bounds` | Aralık dışı bir indeks. Uzunluğu `len` ile kontrol edin ya da aralık dışında `None` döndüren bir fonksiyon kullanın (`nth`, `pop` vb.) |
 | `panic: an integer argument does not fit a fixnum` | Bir indeks ya da sayı alan bir bağımsız değişkene, 63 bite sığmayan bir `int` geçirildi |
 | `throw: no enclosing (catch 'oops) for this throw` | Aynı etiketli çevreleyen bir `catch` olmadan bir `throw` çalıştı |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Bir `throw`, aynı etiketli ve başka bir tür taşıyan bir `catch`'e ulaştı |

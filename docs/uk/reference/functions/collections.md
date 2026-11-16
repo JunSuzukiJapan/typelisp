@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Рядки, знаки та колекції
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` і `Deque<T>`.
@@ -25,12 +25,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | Упорядкування без урахування регістру (`string-lessp` тощо з CL). За спільного префікса менший — коротший |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | Рядок із `n` копій `c` (`make-string` з CL) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | Позиція, де `sub` з'являється вперше. **У `search` з CL аргументи в зворотному порядку** (`(search pattern sequence)`). Порожній рядок знаходиться на 0. Про ключові слова див. [іменовані аргументи послідовностей](sequences.md#6-іменовані-аргументи) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | Перша позиція, де вони відрізняються. `none` лише коли вони `equal`. Якщо один є префіксом іншого, кінець коротшого. Ключові слова — як вище |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | Перша позиція, де вони відрізняються. `None` лише коли вони `equal`. Якщо один є префіксом іншого, кінець коротшого. Ключові слова — як вище |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | Вилучає знаки, що містяться в `bag`, з обох кінців / зліва / справа (`string-trim` тощо з CL). Без `bag` — пробільні знаки `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | Розбиває за `sep`. У CL відповідника немає. Послідовні роздільники дають порожні елементи. Panic, якщо `sep` порожній |
 | `to-string` | `(to-string x)` | `T→string` | Перетворює на рядок, як `~a`. Реалізовано для `int`/`i32`/`f64`/`bool`/`char`/`string` (`princ-to-string` з CL) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | Кодує як UTF-8 (кожен елемент 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Декодує. `none`, якщо це не коректний UTF-8 |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Декодує. `None`, якщо це не коректний UTF-8 |
 
 ## 2. Знаки `char`
 
@@ -77,7 +77,7 @@ ASCII.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Читає елемент `i`. Panic поза межами |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Змінює елемент `i`. Panic поза межами. Можна також писати `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Кількість елементів |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Вилучає останній елемент і повертає його. `none`, якщо порожньо (на відміну від `get`/`set`, panic не виникає) (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Вилучає останній елемент і повертає його. `None`, якщо порожньо (на відміну від `get`/`set`, panic не виникає) (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Створює ітератор, що реалізує `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Додає `x` у кінець, якщо немає елемента, `eql` йому (`pushnew` з CL. Переписувати місце не треба, тому це метод, а не макрос) |
 
@@ -137,7 +137,7 @@ ASCII.
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 У таблиці `equal` те, чи однакові два ключі, вирішує **сам тип ключа** (`sxhash` і `equal` з `Equal`,
@@ -170,8 +170,8 @@ ASCII.
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` з CL. Ранг змінити не можна. Елементи, що лишаються в межах, зберігаються за своїми індексами, а нові комірки отримують `init`. На відміну від CL, масив не повертає (кожен масив у цій мові регульований, тож другого масиву для повернення немає) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` з CL. Panic без покажчика заповнення |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Те саме, що `push-extend` (метод трейту [`Push`](traits.md#4-трейт-push-додавання-елементів)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` з CL. `none`, якщо порожньо (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Покажчик заповнення (`none`, якщо його немає). Можна записувати через `(setf a::fill-pointer …)` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` з CL. `None`, якщо порожньо (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Покажчик заповнення (`None`, якщо його немає). Можна записувати через `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Ітератор у порядку рядків (row-major). Зупиняється на покажчику заповнення, якщо він є |
 
 - **Індекси — це `Vector<int>`.** Метод не може оголосити «аргументи того самого типу, що повторюються
@@ -264,10 +264,10 @@ ASCII.
 | `new` | `(Deque::new)` | `()→Deque<T>` | Створює порожню послідовність |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Додає на початок / в кінець |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Те саме, що `push-back` (метод трейту [`Push`](traits.md#4-трейт-push-додавання-елементів)) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Виймає елемент з початку / кінця і повертає його. `none`, якщо порожньо |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Виймає елемент з початку / кінця і повертає його. `None`, якщо порожньо |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | Те саме, що `pop-back` (метод трейту [`Pop`](traits.md#5-трейт-pop-вилучення-елементів)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Дивиться на елемент на початку / в кінці (не виймаючи) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-й від початку. `none` поза діапазоном |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-й від початку. `None` поза діапазоном |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Перезаписує `i`-й. Panic поза діапазоном |
 | `count` | `(count d)` | `Deque<T>→int` | Кількість елементів |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | Вилучає все |
@@ -277,5 +277,5 @@ ASCII.
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

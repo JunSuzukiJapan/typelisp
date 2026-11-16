@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Liczby
 
 Operacje na liczbach całkowitych, zmiennoprzecinkowych, wymiernych, zespolonych i wartościach logicznych oraz inne
@@ -33,9 +33,9 @@ sześciu typów o stałej szerokości (tabela dla `int` znajduje się w rozdzial
 | `int->int` | `(int->int x)` | `T→int` | Konwersja rozszerzająca do `int` (zawsze dokładna). To, co robi `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Konwersja rozszerzająca do `ratio` (zawsze dokładna) |
 | `int->char` | `(int->char x)` | `T→char` | Interpretuje wartość jako skalarną wartość Unicode. Powoduje panic przy niepoprawnej wartości |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Wersja `int->char` zwracająca `none` przy niepowodzeniu |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Wersja `int->char` zwracająca `None` przy niepowodzeniu |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Konwersja szerokości. Wartości, które się nie mieszczą, są obcinane (jak `as` w Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Ta sama konwersja w postaci pytania. `none`, jeśli wartość nie mieści się w tej szerokości |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Ta sama konwersja w postaci pytania. `None`, jeśli wartość nie mieści się w tej szerokości |
 
 Te konwersje to także to, co robią formy specjalne `(as Type x)`/`(try-as Type x)`
 ([Referencja składni](../syntax.md#7-pozostałe-formy-specjalne)). Operacje bitowe (`logand`/`ash`/`ldb` i tak
@@ -145,7 +145,7 @@ argument does not fit a fixnum").
 | `float->int` | `(float->int x)` | `f64→int` | Konwertuje na `int` przez obcięcie w stronę zera (`truncate` z CL; dokładne dla skończonych wartości dowolnej wielkości). Powoduje panic dla nieskończoności i NaN. Dla stałej szerokości użyj `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Konwertuje na `ratio` jako dokładną binarną liczbę wymierną (`rational` z CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Konwertuje między szerokościami zmiennoprzecinkowymi. `float->f32` zaokrągla do najbliższej, `float->f64` jest zawsze dokładne. To, co robi `(as f32 x)` |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Ta sama konwersja w postaci pytania. `none`, jeśli zaokrąglenie zmienia wartość (rozszerzenie do `f64` zawsze daje `some`). To, co robi `(try-as f32 x)` |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Ta sama konwersja w postaci pytania. `None`, jeśli zaokrąglenie zmienia wartość (rozszerzenie do `f64` zawsze daje `Some`). To, co robi `(try-as f32 x)` |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | Funkcje o tych samych nazwach z CL. Aliasy powyższych `floor`/`ceiling`/`round`/`truncate`: w CL te bez prefiksu zwracają liczby całkowite, więc te z prefiksem `f` odpowiadają zachowaniu tego języka |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | Odpowiednio 2 / 53 / 53 (tylko precyzja `0.0` to 0). `f64` to zawsze IEEE-754 binary64, więc są to stałe |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` lub `-1.0` |
@@ -227,7 +227,7 @@ wydobywa się przez `as`/`try-as`.
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Porównanie |
 | `numerator` `denominator` | `(op x)` | `rational→int` | Licznik i mianownik po skróceniu |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Obcięte w stronę zera, jako `ratio`, do `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` dla liczby całkowitej, w przeciwnym razie `none` (`integerp` z CL) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` dla liczby całkowitej, w przeciwnym razie `None` (`integerp` z CL) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Jak dla `ratio` (wykładnik `expt` to `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Jak dla `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Jak dla `ratio` |

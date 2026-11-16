@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Felmeddelanden
 
 Vad de viktigaste felmeddelandena från `typl` betyder och hur man åtgärdar dem.
@@ -100,8 +100,8 @@ Fel som hittas före körning. Formen körs inte förrän de är åtgärdade.
 | Meddelande | Betydelse och åtgärd |
 |---|---|
 | `panic: divide by zero` | Division med noll med heltal eller kvoter (ratio). Flyttalsdivision med noll ger inte panic; den ger `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` tillämpades på `none`. Hantera `none`-fallet med `match` eller `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | Ett index utanför intervallet. Kontrollera längden med `len`, eller använd en funktion som returnerar `none` när det är utanför intervallet (`nth`, `pop` och så vidare) |
+| `panic: unwrap: called on None` | `unwrap` tillämpades på `None`. Hantera `None`-fallet med `match` eller `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | Ett index utanför intervallet. Kontrollera längden med `len`, eller använd en funktion som returnerar `None` när det är utanför intervallet (`nth`, `pop` och så vidare) |
 | `panic: an integer argument does not fit a fixnum` | Ett `int` som inte ryms i 63 bitar skickades till ett argument som tar ett index eller ett antal |
 | `throw: no enclosing (catch 'oops) for this throw` | Ett `throw` kördes utan något omslutande `catch` med samma tagg |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | En `throw` nådde en `catch` med samma tagg som bär en annan typ |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # E/S de archivos, streams y red
 
 Esta guía muestra lo básico de leer y escribir archivos, los nombres de ruta y la comunicación por sockets.
@@ -14,14 +14,14 @@ resultados con `match`.
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; si falta el archivo:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
 Cuando sabes que una operación no puede fallar, o en un script pequeño en el que detenerse ante un fallo
-no importa, `unwrap` saca el valor. Si es un `err`, provoca un panic.
+no importa, `unwrap` saca el valor. Si es un `Err`, provoca un panic.
 
 ## 2. Leer y escribir un archivo entero
 
@@ -30,8 +30,8 @@ Las funciones más sencillas tratan el archivo entero de una vez.
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. Leer y escribir con streams
@@ -46,23 +46,23 @@ el stream se cierra. El valor es `Result<valor del cuerpo, FileError>`.
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; leer línea a línea
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - Hay tres direcciones para abrir un archivo: `direction-input` (lectura), `direction-output` (escritura;
   el contenido existente se descarta) y `direction-append` (añadir al final).
-- `read-line` devuelve `none` al final del archivo.
+- `read-line` devuelve `None` al final del archivo.
 - Si abres un archivo con `open-file` en lugar de `with-open-file`, llama siempre a `close`. El GC no
   cierra los streams.
 
@@ -78,7 +78,7 @@ leer bytes de un stream de caracteres es un error de tipos.
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### Entrada y salida estándar
@@ -95,8 +95,8 @@ recibe su argumento con `(:where (CharInput S))` puede leer de un archivo, de un
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -108,8 +108,8 @@ Las funciones que reciben un nombre de archivo aceptan tanto una cadena como un 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; sustituir solo la extensión
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -149,14 +149,14 @@ hasta que llegan datos, así que la atención a otras conexiones continúa.
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; el otro lado cerró
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; el otro lado cerró
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` acepta conexiones solo desde esta máquina, y `"0.0.0.0"` las acepta en todas las
@@ -172,8 +172,8 @@ interfaces. Para las tareas, consulta el [capítulo 12 de la Referencia de sinta
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 Para poner un límite de tiempo a una operación, pasa `:timeout` (en segundos).
@@ -182,13 +182,13 @@ Para poner un límite de tiempo a una operación, pasa `:timeout` (en segundos).
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; poner un reloj a la siguiente lectura
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; poner un reloj a la siguiente lectura
 ```
 
 ### Cuando el otro lado se desconecta
 
 Si el otro lado reinicia la conexión o la corta a mitad, no se produce un `panic`. Las lecturas posteriores
-devuelven `none` y las escrituras se descartan en silencio. Para saber si la conexión se cerró limpiamente
+devuelven `None` y las escrituras se descartan en silencio. Para saber si la conexión se cerró limpiamente
 o falló, comprueba `(socket-error c)`.
 
 ## 6. Resolución de nombres (DNS)
@@ -197,13 +197,13 @@ No hay una función dedicada a la resolución de nombres. Pasar un nombre de hos
 `tls-connect` o `send-to` lo resuelve dentro de ellas. La resolución ocurre en otro hilo, así que las demás
 tareas siguen en marcha mientras espera. Si un nombre tiene varias direcciones, se prueban por turno.
 
-Si el nombre no se puede resolver, se devuelve un `err`.
+Si el nombre no se puede resolver, se devuelve un `Err`.
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -216,12 +216,12 @@ lectura y la escritura funcionan como con TCP.
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 Un servidor TLS se crea pasando a `tls-listen` los archivos de certificado y de clave privada (PEM).
@@ -230,8 +230,8 @@ Un servidor TLS se crea pasando a `tls-listen` los archivos de certificado y de 
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; el serve de TCP funciona tal cual
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; el serve de TCP funciona tal cual
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 Al probar con un certificado autofirmado, pasa `:ca-file "cert.pem"` en el lado del cliente para que confíe
@@ -249,8 +249,8 @@ UDP no es un stream; envía y recibe un datagrama cada vez. Los datos son una se
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -259,5 +259,5 @@ UDP no es un stream; envía y recibe un datagrama cada vez. Los datos son una se
 ## 9. Sockets de dominio Unix
 
 Pasa la ruta del archivo de socket a `unix-listen` / `unix-connect`. El valor que obtienes es el mismo
-`socket-stream` que con TCP. `unix-listen` devuelve un `err` si el archivo ya existe. Cerrar el listener
+`socket-stream` que con TCP. `unix-listen` devuelve un `Err` si el archivo ya existe. Cerrar el listener
 elimina el archivo.

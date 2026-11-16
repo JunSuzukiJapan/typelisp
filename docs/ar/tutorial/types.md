@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # أساسيات الأنواع
 
 typelisp لغة ذات أنواع ساكنة. يشرح هذا الفصل ما يفعله فاحص الأنواع من أجلك، والأنواع التي ستستخدمها
@@ -48,40 +48,40 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 ## 2. `Option<T>`: قيمة قد تكون غائبة
 
 لا يوجد `nil` في typelisp. ويُعبَّر عن "قد لا توجد قيمة" بالنوع `Option<T>`. وقيمة `Option<T>` إما
-`some` وتحمل قيمة واحدة من `T`، وإما `none` ولا تحمل شيئًا.
+`Some` وتحمل قيمة واحدة من `T`، وإما `None` ولا تحمل شيئًا.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` ليس `int`، فلا يمكن استخدامه في العمليات الحسابية كما هو. و`(+ (safe-div 10 2) 1)` خطأ في
-الأنواع. ولاستخدام ما بداخله افصل `some` عن `none` بـ `match`.
+الأنواع. ولاستخدام ما بداخله افصل `Some` عن `None` بـ `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- في فرع `(some q)` يُربط المحتوى بالمتغير `q`.
-- يتحقق `match` من أن فروعه **تغطي كل الحالات**. ونسيان فرع `(none)` خطأ في الأنواع.
+- في فرع `(Some q)` يُربط المحتوى بالمتغير `q`.
+- يتحقق `match` من أن فروعه **تغطي كل الحالات**. ونسيان فرع `(None)` خطأ في الأنواع.
 
 ### لماذا لا يوجد nil
 
 في لغات كثيرة يمكن لـ `nil` (`null`) أن يحل محل قيمة من أي نوع. والنتيجة أن نسيان معالجة حالة "لا قيمة"
 يمرّ دون أن يلاحظه أحد حتى يعمل البرنامج. أما في typelisp فالموضع الذي قد تغيب فيه القيمة نوعه
-`Option<T>`، ولا تجتاز الشيفرة فاحص الأنواع ما لم يعالج `match` حالة `none`. فالحالة المنسية تُكتشف
+`Option<T>`، ولا تجتاز الشيفرة فاحص الأنواع ما لم يعالج `match` حالة `None`. فالحالة المنسية تُكتشف
 قبل تشغيل البرنامج.
 
 وتسير الشروط على الفكرة نفسها: لا يصلح شرطًا لـ `if` إلا `bool`. ولا توجد قاعدة مثل قاعدة Common Lisp
@@ -91,12 +91,12 @@ none
 
 | الصيغة | المعنى |
 |---|---|
-| `(unwrap-or opt default)` | المحتوى إن كانت `some`؛ والقيمة الافتراضية إن كانت `none` |
-| `(unwrap opt)` | يستخرج المحتوى. ويوقف البرنامج عند `none` |
+| `(unwrap-or opt default)` | المحتوى إن كانت `Some`؛ والقيمة الافتراضية إن كانت `None` |
+| `(unwrap opt)` | يستخرج المحتوى. ويوقف البرنامج عند `None` |
 | `(is-some opt)` / `(is-none opt)` | يختبر أيهما هي |
 
-كثير من دوال المكتبة القياسية تعيد `Option`. فمثلًا تعيد `position` الموضع داخل `some` إذا عُثر على
-العنصر، و`none` إذا لم يُعثر عليه.
+كثير من دوال المكتبة القياسية تعيد `Option`. فمثلًا تعيد `position` الموضع داخل `Some` إذا عُثر على
+العنصر، و`None` إذا لم يُعثر عليه.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -104,25 +104,25 @@ none
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: عملية قد تفشل
 
-العملية التي قد تفشل تعيد `Result<T,E>`: `ok` تحمل قيمة من `T` عند النجاح، أو `err` تحمل خطأ `E`
+العملية التي قد تفشل تعيد `Result<T,E>`: `Ok` تحمل قيمة من `T` عند النجاح، أو `Err` تحمل خطأ `E`
 عند الفشل.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -131,8 +131,8 @@ none
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 استخدم `Option` عندما لا يحتاج غياب القيمة إلى تفسير، و`Result` عندما تريد أن تقول لماذا فشل شيء. ويتناول

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 模組與檔案結構
 
 本指南說明如何組織由多個檔案構成的程式。詳細的語法規則見[語法參考](../reference/syntax.md#310-module--use--命名空間)的 3.10 至 3.13 節。
@@ -119,7 +119,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; 本模組的 first => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 標準函式庫的 first => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 標準函式庫的 first => (Some 1)
 ```
 
 `shadow` 之後，在該模組中寫 `first` 指的是自己的定義。要使用標準函式庫的 `first`，就用路徑寫成

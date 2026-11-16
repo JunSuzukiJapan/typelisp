@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 동시성
 
 typelisp에서는 **태스크**(경량 스레드)를 시작해서 처리를 동시에 진행하고, 태스크끼리는 **채널**을 통해 값을
@@ -53,7 +53,7 @@ got 30
 ```
 
 - `(send ch v)`는 보낸다. 채널이 가득 차 있으면 빈자리가 생길 때까지 기다린다.
-- `(recv ch)`는 받는다. 값이 도착할 때까지 기다린다. 결과는 `Option<T>`이고, 채널이 닫히고 비면 `none`을 반환한다.
+- `(recv ch)`는 받는다. 값이 도착할 때까지 기다린다. 결과는 `Option<T>`이고, 채널이 닫히고 비면 `None`을 반환한다.
 - 채널을 `doiter`로 순회하면 닫힐 때까지 값을 계속 받는다. `map`이나 `filter`에 그대로 넘길 수도 있다.
 - 닫힌 채널에 `send`하면 panic한다.
 

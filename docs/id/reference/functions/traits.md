@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Trait Standar
 
 Trait untuk iterasi, perbandingan, aritmetika, serta penambahan dan pengambilan elemen. Trait standar lainnya ada di bab masing-masing:
@@ -162,7 +162,7 @@ Tipe itu juga dapat menjadi objek trait, seperti pada `:dyn Push<int>`.
   (defmethod pop (self) Option<Item>))
 ```
 
-Koleksi yang elemen terakhir yang ditambahkan `push` dapat diambil kembali darinya. `none` jika
+Koleksi yang elemen terakhir yang ditambahkan `push` dapat diambil kembali darinya. `None` jika
 kosong. Fungsi generik memintanya dengan `(:where (Pop C (Item T)))`.
 
 | Tipe | Yang dilakukan `pop` |
@@ -179,8 +179,8 @@ kosong. Fungsi generik memintanya dengan `(:where (Pop C (Item T)))`.
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

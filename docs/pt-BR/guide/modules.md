@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Módulos e organização de arquivos
 
 Este guia explica como montar um programa composto por vários arquivos. As regras detalhadas estão nas
@@ -133,7 +133,7 @@ Quando decidir que o módulo deve usar a sua própria definição, escreva `shad
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; o first deste módulo => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; o first da biblioteca padrão => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; o first da biblioteca padrão => (Some 1)
 ```
 
 Depois de `shadow`, escrever `first` nesse módulo se refere à sua própria definição. Para usar o

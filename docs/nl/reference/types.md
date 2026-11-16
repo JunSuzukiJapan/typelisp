@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -31,8 +31,8 @@ Er is geen 64-bits geheel type. Gebruik voor gehele getallen waarvan de breedte 
 
 | Type | Inhoud | Details |
 |---|---|---|
-| `Option<T>` | Een waarde die er is of niet. `some` / `none` | [Option en Result](functions/option-result.md) |
-| `Result<T,E>` | Succes of mislukking. `ok` / `err` | Idem |
+| `Option<T>` | Een waarde die er is of niet. `Some` / `None` | [Option en Result](functions/option-result.md) |
+| `Result<T,E>` | Succes of mislukking. `Ok` / `Err` | Idem |
 | `Vector<T>` | Een groeibare array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Een hashtabel. Hoe sleutels vergeleken worden bepaalt `:test` bij het maken, en in een `equal`-tabel moet het sleuteltype `Hash` implementeren | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 tot 12 elementen). Elementen lees je met `t::0` | [Syntaxis hoofdstuk 2](syntax.md#2-types-schrijven) |
@@ -48,7 +48,7 @@ Functietypen schrijf je `(fn (argumenttypen...) returntype)`, trait-objecten `:d
 | Type | Inhoud | Details |
 |---|---|---|
 | `Sexpr` | Een niet-lege S-expressie. 19 varianten: `int`, `i8` tot en met `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-expressiedata](functions/sequences.md#2-s-expressiedata-sexpr) |
-| `Option<Sexpr>` | S-expressiedata in het algemeen. De lege lijst `()` is `none` | Idem |
+| `Option<Sexpr>` | S-expressiedata in het algemeen. De lege lijst `()` is `None` | Idem |
 
 ## 4. Types in de standaardbibliotheek
 
@@ -74,7 +74,7 @@ hen.
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Streams | [Streams](functions/streams-files.md#3-concrete-streamtypes) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Samengestelde streams | [Samengestelde streams](functions/streams-files.md#4-samengestelde-streams) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Netwerk | [Netwerk](functions/network.md#1-types) |
-| `ReadOutcome` | Het resultaat van `read-sexpr`. `datum` / `eof` | [Streams](functions/streams-files.md#6-generieke-functies-en-bestandsbewerkingen) |
+| `ReadOutcome` | Het resultaat van `read-sexpr`. `Datum` / `Eof` | [Streams](functions/streams-files.md#6-generieke-functies-en-bestandsbewerkingen) |
 | `universal-time` `internal-time` `decoded-time` | Tijd | [Tijd](functions/system.md#1-tijd) |
 | `heap-info` | De huidige toestand van de heap | [Implementatiehulpmiddelen](functions/system.md#51-velden-van-heap-info) |
 

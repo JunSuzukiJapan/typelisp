@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Модули и разбиение на файлы
 
 Это руководство объясняет, как собрать программу из нескольких файлов. Подробные правила — в разделах 3.10–3.13
@@ -131,7 +131,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first этого модуля => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first стандартной библиотеки => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first стандартной библиотеки => (Some 1)
 ```
 
 После `shadow` имя `first` в этом модуле обозначает ваше собственное определение. Чтобы использовать

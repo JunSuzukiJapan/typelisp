@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # C FFI (defffi)
 
 Tài liệu này giải thích cách gọi hàm C từ typelisp. Danh sách các kiểu có thể khai báo và các hạn chế
@@ -67,7 +67,7 @@ nào**. Để dùng chúng như số nguyên của typelisp, hãy chuyển đổ
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int không làm mất bit nào của giá trị 64 bit
-(try-as i32 (unsafe (c-strlen s)))  ; none nếu không vừa với i32
+(try-as i32 (unsafe (c-strlen s)))  ; None nếu không vừa với i32
 (unsafe (c-malloc 16))              ; có thể truyền nguyên hằng số nguyên
 ```
 

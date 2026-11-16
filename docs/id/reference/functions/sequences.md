@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Pasangan, S-Expression, dan Sekuens
 
 Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens yang ditulis di atas
@@ -45,15 +45,15 @@ Sel S-expression ditangani bukan oleh `cons`/`car`/`cdr` umum pada bab 1 melaink
 bentuk.
 
 **Tipe data S-expression adalah `Option<Sexpr>`.** Daftar kosong bukan varian `Sexpr` melainkan
-`none` pada `Option`, dan `Sexpr` sendiri berarti "S-expression tak kosong". Jadi fungsi `sexpr-*`
+`None` pada `Option`, dan `Sexpr` sendiri berarti "S-expression tak kosong". Jadi fungsi `sexpr-*`
 menerima dan mengembalikan `Option<Sexpr>`.
 
 - `()` adalah daftar kosong di tempat `Option<Sexpr>` diharapkan (dapat juga ditulis
-  `(Option::none)`)
+  `(Option::None)`)
 - `Sexpr` melebar secara implisit di tempat `Option<Sexpr>` diharapkan (tanpa konversi saat
   dijalankan). Arah sebaliknya, memakai `Option<Sexpr>` sebagai `Sexpr`, mengklaim "ini bukan daftar
   kosong", sehingga harus dinyatakan secara eksplisit dengan `match` atau `unwrap`
-- Pada `match`, 19 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
+- Pada `match`, 19 varian `Sexpr` dan `None` dapat ditulis **rata dalam daftar cabang yang sama**
   ([Referensi Sintaks](../syntax.md#43-match--pencocokan-pola))
 
 | Nama | Bentuk | Tipe | Deskripsi |
@@ -119,7 +119,7 @@ Fungsi yang menerima predikat (sepadan dengan keluarga `-if` pada CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Posisi pertama yang memenuhi predikat |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Berapa banyak yang memenuhi predikat |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Apakah setiap elemen memenuhi predikat |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Apakah ada elemen yang memenuhi predikat (sepadan dengan `some` pada CL; nama yang tidak bentrok dengan konstruktor `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Apakah ada elemen yang memenuhi predikat (sepadan dengan `some` pada CL) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Lipatan kiri |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Lipatan kanan |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Mengumpulkan semua elemen yang tersisa. Dipakai untuk mengubah hasil fungsi `lazy` di bawah menjadi `Vector` |
@@ -132,7 +132,7 @@ Pengindeksan, panjang, dan pengirisan:
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Menyambung iterator. Tiga atau lebih dapat diberikan |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` pada CL. Tipe hasil ditulis sebagai **literal simbol yang dikutip** (CL memakai type specifier saat dijalankan). `'vector` menerima satu atau lebih, `'string` nol atau lebih (`""` untuk nol). Daftar `Sexpr` tidak tercakup (gunakan `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Pembalikan (tidak destruktif) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Elemen `n` (`none` jika di luar rentang) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Elemen `n` (`None` jika di luar rentang) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` dengan urutan argumen terbalik |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | `n` elemen pertama |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` dibatasi pada panjang) |
@@ -227,7 +227,7 @@ Semuanya adalah fungsi generik pada `Iter`, seperti pada bab 4. Koleksi hasil di
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Memetakan atas ekor untuk efek samping (padanan `maplist` bagi `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Memetakan atas ekor dan menyambung (padanan `maplist` bagi `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Posisi tempat `sub` pertama kali muncul. Jika penerimanya `string`, metode `string` yang dipilih ([String](collections.md#1-string-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Posisi pertama tempat keduanya berbeda. `none` jika sama |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Posisi pertama tempat keduanya berbeda. `None` jika sama |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Penggabungan. CL mensyaratkan masukan terurut; ini mengurutkan hasil sambungan |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Menambahkan `x` **di depan** jika belum ada |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Operasi himpunan. CL tidak menentukan urutannya; di sini stabil, **berdasarkan urutan kemunculan pertama** |
@@ -280,7 +280,7 @@ Fungsi mana yang menerima keyword mana mengikuti CL:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; removes only one, from the end
 (position 3 (iter v) :start 1)                          ; the index is relative to the whole sequence
 ```

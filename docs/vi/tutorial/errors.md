@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Xử lý lỗi
 
 Việc xử lý lỗi trong typelisp chia các thất bại thành hai loại.
@@ -6,7 +6,7 @@ Việc xử lý lỗi trong typelisp chia các thất bại thành hai loại.
 | Loại thất bại | Ví dụ | Cách biểu diễn |
 |---|---|---|
 | Thất bại có thể xảy ra (có thể khôi phục) | Thiếu một tệp, đầu vào không phải là số | Trả về một `Result<T,E>` |
-| Sai sót trong chương trình (không thể khôi phục) | Chỉ số ngoài phạm vi, `unwrap` của `none`, chia cho không | Dừng bằng `panic` |
+| Sai sót trong chương trình (không thể khôi phục) | Chỉ số ngoài phạm vi, `unwrap` của `None`, chia cho không | Dừng bằng `panic` |
 
 Ngoài ra còn có `catch` / `throw`, thoát khỏi nhiều lời gọi hàm cùng lúc, và `unwind-protect`, chạy
 phần dọn dẹp dù thân được rời đi bằng cách nào. Chương này giả định bạn đã đọc phần về `Result` trong
@@ -21,22 +21,22 @@ hoặc nằm ngoài phạm vi.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 Bên gọi tách thành công khỏi thất bại bằng `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- Giá trị của một hàm trả về `Result` không thể dùng trừ khi `match` xử lý trường hợp `err`. Quên xử lý
+- Giá trị của một hàm trả về `Result` không thể dùng trừ khi `match` xử lý trường hợp `Err`. Quên xử lý
   thất bại là lỗi kiểu.
 - Lỗi từ `parse-int` là một giá trị kiểu `ParseIntError`. `(message e)` cho chuỗi thông điệp của nó.
 
@@ -48,17 +48,17 @@ thất bại về nguyên trạng" bằng `match`.
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 Khi bạn biết một thao tác không thể thất bại, hoặc trong một script nhỏ mà dừng lại khi thất bại là
-chấp nhận được, `unwrap` lấy nội dung ra. Nếu giá trị là `err`, nó panic. Nếu một giá trị mặc định là
+chấp nhận được, `unwrap` lấy nội dung ra. Nếu giá trị là `Err`, nó panic. Nếu một giá trị mặc định là
 đủ, hãy dùng `unwrap-or`.
 
 ## 3. Tạo kiểu lỗi của riêng bạn
@@ -76,16 +76,16 @@ một `defenum` hoặc `defstruct` thông thường triển khai trait `Error`.
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::invalid "workers" n))))
 ```
 
 - `message` trả về mô tả của lỗi.
-- `source` trả về một lỗi khác đã gây ra lỗi này. Khi không có nguyên nhân, nó là `none`.
+- `source` trả về một lỗi khác đã gây ra lỗi này. Khi không có nguyên nhân, nó là `None`.
 
 ## 4. Kết hợp các loại lỗi khác nhau
 
@@ -97,8 +97,8 @@ và chúng không thể cùng là `E` của một `Result<T,E>`. Trong trường
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 Với `"4"`, `"-1"` và `"abc"`, các kết quả là:
@@ -128,7 +128,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - Kiểu của `panic` là `!` (nó không trả về), nên có thể viết nó ở bất cứ chỗ nào mong đợi một kiểu
   nào đó. Đó là lý do hai nhánh của `if` ở trên khớp nhau.
-- Những thao tác này cũng panic: `unwrap` của `none` hoặc `err`, `get` với chỉ số ngoài phạm vi, và
+- Những thao tác này cũng panic: `unwrap` của `None` hoặc `Err`, `get` với chỉ số ngoài phạm vi, và
   phép chia số nguyên cho không.
 - `panic` dừng chương trình. Ngay cả khi nó xảy ra bên trong một task, toàn bộ chương trình dừng lại.
 - Trong REPL, một `panic` không kết thúc REPL; nó chờ lần nhập tiếp theo.
@@ -194,8 +194,8 @@ nguồn.
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: luôn dọn dẹp

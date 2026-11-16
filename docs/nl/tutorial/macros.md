@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Macro's
 
 Een macro is een functie die een programma neemt en een programma teruggeeft. Met macro's kun je
@@ -45,7 +45,7 @@ zijn expansie kijken de snelste weg vooruit.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Expansies worden ook getypechecked
@@ -125,14 +125,14 @@ geschreven:
 
 Een macrobody is gewone typelisp-code, dus ze kan haar argumenten met `if` of `match` inspecteren en
 een andere expansie bouwen. De argumenten zijn S-expressiedata (`Option<Sexpr>`), en de lege lijst is
-`none`.
+`None`.
 
 Laten we `my-and` maken, dat `true` teruggeeft als al zijn voorwaarden waar zijn.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
+    ((None) 'true)                                    ; no arguments
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; just one

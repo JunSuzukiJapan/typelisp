@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -34,9 +34,9 @@ Tabel di bawah untuk enam tipe berlebar tetap (tabel untuk `int` ada di bab 3).
 | `int->int` | `(int->int x)` | `T→int` | Konversi pelebaran ke `int` (selalu tepat). Yang dilakukan `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Konversi pelebaran ke `ratio` (selalu tepat) |
 | `int->char` | `(int->char x)` | `T→char` | Menafsirkan nilai sebagai nilai skalar Unicode. Panic pada nilai yang tidak sah |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Versi `int->char` yang mengembalikan `none` saat gagal |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Versi `int->char` yang mengembalikan `None` saat gagal |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Konversi lebar. Nilai yang tidak muat dipotong (seperti `as` pada Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Konversi yang sama sebagai pertanyaan. `none` jika nilai tidak muat pada lebar itu |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Konversi yang sama sebagai pertanyaan. `None` jika nilai tidak muat pada lebar itu |
 
 Konversi ini juga yang dilakukan bentuk khusus `(as Type x)`/`(try-as Type x)`
 ([Referensi Sintaks](../syntax.md#7-bentuk-khusus-lainnya)). Operasi bit (`logand`/`ash`/`ldb` dan
@@ -147,7 +147,7 @@ kesalahan saat dijalankan ("an integer argument does not fit a fixnum").
 | `float->int` | `(float->int x)` | `f64→int` | Mengubah menjadi `int` dengan memotong ke arah nol (`truncate` pada CL; tepat untuk nilai hingga berukuran berapa pun). Panic pada tak hingga dan NaN. Untuk lebar tetap, gunakan `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Mengubah menjadi `ratio` sebagai rasional biner yang tepat (`rational` pada CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Mengubah antarlebar floating-point. `float->f32` membulatkan ke yang terdekat, `float->f64` selalu tepat. Yang dilakukan `(as f32 x)` |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Konversi yang sama sebagai pertanyaan. `none` jika pembulatan mengubah nilai (pelebaran ke `f64` selalu `some`). Yang dilakukan `(try-as f32 x)` |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Konversi yang sama sebagai pertanyaan. `None` jika pembulatan mengubah nilai (pelebaran ke `f64` selalu `Some`). Yang dilakukan `(try-as f32 x)` |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | Fungsi bernama sama pada CL. Alias `floor`/`ceiling`/`round`/`truncate` di atas: di CL yang tanpa awalan mengembalikan bilangan bulat, sehingga yang berawalan `f` sesuai dengan perilaku bahasa ini |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | Masing-masing 2 / 53 / 53 (hanya presisi `0.0` yang 0). `f64` selalu IEEE-754 binary64, sehingga ini konstanta |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` atau `-1.0` |
@@ -229,7 +229,7 @@ dengan `as`/`try-as`.
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Perbandingan |
 | `numerator` `denominator` | `(op x)` | `rational→int` | Pembilang dan penyebut dalam bentuk paling sederhana |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Dipotong ke arah nol, sebagai `ratio`, ke `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` untuk bilangan bulat, selain itu `none` (`integerp` milik CL) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` untuk bilangan bulat, selain itu `None` (`integerp` milik CL) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Sama seperti `ratio` (eksponen `expt` adalah `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Sama seperti `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Sama seperti `ratio` |

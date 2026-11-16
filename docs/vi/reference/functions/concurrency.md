@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Task và kênh
 
 Từ vựng về task (thread nhẹ). `task` và `thread`, vốn khởi động chúng, và `select`, vốn chờ nhiều thứ, là
@@ -35,7 +35,7 @@ chuyển đổi và điểm khác với Go nằm ở [Tham chiếu cú pháp 12.
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | Một kênh có dung lượng `n`. `0` là rendezvous (không có bộ đệm) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Chờ đến khi có chỗ, rồi trao giá trị |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Chờ đến khi có giá trị đến. `none` khi đã đóng và rỗng |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Chờ đến khi có giá trị đến. `None` khi đã đóng và rỗng |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Đóng nó |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Hiện có bao nhiêu giá trị trong bộ đệm |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | Dung lượng |
@@ -61,7 +61,7 @@ chuyển đổi và điểm khác với Go nằm ở [Tham chiếu cú pháp 12.
   Đây là bug của chương trình, không phải thất bại có thể khôi phục, nên chúng không phải `Result`.
 - **Đóng một kênh mà một task đang chờ `send` lên đó sẽ làm task đó panic** (quy tắc của Go).
 - `recv` trên một kênh đã đóng trả về những gì còn lại trong bộ đệm, và khi nó rỗng thì liên tục trả về
-  `none`.
+  `None`.
 - `close` được phân giải theo kiểu của bên nhận, nên nó là một thứ khác với `close` của trait `Stream`.
   `Chan<T>` không triển khai `Stream`.
 - **Dung lượng âm sẽ panic** (nó không bị làm tròn về 0 một cách im lặng).
@@ -194,8 +194,8 @@ của `Task<T>`.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -209,7 +209,7 @@ của `Task<T>`.
 - **Việc hủy lan tới các con.** Context tạo bằng `with-cancel`/`with-timeout` bị hủy cùng với cha
   của nó. Chiều ngược lại (từ con lên cha) thì không.
 - Con được tạo từ một context đã bị hủy thì bị hủy ngay từ đầu.
-- `done` chỉ được đóng; không có giá trị nào được gửi. Nhận sẽ trả về `none`.
+- `done` chỉ được đóng; không có giá trị nào được gửi. Nhận sẽ trả về `None`.
 - Mỗi lần gọi `(Context::background)` tạo một gốc riêng. `Background()` của Go chỉ có một và không
   hủy được; ở đây gốc cũng hủy được, và việc đó chỉ ảnh hưởng tới những gì tạo ra từ nó.
 - Context có thể truyền giữa các task và giữa các thread.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # คู่ S-expression และลำดับ
 
 คู่ generic `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับที่เขียนบน
@@ -36,15 +36,15 @@
 ใช้หลัก ๆ ในตัวเนื้อหาของ `defmacro` เพื่อสร้างและแยกฟอร์ม
 
 **ชนิดของข้อมูล S-expression คือ `Option<Sexpr>`** ลิสต์ว่างไม่ใช่ variant ของ `Sexpr` แต่เป็น
-`none` ของ `Option` และ `Sexpr` เองหมายถึง "S-expression ที่ไม่ว่าง" ดังนั้นฟังก์ชัน `sexpr-*`
+`None` ของ `Option` และ `Sexpr` เองหมายถึง "S-expression ที่ไม่ว่าง" ดังนั้นฟังก์ชัน `sexpr-*`
 รับและคืน `Option<Sexpr>`
 
 - `()` คือลิสต์ว่างในที่ที่คาดหวัง `Option<Sexpr>` (เขียนเป็น
-  `(Option::none)` ได้ด้วย)
+  `(Option::None)` ได้ด้วย)
 - `Sexpr` ขยายโดยปริยายในที่ที่คาดหวัง `Option<Sexpr>` (ไม่มีการแปลงตอนรัน) ทิศตรงข้าม
   คือการใช้ `Option<Sexpr>` เป็น `Sexpr` อ้างว่า "นี่ไม่ใช่ลิสต์ว่าง"
   จึงต้องระบุอย่างชัดเจนด้วย `match` หรือ `unwrap`
-- ใน `match` เขียน 19 variant ของ `Sexpr` และ `none` **แบบแบนในรายการกิ่งเดียวกัน** ได้
+- ใน `match` เขียน 19 variant ของ `Sexpr` และ `None` **แบบแบนในรายการกิ่งเดียวกัน** ได้
   ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#43-match--การจับคู่รูปแบบ))
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
@@ -110,7 +110,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | ตำแหน่งแรกที่ตรงตาม predicate |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | มีกี่ตัวที่ตรงตาม predicate |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | ทุกสมาชิกตรงตาม predicate หรือไม่ |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | มีสมาชิกใดตรงตาม predicate หรือไม่ (สอดคล้องกับ `some` ของ CL; ชื่อที่ไม่ชนกับตัวสร้าง `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | มีสมาชิกใดตรงตาม predicate หรือไม่ (สอดคล้องกับ `some` ของ CL) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | การพับซ้าย |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | การพับขวา |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | รวบรวมสมาชิกที่เหลือทั้งหมด ใช้เปลี่ยนผลของฟังก์ชัน `lazy` ข้างล่างให้เป็น `Vector` |
@@ -123,7 +123,7 @@
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | ต่อตัววนซ้ำ ให้ได้ตั้งแต่สามตัวขึ้นไป |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` ของ CL ชนิดผลลัพธ์เขียนเป็น **literal สัญลักษณ์ที่ quote** (CL ใช้ type specifier ตอนรัน) `'vector` รับหนึ่งตัวขึ้นไป `'string` รับศูนย์ตัวขึ้นไป (`""` เมื่อศูนย์) ไม่ครอบคลุมลิสต์ `Sexpr` (ใช้ `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | การกลับลำดับ (แบบไม่ทำลาย) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | สมาชิกตัวที่ `n` (`none` เมื่อเกินช่วง) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | สมาชิกตัวที่ `n` (`None` เมื่อเกินช่วง) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` ที่อาร์กิวเมนต์สลับกัน |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | `n` สมาชิกแรก |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` ถูกจำกัดที่ความยาว) |
@@ -209,7 +209,7 @@
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | แมปบนหางเพื่อผลข้างเคียง (คู่ของ `maplist` ที่เทียบกับ `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | แมปบนหางแล้วต่อกัน (คู่ของ `maplist` ที่เทียบกับ `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | ตำแหน่งที่ `sub` ปรากฏครั้งแรก หากตัวรับเป็น `string` จะเลือกเมทอดของ `string` ([สตริง](collections.md#1-สตริง-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | ตำแหน่งแรกที่ต่างกัน `none` หากเท่ากัน |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | ตำแหน่งแรกที่ต่างกัน `None` หากเท่ากัน |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | การผสาน CL ต้องการอินพุตที่เรียงแล้ว ที่นี่เรียงลำดับผลการต่อกัน |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | เพิ่ม `x` **ที่ด้านหน้า** หากยังไม่มี |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | การดำเนินการเซต CL ไม่กำหนดลำดับ ที่นี่เสถียร **ตามลำดับที่ปรากฏครั้งแรก** |
@@ -261,7 +261,7 @@
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; removes only one, from the end
 (position 3 (iter v) :start 1)                          ; the index is relative to the whole sequence
 ```

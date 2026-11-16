@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # trait
 
 trait 是"这个类型支持这些操作"的约定。它让多个类型拥有同名的操作，从而使用这些操作的函数不必为每个类型分别编写。
@@ -130,12 +130,12 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-传入按 300、900、100 顺序放入 `money` 的 `Vector`，返回 `(some 900 yen)`。
+传入按 300、900、100 顺序放入 `money` 的 `Vector`，返回 `(Some 900 yen)`。
 
 ## 5. `:dyn`：统一处理不同类型的值
 

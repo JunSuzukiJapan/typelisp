@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # رسائل الخطأ
 
 معنى أهم رسائل الخطأ الصادرة من `typl` وكيفية إصلاحها.
@@ -100,8 +100,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | الرسالة | المعنى والإصلاح |
 |---|---|
 | `panic: divide by zero` | قسمة على صفر في الأعداد الصحيحة أو الكسرية (ratio). أما القسمة على صفر في الفاصلة العائمة فلا تحدث `panic`؛ بل تعطي `inf`/`NaN` |
-| `panic: unwrap: called on none` | طُبّقت `unwrap` على `none`. عالج حالة `none` بـ `match` أو `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | فهرس خارج النطاق. افحص الطول بـ `len` أو استخدم دالة تعيد `none` عند الخروج عن النطاق (`nth` و`pop` وغيرهما) |
+| `panic: unwrap: called on None` | طُبّقت `unwrap` على `None`. عالج حالة `None` بـ `match` أو `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | فهرس خارج النطاق. افحص الطول بـ `len` أو استخدم دالة تعيد `None` عند الخروج عن النطاق (`nth` و`pop` وغيرهما) |
 | `panic: an integer argument does not fit a fixnum` | مُرِّر `int` لا يتسع في 63 بتًا إلى وسيط يأخذ فهرسًا أو عددًا |
 | `throw: no enclosing (catch 'oops) for this throw` | نُفِّذ `throw` دون `catch` محيطة بالوسم نفسه |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | وصل `throw` إلى `catch` بالوسم نفسه يحمل نوعًا آخر |

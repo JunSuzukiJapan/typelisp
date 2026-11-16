@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Makros
 
 Ein Makro ist eine Funktion, die ein Programm entgegennimmt und ein Programm zurückgibt. Mit Makros lässt sich
@@ -45,7 +45,7 @@ voran, wenn man sich zuerst die Expansion ansieht.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Auch Expansionen werden typgeprüft
@@ -123,14 +123,14 @@ Ebenso lässt sich ein Makro, das seinen Rumpf eine gegebene Anzahl von Malen wi
 
 Ein Makrorumpf ist gewöhnlicher typelisp-Code und kann seine Argumente daher mit `if` oder `match`
 untersuchen und eine andere Expansion bauen. Die Argumente sind S-Ausdrucksdaten (`Option<Sexpr>`), und die
-leere Liste ist `none`.
+leere Liste ist `None`.
 
 Bauen wir `my-and`, das `true` zurückgibt, wenn alle seine Bedingungen wahr sind.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; keine Argumente
+    ((None) 'true)                                    ; keine Argumente
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; nur eines

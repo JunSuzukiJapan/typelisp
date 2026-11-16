@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # الأزواج والتعبيرات الرمزية والتسلسلات
 
 الزوج العام `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات المكتوبة فوق `Iter`
@@ -37,14 +37,14 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 وتُعالَج خلايا التعبيرات الرمزية لا بـ `cons`/`car`/`cdr` العامة في الفصل 1 بل بدوال `sexpr-*`. وتُستخدم
 أساسًا في أجسام `defmacro` لبناء الصيغ وتفكيكها.
 
-**نوع بيانات التعبيرات الرمزية هو `Option<Sexpr>`.** فالقائمة الفارغة ليست متغايرًا من `Sexpr` بل هي `none`
+**نوع بيانات التعبيرات الرمزية هو `Option<Sexpr>`.** فالقائمة الفارغة ليست متغايرًا من `Sexpr` بل هي `None`
 من `Option`، و`Sexpr` نفسه يعني "تعبير رمزي غير فارغ". ولذلك تأخذ دوال `sexpr-*` وتعيد `Option<Sexpr>`.
 
-- `()` هي القائمة الفارغة حيث يُتوقَّع `Option<Sexpr>` (ويمكن كتابتها أيضًا `(Option::none)`)
+- `()` هي القائمة الفارغة حيث يُتوقَّع `Option<Sexpr>` (ويمكن كتابتها أيضًا `(Option::None)`)
 - يتّسع `Sexpr` ضمنيًا حيث يُتوقَّع `Option<Sexpr>` (دون تحويل وقت التشغيل). أما الاتجاه المعاكس، أي
   استخدام `Option<Sexpr>` على أنه `Sexpr`، فيدّعي "هذه ليست القائمة الفارغة"، فيجب التصريح به بـ `match`
   أو `unwrap`
-- في `match` يمكن كتابة المتغايرات التسعة عشر لـ `Sexpr` و`none` **مسطّحة في قائمة الفروع نفسها**
+- في `match` يمكن كتابة المتغايرات التسعة عشر لـ `Sexpr` و`None` **مسطّحة في قائمة الفروع نفسها**
   ([مرجع الصياغة](../syntax.md#43-match--مطابقة-الأنماط))
 
 | الاسم | الصيغة | النوع | الوصف |
@@ -106,7 +106,7 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | أول موضع يحقق المحمول |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | كم عنصرًا يحقق المحمول |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | هل يحقق كل عنصر المحمول |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | هل يحقق أي عنصر المحمول (تقابل `some` في CL؛ اسم لا يتعارض مع المُنشِئ `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | هل يحقق أي عنصر المحمول (تقابل `some` في CL) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | طي من اليسار |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | طي من اليمين |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | تجمع كل العناصر المتبقية. تُستعمل لتحويل نتيجة إحدى دوال `lazy` أدناه إلى `Vector` |
@@ -119,7 +119,7 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | يضم المكرِّرات. ويمكن إعطاء ثلاثة أو أكثر |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` في CL. ويُكتب نوع النتيجة على صورة **ثابت رمز مقتبس** (تستخدم CL محدِّد نوع وقت التشغيل). و`'vector` تأخذ واحدًا أو أكثر، و`'string` صفرًا أو أكثر (`""` للصفر). ولا تغطي قوائم `Sexpr` (استخدم `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | العكس (دون إتلاف) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | العنصر `n` (`none` خارج النطاق) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | العنصر `n` (`None` خارج النطاق) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` بترتيب وسائط معكوس |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | أول `n` عنصر |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (تُقيَّد `end` بالطول) |
@@ -210,7 +210,7 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | يحوّل على الذيول لأجل الآثار الجانبية (نظير `maplist` لـ `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | يحوّل على الذيول ويضم (نظير `maplist` لـ `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | الموضع الذي تظهر فيه `sub` أول مرة. وإذا كان المستقبِل `string` اختير تابع `string` ([السلاسل النصية](collections.md#1-السلاسل-النصية-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | أول موضع يختلفان فيه. `none` إذا تساويا |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | أول موضع يختلفان فيه. `None` إذا تساويا |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | الدمج. وتشترط CL مدخلات مرتبة؛ أما هذه فتفرز المضموم |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | يضيف `x` **في المقدمة** إذا لم يكن موجودًا |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | عمليات المجموعات. ولا تحدد CL الترتيب؛ وهنا مستقر، **بترتيب أول ظهور** |
@@ -261,7 +261,7 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; يزيل واحدًا فقط، من النهاية
 (position 3 (iter v) :start 1)                          ; الفهرس نسبة إلى التسلسل كله
 ```

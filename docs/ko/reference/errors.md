@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 오류 메시지
 
 `typl`이 내는 주요 오류 메시지의 의미와 고치는 방법.
@@ -99,8 +99,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | 메시지 | 의미와 고치는 법 |
 |---|---|
 | `panic: divide by zero` | 정수나 유리수의 0으로 나누기. 부동소수점의 0으로 나누기는 panic하지 않고 `inf`/`NaN`이 된다 |
-| `panic: unwrap: called on none` | `none`에 `unwrap`을 적용했다. `match`나 `unwrap-or`로 `none`의 경우를 처리한다 |
-| `panic: Vector: index 5 out of bounds` | 범위를 벗어난 인덱스. `len`으로 길이를 확인하거나, 범위를 벗어나면 `none`을 반환하는 함수(`nth`, `pop` 등)를 쓴다 |
+| `panic: unwrap: called on None` | `None`에 `unwrap`을 적용했다. `match`나 `unwrap-or`로 `None`의 경우를 처리한다 |
+| `panic: Vector: index 5 out of bounds` | 범위를 벗어난 인덱스. `len`으로 길이를 확인하거나, 범위를 벗어나면 `None`을 반환하는 함수(`nth`, `pop` 등)를 쓴다 |
 | `panic: an integer argument does not fit a fixnum` | 인덱스나 개수를 받는 인수에 63비트에 들어가지 않는 `int`를 넘겼다 |
 | `throw: no enclosing (catch 'oops) for this throw` | 같은 태그의 `catch`가 바깥에 없는 상태에서 `throw`가 실행되었다 |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw`가 다른 타입을 나르는 같은 태그의 `catch`에 닿았다 |

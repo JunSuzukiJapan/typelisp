@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Utskrift
 
 `print`/`println`/`format`, utskriftsfunktionerna med ett argument, den snygga skrivaren (pretty printer),
@@ -43,18 +43,18 @@ skriver till standard ut genom att anropa dessa. `print`/`println`/`format` skic
 anrop (så att en prompt syns innan standard in läses, även genom en pipe).
 
 **`Option<Sexpr>` skrivs ut transparent.** Typen för S-uttrycksdata är `Option<Sexpr>`, så omslaget
-`(some x)` syns inte i utdata och innehållet skrivs ut som det är. Den tomma listan skrivs ut som `()`.
-Andra `Option<T>` skrivs ut som `(some ...)` / `none`. Detsamma gäller `Option<T>`-fält inuti structs, enums
-och `Vector`. Ett `Result<Option<Sexpr>,…>` från `(eval ...)` skrivs ut som `(ok 42)`, eller `(ok ())` för
-`none`.
+`(Some x)` syns inte i utdata och innehållet skrivs ut som det är. Den tomma listan skrivs ut som `()`.
+Andra `Option<T>` skrivs ut som `(Some ...)` / `None`. Detsamma gäller `Option<T>`-fält inuti structs, enums
+och `Vector`. Ett `Result<Option<Sexpr>,…>` från `(eval ...)` skrivs ut som `(Ok 42)`, eller `(Ok ())` för
+`None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -311,10 +311,10 @@ inte ändras efter att de skapats, så en lista som `'(1 2 3)` kan aldrig vara c
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a pekar på a självt
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a pekar på a självt
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Etiketter **börjar om från 1 för varje sak som skrivs ut** (som i CL). Även utan cykel får samma objekt

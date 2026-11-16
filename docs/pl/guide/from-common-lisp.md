@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Dla programistów Common Lisp
 
 typelisp dziedziczy składnię Common Lisp (CL) i wiele jego nazw funkcji, ale jest językiem
@@ -19,12 +19,12 @@ Wartościami logicznymi są `true` i `false`. `nil` i `t` nie są zdefiniowane.
 - **Gałęzi else w `if` nie można pominąć.** `(if c x)` jest błędem. Gdy gałąź else nie jest
   potrzebna, użyj `when` / `unless`.
 - **„Brak wartości" wyraża się za pomocą `Option<T>`.** Funkcja, która w CL zwracała nil na znak „nie
-  znaleziono", zwraca tutaj `(some x)` lub `none`.
+  znaleziono", zwraca tutaj `(Some x)` lub `None`.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - Pusta lista `()` jest, zależnie od kontekstu, albo wartością typu Unit (wartością zwracaną
@@ -98,7 +98,7 @@ funkcja `list` obok zmiennej `list`).
 ## 4. Listy i Vector
 
 Odpowiednikiem listy z CL są **dane w postaci S-wyrażeń**, których typem jest `Option<Sexpr>` (pusta lista
-to `none`). `(list 1 2 3)` i `'(a b c)` mają ten typ. Dane w postaci S-wyrażeń to coś, z czym pracują makra i
+to `None`). `(list 1 2 3)` i `'(a b c)` mają ten typ. Dane w postaci S-wyrażeń to coś, z czym pracują makra i
 `read`; jako zwykły kontener danych użyj **`Vector<T>`**.
 
 | Czego chcesz | CL | typelisp |
@@ -181,17 +181,17 @@ i przywraca pierwotną bez względu na to, jak ciało zostanie opuszczone.
 Nie ma `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error` ani `signal`.
 Słabo pasują do typowania statycznego. Zamiast tego te dwa mechanizmy służą różnym celom:
 
-- **Niepowodzenia odwracalne zwracają `Result<T,E>`.** Wywołujący rozdziela `ok` / `err` za pomocą `match`.
+- **Niepowodzenia odwracalne zwracają `Result<T,E>`.** Wywołujący rozdziela `Ok` / `Err` za pomocą `match`.
   Nie ma skrótu w rodzaju `?` z Rust.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Niepowodzenia nieodwracalne (błędy) to `panic`.** `(panic "message")`, przekazanie `none` do `unwrap`,
+- **Niepowodzenia nieodwracalne (błędy) to `panic`.** `(panic "message")`, przekazanie `None` do `unwrap`,
   dzielenie przez 0 i indeks poza zakresem należą do tego rodzaju, a program się zatrzymuje. Kod sprzątający
   `unwind-protect` wykonuje się przed zatrzymaniem.
 

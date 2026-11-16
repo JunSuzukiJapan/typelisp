@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # प्रिंटिंग
 
 `print`/`println`/`format`, एक-आर्ग्युमेंट प्रिंटर, सुंदर प्रिंटर, `print-object`, और प्रिंटिंग को नियंत्रित करने वाले वेरिएबल। फ़ॉर्मैट निर्देशों की सूची [format.md](format.md) में है। स्ट्रीम से पढ़ना और लिखना [स्ट्रीम और फ़ाइलें](streams-files.md) में है।
@@ -24,15 +24,15 @@
 
 `typl file.typl` से स्क्रिप्ट चलाना **टॉप-लेवल एक्सप्रेशन के मान प्रिंट नहीं करता**, इसलिए प्रोग्राम इन्हें कॉल करके स्टैंडर्ड आउटपुट पर लिखता है। `print`/`println`/`format` हर कॉल पर अपना आउटपुट बाहर भेजते हैं (ताकि स्टैंडर्ड इनपुट पढ़ने से पहले, पाइप से होकर भी, प्रॉम्प्ट दिखाई दे)।
 
-**`Option<Sexpr>` पारदर्शी रूप से प्रिंट होता है।** S-एक्सप्रेशन डेटा का टाइप `Option<Sexpr>` है, इसलिए `(some x)` आवरण आउटपुट में नहीं दिखता और सामग्री जस की तस प्रिंट होती है। खाली सूची `()` के रूप में प्रिंट होती है। अन्य `Option<T>` `(some ...)` / `none` के रूप में प्रिंट होते हैं। struct, enum और `Vector` के भीतर के `Option<T>` फ़ील्ड पर भी यही लागू होता है। `(eval ...)` से `Result<Option<Sexpr>,…>` `(ok 42)` के रूप में प्रिंट होता है, या `none` के लिए `(ok ())`।
+**`Option<Sexpr>` पारदर्शी रूप से प्रिंट होता है।** S-एक्सप्रेशन डेटा का टाइप `Option<Sexpr>` है, इसलिए `(Some x)` आवरण आउटपुट में नहीं दिखता और सामग्री जस की तस प्रिंट होती है। खाली सूची `()` के रूप में प्रिंट होती है। अन्य `Option<T>` `(Some ...)` / `None` के रूप में प्रिंट होते हैं। struct, enum और `Vector` के भीतर के `Option<T>` फ़ील्ड पर भी यही लागू होता है। `(eval ...)` से `Result<Option<Sexpr>,…>` `(Ok 42)` के रूप में प्रिंट होता है, या `None` के लिए `(Ok ())`।
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -235,10 +235,10 @@ CL "असीमित" के लिए `nil` उपयोग करता ह�
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a स्वयं a की ओर इंगित करता है
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a स्वयं a की ओर इंगित करता है
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 लेबल **प्रिंट की गई हर चीज़ के लिए फिर 1 से शुरू होते हैं** (CL की तरह)। चक्र के बिना भी, यदि वही ऑब्जेक्ट दो बार आता है तो उसे `#1=`/`#1#` मिलता है, आउटपुट में यह जानकारी रखते हुए कि "ये दोनों एक ही ऑब्जेक्ट हैं", जैसा CL निर्दिष्ट करता है:

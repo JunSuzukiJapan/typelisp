@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Współbieżność
 
 W typelisp uruchamiasz pracę współbieżnie, startując **zadania** (lekkie wątki), a zadania przekazują
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` wysyła. Jeśli kanał jest pełny, czeka, aż zrobi się miejsce.
 - `(recv ch)` odbiera. Czeka, aż nadejdzie wartość. Wynikiem jest `Option<T>`; gdy
-  kanał jest zamknięty i pusty, zwraca `none`.
+  kanał jest zamknięty i pusty, zwraca `None`.
 - Iterowanie po kanale za pomocą `doiter` odbiera kolejne wartości aż do zamknięcia kanału. Można go też
   przekazać wprost do `map` lub `filter`.
 - `send` na zamkniętym kanale powoduje panic.

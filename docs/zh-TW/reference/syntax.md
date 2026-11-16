@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -48,7 +48,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **陣列**：`#2A((1 2) (3 4))`（與 CL 相同）。`#` 與 `A` 之間的數是維數，內容中串列巢狀的前這麼多層就是各個維度。`#0A x` 是只有一個元素的零維陣列。同一層的串列長度不一致是讀取錯誤。型別的決定方式與向量相同，結果是 `Array<T>`（沒有元素時需要上下文，例如 `(the Array<f64> #2A(()))`）。作為 S 運算式資料，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `array` 變體。
 - **元組**：`#{"foo" 123 45.6}`。內容全部是字面值，不求值（`#{a b}` 的 `a` 是符號）。各元素的型別依位置由上下文決定（`(the #{i32 f64} #{1 2.0})`），沒有上下文時就是各元素自身的型別（`#{"foo" 123}` 是 `#{string int}`）。元素為 1～12 個。每次求值都會產生新的元組。要用計算出的值建構元組，使用 `(tuple a b)`。在期望 S 運算式資料的位置，它是元素全部為資料的元組——即 `Sexpr` 的 `tuple` 變體。
 - **屬性**：`#[test]` 是附加在下一個形式上的標記（與 Rust 的寫法相同）。目前唯一的屬性是 `test`，加在 `defun` 上（[3.16 `#[test]`](#316-test--測試函式)）。用 `read` 讀取時，它會成為串列 `(%internal::attribute (test) form)`。
-- **空串列 `()`**：依上下文，是 `Unit` 型別的值，或是 `Option<Sexpr>` 的 `none`。**`Sexpr` 沒有空串列的變體**——`Sexpr` 表示「非空的 S
+- **空串列 `()`**：依上下文，是 `Unit` 型別的值，或是 `Option<Sexpr>` 的 `None`。**`Sexpr` 沒有空串列的變體**——`Sexpr` 表示「非空的 S
   運算式」，S 運算式資料的型別是 `Option<Sexpr>`（見 [4.3 match](#43-match--模式比對) 的「`Option<Sexpr>` 的模式」）。
 - **quote/quasiquote/unquote**：
   - `'x` → `(quote x)`
@@ -90,7 +90,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
   `HashTable<string, :dyn Drawable>`。具體值在期望位置自動裝箱，明確形式為 `(as :dyn Trait 式)`。
   `:dyn Sub` 的值可以直接傳給要求其超 trait（遞移繼承的所有 trait）的 `:dyn Super` 的位置（向上轉型）。不能傳給沒有繼承關係的 trait。可以成為
   `:dyn` 的 trait 的條件見 [3.9 deftrait / impl](#39-deftrait--impl--trait-機制)。在型別位置以外寫 `:dyn` 是錯誤。
-- 內建泛型型別：`Option<T>`（`(some T)` / `none`）、`Result<T,E>`（`(ok T)` / `(err E)`）、`HashTable<K,V>`、`Vector<T>`，以及並行機制的
+- 內建泛型型別：`Option<T>`（`(Some T)` / `None`）、`Result<T,E>`（`(Ok T)` / `(Err E)`）、`HashTable<K,V>`、`Vector<T>`，以及並行機制的
   `Task<T>` / `Thread<T>` / `Chan<T>`（[第 12 章](#12-並行任務)）。還有 S 運算式資料的型別 `Sexpr`。內建的具體錯誤型別有 `ParseIntError` /
   `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`，標準函式庫的結構有 `SimpleError` / `WrappedError`（`Error` 不是
   型別而是 trait——以 `:dyn Error` 使用）。一覽見 [types.md](types.md)。
@@ -119,7 +119,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; 沒有預設值
-    (match suffix ((some s) (append name s)) ((none) name)))         ; 本體中是 Option<string>
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; 本體中是 Option<string>
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; 有預設值
   (pow 3)      ; n = 2
@@ -129,7 +129,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
   (mk :b "q")  ; 呼叫端寫 `:name 值`，順序任意。省略的取預設值
   ```
 
-  - **沒有寫預設式的參數的型別是 `Option<Type>`。** 省略時為 `none`，傳入時呼叫端寫的裸值自動包裝為 `some`。CL 中「以 supplied-p 變數得知是否
+  - **沒有寫預設式的參數的型別是 `Option<Type>`。** 省略時為 `None`，傳入時呼叫端寫的裸值自動包裝為 `Some`。CL 中「以 supplied-p 變數得知是否
     省略」的東西，在這裡呈現在靜態型別端。
   - 寫了預設式時，型別保持宣告的 `Type`。省略時，那個**經過檢查的式子**原樣嵌入呼叫端（每次呼叫都求值）。
   - **`&key` 不能與 `&optional`/`&rest` 混在同一個引數清單中。** CL 本身有一個歧義（尾端的實際引數是由依位置填入的 `&optional` 接收，還是由依
@@ -290,7 +290,7 @@ C 的符號名稱。
 
 ```lisp
 (defstruct handle (p ptr))          ; 結構的欄位
-(defenum maybe (none) (some ptr))   ; 列舉的欄位
+(defenum maybe (None) (Some ptr))   ; 列舉的欄位
 (defvar (block ptr) ...)            ; 全域變數
 (defffi f (Vector<ptr>) i32)        ; 型別引數內部
 ```
@@ -680,8 +680,8 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 ; 泛型
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - 每個變體的形式是 `(VariantName FieldType...)`。欄位只能依位置指定（沒有名稱）。至少需要一個變體，名稱不能重複。
@@ -689,8 +689,8 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - 可以用 `match` / `if-let` 拆解。`match` 檢查窮盡性（需要涵蓋所有變體或有 `_`）：
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - 方法與靜態方法和 `defstruct` 一樣寫在 `impl`（3.5）中。
 - 要讓列舉本身 `pub`，寫 `(pub defenum ...)`。
@@ -840,10 +840,10 @@ vtable 進行動態分派：
 ```
 
 - `module` 建立命名空間。**型別不是命名空間**（與 Rust 一樣，型別只擁有靜態方法與方法）。
-- `(use Type)` 引入的只有型別的名稱。列舉的變體與靜態方法要透過型別名稱書寫，如 `Option::some` 或 `Chan::new`。即使在 `(use std::sync::Chan)` 之後，只要沒有在任何地方定義名為 `new` 的函式，裸的 `(new 1)` 就是錯誤。
+- `(use Type)` 引入的只有型別的名稱。列舉的變體與靜態方法要透過型別名稱書寫，如 `Option::Some` 或 `Chan::new`。即使在 `(use std::sync::Chan)` 之後，只要沒有在任何地方定義名為 `new` 的函式，裸的 `(new 1)` 就是錯誤。
 - 要以裸名使用型別的建構函式與靜態方法，可以像 `(use std::sync::Chan::new)` 這樣逐一引入，或用 `(use Type::*)` 引入全部建構函式與公開的靜態方法（結構體的建構函式不包含在內，因為結構體以 `make-instance` 建立）。不能用 `pub use` 再匯出。
 - 不能從兩個不同的型別引入同一個裸名（`(use std::sync::Chan::* std::sync::WaitGroup::*)` 是錯誤，因為兩者都有 `new`）。引入與該模組定義的函式、全域變數、巨集同名的名稱也是錯誤。明知如此仍要取代時，使用 `shadowing-import`。
-- `Option` 的 `some`/`none` 與 `Result` 的 `ok`/`err` 由標準函式庫向所有模組公開，所以不用 `use` 也能以裸名使用（與 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
+- `Option` 的 `Some`/`None` 與 `Result` 的 `Ok`/`Err` 由標準函式庫向所有模組公開，所以不用 `use` 也能以裸名使用（與 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
 - **一個名稱只有一個意義**。函式、全域變數與巨集屬於同一個命名空間，在同一模組中其中任意兩個都不能
   取同一個名稱（無論以什麼順序定義都是錯誤）。不像 CL 那樣把函式與變數的命名空間分開。不同模組中的
   同名名稱，較近的那個可見。
@@ -968,20 +968,20 @@ vtable 進行動態分派：
   (assert-equal (+ 1 2) 3))
 ```
 
-加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()` 或 `Result<(), E>`（也不能有型別參數）。不需要 `pub`。回傳 `Result` 的測試在回傳 `err` 時失敗，並顯示該錯誤，因此 `E` 必須實作 `Error` 或 `print-object`（與 Rust 要求測試的錯誤型別實作 `Debug` 相同）。是 `Error` 時用 `describe-error`（訊息及原因鏈）顯示，否則用 `print-object` 顯示。`:dyn Error` 也是 `Error`，因此可以把各種錯誤歸為一個型別回傳。
+加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()` 或 `Result<(), E>`（也不能有型別參數）。不需要 `pub`。回傳 `Result` 的測試在回傳 `Err` 時失敗，並顯示該錯誤，因此 `E` 必須實作 `Error` 或 `print-object`（與 Rust 要求測試的錯誤型別實作 `Debug` 相同）。是 `Error` 時用 `describe-error`（訊息及原因鏈）顯示，否則用 `print-object` 顯示。`:dyn Error` 也是 `Error`，因此可以把各種錯誤歸為一個型別回傳。
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **一般執行和 `compile-file` 會略過它**，連內容也不檢查（與 Rust 只在 `--test` 時編譯測試相同）。程式本身無法呼叫測試函式。
 - 測試可以寫在任何放置函式的檔案中、任何 `module` 之內。也可以另外寫在專案的 `tests/` 資料夾裡。
-- 失敗指 `panic`、執行時錯誤與回傳 `err`。用 `assert`，或會印出兩邊的 `assert-equal`（[系統](functions/system.md)）來檢查。即使一個測試失敗，其餘測試也會繼續執行。
+- 失敗指 `panic`、執行時錯誤與回傳 `Err`。用 `assert`，或會印出兩邊的 `assert-equal`（[系統](functions/system.md)）來檢查。即使一個測試失敗，其餘測試也會繼續執行。
 
 ```sh
 typl test                 # 執行此資料夾中專案的全部測試
@@ -1109,7 +1109,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
   依值比較。字串比較的是內容，而不是同一性
 - `(:= expr)` —— 對任意式子求值，以 `equal` 比較。是比較沒有字面值語法的型別（`defstruct` 實例、全域變數、計算結果）的唯一寫法，使用者定義的
   `Equal` 實作直接成為比較規則。`expr` 可以參照從該分支位置可見的任何東西（引數、外層繫結、全域變數）
-- `(Ctor sub-pattern...)` —— 建構函式模式（`(some x)` `(none)` `(cons a d)` `(ok v)` 等）
+- `(Ctor sub-pattern...)` —— 建構函式模式（`(Some x)` `(None)` `(cons a d)` `(Ok v)` 等）
 - `(Type :slot pattern... :slot...)` — 結構的模式。在型別名稱之後以關鍵字寫槽。關鍵字之後是模式時，
   以該模式比對這個槽；之後是關鍵字或結束時，把槽繫結到同名的變數。沒寫的槽不參與比對（不依賴欄位的
   數量與順序）：
@@ -1119,11 +1119,11 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; 繫結 x，並以 (some b) 比對 y
+      ((point :x :y (Some b)) (+ x b))   ; 繫結 x，並以 (Some b) 比對 y
       ((point :x a) a)))                 ; 繫結到 a
   ```
 - `#{p0 p1 ...}` —— 元組模式。逐個元素用子模式比對。對 `Sexpr` 而言，只符合元素個數相同的 `#{..}` 資料
-- `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(some (:or (circle r) (rect r _)))`）
+- `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(Some (:or (circle r) (rect r _)))`）
 
 以值字面值／`(:= expr)` 比較沒有實作 `Equal` 的型別是型別錯誤（比起留下默默不符合的分支，選擇說明無法比較）。
 
@@ -1169,8 +1169,8 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
   寫法，也是從 `Sexpr` 取出 `Vector<T>`/`HashTable<K,V>` 的唯一手段（兩者沒有欄位拆解形式）。例：在 `(the point p)` 之後 `(setf p::x 9)`，也會
   反映到串列中的原實例。
 
-**`Option<Sexpr>` 的模式**：S 運算式資料的型別不是 `Sexpr` 而是 `Option<Sexpr>`，空串列不是 `Sexpr` 的變體，而是 `Option` 的 `none`。因此
-`match` `Option<Sexpr>` 時，`Sexpr` 的 19 種變體與 `none` 可以**平鋪在同一組分支中**（不需要剝去 `Option` 的外層 `match`）：
+**`Option<Sexpr>` 的模式**：S 運算式資料的型別不是 `Sexpr` 而是 `Option<Sexpr>`，空串列不是 `Sexpr` 的變體，而是 `Option` 的 `None`。因此
+`match` `Option<Sexpr>` 時，`Sexpr` 的 19 種變體與 `None` 可以**平鋪在同一組分支中**（不需要剝去 `Option` 的外層 `match`）：
 
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
@@ -1178,11 +1178,11 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
     ((int _)    1)
     ((cons _ _) 2)
     ((str _)    3)
-    ((none)     0)          ; 空串列
+    ((None)     0)          ; 空串列
     (_          9)))
 ```
 
-窮盡性也在同一個平鋪的全集——`Sexpr` 的 19 種變體加上 `none` 共 20 個——中檢查。忘了寫 `(none)` 時，只要沒有 `_` 就是錯誤。也可以寫 `(some x)`，
+窮盡性也在同一個平鋪的全集——`Sexpr` 的 19 種變體加上 `None` 共 20 個——中檢查。忘了寫 `(None)` 時，只要沒有 `_` 就是錯誤。也可以寫 `(Some x)`，
 繫結「非空的某物」。
 
 這個語法糖**恰好**只適用於 `Option<Sexpr>`。對 `Option<Option<Sexpr>>`，無法決定 `(int n)` 剝去的是哪一層，所以照常寫兩層 `match`。
@@ -1211,7 +1211,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 ```
 
 **分支之間的型別推論**：所有分支必須是同一型別（`panic` 等發散的分支除外）。在沒有期望型別的位置寫的 `match` 中，分支會**互相**補足缺少的型別
-引數——`(Result::ok v)` 只決定 `T`，`(Result::err e)` 只決定 `E`，兩者並列就決定了 `Result<T,E>`。到最後仍有任何分支都無法決定的型別引數時，會
+引數——`(Result::Ok v)` 只決定 `T`，`(Result::Err e)` 只決定 `E`，兩者並列就決定了 `Result<T,E>`。到最後仍有任何分支都無法決定的型別引數時，會
 成為該分支本身的錯誤（`cannot infer type argument ...`）。在 `match` 之外，無法決定的型別引數當場就是錯誤。
 
 使用向下轉型模式的 `match` 的窮盡性檢查，不計入 `Sexpr` 本身變體的涵蓋（只列出向下轉型模式的 `match` 需要以 `_` 收尾）。泛型 ADT
@@ -1317,7 +1317,7 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 | `:sum e` / `:count e` | 合計 / 為真的次數 |
 | `:maximize e` / `:minimize e` | 最大 / 最小。**`Option<T>`**（與 CL 對空序列回傳 nil 相同。任意的 `Ord` 型別沒有最小元素） |
 | `:always e` / `:never e` | 全部滿足則為 `true`，一旦不滿足立即為 `false` |
-| `:thereis e` | `e` 是 **`Option<T>`**。回傳第一個 `some`，沒有時為 `none`（相當於 CL 的「第一個非 nil 值」的就是它。要測試 `bool` 用 `:always`/`:never`） |
+| `:thereis e` | `e` 是 **`Option<T>`**。回傳第一個 `Some`，沒有時為 `None`（相當於 CL 的「第一個非 nil 值」的就是它。要測試 `bool` 用 `:always`/`:never`） |
 | `:while e` / `:until e` | 在這裡**正常結束**（`:finally` 會執行，收集的東西就是答案） |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | 讓一個子句成為有條件的 |
 | `:return e` | 立即以該值離開（`:finally` 不執行。與 CL 相同） |
@@ -1335,7 +1335,7 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 
 省略 `:finally (return 0)` 是**型別錯誤**。這只是 `block` 的規則在作用（5.1）：跳出的型別 `int` 與迴圈用盡時留下的 `()` 不符。
 
-**迴圈的值**：有累積子句時為其累積（有多個時為第一個），`:always`/`:never` 時為 `true`，`:thereis` 時為 `none`，都沒有時為 `()`。`:finally` 的
+**迴圈的值**：有累積子句時為其累積（有多個時為第一個），`:always`/`:never` 時為 `true`，`:thereis` 時為 `None`，都沒有時為 `()`。`:finally` 的
 最後是 `(return e)` 時，它就是值——這是 CL 的 `finally (return …)` 慣用法，是不做累積的迴圈表明自己答案的唯一方法。
 
 **與 CL 的差異 / 沒有加入的東西**：
@@ -1396,7 +1396,7 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 (unreachable)                       ; 展開為 (panic "unreachable")。defmacro
 (todo)                              ; 展開為 (panic "todo")。defmacro
 (as Type expr)                      ; 數值/字元的型別轉換。可能失敗的轉換失敗時 panic
-(try-as Type expr)                  ; 與 as 相同，但以 Option<Type> 回傳結果（失敗時為 none）
+(try-as Type expr)                  ; 與 as 相同，但以 Option<Type> 回傳結果（失敗時為 None）
 (print control args...)             ; 展開格式寫到標準輸出（不換行）
 (println control args...)           ; 同上（最後換行）
 (format dest control args...)       ; CL 的 format。回傳展開結果的 string
@@ -1431,7 +1431,7 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 
 `as`/`try-as` 能處理的只有數值與字元的目錄（`int`、固定寬度整數型別、`f32`/`f64`/`ratio`/`char` 之間）。同一型別不轉換。**整數寬度之間（包括
 `int`）以及 `f32`↔`f64` 是真正的轉換**——`as` 截斷／捨入，`try-as` 回答能否放進該寬度（精度）。`(as int x)` 是從固定寬度的精確擴大，
-`(as i32 n)` 是從 `int` 的截斷。整數→`char` 可能因超出範圍而失敗，所以 `as` 會 panic，`try-as` 為 `none`。其他（擴大轉換以及
+`(as i32 n)` 是從 `int` 的截斷。整數→`char` 可能因超出範圍而失敗，所以 `as` 會 panic，`try-as` 為 `None`。其他（擴大轉換以及
 `float->int`/`ratio->int` 的截斷）一律成功。`float->int`/`ratio->int`/`char->int` 落在 `int`，要求更窄的寬度時接著呼叫 `int->W`。是展開為
 對應轉換方法（[數值](functions/numbers.md)的 `int->char`/`int->int`/`int->W` 等）的語法糖。
 
@@ -1440,7 +1440,7 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 
 `documentation` 與 `quote`/`compile` 一樣是不對 `name` 求值、以未求值的裸符號/`::` 路徑讀取的特殊形式。與 CL 的 `(documentation 'name 'function)`
 不同，不接受型別引數——依變數→函式→型別→trait→巨集的順序（與把裸識別字作為運算式求值時的優先順序相同）解析 `name`，回傳找到的定義的文件
-字串（`(documentation Type::method)` 專用於方法）。解析本身失敗（沒有該名稱的定義）是檢查時的錯誤，有定義但沒有文件字串時為 `Option::none`。
+字串（`(documentation Type::method)` 專用於方法）。解析本身失敗（沒有該名稱的定義）是檢查時的錯誤，有定義但沒有文件字串時為 `Option::None`。
 全部在檢查時作為常數決定——不會發生執行期的查找。不支援帶模組限定的自由名稱（`mod::name`，`Type::method` 除外）。
 
 ## 8. 非區域跳出（catch / throw / unwind-protect）
@@ -1588,10 +1588,10 @@ typl --image session.typld             # REPL 也一樣
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => 讀作 (not (equal 1 2))，即 true
 ```

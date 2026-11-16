@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # الزمن والبيئة والتنفيذ
 
 دوال الزمن والاستعلام عن بيئة التشغيل وأدوات التنفيذ وتحليل النصوص وتقييمها والسلاسل التوثيقية والماكرو.
@@ -53,20 +53,20 @@ time-zone is supplied, daylight saving time information is ignored*).
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | سطر الأوامر. **العنصر 0 هو اسم البرنامج** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | متغير بيئي. `none` إذا لم يُضبط أو لم يكن UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | متغير بيئي. `None` إذا لم يُضبط أو لم يكن UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. وهو أساس `user-homedir-pathname` ([المسارات](streams-files.md#92-الدوال)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | إصدار التنفيذ |
 | `machine-type` | `(machine-type)` | `()→string` | بنية المعالج (`x86_64` / `aarch64` …). قيمة **هدف البناء** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | اسم المضيف |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | اسم العتاد **العامل الآن** (`Apple M1` / `Intel(R) Xeon(R) …`). و`none` حيثما تعذّر تحديده |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | اسم العتاد **العامل الآن** (`Apple M1` / `Intel(R) Xeon(R) …`). و`None` حيثما تعذّر تحديده |
 | `software-type` | `(software-type)` | `()→string` | نظام التشغيل (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | إصدار نظام التشغيل (`uname -r`، مثل `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | اسم قصير لموقع التثبيت. **دائمًا `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | كذلك، اسم طويل. **دائمًا `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | اسم قصير لموقع التثبيت. **دائمًا `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | كذلك، اسم طويل. **دائمًا `None`** |
 
 الدوال التي تعيد `Option` هي بنود تسمح فيها CL بـ `NIL` (*or nil if no such name can be determined*).
-ولا يوجد في POSIX مكان لتسجيل أسماء المواقع، فهي دائمًا `none`؛ وتعيد SBCL الشيء نفسه. ولاحظ الفرق بين
+ولا يوجد في POSIX مكان لتسجيل أسماء المواقع، فهي دائمًا `None`؛ وتعيد SBCL الشيء نفسه. ولاحظ الفرق بين
 `machine-type` و`machine-version`: الأول هو البنية التي **بُني** لها هذا الملف الثنائي، والثاني هو الشريحة
 **التي تشغّله** الآن.
 
@@ -129,7 +129,7 @@ time-zone is supplied, daylight saving time information is ignored*).
 فحسب**: سلوك متحلل تسمح به CLHS صراحةً، حتى لا تتعلق السكربتات والاختبارات عند محث لا يجيب عنه أحد.
 
 ويُقسَّم `$VISUAL` / `$EDITOR` في `ed` عند المسافات البيضاء، فيعمل `EDITOR="code -w"`. وإذا لم يُضبط أي
-منهما فالنتيجة `err`: فلا تخمّن `vi`. ويُمرَّر رقم السطر أولًا على الصورة `+N`.
+منهما فالنتيجة `Err`: فلا تخمّن `vi`. ويُمرَّر رقم السطر أولًا على الصورة `+N`.
 
 وتسجّل `dribble` الطرق الثلاث التي يغادر بها خرج الجلسة العملية: ما تكتبه `print`/`println`/`format`، وما
 يُكتب إلى التدفقات المتصلة بالخرج القياسي، والأسطر المكتوبة في الـ REPL مع القيم التي يطبعها الـ REPL
@@ -137,15 +137,15 @@ time-zone is supplied, daylight saving time information is ignored*).
 
 ## 6. التحليل والتقييم
 
-كل هذه تتعامل مع نصوص وبيانات وقت التشغيل (التي لا يتحكم فيها البرنامج نفسه)، فعند الفشل تعيد `err` من
+كل هذه تتعامل مع نصوص وبيانات وقت التشغيل (التي لا يتحكم فيها البرنامج نفسه)، فعند الفشل تعيد `Err` من
 `Result` بدلًا من `panic`. وأنواع الأخطاء أنواع ملموسة لكل عملية
 ([أنواع الأخطاء](option-result.md#3-أنواع-الأخطاء-والسمة-error)).
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` في CL. تتخطى المسافات البيضاء في البداية والنهاية (المجموعة نفسها كما في `trim`)، وتقرأ إشارة واحدة على الأكثر `+`/`-`، ثم أرقامًا بالأساس `radix` (الافتراضي 10، من 2 إلى 36؛ والأرقام فوق 10 بأي حالة أحرف). ولا حد لعدد الأرقام (`int`). وأي محارف أخرى متبقية تعطي `err`. ومع `:junk-allowed true` تتوقف عند أول غير رقم وتتجاهل الباقي، لكنها تعطي `err` إذا لم يوجد رقم واحد (يقابل `nil` في CL). ولا تعيد القيمة الثانية في CL (الموضع الذي انتهت عنده القراءة). و`radix` خارج النطاق يحدث `panic` (خطأ من المستدعي لا من النص) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` في CL. تتخطى المسافات البيضاء في البداية والنهاية (المجموعة نفسها كما في `trim`)، وتقرأ إشارة واحدة على الأكثر `+`/`-`، ثم أرقامًا بالأساس `radix` (الافتراضي 10، من 2 إلى 36؛ والأرقام فوق 10 بأي حالة أحرف). ولا حد لعدد الأرقام (`int`). وأي محارف أخرى متبقية تعطي `Err`. ومع `:junk-allowed true` تتوقف عند أول غير رقم وتتجاهل الباقي، لكنها تعطي `Err` إذا لم يوجد رقم واحد (يقابل `nil` في CL). ولا تعيد القيمة الثانية في CL (الموضع الذي انتهت عنده القراءة). و`radix` خارج النطاق يحدث `panic` (خطأ من المستدعي لا من النص) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | عدد ذو فاصلة عائمة. ويقبل أيضًا `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | يقرأ `Sexpr` واحدًا من `s` (بالقارئ نفسه الذي يقرأ الشيفرة المصدرية). وأقواس غير متوازنة أو سلاسل غير منتهية ونحوها تعطي `err`. والقراءة من تدفق هي `read-sexpr` ([التدفقات](streams-files.md#6-الدوال-العامة-وعمليات-الملفات)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | يقرأ `Sexpr` واحدًا من `s` (بالقارئ نفسه الذي يقرأ الشيفرة المصدرية). وأقواس غير متوازنة أو سلاسل غير منتهية ونحوها تعطي `Err`. والقراءة من تدفق هي `read-sexpr` ([التدفقات](streams-files.md#6-الدوال-العامة-وعمليات-الملفات)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` مع **الموضع الذي انتهت عنده القراءة**. `(car r)` هي القيمة و`(cdr r)` موضع المحرف التالي المراد قراءته. و`start` افتراضيًا 0 |
 | `read-from-string-preserving-whitespace` | مثل ما سبق | مثل ما سبق | المثل، لكنها لا تستهلك المحرف الأبيض الذي أنهى البيان. ويظهر الفرق في الموضع المُعاد |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | تفحص أنواع `form` وقت التشغيل وتقيّمه. وتتبع `eval` في CL |
@@ -157,9 +157,9 @@ time-zone is supplied, daylight saving time information is ignored*).
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 الفرق الذي تحدثه `preserving-whitespace` هو **محرف أبيض واحد**: فـ `read` في CL تستهلك المحرف الأبيض الذي
@@ -178,11 +178,11 @@ time-zone is supplied, daylight saving time information is ignored*).
 `defenum`/`defmacro`) معًا، وتُسجَّل التعريفات في البيئة العامة فورًا ودائمًا.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; x العام مرئي
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; تعيد الاسم المعرَّف
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; التعريف الذي صُنع للتو مرئي
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; x العام مرئي
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; تعيد الاسم المعرَّف
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; التعريف الذي صُنع للتو مرئي
 ```
 
 - **القيمة الراجعة**: للتعبير، النتيجة على صورة `Option<Sexpr>`؛ وللتعريف، رمز الاسم المعرَّف (كما في CL).
@@ -193,7 +193,7 @@ time-zone is supplied, daylight saving time information is ignored*).
   `eval` التي تعرّف `sq`، وتكون "غير معرَّفة". غير أن **`eval`ات اللاحقة تراها** (ففحص أنواعها يجري وقت
   التشغيل، بعد التعريف). والـ REPL يفحص وينفّذ سطرًا في كل مرة، فيمكن استدعاء اسم عُرِّف بـ `eval` مباشرة
   من السطر التالي.
-- **الأخطاء**: أخطاء الأنواع وأخطاء الصياغة تعيد `err` (ولا تحدث `panic`). أما **حالات panic وقت التشغيل**
+- **الأخطاء**: أخطاء الأنواع وأخطاء الصياغة تعيد `Err` (ولا تحدث `panic`). أما **حالات panic وقت التشغيل**
   في الشيفرة المقيَّمة (القسمة على صفر وهكذا) فتنتشر كما كانت ستنتشر من شيفرة مكتوبة مباشرة. وينفّذ تنظيف
   أي `unwind-protect` بينها
   ([الفصل 8 من مرجع الصياغة](../syntax.md#8-الخروج-غير-المحلي-catch--throw--unwind-protect)).
@@ -241,7 +241,7 @@ time-zone is supplied, daylight saving time information is ignored*).
 ```
 
 **تتحدد القيمة وقت الفحص**: فإذا لم يُحَلّ الاسم إلى أي تعريف فهو خطأ وقت الفحص (مثل الإشارة إلى متغير
-غير معرَّف). وإذا حُلّ لكن لا توجد سلسلة توثيقية فالنتيجة `Option::none`.
+غير معرَّف). وإذا حُلّ لكن لا توجد سلسلة توثيقية فالنتيجة `Option::None`.
 
 **غير مغطى**:
 
@@ -260,18 +260,18 @@ time-zone is supplied, daylight saving time information is ignored*).
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | رمز جديد. واسمه `" <prefix><n>"`، حيث `n` هي `*gensym-counter*`. ولا يمكن كتابة مسافة في البداية في المصدر، فلا تتصادم الربطات المولَّدة أبدًا مع الأسماء المكتوبة |
 | `*gensym-counter*` | متغير | `int` | الرقم الذي ستستخدمه `gensym` تاليًا. وكما في CL يمكن قراءته وضبطه |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | توسّع استدعاء ماكرو خطوة واحدة. و`none` تعني "ليس استدعاء ماكرو" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | توسّع استدعاء ماكرو خطوة واحدة. و`None` تعني "ليس استدعاء ماكرو" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | تتكرر حتى لا يبقى ماكرو |
 
 تعيد `macroexpand-1` قيمة `Option`. وتبلّغ CL عن "هل توسّعت" بقيمة راجعة ثانية، لكن لا قيم متعددة، فتؤدي
-`none` هذا الدور. و**لا يمكن أبدًا الخلط بين ماكرو تتوسع إلى استدعاء نفسها وبين ما ليس ماكرو.** وخطوة
+`None` هذا الدور. و**لا يمكن أبدًا الخلط بين ماكرو تتوسع إلى استدعاء نفسها وبين ما ليس ماكرو.** وخطوة
 التوسيع الواحدة هي نفسها التي يستخدمها فاحص الأنواع، فلا يتباعد أبدًا ما يراه البرنامج عما رآه الفاحص.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; تظهر none على أنها القائمة الفارغة (Option<Sexpr> شفاف)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; تظهر none على أنها القائمة الفارغة (Option<Sexpr> شفاف)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 ما في CL وليس في هذه اللغة: `eval-when` (فـ `:compile-toplevel`/`:load-toplevel`/`:execute` تتطابق دائمًا،

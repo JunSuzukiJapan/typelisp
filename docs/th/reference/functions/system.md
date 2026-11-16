@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # เวลา สภาพแวดล้อม และการ implement
 
 ฟังก์ชันสำหรับเวลา การสอบถามสภาพแวดล้อมขณะรัน เครื่องมือของการ implement การแยกวิเคราะห์และ
@@ -54,20 +54,20 @@ zone ที่คุณเขียนด้วยมือเป็นจำน
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | บรรทัดคำสั่ง **สมาชิกตัวที่ 0 คือชื่อโปรแกรม** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | ตัวแปรสภาพแวดล้อม `none` หากไม่ได้ตั้งหรือไม่ใช่ UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | ตัวแปรสภาพแวดล้อม `None` หากไม่ได้ตั้งหรือไม่ใช่ UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME` พื้นฐานของ `user-homedir-pathname` ([Pathname](streams-files.md#92-ฟังก์ชัน)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | เวอร์ชันของ implementation |
 | `machine-type` | `(machine-type)` | `()→string` | สถาปัตยกรรม CPU (`x86_64` / `aarch64` …) ค่าของ **เป้าหมายการบิลด์** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | ชื่อโฮสต์ |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | ชื่อของฮาร์ดแวร์ที่ **กำลังรันอยู่ตอนนี้** (`Apple M1` / `Intel(R) Xeon(R) …`) `none` ในที่ที่ระบุไม่ได้ |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | ชื่อของฮาร์ดแวร์ที่ **กำลังรันอยู่ตอนนี้** (`Apple M1` / `Intel(R) Xeon(R) …`) `None` ในที่ที่ระบุไม่ได้ |
 | `software-type` | `(software-type)` | `()→string` | OS (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | รุ่นของ OS (`uname -r` เช่น `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | ชื่อสั้นของไซต์ที่ติดตั้ง **เป็น `none` เสมอ** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | ในทำนองเดียวกัน ชื่อยาว **เป็น `none` เสมอ** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | ชื่อสั้นของไซต์ที่ติดตั้ง **เป็น `None` เสมอ** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | ในทำนองเดียวกัน ชื่อยาว **เป็น `None` เสมอ** |
 
 ตัวที่คืน `Option` เป็นรายการที่ CL ยอมให้เป็น `NIL` (*or nil if no such name can be
-determined*) POSIX ไม่มีที่บันทึกชื่อไซต์ ดังนั้นจึงเป็น `none` เสมอ SBCL คืน
+determined*) POSIX ไม่มีที่บันทึกชื่อไซต์ ดังนั้นจึงเป็น `None` เสมอ SBCL คืน
 เหมือนกัน สังเกตความต่างระหว่าง `machine-type` และ `machine-version`: อย่างแรกคือสถาปัตยกรรม
 ที่ไบนารีนี้ **ถูกบิลด์** สำหรับมัน อย่างหลังคือชิปที่ **กำลังรัน** มันตอนนี้
 
@@ -134,7 +134,7 @@ determined*) POSIX ไม่มีที่บันทึกชื่อไซ�
 ค้างที่ prompt ที่ไม่มีใครตอบได้
 
 `$VISUAL` / `$EDITOR` ของ `ed` ถูกแยกที่ช่องว่าง ดังนั้น `EDITOR="code -w"` ใช้ได้ หากไม่ได้ตั้งทั้งสอง
-ผลลัพธ์คือ `err`: ไม่เดา `vi` หมายเลขบรรทัดถูกส่งก่อน ในรูป `+N`
+ผลลัพธ์คือ `Err`: ไม่เดา `vi` หมายเลขบรรทัดถูกส่งก่อน ในรูป `+N`
 
 `dribble` บันทึกทั้งสามทางที่เอาต์พุตของเซสชันออกจากโพรเซส: สิ่งที่
 `print`/`println`/`format` เขียน สิ่งที่เขียนไปยังสตรีมที่เชื่อมกับเอาต์พุตมาตรฐาน และ
@@ -143,14 +143,14 @@ determined*) POSIX ไม่มีที่บันทึกชื่อไซ�
 ## 6. การแยกวิเคราะห์และการประเมินค่า
 
 ทั้งหมดนี้จัดการข้อความและข้อมูลจากตอนรัน (ซึ่งโปรแกรมเองควบคุมไม่ได้) ดังนั้นเมื่อล้มเหลว
-จะคืน `err` ของ `Result` แทนที่จะ panic ชนิดข้อผิดพลาดเป็นชนิดที่เป็นรูปธรรม
+จะคืน `Err` ของ `Result` แทนที่จะ panic ชนิดข้อผิดพลาดเป็นชนิดที่เป็นรูปธรรม
 ต่อการดำเนินการ ([ชนิดข้อผิดพลาด](option-result.md#3-ชนิดข้อผิดพลาดและ-trait-error))
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` ของ CL ข้ามช่องว่างนำหน้าและตามหลัง (ชุดเดียวกับ `trim`) อ่านเครื่องหมาย `+`/`-` อย่างมากหนึ่งตัว แล้วเป็นหลักในฐาน `radix` (ค่าเริ่มต้น 10, 2 ถึง 36; หลักที่เกิน 10 ใช้ตัวพิมพ์ใหญ่หรือเล็กก็ได้) ไม่มีขีดจำกัดจำนวนหลัก (`int`) อักขระอื่นที่เหลือให้ `err` เมื่อใช้ `:junk-allowed true` จะหยุดที่ตัวที่ไม่ใช่หลักตัวแรกและเพิกเฉยส่วนที่เหลือ แต่ให้ `err` หากไม่มีหลักเลยสักตัว (สอดคล้องกับ `nil` ของ CL) ไม่คืนค่าที่สองของ CL (ตำแหน่งที่การอ่านจบ) `radix` ที่เกินช่วงจะ panic (เป็นความผิดพลาดของผู้เรียก ไม่ใช่ของข้อความ) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` ของ CL ข้ามช่องว่างนำหน้าและตามหลัง (ชุดเดียวกับ `trim`) อ่านเครื่องหมาย `+`/`-` อย่างมากหนึ่งตัว แล้วเป็นหลักในฐาน `radix` (ค่าเริ่มต้น 10, 2 ถึง 36; หลักที่เกิน 10 ใช้ตัวพิมพ์ใหญ่หรือเล็กก็ได้) ไม่มีขีดจำกัดจำนวนหลัก (`int`) อักขระอื่นที่เหลือให้ `Err` เมื่อใช้ `:junk-allowed true` จะหยุดที่ตัวที่ไม่ใช่หลักตัวแรกและเพิกเฉยส่วนที่เหลือ แต่ให้ `Err` หากไม่มีหลักเลยสักตัว (สอดคล้องกับ `nil` ของ CL) ไม่คืนค่าที่สองของ CL (ตำแหน่งที่การอ่านจบ) `radix` ที่เกินช่วงจะ panic (เป็นความผิดพลาดของผู้เรียก ไม่ใช่ของข้อความ) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | จำนวนทศนิยม รับ `inf`/`nan` ด้วย |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | อ่านหนึ่ง `Sexpr` จาก `s` (ด้วยตัวอ่านเดียวกับที่อ่านซอร์สโค้ด) วงเล็บไม่สมดุล สตริงที่ไม่ปิด และทำนองเดียวกันให้ `err` การอ่านจากสตรีมคือ `read-sexpr` ([สตรีม](streams-files.md#6-ฟังก์ชัน-generic-และการดำเนินการกับไฟล์)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | อ่านหนึ่ง `Sexpr` จาก `s` (ด้วยตัวอ่านเดียวกับที่อ่านซอร์สโค้ด) วงเล็บไม่สมดุล สตริงที่ไม่ปิด และทำนองเดียวกันให้ `Err` การอ่านจากสตรีมคือ `read-sexpr` ([สตรีม](streams-files.md#6-ฟังก์ชัน-generic-และการดำเนินการกับไฟล์)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` บวก **ตำแหน่งที่การอ่านจบ** `(car r)` คือค่าและ `(cdr r)` คือตำแหน่งของอักขระถัดไปที่จะอ่าน `start` ค่าเริ่มต้นเป็น 0 |
 | `read-from-string-preserving-whitespace` | เหมือนข้างบน | เหมือนข้างบน | เหมือนกัน แต่ไม่ใช้ช่องว่างที่จบ datum ความต่างเห็นได้ในตำแหน่งที่คืน |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | ตรวจสอบชนิดของ `form` ตอนรันและประเมินค่า ตาม `eval` ของ CL |
@@ -163,9 +163,9 @@ CL คืน **สองค่า** (ค่าและตำแหน่ง) �
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 ความต่างที่ `preserving-whitespace` สร้างคือ **ช่องว่างหนึ่งตัว**: `read` ของ CL ใช้
@@ -185,11 +185,11 @@ CL คืน **สองค่า** (ค่าและตำแหน่ง) �
 ลงทะเบียนในสภาพแวดล้อมโกลบอลทันทีและถาวร
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; the global x is visible
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; returns the defined name
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; the definition just made is visible
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; the global x is visible
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; returns the defined name
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; the definition just made is visible
 ```
 
 - **ค่าที่คืน**: สำหรับนิพจน์ คือผลลัพธ์เป็น `Option<Sexpr>` สำหรับการนิยาม คือสัญลักษณ์ของ
@@ -201,7 +201,7 @@ CL คืน **สองค่า** (ค่าและตำแหน่ง) �
   ตรง ๆ ในไฟล์ถูกตรวจสอบก่อนที่ `eval` ที่นิยาม `sq` จะรัน และ "ไม่ได้นิยาม" อย่างไรก็ตาม
   **`eval` ที่ตามมามองเห็นมัน** (การตรวจสอบชนิดของมันรันตอนรัน หลังการนิยาม) REPL ตรวจสอบ
   และรันทีละบรรทัด ดังนั้นชื่อที่นิยามด้วย `eval` เรียกตรง ๆ ได้จากบรรทัดถัดไป
-- **ข้อผิดพลาด**: ข้อผิดพลาดของชนิดและของไวยากรณ์คืน `err` (ไม่ panic) **panic ตอนรัน** ใน
+- **ข้อผิดพลาด**: ข้อผิดพลาดของชนิดและของไวยากรณ์คืน `Err` (ไม่ panic) **panic ตอนรัน** ใน
   โค้ดที่ประเมิน (การหารด้วยศูนย์และอื่น ๆ) แพร่ออกไปเหมือนจากโค้ดที่เขียนตรง ๆ การล้างทรัพยากร
   ของ `unwind-protect` ที่คั่นอยู่จะรัน
   ([เอกสารอ้างอิงไวยากรณ์ บทที่ 8](../syntax.md#8-การออกจากการทำงานแบบไม่เป็นเส้นตรง-catch--throw--unwind-protect))
@@ -252,7 +252,7 @@ CL คืน **สองค่า** (ค่าและตำแหน่ง) �
 
 **ค่าถูกตัดสินตอนตรวจสอบ**: หากชื่อไม่แก้ไขไปยังการนิยามใด จะเป็นข้อผิดพลาด
 ตอนตรวจสอบ (เหมือนการอ้างอิงตัวแปรที่ไม่ได้นิยาม) หากแก้ไขได้แต่ไม่มี docstring
-ผลลัพธ์คือ `Option::none`
+ผลลัพธ์คือ `Option::None`
 
 **ไม่ครอบคลุม**:
 
@@ -272,19 +272,19 @@ hover ของ language server (`typl-lsp`) แสดง docstring ด้วย
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | สัญลักษณ์ใหม่ ชื่อของมันคือ `" <prefix><n>"` โดย `n` คือ `*gensym-counter*` ช่องว่างนำหน้าเขียนในซอร์สไม่ได้ ดังนั้นการผูกที่สร้างขึ้นจะไม่ชนกับชื่อที่เขียน |
 | `*gensym-counter*` | ตัวแปร | `int` | หมายเลขที่ `gensym` ใช้ครั้งถัดไป เหมือนใน CL อ่านและตั้งค่าได้ |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | ขยายการเรียกแมโครหนึ่งขั้น `none` หมายถึง "ไม่ใช่การเรียกแมโคร" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | ขยายการเรียกแมโครหนึ่งขั้น `None` หมายถึง "ไม่ใช่การเรียกแมโคร" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | ทำซ้ำจนไม่ใช่แมโครอีก |
 
 `macroexpand-1` คืน `Option` CL รายงาน "ขยายหรือไม่" เป็นค่าที่คืนค่าที่สอง แต่
-ไม่มีค่าหลายค่า จึงให้ `none` ทำหน้าที่นั้น **แมโครที่ขยายเป็นการเรียกตัวเอง
+ไม่มีค่าหลายค่า จึงให้ `None` ทำหน้าที่นั้น **แมโครที่ขยายเป็นการเรียกตัวเอง
 ไม่มีวันสับสนกับสิ่งที่ไม่ใช่แมโคร** การขยายหนึ่งขั้นเป็นอันเดียวกับที่ตัวตรวจสอบชนิดใช้
 ดังนั้นสิ่งที่โปรแกรมเห็นและสิ่งที่ตัวตรวจสอบเห็นไม่เคยต่างกัน
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 สิ่งที่ CL มีแต่ภาษานี้ไม่มี: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

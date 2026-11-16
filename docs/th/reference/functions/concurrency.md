@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Task และ channel
 
 คำศัพท์ของ task (เธรดน้ำหนักเบา) `task` และ `thread` ที่ใช้เริ่ม task และ `select`
@@ -36,7 +36,7 @@ task เป็นแบบ **ร่วมมือ (cooperative)**: task สล�
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | channel ความจุ `n` `0` คือ rendezvous (ไม่มีบัฟเฟอร์) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | รอจนมีที่ว่าง แล้วส่งมอบค่า |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | รอจนค่ามาถึง `none` เมื่อถูกปิดและว่าง |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | รอจนค่ามาถึง `None` เมื่อถูกปิดและว่าง |
 | `close` | `(close ch)` | `(Chan<T>)→()` | ปิด |
 | `len` | `(len ch)` | `(Chan<T>)→int` | ตอนนี้มีกี่ค่าในบัฟเฟอร์ |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | ความจุ |
@@ -62,7 +62,7 @@ task เป็นแบบ **ร่วมมือ (cooperative)**: task สล�
   บั๊กของโปรแกรม ไม่ใช่ความล้มเหลวที่กู้คืนได้ จึงไม่ใช่ `Result`
 - **การปิด channel ที่ task กำลังรอ `send` อยู่ทำให้ task นั้น panic** (กฎของ Go)
 - `recv` บน channel ที่ปิดแล้วคืนสิ่งที่เหลืออยู่ในบัฟเฟอร์ และเมื่อว่างแล้วจะคืน
-  `none` ต่อไปเรื่อย ๆ
+  `None` ต่อไปเรื่อย ๆ
 - `close` ถูกแก้ไขโดยชนิดของตัวรับ จึงเป็นคนละสิ่งกับ `close` ของ
   trait `Stream` `Chan<T>` ไม่ implement `Stream`
 - **ความจุติดลบ panic** (ไม่ถูกปัดเป็น 0 โดยไม่แจ้ง)
@@ -193,8 +193,8 @@ handle ที่ `(thread (f args...))` คืน
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -207,7 +207,7 @@ handle ที่ `(thread (f args...))` คืน
 
 - **การยกเลิกส่งต่อไปยังลูก** คอนเท็กซ์ที่สร้างด้วย `with-cancel`/`with-timeout` จะถูกยกเลิกไปพร้อมกับพ่อแม่ ในทางกลับกัน (จากลูกไปพ่อแม่) จะไม่ส่งต่อ
 - ลูกที่สร้างจากคอนเท็กซ์ที่ถูกยกเลิกไปแล้วจะถูกยกเลิกตั้งแต่แรก
-- `done` ถูกปิดเท่านั้น ไม่มีการส่งค่า การรับจะได้ `none`
+- `done` ถูกปิดเท่านั้น ไม่มีการส่งค่า การรับจะได้ `None`
 - การเรียก `(Context::background)` แต่ละครั้งสร้างรากแยกกัน `Background()` ของ Go มีอันเดียวและยกเลิกไม่ได้ แต่ที่นี่รากก็ยกเลิกได้ และส่งผลเฉพาะสิ่งที่สร้างจากรากนั้น
 - ส่งต่อระหว่างทาสก์และระหว่างเธรดได้
 

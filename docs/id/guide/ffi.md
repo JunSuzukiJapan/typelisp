@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # FFI C (defffi)
 
 Panduan ini menjelaskan cara memanggil fungsi C dari typelisp. Daftar tipe yang dapat dideklarasikan
@@ -68,7 +68,7 @@ aritmetika**. Untuk memakainya sebagai bilangan bulat typelisp, konversikan deng
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
-(try-as i32 (unsafe (c-strlen s)))  ; none if it does not fit in an i32
+(try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```
 

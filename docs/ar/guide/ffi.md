@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # واجهة C الخارجية (defffi)
 
 يشرح هذا الدليل كيفية استدعاء دوال C من typelisp. وقائمة الأنواع التي يمكن إعلانها والقيود موجودة في
@@ -65,7 +65,7 @@
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; لا يفقد int أي شيء من القيمة ذات 64 بت
-(try-as i32 (unsafe (c-strlen s)))  ; none إذا لم تتسع في i32
+(try-as i32 (unsafe (c-strlen s)))  ; None إذا لم تتسع في i32
 (unsafe (c-malloc 16))              ; يمكن تمرير الثوابت الصحيحة كما هي
 ```
 

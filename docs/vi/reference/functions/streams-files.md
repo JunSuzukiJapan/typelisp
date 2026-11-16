@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Stream và tệp
 
 Các trait và phương thức của stream, các kiểu stream cụ thể, thao tác tệp và pathname. Socket mạng cũng là
@@ -30,18 +30,18 @@ Mọi phương thức của `CharInput` đều có triển khai mặc định. M
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Phần tử tiếp theo. `none` ở cuối. **Phương thức duy nhất phải được triển khai** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Phần tử tiếp theo. `None` ở cuối. **Phương thức duy nhất phải được triển khai** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Ký tự tiếp theo |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | Đến dòng mới tiếp theo (dòng mới được tiêu thụ và bỏ đi). Một dòng cuối không kết thúc bằng dòng mới cũng được trả về |
 | `read-all` | `(read-all s)` | `(S)→string` | Mọi thứ còn lại |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Chỉ một ký tự đã có sẵn. `none` thay vì chờ |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Chỉ một ký tự đã có sẵn. `None` thay vì chờ |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Đẩy tối đa `n` ký tự vào `v` và trả về số ký tự thực sự đã đọc. Ít hơn `n` chỉ ở cuối |
 
 `listen` nằm trong `InputStream` (cha của `CharInput`):
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Lần đọc tiếp theo có thể được đáp ứng mà không phải chờ hay không. Mặc định là `false`, **phía không bao giờ nói dối**: `true` sẽ là một phỏng đoán, và một phỏng đoán sai sẽ làm `read-char-no-hang` bị chặn. Mọi stream dựng sẵn đều ghi đè nó. **Với các stream do người dùng định nghĩa mà không ghi đè, `read-char-no-hang` luôn trả về `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | Lần đọc tiếp theo có thể được đáp ứng mà không phải chờ hay không. Mặc định là `false`, **phía không bao giờ nói dối**: `true` sẽ là một phỏng đoán, và một phỏng đoán sai sẽ làm `read-char-no-hang` bị chặn. Mọi stream dựng sẵn đều ghi đè nó. **Với các stream do người dùng định nghĩa mà không ghi đè, `read-char-no-hang` luôn trả về `None`** |
 
 `PeekInput` (kế thừa từ `CharInput`) thêm **việc đẩy lại một ký tự**. Chỉ bản thân stream mới có chỗ để giữ
 ký tự đã đẩy lại, nên điều này không thể có triển khai mặc định và là một trait riêng.
@@ -89,7 +89,7 @@ không biết về các dòng mới mà `println` đã ghi. Hãy chỉ dùng m�
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` là một trong ba hằng số `direction-input` / `direction-output` / `direction-append`. `open-file`
-trả về `(err FileError)` nếu không mở được tệp (một tệp bị thiếu là một kết quả bình thường, không phải
+trả về `(Err FileError)` nếu không mở được tệp (một tệp bị thiếu là một kết quả bình thường, không phải
 panic). Tên tệp có thể là một chuỗi hoặc một `pathname` (`Pathish` ở chương 9).
 
 `(get-output-stream-string s)` trả về những gì đã được ghi vào một `string-output-stream` và làm rỗng nó.
@@ -100,7 +100,7 @@ Như trong CL, nó có thể được lấy ra ngay cả sau `close`.
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` với `ByteInput S` | Byte tiếp theo. `none` ở cuối tệp |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` với `ByteInput S` | Byte tiếp theo. `None` ở cuối tệp |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` với `ByteOutput S` | Ghi một byte. Lỗi nếu ngoài 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` với `ByteInput S` | Phiên bản ký tự, tính bằng byte |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` với `ByteOutput S` | Như trên |
@@ -136,18 +136,18 @@ Tất cả là các `defstruct` trong thư viện chuẩn và có thể lồng n
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` với `CharInput I`,`CharOutput O` | Chuyển mọi thứ |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` với `CharInput S` | Tất cả các dòng còn lại |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` với `PeekInput S` | Đọc một `Sexpr` (`read` của CL). `(ok eof)` ở cuối đầu vào, `(ok (datum d))` khi đọc được một cái, `err` nếu không phải dữ liệu. Nó **tiêu thụ một ký tự khoảng trắng** đã kết thúc datum (như trong CL). `ReadOutcome` không phải là `Option<Sexpr>` để việc đọc danh sách rỗng `()` và cuối đầu vào không phải cùng một giá trị |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` với `PeekInput S` | Đọc một `Sexpr` (`read` của CL). `(Ok eof)` ở cuối đầu vào, `(Ok (Datum d))` khi đọc được một cái, `Err` nếu không phải dữ liệu. Nó **tiêu thụ một ký tự khoảng trắng** đã kết thúc datum (như trong CL). `ReadOutcome` không phải là `Option<Sexpr>` để việc đọc danh sách rỗng `()` và cuối đầu vào không phải cùng một giá trị |
 | `read-sexpr-preserving-whitespace` | Như trên | Như trên | Giống vậy, nhưng để lại khoảng trắng (`read-preserving-whitespace` của CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` với `PeekInput S` | Đọc đến `ch` và tạo một danh sách. `ch` được tiêu thụ. `err` nếu đầu vào hết |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` với `PeekInput S` | Đọc đến `ch` và tạo một danh sách. `ch` được tiêu thụ. `Err` nếu đầu vào hết |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` với `CharOutput S`,`Iter I (Item string)` | Ghi từng dòng một |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` với `Pathish P` | Toàn bộ nội dung |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` với `Pathish P` | Tất cả các dòng |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` với `Pathish P` | Ghi ra |
 | `probe-file` | `(probe-file name)` | `(P)→bool` với `Pathish P` | Nó có tồn tại không |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Xóa, đổi tên (các đối số là `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` với `Pathish P` | Đường dẫn tuyệt đối với liên kết tượng trưng và `.`/`..` đã được phân giải. `err` nếu nó không tồn tại |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` với `Pathish P` | Đường dẫn tuyệt đối với liên kết tượng trưng và `.`/`..` đã được phân giải. `Err` nếu nó không tồn tại |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` với `Pathish P` | Thời điểm sửa đổi cuối cùng. Đó là **universal time**, nên `decode-universal-time` ([Thời gian](system.md#2-giải-mã-và-mã-hóa-ngày-tháng)) đọc được nó |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` với `Pathish P` | Tên đăng nhập của chủ sở hữu. `err` nếu tệp không tồn tại, `(ok none)` nếu uid của chủ sở hữu không có mục trong cơ sở dữ liệu mật khẩu: hai trường hợp mà CL phân biệt được giữ tách bạch |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` với `Pathish P` | Tên đăng nhập của chủ sở hữu. `Err` nếu tệp không tồn tại, `(Ok none)` nếu uid của chủ sở hữu không có mục trong cơ sở dữ liệu mật khẩu: hai trường hợp mà CL phân biệt được giữ tách bạch |
 | `directory-p` | `(directory-p name)` | `(P)→bool` với `Pathish P` | Có phải thư mục không. **Cũng là `false` nếu nó không tồn tại**; hãy dùng `probe-file` để phân biệt hai trường hợp |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` với `Pathish P` | Liệt kê nội dung theo truename (đường dẫn tuyệt đối với liên kết tượng trưng đã phân giải, như `truename`). Các liên kết tượng trưng có đích bị thiếu bị bỏ qua. `.`/`..` bị bỏ qua. Thứ tự là bất cứ thứ gì HĐH đưa ra |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` với `Pathish P` | Tạo nó cùng với các thư mục cha. Thành công nếu nó đã tồn tại |
@@ -200,8 +200,8 @@ rộng), và việc nó có bắt đầu từ gốc hay không.
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   tách ở dấu chấm cuối cùng
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   tách ở dấu chấm cuối cùng
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -228,10 +228,10 @@ tích nào xảy ra.
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Tách một chuỗi thành các phần. Một `/` ở cuối (hoặc một tên rỗng) nghĩa là "không có tên", tức là một thư mục |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Dựng một pathname chỉ từ các thành phần được đưa ra (tất cả là `&key`). Một tên hoặc kiểu bị bỏ qua vẫn "vắng mặt" và là thứ `merge-pathnames` điền vào |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Các thành phần thư mục, ngoài cùng đứng đầu |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Tên không có kiểu. `none` với một thư mục |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Tên không có kiểu. `None` với một thư mục |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Sau dấu chấm cuối cùng. Dấu chấm ở đầu không tính (toàn bộ `.gitignore` là tên) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Nó có bắt đầu từ gốc không |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Thư mục home. `none` nếu không có `$HOME` (CL cũng cho phép `NIL`) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Thư mục home. `None` nếu không có `$HOME` (CL cũng cho phép `NIL`) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Phần đến `/` cuối cùng |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Chỉ phần `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Điền các thành phần còn thiếu của `p` từ `default`. Một `p` tương đối được đặt dưới thư mục của `default`; một `p` tuyệt đối giữ thư mục của chính nó |

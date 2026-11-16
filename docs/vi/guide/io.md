@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Vào/ra tệp, stream và mạng
 
 Tài liệu này trình bày những điều cơ bản về đọc và ghi tệp, pathname, và giao tiếp qua socket. Danh sách
@@ -13,14 +13,14 @@ thiếu không phải là sai sót của chương trình, nên nó không `panic
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; nếu tệp bị thiếu:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
 Khi bạn biết một thao tác không thể thất bại, hoặc trong một script nhỏ mà dừng lại khi thất bại là
-chấp nhận được, `unwrap` lấy giá trị ra. Nếu là `err`, nó panic.
+chấp nhận được, `unwrap` lấy giá trị ra. Nếu là `Err`, nó panic.
 
 ## 2. Đọc và ghi toàn bộ một tệp
 
@@ -29,8 +29,8 @@ Các hàm dễ dùng nhất xử lý cả tệp trong một lần.
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. Đọc và ghi bằng stream
@@ -45,23 +45,23 @@ cách nào, stream đều được đóng. Giá trị là `Result<giá trị c�
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; đọc từng dòng một
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - Có ba hướng để mở một tệp: `direction-input` (đọc), `direction-output` (ghi; nội dung hiện có bị bỏ
   đi) và `direction-append` (nối vào cuối).
-- `read-line` trả về `none` ở cuối tệp.
+- `read-line` trả về `None` ở cuối tệp.
 - Nếu bạn mở tệp bằng `open-file` thay vì `with-open-file`, hãy luôn gọi `close`. GC không đóng
   stream.
 
@@ -77,7 +77,7 @@ lỗi kiểu.
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### Đầu vào và đầu ra chuẩn
@@ -94,8 +94,8 @@ bằng `(:where (CharInput S))` có thể đọc từ một tệp, một chuỗi
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -107,8 +107,8 @@ Các hàm nhận tên tệp chấp nhận hoặc một chuỗi hoặc một `pat
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; chỉ thay phần mở rộng
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -147,14 +147,14 @@ khi có dữ liệu, nên việc xử lý các kết nối khác vẫn tiếp t�
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; phía bên kia đã đóng
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; phía bên kia đã đóng
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` chỉ chấp nhận kết nối từ chính máy này, còn `"0.0.0.0"` chấp nhận trên mọi giao diện
@@ -170,8 +170,8 @@ mạng. Về task, xem [Tham chiếu cú pháp chương 12](../reference/syntax.
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 Để đặt giới hạn thời gian cho một thao tác, hãy truyền `:timeout` (tính bằng giây).
@@ -180,13 +180,13 @@ mạng. Về task, xem [Tham chiếu cú pháp chương 12](../reference/syntax.
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; đặt đồng hồ cho lần đọc tiếp theo
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; đặt đồng hồ cho lần đọc tiếp theo
 ```
 
 ### Khi phía bên kia ngắt kết nối
 
 Nếu phía bên kia đặt lại kết nối hoặc làm rơi nó giữa chừng, nó không `panic`. Các lần đọc sau đó trả về
-`none`, và các lần ghi bị bỏ qua một cách im lặng. Để biết kết nối được đóng gọn gàng hay thất bại,
+`None`, và các lần ghi bị bỏ qua một cách im lặng. Để biết kết nối được đóng gọn gàng hay thất bại,
 hãy kiểm tra `(socket-error c)`.
 
 ## 6. Phân giải tên (DNS)
@@ -195,13 +195,13 @@ Không có hàm riêng để phân giải tên. Truyền một tên host cho `tc
 `send-to` thì việc phân giải diễn ra bên trong chúng. Việc phân giải diễn ra trên một thread khác, nên
 các task khác vẫn chạy trong lúc chờ. Nếu một tên có nhiều địa chỉ, chúng được thử lần lượt.
 
-Nếu không phân giải được tên, một `err` được trả về.
+Nếu không phân giải được tên, một `Err` được trả về.
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -214,12 +214,12 @@ server được xác minh theo các chứng chỉ gốc chuẩn. Kết quả là
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 Một server TLS được tạo bằng cách truyền các tệp chứng chỉ và khóa riêng (PEM) cho `tls-listen`.
@@ -228,8 +228,8 @@ Một server TLS được tạo bằng cách truyền các tệp chứng chỉ v
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; serve của TCP dùng nguyên trạng
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; serve của TCP dùng nguyên trạng
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 Khi thử nghiệm với chứng chỉ tự ký, hãy truyền `:ca-file "cert.pem"` ở phía client để nó tin cậy chứng
@@ -247,8 +247,8 @@ chuyển đổi qua lại với chuỗi bằng `string->utf8` / `utf8->string`.
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -257,5 +257,5 @@ chuyển đổi qua lại với chuỗi bằng `string->utf8` / `utf8->string`.
 ## 9. Unix domain socket
 
 Hãy truyền đường dẫn của tệp socket cho `unix-listen` / `unix-connect`. Giá trị bạn nhận được là cùng
-`socket-stream` như với TCP. `unix-listen` trả về một `err` nếu tệp đã tồn tại. Đóng listener sẽ xóa
+`socket-stream` như với TCP. `unix-listen` trả về một `Err` nếu tệp đã tồn tại. Đóng listener sẽ xóa
 tệp.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Modüller ve Dosya Düzeni
 
 Bu kılavuz, birkaç dosyadan oluşan bir programın nasıl bir araya getirileceğini anlatır. Ayrıntılı
@@ -133,7 +133,7 @@ Modülün kendi tanımınızı kullanmasına karar verdiğinizde, tanımdan önc
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; bu modülün first'ü => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; standart kütüphanenin first'ü => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; standart kütüphanenin first'ü => (Some 1)
 ```
 
 `shadow`'dan sonra o modülde `first` yazmak kendi tanımınızı gösterir. Standart kütüphanenin

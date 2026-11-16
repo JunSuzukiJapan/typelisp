@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Option, Result en foutentypes
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-Constructors: `Option<T>` heeft `(some T)` / `none`. `Result<T,E>` heeft `(ok T)` / `(err E)`. `E` kan
+Constructors: `Option<T>` heeft `(Some T)` / `None`. `Result<T,E>` heeft `(Ok T)` / `(Err E)`. `E` kan
 elk type zijn: de ingebouwde concrete foutentypes, en types die je zelf met `defstruct`/`defenum`
 schrijft, passen er net zo goed (hoofdstuk 3).
 
 | Naam | Vorm | Option | Result | Beschrijving |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Haalt de waarde eruit. Geeft een panic bij `none`/`err` |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Haalt de waarde eruit. Geeft een panic bij `None`/`Err` |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | De waarde, of de standaardwaarde |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Of het `some` is |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Of het `none` is |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Of het `ok` is |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Of het `err` is |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Haalt de waarde eruit. Bij `none`/`err` een panic met `msg` |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | De waarde, of het resultaat van `f`. `f` wordt alleen bij `none`/`err` aangeroepen |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Past `f` toe op de inhoud van `some`/`ok` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Past `f` toe op de inhoud van `err` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Geeft bij `some`/`ok` de inhoud aan `f` en levert het resultaat daarvan op |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Levert bij `none`/`err` het resultaat van `f` op |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Maakt van `(some v)` een `(ok v)` en van `none` een `(err e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Of het `Some` is |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Of het `None` is |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Of het `Ok` is |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Of het `Err` is |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Haalt de waarde eruit. Bij `None`/`Err` een panic met `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | De waarde, of het resultaat van `f`. `f` wordt alleen bij `None`/`Err` aangeroepen |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Past `f` toe op de inhoud van `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Past `f` toe op de inhoud van `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Geeft bij `Some`/`Ok` de inhoud aan `f` en levert het resultaat daarvan op |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Levert bij `None`/`Err` het resultaat van `f` op |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Maakt van `(Some v)` een `(Ok v)` en van `None` een `(Err e)` |
 
-De constructors `some`/`none`/`ok`/`err` zijn in elke module zonder `use` als kale namen te gebruiken.
-Ze kunnen ook met de typenaam worden geschreven, zoals `Option::some`.
+De constructors `Some`/`None`/`Ok`/`Err` zijn in elke module zonder `use` als kale namen te gebruiken.
+Ze kunnen ook met de typenaam worden geschreven, zoals `Option::Some`.
 
 Vertakken schrijf je expliciet met `match`, of je ketent met `map`/`and-then` en de andere
 hierboven. Er is geen syntaxis die overeenkomt met Rusts `?`.
@@ -40,12 +40,12 @@ ketenen zoals ze zijn:
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
+  (if (= 0 (mod n 2)) (Option::Some (truncate n 2)) (Option::None)))
 
-(-> (Option::some 8)
-    (and-then half)                          ; (some 4)
-    (and-then half)                          ; (some 2)
-    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+(-> (Option::Some 8)
+    (and-then half)                          ; (Some 4)
+    (and-then half)                          ; (Some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (Some 20)
     (unwrap-or 0))                           ; => 20
 
 (-> (parse-int "x")
@@ -55,9 +55,9 @@ ketenen zoals ze zijn:
 
 ## 2. De runtime-representatie van `Option<T>`
 
-Net als in Rust **maakt `Option<T>` meestal geen box**. `some v` is `v` zelf en `none` is de waarde
+Net als in Rust **maakt `Option<T>` meestal geen box**. `Some v` is `v` zelf en `None` is de waarde
 van de lege lijst, zonder allocatie en zonder indirectie. `Option<Sexpr>` (waarbij de lege lijst
-`none` is), `Option<int>`, `Option<string>`, `Option<my-struct>`, `Option<f64>` en
+`None` is), `Option<int>`, `Option<string>`, `Option<my-struct>`, `Option<f64>` en
 `Option<(fn ...)>` hebben allemaal deze vorm.
 
 Er wordt alleen een box gebruikt wanneer een waarde van `T` niet van de waarde van de lege lijst kan
@@ -65,19 +65,19 @@ worden onderscheiden:
 
 | `T` | Representatie | Reden |
 |---|---|---|
-| `Option<U>` (genest) | Box | De binnenste `none` zou dezelfde waarde zijn als de buitenste `none` |
+| `Option<U>` (genest) | Box | De binnenste `None` zou dezelfde waarde zijn als de buitenste `None` |
 | `()` | Box | De waarde van `()` is zelf de waarde van de lege lijst |
 | `ptr` / `c-long` / `c-ulong` | Box | Alle 64 bits zijn waarde, zodat er geen ruimte is om ze te onderscheiden |
 | Al het andere | Geen box | — |
 
 De representatie wordt door het type alleen bepaald en kan niet uit een waarde worden gelezen. Bij het
-afdrukken wordt `(some ...)`/`none` uit het statische type gereconstrueerd, dus
-`(format false "~a" opt)` drukt `(some 1)` af. Er zijn twee beperkingen:
+afdrukken wordt `(Some ...)`/`None` uit het statische type gereconstrueerd, dus
+`(format false "~a" opt)` drukt `(Some 1)` af. Er zijn twee beperkingen:
 
 - **Het kan niet in een `:dyn Trait` worden gezet** (een waarde van `Option<int>` waarvoor je
   `(impl Speak Option<int> ...)` schreef doorgeven aan een `:dyn Speak` is een fout).
 - Een downcast `(the Option<T> ...)` vanuit een `Sexpr` **noemt een constructor**:
-  `(the Option<int> (some x))` / `(the Option<int> (none))`. De vorm die de hele waarde bindt,
+  `(the Option<int> (Some x))` / `(the Option<int> (None))`. De vorm die de hele waarde bindt,
   `(the Option<int> o)`, is een fout.
 
 ## 3. Foutentypes en de trait `Error`
@@ -105,7 +105,7 @@ bijzonders aan: ze worden precies zo behandeld als je eigen foutentypes die met
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | De foutmelding (een methode van de trait `Error`) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | De oorzaak die deze fout omhult, of `none` als er geen is (`Error::source` van Rust) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | De oorzaak die deze fout omhult, of `None` als er geen is (`Error::source` van Rust) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` implementeert `Error`) | Verbreedt een concreet foutentype tot het trait-object |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` implementeert `Error`) | De melding en de keten van oorzaken die je vindt door `source` te volgen, één oorzaak per regel. CL heeft geen tegenhanger ("caused by" van Rust) |
 
@@ -117,10 +117,10 @@ ingebouwde fouten worden behandeld:
 (defstruct io-err (path string))
 (impl Error io-err
   (defmethod message (self) string (append "io failed: " self::path))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; the concrete type goes into E as it is
-  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
+  (if (equal p "") (Result::Err (make-instance 'io-err :path "<empty>")) (Result::Ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; handle any kind uniformly
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -135,8 +135,8 @@ is, wordt deze conversie expliciet geschreven:
 (use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
-    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((Err e) (Result::Err e))))
 ```
 
 **Types en traits delen één namespace** (zoals in Rust). Binnen één module kunnen een

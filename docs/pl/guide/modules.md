@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Moduły i układ plików
 
 Ten przewodnik wyjaśnia, jak złożyć program składający się z kilku plików. Szczegółowe reguły znajdują się w
@@ -133,7 +133,7 @@ Gdy zdecydujesz, że moduł ma używać własnej definicji, napisz `shadow` prze
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first tego modułu => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first biblioteki standardowej => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first biblioteki standardowej => (Some 1)
 ```
 
 Po `shadow` napisanie `first` w tym module wskazuje twoją własną definicję. Aby użyć `first` z

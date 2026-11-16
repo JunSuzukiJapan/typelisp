@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Числа
 
 Операції над цілими числами, числами з рухомою комою, раціональними, комплексними числами та булевими
@@ -34,9 +34,9 @@
 | `int->int` | `(int->int x)` | `T→int` | Розширювальне перетворення на `int` (завжди точне). Те, що робить `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Розширювальне перетворення на `ratio` (завжди точне) |
 | `int->char` | `(int->char x)` | `T→char` | Інтерпретує значення як скалярне значення Unicode. Panic на некоректному значенні |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Версія `int->char`, що повертає `none` у разі невдачі |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Версія `int->char`, що повертає `None` у разі невдачі |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Перетворення ширини. Значення, що не вміщуються, обрізаються (як `as` у Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Те саме перетворення у вигляді запитання. `none`, якщо значення не вміщується в цю ширину |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Те саме перетворення у вигляді запитання. `None`, якщо значення не вміщується в цю ширину |
 
 Ці перетворення — це також те, що роблять спеціальні форми `(as Type x)`/`(try-as Type x)`
 ([Довідник із синтаксису](../syntax.md#7-інші-спеціальні-форми)). Бітові операції (`logand`/`ash`/`ldb` тощо)
@@ -144,7 +144,7 @@
 | `float->int` | `(float->int x)` | `f64→int` | Перетворює на `int`, відкидаючи в бік нуля (`truncate` з CL; точно для скінченних значень будь-якого розміру). Panic на нескінченності та NaN. Для фіксованої ширини використовуйте `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Перетворює на `ratio` як точне двійкове раціональне число (`rational` з CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Перетворює між ширинами чисел з рухомою комою. `float->f32` округлює до найближчого, `float->f64` завжди точне. Те, що робить `(as f32 x)` |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Те саме перетворення у вигляді запитання. `none`, якщо округлення змінює значення (розширення до `f64` — завжди `some`). Те, що робить `(try-as f32 x)` |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Те саме перетворення у вигляді запитання. `None`, якщо округлення змінює значення (розширення до `f64` — завжди `Some`). Те, що робить `(try-as f32 x)` |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | Функції з тими самими назвами з CL. Псевдоніми наведених вище `floor`/`ceiling`/`round`/`truncate`: у CL ті, що без префікса, повертають цілі числа, тож ті, що з префіксом `f`, відповідають поведінці цієї мови |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | 2 / 53 / 53 відповідно (лише точність `0.0` дорівнює 0). `f64` — завжди IEEE-754 binary64, тож це константи |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` або `-1.0` |
@@ -225,7 +225,7 @@
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Порівняння |
 | `numerator` `denominator` | `(op x)` | `rational→int` | Чисельник і знаменник нескоротного дробу |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Усічення до нуля, як `ratio`, у `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` для цілого, інакше `none` (`integerp` з CL) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` для цілого, інакше `None` (`integerp` з CL) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Як у `ratio` (показник `expt` — `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Як у `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Як у `ratio` |

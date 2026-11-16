@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Traits
 
 Un trait es una promesa de que "este tipo admite estas operaciones". Los traits permiten que varios tipos
@@ -140,12 +140,12 @@ implemente `Ord`.
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-Dado un `Vector` con valores `money` de 300, 900 y 100 en ese orden, devuelve `(some 900 yen)`.
+Dado un `Vector` con valores `money` de 300, 900 y 100 en ese orden, devuelve `(Some 900 yen)`.
 
 ## 5. `:dyn`: manejar juntos valores de tipos distintos
 

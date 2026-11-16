@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Gestion des erreurs
 
 La gestion des erreurs de typelisp répartit les échecs en deux sortes.
@@ -6,7 +6,7 @@ La gestion des erreurs de typelisp répartit les échecs en deux sortes.
 | Sorte d'échec | Exemples | Comment l'exprimer |
 |---|---|---|
 | Échecs qui peuvent arriver (récupérables) | Un fichier manque, une saisie n'est pas un nombre | Renvoyer un `Result<T,E>` |
-| Erreurs dans le programme (irrécupérables) | Un indice hors limites, `unwrap` sur `none`, une division par zéro | S'arrêter avec `panic` |
+| Erreurs dans le programme (irrécupérables) | Un indice hors limites, `unwrap` sur `None`, une division par zéro | S'arrêter avec `panic` |
 
 S'y ajoutent `catch` / `throw`, qui sortent de plusieurs appels de fonctions d'un coup, et `unwind-protect`, qui
 exécute un nettoyage quelle que soit la façon dont son corps est quitté. Ce chapitre suppose que vous avez lu la
@@ -21,23 +21,23 @@ pas un nombre, ou elle est hors limites.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 L'appelant sépare le succès de l'échec avec `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
 - La valeur d'une fonction qui renvoie un `Result` ne peut pas être utilisée tant que `match` ne traite pas le cas
-  `err`. Oublier de traiter l'échec est une erreur de type.
+  `Err`. Oublier de traiter l'échec est une erreur de type.
 - L'erreur de `parse-int` est une valeur de type `ParseIntError`. `(message e)` donne sa chaîne de message.
 
 ## 2. Transmettre un échec à l'appelant
@@ -48,17 +48,17 @@ Il n'existe pas de raccourci comme le `?` de Rust. Quand on appelle à la suite 
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 Quand on sait qu'une opération ne peut pas échouer, ou dans un petit script où s'arrêter en cas d'échec convient,
-`unwrap` extrait le contenu. Si la valeur est un `err`, c'est un panic. Si une valeur par défaut suffit, utilisez
+`unwrap` extrait le contenu. Si la valeur est un `Err`, c'est un panic. Si une valeur par défaut suffit, utilisez
 `unwrap-or`.
 
 ## 3. Créer son propre type d'erreur
@@ -76,16 +76,16 @@ d'erreur. Un type d'erreur est un `defenum` ou un `defstruct` ordinaire qui impl
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::invalid "workers" n))))
 ```
 
 - `message` renvoie une description de l'erreur.
-- `source` renvoie une autre erreur qui a causé celle-ci. Sans cause, c'est `none`.
+- `source` renvoie une autre erreur qui a causé celle-ci. Sans cause, c'est `None`.
 
 ## 4. Combiner différentes sortes d'erreurs
 
@@ -98,8 +98,8 @@ types d'erreur, et ils ne peuvent pas être tous deux le `E` d'un même `Result<
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 Avec `"4"`, `"-1"` et `"abc"`, les résultats sont :
@@ -129,7 +129,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - Le type de `panic` est `!` (il ne revient pas) ; on peut donc l'écrire partout où un type quelconque est
   attendu. C'est pourquoi les deux branches du `if` ci-dessus concordent.
-- Ces opérations déclenchent aussi un panic : `unwrap` sur `none` ou `err`, `get` avec un indice hors limites et
+- Ces opérations déclenchent aussi un panic : `unwrap` sur `None` ou `Err`, `get` avec un indice hors limites et
   la division entière par zéro.
 - `panic` arrête le programme. Même s'il survient dans une tâche, tout le programme s'arrête.
 - Dans la REPL, un `panic` ne met pas fin à la REPL ; elle attend la saisie suivante.
@@ -197,8 +197,8 @@ source.
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect` : toujours nettoyer

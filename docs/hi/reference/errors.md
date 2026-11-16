@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # त्रुटि संदेश
 
 `typl` के मुख्य त्रुटि संदेशों का अर्थ और उन्हें कैसे ठीक करें।
@@ -98,8 +98,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | संदेश | अर्थ और समाधान |
 |---|---|
 | `panic: divide by zero` | पूर्णांकों या ratio के साथ शून्य से भाग। फ़्लोटिंग-पॉइंट का शून्य से भाग panic नहीं करता; वह `inf`/`NaN` देता है |
-| `panic: unwrap: called on none` | `unwrap` को `none` पर लगाया गया। `none` स्थिति को `match` या `unwrap-or` से संभालें |
-| `panic: Vector: index 5 out of bounds` | सीमा से बाहर इंडेक्स। `len` से लंबाई जाँचें, या ऐसा फ़ंक्शन उपयोग करें जो सीमा से बाहर होने पर `none` लौटाता है (`nth`, `pop` आदि) |
+| `panic: unwrap: called on None` | `unwrap` को `None` पर लगाया गया। `None` स्थिति को `match` या `unwrap-or` से संभालें |
+| `panic: Vector: index 5 out of bounds` | सीमा से बाहर इंडेक्स। `len` से लंबाई जाँचें, या ऐसा फ़ंक्शन उपयोग करें जो सीमा से बाहर होने पर `None` लौटाता है (`nth`, `pop` आदि) |
 | `panic: an integer argument does not fit a fixnum` | इंडेक्स या गिनती लेने वाले आर्ग्युमेंट को ऐसा `int` पास किया गया जो 63 बिट में नहीं समाता |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` चला जबकि उसी टैग का कोई घेरने वाला `catch` नहीं था |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` उसी टैग के ऐसे `catch` तक पहुँचा जो दूसरा प्रकार ले जाता है |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ cf9721837e052276b10b9782b0463a46f75a6640 -->
+<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # typelisp 문서 (한국어)
 
 typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최상위의 [README.md](../../README.md)(영어)를
@@ -43,46 +43,46 @@ typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최�
     (make-instance 'Pair :first self::second :second self::first)))
 
 (defun largest<T> ((xs Vector<T>)) Option<T> (:where (Ord T))
-  (let ((best (the Option<T> (Option::none))))
+  (let ((best (the Option<T> (Option::None))))
     (doiter (x (iter xs))
-      (setf best (Option::some (match best
-                                 ((some b) (if (> x b) x b))
-                                 ((none) x)))))
+      (setf best (Option::Some (match best
+                                 ((Some b) (if (> x b) x b))
+                                 ((None) x)))))
     best))
 
 (let ((p (swap (make-instance 'Pair :first 1 :second "one"))))
   (println "~a ~a" p::first p::second))                       ; one 1
 
-(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (some 9)
-(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (some pear)
+(println "~a" (largest (the Vector<int> #(3 9 4))))           ; (Some 9)
+(println "~a" (largest (the Vector<string> #("pear" "fig")))) ; (Some pear)
 ```
 
 ### nil 대신 Option과 Result
 
-`nil`은 없다. 값이 없을 수 있으면 `Option<T>`를, 실패할 수 있으면 `Result<T,E>`를 반환하고, `match`로 내용을 꺼낸다. `Option<string>`을 `string`처럼 쓰거나 `match`에서 `none`인 경우를 빠뜨리면 실행하기 전에 타입 오류가 된다. 자세한 내용은 [타입의 기초](tutorial/types.md), [오류 처리](tutorial/errors.md) 문서를 참조한다.
+`nil`은 없다. 값이 없을 수 있으면 `Option<T>`를, 실패할 수 있으면 `Result<T,E>`를 반환하고, `match`로 내용을 꺼낸다. `Option<string>`을 `string`처럼 쓰거나 `match`에서 `None`인 경우를 빠뜨리면 실행하기 전에 타입 오류가 된다. 자세한 내용은 [타입의 기초](tutorial/types.md), [오류 처리](tutorial/errors.md) 문서를 참조한다.
 
 ```lisp
 (use std::num::parse-int)
 (defun find-user ((id int)) Option<string>
   (case id
-    (1 (Option::some "alice"))
-    (2 (Option::some "bob"))
-    (:else (Option::none))))
+    (1 (Option::Some "alice"))
+    (2 (Option::Some "bob"))
+    (:else (Option::None))))
 
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (<= 1 n 65535)
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (<= 1 n 65535)
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 
 (match (find-user 3)
-  ((some name) (println "user: ~a" name))
-  ((none) (println "not found")))        ; not found
+  ((Some name) (println "user: ~a" name))
+  ((None) (println "not found")))        ; not found
 
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))     ; error: port out of range: 99999
 ```
 
 ### `->`로 처리 잇기
@@ -93,14 +93,14 @@ typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최�
 (use std::num::parse-int)
 (defun half ((n int)) Option<int>
   (if (= 0 (mod n 2))
-      (Option::some (truncate n 2))
-      (Option::none)))
+      (Option::Some (truncate n 2))
+      (Option::None)))
 
 (println "~a"
-  (-> (Option::some 40)
-      (and-then half)                          ; (some 20)
-      (and-then half)                          ; (some 10)
-      (map (lambda ((x int)) int (+ x 1)))     ; (some 11)
+  (-> (Option::Some 40)
+      (and-then half)                          ; (Some 20)
+      (and-then half)                          ; (Some 10)
+      (map (lambda ((x int)) int (+ x 1)))     ; (Some 11)
       (unwrap-or 0)))                          ; 11
 
 (println "~a"

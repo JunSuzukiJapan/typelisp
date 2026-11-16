@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Makrolar
 
 Bir makro, bir program alıp bir program döndüren fonksiyondur. Makrolar, fonksiyonların ifade
@@ -44,7 +44,7 @@ ilerlemenin en hızlı yoludur.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Açılımların da türleri denetlenir
@@ -121,14 +121,14 @@ Aynı şekilde, gövdesini belirli sayıda tekrarlayan bir makro şöyle yazıla
 
 Bir makro gövdesi sıradan typelisp kodudur; bu yüzden bağımsız değişkenlerini `if` ya da `match` ile
 inceleyip farklı bir açılım oluşturabilir. Bağımsız değişkenler S-ifade verisidir
-(`Option<Sexpr>`) ve boş liste `none`'dur.
+(`Option<Sexpr>`) ve boş liste `None`'dur.
 
 Tüm koşulları doğruysa `true` döndüren `my-and`'i yapalım.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
+    ((None) 'true)                                    ; no arguments
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; just one

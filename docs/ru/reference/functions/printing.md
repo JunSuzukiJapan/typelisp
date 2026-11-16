@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Печать
 
 `print`/`println`/`format`, функции печати с одним аргументом, красивая печать, `print-object` и переменные,
@@ -40,18 +40,18 @@ CL)**. Первый аргумент (у `format` — второй) — **упр
 стандартный вывод, вызывая эти функции. `print`/`println`/`format` отправляют свой вывод при каждом вызове (чтобы
 приглашение было видно до чтения стандартного ввода, даже через конвейер).
 
-**`Option<Sexpr>` печатается прозрачно.** Тип данных S-выражений — `Option<Sexpr>`, поэтому обёртка `(some x)` в
+**`Option<Sexpr>` печатается прозрачно.** Тип данных S-выражений — `Option<Sexpr>`, поэтому обёртка `(Some x)` в
 выводе не появляется, и содержимое печатается как есть. Пустой список печатается как `()`. Прочие `Option<T>`
-печатаются как `(some ...)` / `none`. То же относится к полям `Option<T>` внутри структур, перечислений и `Vector`.
-`Result<Option<Sexpr>,…>` из `(eval ...)` печатается как `(ok 42)`, или `(ok ())` для `none`.
+печатаются как `(Some ...)` / `None`. То же относится к полям `Option<T>` внутри структур, перечислений и `Vector`.
+`Result<Option<Sexpr>,…>` из `(eval ...)` печатается как `(Ok 42)`, или `(Ok ())` для `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -307,10 +307,10 @@ CL использует `nil` для «без ограничения», но в 
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a указывает на само a
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a указывает на само a
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Метки **начинаются заново с 1 для каждой печати** (как в CL). Даже без цикла, если один и тот же объект встречается

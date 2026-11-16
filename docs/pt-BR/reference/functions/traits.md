@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Traits padrão
 
 Os traits para iteração, comparação, aritmética e adição e remoção de elementos. Os outros traits padrão estão nos seus próprios capítulos:
@@ -161,7 +161,7 @@ objeto trait, como em `:dyn Push<int>`.
   (defmethod pop (self) Option<Item>))
 ```
 
-Uma coleção da qual se pode retirar o último elemento adicionado com `push`. `none` quando está
+Uma coleção da qual se pode retirar o último elemento adicionado com `push`. `None` quando está
 vazia. Uma função genérica a pede com `(:where (Pop C (Item T)))`.
 
 | Tipo | O que `pop` faz |
@@ -178,8 +178,8 @@ Um `HashSet<T>` não tem “último elemento”, então é `Push` mas não `Pop`
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

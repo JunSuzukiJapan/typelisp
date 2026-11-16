@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Task'ler ve Kanallar
 
 Task'lerin (hafif thread'lerin) sözcük dağarcığı. Onları başlatan `task` ve `thread` ile birkaç şeyi
@@ -35,7 +35,7 @@ diğer thread'lere çıkar). Nerede geçiş yaptıkları ve bunun Go'dan farkı
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | `n` kapasiteli bir kanal. `0` bir buluşmadır (tampon yok) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Yer olana kadar bekler, sonra değeri teslim eder |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Bir değer gelene kadar bekler. Kapatılıp boşaldığında `none` |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Bir değer gelene kadar bekler. Kapatılıp boşaldığında `None` |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Kapatır |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Şu anda tamponda kaç değer olduğu |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | Kapasite |
@@ -62,7 +62,7 @@ durum, burada `(Chan::new 0)` ve `(Chan::new 16)` olarak yazılır.
   gibi). Bunlar programdaki hatalardır, kurtarılabilir başarısızlıklar değildir; bu yüzden `Result`
   değildirler.
 - **Bir task'in `send` için beklediği kanalı kapatmak, o task'in panic olmasına yol açar** (Go'nun kuralı).
-- Kapalı bir kanalda `recv`, tamponda kalanı döndürür ve boşaldığında `none` döndürmeye devam eder.
+- Kapalı bir kanalda `recv`, tamponda kalanı döndürür ve boşaldığında `None` döndürmeye devam eder.
 - `close`, alıcının türüne göre çözümlenir; bu yüzden `Stream` trait'inin `close`'undan farklı bir
   şeydir. `Chan<T>`, `Stream`'i gerçekleştirmez.
 - **Negatif bir kapasite panic olur** (sessizce 0'a yuvarlanmaz).
@@ -196,8 +196,8 @@ denetleyerek ya da `done`'dan alarak fark eder.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -211,7 +211,7 @@ denetleyerek ya da `done`'dan alarak fark eder.
 - **İptal çocuklara ulaşır.** `with-cancel`/`with-timeout` ile oluşturulan bir bağlam, ebeveyniyle
   birlikte iptal edilir. Ters yönde (çocuktan ebeveyne) gitmez.
 - Zaten iptal edilmiş bir bağlamdan oluşturulan çocuk baştan iptal edilmiş olur.
-- `done` yalnızca kapatılır; değer gönderilmez. Alma işlemi `none` döndürür.
+- `done` yalnızca kapatılır; değer gönderilmez. Alma işlemi `None` döndürür.
 - Her `(Context::background)` çağrısı ayrı bir kök oluşturur. Go'nun `Background()`'ı tektir ve
   iptal edilemez; burada bir kök de iptal edilebilir ve bu yalnızca ondan oluşturulanları etkiler.
 - Bir bağlam görevler arasında ve iş parçacıkları arasında aktarılabilir.

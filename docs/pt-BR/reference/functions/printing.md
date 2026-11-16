@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Impressão
 
 `print`/`println`/`format`, as impressoras de um argumento, o pretty printer, `print-object` e as variáveis que
@@ -42,18 +42,18 @@ programa escreve na saída padrão chamando estas. `print`/`println`/`format` en
 (para que um prompt fique visível antes de a entrada padrão ser lida, mesmo através de um pipe).
 
 **`Option<Sexpr>` é impresso de forma transparente.** O tipo dos dados de expressões S é `Option<Sexpr>`, então
-o invólucro `(some x)` não aparece na saída e o conteúdo é impresso como está. A lista vazia é impressa como
-`()`. Os outros `Option<T>` são impressos como `(some ...)` / `none`. O mesmo vale para campos `Option<T>`
+o invólucro `(Some x)` não aparece na saída e o conteúdo é impresso como está. A lista vazia é impressa como
+`()`. Os outros `Option<T>` são impressos como `(Some ...)` / `None`. O mesmo vale para campos `Option<T>`
 dentro de estruturas, enumerações e `Vector`. Um `Result<Option<Sexpr>,…>` de `(eval ...)` é impresso como
-`(ok 42)`, ou `(ok ())` para `none`.
+`(Ok 42)`, ou `(Ok ())` para `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -312,10 +312,10 @@ podem ser mudadas depois de criadas, então uma lista como `'(1 2 3)` nunca pode
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a aponta para o próprio a
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a aponta para o próprio a
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Os rótulos **recomeçam de 1 a cada coisa impressa** (como no CL). Mesmo sem ciclo, se o mesmo objeto aparecer

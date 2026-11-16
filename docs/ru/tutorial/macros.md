@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Макросы
 
 Макрос — это функция, которая принимает программу и возвращает программу. Макросы позволяют создавать новый
@@ -42,7 +42,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Раскрытия тоже проверяются по типам
@@ -118,14 +118,14 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 ## 5. Раскрытие, зависящее от аргументов
 
 Тело макроса — обычный код typelisp, поэтому оно может исследовать аргументы с помощью `if` или `match` и строить
-разные раскрытия. Аргументы — данные S-выражений (`Option<Sexpr>`), а пустой список — это `none`.
+разные раскрытия. Аргументы — данные S-выражений (`Option<Sexpr>`), а пустой список — это `None`.
 
 Создадим `my-and`, который возвращает `true`, если все его условия истинны.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; нет аргументов
+    ((None) 'true)                                    ; нет аргументов
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; ровно один

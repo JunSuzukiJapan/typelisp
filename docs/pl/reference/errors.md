@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Komunikaty o błędach
 
 Co oznaczają główne komunikaty o błędach z `typl` i jak je naprawić.
@@ -100,8 +100,8 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | Komunikat | Znaczenie i naprawa |
 |---|---|
 | `panic: divide by zero` | Dzielenie przez zero na liczbach całkowitych lub ułamkach. Dzielenie zmiennoprzecinkowe przez zero nie powoduje panic; daje `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` zastosowano do `none`. Obsłuż przypadek `none` za pomocą `match` lub `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | Indeks poza zakresem. Sprawdź długość za pomocą `len` albo użyj funkcji zwracającej `none` poza zakresem (`nth`, `pop` i tak dalej) |
+| `panic: unwrap: called on None` | `unwrap` zastosowano do `None`. Obsłuż przypadek `None` za pomocą `match` lub `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | Indeks poza zakresem. Sprawdź długość za pomocą `len` albo użyj funkcji zwracającej `None` poza zakresem (`nth`, `pop` i tak dalej) |
 | `panic: an integer argument does not fit a fixnum` | `int`, który nie mieści się w 63 bitach, przekazano do argumentu przyjmującego indeks lub liczbę |
 | `throw: no enclosing (catch 'oops) for this throw` | Wykonano `throw` bez otaczającego `catch` z tym samym znacznikiem |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` dotarł do `catch` z tym samym znacznikiem, który niesie inny typ |

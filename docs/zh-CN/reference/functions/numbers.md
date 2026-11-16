@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -28,9 +28,9 @@
 | `int->int` | `(int->int x)` | `T→int` | 扩展转换为 `int`（总是精确的）。`(as int x)` 的实质 |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | 扩展转换为 `ratio`（总是精确的） |
 | `int->char` | `(int->char x)` | `T→char` | 解释为 Unicode 标量值。非法值时 panic |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 用 `none` 返回 `int->char` 失败的版本 |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 用 `None` 返回 `int->char` 失败的版本 |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | 宽度转换。放不下的值被截断（与 Rust 的 `as` 相同） |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 把同样的转换作为询问。值放不进该宽度时为 `none` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 把同样的转换作为询问。值放不进该宽度时为 `None` |
 
 这些转换也是特殊形式 `(as Type x)`/`(try-as Type x)`（[语法参考](../syntax.md#7-其他特殊形式)）的实质。位运算
 （`logand`/`ash`/`ldb` 等）和谓词（`zerop`/`evenp` 等）在各类型间形式相同，所以归到第 11 章和第 9 章。
@@ -123,7 +123,7 @@ CL 的 `integer`，也就是这门语言的**整数**——未注解的整数字
 | `float->int` | `(float->int x)` | `f64→int` | 向零截断转换为 `int`（CL 的 `truncate`；任何大小的有限值都是精确的）。无穷大和 NaN 时 panic。需要固定宽度时用 `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 作为精确的二进制有理数转换为 `ratio`（CL 的 `rational`） |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮点宽度的转换。`float->f32` 舍入到最近，`float->f64` 总是精确的。`(as f32 x)` 的实质 |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 把同样的转换作为询问。舍入会改变值时为 `none`（扩展到 `f64` 总是 `some`）。`(try-as f32 x)` 的实质 |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 把同样的转换作为询问。舍入会改变值时为 `None`（扩展到 `f64` 总是 `Some`）。`(try-as f32 x)` 的实质 |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL 的同名函数。上面 `floor`/`ceiling`/`round`/`truncate` 的别名——在 CL 中不带前缀的返回整数，所以带 `f` 的才符合本语言的行为 |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | 分别为 2 / 53 / 53（只有 `0.0` 的 precision 是 0）。`f64` 总是 IEEE-754 binary64，所以是常量 |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` 或 `-1.0` |
@@ -200,7 +200,7 @@ CL 的整数是分母为 1 的有理数，因此 `int` 也有 `numerator`（自�
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | 比较 |
 | `numerator` `denominator` | `(op x)` | `rational→int` | 既约的分子和分母 |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | 向零截断、作为 `ratio`、转为 `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 是整数时为 `(some n)`，否则为 `none`（CL 的 `integerp`） |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 是整数时为 `(Some n)`，否则为 `None`（CL 的 `integerp`） |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | 与 `ratio` 相同（`expt` 的指数为 `int`） |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | 与 `ratio` 相同 |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | 与 `ratio` 相同 |

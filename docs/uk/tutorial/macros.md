@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Макроси
 
 Макрос — це функція, що приймає програму й повертає програму. Макроси дозволяють створювати новий
@@ -43,7 +43,7 @@ Lisp. Цей розділ припускає, що ви прочитали «С�
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Розгортання теж перевіряються за типами
@@ -121,14 +121,14 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 
 Тіло макроса — це звичайний код typelisp, тому воно може досліджувати свої аргументи через `if` чи
 `match` і будувати різні розгортання. Аргументи — це дані у вигляді S-виразів (`Option<Sexpr>`), а
-порожній список — це `none`.
+порожній список — це `None`.
 
 Створимо `my-and`, що повертає `true`, якщо всі його умови істинні.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
+    ((None) 'true)                                    ; no arguments
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; just one

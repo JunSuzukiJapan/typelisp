@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Thông báo lỗi
 
 Ý nghĩa của các thông báo lỗi chính từ `typl` và cách sửa chúng.
@@ -100,8 +100,8 @@ Các sai sót được phát hiện trước khi chạy. Dạng đó không đư
 | Thông báo | Ý nghĩa và cách sửa |
 |---|---|
 | `panic: divide by zero` | Chia cho không với số nguyên hoặc ratio. Phép chia dấu phẩy động cho không không panic; nó cho `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` được áp dụng cho `none`. Hãy xử lý trường hợp `none` bằng `match` hoặc `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | Chỉ số ngoài phạm vi. Kiểm tra độ dài bằng `len`, hoặc dùng một hàm trả về `none` khi ngoài phạm vi (`nth`, `pop`, v.v.) |
+| `panic: unwrap: called on None` | `unwrap` được áp dụng cho `None`. Hãy xử lý trường hợp `None` bằng `match` hoặc `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | Chỉ số ngoài phạm vi. Kiểm tra độ dài bằng `len`, hoặc dùng một hàm trả về `None` khi ngoài phạm vi (`nth`, `pop`, v.v.) |
 | `panic: an integer argument does not fit a fixnum` | Một `int` không vừa trong 63 bit được truyền cho một đối số nhận chỉ số hoặc số đếm |
 | `throw: no enclosing (catch 'oops) for this throw` | Một `throw` chạy mà không có `catch` bao quanh cùng tag |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Một `throw` đến một `catch` cùng thẻ nhưng mang kiểu khác |

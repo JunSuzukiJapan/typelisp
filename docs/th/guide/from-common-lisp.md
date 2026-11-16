@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # สำหรับโปรแกรมเมอร์ Common Lisp
 
 typelisp สืบทอดไวยากรณ์และชื่อฟังก์ชันจำนวนมากของ Common Lisp (CL) แต่เป็นภาษาที่มี
@@ -19,12 +19,12 @@ typelisp สืบทอดไวยากรณ์และชื่อฟั�
 - **ไม่สามารถละกิ่ง else ของ `if` ได้** `(if c x)` เป็นข้อผิดพลาด เมื่อไม่ต้องการกิ่ง else
   ให้ใช้ `when` / `unless`
 - **"ไม่มีค่า" แสดงด้วย `Option<T>`** ฟังก์ชันที่ใน CL คืน nil เพื่อหมายถึง "ไม่พบ"
-  ในที่นี้จะคืน `(some x)` หรือ `none`
+  ในที่นี้จะคืน `(Some x)` หรือ `None`
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - ลิสต์ว่าง `()` ขึ้นกับบริบท อาจเป็นค่าของชนิด Unit (ค่าที่ฟังก์ชันซึ่งไม่คืนอะไรคืนมา)
@@ -96,7 +96,7 @@ typelisp ไม่แยกเนมสเปซของฟังก์ชั�
 ## 4. ลิสต์และ Vector
 
 สิ่งที่สอดคล้องกับลิสต์ของ CL คือ **ข้อมูล S-expression** ซึ่งมีชนิด `Option<Sexpr>` (ลิสต์ว่าง
-คือ `none`) `(list 1 2 3)` และ `'(a b c)` มีชนิดนี้ ข้อมูล S-expression เป็นสิ่งที่แมโครและ
+คือ `None`) `(list 1 2 3)` และ `'(a b c)` มีชนิดนี้ ข้อมูล S-expression เป็นสิ่งที่แมโครและ
 `read` ทำงานด้วย สำหรับที่เก็บข้อมูลทั่วไป ให้ใช้ **`Vector<T>`**
 
 | สิ่งที่ต้องการ | CL | typelisp |
@@ -174,17 +174,17 @@ typelisp ไม่แยกเนมสเปซของฟังก์ชั�
 ไม่มี `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error` หรือ `signal`
 สิ่งเหล่านี้เข้ากับระบบชนิดแบบสถิตได้ไม่ดี แทนที่จะเป็นเช่นนั้น ใช้สองอย่างนี้สำหรับจุดประสงค์ที่ต่างกัน:
 
-- **ความล้มเหลวที่กู้คืนได้คืน `Result<T,E>`** ผู้เรียกแยก `ok` / `err` ด้วย `match`
+- **ความล้มเหลวที่กู้คืนได้คืน `Result<T,E>`** ผู้เรียกแยก `Ok` / `Err` ด้วย `match`
   ไม่มีทางลัดอย่าง `?` ของ Rust
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **ความล้มเหลวที่กู้คืนไม่ได้ (บั๊ก) คือ `panic`** `(panic "message")`, การส่ง `none` ให้ `unwrap`,
+- **ความล้มเหลวที่กู้คืนไม่ได้ (บั๊ก) คือ `panic`** `(panic "message")`, การส่ง `None` ให้ `unwrap`,
   การหารด้วย 0 และดัชนีที่เกินช่วงเป็นกรณีประเภทนี้ และโปรแกรมจะหยุด การล้างทรัพยากรของ
   `unwind-protect` จะรันก่อนหยุด
 

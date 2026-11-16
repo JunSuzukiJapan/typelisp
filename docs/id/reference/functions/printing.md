@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -45,18 +45,18 @@ mengirim keluarannya pada setiap pemanggilan (agar prompt terlihat sebelum masuk
 bahkan melalui pipe).
 
 **`Option<Sexpr>` dicetak secara transparan.** Tipe data S-expression adalah `Option<Sexpr>`, sehingga
-pembungkus `(some x)` tidak muncul pada keluaran dan isinya dicetak apa adanya. Daftar kosong dicetak
-sebagai `()`. `Option<T>` lainnya dicetak sebagai `(some ...)` / `none`. Hal yang sama berlaku untuk
+pembungkus `(Some x)` tidak muncul pada keluaran dan isinya dicetak apa adanya. Daftar kosong dicetak
+sebagai `()`. `Option<T>` lainnya dicetak sebagai `(Some ...)` / `None`. Hal yang sama berlaku untuk
 field `Option<T>` di dalam struct, enum, dan `Vector`. `Result<Option<Sexpr>,…>` dari `(eval ...)`
-dicetak sebagai `(ok 42)`, atau `(ok ())` untuk `none`.
+dicetak sebagai `(Ok 42)`, atau `(Ok ())` untuk `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -319,10 +319,10 @@ melingkar):
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a points to a itself
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a points to a itself
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Label **dimulai lagi dari 1 untuk setiap hal yang dicetak** (seperti di CL). Bahkan tanpa siklus,

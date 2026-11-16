@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -83,7 +83,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   Hesaplanmış değerlerden bir demet kurmak için `(tuple a b)` kullanılır. S-ifadesi verisi beklenen
   yerlerde, tüm öğeleri veri olan bir demettir: `Sexpr`'in `tuple` varyantı.
 - **Öznitelikler**: `#[test]`, sonraki forma bağlanan bir işarettir (Rust'taki gibi yazılır). Şimdilik tek öznitelik `test`'tir ve bir `defun` üzerine konur ([3.16 `#[test]`](#316-test--test-fonksiyonları)). `read` ile okunduğunda `(%internal::attribute (test) form)` listesi olur.
-- **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `none`'ı.
+- **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `None`'ı.
   **`Sexpr`'in boş liste varyantı yoktur**: `Sexpr`, "boş olmayan bir S-ifade" demektir ve S-ifade
   verisinin türü `Option<Sexpr>`'dir ([4.3 match](#43-match--örüntü-eşleme) içindeki "`Option<Sexpr>`
   için örüntüler"e bakın).
@@ -154,7 +154,7 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
   Bir trait'in `:dyn` ile kullanılması için karşılaması gereken koşullar için
   [3.9 deftrait / impl](#39-deftrait--impl--traitler)'a bakın. `:dyn`'i bir tür konumunun dışına yazmak
   hatadır.
-- Yerleşik jenerik türler: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
+- Yerleşik jenerik türler: `Option<T>` (`(Some T)` / `None`), `Result<T,E>` (`(Ok T)` / `(Err E)`),
   `HashTable<K,V>`, `Vector<T>` ve eşzamanlılık türleri `Task<T>` / `Thread<T>` / `Chan<T>`
   ([12. bölüm](#12-eşzamanlılık-taskler)). S-ifade verisinin türü olan `Sexpr` de vardır. Yerleşik somut
   hata türleri `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` /
@@ -192,7 +192,7 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; no default
-    (match suffix ((some s) (append name s)) ((none) name)))         ; Option<string> in the body
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; Option<string> in the body
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; with a default
   (pow 3)      ; n = 2
@@ -202,8 +202,8 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
   (mk :b "q")  ; the caller writes `:name value`, in any order; omitted ones take their defaults
   ```
 
-  - **Varsayılan ifadesi olmayan bir parametrenin türü `Option<Type>`'dır.** Atlanırsa `none`'dır;
-    geçirilirse çağıranın yazdığı çıplak değer otomatik olarak `some` içine sarılır. CL'nin bir supplied-p
+  - **Varsayılan ifadesi olmayan bir parametrenin türü `Option<Type>`'dır.** Atlanırsa `None`'dır;
+    geçirilirse çağıranın yazdığı çıplak değer otomatik olarak `Some` içine sarılır. CL'nin bir supplied-p
     değişkeniyle yaptığı şey ("sağlandı mı?") bunun yerine statik türün tarafında görünür.
   - Bir varsayılan ifadesi varsa tür, bildirildiği gibi `Type` kalır. Atlandığında o **denetlenmiş ifade**
     çağrıya olduğu gibi gömülür (her çağrıda değerlendirilir).
@@ -405,7 +405,7 @@ değişkenler. Aşağıdakilerin her biri hatadır:
 
 ```lisp
 (defstruct handle (p ptr))          ; a struct field
-(defenum maybe (none) (some ptr))   ; an enum field
+(defenum maybe (None) (Some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
 (defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
@@ -862,8 +862,8 @@ Ad konumuna bir `(Name option...)` listesi yazmak seçenekleri belirtir (CL ile 
 
 ; generic
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - Her varyant `(VariantName FieldType...)` biçimindedir. Alanlar yalnızca konumsaldır (adları yoktur). En az
@@ -874,8 +874,8 @@ Ad konumuna bir `(Name option...)` listesi yazmak seçenekleri belirtir (CL ile 
   bir `_` içermelidir):
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - Metotlar ve statik metotlar `defstruct`'taki gibi `impl`'e (3.5) yazılır.
 - Enum'un kendisini `pub` yapmak için `(pub defenum ...)` yazın.
@@ -1064,7 +1064,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 
 - `module` bir ad alanı oluşturur. **Türler ad alanı değildir** (Rust'taki gibi bir türün yalnızca statik
   metotları ve metotları vardır).
-- `(use Type)` yalnızca türün adını getirir. Bir enum'un varyantları ve statik metotlar, `Option::some`
+- `(use Type)` yalnızca türün adını getirir. Bir enum'un varyantları ve statik metotlar, `Option::Some`
   ya da `Chan::new` gibi türün adı üzerinden yazılır. `(use std::sync::Chan)`'dan sonra bile, bir yerde
   `new` adlı bir fonksiyon tanımlanmadıkça çıplak `(new 1)` hatadır.
 - Bir türün yapıcılarını ve statik metotlarını çıplak adla kullanmak için onları
@@ -1074,7 +1074,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 - Aynı çıplak ad iki farklı türden getirilemez (`(use std::sync::Chan::* std::sync::WaitGroup::*)`
   hatadır, çünkü ikisinde de `new` vardır). Modülün tanımladığı bir fonksiyon, global değişken ya da
   makroyla aynı adı getirmek de hatadır. Bilerek değiştirmek için `shadowing-import` kullanılır.
-- Standart kütüphane `Option`'ın `some`/`none`'ını ve `Result`'ın `ok`/`err`'ini her modüle sunar; bu
+- Standart kütüphane `Option`'ın `Some`/`None`'ını ve `Result`'ın `Ok`/`Err`'ini her modüle sunar; bu
   yüzden `use` olmadan çıplak adla kullanılabilirler (Rust'ın prelude'unun `Some`/`None`/`Ok`/`Err`'i
   getirmesi gibi).
 - **Bir adın tek bir anlamı vardır.** Fonksiyonlar, global değişkenler ve makrolar tek bir ad alanını
@@ -1238,20 +1238,20 @@ bölümündedir.
   (assert-equal (+ 1 2) 3))
 ```
 
-`#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `err` döndürdüğünde başarısız olur ve hata gösterilir; bu yüzden `E`, `Error` ya da `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi). Bir `Error`, `describe-error` ile (mesaj ve nedenler zinciri), diğer her şey `print-object` ile gösterilir. `:dyn Error` de bir `Error` olduğundan, bir test farklı hataları tek bir türde toplayıp döndürebilir.
+`#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `Err` döndürdüğünde başarısız olur ve hata gösterilir; bu yüzden `E`, `Error` ya da `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi). Bir `Error`, `describe-error` ile (mesaj ve nedenler zinciri), diğer her şey `print-object` ile gösterilir. `:dyn Error` de bir `Error` olduğundan, bir test farklı hataları tek bir türde toplayıp döndürebilir.
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **Sıradan bir çalıştırma ve `compile-file` onu atlar**; içeriğini denetlemez bile (Rust'ın testleri yalnızca `--test` altında derlemesi gibi). Programın kendisi bir test fonksiyonunu çağıramaz.
 - Bir test, fonksiyon barındıran herhangi bir dosyaya, herhangi bir `module` içine yazılabilir. Testler ayrıca projenin `tests/` klasöründe ayrı tutulabilir.
-- Bir test, `panic`, bir çalışma zamanı hatası ya da `err` döndürmesiyle başarısız olur. Denetim için `assert` ya da iki tarafı da yazdıran `assert-equal` kullanılır ([Sistem](functions/system.md)). Bir test başarısız olduğunda geri kalanlar yine çalışır.
+- Bir test, `panic`, bir çalışma zamanı hatası ya da `Err` döndürmesiyle başarısız olur. Denetim için `assert` ya da iki tarafı da yazdıran `assert-equal` kullanılır ([Sistem](functions/system.md)). Bir test başarısız olduğunda geri kalanlar yine çalışır.
 
 ```sh
 typl test                 # bu klasördeki projenin tüm testlerini çalıştır
@@ -1400,7 +1400,7 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   olmayan türleri (`defstruct` örnekleri, globaller, hesaplanan sonuçlar) karşılaştırmanın tek yolu ve
   kullanıcı tanımlı bir `Equal` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
-- `(Ctor sub-pattern...)` — yapıcı örüntüleri (`(some x)` `(none)` `(cons a d)` `(ok v)` vb.)
+- `(Ctor sub-pattern...)` — yapıcı örüntüleri (`(Some x)` `(None)` `(cons a d)` `(Ok v)` vb.)
 - `(Type :slot pattern... :slot...)` — yapı desenleri. Yuvaları tür adından sonra anahtar sözcük olarak
   yazın. Bir anahtar sözcüğü bir desen izliyorsa o yuva desenle eşleştirilir; ardından başka bir anahtar
   sözcük geliyor ya da hiçbir şey gelmiyorsa yuva kendi adındaki bir değişkene bağlanır. Yazılmayan
@@ -1411,14 +1411,14 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; x'i bağlar ve y'yi (some b) ile eşleştirir
+      ((point :x :y (Some b)) (+ x b))   ; x'i bağlar ve y'yi (Some b) ile eşleştirir
       ((point :x a) a)))                 ; a'yı bağlar
   ```
 - `#{p0 p1 ...}` — bir demet örüntüsü. Her öğe kendi alt örüntüsüyle eşleştirilir. Bir `Sexpr`'e
   karşı yalnızca aynı sayıda öğeli `#{..}` verisiyle eşleşir
 - `(:or p1 p2 ...)` — bir veya-örüntüsü: seçeneklerden herhangi biri eşleşince eşleşir. Gövde
   tektir, bu yüzden her seçenek aynı değişkenleri aynı türlerle bağlamalıdır. Bir yapıcı örüntüsünün
-  içine de yazılabilir (`(some (:or (circle r) (rect r _)))`)
+  içine de yazılabilir (`(Some (:or (circle r) (rect r _)))`)
 
 `Equal`'i gerçekleştirmeyen bir türü bir değer sabitiyle / `(:= expr)` ile karşılaştırmak tür hatasıdır (bu
 dil, sessizce asla eşleşmeyen bir kolu bırakmak yerine "bunlar karşılaştırılamaz" demeyi seçer).
@@ -1480,8 +1480,8 @@ dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıka
   yansır.
 
 **`Option<Sexpr>` için örüntüler**: S-ifade verisinin türü `Sexpr` değil, `Option<Sexpr>`'dir ve boş
-liste `Sexpr`'in bir varyantı değil, `Option`'ın `none`'dır. Bu yüzden bir `Option<Sexpr>`'i eşleştirirken
-`Sexpr`'in 19 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir (`Option`'ı soyacak dış
+liste `Sexpr`'in bir varyantı değil, `Option`'ın `None`'dır. Bu yüzden bir `Option<Sexpr>`'i eşleştirirken
+`Sexpr`'in 19 varyantı ve `None` **aynı kol listesinde düz olarak** yazılabilir (`Option`'ı soyacak dış
 bir `match` gerekmez):
 
 ```lisp
@@ -1490,12 +1490,12 @@ bir `match` gerekmez):
     ((int _)    1)
     ((cons _ _) 2)
     ((str _)    3)
-    ((none)     0)          ; the empty list
+    ((None)     0)          ; the empty list
     (_          9)))
 ```
 
-Kapsamlılık aynı düz evrende denetlenir: `Sexpr`'in 19 varyantı artı `none`, toplam 20. `_` yoksa
-`(none)`'ı unutmak hatadır. `(some x)` de yazılabilir ve "boş olmayan bir şeyi" bağlar.
+Kapsamlılık aynı düz evrende denetlenir: `Sexpr`'in 19 varyantı artı `None`, toplam 20. `_` yoksa
+`(None)`'ı unutmak hatadır. `(Some x)` de yazılabilir ve "boş olmayan bir şeyi" bağlar.
 
 Bu şeker **tam olarak** yalnızca `Option<Sexpr>`'e uygulanır. `Option<Option<Sexpr>>` için `(int n)`'in
 hangi katmanı soyduğu belirsiz olurdu; bu yüzden olağan şekilde iki düzey `match` yazın.
@@ -1527,7 +1527,7 @@ Burada da uygulayan türlerin kümesi açık olduğundan bir `_` kolu gerekir:
 
 **Kollar arası tür çıkarımı**: tüm kolların türü aynı olmalıdır (`panic` gibi sapan kollar hariç). Hiçbir
 türün beklenmediği yere yazılan bir `match` içinde kollar birbirlerinin eksik tür bağımsız değişkenlerini
-doldurur: `(Result::ok v)` yalnızca `T`'yi, `(Result::err e)` yalnızca `E`'yi sabitler, ancak birlikte
+doldurur: `(Result::Ok v)` yalnızca `T`'yi, `(Result::Err e)` yalnızca `E`'yi sabitler, ancak birlikte
 `Result<T,E>`'yi sabitlerler. Sonuna kadar hiçbir kolun sabitleyemediği bir tür bağımsız değişkeni, o
 kolun hatasıdır (`cannot infer type argument ...`). `match` dışında, sabitlenemeyen bir tür bağımsız
 değişkeni orada hatadır.
@@ -1650,7 +1650,7 @@ Birkaç `:for` ile bunlar **paralel olarak** ilerler ve herhangi biri tükenir t
 | `:sum e` / `:count e` | Toplam / doğru olduğu sayı |
 | `:maximize e` / `:minimize e` | Maksimum / minimum. **`Option<T>`** (CL'nin boş bir dizi için nil döndürmesi gibi; keyfi bir `Ord` türünün en küçük elemanı yoktur) |
 | `:always e` / `:never e` | Hepsi sağlanıyorsa `true`; biri başarısız olur olmaz hemen `false` |
-| `:thereis e` | `e` bir **`Option<T>`**'dir. İlk `some`'u döndürür; yoksa `none` (bu, CL'nin "ilk nil olmayan değer"ine karşılık gelendir; bir `bool`'u sınamak için `:always`/`:never` kullanın) |
+| `:thereis e` | `e` bir **`Option<T>`**'dir. İlk `Some`'u döndürür; yoksa `None` (bu, CL'nin "ilk nil olmayan değer"ine karşılık gelendir; bir `bool`'u sınamak için `:always`/`:never` kullanın) |
 | `:while e` / `:until e` | Burada **normal şekilde biter** (`:finally` çalışır ve toplanan şey yanıttır) |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | Bir yan tümceyi koşullu yapar |
 | `:return e` | O değerle hemen çıkar (`:finally` çalışmaz, CL'deki gibi) |
@@ -1672,7 +1672,7 @@ ve `:return` gibi `:finally` çalışmaz. Ad olmadan hiçbir block kurulmaz: CL'
 olmasıdır (5.1): çıkışın `int` türü, döngü tükendiğinde bıraktığı `()`'ya uymaz.
 
 **Döngünün değeri**, varsa biriktiren yan tümcenin birikimidir (birkaç tane varsa ilki), `:always`/
-`:never` için `true`, `:thereis` için `none` ve hiçbiri yoksa `()`'dir. `:finally` içindeki son şey
+`:never` için `true`, `:thereis` için `None` ve hiçbiri yoksa `()`'dir. `:finally` içindeki son şey
 `(return e)` ise değer odur: CL'nin `finally (return …)` deyimi; biriktirmeyen bir döngünün kendi
 yanıtını adlandırabilmesinin tek yolu.
 
@@ -1738,7 +1738,7 @@ bağımsız değişken olarak vb.).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1780,7 +1780,7 @@ türleri, `f32`/`f64`/`ratio`/`char` arasında). Aynı tür dönüşüm değildi
 (`int` dahil) arasındaki ve `f32`↔`f64` arasındaki dönüşümler gerçek dönüşümlerdir**: `as` kırpar /
 yuvarlar ve `try-as` o genişliğe (duyarlığa) sığıp sığmadığını yanıtlar. `(as int x)`, sabit bir
 genişlikten tam genişletmedir ve `(as i32 n)`, `int`'ten kırpmadır. Tamsayı → `char` aralık dışında
-başarısız olabilir; bu yüzden `as` panic olur ve `try-as` `none` verir. Geri kalan her şey (genişletme ve
+başarısız olabilir; bu yüzden `as` panic olur ve `try-as` `None` verir. Geri kalan her şey (genişletme ve
 `float->int`/`ratio->int`'in kırpması) her zaman başarılı olur. `float->int`/`ratio->int`/`char->int`
 `int`'e iner ve daha dar bir genişlik istenirse onlardan sonra `int->W` çağrılır. Bu, karşılık gelen
 dönüşüm metotlarına açılan bir şekerdir ([Sayılar](functions/numbers.md)'daki
@@ -1794,7 +1794,7 @@ ve `f64`'e dönüştürür; `int`/`ratio`'dan `rational`'a dönüştürür.
 tür bağımsız değişkeni almaz: `name`'i değişken → fonksiyon → tür → trait → makro sırasıyla çözümler
 (çıplak bir tanımlayıcı bir ifade olarak değerlendirildiğinde olduğu gibi aynı öncelik) ve bulunan tanımın
 docstring'ini döndürür (`(documentation Type::method)` metotlar içindir). Çözümlenememesi (o adda tanım
-yok) bir denetim zamanı hatasıdır; var olan ama docstring'i olmayan bir tanım `Option::none` verir. Her şey
+yok) bir denetim zamanı hatasıdır; var olan ama docstring'i olmayan bir tanım `Option::None` verir. Her şey
 denetim zamanında bir sabit olarak belirlenir: çalışma zamanı araması olmaz. Modül nitelikli serbest adlar
 (`Type::method` dışında `mod::name`) desteklenmez.
 
@@ -1988,10 +1988,10 @@ okuyucu her zaman bu tek türü geçirir: `read-sexpr` / `read-char` / `peek-cha
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => read as (not (equal 1 2)), that is, true
 ```

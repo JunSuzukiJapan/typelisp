@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -34,9 +34,9 @@ bölümdedir).
 | `int->int` | `(int->int x)` | `T→int` | `int`'e genişleten dönüşüm (her zaman tam). `(as int x)`'in yaptığı şey |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio`'ya genişleten dönüşüm (her zaman tam) |
 | `int->char` | `(int->char x)` | `T→char` | Değeri bir Unicode skaler değeri olarak yorumlar. Geçersiz bir değerde panic olur |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Başarısızlıkta `none` döndüren bir `int->char` sürümü |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Başarısızlıkta `None` döndüren bir `int->char` sürümü |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Genişlik dönüşümü. Sığmayan değerler kırpılır (Rust'ın `as`'ı gibi) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Aynı dönüşüm bir soru olarak. Değer o genişliğe sığmıyorsa `none` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Aynı dönüşüm bir soru olarak. Değer o genişliğe sığmıyorsa `None` |
 
 Bu dönüşümler, `(as Type x)`/`(try-as Type x)` özel formlarının
 ([Sözdizimi Başvurusu](../syntax.md#7-diğer-özel-formlar)) yaptığı şeylerdir. Bit işlemleri
@@ -145,7 +145,7 @@ sayısı vb.) `int` kabul eder, ancak bir fixnum'a sığmayan bir değer geçirm
 | `float->int` | `(float->int x)` | `f64→int` | Sıfıra doğru keserek `int`'e çevirir (CL'nin `truncate`'i; her boyuttaki sonlu değerler için tam). Sonsuzluk ve NaN'da panic olur. Sabit bir genişlik için `(as i32 x)` kullanın |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Tam ikili rasyonel olarak bir `ratio`'ya çevirir (CL'nin `rational`'ı) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Kayan noktalı genişlikler arasında dönüştürür. `float->f32` en yakına yuvarlar, `float->f64` her zaman tamdır. `(as f32 x)`'in yaptığı şey |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Aynı dönüşüm bir soru olarak. Yuvarlama değeri değiştiriyorsa `none` (`f64`'e genişletme her zaman `some`'dır). `(try-as f32 x)`'in yaptığı şey |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Aynı dönüşüm bir soru olarak. Yuvarlama değeri değiştiriyorsa `None` (`f64`'e genişletme her zaman `Some`'dır). `(try-as f32 x)`'in yaptığı şey |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL'nin aynı adlı fonksiyonları. Yukarıdaki `floor`/`ceiling`/`round`/`truncate`'in takma adları: CL'de öneksiz olanlar tamsayı döndürür; bu yüzden `f` önekli olanlar bu dilin davranışıyla eşleşir |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | Sırasıyla 2 / 53 / 53 (yalnızca `0.0`'ın duyarlığı 0'dır). `f64` her zaman IEEE-754 binary64'tür; bu yüzden bunlar sabittir |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` ya da `-1.0` |
@@ -227,7 +227,7 @@ alınır.
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Karşılaştırma |
 | `numerator` `denominator` | `(op x)` | `rational→int` | Sadeleştirilmiş pay ve payda |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Sıfıra doğru kırpılmış, `ratio` olarak, `f64`'e |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | Tam sayıysa `(some n)`, değilse `none` (CL'nin `integerp`'i) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | Tam sayıysa `(Some n)`, değilse `None` (CL'nin `integerp`'i) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio` ile aynı (`expt`'in üssü `int`'tir) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio` ile aynı |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio` ile aynı |

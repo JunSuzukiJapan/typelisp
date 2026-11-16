@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Standard Traits
 
 The traits for iteration, comparison, arithmetic, and adding and removing elements. The other standard traits are in their own
@@ -162,7 +162,7 @@ be a trait object, as in `:dyn Push<int>`.
   (defmethod pop (self) Option<Item>))
 ```
 
-A collection the element `push` added last can be taken back out of. `none` when it is empty. A
+A collection the element `push` added last can be taken back out of. `None` when it is empty. A
 generic function asks for one with `(:where (Pop C (Item T)))`.
 
 | Type | What `pop` does |
@@ -179,8 +179,8 @@ A `HashSet<T>` has no "last element", so it is a `Push` but not a `Pop`.
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

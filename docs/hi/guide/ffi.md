@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # C FFI (defffi)
 
 यह गाइड बताती है कि typelisp से C फ़ंक्शन कैसे कॉल करें। जो टाइप घोषित किए जा सकते हैं उनकी सूची और प्रतिबंध [सिंटैक्स संदर्भ 3.3](../reference/syntax.md#33-defffi--c-फ़ंक्शन-घोषित-करना-ffi) में हैं।
@@ -59,7 +59,7 @@
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int 64-बिट मान का कुछ भी नहीं खोता
-(try-as i32 (unsafe (c-strlen s)))  ; यदि i32 में न समाए तो none
+(try-as i32 (unsafe (c-strlen s)))  ; यदि i32 में न समाए तो None
 (unsafe (c-malloc 16))              ; पूर्णांक लिटरल जस के तस पास किए जा सकते हैं
 ```
 

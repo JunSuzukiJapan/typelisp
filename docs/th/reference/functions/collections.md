@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # สตริง อักขระ และคอลเลกชัน
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` และ `Deque<T>`
@@ -25,12 +25,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | การเรียงลำดับแบบไม่แยกตัวพิมพ์ใหญ่เล็ก (`string-lessp` ของ CL และอื่น ๆ) เมื่อมี prefix ร่วมกัน ตัวที่สั้นกว่าถือว่าน้อยกว่า |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | สตริงที่ประกอบด้วย `c` จำนวน `n` ตัว (`make-string` ของ CL) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | ตำแหน่งที่ `sub` ปรากฏครั้งแรก **`search` ของ CL มีอาร์กิวเมนต์สลับกัน** (`(search pattern sequence)`) สตริงว่างพบที่ 0 สำหรับคีย์เวิร์ด ดู[อาร์กิวเมนต์คีย์เวิร์ดของลำดับ](sequences.md#6-อาร์กิวเมนต์คีย์เวิร์ด) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | ตำแหน่งแรกที่ต่างกัน `none` เฉพาะเมื่อ `equal` หากตัวหนึ่งเป็น prefix ของอีกตัว จะเป็นปลายของตัวที่สั้นกว่า คีย์เวิร์ดเหมือนข้างบน |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | ตำแหน่งแรกที่ต่างกัน `None` เฉพาะเมื่อ `equal` หากตัวหนึ่งเป็น prefix ของอีกตัว จะเป็นปลายของตัวที่สั้นกว่า คีย์เวิร์ดเหมือนข้างบน |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | ตัดอักขระที่อยู่ใน `bag` ออกจากทั้งสองปลาย / ซ้าย / ขวา (`string-trim` ของ CL และอื่น ๆ) หากไม่มี `bag` จะเป็นช่องว่าง `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | แยกที่ `sep` CL ไม่มีสิ่งที่ตรงกัน ตัวคั่นที่ต่อเนื่องกันทำให้เกิดสมาชิกว่าง panic หาก `sep` ว่าง |
 | `to-string` | `(to-string x)` | `T→string` | แปลงเป็นสตริงอย่างที่ `~a` ทำ implement สำหรับ `int`/`i32`/`f64`/`bool`/`char`/`string` (`princ-to-string` ของ CL) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | เข้ารหัสเป็น UTF-8 (แต่ละสมาชิก 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | ถอดรหัส `none` หากไม่ใช่ UTF-8 ที่ถูกต้อง |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | ถอดรหัส `None` หากไม่ใช่ UTF-8 ที่ถูกต้อง |
 
 ## 2. อักขระ (`char`)
 
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | อ่านสมาชิกตัวที่ `i` panic เมื่อเกินช่วง |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | เปลี่ยนสมาชิกตัวที่ `i` panic เมื่อเกินช่วง เขียนเป็น `(setf (get v i) x)` ได้ด้วย |
 | `len` | `(len v)` | `Vector<T>→int` | จำนวนสมาชิก |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | ลบสมาชิกตัวสุดท้ายและคืนค่า `none` หากว่าง (ต่างจาก `get`/`set` ตรงที่ไม่ panic) (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | ลบสมาชิกตัวสุดท้ายและคืนค่า `None` หากว่าง (ต่างจาก `get`/`set` ตรงที่ไม่ panic) (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | สร้างตัววนซ้ำที่ implement `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | เพิ่ม `x` ต่อท้ายถ้าไม่มีสมาชิกที่ `eql` กับมัน (`pushnew` ของ CL ไม่ต้องเขียนทับตำแหน่ง จึงเป็นเมธอดไม่ใช่แมโคร) |
 
@@ -135,7 +135,7 @@
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 ในตาราง `equal` สิ่งที่ตัดสินว่าคีย์สองตัวเหมือนกันหรือไม่คือ **ชนิดของคีย์เอง** (`sxhash` และ `equal` ของ
@@ -167,8 +167,8 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` ของ CL rank เปลี่ยนไม่ได้ สมาชิกที่ยังอยู่ในช่วงถูกเก็บไว้ที่ดัชนีเดิม และเซลล์ใหม่ได้ `init` ต่างจาก CL ตรงที่ไม่คืนอาร์เรย์ (ทุกอาร์เรย์ในภาษานี้ปรับได้ จึงไม่มีอาร์เรย์ตัวที่สองให้คืน) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` ของ CL panic หากไม่มี fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | เหมือน `push-extend` (เมธอดของ trait [`Push`](traits.md#4-trait-push-การเพิ่มสมาชิก)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` ของ CL `none` หากว่าง (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer (`none` หากไม่มี) เขียนได้ด้วย `(setf a::fill-pointer …)` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` ของ CL `None` หากว่าง (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer (`None` หากไม่มี) เขียนได้ด้วย `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | ตัววนซ้ำตามลำดับ row-major หยุดที่ fill pointer หากมี |
 
 - **ดัชนีเป็น `Vector<int>`** เมทอดไม่สามารถประกาศ "อาร์กิวเมนต์ชนิดเดียวกันซ้ำกี่ตัวก็ได้ที่ท้าย" และน้ำตาลไวยากรณ์
@@ -257,10 +257,10 @@
 | `new` | `(Deque::new)` | `()→Deque<T>` | สร้างลำดับว่าง |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | เพิ่มที่หัว / ท้าย |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | เหมือน `push-back` (เมธอดของ trait [`Push`](traits.md#4-trait-push-การเพิ่มสมาชิก)) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | เอาสมาชิกที่หัว / ท้ายออกแล้วคืนให้ ถ้าว่างคืน `none` |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | เอาสมาชิกที่หัว / ท้ายออกแล้วคืนให้ ถ้าว่างคืน `None` |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | เหมือน `pop-back` (เมธอดของ trait [`Pop`](traits.md#5-trait-pop-นำสมาชิกออก)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | ดูสมาชิกที่หัว / ท้าย (ไม่เอาออก) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | ตัวที่ `i` นับจากหัว ถ้าเกินช่วงคืน `none` |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | ตัวที่ `i` นับจากหัว ถ้าเกินช่วงคืน `None` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | เขียนทับตัวที่ `i` ถ้าเกินช่วงจะ panic |
 | `count` | `(count d)` | `Deque<T>→int` | จำนวนสมาชิก |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | ลบทั้งหมด |
@@ -270,5 +270,5 @@
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

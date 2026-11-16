@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Penanganan Kesalahan
 
 Penanganan kesalahan di typelisp membagi kegagalan menjadi dua jenis.
@@ -6,7 +6,7 @@ Penanganan kesalahan di typelisp membagi kegagalan menjadi dua jenis.
 | Jenis kegagalan | Contoh | Cara menyatakannya |
 |---|---|---|
 | Kegagalan yang dapat terjadi (dapat dipulihkan) | Berkas tidak ada, masukan bukan bilangan | Mengembalikan `Result<T,E>` |
-| Kesalahan dalam program (tidak dapat dipulihkan) | Indeks di luar rentang, `unwrap` pada `none`, pembagian dengan nol | Berhenti dengan `panic` |
+| Kesalahan dalam program (tidak dapat dipulihkan) | Indeks di luar rentang, `unwrap` pada `None`, pembagian dengan nol | Berhenti dengan `panic` |
 
 Selain itu ada `catch` / `throw`, yang keluar dari banyak pemanggilan fungsi sekaligus, dan
 `unwind-protect`, yang menjalankan pembersihan bagaimanapun badannya ditinggalkan. Bab ini
@@ -21,22 +21,22 @@ masukan bukan bilangan, atau di luar rentang.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 Pemanggil memisahkan keberhasilan dan kegagalan dengan `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- Nilai fungsi yang mengembalikan `Result` tidak dapat dipakai kecuali `match` menangani kasus `err`.
+- Nilai fungsi yang mengembalikan `Result` tidak dapat dipakai kecuali `match` menangani kasus `Err`.
   Lupa menangani kegagalan adalah kesalahan tipe.
 - Kesalahan dari `parse-int` adalah nilai bertipe `ParseIntError`. `(message e)` memberikan string
   pesannya.
@@ -49,17 +49,17 @@ Tidak ada pintasan seperti `?` pada Rust. Ketika memanggil beberapa fungsi yang 
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 Ketika Anda tahu operasinya tidak mungkin gagal, atau pada skrip kecil yang berhenti saat gagal
-tidak masalah, `unwrap` mengambil isinya. Jika nilainya `err`, ia melakukan panic. Jika nilai bawaan
+tidak masalah, `unwrap` mengambil isinya. Jika nilainya `Err`, ia melakukan panic. Jika nilai bawaan
 sudah cukup, gunakan `unwrap-or`.
 
 ## 3. Membuat tipe kesalahan sendiri
@@ -78,17 +78,17 @@ trait `Error`.
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::invalid "workers" n))))
 ```
 
 - `message` mengembalikan deskripsi kesalahan.
 - `source` mengembalikan kesalahan lain yang menyebabkan kesalahan ini. Jika tanpa penyebab, nilainya
-  `none`.
+  `None`.
 
 ## 4. Menggabungkan berbagai jenis kesalahan
 
@@ -101,8 +101,8 @@ Konversikan setiap kesalahan dengan `as-dyn-error`.
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 Dengan masukan `"4"`, `"-1"`, dan `"abc"`, hasilnya:
@@ -132,7 +132,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - Tipe `panic` adalah `!` (tidak kembali), sehingga dapat ditulis di mana pun tipe apa pun
   diharapkan. Itulah sebabnya kedua cabang `if` di atas cocok.
-- Operasi berikut juga melakukan panic: `unwrap` pada `none` atau `err`, `get` dengan indeks di luar
+- Operasi berikut juga melakukan panic: `unwrap` pada `None` atau `Err`, `get` dengan indeks di luar
   rentang, dan pembagian bilangan bulat dengan nol.
 - `panic` menghentikan program. Bahkan ketika terjadi di dalam task, seluruh program berhenti.
 - Di REPL, `panic` tidak mengakhiri REPL; REPL menunggu masukan berikutnya.
@@ -200,8 +200,8 @@ dapat mengetahui ke mana ia kembali dengan membaca kode sumber.
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: selalu bersihkan

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.
@@ -35,13 +35,13 @@
 S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` 함수로 다룬다. 주로 `defmacro`의 본체에서 형식을 만들고
 분해하는 데 쓴다.
 
-**S 식 데이터의 타입은 `Option<Sexpr>`이다.** 빈 리스트는 `Sexpr`의 변형이 아니라 `Option`의 `none`이며, `Sexpr` 자체는
+**S 식 데이터의 타입은 `Option<Sexpr>`이다.** 빈 리스트는 `Sexpr`의 변형이 아니라 `Option`의 `None`이며, `Sexpr` 자체는
 "비어 있지 않은 S 식"을 뜻한다. 그래서 `sexpr-*` 함수는 `Option<Sexpr>`를 받고 반환한다.
 
-- `Option<Sexpr>`가 기대되는 곳의 `()`는 빈 리스트이다(`(Option::none)`으로도 쓸 수 있다)
+- `Option<Sexpr>`가 기대되는 곳의 `()`는 빈 리스트이다(`(Option::None)`으로도 쓸 수 있다)
 - `Sexpr`는 `Option<Sexpr>`가 기대되는 곳에서 암묵적으로 넓어진다(실행 시 변환 없음). 반대 방향, 즉 `Option<Sexpr>`를
   `Sexpr`로 쓰는 것은 "이것은 빈 리스트가 아니다"라고 주장하는 것이므로 `match`나 `unwrap`으로 명시해야 한다
-- `match`에서는 `Sexpr`의 19개 변형과 `none`을 **같은 갈래 목록에 평평하게** 쓸 수 있다
+- `match`에서는 `Sexpr`의 19개 변형과 `None`을 **같은 갈래 목록에 평평하게** 쓸 수 있다
   ([문법 레퍼런스](../syntax.md#43-match--패턴-매칭))
 
 | 이름 | 형식 | 타입 | 설명 |
@@ -103,7 +103,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 술어를 만족하는 첫 위치 |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 술어를 만족하는 개수 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 모든 요소가 술어를 만족하는지 |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 술어를 만족하는 요소가 있는지(CL의 `some`에 해당. `some` 생성자와 겹치지 않는 이름) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 술어를 만족하는 요소가 있는지(CL의 `some`에 해당) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 왼쪽 접기 |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 오른쪽 접기 |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 남은 요소를 모두 모은다. 아래 `lazy` 함수의 결과를 `Vector`로 만들 때 쓴다 |
@@ -116,7 +116,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | 이터레이터를 잇는다. 세 개 이상도 줄 수 있다 |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL의 `concatenate`. 결과 타입은 **인용한 심볼 리터럴**로 쓴다(CL은 실행 시의 타입 지정자). `'vector`는 하나 이상, `'string`은 0개 이상(0개면 `""`). `Sexpr` 리스트는 대상이 아니다(`sexpr-append`를 쓴다) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 뒤집기(비파괴적) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`번째 요소(범위를 벗어나면 `none`) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`번째 요소(범위를 벗어나면 `None`) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | 인수 순서가 반대인 `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 앞의 `n`개 |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`(`end`는 길이로 잘린다) |
@@ -204,7 +204,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 부작용을 위해 꼬리에 대해 사상한다(`mapc`의 `maplist`판) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 꼬리에 대해 사상하고 잇는다(`mapcan`의 `maplist`판) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub`가 처음 나타나는 위치. 받는 쪽이 `string`이면 `string`의 메서드가 선택된다([문자열](collections.md#1-문자열-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 처음으로 다른 위치. 같으면 `none` |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 처음으로 다른 위치. 같으면 `None` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 병합. CL은 정렬된 입력을 요구하지만 이것은 이은 것을 정렬한다 |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | `x`가 없으면 **앞에** 추가한다 |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 집합 연산. CL은 순서를 정하지 않지만 여기서는 안정적이며 **처음 나타난 순서**이다 |
@@ -255,7 +255,7 @@ CL에 있고 이 언어에 없는 것: `list*`(꼬리를 바꿔 끼운 부적절
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; 끝에서부터 하나만 없앤다
 (position 3 (iter v) :start 1)                          ; 인덱스는 시퀀스 전체 기준
 ```

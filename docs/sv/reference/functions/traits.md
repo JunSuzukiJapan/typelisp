@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Standardtraits
 
 Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut element. De andra standardtraits finns i sina egna kapitel: `Hash`
@@ -161,7 +161,7 @@ ett trait-objekt, som i `:dyn Push<int>`.
   (defmethod pop (self) Option<Item>))
 ```
 
-En samling som elementet som `push` lade till sist kan tas ut ur igen. `none` när den är tom. En
+En samling som elementet som `push` lade till sist kan tas ut ur igen. `None` när den är tom. En
 generisk funktion kräver den med `(:where (Pop C (Item T)))`.
 
 | Typ | Vad `pop` gör |
@@ -178,8 +178,8 @@ En `HashSet<T>` har inget "sista element", så den är en `Push` men inte en `Po
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

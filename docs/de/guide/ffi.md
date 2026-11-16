@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # C-FFI (defffi)
 
 Dieser Leitfaden erklärt, wie man aus typelisp C-Funktionen aufruft. Die Liste der deklarierbaren Typen und
@@ -67,7 +67,7 @@ Um einen davon als typelisp-Ganzzahl zu verwenden, wandelt man ihn mit `as` um.
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int verliert nichts vom 64-Bit-Wert
-(try-as i32 (unsafe (c-strlen s)))  ; none, wenn er nicht in ein i32 passt
+(try-as i32 (unsafe (c-strlen s)))  ; None, wenn er nicht in ein i32 passt
 (unsafe (c-malloc 16))              ; Ganzzahlliterale lassen sich direkt übergeben
 ```
 

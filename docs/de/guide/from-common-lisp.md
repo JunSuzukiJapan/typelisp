@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Für Common-Lisp-Programmierer
 
 typelisp übernimmt die Syntax von Common Lisp (CL) und viele seiner Funktionsnamen, ist aber eine statisch
@@ -19,12 +19,12 @@ Die Wahrheitswerte sind `true` und `false`. `nil` und `t` sind nicht definiert.
 - **Der else-Zweig von `if` kann nicht weggelassen werden.** `(if c x)` ist ein Fehler. Wird kein else-Zweig
   gebraucht, verwendet man `when` / `unless`.
 - **„Kein Wert“ wird mit `Option<T>` ausgedrückt.** Eine Funktion, die in CL nil für „nicht gefunden“
-  zurückgab, gibt hier `(some x)` oder `none` zurück.
+  zurückgab, gibt hier `(Some x)` oder `None` zurück.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - Die leere Liste `()` ist je nach Kontext entweder der Wert des Unit-Typs (der Rückgabewert einer Funktion,
@@ -98,7 +98,7 @@ zwei von Funktion, globaler Variable und Makro denselben Namen haben (anders als
 ## 4. Listen und Vector
 
 Was einer CL-Liste entspricht, sind **S-Ausdrucksdaten**, deren Typ `Option<Sexpr>` ist (die leere Liste ist
-`none`). `(list 1 2 3)` und `'(a b c)` haben diesen Typ. S-Ausdrucksdaten sind etwas, womit Makros und `read`
+`None`). `(list 1 2 3)` und `'(a b c)` haben diesen Typ. S-Ausdrucksdaten sind etwas, womit Makros und `read`
 arbeiten; als gewöhnlichen Datenbehälter verwendet man **`Vector<T>`**.
 
 | Was man will | CL | typelisp |
@@ -183,17 +183,17 @@ Es gibt kein `define-condition`, `handler-case`, `handler-bind`, `restart-case`,
 passen schlecht zu statischer Typisierung. Stattdessen werden diese beiden für unterschiedliche Zwecke
 verwendet:
 
-- **Behebbare Fehlschläge geben `Result<T,E>` zurück.** Der Aufrufer trennt `ok` / `err` mit `match`. Eine
+- **Behebbare Fehlschläge geben `Result<T,E>` zurück.** Der Aufrufer trennt `Ok` / `Err` mit `match`. Eine
   Kurzschreibweise wie Rusts `?` gibt es nicht.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Nicht behebbare Fehlschläge (Programmfehler) sind `panic`.** `(panic "message")`, `none` an `unwrap`
+- **Nicht behebbare Fehlschläge (Programmfehler) sind `panic`.** `(panic "message")`, `None` an `unwrap`
   übergeben, Division durch 0 und ein Index außerhalb des Bereichs gehören dazu, und das Programm hält an. Die
   Aufräumarbeit von `unwind-protect` läuft, bevor es anhält.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -58,20 +58,20 @@ waktu seperti itu.
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | Baris perintah. **Elemen 0 adalah nama program** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | Variabel lingkungan. `none` jika tidak disetel atau bukan UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | Variabel lingkungan. `None` jika tidak disetel atau bukan UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. Dasar `user-homedir-pathname` ([Pathname](streams-files.md#92-fungsi)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Versi implementasi |
 | `machine-type` | `(machine-type)` | `()→string` | Arsitektur CPU (`x86_64` / `aarch64` …). Nilai **target build** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | Nama host |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | Nama perangkat keras yang **berjalan sekarang** (`Apple M1` / `Intel(R) Xeon(R) …`). `none` jika tidak dapat ditentukan |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | Nama perangkat keras yang **berjalan sekarang** (`Apple M1` / `Intel(R) Xeon(R) …`). `None` jika tidak dapat ditentukan |
 | `software-type` | `(software-type)` | `()→string` | OS (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | Rilis OS (`uname -r`, misalnya `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Nama singkat lokasi pemasangan. **Selalu `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Demikian pula, nama panjang. **Selalu `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Nama singkat lokasi pemasangan. **Selalu `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Demikian pula, nama panjang. **Selalu `None`** |
 
 Yang mengembalikan `Option` adalah butir yang dalam CL boleh `NIL` (*or nil if no such name can be
-determined*). POSIX tidak memiliki tempat untuk mencatat nama situs, sehingga selalu `none`; SBCL
+determined*). POSIX tidak memiliki tempat untuk mencatat nama situs, sehingga selalu `None`; SBCL
 mengembalikan hal yang sama. Perhatikan perbedaan `machine-type` dan `machine-version`: yang pertama
 adalah arsitektur tempat biner ini **dibangun**, yang kedua adalah chip yang **menjalankannya**
 sekarang.
@@ -144,7 +144,7 @@ diizinkan CLHS, agar skrip dan pengujian tidak menggantung pada prompt yang tida
 pun.
 
 `$VISUAL` / `$EDITOR` pada `ed` dipecah pada spasi putih, sehingga `EDITOR="code -w"` berfungsi.
-Jika keduanya tidak disetel, hasilnya `err`: ia tidak menebak `vi`. Nomor baris diserahkan lebih
+Jika keduanya tidak disetel, hasilnya `Err`: ia tidak menebak `vi`. Nomor baris diserahkan lebih
 dulu, dalam bentuk `+N`.
 
 `dribble` merekam ketiga cara keluaran sesi meninggalkan proses: apa yang ditulis
@@ -154,14 +154,14 @@ yang diketik ke REPL beserta nilai yang dicetak balik REPL.
 ## 6. Parsing dan evaluasi
 
 Semuanya menangani teks dan data dari saat dijalankan (yang tidak dikendalikan program itu sendiri),
-sehingga saat gagal mereka mengembalikan `err` dari `Result` dan bukan panic. Tipe kesalahannya
+sehingga saat gagal mereka mengembalikan `Err` dari `Result` dan bukan panic. Tipe kesalahannya
 adalah tipe konkret per operasi ([Tipe kesalahan](option-result.md#3-tipe-kesalahan-dan-trait-error)).
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` pada CL. Melewati spasi putih di awal dan akhir (himpunan yang sama seperti `trim`), membaca paling banyak satu tanda `+`/`-`, lalu digit pada basis `radix` (bawaan 10, 2 sampai 36; digit di atas 10 dalam huruf besar atau kecil). Tidak ada batas jumlah digit (`int`). Karakter lain yang tersisa menghasilkan `err`. Dengan `:junk-allowed true`, ia berhenti pada non-digit pertama dan mengabaikan sisanya, tetapi menghasilkan `err` jika tidak ada satu digit pun (sepadan dengan `nil` pada CL). Ia tidak mengembalikan nilai kedua CL (posisi tempat pembacaan berakhir). `radix` di luar rentang melakukan panic (kesalahan pemanggil, bukan pada teks) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` pada CL. Melewati spasi putih di awal dan akhir (himpunan yang sama seperti `trim`), membaca paling banyak satu tanda `+`/`-`, lalu digit pada basis `radix` (bawaan 10, 2 sampai 36; digit di atas 10 dalam huruf besar atau kecil). Tidak ada batas jumlah digit (`int`). Karakter lain yang tersisa menghasilkan `Err`. Dengan `:junk-allowed true`, ia berhenti pada non-digit pertama dan mengabaikan sisanya, tetapi menghasilkan `Err` jika tidak ada satu digit pun (sepadan dengan `nil` pada CL). Ia tidak mengembalikan nilai kedua CL (posisi tempat pembacaan berakhir). `radix` di luar rentang melakukan panic (kesalahan pemanggil, bukan pada teks) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Bilangan floating-point. Juga menerima `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Membaca satu `Sexpr` dari `s` (dengan reader yang sama yang membaca kode sumber). Tanda kurung tidak seimbang, string yang tidak tertutup, dan sejenisnya menghasilkan `err`. Membaca dari stream adalah `read-sexpr` ([Stream](streams-files.md#6-fungsi-generik-dan-operasi-berkas)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Membaca satu `Sexpr` dari `s` (dengan reader yang sama yang membaca kode sumber). Tanda kurung tidak seimbang, string yang tidak tertutup, dan sejenisnya menghasilkan `Err`. Membaca dari stream adalah `read-sexpr` ([Stream](streams-files.md#6-fungsi-generik-dan-operasi-berkas)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` ditambah **posisi tempat pembacaan berakhir**. `(car r)` adalah nilainya dan `(cdr r)` posisi karakter berikutnya yang akan dibaca. `start` bawaannya 0 |
 | `read-from-string-preserving-whitespace` | Sama seperti di atas | Sama seperti di atas | Sama, tetapi tidak mengonsumsi spasi putih yang mengakhiri datum. Perbedaannya terlihat pada posisi yang dikembalikan |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Memeriksa tipe `form` saat dijalankan dan mengevaluasinya. Mengikuti `eval` pada CL |
@@ -174,9 +174,9 @@ satu datum sekali waktu menjadi perulangan dan bukan pemindaian ulang:
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 Perbedaan yang dibuat `preserving-whitespace` adalah **satu karakter spasi putih**: `read` pada CL
@@ -196,11 +196,11 @@ maupun definisi (`defun`/`defvar`/`defstruct`/`defenum`/`defmacro`) dapat dieval
 langsung didaftarkan ke lingkungan global secara permanen.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; the global x is visible
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; returns the defined name
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; the definition just made is visible
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; the global x is visible
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; returns the defined name
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; the definition just made is visible
 ```
 
 - **Nilai kembalian**: untuk ekspresi, hasilnya sebagai `Option<Sexpr>`; untuk definisi, simbol nama
@@ -214,7 +214,7 @@ langsung didaftarkan ke lingkungan global secara permanen.
   (pemeriksaan tipenya berjalan saat dijalankan, setelah definisi). REPL memeriksa dan menjalankan
   satu baris sekali waktu, sehingga nama yang didefinisikan dengan `eval` dapat dipanggil langsung
   dari baris berikutnya.
-- **Kesalahan**: kesalahan tipe dan kesalahan sintaks mengembalikan `err` (tidak melakukan panic).
+- **Kesalahan**: kesalahan tipe dan kesalahan sintaks mengembalikan `Err` (tidak melakukan panic).
   **Panic saat dijalankan** pada kode yang dievaluasi (pembagian dengan nol dan sebagainya)
   merambat seperti pada kode yang ditulis langsung. Pembersihan `unwind-protect` di antaranya
   dijalankan ([Referensi Sintaks bab 8](../syntax.md#8-keluar-non-lokal-catch--throw--unwind-protect)).
@@ -265,7 +265,7 @@ makro** (prioritas yang sama seperti untuk pengenal polos yang dievaluasi sebaga
 
 **Nilainya ditentukan saat pemeriksaan**: jika nama tidak diselesaikan ke definisi apa pun, itu
 adalah kesalahan saat pemeriksaan (seperti merujuk variabel yang tidak terdefinisi). Jika
-diselesaikan tetapi tidak ada docstring, hasilnya `Option::none`.
+diselesaikan tetapi tidak ada docstring, hasilnya `Option::None`.
 
 **Tidak tercakup**:
 
@@ -285,20 +285,20 @@ Cara mendefinisikan makro ada di [Referensi Sintaks 3.14](../syntax.md#314-defma
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Simbol baru. Namanya `" <prefix><n>"`, dengan `n` adalah `*gensym-counter*`. Spasi di awal tidak dapat ditulis pada kode sumber, sehingga pengikatan yang dihasilkan tidak pernah bentrok dengan nama yang ditulis |
 | `*gensym-counter*` | Variabel | `int` | Bilangan yang dipakai `gensym` berikutnya. Seperti di CL, dapat dibaca dan disetel |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Mengekspansi pemanggilan makro satu langkah. `none` berarti "bukan pemanggilan makro" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Mengekspansi pemanggilan makro satu langkah. `None` berarti "bukan pemanggilan makro" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Mengulang sampai bukan makro lagi |
 
 `macroexpand-1` mengembalikan `Option`. CL melaporkan "apakah diekspansi" sebagai nilai kembalian
-kedua, tetapi tidak ada nilai ganda, sehingga `none` berperan itu. **Makro yang berekspansi menjadi
+kedua, tetapi tidak ada nilai ganda, sehingga `None` berperan itu. **Makro yang berekspansi menjadi
 pemanggilan dirinya sendiri tidak pernah dapat tertukar dengan non-makro.** Satu langkah ekspansi
 adalah yang sama dengan yang dipakai pemeriksa tipe, sehingga apa yang dilihat program dan apa yang
 dilihat pemeriksa tidak pernah berbeda.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 Yang dimiliki CL dan tidak dimiliki bahasa ini: `eval-when` (`:compile-toplevel`/`:load-toplevel`/

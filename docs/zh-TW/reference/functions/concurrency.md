@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 任務與通道
 
 任務（輕量級執行緒）的詞彙。啟動它們的 `task`・`thread` 與多路等待的 `select` 是特殊形式，見[語法參考](../syntax.md#12-並行任務)。本章是
@@ -29,7 +29,7 @@
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | 容量為 `n` 的通道。`0` 是會合（無緩衝） |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | 等到有空位再交出 |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 等到有值抵達。關閉且為空時為 `none` |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 等到有值抵達。關閉且為空時為 `None` |
 | `close` | `(close ch)` | `(Chan<T>)→()` | 關閉 |
 | `len` | `(len ch)` | `(Chan<T>)→int` | 目前緩衝區中的個數 |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | 容量 |
@@ -52,7 +52,7 @@
   都可以直接使用。
 - **對已關閉的通道 `send` 會 panic**，**第 2 次 `close` 也會 panic**（都與 Go 相同。這是程式的 bug 而不是可恢復的失敗，所以不用 `Result`）。
 - **關閉有任務正在等待 `send` 的通道，該任務會 panic**（Go 的規則）。
-- 從已關閉的通道 `recv`，緩衝區中有剩餘就回傳它，變空之後一直回傳 `none`。
+- 從已關閉的通道 `recv`，緩衝區中有剩餘就回傳它，變空之後一直回傳 `None`。
 - `close` 依接收者的型別解析，所以與 `Stream` trait 的 `close` 是不同的東西。`Chan<T>` 沒有實作 `Stream`。
 - **負的容量會 panic**（不會默默捨入為 0）。
 
@@ -169,8 +169,8 @@ Go 的 `context.Context`。傳給想要能從外部停止的工作。停止是**
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -183,7 +183,7 @@ Go 的 `context.Context`。傳給想要能從外部停止的工作。停止是**
 
 - **取消會傳給子上下文**。用 `with-cancel`/`with-timeout` 建立的上下文會隨父上下文一起被取消。反方向（從子到父）不會傳遞。
 - 從已取消的上下文建立的子上下文，一開始就是已取消的。
-- `done` 只會被關閉，不傳送值。接收時傳回 `none`。
+- `done` 只會被關閉，不傳送值。接收時傳回 `None`。
 - `(Context::background)` 每次呼叫都建立一個不同的根。Go 的 `Background()` 只有一個且不能取消；這裡根也可以取消，影響只及於從它建立的東西。
 - 可以在任務之間、執行緒之間傳遞。
 

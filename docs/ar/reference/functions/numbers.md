@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -32,9 +32,9 @@
 | `int->int` | `(int->int x)` | `T→int` | تحويل توسيعي إلى `int` (دقيق دائمًا). وهو ما يفعله `(as int x)` |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | تحويل توسيعي إلى `ratio` (دقيق دائمًا) |
 | `int->char` | `(int->char x)` | `T→char` | يفسّر القيمة على أنها قيمة عددية Unicode. ويحدث `panic` عند قيمة غير صالحة |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | نسخة من `int->char` تعيد `none` عند الفشل |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | نسخة من `int->char` تعيد `None` عند الفشل |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | تحويل العرض. والقيم التي لا تتسع تُقتطع (مثل `as` في Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | التحويل نفسه على صورة سؤال. `none` إذا لم تتسع القيمة في ذلك العرض |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | التحويل نفسه على صورة سؤال. `None` إذا لم تتسع القيمة في ذلك العرض |
 
 وهذه التحويلات هي أيضًا ما تفعله الصيغتان الخاصتان `(as Type x)`/`(try-as Type x)`
 ([مرجع الصياغة](../syntax.md#7-صيغ-خاصة-أخرى)). أما عمليات البتات (`logand`/`ash`/`ldb` وهكذا) والمحمولات
@@ -135,7 +135,7 @@
 | `float->int` | `(float->int x)` | `f64→int` | يحوّل إلى `int` بالاقتطاع نحو الصفر (`truncate` في CL؛ دقيق للقيم المنتهية من أي حجم). ويحدث `panic` عند اللانهاية وNaN. ولعرض ثابت استخدم `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | يحوّل إلى `ratio` على أنه الكسر الثنائي الدقيق (`rational` في CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | يحوّل بين عروض الفاصلة العائمة. `float->f32` تقرّب إلى الأقرب، و`float->f64` دقيقة دائمًا. وهو ما يفعله `(as f32 x)` |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | التحويل نفسه على صورة سؤال. `none` إذا غيّر التقريب القيمة (والتوسيع إلى `f64` هو دائمًا `some`). وهو ما يفعله `(try-as f32 x)` |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | التحويل نفسه على صورة سؤال. `None` إذا غيّر التقريب القيمة (والتوسيع إلى `f64` هو دائمًا `Some`). وهو ما يفعله `(try-as f32 x)` |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | الدوال ذات الاسم نفسه في CL. أسماء مستعارة لـ `floor`/`ceiling`/`round`/`truncate` أعلاه: ففي CL تعيد التي بلا بادئة أعدادًا صحيحة، فالتي بالبادئة `f` تطابق سلوك هذه اللغة |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | 2 / 53 / 53 على الترتيب (دقة `0.0` وحدها هي 0). و`f64` دائمًا IEEE-754 binary64، فهذه ثوابت |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` أو `-1.0` |
@@ -213,7 +213,7 @@
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | المقارنة |
 | `numerator` `denominator` | `(op x)` | `rational→int` | البسط والمقام في أبسط صورة |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | مقتطعًا نحو الصفر، بوصفه `ratio`، إلى `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` للعدد الصحيح، وإلا `none` (`integerp` في CL) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` للعدد الصحيح، وإلا `None` (`integerp` في CL) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | كما في `ratio` (أُس `expt` من النوع `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | كما في `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | كما في `ratio` |

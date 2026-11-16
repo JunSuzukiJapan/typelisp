@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # टाइप की बुनियादी बातें
 
 typelisp एक स्टैटिक रूप से टाइप की गई भाषा है। यह अध्याय समझाता है कि टाइप चेकर आपके लिए क्या करता है, वे टाइप जिनका आप सबसे अधिक उपयोग करेंगे
@@ -43,37 +43,37 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 
 ## 2. `Option<T>`: ऐसा मान जो अनुपस्थित हो सकता है
 
-typelisp में `nil` नहीं है। "हो सकता है कोई मान न हो" को टाइप `Option<T>` से व्यक्त किया जाता है। `Option<T>` का मान या तो `some` होता है, जिसमें `T` का एक मान होता है, या `none`, जिसमें कुछ नहीं होता।
+typelisp में `nil` नहीं है। "हो सकता है कोई मान न हो" को टाइप `Option<T>` से व्यक्त किया जाता है। `Option<T>` का मान या तो `Some` होता है, जिसमें `T` का एक मान होता है, या `None`, जिसमें कुछ नहीं होता।
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
-`Option<int>`, `int` नहीं है, इसलिए इसे जस का तस अंकगणित में इस्तेमाल नहीं किया जा सकता। `(+ (safe-div 10 2) 1)` एक टाइप त्रुटि है। अंदर के मान का उपयोग करने के लिए `match` से `some` और `none` को अलग करें।
+`Option<int>`, `int` नहीं है, इसलिए इसे जस का तस अंकगणित में इस्तेमाल नहीं किया जा सकता। `(+ (safe-div 10 2) 1)` एक टाइप त्रुटि है। अंदर के मान का उपयोग करने के लिए `match` से `Some` और `None` को अलग करें।
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- `(some q)` शाखा में अंदर की सामग्री वेरिएबल `q` से बँध जाती है।
-- `match` जाँचता है कि उसकी शाखाएँ **हर स्थिति को कवर करती हैं**। `(none)` शाखा भूल जाना टाइप त्रुटि है।
+- `(Some q)` शाखा में अंदर की सामग्री वेरिएबल `q` से बँध जाती है।
+- `match` जाँचता है कि उसकी शाखाएँ **हर स्थिति को कवर करती हैं**। `(None)` शाखा भूल जाना टाइप त्रुटि है।
 
 ### nil क्यों नहीं है
 
-कई भाषाओं में `nil` (`null`) किसी भी टाइप के मान की जगह ले सकता है। नतीजतन, "कोई मान नहीं" वाली स्थिति को संभालना भूल जाने का पता प्रोग्राम चलने तक नहीं चलता। typelisp में जहाँ मान अनुपस्थित हो सकता है, वहाँ टाइप `Option<T>` होता है, और जब तक `match` `none` स्थिति को संभाल न ले, कोड टाइप चेकर से पास नहीं होता। भूली हुई स्थिति प्रोग्राम चलने से पहले ही पकड़ ली जाती है।
+कई भाषाओं में `nil` (`null`) किसी भी टाइप के मान की जगह ले सकता है। नतीजतन, "कोई मान नहीं" वाली स्थिति को संभालना भूल जाने का पता प्रोग्राम चलने तक नहीं चलता। typelisp में जहाँ मान अनुपस्थित हो सकता है, वहाँ टाइप `Option<T>` होता है, और जब तक `match` `None` स्थिति को संभाल न ले, कोड टाइप चेकर से पास नहीं होता। भूली हुई स्थिति प्रोग्राम चलने से पहले ही पकड़ ली जाती है।
 
 शर्तें भी यही विचार अपनाती हैं: `if` की शर्त केवल `bool` हो सकती है। Common Lisp जैसा "`nil` के अलावा कुछ भी सत्य है" नियम यहाँ नहीं है।
 
@@ -81,11 +81,11 @@ none
 
 | फ़ॉर्म | अर्थ |
 |---|---|
-| `(unwrap-or opt default)` | `some` के लिए सामग्री; `none` के लिए डिफ़ॉल्ट |
-| `(unwrap opt)` | सामग्री बाहर निकालता है। `none` पर प्रोग्राम रोक देता है |
+| `(unwrap-or opt default)` | `Some` के लिए सामग्री; `None` के लिए डिफ़ॉल्ट |
+| `(unwrap opt)` | सामग्री बाहर निकालता है। `None` पर प्रोग्राम रोक देता है |
 | `(is-some opt)` / `(is-none opt)` | जाँचता है कि कौन-सा है |
 
-कई स्टैंडर्ड लाइब्रेरी फ़ंक्शन `Option` लौटाते हैं। उदाहरण के लिए, `position` तत्व मिलने पर `some` में स्थिति लौटाता है और न मिलने पर `none`।
+कई स्टैंडर्ड लाइब्रेरी फ़ंक्शन `Option` लौटाते हैं। उदाहरण के लिए, `position` तत्व मिलने पर `Some` में स्थिति लौटाता है और न मिलने पर `None`।
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -93,24 +93,24 @@ none
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: ऐसा ऑपरेशन जो विफल हो सकता है
 
-जो ऑपरेशन विफल हो सकता है वह `Result<T,E>` लौटाता है: सफलता पर `T` का मान रखने वाला `ok`, या विफलता पर त्रुटि `E` रखने वाला `err`।
+जो ऑपरेशन विफल हो सकता है वह `Result<T,E>` लौटाता है: सफलता पर `T` का मान रखने वाला `Ok`, या विफलता पर त्रुटि `E` रखने वाला `Err`।
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -119,8 +119,8 @@ none
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 जब अनुपस्थित मान को किसी स्पष्टीकरण की ज़रूरत न हो तब `Option` का उपयोग करें, और जब आप बताना चाहें कि कुछ क्यों विफल हुआ तब `Result` का। त्रुटियों को विस्तार से संभालने के बारे में [त्रुटि प्रबंधन](errors.md) में बताया गया है।

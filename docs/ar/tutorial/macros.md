@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # الماكرو (Macros)
 
 الماكرو دالة تأخذ برنامجًا وتعيد برنامجًا. وتتيح لك الماكرو ابتكار صياغة جديدة لا تستطيع الدوال التعبير
@@ -41,7 +41,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. تُفحص أنواع التوسيعات أيضًا
@@ -117,14 +117,14 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 ## 5. التوسيع بشكل مختلف بحسب الوسائط
 
 جسم الماكرو شيفرة typelisp عادية، فيمكنه فحص وسائطه بـ `if` أو `match` وبناء توسيع مختلف. والوسائط بيانات
-تعبيرات رمزية (`Option<Sexpr>`)، والقائمة الفارغة هي `none`.
+تعبيرات رمزية (`Option<Sexpr>`)، والقائمة الفارغة هي `None`.
 
 لنصنع `my-and` التي تعيد `true` إذا كانت كل شروطها صحيحة.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; لا وسائط
+    ((None) 'true)                                    ; لا وسائط
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; واحد فقط

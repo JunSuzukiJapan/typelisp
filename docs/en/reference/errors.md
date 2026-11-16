@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Error Messages
 
 What the main error messages from `typl` mean and how to fix them.
@@ -101,8 +101,8 @@ Mistakes found before running. The form is not run until they are fixed.
 | Message | Meaning and fix |
 |---|---|
 | `panic: divide by zero` | Division by zero with integers or ratios. Floating-point division by zero does not panic; it gives `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` was applied to `none`. Handle the `none` case with `match` or `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | An index out of range. Check the length with `len`, or use a function that returns `none` when out of range (`nth`, `pop` and so on) |
+| `panic: unwrap: called on None` | `unwrap` was applied to `None`. Handle the `None` case with `match` or `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | An index out of range. Check the length with `len`, or use a function that returns `None` when out of range (`nth`, `pop` and so on) |
 | `panic: an integer argument does not fit a fixnum` | An `int` that does not fit in 63 bits was passed to an argument taking an index or a count |
 | `throw: no enclosing (catch 'oops) for this throw` | A `throw` ran with no enclosing `catch` of the same tag |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | A `throw` reached a `catch` of the same tag that carries another type |

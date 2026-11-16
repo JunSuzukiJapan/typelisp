@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -86,7 +86,7 @@ messages d'erreur, [errors.md](errors.md).
   où des données S-expression sont attendues, c'est un tuple dont tous les éléments sont des données
   : la variante `tuple` de `Sexpr`.
 - **Attributs** : `#[test]` est une marque attachée à la forme suivante (écrite comme en Rust). Le seul attribut pour l'instant est `test`, qui se place sur un `defun` ([3.16 `#[test]`](#316-test--fonctions-de-test)). Lu avec `read`, il devient la liste `(%internal::attribute (test) form)`.
-- **La liste vide `()`** : selon le contexte, la valeur du type `Unit` ou le `none` de `Option<Sexpr>`. **`Sexpr` n'a
+- **La liste vide `()`** : selon le contexte, la valeur du type `Unit` ou le `None` de `Option<Sexpr>`. **`Sexpr` n'a
   pas de variante liste vide** : `Sexpr` signifie « une S-expression non vide », et le type des données S-expression
   est `Option<Sexpr>` (voir « Motifs pour `Option<Sexpr>` » dans [4.3 match](#43-match--filtrage-par-motifs)).
 - **quote/quasiquote/unquote** :
@@ -157,7 +157,7 @@ Dans le source, les types s'écrivent comme des symboles ou des listes ordinaire
   rapport.
   Pour les conditions qu'un trait doit remplir pour s'utiliser avec `:dyn`, voir
   [3.9 deftrait / impl](#39-deftrait--impl--traits). Écrire `:dyn` en dehors d'une position de type est une erreur.
-- Types génériques intégrés : `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
+- Types génériques intégrés : `Option<T>` (`(Some T)` / `None`), `Result<T,E>` (`(Ok T)` / `(Err E)`),
   `HashTable<K,V>`, `Vector<T>`, et les types de concurrence `Task<T>` / `Thread<T>` / `Chan<T>`
   ([chapitre 12](#12-concurrence-tâches)). Il y a aussi `Sexpr`, le type des données S-expression. Les types
   d'erreur concrets intégrés sont `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` /
@@ -193,7 +193,7 @@ Les noms des formes spéciales (mots réservés comme `if`, `let` et `step`, qui
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; sans valeur par défaut
-    (match suffix ((some s) (append name s)) ((none) name)))         ; Option<string> dans le corps
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; Option<string> dans le corps
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; avec valeur par défaut
   (pow 3)      ; n = 2
@@ -203,8 +203,8 @@ Les noms des formes spéciales (mots réservés comme `if`, `let` et `step`, qui
   (mk :b "q")  ; l'appelant écrit `:nom valeur`, dans n'importe quel ordre ; ceux omis prennent leur valeur par défaut
   ```
 
-  - **Un paramètre sans expression par défaut a le type `Option<Type>`.** Omis, il vaut `none` ; passé, la valeur nue
-    écrite par l'appelant est automatiquement enveloppée dans `some`. Ce que CL fait avec une variable supplied-p
+  - **Un paramètre sans expression par défaut a le type `Option<Type>`.** Omis, il vaut `None` ; passé, la valeur nue
+    écrite par l'appelant est automatiquement enveloppée dans `Some`. Ce que CL fait avec une variable supplied-p
     (« a-t-il été fourni ? ») apparaît ici du côté du type statique.
   - Avec une expression par défaut, le type reste `Type` tel que déclaré. En cas d'omission, cette **expression
     vérifiée** est insérée telle quelle dans l'appel (évaluée à chaque appel).
@@ -408,7 +408,7 @@ uniquement. Chacun des cas suivants est une erreur :
 
 ```lisp
 (defstruct handle (p ptr))          ; un champ de structure
-(defenum maybe (none) (some ptr))   ; un champ d'énumération
+(defenum maybe (None) (Some ptr))   ; un champ d'énumération
 (defvar (block ptr) ...)            ; une globale
 (defffi f (Vector<ptr>) i32)        ; dans un argument de type
 ```
@@ -875,8 +875,8 @@ Une valeur de structure se crée avec `make-instance`, comme en CLOS.
 
 ; générique
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - Chaque variante a la forme `(VariantName FieldType...)`. Les champs sont uniquement positionnels (ils n'ont pas de
@@ -887,8 +887,8 @@ Une valeur de structure se crée avec `make-instance`, comme en CLOS.
   ou avoir un `_`) :
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - Les méthodes et les méthodes statiques s'écrivent dans `impl` (3.5), comme pour `defstruct`.
 - Pour rendre l'énumération elle-même `pub`, écrivez `(pub defenum ...)`.
@@ -1078,7 +1078,7 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
 - `module` crée un espace de noms. **Les types ne sont pas des espaces de noms** (comme en Rust, un type n'a que
   des méthodes statiques et des méthodes).
 - `(use Type)` n'importe que le nom du type. Les variantes d'une énumération et les méthodes statiques
-  s'écrivent à travers le nom du type, comme `Option::some` ou `Chan::new`. Même après
+  s'écrivent à travers le nom du type, comme `Option::Some` ou `Chan::new`. Même après
   `(use std::sync::Chan)`, un `(new 1)` nu est une erreur si aucune fonction nommée `new` n'est définie.
 - Pour utiliser par nom nu les constructeurs et méthodes statiques d'un type, on les importe un par un,
   comme `(use std::sync::Chan::new)`, ou on importe tous les constructeurs et méthodes statiques
@@ -1088,7 +1088,7 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
   (`(use std::sync::Chan::* std::sync::WaitGroup::*)` est une erreur, car les deux ont `new`). Importer
   un nom identique à une fonction, une variable globale ou une macro que définit le module est aussi une
   erreur. Pour remplacer en connaissance de cause, on utilise `shadowing-import`.
-- La bibliothèque standard offre à tous les modules `some`/`none` d'`Option` et `ok`/`err` de `Result` :
+- La bibliothèque standard offre à tous les modules `Some`/`None` d'`Option` et `Ok`/`Err` de `Result` :
   ils s'utilisent donc par nom nu sans `use` (comme le prélude de Rust importe
   `Some`/`None`/`Ok`/`Err`).
 - **Un nom n'a qu'un sens.** Les fonctions, les variables globales et les macros partagent un espace de
@@ -1261,20 +1261,20 @@ se trouvent dans
   (assert-equal (+ 1 2) 3))
 ```
 
-Un `defun` marqué `#[test]` est une fonction de test, que `typl test` appelle une à une (comme le `#[test]` de Rust). Elle ne doit prendre aucun argument et doit renvoyer `()` ou `Result<(), E>` (elle ne peut pas non plus prendre de paramètres de type). Elle n'a pas besoin de `pub`. Un test qui renvoie un `Result` échoue en renvoyant un `err`, et l'erreur est affichée ; `E` doit donc implémenter `Error` ou `print-object` (comme Rust exige `Debug` du type d'erreur d'un test). Un `Error` est affiché par `describe-error` (le message et la chaîne de ses causes), tout le reste par `print-object`. `:dyn Error` est aussi un `Error` : un test peut donc rassembler des erreurs différentes en un seul type et le renvoyer.
+Un `defun` marqué `#[test]` est une fonction de test, que `typl test` appelle une à une (comme le `#[test]` de Rust). Elle ne doit prendre aucun argument et doit renvoyer `()` ou `Result<(), E>` (elle ne peut pas non plus prendre de paramètres de type). Elle n'a pas besoin de `pub`. Un test qui renvoie un `Result` échoue en renvoyant un `Err`, et l'erreur est affichée ; `E` doit donc implémenter `Error` ou `print-object` (comme Rust exige `Debug` du type d'erreur d'un test). Un `Error` est affiché par `describe-error` (le message et la chaîne de ses causes), tout le reste par `print-object`. `:dyn Error` est aussi un `Error` : un test peut donc rassembler des erreurs différentes en un seul type et le renvoyer.
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **Une exécution ordinaire et `compile-file` l'ignorent**, sans même vérifier son contenu (comme Rust ne compile les tests que sous `--test`). Le programme lui-même ne peut pas appeler une fonction de test.
 - Un test peut s'écrire dans n'importe quel fichier contenant des fonctions, à l'intérieur de n'importe quel `module`. Les tests peuvent aussi être rangés à part dans le dossier `tests/` du projet.
-- Un test échoue par un `panic`, une erreur d'exécution ou le renvoi d'un `err`. On vérifie avec `assert`, ou avec `assert-equal`, qui affiche les deux côtés ([Système](functions/system.md)). Quand un test échoue, les autres s'exécutent quand même.
+- Un test échoue par un `panic`, une erreur d'exécution ou le renvoi d'un `Err`. On vérifie avec `assert`, ou avec `assert-equal`, qui affiche les deux côtés ([Système](functions/system.md)). Quand un test échoue, les autres s'exécutent quand même.
 
 ```sh
 typl test                 # exécute tous les tests du projet de ce dossier
@@ -1420,7 +1420,7 @@ Sortes de motifs :
   syntaxe littérale (instances de `defstruct`, globales, résultats calculés), et une implémentation d'`Equal` définie
   par l'utilisateur devient telle quelle la règle de comparaison. `expr` peut faire référence à tout ce qui est
   visible depuis la position de la branche (arguments, liaisons extérieures, globales)
-- `(Ctor sub-pattern...)` — motifs de constructeur (`(some x)` `(none)` `(cons a d)` `(ok v)`, etc.)
+- `(Ctor sub-pattern...)` — motifs de constructeur (`(Some x)` `(None)` `(cons a d)` `(Ok v)`, etc.)
 - `(Type :slot pattern... :slot...)` — motifs de structure. Écrivez les slots après le nom du type sous
   forme de mots-clés. Si un mot-clé est suivi d'un motif, ce slot est confronté au motif ; s'il est suivi
   d'un autre mot-clé ou de rien, le slot est lié à une variable de même nom. Les slots non écrits ne sont
@@ -1431,7 +1431,7 @@ Sortes de motifs :
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; lie x, et confronte y à (some b)
+      ((point :x :y (Some b)) (+ x b))   ; lie x, et confronte y à (Some b)
       ((point :x a) a)))                 ; lie a
   ```
 - `#{p0 p1 ...}` — un motif de tuple. Chaque élément est mis en correspondance avec son propre
@@ -1439,7 +1439,7 @@ Sortes de motifs :
   d'éléments
 - `(:or p1 p2 ...)` — un motif « ou » : il correspond dès qu'une des alternatives correspond. Il n'y
   a qu'un corps, donc chaque alternative doit lier les mêmes variables avec les mêmes types. Il peut
-  aussi s'écrire à l'intérieur d'un motif de constructeur (`(some (:or (circle r) (rect r _)))`)
+  aussi s'écrire à l'intérieur d'un motif de constructeur (`(Some (:or (circle r) (rect r _)))`)
 
 Comparer un type qui n'implémente pas `Equal` avec un littéral de valeur / `(:= expr)` est une erreur de type (ce langage
 choisit de dire « on ne peut pas les comparer » plutôt que de laisser une branche qui ne correspond silencieusement
@@ -1504,8 +1504,8 @@ dans `(list p 42)` :
   d'origine dans la liste.
 
 **Motifs pour `Option<Sexpr>`** : le type des données S-expression n'est pas `Sexpr` mais `Option<Sexpr>`, et la liste
-vide n'est pas une variante de `Sexpr` mais le `none` d'`Option`. Quand on filtre une `Option<Sexpr>`, les 19
-variantes de `Sexpr` et `none` peuvent donc s'écrire **à plat dans la même liste de branches** (pas besoin d'un
+vide n'est pas une variante de `Sexpr` mais le `None` d'`Option`. Quand on filtre une `Option<Sexpr>`, les 19
+variantes de `Sexpr` et `None` peuvent donc s'écrire **à plat dans la même liste de branches** (pas besoin d'un
 `match` extérieur pour retirer l'`Option`) :
 
 ```lisp
@@ -1514,12 +1514,12 @@ variantes de `Sexpr` et `none` peuvent donc s'écrire **à plat dans la même li
     ((int _)    1)
     ((cons _ _) 2)
     ((str _)    3)
-    ((none)     0)          ; la liste vide
+    ((None)     0)          ; la liste vide
     (_          9)))
 ```
 
-L'exhaustivité est vérifiée dans le même univers plat : les 19 variantes de `Sexpr` plus `none`, 20 en tout. Oublier
-`(none)` est une erreur à moins qu'il y ait un `_`. `(some x)` peut aussi s'écrire et lie « quelque chose de non
+L'exhaustivité est vérifiée dans le même univers plat : les 19 variantes de `Sexpr` plus `None`, 20 en tout. Oublier
+`(None)` est une erreur à moins qu'il y ait un `_`. `(Some x)` peut aussi s'écrire et lie « quelque chose de non
 vide ».
 
 Ce sucre s'applique **exactement** à `Option<Sexpr>` seulement. Pour `Option<Option<Sexpr>>`, on ne saurait pas quelle
@@ -1552,7 +1552,7 @@ Ici aussi l'ensemble des types qui l'implémentent est ouvert, donc une branche 
 
 **Inférence de types entre branches** : toutes les branches doivent avoir le même type (sauf les branches qui
 divergent, comme avec `panic`). Dans un `match` écrit là où aucun type n'est attendu, les branches complètent
-mutuellement leurs arguments de type manquants : `(Result::ok v)` ne fixe que `T`, et `(Result::err e)` que `E`, mais
+mutuellement leurs arguments de type manquants : `(Result::Ok v)` ne fixe que `T`, et `(Result::Err e)` que `E`, mais
 ensemble ils fixent `Result<T,E>`. Un argument de type qu'aucune branche ne peut fixer à la fin est une erreur de cette
 branche (`cannot infer type argument ...`). En dehors de `match`, un argument de type qui ne peut pas être fixé est
 une erreur sur place.
@@ -1675,7 +1675,7 @@ Avec plusieurs `:for`, ils avancent **en parallèle**, et la boucle se termine d
 | `:sum e` / `:count e` | La somme / le nombre de fois où c'était vrai |
 | `:maximize e` / `:minimize e` | Le maximum / minimum. **`Option<T>`** (comme CL renvoie nil pour une séquence vide ; un type `Ord` quelconque n'a pas de plus petit élément) |
 | `:always e` / `:never e` | `true` si tous sont vérifiés ; `false` immédiatement dès que l'un échoue |
-| `:thereis e` | `e` est une **`Option<T>`**. Renvoie le premier `some`, ou `none` s'il n'y en a pas (c'est ce qui correspond à la « première valeur non nil » de CL ; pour tester un `bool`, utilisez `:always`/`:never`) |
+| `:thereis e` | `e` est une **`Option<T>`**. Renvoie le premier `Some`, ou `None` s'il n'y en a pas (c'est ce qui correspond à la « première valeur non nil » de CL ; pour tester un `bool`, utilisez `:always`/`:never`) |
 | `:while e` / `:until e` | **Se termine normalement** ici (`:finally` s'exécute, et ce qui a été collecté est la réponse) |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | Rend une clause conditionnelle |
 | `:return e` | Sort immédiatement avec cette valeur (`:finally` ne s'exécute pas, comme en CL) |
@@ -1696,7 +1696,7 @@ Omettre `:finally (return 0)` est une **erreur de type**. Ce ne sont que les rè
 type `int` de la sortie ne s'accorde pas avec le `()` que laisse la boucle quand elle est épuisée.
 
 **La valeur de la boucle** est l'accumulation de la clause d'accumulation s'il y en a une (la première s'il y en a
-plusieurs), `true` pour `:always`/`:never`, `none` pour `:thereis`, et `()` s'il n'y en a pas. Si la dernière chose de
+plusieurs), `true` pour `:always`/`:never`, `None` pour `:thereis`, et `()` s'il n'y en a pas. Si la dernière chose de
 `:finally` est `(return e)`, c'est la valeur : l'idiome `finally (return …)` de CL, le seul moyen pour une boucle qui
 n'accumule pas de nommer sa propre réponse.
 
@@ -1762,7 +1762,7 @@ supérieur, etc.).
 (unreachable)                       ; s'expanse en (panic "unreachable"). defmacro
 (todo)                              ; s'expanse en (panic "todo"). defmacro
 (as Type expr)                      ; conversion de type numérique/caractère. les conversions qui peuvent échouer déclenchent alors un panic
-(try-as Type expr)                  ; comme as, mais renvoie le résultat sous forme d'Option<Type> (none en cas d'échec)
+(try-as Type expr)                  ; comme as, mais renvoie le résultat sous forme d'Option<Type> (None en cas d'échec)
 (print control args...)             ; développe le format et écrit sur la sortie standard (sans saut de ligne)
 (println control args...)           ; idem (avec un saut de ligne à la fin)
 (format dest control args...)       ; le format de CL. renvoie la chaîne développée
@@ -1805,7 +1805,7 @@ se trouvent dans [Directives de format](functions/format.md) et [Affichage](func
 compris `int`) et entre `f32`↔`f64` sont de vraies conversions** : `as` tronque / arrondit, et `try-as` répond si cela
 tient dans cette largeur (précision). `(as int x)` est l'élargissement exact depuis une largeur fixe, et `(as i32 n)`
 la troncature depuis `int`. Entier → `char` peut échouer hors limites ; `as` déclenche donc un panic et `try-as` donne
-`none`. Tout le reste (l'élargissement, et la troncature de `float->int`/`ratio->int`) réussit toujours.
+`None`. Tout le reste (l'élargissement, et la troncature de `float->int`/`ratio->int`) réussit toujours.
 `float->int`/`ratio->int`/`char->int` aboutissent à `int`, et si une largeur plus étroite est demandée, `int->W` est
 appelé ensuite. C'est du sucre qui s'expanse vers les méthodes de conversion correspondantes
 (`int->char`/`int->int`/`int->W`, etc. dans [Nombres](functions/numbers.md)).
@@ -1818,7 +1818,7 @@ chemin `::` non évalué. Contrairement au `(documentation 'name 'function)` de 
 type : elle résout `name` dans l'ordre variable → fonction → type → trait → macro (la même priorité que lorsqu'un
 identificateur nu est évalué comme expression) et renvoie la docstring de la définition trouvée
 (`(documentation Type::method)` est pour les méthodes). Un échec de résolution (aucune définition de ce nom) est une
-erreur à la vérification ; une définition qui existe mais sans docstring donne `Option::none`. Tout est décidé comme
+erreur à la vérification ; une définition qui existe mais sans docstring donne `Option::None`. Tout est décidé comme
 constante à la vérification : aucune recherche n'a lieu à l'exécution. Les noms libres qualifiés par un module
 (`mod::name`, sauf `Type::method`) ne sont pas pris en charge.
 
@@ -2013,10 +2013,10 @@ tous `(:where (PeekInput S))` ; ils fonctionnent donc tous tels quels sur le typ
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => lu comme (not (equal 1 2)), c'est-à-dire true
 ```

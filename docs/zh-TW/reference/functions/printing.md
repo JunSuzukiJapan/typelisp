@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -32,17 +32,17 @@
 以 `typl file.typl` 執行腳本時**不會輸出頂層運算式的值**，所以程式要自己寫到標準輸出就呼叫這些函式。`print`/`println`/`format` 每次呼叫都會
 把輸出送出（這樣即使透過管線，也能在讀取標準輸入之前看到提示）。
 
-**`Option<Sexpr>` 透明地列印。** S 運算式資料的型別是 `Option<Sexpr>`，所以 `(some x)` 的包裝不會出現在列印中，內容直接輸出。空串列輸出為
-`()`。其他 `Option<T>` 列印為 `(some ...)` / `none`。結構、列舉、`Vector` 中的 `Option<T>` 欄位也一樣。`(eval ...)` 的
-`Result<Option<Sexpr>,…>` 輸出為 `(ok 42)`，`none` 時為 `(ok ())`。
+**`Option<Sexpr>` 透明地列印。** S 運算式資料的型別是 `Option<Sexpr>`，所以 `(Some x)` 的包裝不會出現在列印中，內容直接輸出。空串列輸出為
+`()`。其他 `Option<T>` 列印為 `(Some ...)` / `None`。結構、列舉、`Vector` 中的 `Option<T>` 欄位也一樣。`(eval ...)` 的
+`Result<Option<Sexpr>,…>` 輸出為 `(Ok 42)`，`None` 時為 `(Ok ())`。
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -264,10 +264,10 @@ CL 以 `nil` 表示「無限制」，但這個語言沒有 `nil`，所以與 `*p
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a 指向 a 自己
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a 指向 a 自己
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 標籤**依每個列印對象從 1 重新編號**（與 CL 相同）。即使沒有循環，同一個物件出現 2 次也會加上 `#1=`/`#1#`——這是把「這兩個是同一個物件」的

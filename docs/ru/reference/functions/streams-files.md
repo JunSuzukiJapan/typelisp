@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Потоки и файлы
 
 Трейты и методы потоков, конкретные типы потоков, операции с файлами и пути. Сетевые сокеты тоже являются потоками и
@@ -30,18 +30,18 @@
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Следующий элемент. `none` в конце. **Единственный метод, который нужно реализовать** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Следующий элемент. `None` в конце. **Единственный метод, который нужно реализовать** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Следующий символ |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | До следующего перевода строки (перевод строки потребляется и удаляется). Последняя строка без перевода строки тоже возвращается |
 | `read-all` | `(read-all s)` | `(S)→string` | Всё, что осталось |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Только символ, который уже доступен. Лучше `none`, чем ждать |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Только символ, который уже доступен. Лучше `None`, чем ждать |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Добавляет в `v` до `n` символов и возвращает, сколько реально прочитано. Меньше `n` — только в конце |
 
 `listen` находится в `InputStream` (родителе `CharInput`):
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Можно ли ответить на следующее чтение без ожидания. По умолчанию `false`, **сторона, которая никогда не лжёт**: `true` было бы догадкой, а неверная догадка заставила бы `read-char-no-hang` заблокироваться. Все встроенные потоки его переопределяют. **Для пользовательских потоков, которые его не переопределяют, `read-char-no-hang` всегда возвращает `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | Можно ли ответить на следующее чтение без ожидания. По умолчанию `false`, **сторона, которая никогда не лжёт**: `true` было бы догадкой, а неверная догадка заставила бы `read-char-no-hang` заблокироваться. Все встроенные потоки его переопределяют. **Для пользовательских потоков, которые его не переопределяют, `read-char-no-hang` всегда возвращает `None`** |
 
 `PeekInput` (наследуется от `CharInput`) добавляет **возврат одного символа**. Место, где хранить возвращённый символ,
 есть только у самого потока, поэтому реализации по умолчанию быть не может, и это отдельный трейт.
@@ -89,7 +89,7 @@
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` — одна из трёх констант `direction-input` / `direction-output` / `direction-append`. `open-file`
-возвращает `(err FileError)`, если файл не удаётся открыть (отсутствующий файл — обычный результат, а не panic). Имя
+возвращает `(Err FileError)`, если файл не удаётся открыть (отсутствующий файл — обычный результат, а не panic). Имя
 файла может быть строкой или `pathname` (`Pathish` в главе 9).
 
 `(get-output-stream-string s)` возвращает то, что было записано в `string-output-stream`, и очищает его. Как в CL,
@@ -100,7 +100,7 @@
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Следующий байт. `none` в конце файла |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Следующий байт. `None` в конце файла |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Пишет один байт. Вне 0..255 — ошибка |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | Символьная версия, в байтах |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | То же |
@@ -136,18 +136,18 @@ CL определяет тип элементов **в вызове**, как `(
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Переносит всё |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Все оставшиеся строки |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читает один `Sexpr` (`read` из CL). `(ok eof)` в конце ввода, `(ok (datum d))`, когда данное прочитано, `err`, если это не данные. Он **потребляет один пробельный символ**, завершивший данное (как в CL). `ReadOutcome` — не `Option<Sexpr>`, чтобы чтение пустого списка `()` и конец ввода не были одним и тем же значением |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читает один `Sexpr` (`read` из CL). `(Ok eof)` в конце ввода, `(Ok (Datum d))`, когда данное прочитано, `Err`, если это не данные. Он **потребляет один пробельный символ**, завершивший данное (как в CL). `ReadOutcome` — не `Option<Sexpr>`, чтобы чтение пустого списка `()` и конец ввода не были одним и тем же значением |
 | `read-sexpr-preserving-whitespace` | То же | То же | То же, но оставляет пробельный символ (`read-preserving-whitespace` из CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читает до `ch` и составляет список. `ch` потребляется. `err`, если ввод заканчивается |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читает до `ch` и составляет список. `ch` потребляется. `Err`, если ввод заканчивается |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Пишет по одной строке |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Всё содержимое |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Все строки |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Записывает |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Существует ли |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Удалить, переименовать (аргументы — `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютный путь с разрешёнными символическими ссылками и `.`/`..`. `err`, если не существует |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютный путь с разрешёнными символическими ссылками и `.`/`..`. `Err`, если не существует |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Время последнего изменения. Это **универсальное время**, поэтому его может прочитать `decode-universal-time` ([Время](system.md#2-разбор-и-сборка-дат)) |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Имя входа владельца. `err`, если файла нет, `(ok none)`, если для uid владельца нет записи в базе паролей: два случая, которые различает CL, остаются раздельными |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Имя входа владельца. `Err`, если файла нет, `(Ok none)`, если для uid владельца нет записи в базе паролей: два случая, которые различает CL, остаются раздельными |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Является ли каталогом. **Тоже `false`, если не существует**; чтобы различить эти случаи, используйте `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Перечисляет содержимое по truename (абсолютный путь с разрешёнными символическими ссылками, как у `truename`). Символические ссылки с отсутствующей целью пропускаются. `.`/`..` пропускаются. Порядок — тот, что даёт ОС |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Создаёт вместе с родительскими. Успешно, если уже существует |
@@ -199,8 +199,8 @@ CL определяет тип элементов **в вызове**, как `(
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   разделено по последней точке
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   разделено по последней точке
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -226,10 +226,10 @@ CL определяет тип элементов **в вызове**, как `(
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Разбивает строку на части. Завершающий `/` (или пустое имя) означает «нет имени», то есть каталог |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Строит путь только из указанных компонентов (все `&key`). Опущенные имя или тип остаются «отсутствующими», и их дополнит `merge-pathnames` |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Компоненты каталогов, начиная с самого внешнего |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Имя без типа. `none` для каталога |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Имя без типа. `None` для каталога |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | После последней точки. Начальная точка не считается (весь `.gitignore` — имя) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Начинается ли от корня |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Домашний каталог. `none`, если нет `$HOME` (CL допускает и `NIL`) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Домашний каталог. `None`, если нет `$HOME` (CL допускает и `NIL`) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Часть до последнего `/` |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Только часть `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Дополняет недостающие у `p` компоненты из `default`. Относительный `p` помещается в каталог `default`; абсолютный `p` сохраняет свой каталог |

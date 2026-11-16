@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Gelijktijdigheid
 
 In typelisp voer je werk gelijktijdig uit door **taken** (lichtgewicht threads) te starten, en taken
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` verzendt. Als het kanaal vol is, wacht het tot er ruimte is.
 - `(recv ch)` ontvangt. Het wacht tot er een waarde binnenkomt. Het resultaat is een `Option<T>`;
-  zodra het kanaal gesloten en leeg is, geeft het `none` terug.
+  zodra het kanaal gesloten en leeg is, geeft het `None` terug.
 - Een kanaal met `doiter` doorlopen blijft waarden ontvangen totdat het wordt gesloten. Het kan ook
   rechtstreeks aan `map` of `filter` worden doorgegeven.
 - `send` op een gesloten kanaal geeft een panic.

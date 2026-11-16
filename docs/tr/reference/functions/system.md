@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -56,20 +56,20 @@ alınacağını söylemez. `encode-universal-time`, böyle bir zaman için iki y
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | Komut satırı. **0. eleman program adıdır** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | Bir ortam değişkeni. Ayarlı değilse ya da UTF-8 değilse `none` |
+| `getenv` | `(getenv name)` | `string→Option<string>` | Bir ortam değişkeni. Ayarlı değilse ya da UTF-8 değilse `None` |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. `user-homedir-pathname`'in temeli ([Yol adları](streams-files.md#92-fonksiyonlar)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Gerçekleştirimin sürümü |
 | `machine-type` | `(machine-type)` | `()→string` | CPU mimarisi (`x86_64` / `aarch64` …). **Derleme hedefinin** değeri |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | Host adı |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | **Şu anda çalışan** donanımın adı (`Apple M1` / `Intel(R) Xeon(R) …`). Belirlenemediği yerde `none` |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | **Şu anda çalışan** donanımın adı (`Apple M1` / `Intel(R) Xeon(R) …`). Belirlenemediği yerde `None` |
 | `software-type` | `(software-type)` | `()→string` | İşletim sistemi (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | İşletim sistemi sürümü (`uname -r`, örneğin `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Kurulum yerinin kısa bir adı. **Her zaman `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Aynı şekilde, uzun bir ad. **Her zaman `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Kurulum yerinin kısa bir adı. **Her zaman `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Aynı şekilde, uzun bir ad. **Her zaman `None`** |
 
 `Option` döndürenler, CL'nin `NIL`'e izin verdiği öğelerdir (*ya da böyle bir ad belirlenemiyorsa nil*).
-POSIX'te site adlarını kaydedecek bir yer yoktur; bu yüzden her zaman `none`'dır; SBCL de aynısını
+POSIX'te site adlarını kaydedecek bir yer yoktur; bu yüzden her zaman `None`'dır; SBCL de aynısını
 döndürür. `machine-type` ile `machine-version` arasındaki farka dikkat edin: birincisi bu ikili dosyanın
 **derlendiği** mimaridir, ikincisi onu şu anda **çalıştıran** yongadır.
 
@@ -136,7 +136,7 @@ atla), `c` (buradan sonra sormayı bırak) ve `q`'dur (iptal). **Standart girdi 
 betikler ve testler kimsenin yanıtlayamayacağı bir istemde takılmaz.
 
 `ed`'in `$VISUAL` / `$EDITOR`'ı boşluklardan bölünür; bu yüzden `EDITOR="code -w"` çalışır. İkisi de
-ayarlı değilse sonuç `err`'dir: `vi`'yi tahmin etmez. Satır numarası, `+N` biçiminde ilk olarak geçirilir.
+ayarlı değilse sonuç `Err`'dir: `vi`'yi tahmin etmez. Satır numarası, `+N` biçiminde ilk olarak geçirilir.
 
 `dribble`, oturumun çıktısının süreçten çıktığı üç yolun hepsini kaydeder: `print`/`println`/`format`'ın
 yazdıkları, standart çıktıya bağlı akışlara yazılanlar ve REPL'e yazılan satırlar ile REPL'in geri
@@ -145,14 +145,14 @@ yazdırdığı değerler.
 ## 6. Ayrıştırma ve değerlendirme
 
 Bunların hepsi çalışma zamanından gelen metni ve veriyi ele alır (programın kendisinin denetlemediği);
-bu yüzden başarısızlıkta panic olmak yerine bir `Result`'ın `err`'ini döndürürler. Hata türleri işlem
+bu yüzden başarısızlıkta panic olmak yerine bir `Result`'ın `Err`'ini döndürürler. Hata türleri işlem
 başına somut türlerdir ([Hata türleri](option-result.md#3-hata-türleri-ve-error-traiti)).
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL'nin `parse-integer`'ı. Baştaki ve sondaki boşlukları atlar (`trim` ile aynı küme), en çok bir `+`/`-` işareti, sonra `radix` tabanında (varsayılan 10, 2 ile 36; 10'un üzerindeki basamaklar iki harf büyüklüğünde de) basamakları okur. Basamak sayısına sınır yoktur (`int`). Artakalan diğer karakterler `err` verir. `:junk-allowed true` ile ilk basamak olmayan karakterde durur ve geri kalanı yok sayar, ancak tek bir basamak bile yoksa `err` verir (CL'nin `nil`'ine karşılık gelir). CL'nin ikinci değerini (okumanın bittiği konum) döndürmez. Aralık dışı bir `radix` panic olur (metindeki değil, çağıranın hatası) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL'nin `parse-integer`'ı. Baştaki ve sondaki boşlukları atlar (`trim` ile aynı küme), en çok bir `+`/`-` işareti, sonra `radix` tabanında (varsayılan 10, 2 ile 36; 10'un üzerindeki basamaklar iki harf büyüklüğünde de) basamakları okur. Basamak sayısına sınır yoktur (`int`). Artakalan diğer karakterler `Err` verir. `:junk-allowed true` ile ilk basamak olmayan karakterde durur ve geri kalanı yok sayar, ancak tek bir basamak bile yoksa `Err` verir (CL'nin `nil`'ine karşılık gelir). CL'nin ikinci değerini (okumanın bittiği konum) döndürmez. Aralık dışı bir `radix` panic olur (metindeki değil, çağıranın hatası) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Bir kayan noktalı sayı. `inf`/`nan` de kabul eder |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`'den bir `Sexpr` okur (kaynak kodu okuyanla aynı okuyucuyla). Dengesiz parantezler, sonlandırılmamış string'ler vb. `err` verir. Bir akıştan okumak `read-sexpr`'dir ([Akışlar](streams-files.md#6-jenerik-fonksiyonlar-ve-dosya-işlemleri)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`'den bir `Sexpr` okur (kaynak kodu okuyanla aynı okuyucuyla). Dengesiz parantezler, sonlandırılmamış string'ler vb. `Err` verir. Bir akıştan okumak `read-sexpr`'dir ([Akışlar](streams-files.md#6-jenerik-fonksiyonlar-ve-dosya-işlemleri)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` artı **okumanın bittiği konum**. `(car r)` değer, `(cdr r)` okunacak sonraki karakterin konumudur. `start` varsayılan olarak 0'dır |
 | `read-from-string-preserving-whitespace` | Yukarıdakiyle aynı | Yukarıdakiyle aynı | Aynısı, ancak veriyi bitiren boşluğu tüketmez. Fark döndürülen konumda görünür |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | `form`'un türlerini çalışma zamanında denetler ve değerlendirir. CL'nin `eval`'ini izler |
@@ -165,9 +165,9 @@ olarak okumayı yeniden tarama değil, bir döngü yapar:
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 `preserving-whitespace`'in yarattığı fark **bir boşluk karakteridir**: CL'nin `read`'i veriyi bitiren
@@ -187,11 +187,11 @@ yerel bağlamaları görünmez) değerlendirir. Hem ifadeler hem tanımlar
 kalıcı olarak kaydedilir.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; the global x is visible
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; returns the defined name
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; the definition just made is visible
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; the global x is visible
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; returns the defined name
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; the definition just made is visible
 ```
 
 - **Dönüş değeri**: bir ifade için sonuç bir `Option<Sexpr>` olarak; bir tanım için tanımlanan adın sembolü
@@ -204,7 +204,7 @@ kalıcı olarak kaydedilir.
   Ancak **sonraki `eval`'ler onu görebilir** (tür denetimleri çalışma zamanında, tanımdan sonra çalışır).
   REPL her seferinde bir satırı denetler ve çalıştırır; bu yüzden `eval` ile tanımlanan bir ad sonraki
   satırdan doğrudan çağrılabilir.
-- **Hatalar**: tür hataları ve sözdizimi hataları `err` döndürür (panic olmaz). Değerlendirilen koddaki
+- **Hatalar**: tür hataları ve sözdizimi hataları `Err` döndürür (panic olmaz). Değerlendirilen koddaki
   **çalışma zamanı panic'leri** (sıfıra bölme vb.) doğrudan yazılmış koddaki gibi yayılır. Aradaki
   herhangi bir `unwind-protect` temizliği çalışır
   ([Sözdizimi Başvurusu 8. bölüm](../syntax.md#8-yerel-olmayan-çıkışlar-catch--throw--unwind-protect)).
@@ -254,7 +254,7 @@ statik bir metodun docstring'ini arar.
 ```
 
 **Değer denetim zamanında belirlenir**: ad hiçbir tanıma çözümlenmiyorsa bu bir denetim zamanı hatasıdır
-(tanımsız bir değişkene başvurmak gibi). Çözümleniyor ama docstring yoksa sonuç `Option::none`'dır.
+(tanımsız bir değişkene başvurmak gibi). Çözümleniyor ama docstring yoksa sonuç `Option::None`'dır.
 
 **Kapsanmayanlar**:
 
@@ -275,19 +275,19 @@ Makroların nasıl tanımlanacağı
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Yeni bir sembol. Adı `" <prefix><n>"`'dir; burada `n`, `*gensym-counter*`'dır. Baştaki bir boşluk kaynakta yazılamaz; bu yüzden üretilen bağlamalar yazılmış adlarla asla çakışmaz |
 | `*gensym-counter*` | Değişken | `int` | `gensym`'in sonraki kullandığı sayı. CL'deki gibi okunabilir ve ayarlanabilir |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Bir makro çağrısını bir adım açar. `none`, "bir makro çağrısı değil" demektir |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Bir makro çağrısını bir adım açar. `None`, "bir makro çağrısı değil" demektir |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Artık bir makro olmayana kadar tekrarlar |
 
 `macroexpand-1` bir `Option` döndürür. CL "açılıp açılmadığını" ikinci bir dönüş değeri olarak bildirir,
-ancak çoklu değerler yoktur; bu yüzden bu rolü `none` oynar. **Kendi çağrısına açılan bir makro asla bir
+ancak çoklu değerler yoktur; bu yüzden bu rolü `None` oynar. **Kendi çağrısına açılan bir makro asla bir
 makro olmayanla karıştırılamaz.** Bir adımlık açılım, tür denetleyicisinin kullandığıyla aynıdır; bu
 yüzden programın gördüğü ile denetleyicinin gördüğü asla ayrışmaz.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 CL'de olup bu dilde olmayanlar: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` her zaman

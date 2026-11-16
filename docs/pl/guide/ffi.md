@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # FFI do C (defffi)
 
 Ten przewodnik wyjaśnia, jak wywoływać funkcje C z typelisp. Lista typów, które można deklarować, oraz
@@ -67,7 +67,7 @@ użyć któregoś jako liczby całkowitej typelisp, przekonwertuj go za pomocą 
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int nie traci żadnej części 64-bitowej wartości
-(try-as i32 (unsafe (c-strlen s)))  ; none, jeśli nie mieści się w i32
+(try-as i32 (unsafe (c-strlen s)))  ; None, jeśli nie mieści się w i32
 (unsafe (c-malloc 16))              ; literały całkowite można przekazywać wprost
 ```
 

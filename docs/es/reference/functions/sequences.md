@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Pares, expresiones S y secuencias
 
 El par genérico `cons-cell`, los datos de expresiones S `Sexpr`, los símbolos, las funciones de secuencia
@@ -43,14 +43,14 @@ Las celdas de expresiones S no se manejan con los `cons`/`car`/`cdr` generales d
 funciones `sexpr-*`. Se usan sobre todo en los cuerpos de `defmacro` para construir y desarmar formas.
 
 **El tipo de los datos de expresiones S es `Option<Sexpr>`.** La lista vacía no es una variante de `Sexpr`
-sino el `none` de `Option`, y `Sexpr` en sí significa "una expresión S no vacía". Así que las funciones
+sino el `None` de `Option`, y `Sexpr` en sí significa "una expresión S no vacía". Así que las funciones
 `sexpr-*` reciben y devuelven `Option<Sexpr>`.
 
-- `()` es la lista vacía donde se espera un `Option<Sexpr>` (también se puede escribir `(Option::none)`)
+- `()` es la lista vacía donde se espera un `Option<Sexpr>` (también se puede escribir `(Option::None)`)
 - `Sexpr` se amplía implícitamente donde se espera un `Option<Sexpr>` (sin conversión en tiempo de
   ejecución). La dirección contraria, usar un `Option<Sexpr>` como `Sexpr`, afirma "esto no es la lista
   vacía", así que hay que indicarlo explícitamente con `match` o `unwrap`
-- En `match`, las 19 variantes de `Sexpr` y `none` se pueden escribir **planas en la misma lista de ramas**
+- En `match`, las 19 variantes de `Sexpr` y `None` se pueden escribir **planas en la misma lista de ramas**
   ([Referencia de sintaxis](../syntax.md#43-match--coincidencia-de-patrones))
 
 | Nombre | Forma | Tipo | Descripción |
@@ -116,7 +116,7 @@ Funciones que reciben un predicado (corresponden a la familia `-if` de CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | La primera posición que cumple el predicado |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Cuántos cumplen el predicado |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Si todos los elementos cumplen el predicado |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Si algún elemento cumple el predicado (corresponde al `some` de CL; un nombre que no choca con el constructor `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Si algún elemento cumple el predicado (corresponde al `some` de CL) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Plegado por la izquierda |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Plegado por la derecha |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Reúne todos los elementos restantes. Sirve para convertir en `Vector` el resultado de una función `lazy` de abajo |
@@ -129,7 +129,7 @@ Funciones que reciben un predicado (corresponden a la familia `-if` de CL):
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Concatena iteradores. Se pueden dar tres o más |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | El `concatenate` de CL. El tipo del resultado se escribe como **un literal de símbolo citado** (CL usa un especificador de tipo en tiempo de ejecución). `'vector` recibe uno o más, `'string` cero o más (`""` para cero). Las listas `Sexpr` no están incluidas (usa `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Inversión (no destructiva) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | El elemento `n` (`none` fuera de rango) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | El elemento `n` (`None` fuera de rango) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` con los argumentos al revés |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | Los primeros `n` elementos |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` se recorta a la longitud) |
@@ -223,7 +223,7 @@ como `Vector` nuevos.
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Aplica sobre las colas por sus efectos secundarios (la contrapartida en `maplist` de `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Aplica sobre las colas y concatena (la contrapartida en `maplist` de `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | La posición donde aparece `sub` por primera vez. Si el receptor es un `string`, se elige el método de `string` ([Cadenas](collections.md#1-cadenas-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | La primera posición donde difieren. `none` si son iguales |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | La primera posición donde difieren. `None` si son iguales |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Fusión. CL exige entradas ordenadas; esta ordena la concatenación |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Añade `x` **al principio** si no está |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Operaciones de conjuntos. CL no especifica el orden; aquí es estable, **por orden de primera aparición** |
@@ -276,7 +276,7 @@ Qué función recibe cuál sigue a CL:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; quita solo uno, desde el final
 (position 3 (iter v) :start 1)                          ; el índice es relativo a la secuencia entera
 ```

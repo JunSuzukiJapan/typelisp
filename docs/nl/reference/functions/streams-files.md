@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Streams en bestanden
 
 Streamtraits en -methoden, concrete streamtypes, bestandsbewerkingen en padnamen. Netwerksockets zijn
@@ -31,18 +31,18 @@ Elke methode van `CharInput` heeft een standaardimplementatie. Een implementatie
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Het volgende element. `none` aan het einde. **De enige methode die moet worden geïmplementeerd** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Het volgende element. `None` aan het einde. **De enige methode die moet worden geïmplementeerd** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Het volgende teken |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | Tot de volgende nieuwe regel (de nieuwe regel wordt verbruikt en verwijderd). Een laatste regel die niet op een nieuwe regel eindigt wordt ook teruggegeven |
 | `read-all` | `(read-all s)` | `(S)→string` | Alles wat er over is |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Alleen een teken dat al binnen handbereik is. `none` in plaats van te wachten |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Alleen een teken dat al binnen handbereik is. `None` in plaats van te wachten |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Duwt tot `n` tekens op `v` en geeft terug hoeveel er werkelijk zijn gelezen. Minder dan `n` alleen aan het einde |
 
 `listen` zit in `InputStream` (de ouder van `CharInput`):
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Of het volgende lezen zonder wachten kan worden beantwoord. De standaardwaarde is `false`, **de kant die nooit liegt**: `true` zou een gok zijn, en een verkeerde gok zou `read-char-no-hang` laten blokkeren. Alle ingebouwde streams overschrijven het. **Bij door de gebruiker gedefinieerde streams die het niet overschrijven, geeft `read-char-no-hang` altijd `none` terug** |
+| `listen` | `(listen s)` | `(S)→bool` | Of het volgende lezen zonder wachten kan worden beantwoord. De standaardwaarde is `false`, **de kant die nooit liegt**: `true` zou een gok zijn, en een verkeerde gok zou `read-char-no-hang` laten blokkeren. Alle ingebouwde streams overschrijven het. **Bij door de gebruiker gedefinieerde streams die het niet overschrijven, geeft `read-char-no-hang` altijd `None` terug** |
 
 `PeekInput` (dat van `CharInput` erft) voegt **één teken terugduwen** toe. Alleen de stream zelf heeft
 een plek om het teruggeduwde teken te bewaren, dus dit kan geen standaardimplementatie hebben en is een
@@ -91,7 +91,7 @@ Houd je aan een van beide.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` is een van de drie constanten `direction-input` / `direction-output` /
-`direction-append`. `open-file` geeft `(err FileError)` terug als het bestand niet kan worden geopend
+`direction-append`. `open-file` geeft `(Err FileError)` terug als het bestand niet kan worden geopend
 (een ontbrekend bestand is een gewoon resultaat, geen panic). De bestandsnaam kan een string of een
 `pathname` zijn (`Pathish` in hoofdstuk 9).
 
@@ -104,7 +104,7 @@ hem leeg. Zoals in CL kan het ook na `close` worden opgehaald.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | De volgende byte. `none` aan het einde van het bestand |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | De volgende byte. `None` aan het einde van het bestand |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Schrijft één byte. Een fout buiten 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | De tekenversie, in bytes |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | Idem |
@@ -140,18 +140,18 @@ Allemaal `defstruct`s in de standaardbibliotheek en ze kunnen worden genest.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Draagt alles over |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Alle resterende regels |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Leest één `Sexpr` (`read` van CL). `(ok eof)` aan het einde van de invoer, `(ok (datum d))` wanneer er een wordt gelezen, `err` als het geen data is. Het **verbruikt het ene witruimteteken** dat het datum beëindigde (zoals in CL). `ReadOutcome` is geen `Option<Sexpr>` zodat het lezen van de lege lijst `()` en het einde van de invoer niet dezelfde waarde zijn |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Leest één `Sexpr` (`read` van CL). `(Ok eof)` aan het einde van de invoer, `(Ok (Datum d))` wanneer er een wordt gelezen, `Err` als het geen data is. Het **verbruikt het ene witruimteteken** dat het datum beëindigde (zoals in CL). `ReadOutcome` is geen `Option<Sexpr>` zodat het lezen van de lege lijst `()` en het einde van de invoer niet dezelfde waarde zijn |
 | `read-sexpr-preserving-whitespace` | Idem | Idem | Hetzelfde, maar laat de witruimte staan (`read-preserving-whitespace` van CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Leest tot `ch` en maakt een lijst. `ch` wordt verbruikt. `err` als de invoer opraakt |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Leest tot `ch` en maakt een lijst. `ch` wordt verbruikt. `Err` als de invoer opraakt |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Schrijft één regel per keer |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | De hele inhoud |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Alle regels |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Schrijft het weg |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Of het bestaat |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Verwijderen, hernoemen (argumenten zijn `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Het absolute pad met symbolische koppelingen en `.`/`..` opgelost. `err` als het niet bestaat |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Het absolute pad met symbolische koppelingen en `.`/`..` opgelost. `Err` als het niet bestaat |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Het tijdstip van de laatste wijziging. Het is **universele tijd**, dus `decode-universal-time` ([Tijd](system.md#2-datums-decoderen-en-coderen)) kan het lezen |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | De inlognaam van de eigenaar. `err` als het bestand niet bestaat, `(ok none)` als de uid van de eigenaar geen invoer in de wachtwoorddatabase heeft: de twee gevallen die CL onderscheidt blijven gescheiden |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | De inlognaam van de eigenaar. `Err` als het bestand niet bestaat, `(Ok none)` als de uid van de eigenaar geen invoer in de wachtwoorddatabase heeft: de twee gevallen die CL onderscheidt blijven gescheiden |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Of het een map is. **Ook `false` als het niet bestaat**; gebruik `probe-file` om de twee te onderscheiden |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Toont de inhoud als truename (het absolute pad met opgeloste symbolische koppelingen, zoals bij `truename`). Symbolische koppelingen waarvan het doel ontbreekt blijven weg. `.`/`..` blijven weg. De volgorde is wat het OS geeft |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Maakt het aan samen met zijn ouders. Slaagt als het al bestaat |
@@ -207,8 +207,8 @@ Een in delen gesplitste bestandsnaam. Hij bevat de door `/` gescheiden mapcompon
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   split at the last dot
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   split at the last dot
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -235,10 +235,10 @@ doorgeeft, vindt er geen parsing plaats.
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Splitst een string in delen. Een afsluitende `/` (of een lege naam) betekent "geen naam", dat wil zeggen een map |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Bouwt er een uit alleen de gegeven componenten (allemaal `&key`). Een weggelaten naam of type blijft "afwezig" en is iets wat `merge-pathnames` invult |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | De mapcomponenten, buitenste eerst |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | De naam zonder het type. `none` voor een map |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | De naam zonder het type. `None` voor een map |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Na de laatste punt. Een voorloopstip telt niet mee (heel `.gitignore` is de naam) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Of hij bij de root begint |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | De thuismap. `none` als er geen `$HOME` is (CL staat ook `NIL` toe) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | De thuismap. `None` als er geen `$HOME` is (CL staat ook `NIL` toe) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Het deel tot en met de laatste `/` |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Alleen het deel `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Vult de componenten die in `p` ontbreken uit `default`. Een relatieve `p` komt onder de map van `default`; een absolute `p` behoudt zijn eigen map |

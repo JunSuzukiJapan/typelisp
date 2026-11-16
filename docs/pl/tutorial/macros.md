@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Makra
 
 Makro to funkcja, która przyjmuje program i zwraca program. Makra pozwalają tworzyć nową składnię,
@@ -43,7 +43,7 @@ jest najszybszą drogą naprzód.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Rozwinięcia są także sprawdzane pod względem typów
@@ -121,14 +121,14 @@ W ten sam sposób można napisać makro powtarzające swoje ciało zadaną liczb
 
 Ciało makra to zwykły kod typelisp, więc może badać swoje argumenty za pomocą `if` lub `match` i
 budować inne rozwinięcie. Argumenty to dane w postaci S-wyrażeń (`Option<Sexpr>`), a pusta
-lista to `none`.
+lista to `None`.
 
 Zróbmy `my-and`, które zwraca `true`, jeśli wszystkie jego warunki są prawdziwe.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; brak argumentów
+    ((None) 'true)                                    ; brak argumentów
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; tylko jeden

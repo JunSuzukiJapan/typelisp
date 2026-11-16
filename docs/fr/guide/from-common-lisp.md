@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Pour les programmeurs Common Lisp
 
 typelisp reprend la syntaxe de Common Lisp (CL) et beaucoup de ses noms de fonctions, mais c'est un langage à
@@ -19,12 +19,12 @@ Les valeurs booléennes sont `true` et `false`. `nil` et `t` ne sont pas défini
 - **La branche « sinon » de `if` ne peut pas être omise.** `(if c x)` est une erreur. Quand aucune branche
   « sinon » n'est nécessaire, utilisez `when` / `unless`.
 - **« Pas de valeur » s'exprime avec `Option<T>`.** Une fonction qui renvoyait nil en CL pour dire « non trouvé »
-  renvoie ici `(some x)` ou `none`.
+  renvoie ici `(Some x)` ou `None`.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - La liste vide `()` est, selon le contexte, soit la valeur du type Unit (la valeur de retour d'une fonction qui ne
@@ -98,7 +98,7 @@ module deux éléments parmi une fonction, une variable globale et une macro ne 
 ## 4. Listes et Vector
 
 Ce qui correspond à une liste CL, ce sont les **données S-expression**, de type `Option<Sexpr>` (la liste vide est
-`none`). `(list 1 2 3)` et `'(a b c)` ont ce type. Les données S-expression sont ce que manipulent les macros et
+`None`). `(list 1 2 3)` et `'(a b c)` ont ce type. Les données S-expression sont ce que manipulent les macros et
 `read` ; comme conteneur de données ordinaire, utilisez **`Vector<T>`**.
 
 | Ce qu'on veut | CL | typelisp |
@@ -181,17 +181,17 @@ et restaure l'originale quelle que soit la façon dont le corps est quitté.
 Il n'y a ni `define-condition`, ni `handler-case`, ni `handler-bind`, ni `restart-case`, ni `error`, ni `signal`.
 Ils s'accordent mal avec le typage statique. À la place, ces deux mécanismes servent à des fins différentes :
 
-- **Les échecs récupérables renvoient `Result<T,E>`.** L'appelant sépare `ok` / `err` avec `match`. Il n'existe pas
+- **Les échecs récupérables renvoient `Result<T,E>`.** L'appelant sépare `Ok` / `Err` avec `match`. Il n'existe pas
   de raccourci comme le `?` de Rust.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Les échecs irrécupérables (bogues) sont des `panic`.** `(panic "message")`, passer `none` à `unwrap`, diviser
+- **Les échecs irrécupérables (bogues) sont des `panic`.** `(panic "message")`, passer `None` à `unwrap`, diviser
   par 0 et un indice hors limites sont de cette sorte, et le programme s'arrête. Le nettoyage de `unwind-protect`
   s'exécute avant l'arrêt.
 

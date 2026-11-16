@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Zadania i kanały
 
 Słownictwo zadań (lekkich wątków). `task` i `thread`, które je uruchamiają, oraz `select`,
@@ -36,7 +36,7 @@ się przełączają i czym różni się to od Go, opisano w
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | Kanał o pojemności `n`. `0` to rendezvous (bez bufora) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Czeka, aż zrobi się miejsce, a potem przekazuje wartość |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Czeka, aż nadejdzie wartość. `none`, gdy jest zamknięty i pusty |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Czeka, aż nadejdzie wartość. `None`, gdy jest zamknięty i pusty |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Zamyka go |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Ile wartości jest teraz w buforze |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | Pojemność |
@@ -62,7 +62,7 @@ się przełączają i czym różni się to od Go, opisano w
   błędy w programie, a nie niepowodzenia odwracalne, więc nie są `Result`.
 - **Zamknięcie kanału, na którego `send` czeka zadanie, powoduje panic tego zadania** (reguła Go).
 - `recv` na zamkniętym kanale zwraca to, co zostało w buforze, a gdy jest pusty, stale zwraca
-  `none`.
+  `None`.
 - `close` jest rozstrzygane według typu odbiorcy, więc jest czymś innym niż `close` traitu
   `Stream`. `Chan<T>` nie implementuje `Stream`.
 - **Ujemna pojemność powoduje panic** (nie jest po cichu zaokrąglana do 0).
@@ -195,8 +195,8 @@ sprawdzając `is-cancelled` albo odbierając z `done`.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -210,7 +210,7 @@ sprawdzając `is-cancelled` albo odbierając z `done`.
 - **Anulowanie dociera do dzieci.** Kontekst utworzony przez `with-cancel`/`with-timeout` zostaje
   anulowany razem z rodzicem. W drugą stronę (od dziecka do rodzica) nie działa.
 - Dziecko utworzone z już anulowanego kontekstu jest anulowane od początku.
-- `done` jest tylko zamykany; żadna wartość nie jest wysyłana. Odbiór zwraca `none`.
+- `done` jest tylko zamykany; żadna wartość nie jest wysyłana. Odbiór zwraca `None`.
 - Każde wywołanie `(Context::background)` tworzy osobny korzeń. `Background()` w Go jest jeden i nie
   da się go anulować; tu korzeń też można anulować, a dotyczy to tylko tego, co z niego utworzono.
 - Kontekst można przekazywać między zadaniami i między wątkami.

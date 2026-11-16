@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # फ़ाइल I/O, स्ट्रीम और नेटवर्किंग
 
 यह गाइड फ़ाइलें पढ़ने-लिखने, पाथनेम और सॉकेट संचार की बुनियादी बातें दिखाती है। फ़ंक्शनों की सूचियाँ [स्ट्रीम और फ़ाइलें](../reference/functions/streams-files.md) और [नेटवर्किंग](../reference/functions/network.md) में हैं।
@@ -10,13 +10,13 @@
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; यदि फ़ाइल गायब है:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
-जब आप जानते हों कि कोई ऑपरेशन विफल नहीं हो सकता, या किसी छोटी स्क्रिप्ट में जहाँ विफलता पर रुक जाना ठीक है, `unwrap` मान बाहर निकाल लेता है। यदि वह `err` है, तो वह panic करता है।
+जब आप जानते हों कि कोई ऑपरेशन विफल नहीं हो सकता, या किसी छोटी स्क्रिप्ट में जहाँ विफलता पर रुक जाना ठीक है, `unwrap` मान बाहर निकाल लेता है। यदि वह `Err` है, तो वह panic करता है।
 
 ## 2. पूरी फ़ाइल को पढ़ना और लिखना
 
@@ -25,8 +25,8 @@
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. स्ट्रीम से पढ़ना और लिखना
@@ -40,22 +40,22 @@
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; एक बार में एक पंक्ति पढ़ना
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - फ़ाइल खोलने की तीन दिशाएँ हैं: `direction-input` (पढ़ना), `direction-output` (लिखना; मौजूदा सामग्री हटा दी जाती है) और `direction-append` (अंत में जोड़ना)।
-- फ़ाइल के अंत पर `read-line` `none` लौटाता है।
+- फ़ाइल के अंत पर `read-line` `None` लौटाता है।
 - यदि आप `with-open-file` की जगह `open-file` से फ़ाइल खोलते हैं, तो हमेशा `close` कॉल करें। GC स्ट्रीम बंद नहीं करता।
 
 बाइट पढ़ने और लिखने के लिए, फ़ाइल को `open-binary-input` / `open-binary-output` से खोलें और `read-byte` / `write-byte` का उपयोग करें। कैरेक्टर स्ट्रीम और बाइट स्ट्रीम अलग टाइप हैं, इसलिए कैरेक्टर स्ट्रीम से बाइट पढ़ने की कोशिश टाइप त्रुटि है।
@@ -68,7 +68,7 @@
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### स्टैंडर्ड इनपुट और आउटपुट
@@ -83,8 +83,8 @@
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -95,8 +95,8 @@
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; केवल एक्सटेंशन बदलें
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -133,14 +133,14 @@
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; दूसरे पक्ष ने बंद कर दिया
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; दूसरे पक्ष ने बंद कर दिया
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` केवल इसी मशीन से कनेक्शन स्वीकार करता है, और `"0.0.0.0"` हर इंटरफ़ेस पर स्वीकार करता है। टास्क के लिए [सिंटैक्स संदर्भ अध्याय 12](../reference/syntax.md#12-कंकरेंसी-टास्क) देखें।
@@ -154,8 +154,8 @@
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 किसी ऑपरेशन पर समय सीमा लगाने के लिए `:timeout` (सेकंड में) पास करें।
@@ -164,24 +164,24 @@
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; अगले पढ़ने पर घड़ी लगाएँ
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; अगले पढ़ने पर घड़ी लगाएँ
 ```
 
 ### जब दूसरा पक्ष डिस्कनेक्ट हो जाए
 
-यदि दूसरा पक्ष कनेक्शन रीसेट कर दे या उसे बीच में छोड़ दे, तो वह `panic` नहीं करता। बाद के पढ़ने `none` लौटाते हैं, और लिखना चुपचाप छोड़ दिया जाता है। यह बताने के लिए कि कनेक्शन साफ़-सुथरे ढंग से बंद हुआ या विफल हुआ, `(socket-error c)` जाँचें।
+यदि दूसरा पक्ष कनेक्शन रीसेट कर दे या उसे बीच में छोड़ दे, तो वह `panic` नहीं करता। बाद के पढ़ने `None` लौटाते हैं, और लिखना चुपचाप छोड़ दिया जाता है। यह बताने के लिए कि कनेक्शन साफ़-सुथरे ढंग से बंद हुआ या विफल हुआ, `(socket-error c)` जाँचें।
 
 ## 6. नाम समाधान (DNS)
 
 नाम समाधान के लिए कोई समर्पित फ़ंक्शन नहीं है। `tcp-connect`, `tls-connect` या `send-to` को होस्ट नाम देने पर वह उनके भीतर हल हो जाता है। समाधान दूसरे थ्रेड पर होता है, इसलिए प्रतीक्षा के दौरान दूसरे टास्क चलते रहते हैं। यदि एक नाम के कई पते हैं, तो उन्हें बारी-बारी से आज़माया जाता है।
 
-यदि नाम हल नहीं हो सकता, तो `err` लौटाया जाता है।
+यदि नाम हल नहीं हो सकता, तो `Err` लौटाया जाता है।
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -192,12 +192,12 @@
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 TLS सर्वर `tls-listen` को प्रमाणपत्र और निजी कुंजी फ़ाइलें (PEM) देकर बनाया जाता है।
@@ -206,8 +206,8 @@ TLS सर्वर `tls-listen` को प्रमाणपत्र और �
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; TCP वाला serve जस का तस काम करता है
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; TCP वाला serve जस का तस काम करता है
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 स्व-हस्ताक्षरित प्रमाणपत्र के साथ आज़माते समय, क्लाइंट की ओर `:ca-file "cert.pem"` पास करें ताकि वह उस प्रमाणपत्र पर भरोसा करे। म्यूचुअल TLS, और एक लिसनर से कई साइटें परोसना, [नेटवर्किंग](../reference/functions/network.md#2-tcp--tls--unix-डोमेन) में दिए हैं।
@@ -222,8 +222,8 @@ UDP स्ट्रीम नहीं है; यह एक बार में
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -231,4 +231,4 @@ UDP स्ट्रीम नहीं है; यह एक बार में
 
 ## 9. Unix डोमेन सॉकेट
 
-`unix-listen` / `unix-connect` को सॉकेट फ़ाइल का पाथ दें। जो मान मिलता है वह TCP वाला ही `socket-stream` है। यदि फ़ाइल पहले से मौजूद हो तो `unix-listen` `err` लौटाता है। लिसनर को बंद करने से फ़ाइल हट जाती है।
+`unix-listen` / `unix-connect` को सॉकेट फ़ाइल का पाथ दें। जो मान मिलता है वह TCP वाला ही `socket-stream` है। यदि फ़ाइल पहले से मौजूद हो तो `unix-listen` `Err` लौटाता है। लिसनर को बंद करने से फ़ाइल हट जाती है।

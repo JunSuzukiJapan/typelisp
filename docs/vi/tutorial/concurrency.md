@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Lập trình đồng thời
 
 Trong typelisp, bạn chạy công việc đồng thời bằng cách khởi động các **task** (thread nhẹ), và các task
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` gửi. Nếu kênh đầy, nó chờ cho đến khi có chỗ.
 - `(recv ch)` nhận. Nó chờ cho đến khi có giá trị đến. Kết quả là một `Option<T>`; khi kênh đã đóng và
-  rỗng, nó trả về `none`.
+  rỗng, nó trả về `None`.
 - Duyệt một kênh bằng `doiter` sẽ liên tục nhận giá trị cho đến khi kênh bị đóng. Kênh cũng có thể được
   truyền thẳng cho `map` hoặc `filter`.
 - `send` trên một kênh đã đóng sẽ panic.

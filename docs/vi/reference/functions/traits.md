@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Các trait chuẩn
 
 Các trait cho việc lặp, so sánh, số học và thêm, lấy ra phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
@@ -159,7 +159,7 @@ có thể là một trait object, như `:dyn Push<int>`.
   (defmethod pop (self) Option<Item>))
 ```
 
-Tập hợp có thể lấy lại phần tử mà `push` thêm vào sau cùng. Trả về `none` khi rỗng. Hàm generic yêu
+Tập hợp có thể lấy lại phần tử mà `push` thêm vào sau cùng. Trả về `None` khi rỗng. Hàm generic yêu
 cầu nó bằng `(:where (Pop C (Item T)))`.
 
 | Kiểu | `pop` làm gì |
@@ -176,8 +176,8 @@ cầu nó bằng `(:where (Pop C (Item T)))`.
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

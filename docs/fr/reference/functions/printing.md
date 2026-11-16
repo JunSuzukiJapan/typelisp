@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Affichage
 
 `print`/`println`/`format`, les fonctions d'affichage à un argument, le pretty printer, `print-object` et les
@@ -44,18 +44,18 @@ sortie à chaque appel (afin qu'une invite soit visible avant la lecture de l'en
 tube).
 
 **`Option<Sexpr>` s'affiche de façon transparente.** Le type des données S-expression est `Option<Sexpr>` ;
-l'enveloppe `(some x)` n'apparaît donc pas dans la sortie et le contenu est affiché tel quel. La liste vide
-s'affiche `()`. Les autres `Option<T>` s'affichent `(some ...)` / `none`. Il en va de même pour les champs
+l'enveloppe `(Some x)` n'apparaît donc pas dans la sortie et le contenu est affiché tel quel. La liste vide
+s'affiche `()`. Les autres `Option<T>` s'affichent `(Some ...)` / `None`. Il en va de même pour les champs
 `Option<T>` à l'intérieur des structures, des énumérations et des `Vector`. Un `Result<Option<Sexpr>,…>` issu de
-`(eval ...)` s'affiche `(ok 42)`, ou `(ok ())` pour `none`.
+`(eval ...)` s'affiche `(Ok 42)`, ou `(Ok ())` pour `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -314,10 +314,10 @@ circulaire) :
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a pointe vers a lui-même
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a pointe vers a lui-même
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Les étiquettes **recommencent à 1 pour chaque affichage** (comme en CL). Même sans cycle, si le même objet apparaît

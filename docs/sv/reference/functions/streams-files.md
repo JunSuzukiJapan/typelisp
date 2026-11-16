@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Strömmar och filer
 
 Strömtraits och metoder, konkreta strömtyper, filoperationer och pathnames. Nätverkssocketar är också
@@ -30,18 +30,18 @@ Varje metod i `CharInput` har en standardimplementation. En implementation skriv
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Nästa element. `none` vid slutet. **Den enda metod som måste implementeras** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Nästa element. `None` vid slutet. **Den enda metod som måste implementeras** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Nästa tecken |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | Fram till nästa radbyte (radbytet förbrukas och tas bort). En sista rad som inte slutar med ett radbyte returneras också |
 | `read-all` | `(read-all s)` | `(S)→string` | Allt som är kvar |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Bara ett tecken som redan finns till hands. `none` i stället för att vänta |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Bara ett tecken som redan finns till hands. `None` i stället för att vänta |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Lägger upp till `n` tecken på `v` och returnerar hur många som faktiskt lästes. Färre än `n` bara vid slutet |
 
 `listen` finns i `InputStream` (föräldern till `CharInput`):
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Om nästa läsning kan besvaras utan att vänta. Standardvärdet är `false`, **den sida som aldrig ljuger**: `true` vore en gissning, och en felaktig gissning skulle få `read-char-no-hang` att blockera. Alla inbyggda strömmar åsidosätter den. **För användardefinierade strömmar som inte åsidosätter den returnerar `read-char-no-hang` alltid `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | Om nästa läsning kan besvaras utan att vänta. Standardvärdet är `false`, **den sida som aldrig ljuger**: `true` vore en gissning, och en felaktig gissning skulle få `read-char-no-hang` att blockera. Alla inbyggda strömmar åsidosätter den. **För användardefinierade strömmar som inte åsidosätter den returnerar `read-char-no-hang` alltid `None`** |
 
 `PeekInput` (som ärver från `CharInput`) lägger till att **skjuta tillbaka ett tecken**. Bara strömmen
 själv har en plats att behålla det tillbakaskjutna tecknet, så detta kan inte ha en standardimplementation
@@ -90,7 +90,7 @@ dem.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` är en av de tre konstanterna `direction-input` / `direction-output` /
-`direction-append`. `open-file` returnerar `(err FileError)` om filen inte kan öppnas (en saknad fil är ett
+`direction-append`. `open-file` returnerar `(Err FileError)` om filen inte kan öppnas (en saknad fil är ett
 vanligt resultat, inte en panic). Filnamnet kan vara en sträng eller ett `pathname` (`Pathish` i
 kapitel 9).
 
@@ -103,7 +103,7 @@ Som i CL kan den tas ut även efter `close`.
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Nästa byte. `none` vid filslut |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Nästa byte. `None` vid filslut |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Skriver ett byte. Ett fel utanför 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | Teckenversionen, i byte |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | Som ovan |
@@ -139,18 +139,18 @@ Alla är `defstruct`s i standardbiblioteket och kan nästlas.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Överför allt |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Alla återstående rader |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Läser en `Sexpr` (CL:s `read`). `(ok eof)` vid slutet av indata, `(ok (datum d))` när en läses, `err` om det inte är data. Den **förbrukar det ena blanktecken** som avslutade datumet (som i CL). `ReadOutcome` är inte en `Option<Sexpr>` så att läsning av den tomma listan `()` och slutet av indata inte blir samma värde |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Läser en `Sexpr` (CL:s `read`). `(Ok eof)` vid slutet av indata, `(Ok (Datum d))` när en läses, `Err` om det inte är data. Den **förbrukar det ena blanktecken** som avslutade datumet (som i CL). `ReadOutcome` är inte en `Option<Sexpr>` så att läsning av den tomma listan `()` och slutet av indata inte blir samma värde |
 | `read-sexpr-preserving-whitespace` | Som ovan | Som ovan | Samma, men lämnar blanktecknet (CL:s `read-preserving-whitespace`) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Läser fram till `ch` och gör en lista. `ch` förbrukas. `err` om indata tar slut |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Läser fram till `ch` och gör en lista. `ch` förbrukas. `Err` om indata tar slut |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Skriver en rad i taget |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Hela innehållet |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Alla rader |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Skriver ut det |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Om den finns |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Ta bort, byt namn (argumenten är `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Den absoluta sökvägen med symboliska länkar och `.`/`..` upplösta. `err` om den inte finns |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Den absoluta sökvägen med symboliska länkar och `.`/`..` upplösta. `Err` om den inte finns |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Tidpunkten för senaste ändring. Det är **universal time**, så `decode-universal-time` ([Tid](system.md#2-avkoda-och-koda-datum)) kan läsa den |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ägarens inloggningsnamn. `err` om filen inte finns, `(ok none)` om ägarens uid inte har någon post i lösenordsdatabasen: de två fall CL skiljer åt hålls isär |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ägarens inloggningsnamn. `Err` om filen inte finns, `(Ok none)` om ägarens uid inte har någon post i lösenordsdatabasen: de två fall CL skiljer åt hålls isär |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Om det är en katalog. **Också `false` om den inte finns**; använd `probe-file` för att skilja de två åt |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Listar innehållet som truenames (den absoluta sökvägen med symboliska länkar upplösta, som med `truename`). Symboliska länkar vars mål saknas utelämnas. `.`/`..` utelämnas. Ordningen är den OS ger |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Skapar den tillsammans med sina föräldrar. Lyckas om den redan finns |
@@ -204,8 +204,8 @@ Ett filnamn uppdelat i delar. Det håller de `/`-separerade katalogkomponenterna
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   delat vid den sista punkten
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   delat vid den sista punkten
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -232,10 +232,10 @@ tolkning.
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Delar upp en sträng i delar. Ett avslutande `/` (eller ett tomt namn) betyder "inget namn", det vill säga en katalog |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Bygger ett av bara de komponenter som anges (alla `&key`). Ett namn eller en typ som utelämnas förblir "frånvarande" och är något `merge-pathnames` fyller i |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Katalogkomponenterna, yttersta först |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Namnet utan typen. `none` för en katalog |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Namnet utan typen. `None` för en katalog |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Efter den sista punkten. En inledande punkt räknas inte (hela `.gitignore` är namnet) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Om det börjar vid roten |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Hemkatalogen. `none` om det inte finns någon `$HOME` (CL tillåter också `NIL`) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Hemkatalogen. `None` om det inte finns någon `$HOME` (CL tillåter också `NIL`) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Delen fram till det sista `/` |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Bara delen `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Fyller de komponenter som saknas i `p` från `default`. Ett relativt `p` hamnar under katalogen i `default`; ett absolut `p` behåller sin egen katalog |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Makro
 
 Makro adalah fungsi yang menerima program dan mengembalikan program. Dengan makro Anda dapat membuat
@@ -44,7 +44,7 @@ lebih dulu adalah cara tercepat untuk maju.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Ekspansi juga diperiksa tipenya
@@ -123,14 +123,14 @@ ini:
 
 Badan makro adalah kode typelisp biasa, sehingga dapat memeriksa argumennya dengan `if` atau `match`
 dan menyusun ekspansi yang berbeda. Argumennya adalah data S-expression (`Option<Sexpr>`), dan daftar
-kosong adalah `none`.
+kosong adalah `None`.
 
 Mari buat `my-and`, yang mengembalikan `true` jika semua kondisinya benar.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
+    ((None) 'true)                                    ; no arguments
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; just one

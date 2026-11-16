@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # FFI для C (defffi)
 
 Это руководство объясняет, как вызывать функции C из typelisp. Список объявляемых типов и ограничения приведены в
@@ -67,7 +67,7 @@ C. Написав `unsafe`, вы, автор, берёте ответствен�
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int не теряет ничего из 64-битного значения
-(try-as i32 (unsafe (c-strlen s)))  ; none, если не помещается в i32
+(try-as i32 (unsafe (c-strlen s)))  ; None, если не помещается в i32
 (unsafe (c-malloc 16))              ; целочисленные литералы можно передавать как есть
 ```
 

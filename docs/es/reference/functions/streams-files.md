@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Streams y archivos
 
 Traits y métodos de stream, tipos de stream concretos, operaciones con archivos y nombres de ruta. Los
@@ -31,18 +31,18 @@ Todos los métodos de `CharInput` tienen una implementación por defecto. Una im
 
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | El siguiente elemento. `none` al final. **El único método que hay que implementar** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | El siguiente elemento. `None` al final. **El único método que hay que implementar** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | El siguiente carácter |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | Hasta el siguiente salto de línea (el salto se consume y se quita). También se devuelve una última línea que no termina en salto de línea |
 | `read-all` | `(read-all s)` | `(S)→string` | Todo lo que queda |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Solo un carácter que ya está a mano. `none` en lugar de esperar |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Solo un carácter que ya está a mano. `None` en lugar de esperar |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Añade hasta `n` caracteres a `v` y devuelve cuántos se leyeron realmente. Menos de `n` solo al final |
 
 `listen` está en `InputStream` (el padre de `CharInput`):
 
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Si la siguiente lectura se puede responder sin esperar. El valor por defecto es `false`, **el lado que nunca es mentira**: `true` sería una suposición, y una suposición equivocada haría que `read-char-no-hang` bloqueara. Todos los streams incorporados lo sobrescriben. **En los streams definidos por el usuario que no lo sobrescriben, `read-char-no-hang` siempre devuelve `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | Si la siguiente lectura se puede responder sin esperar. El valor por defecto es `false`, **el lado que nunca es mentira**: `true` sería una suposición, y una suposición equivocada haría que `read-char-no-hang` bloqueara. Todos los streams incorporados lo sobrescriben. **En los streams definidos por el usuario que no lo sobrescriben, `read-char-no-hang` siempre devuelve `None`** |
 
 `PeekInput` (que hereda de `CharInput`) añade **devolver un carácter**. Solo el propio stream tiene dónde
 guardar el carácter devuelto, así que esto no puede tener implementación por defecto y es un trait aparte.
@@ -90,7 +90,7 @@ dos, `(fresh-line *standard-output*)` no sabe de los saltos de línea que escrib
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` es una de las tres constantes `direction-input` / `direction-output` / `direction-append`.
-`open-file` devuelve `(err FileError)` si el archivo no se puede abrir (que falte un archivo es un resultado
+`open-file` devuelve `(Err FileError)` si el archivo no se puede abrir (que falte un archivo es un resultado
 normal, no un panic). El nombre de archivo puede ser una cadena o un `pathname` (`Pathish` en el
 capítulo 9).
 
@@ -102,7 +102,7 @@ igual que `CharInput`/`CharOutput` lo fijan a `char`.
 
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | El siguiente byte. `none` al final del archivo |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | El siguiente byte. `None` al final del archivo |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Escribe un byte. Error fuera de 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | La versión de caracteres, en bytes |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | Igual que arriba |
@@ -138,18 +138,18 @@ Todos son `defstruct` de la biblioteca estándar y se pueden anidar.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Transfiere todo |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Todas las líneas que quedan |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Lee un `Sexpr` (el `read` de CL). `(ok eof)` al final de la entrada, `(ok (datum d))` cuando lee uno, `err` si no son datos. **Consume el carácter de espacio en blanco** que terminó el dato (como en CL). `ReadOutcome` no es un `Option<Sexpr>` para que leer la lista vacía `()` y el final de la entrada no sean el mismo valor |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Lee un `Sexpr` (el `read` de CL). `(Ok eof)` al final de la entrada, `(Ok (Datum d))` cuando lee uno, `Err` si no son datos. **Consume el carácter de espacio en blanco** que terminó el dato (como en CL). `ReadOutcome` no es un `Option<Sexpr>` para que leer la lista vacía `()` y el final de la entrada no sean el mismo valor |
 | `read-sexpr-preserving-whitespace` | Igual que arriba | Igual que arriba | Lo mismo, pero deja el espacio en blanco (el `read-preserving-whitespace` de CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Lee hasta `ch` y forma una lista. `ch` se consume. `err` si la entrada se agota |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Lee hasta `ch` y forma una lista. `ch` se consume. `Err` si la entrada se agota |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Escribe una línea cada vez |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Todo el contenido |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Todas las líneas |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Lo escribe |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Si existe |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Borrar, renombrar (los argumentos son `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | La ruta absoluta con los enlaces simbólicos y `.`/`..` resueltos. `err` si no existe |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | La ruta absoluta con los enlaces simbólicos y `.`/`..` resueltos. `Err` si no existe |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | La hora de la última modificación. Es **tiempo universal**, así que `decode-universal-time` ([Tiempo](system.md#2-decodificar-y-codificar-fechas)) lo puede leer |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | El nombre de usuario del propietario. `err` si el archivo no existe, `(ok none)` si el uid del propietario no tiene entrada en la base de datos de contraseñas: se mantienen separados los dos casos que distingue CL |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | El nombre de usuario del propietario. `Err` si el archivo no existe, `(Ok none)` si el uid del propietario no tiene entrada en la base de datos de contraseñas: se mantienen separados los dos casos que distingue CL |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Si es un directorio. **También `false` si no existe**; usa `probe-file` para distinguir los dos casos |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Enumera el contenido por truename (la ruta absoluta con los enlaces simbólicos resueltos, como con `truename`). Se omiten los enlaces simbólicos cuyo destino falta. Se omiten `.`/`..`. El orden es el que dé el SO |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Lo crea junto con sus padres. Tiene éxito si ya existe |
@@ -203,8 +203,8 @@ nombre, el tipo (extensión) y si empieza en la raíz.
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   dividido en el último punto
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   dividido en el último punto
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -231,10 +231,10 @@ una cadena no se hace ningún análisis.
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Divide una cadena en partes. Un `/` final (o un nombre vacío) significa "sin nombre", es decir, un directorio |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Construye uno solo con los componentes dados (todos `&key`). Un nombre o tipo omitido queda "ausente" y es algo que `merge-pathnames` rellena |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Los componentes de directorio, el más externo primero |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | El nombre sin el tipo. `none` para un directorio |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | El nombre sin el tipo. `None` para un directorio |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Lo que va tras el último punto. Un punto inicial no cuenta (todo `.gitignore` es el nombre) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Si empieza en la raíz |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | El directorio personal. `none` si no hay `$HOME` (CL también permite `NIL`) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | El directorio personal. `None` si no hay `$HOME` (CL también permite `NIL`) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | La parte hasta el último `/` |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Solo la parte `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Rellena los componentes que faltan en `p` a partir de `default`. Un `p` relativo va bajo el directorio de `default`; un `p` absoluto conserva su propio directorio |

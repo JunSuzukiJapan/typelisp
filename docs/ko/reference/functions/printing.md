@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 출력
 
 `print`/`println`/`format`, 인수 하나의 출력 함수, 프리티 프린터, `print-object`, 출력을 제어하는 변수. 서식 지시자 목록은
@@ -34,18 +34,18 @@
 `typl file.typl`로 스크립트를 실행하면 **최상위 식의 값은 출력되지 않으므로** 프로그램은 이것들을 호출해서 표준 출력에
 쓴다. `print`/`println`/`format`은 호출할 때마다 출력을 내보낸다(파이프를 거쳐도 표준 입력을 읽기 전에 프롬프트가 보이도록).
 
-**`Option<Sexpr>`는 투명하게 출력된다.** S 식 데이터의 타입은 `Option<Sexpr>`이므로 `(some x)` 감싸개는 출력에 나타나지
-않고 내용이 그대로 출력된다. 빈 리스트는 `()`로 출력된다. 그 밖의 `Option<T>`는 `(some ...)` / `none`으로 출력된다.
-구조체, 열거형, `Vector` 안의 `Option<T>` 필드도 마찬가지이다. `(eval ...)`의 `Result<Option<Sexpr>,…>`는 `(ok 42)`,
-`none`이면 `(ok ())`로 출력된다.
+**`Option<Sexpr>`는 투명하게 출력된다.** S 식 데이터의 타입은 `Option<Sexpr>`이므로 `(Some x)` 감싸개는 출력에 나타나지
+않고 내용이 그대로 출력된다. 빈 리스트는 `()`로 출력된다. 그 밖의 `Option<T>`는 `(Some ...)` / `None`으로 출력된다.
+구조체, 열거형, `Vector` 안의 `Option<T>` 필드도 마찬가지이다. `(eval ...)`의 `Result<Option<Sexpr>,…>`는 `(Ok 42)`,
+`None`이면 `(Ok ())`로 출력된다.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -283,10 +283,10 @@ CL은 "무제한"에 `nil`을 쓰지만 이 언어에는 `nil`이 없으므로 `
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a가 a 자신을 가리킨다
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a가 a 자신을 가리킨다
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 레이블은 **출력하는 것마다 1부터 다시 시작한다**(CL과 같다). 순환이 없어도 같은 객체가 두 번 나타나면 `#1=`/`#1#`이

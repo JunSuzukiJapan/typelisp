@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -31,8 +31,8 @@ Tidak ada tipe bilangan bulat 64 bit. Untuk bilangan bulat yang lebarnya tidak p
 
 | Tipe | Isi | Rincian |
 |---|---|---|
-| `Option<T>` | Nilai yang ada atau tidak. `some` / `none` | [Option dan Result](functions/option-result.md) |
-| `Result<T,E>` | Berhasil atau gagal. `ok` / `err` | Sama seperti di atas |
+| `Option<T>` | Nilai yang ada atau tidak. `Some` / `None` | [Option dan Result](functions/option-result.md) |
+| `Result<T,E>` | Berhasil atau gagal. `Ok` / `Err` | Sama seperti di atas |
 | `Vector<T>` | Larik yang dapat membesar | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Tabel hash. Cara kunci dibandingkan ditentukan oleh `:test` saat dibuat, dan dalam tabel `equal` tipe kunci harus mengimplementasikan `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 sampai 12 elemen). Elemen dibaca dengan `t::0` | [Sintaks bab 2](syntax.md#2-menulis-tipe) |
@@ -48,7 +48,7 @@ Tipe fungsi ditulis `(fn (tipe-argumen...) tipe-kembalian)`, objek trait `:dyn T
 | Tipe | Isi | Rincian |
 |---|---|---|
 | `Sexpr` | S-expression tak kosong. 19 varian: `int`, `i8` sampai `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Data S-expression](functions/sequences.md#2-data-s-expression-sexpr) |
-| `Option<Sexpr>` | Data S-expression secara umum. Daftar kosong `()` adalah `none` | Sama seperti di atas |
+| `Option<Sexpr>` | Data S-expression secara umum. Daftar kosong `()` adalah `None` | Sama seperti di atas |
 
 ## 4. Tipe pada pustaka standar
 
@@ -74,7 +74,7 @@ diperlakukan sama seperti tipe yang Anda tulis sendiri, dan semua yang dapat dil
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Stream | [Stream](functions/streams-files.md#3-tipe-stream-konkret) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Stream komposit | [Stream komposit](functions/streams-files.md#4-stream-komposit) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Jaringan | [Jaringan](functions/network.md#1-tipe) |
-| `ReadOutcome` | Hasil `read-sexpr`. `datum` / `eof` | [Stream](functions/streams-files.md#6-fungsi-generik-dan-operasi-berkas) |
+| `ReadOutcome` | Hasil `read-sexpr`. `Datum` / `Eof` | [Stream](functions/streams-files.md#6-fungsi-generik-dan-operasi-berkas) |
 | `universal-time` `internal-time` `decoded-time` | Waktu | [Waktu](functions/system.md#1-waktu) |
 | `heap-info` | Keadaan heap saat ini | [Alat implementasi](functions/system.md#51-field-heap-info) |
 

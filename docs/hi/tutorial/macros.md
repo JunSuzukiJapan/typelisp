@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Macro
 
 Macro एक ऐसा फ़ंक्शन है जो प्रोग्राम लेता है और प्रोग्राम लौटाता है। Macro आपको ऐसा नया सिंटैक्स बनाने देते हैं जिसे फ़ंक्शन व्यक्त नहीं कर सकते। typelisp के macro Common Lisp के `defmacro` की तरह ही काम करते हैं। यह अध्याय मानकर चलता है कि आपने [शुरुआत करना](intro.md) में "सूचियाँ (S-एक्सप्रेशन)" पढ़ लिया है।
@@ -36,7 +36,7 @@ Macro एक ऐसा फ़ंक्शन है जो प्रोग्र
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. विस्तारों की भी टाइप जाँच होती है
@@ -106,14 +106,14 @@ Common Lisp की तरह, typelisp के macro नाम टकराव �
 
 ## 5. आर्ग्युमेंट के अनुसार अलग-अलग विस्तार
 
-Macro की बॉडी सामान्य typelisp कोड है, इसलिए वह `if` या `match` से अपने आर्ग्युमेंट की जाँच कर सकती है और अलग विस्तार बना सकती है। आर्ग्युमेंट S-एक्सप्रेशन डेटा (`Option<Sexpr>`) होते हैं, और खाली सूची `none` है।
+Macro की बॉडी सामान्य typelisp कोड है, इसलिए वह `if` या `match` से अपने आर्ग्युमेंट की जाँच कर सकती है और अलग विस्तार बना सकती है। आर्ग्युमेंट S-एक्सप्रेशन डेटा (`Option<Sexpr>`) होते हैं, और खाली सूची `None` है।
 
 आइए `my-and` बनाएँ, जो सभी शर्तें सत्य होने पर `true` लौटाता है।
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; कोई आर्ग्युमेंट नहीं
+    ((None) 'true)                                    ; कोई आर्ग्युमेंट नहीं
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; सिर्फ़ एक

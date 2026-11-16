@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Hata Yönetimi
 
 typelisp'te hata yönetimi başarısızlıkları iki türe ayırır.
@@ -6,7 +6,7 @@ typelisp'te hata yönetimi başarısızlıkları iki türe ayırır.
 | Başarısızlık türü | Örnekler | Nasıl ifade edilir |
 |---|---|---|
 | Olabilecek başarısızlıklar (kurtarılabilir) | Bir dosya eksik, girdi bir sayı değil | Bir `Result<T,E>` döndürmek |
-| Programdaki hatalar (kurtarılamaz) | Aralık dışı bir indeks, `none`'a `unwrap`, sıfıra bölme | `panic` ile durmak |
+| Programdaki hatalar (kurtarılamaz) | Aralık dışı bir indeks, `None`'a `unwrap`, sıfıra bölme | `panic` ile durmak |
 
 Bunların üstüne, birçok fonksiyon çağrısından bir kerede çıkan `catch` / `throw` ve gövdesinden
 nasıl çıkılırsa çıkılsın temizliği çalıştıran `unwind-protect` vardır. Bu bölüm,
@@ -21,22 +21,22 @@ değildir ya da aralığın dışındadır.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 Çağıran, başarıyı ve başarısızlığı `match` ile ayırır.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- `Result` döndüren bir fonksiyonun değeri, `match` `err` durumunu ele almadıkça kullanılamaz.
+- `Result` döndüren bir fonksiyonun değeri, `match` `Err` durumunu ele almadıkça kullanılamaz.
   Başarısızlığı ele almayı unutmak bir tür hatasıdır.
 - `parse-int`'ten gelen hata, `ParseIntError` türünde bir değerdir. `(message e)` mesaj string'ini verir.
 
@@ -48,17 +48,17 @@ Rust'ın `?`'si gibi bir kısayol yoktur. `Result` döndüren birkaç fonksiyonu
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 Bir işlemin başarısız olamayacağını bildiğinizde ya da başarısızlıkta durmanın sakıncasız olduğu
-küçük bir betikte, `unwrap` içeriği çıkarır. Değer bir `err` ise panic olur. Bir varsayılan değer
+küçük bir betikte, `unwrap` içeriği çıkarır. Değer bir `Err` ise panic olur. Bir varsayılan değer
 yeterliyse `unwrap-or` kullanın.
 
 ## 3. Kendi hata türünüzü yapma
@@ -76,16 +76,16 @@ sağlar. Bir hata türü, `Error` trait'ini gerçekleştiren sıradan bir `defen
     (match self
       ((missing key) (format false "missing key: ~a" key))
       ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::invalid "workers" n))))
 ```
 
 - `message`, hatanın bir açıklamasını döndürür.
-- `source`, bu hataya yol açan başka bir hatayı döndürür. Neden yoksa `none`'dır.
+- `source`, bu hataya yol açan başka bir hatayı döndürür. Neden yoksa `None`'dır.
 
 ## 4. Farklı türden hataları birleştirme
 
@@ -98,8 +98,8 @@ iki hata türü vardır ve ikisi birden tek bir `Result<T,E>`'nin `E`'si olamaz.
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 `"4"`, `"-1"` ve `"abc"` verildiğinde sonuçlar şunlardır:
@@ -129,7 +129,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - `panic`'in türü `!`'dir (dönmez); bu yüzden herhangi bir türün beklendiği yere yazılabilir. Yukarıdaki
   `if`'in iki dalının uymasının nedeni budur.
-- Şu işlemler de panic olur: `none` ya da `err`'e `unwrap`, aralık dışı indeksle `get` ve sıfıra tamsayı
+- Şu işlemler de panic olur: `None` ya da `Err`'e `unwrap`, aralık dışı indeksle `get` ve sıfıra tamsayı
   bölme.
 - `panic` programı durdurur. Bir task'in içinde bile olsa tüm program durur.
 - REPL'de bir `panic` REPL'i sonlandırmaz; bir sonraki girdiyi bekler.
@@ -197,8 +197,8 @@ anlayabilirsiniz.
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: her zaman temizle

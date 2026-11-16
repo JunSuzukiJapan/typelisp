@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Modules and File Layout
 
 This guide explains how to put together a program made of several files. The detailed rules are in
@@ -134,7 +134,7 @@ definition.
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; this module's first => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; the standard library's first => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; the standard library's first => (Some 1)
 ```
 
 After `shadow`, writing `first` in that module refers to your own definition. To use the standard

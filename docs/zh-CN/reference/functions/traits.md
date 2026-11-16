@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 标准 trait
 
 用于迭代、比较、算术和存取元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
@@ -140,7 +140,7 @@ trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` �
   (defmethod pop (self) Option<Item>))
 ```
 
-可以取回 `push` 最后添加的元素的集合。为空时返回 `none`。泛型函数用 `(:where (Pop C (Item T)))` 要求它。
+可以取回 `push` 最后添加的元素的集合。为空时返回 `None`。泛型函数用 `(:where (Pop C (Item T)))` 要求它。
 
 | 类型 | `pop` 的含义 |
 |---|---|
@@ -156,8 +156,8 @@ trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` �
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

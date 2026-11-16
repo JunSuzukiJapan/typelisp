@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Typen
 
 Die Typen, die typelisp hat, und die Standard-Traits, die jeder Typ implementiert. Wie man Typen schreibt,
@@ -30,8 +30,8 @@ Einen 64-Bit-Ganzzahltyp gibt es nicht. Für Ganzzahlen, deren Breite keine Roll
 
 | Typ | Inhalt | Details |
 |---|---|---|
-| `Option<T>` | Ein Wert, der da ist oder nicht. `some` / `none` | [Option und Result](functions/option-result.md) |
-| `Result<T,E>` | Erfolg oder Fehlschlag. `ok` / `err` | Wie oben |
+| `Option<T>` | Ein Wert, der da ist oder nicht. `Some` / `None` | [Option und Result](functions/option-result.md) |
+| `Result<T,E>` | Erfolg oder Fehlschlag. `Ok` / `Err` | Wie oben |
 | `Vector<T>` | Ein wachsendes Array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Eine Hashtabelle. Wie Schlüssel verglichen werden, bestimmt `:test` beim Anlegen; in einer `equal`-Tabelle muss der Schlüsseltyp `Hash` implementieren | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tupel (1 bis 12 Elemente). Elemente liest man mit `t::0` | [Syntax Kapitel 2](syntax.md#2-typen-schreiben) |
@@ -47,7 +47,7 @@ Listentypen `(T U ...)` (derselbe Typ wie `cons-cell<T,cons-cell<U,()>>`) ([Kapi
 | Typ | Inhalt | Details |
 |---|---|---|
 | `Sexpr` | Ein nicht leerer S-Ausdruck. 19 Varianten: `int`, `i8` bis `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-Ausdrucksdaten](functions/sequences.md#2-s-ausdrucksdaten-sexpr) |
-| `Option<Sexpr>` | S-Ausdrucksdaten im Allgemeinen. Die leere Liste `()` ist `none` | Wie oben |
+| `Option<Sexpr>` | S-Ausdrucksdaten im Allgemeinen. Die leere Liste `()` ist `None` | Wie oben |
 
 ## 4. Typen der Standardbibliothek
 
@@ -72,7 +72,7 @@ behandelt wie selbst geschriebene Typen, und alles, was mit einem `defstruct` ge
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Streams | [Streams](functions/streams-files.md#3-konkrete-stream-typen) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Zusammengesetzte Streams | [Zusammengesetzte Streams](functions/streams-files.md#4-zusammengesetzte-streams) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Netzwerk | [Netzwerk](functions/network.md#1-typen) |
-| `ReadOutcome` | Das Ergebnis von `read-sexpr`. `datum` / `eof` | [Streams](functions/streams-files.md#6-generische-funktionen-und-dateioperationen) |
+| `ReadOutcome` | Das Ergebnis von `read-sexpr`. `Datum` / `Eof` | [Streams](functions/streams-files.md#6-generische-funktionen-und-dateioperationen) |
 | `universal-time` `internal-time` `decoded-time` | Zeit | [Zeit](functions/system.md#1-zeit) |
 | `heap-info` | Der aktuelle Zustand des Heaps | [Werkzeuge der Implementierung](functions/system.md#51-felder-von-heap-info) |
 

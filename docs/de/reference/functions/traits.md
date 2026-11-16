@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Standard-Traits
 
 Die Traits für Iteration, Vergleich, Arithmetik und das Hinzufügen und Entnehmen von Elementen. Die anderen Standard-Traits stehen in ihren eigenen
@@ -165,7 +165,7 @@ Er kann auch ein Trait-Objekt sein, wie in `:dyn Push<int>`.
 ```
 
 Eine Sammlung, aus der sich das zuletzt mit `push` hinzugefügte Element wieder entnehmen lässt.
-`none`, wenn sie leer ist. Eine generische Funktion verlangt sie mit `(:where (Pop C (Item T)))`.
+`None`, wenn sie leer ist. Eine generische Funktion verlangt sie mit `(:where (Pop C (Item T)))`.
 
 | Typ | Was `pop` tut |
 |---|---|
@@ -181,8 +181,8 @@ Ein `HashSet<T>` hat kein „letztes Element“, ist also ein `Push`, aber kein 
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

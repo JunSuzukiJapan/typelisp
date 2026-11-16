@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Untuk Pemrogram Common Lisp
 
 typelisp mewarisi sintaks Common Lisp (CL) dan banyak nama fungsinya, tetapi ia adalah bahasa dengan
@@ -20,12 +20,12 @@ Nilai boolean adalah `true` dan `false`. `nil` dan `t` tidak didefinisikan.
 - **Cabang else pada `if` tidak boleh dihilangkan.** `(if c x)` adalah kesalahan. Jika cabang else
   tidak diperlukan, gunakan `when` / `unless`.
 - **"Tidak ada nilai" dinyatakan dengan `Option<T>`.** Fungsi yang di CL mengembalikan nil untuk
-  berarti "tidak ditemukan" di sini mengembalikan `(some x)` atau `none`.
+  berarti "tidak ditemukan" di sini mengembalikan `(Some x)` atau `None`.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - Daftar kosong `()` adalah, tergantung konteks, nilai tipe Unit (nilai kembalian fungsi yang tidak
@@ -100,7 +100,7 @@ di antara fungsi, variabel global, dan makro yang bernama sama (berbeda dengan C
 ## 4. Daftar dan Vector
 
 Yang sepadan dengan list CL adalah **data S-expression**, yang tipenya `Option<Sexpr>` (daftar kosong
-adalah `none`). `(list 1 2 3)` dan `'(a b c)` bertipe ini. Data S-expression adalah sesuatu yang
+adalah `None`). `(list 1 2 3)` dan `'(a b c)` bertipe ini. Data S-expression adalah sesuatu yang
 dikerjakan makro dan `read`; untuk wadah data biasa, gunakan **`Vector<T>`**.
 
 | Yang Anda inginkan | CL | typelisp |
@@ -183,18 +183,18 @@ Tidak ada `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `e
 Semuanya kurang cocok dengan tipe statis. Sebagai gantinya, dua hal ini dipakai untuk tujuan yang
 berbeda:
 
-- **Kegagalan yang dapat dipulihkan mengembalikan `Result<T,E>`.** Pemanggil memisahkan `ok` / `err`
+- **Kegagalan yang dapat dipulihkan mengembalikan `Result<T,E>`.** Pemanggil memisahkan `Ok` / `Err`
   dengan `match`. Tidak ada pintasan seperti `?` pada Rust.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
 - **Kegagalan yang tidak dapat dipulihkan (bug) adalah `panic`.** `(panic "message")`, memberikan
-  `none` ke `unwrap`, pembagian dengan 0, dan indeks di luar rentang termasuk jenis ini, dan program
+  `None` ke `unwrap`, pembagian dengan 0, dan indeks di luar rentang termasuk jenis ini, dan program
   berhenti. Pembersihan `unwind-protect` dijalankan sebelum berhenti.
 
 Tipe kesalahan disatukan oleh trait `Error`, dan `(message e)` memberikan pesannya. Cara membuat tipe

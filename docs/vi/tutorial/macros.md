@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Macro
 
 Macro là một hàm nhận một chương trình và trả về một chương trình. Macro cho phép bạn tạo cú pháp mới
@@ -43,7 +43,7 @@ nhanh nhất để tiến tới.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Khai triển cũng được kiểm tra kiểu
@@ -120,14 +120,14 @@ Tương tự, một macro lặp lại thân của nó một số lần cho trư�
 
 Thân macro là mã typelisp thông thường, nên nó có thể xem xét các đối số của mình bằng `if` hoặc `match`
 và dựng một khai triển khác. Các đối số là dữ liệu S-expression (`Option<Sexpr>`), và danh sách rỗng là
-`none`.
+`None`.
 
 Hãy tạo `my-and`, trả về `true` nếu mọi điều kiện của nó đều đúng.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; không có đối số
+    ((None) 'true)                                    ; không có đối số
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; chỉ có một

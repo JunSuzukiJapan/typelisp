@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Modules et découpage en fichiers
 
 Ce guide explique comment assembler un programme composé de plusieurs fichiers. Les règles détaillées se trouvent
@@ -136,7 +136,7 @@ définition.
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; le first de ce module => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; le first de la bibliothèque standard => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; le first de la bibliothèque standard => (Some 1)
 ```
 
 Après `shadow`, écrire `first` dans ce module désigne votre propre définition. Pour utiliser le

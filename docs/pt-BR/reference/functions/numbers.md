@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Números
 
 Operações sobre inteiros, números de ponto flutuante, racionais, números complexos e booleanos, e outras
@@ -33,9 +33,9 @@ capítulo 3).
 | `int->int` | `(int->int x)` | `T→int` | Conversão de ampliação para `int` (sempre exata). O que `(as int x)` faz |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Conversão de ampliação para `ratio` (sempre exata) |
 | `int->char` | `(int->char x)` | `T→char` | Interpreta o valor como um valor escalar Unicode. Panic com um valor inválido |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Uma versão de `int->char` que devolve `none` em caso de falha |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Uma versão de `int->char` que devolve `None` em caso de falha |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Conversão de largura. Os valores que não cabem são truncados (como o `as` do Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | A mesma conversão como pergunta. `none` se o valor não couber nessa largura |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | A mesma conversão como pergunta. `None` se o valor não couber nessa largura |
 
 Essas conversões também são o que fazem as formas especiais `(as Type x)`/`(try-as Type x)`
 ([Referência de sintaxe](../syntax.md#7-outras-formas-especiais)). As operações de bits (`logand`/`ash`/`ldb`
@@ -143,7 +143,7 @@ execução ("an integer argument does not fit a fixnum").
 | `float->int` | `(float->int x)` | `f64→int` | Converte para `int` truncando em direção a zero (o `truncate` do CL; exato para valores finitos de qualquer tamanho). Panic com infinito e NaN. Para uma largura fixa, use `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Converte para `ratio` como o racional binário exato (o `rational` do CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Converte entre larguras de ponto flutuante. `float->f32` arredonda para o mais próximo, `float->f64` é sempre exata. O que `(as f32 x)` faz |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | A mesma conversão como pergunta. `none` se o arredondamento mudar o valor (ampliar para `f64` é sempre `some`). O que `(try-as f32 x)` faz |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | A mesma conversão como pergunta. `None` se o arredondamento mudar o valor (ampliar para `f64` é sempre `Some`). O que `(try-as f32 x)` faz |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | As funções homônimas do CL. Apelidos de `floor`/`ceiling`/`round`/`truncate` acima: no CL as sem prefixo devolvem inteiros, então as com `f` batem com o comportamento desta linguagem |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | 2 / 53 / 53 respectivamente (só a precisão de `0.0` é 0). `f64` é sempre IEEE-754 binary64, então são constantes |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` ou `-1.0` |
@@ -225,7 +225,7 @@ podem ser passados para `(defun f ((q rational)) ...)`). No sentido inverso, ret
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Comparação |
 | `numerator` `denominator` | `(op x)` | `rational→int` | O numerador e o denominador reduzidos |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Truncado em direção a zero, como `ratio`, para `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` para um inteiro, `none` caso contrário (o `integerp` do CL) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` para um inteiro, `None` caso contrário (o `integerp` do CL) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Como em `ratio` (o expoente de `expt` é um `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Como em `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Como em `ratio` |

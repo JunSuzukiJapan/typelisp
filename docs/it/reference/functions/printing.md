@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Stampa
 
 `print`/`println`/`format`, i printer a un argomento, il pretty printer, `print-object` e le variabili che
@@ -45,18 +45,18 @@ loro output a ogni chiamata (in modo che un prompt sia visibile prima che venga 
 anche attraverso una pipe).
 
 **`Option<Sexpr>` viene stampato in modo trasparente.** Il tipo dei dati S-expression è `Option<Sexpr>`,
-quindi l'involucro `(some x)` non compare nell'output e il contenuto viene stampato così com'è. La lista
-vuota viene stampata come `()`. Gli altri `Option<T>` vengono stampati come `(some ...)` / `none`. Lo
+quindi l'involucro `(Some x)` non compare nell'output e il contenuto viene stampato così com'è. La lista
+vuota viene stampata come `()`. Gli altri `Option<T>` vengono stampati come `(Some ...)` / `None`. Lo
 stesso vale per i campi `Option<T>` dentro strutture, enumerazioni e `Vector`. Un
-`Result<Option<Sexpr>,…>` da `(eval ...)` viene stampato come `(ok 42)`, oppure `(ok ())` per `none`.
+`Result<Option<Sexpr>,…>` da `(eval ...)` viene stampato come `(Ok 42)`, oppure `(Ok ())` per `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -318,10 +318,10 @@ circolare):
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a points to a itself
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a points to a itself
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Le etichette **ricominciano da 1 per ogni cosa stampata** (come in CL). Anche senza un ciclo, se lo stesso

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Файловий ввід-вивід, потоки та мережа
 
 Цей посібник показує основи читання й запису файлів, шляхів і комунікації через сокети. Переліки
@@ -14,14 +14,14 @@
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; if the file is missing:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
 Коли ви знаєте, що операція не може зазнати невдачі, або в невеликому скрипті, де зупинка при невдачі
-припустима, `unwrap` виймає значення. Якщо це `err`, він завершується через panic.
+припустима, `unwrap` виймає значення. Якщо це `Err`, він завершується через panic.
 
 ## 2. Читання й запис цілого файлу
 
@@ -30,8 +30,8 @@
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. Читання й запис через потоки
@@ -46,23 +46,23 @@
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; read one line at a time
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - Файл можна відкрити в трьох напрямках: `direction-input` (читання), `direction-output` (запис;
   наявний вміст відкидається) і `direction-append` (дописування в кінець).
-- `read-line` повертає `none` у кінці файлу.
+- `read-line` повертає `None` у кінці файлу.
 - Якщо ви відкриваєте файл через `open-file` замість `with-open-file`, завжди викликайте `close`. GC
   потоків не закриває.
 
@@ -78,7 +78,7 @@
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### Стандартний ввід і вивід
@@ -95,8 +95,8 @@
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -108,8 +108,8 @@
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; replace just the extension
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -148,14 +148,14 @@
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; the other side closed
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; the other side closed
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` приймає з'єднання лише з цієї машини, а `"0.0.0.0"` — на кожному інтерфейсі. Про задачі
@@ -171,8 +171,8 @@
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 Щоб обмежити операцію в часі, передайте `:timeout` (у секундах).
@@ -181,13 +181,13 @@
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; put a clock on the next read
 ```
 
 ### Коли інша сторона розриває з'єднання
 
 Якщо інша сторона скидає з'єднання або обриває його посередині, `panic` не виникає. Наступні читання
-повертають `none`, а записи мовчки відкидаються. Щоб відрізнити, чи з'єднання закрито чисто, чи воно
+повертають `None`, а записи мовчки відкидаються. Щоб відрізнити, чи з'єднання закрито чисто, чи воно
 зазнало збою, перевірте `(socket-error c)`.
 
 ## 6. Розв'язання імен (DNS)
@@ -196,13 +196,13 @@
 `send-to` розв'язує його всередині них. Розв'язання відбувається в іншому потоці, тож інші задачі
 продовжують виконуватися, поки воно чекає. Якщо в імені кілька адрес, їх пробують по черзі.
 
-Якщо ім'я розв'язати не вдається, повертається `err`.
+Якщо ім'я розв'язати не вдається, повертається `Err`.
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -215,12 +215,12 @@
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 TLS-сервер створюється передачею файлів сертифіката й закритого ключа (PEM) у `tls-listen`.
@@ -229,8 +229,8 @@ TLS-сервер створюється передачею файлів серт
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 Під час випробування із самопідписаним сертифікатом передайте на боці клієнта `:ca-file "cert.pem"`, щоб
@@ -248,8 +248,8 @@ UDP — це не потік; він надсилає й отримує по о�
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -258,5 +258,5 @@ UDP — це не потік; він надсилає й отримує по о�
 ## 9. Доменні сокети Unix
 
 Передайте шлях до файлу сокета в `unix-listen` / `unix-connect`. Ви отримаєте той самий
-`socket-stream`, що й з TCP. `unix-listen` повертає `err`, якщо файл уже існує. Закриття
+`socket-stream`, що й з TCP. `unix-listen` повертає `Err`, якщо файл уже існує. Закриття
 слухача видаляє файл.

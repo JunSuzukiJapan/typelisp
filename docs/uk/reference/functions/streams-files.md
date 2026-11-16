@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Потоки та файли
 
 Трейти й методи потоків, конкретні типи потоків, файлові операції та шляхи. Мережеві сокети теж є
@@ -30,18 +30,18 @@
 
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Наступний елемент. `none` наприкінці. **Єдиний метод, який треба реалізувати** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Наступний елемент. `None` наприкінці. **Єдиний метод, який треба реалізувати** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Наступний знак |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | До наступного нового рядка (новий рядок споживається й вилучається). Останній рядок, що не закінчується новим рядком, теж повертається |
 | `read-all` | `(read-all s)` | `(S)→string` | Усе, що лишилося |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Лише знак, що вже під рукою. `none` замість очікування |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Лише знак, що вже під рукою. `None` замість очікування |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Додає до `v` до `n` знаків і повертає, скільки справді прочитано. Менше за `n` лише наприкінці |
 
 `listen` міститься в `InputStream` (батьківському для `CharInput`):
 
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Чи можна відповісти на наступне читання без очікування. Типово `false`, **сторона, яка ніколи не бреше**: `true` було б припущенням, а хибне припущення змусило б `read-char-no-hang` блокуватися. Усі вбудовані потоки його перевизначають. **Для користувацьких потоків, що його не перевизначають, `read-char-no-hang` завжди повертає `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | Чи можна відповісти на наступне читання без очікування. Типово `false`, **сторона, яка ніколи не бреше**: `true` було б припущенням, а хибне припущення змусило б `read-char-no-hang` блокуватися. Усі вбудовані потоки його перевизначають. **Для користувацьких потоків, що його не перевизначають, `read-char-no-hang` завжди повертає `None`** |
 
 `PeekInput` (що успадковує `CharInput`) додає **повернення одного знака назад**. Лише сам потік має місце,
 де зберігати повернутий знак, тож це не може мати типової реалізації й становить окремий трейт.
@@ -89,7 +89,7 @@
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` — одна з трьох констант `direction-input` / `direction-output` /
-`direction-append`. `open-file` повертає `(err FileError)`, якщо файл не вдається відкрити (відсутній файл —
+`direction-append`. `open-file` повертає `(Err FileError)`, якщо файл не вдається відкрити (відсутній файл —
 це звичайний результат, а не panic). Ім'ям файлу може бути рядок або `pathname` (`Pathish` у розділі 9).
 
 `(get-output-stream-string s)` повертає те, що записано в `string-output-stream`, і спорожнює його. Як у
@@ -100,7 +100,7 @@ CL, його можна отримати навіть після `close`.
 
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Наступний байт. `none` наприкінці файлу |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Наступний байт. `None` наприкінці файлу |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Записує один байт. Помилка поза 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | Знакова версія, у байтах |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | Так само |
@@ -136,18 +136,18 @@ CL визначає тип елемента **у виклику**, як у `(ope
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Переносить усе |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Усі рядки, що залишилися |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читає один `Sexpr` (`read` з CL). `(ok eof)` наприкінці вводу, `(ok (datum d))`, коли щось прочитано, `err`, якщо це не дані. Він **споживає один пробільний знак**, що завершив дані (як у CL). `ReadOutcome` — це не `Option<Sexpr>`, щоб читання порожнього списку `()` і кінець вводу не були тим самим значенням |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Читає один `Sexpr` (`read` з CL). `(Ok eof)` наприкінці вводу, `(Ok (Datum d))`, коли щось прочитано, `Err`, якщо це не дані. Він **споживає один пробільний знак**, що завершив дані (як у CL). `ReadOutcome` — це не `Option<Sexpr>`, щоб читання порожнього списку `()` і кінець вводу не були тим самим значенням |
 | `read-sexpr-preserving-whitespace` | Так само | Так само | Те саме, але лишає пробільний знак (`read-preserving-whitespace` з CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читає до `ch` і створює список. `ch` споживається. `err`, якщо ввід закінчився |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Читає до `ch` і створює список. `ch` споживається. `Err`, якщо ввід закінчився |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Записує по одному рядку |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Увесь вміст |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Усі рядки |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Записує |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Чи існує |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Видалити, перейменувати (аргументи — `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютний шлях із розв'язаними символічними посиланнями та `.`/`..`. `err`, якщо не існує |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Абсолютний шлях із розв'язаними символічними посиланнями та `.`/`..`. `Err`, якщо не існує |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Час останньої зміни. Це **універсальний час**, тож його вміє читати `decode-universal-time` ([Час](system.md#2-розкодування-та-кодування-дат)) |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ім'я власника для входу. `err`, якщо файлу не існує, `(ok none)`, якщо uid власника не має запису в базі паролів: два випадки, які розрізняє CL, лишаються розділеними |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Ім'я власника для входу. `Err`, якщо файлу не існує, `(Ok none)`, якщо uid власника не має запису в базі паролів: два випадки, які розрізняє CL, лишаються розділеними |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Чи це каталог. **Також `false`, якщо не існує**; щоб їх розрізнити, використовуйте `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Перелічує вміст за truename (абсолютний шлях із розв'язаними символічними посиланнями, як у `truename`). Символічні посилання з відсутньою ціллю пропускаються. `.`/`..` пропускаються. Порядок — той, що дає ОС |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Створює його разом із батьківськими. Успішно, якщо вже існує |
@@ -201,8 +201,8 @@ designator-ів шляхів CL, що розв'язується через тр�
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   split at the last dot
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   split at the last dot
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -228,10 +228,10 @@ designator-ів шляхів CL, що розв'язується через тр�
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Розбиває рядок на частини. Завершальний `/` (або порожнє ім'я) означає «імені немає», тобто каталог |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Будує з лише наведених складників (усі `&key`). Пропущені ім'я чи тип лишаються «відсутніми» і є тим, що заповнює `merge-pathnames` |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Складники каталогу, найзовнішній першим |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Ім'я без типу. `none` для каталогу |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Ім'я без типу. `None` для каталогу |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Після останньої крапки. Початкова крапка не рахується (весь `.gitignore` — це ім'я) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Чи починається з кореня |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Домашній каталог. `none`, якщо немає `$HOME` (CL теж дозволяє `NIL`) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Домашній каталог. `None`, якщо немає `$HOME` (CL теж дозволяє `NIL`) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Частина до останнього `/` |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Лише частина `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Заповнює складники, яких бракує в `p`, зі `default`. Відносний `p` потрапляє під каталог `default`; абсолютний `p` зберігає власний каталог |

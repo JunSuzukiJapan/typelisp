@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Messaggi di errore
 
 Che cosa significano i principali messaggi di errore di `typl` e come correggerli.
@@ -101,8 +101,8 @@ Errori trovati prima dell'esecuzione. La forma non viene eseguita finché non ve
 | Messaggio | Significato e correzione |
 |---|---|
 | `panic: divide by zero` | Divisione per zero con interi o razionali. La divisione per zero in virgola mobile non va in panic; dà `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` è stato applicato a `none`. Gestisci il caso `none` con `match` o `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | Un indice fuori intervallo. Controlla la lunghezza con `len`, oppure usa una funzione che restituisce `none` quando è fuori intervallo (`nth`, `pop` e così via) |
+| `panic: unwrap: called on None` | `unwrap` è stato applicato a `None`. Gestisci il caso `None` con `match` o `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | Un indice fuori intervallo. Controlla la lunghezza con `len`, oppure usa una funzione che restituisce `None` quando è fuori intervallo (`nth`, `pop` e così via) |
 | `panic: an integer argument does not fit a fixnum` | Un `int` che non sta in 63 bit è stato passato a un argomento che prende un indice o un conteggio |
 | `throw: no enclosing (catch 'oops) for this throw` | Un `throw` è stato eseguito senza alcun `catch` con lo stesso tag che lo racchiuda |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Un `throw` ha raggiunto un `catch` dello stesso tag che porta un altro tipo |
