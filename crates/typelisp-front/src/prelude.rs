@@ -433,7 +433,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; methods — no relation to `defun`'s separate generic-parameter syntax.
 (impl<T> Option<T>
   (pub defmethod unwrap (self) T
-    (match self ((Some x) x) ((None) (panic "unwrap: called on none"))))
+    (match self ((Some x) x) ((None) (panic "unwrap: called on None"))))
   (pub defmethod unwrap-or (self (default T)) T
     (match self ((Some x) x) ((None) default)))
   (pub defmethod is-some (self) bool

@@ -1667,7 +1667,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 (unreachable)                       ; (panic "unreachable") に展開。defmacro
 (todo)                              ; (panic "todo") に展開。defmacro
 (as Type expr)                      ; 数値/文字の型変換。失敗しうる変換は失敗時に panic
-(try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は none）
+(try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は None）
 (print control args...)             ; 書式展開して標準出力へ（改行なし）
 (println control args...)           ; 同上（末尾に改行）
 (format dest control args...)       ; CL の format。展開結果の string を返す

@@ -52,7 +52,7 @@
 
 ## 2. `Option<T>` の実行時表現
 
-Rust と同じく、**`Option<T>` は多くの場合、箱を作らない**。`some v` は `v` そのもの、`None` は
+Rust と同じく、**`Option<T>` は多くの場合、箱を作らない**。`Some v` は `v` そのもの、`None` は
 空リストの値で、確保も間接参照も無い。`Option<Sexpr>`（空リストが `None`）、`Option<int>`、
 `Option<string>`、`Option<my-struct>`、`Option<f64>`、`Option<(fn ...)>` はすべてこの形。
 

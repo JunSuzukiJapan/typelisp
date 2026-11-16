@@ -60,7 +60,7 @@ typelisp には `nil` がありません。「値が無いかもしれない」�
 typl> (safe-div 10 2)
 (Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` は `int` ではないので、そのまま計算には使えません。`(+ (safe-div 10 2) 1)` は型エラー
