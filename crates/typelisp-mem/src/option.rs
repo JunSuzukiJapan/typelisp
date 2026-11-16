@@ -3,7 +3,7 @@
 //!
 //! An `Option<T>` is represented as `T`'s own tagged word for `some v` and
 //! the empty-list immediate ([`crate::NIL_WORD`], `Value::Empty`) for
-//! `none` whenever no `T` value can *be* that immediate — which is every
+//! `None` whenever no `T` value can *be* that immediate — which is every
 //! type except the ones listed in [`option_payload_niches`]. The checker
 //! decides the same thing from a `Type` (`Repr::of_by` in `typelisp-front`,
 //! kept in agreement by a test there); this is the decision for the code
@@ -33,7 +33,7 @@ fn option_payload(ty: TypeId) -> Option<TypeId> {
 /// Whether `Option<P>` is niche-represented, given `P`.
 ///
 /// The payload must never be the empty-list word. A nested `Option` may be
-/// (its own `none`), `()` *is* it, and a raw C word (`ptr`/`c-long`/
+/// (its own `None`), `()` *is* it, and a raw C word (`ptr`/`c-long`/
 /// `c-ulong`) has no tag to keep it apart; `!` has no values and no
 /// representation at all. Everything else — fixnums, boxes, strings,
 /// symbols, characters, booleans, cons cells, and `sexpr` itself, whose
@@ -57,10 +57,10 @@ pub fn is_niched_option(ty: TypeId) -> bool {
 }
 
 /// Whether a *printer* should write a value of the type `ty` as
-/// `(some ...)`/`none` around the word it holds: a niche-represented
+/// `(Some ...)`/`None` around the word it holds: a niche-represented
 /// `Option` ([`is_niched_option`]) other than `Option<sexpr>`.
 /// `Option<sexpr>` is S-expression data — the S-expression *is* the value
-/// and the empty list is its `none` — and prints as the datum it is, `()`
+/// and the empty list is its `None` — and prints as the datum it is, `()`
 /// included, wherever it sits (`docs/ja/reference/functions/printing.md` §1). Every other niche has no
 /// such reading, so the wrapper the word cannot carry is written back.
 pub fn option_prints_wrapped(ty: TypeId) -> bool {
@@ -69,10 +69,10 @@ pub fn option_prints_wrapped(ty: TypeId) -> bool {
 
 impl Heap {
     /// An `Option` value of the type `ty` (`Option<P>`): the niche when `P`
-    /// allows one — `v` itself for `some`, [`Value::Empty`] for `none` — and a
-    /// `BoxedObj::Enum` box (`some` = variant 0, `none` = variant 1,
+    /// allows one — `v` itself for `Some`, [`Value::Empty`] for `None` — and a
+    /// `BoxedObj::Enum` box (`Some` = variant 0, `None` = variant 1,
     /// `option_def`'s order) otherwise. **The one producer** for Rust code
-    /// that builds an `Option` from a type; the checker's `some-of`/`none`
+    /// that builds an `Option` from a type; the checker's `some-of`/`None`
     /// forms are its typed twin.
     pub fn alloc_option(&mut self, ty: TypeId, v: Option<Value>) -> Value {
         let Some(payload) = option_payload(ty) else {

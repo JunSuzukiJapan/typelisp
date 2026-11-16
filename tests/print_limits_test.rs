@@ -23,8 +23,8 @@ use common::{eval_err, eval_string};
 const CYCLE_DEFS: &str = r#"
     (defstruct node (val int) (next Option<node>))
     (defun cycle () node
-      (let ((a (make-instance 'node :val 1 :next (Option::none))))
-        (setf a::next (Option::some a))
+      (let ((a (make-instance 'node :val 1 :next (Option::None))))
+        (setf a::next (Option::Some a))
         a))
 "#;
 
@@ -201,7 +201,7 @@ fn a_circular_structure_prints_with_labels_instead_of_recursing() {
     "#
     );
     // `#1=` marks the definition, `#1#` the reference back to it.
-    assert_eq!(eval_string(&src), "#1=#<node val: 1 next: (some #1#)>");
+    assert_eq!(eval_string(&src), "#1=#<node val: 1 next: (Some #1#)>");
 }
 
 #[test]
@@ -263,7 +263,7 @@ fn a_cycle_reached_through_two_paths_gets_one_label() {
           (format false "~a" (list a a)))
     "#
     );
-    assert_eq!(eval_string(&src), "(#1=#<node val: 1 next: (some #1#)> #1#)");
+    assert_eq!(eval_string(&src), "(#1=#<node val: 1 next: (Some #1#)> #1#)");
 }
 
 // ---------------------------------------------------------------------------

@@ -52,7 +52,7 @@ fn a_sortedtable_keeps_its_keys_in_order() {
              (set t "b" 2) (set t "c" 3) (set t "a" 1) (set t "b" 20)
              (format false "~s ~s ~s ~s ~s"
                (keys t) (values t) (get t "b") (get t "zz") (collect (iter t))))"##,
-        r##"#("a" "b" "c") #(1 20 3) (some 20) none #(#{"a" 1} #{"b" 20} #{"c" 3})"##,
+        r##"#("a" "b" "c") #(1 20 3) (Some 20) None #(#{"a" 1} #{"b" 20} #{"c" 3})"##,
     );
 }
 
@@ -64,7 +64,7 @@ fn a_sortedtable_remove_and_clear() {
              (let ((r1 (remove t 8)) (r2 (remove t 8)) (n (count t)) (ks (keys t)))
                (clear t)
                (format false "~s ~s ~a ~s ~a" r1 r2 n ks (count t))))"##,
-        r##"(some "2") none 4 #(6 7 9 10) 0"##,
+        r##"(Some "2") None 4 #(6 7 9 10) 0"##,
     );
 }
 
@@ -85,7 +85,7 @@ fn a_deque_takes_and_gives_at_both_ends() {
                (set d 0 -9)
                (format false "~s ~s ~s ~s ~s ~s ~s ~s"
                  all f b g out (pop-front d) (pop-back d) (count d))))"##,
-        "#(-1 0 1 2) (some -1) (some 2) (some 1) none (some -9) (some 2) 2",
+        "#(-1 0 1 2) (Some -1) (Some 2) (Some 1) None (Some -9) (Some 2) 2",
     );
 }
 
@@ -98,9 +98,9 @@ fn a_deque_pops_what_was_pushed_at_the_other_end() {
              (dotimes (i 6) (push-front d i))
              (dotimes (i 3) (setf a (format false "~a~a" a (unwrap (pop-back d)))))
              (dotimes (i 3) (push-back d (+ 10 i)))
-             (while-let ((some x) (pop-front d)) (setf b (format false "~a ~a" b x)))
+             (while-let ((Some x) (pop-front d)) (setf b (format false "~a ~a" b x)))
              (format false "~a |~a| ~s ~s" a b (pop-back d) (count d)))"##,
-        "012 | 5 4 3 10 11 12| none 0",
+        "012 | 5 4 3 10 11 12| None 0",
     );
 }
 

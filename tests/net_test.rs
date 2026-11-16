@@ -75,15 +75,15 @@ const ECHO: &str = r#"(use std::net::socket-listener std::net::socket-stream)
 (defun echo-conn ((c socket-stream)) ()
   (loop
     (match (read-line c)
-      ((some line) (write-line c line))
-      ((none) (break))))
+      ((Some line) (write-line c line))
+      ((None) (break))))
   (close c))
 
 (defun echo-serve ((l socket-listener) (n int)) ()
   (dotimes (i n)
     (match (accept l)
-      ((ok c) (task (echo-conn c)))
-      ((err e) (panic (message e))))))
+      ((Ok c) (task (echo-conn c)))
+      ((Err e) (panic (message e))))))
 "#;
 
 #[test]
@@ -158,8 +158,8 @@ fn a_refused_connection_is_an_error_value() {
   (let ((port (port-of l)))
     (close l)
     (match (tcp-connect \"127.0.0.1\" port)
-      ((ok c) (progn (close c) \"connected?!\"))
-      ((err e) (let ((m (message e))) (if (> (length m) 0) \"refused\" \"empty message\"))))))"
+      ((Ok c) (progn (close c) \"connected?!\"))
+      ((Err e) (let ((m (message e))) (if (> (length m) 0) \"refused\" \"empty message\"))))))"
     );
     assert_eq!(text(&src), "refused");
 }
@@ -170,25 +170,25 @@ fn a_net_error_is_an_error_trait_object() {
 (defun try-it () Result<socket-stream, :dyn Error>
   (as-dyn-error (tcp-connect "127.0.0.1" 1)))
 (match (try-it)
-  ((ok _) "no error")
-  ((err e) (if (> (length (message e)) 0) "an Error" "")))"#;
+  ((Ok _) "no error")
+  ((Err e) (if (> (length (message e)) 0) "an Error" "")))"#;
     assert_eq!(text(src), "an Error");
 }
 
 #[test]
 fn end_of_input_when_the_peer_closes_and_half_close() {
     // The client sends two lines and shuts its output; the server reads
-    // until `none`, then answers with the count — which the client can still
+    // until `None`, then answers with the count — which the client can still
     // read after `shutdown-output`.
     let src = format!(
         "(use std::net::socket-listener std::net::socket-stream std::net::tcp-connect std::net::tcp-listen std::sync::after) {LISTEN}
 (defun count-lines ((c socket-stream)) ()
   (let ((n 0))
-    (loop (match (read-line c) ((some _) (setf n (+ n 1))) ((none) (break))))
+    (loop (match (read-line c) ((Some _) (setf n (+ n 1))) ((None) (break))))
     (write-line c (format false \"~a lines\" n))
     (close c)))
 (defun serve-one ((l socket-listener)) ()
-  (match (accept l) ((ok c) (count-lines c)) ((err e) (panic (message e)))))
+  (match (accept l) ((Ok c) (count-lines c)) ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (serve-one l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
@@ -210,13 +210,13 @@ fn the_byte_view_shares_the_connection() {
         "(use std::net::byte-stream-of std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-bytes ((l socket-listener)) ()
   (match (accept l)
-    ((ok c)
+    ((Ok c)
      (write-line c \"header\")
      (let ((b (byte-stream-of c)))
        (write-byte b 200)
        (write-byte b 10)
        (close b)))
-    ((err e) (panic (message e)))))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (send-bytes l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
@@ -236,8 +236,8 @@ fn a_pushed_back_character_refuses_a_byte_read() {
         "(use std::net::byte-stream-of std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-text ((l socket-listener)) ()
   (match (accept l)
-    ((ok c) (write-string c \"ab\") (close c))
-    ((err e) (panic (message e)))))
+    ((Ok c) (write-string c \"ab\") (close c))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (send-text l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
@@ -260,8 +260,8 @@ fn waiting_on_a_socket_from_a_print_method_is_refused() {
 (impl print-object peeker
   (defmethod print-object (self (escape bool)) string
     (match (accept self::l)
-      ((ok c) (progn (close c) \"accepted\"))
-      ((err e) (panic (message e))))))
+      ((Ok c) (progn (close c) \"accepted\"))
+      ((Err e) (panic (message e))))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (format false \"~a\" (make-instance 'peeker :l l)))"
     );
@@ -275,8 +275,8 @@ fn accepting_on_a_closed_listener_is_an_error_value() {
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
   (close l)
   (match (accept l)
-    ((ok c) (progn (close c) "accepted?!"))
-    ((err e) (message e))))"#;
+    ((Ok c) (progn (close c) "accepted?!"))
+    ((Err e) (message e))))"#;
     let got = text(src);
     assert!(got.contains("closed"), "{}", got);
 }
@@ -326,8 +326,8 @@ fn accept_with_a_timeout_gives_up() {
     let src = r#"(use std::net::tcp-listen) 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 0))))
   (match (accept l :timeout 0.05)
-    ((ok c) (progn (close c) "accepted?!"))
-    ((err e) (message e))))"#;
+    ((Ok c) (progn (close c) "accepted?!"))
+    ((Err e) (message e))))"#;
     assert_eq!(text(src), "accept: timed out");
 }
 
@@ -337,8 +337,8 @@ fn a_timed_wait_answers_true_when_data_arrives_first() {
         "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-late ((l socket-listener)) ()
   (match (accept l)
-    ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
-    ((err e) (panic (message e)))))
+    ((Ok c) (sleep 0.02) (write-line c \"late\") (close c))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (send-late l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
@@ -358,8 +358,8 @@ fn a_compiled_timed_wait_answers_the_same() {
         "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun send-late ((l socket-listener)) ()
   (match (accept l)
-    ((ok c) (sleep 0.02) (write-line c \"late\") (close c))
-    ((err e) (panic (message e)))))
+    ((Ok c) (sleep 0.02) (write-line c \"late\") (close c))
+    ((Err e) (panic (message e)))))
 (defun client ((port int)) string
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" port))))
     (let ((first (wait-readable c 0.005))
@@ -390,8 +390,8 @@ fn a_timed_wait_does_not_stop_other_tasks() {
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (tick-then-connect (port-of l)))
   (match (accept l :timeout 30.0)
-    ((ok c) (progn (close c) (close l) (format false \"accepted ~a\" ticks)))
-    ((err e) (message e))))"
+    ((Ok c) (progn (close c) (close l) (format false \"accepted ~a\" ticks)))
+    ((Err e) (message e))))"
     );
     assert_eq!(text(&src), "accepted 5");
 }
@@ -419,8 +419,8 @@ fn an_unresolvable_name_is_an_error_value_and_others_keep_running() {
 (defun tick ((n int)) () (dotimes (i n) (sleep 0.005) (setf ticks (+ ticks 1))))
 (task (tick 3))
 (match (tcp-connect "no-such-host.invalid" 80)
-  ((ok c) (progn (close c) "connected?!"))
-  ((err e) (if (> (length (message e)) 0) "resolve failed" "")))"#;
+  ((Ok c) (progn (close c) "connected?!"))
+  ((Err e) (if (> (length (message e)) 0) "resolve failed" "")))"#;
     assert_eq!(text(src), "resolve failed");
 }
 
@@ -446,8 +446,8 @@ fn recv_from_with_a_timeout_gives_up() {
     let src = r#"(use std::net::udp-bind) 
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (match (recv-from s :timeout 0.05)
-    ((ok d) "a datagram?!")
-    ((err e) (message e))))"#;
+    ((Ok d) "a datagram?!")
+    ((Err e) (message e))))"#;
     assert_eq!(text(src), "recv-from: timed out");
 }
 
@@ -472,13 +472,13 @@ fn tls_against_a_plain_peer_fails_cleanly() {
         "(use std::net::socket-listener std::net::tcp-listen std::net::tls-connect) {LISTEN}
 (defun sink ((l socket-listener)) ()
   (match (accept l)
-    ((ok c) (write-line c \"not tls\") (close c))
-    ((err e) (panic (message e)))))
+    ((Ok c) (write-line c \"not tls\") (close c))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (sink l))
   (match (tls-connect \"localhost\" (port-of l) :timeout 5.0)
-    ((ok c) (progn (close c) \"handshake succeeded?!\"))
-    ((err e) (if (> (length (message e)) 0) \"tls failed\" \"\"))))"
+    ((Ok c) (progn (close c) \"handshake succeeded?!\"))
+    ((Err e) (if (> (length (message e)) 0) \"tls failed\" \"\"))))"
     );
     assert_eq!(text(&src), "tls failed");
 }
@@ -512,8 +512,8 @@ fn a_unix_domain_socket_is_the_same_stream() {
 fn connecting_to_a_missing_unix_socket_is_an_error_value() {
     let src = r#"(use std::net::unix-connect) 
 (match (unix-connect "/nonexistent/typelisp.sock")
-  ((ok c) (progn (close c) "connected?!"))
-  ((err e) (if (> (length (message e)) 0) "refused" "")))"#;
+  ((Ok c) (progn (close c) "connected?!"))
+  ((Err e) (if (> (length (message e)) 0) "refused" "")))"#;
     assert_eq!(text(src), "refused");
 }
 
@@ -610,8 +610,8 @@ fn a_server_that_writes_first_shakes_hands_in_its_write() {
         "(use std::net::socket-listener std::net::tls-connect std::net::tls-listen) {LISTEN}
 (defun greet ((l socket-listener)) ()
   (match (accept l)
-    ((ok c) (write-line c \"220 ready\") (close c))
-    ((err e) (panic (message e)))))
+    ((Ok c) (write-line c \"220 ready\") (close c))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (task (greet l))
   (let ((c (unwrap (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\"))))
@@ -635,18 +635,18 @@ fn an_untrusted_certificate_is_the_clients_error_and_the_servers_socket_error() 
 (defvar (server-saw string) \"\")
 (defun serve-one ((l socket-listener)) ()
   (match (accept l)
-    ((ok c)
+    ((Ok c)
      (let ((line (read-line c)))
        (setf server-saw
              (format false \"~a/~a\" (is-none line)
-                     (match (socket-error c) ((some e) (if (> (length (message e)) 0) \"failed\" \"\")) ((none) \"sound\"))))
+                     (match (socket-error c) ((Some e) (if (> (length (message e)) 0) \"failed\" \"\")) ((None) \"sound\"))))
        (close c)))
-    ((err e) (panic (message e)))))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (task (serve-one l))
   (let ((outcome (match (tls-connect \"localhost\" (port-of l) :timeout 5.0)
-                   ((ok c) (progn (close c) \"trusted?!\"))
-                   ((err e) \"rejected\"))))
+                   ((Ok c) (progn (close c) \"trusted?!\"))
+                   ((Err e) \"rejected\"))))
     (sleep 0.2)
     (close l)
     (format false \"~a ~a\" outcome server-saw)))"
@@ -658,22 +658,22 @@ fn an_untrusted_certificate_is_the_clients_error_and_the_servers_socket_error() 
 fn a_peer_that_goes_away_does_not_panic_the_server() {
     // Plain TCP: the client closes without reading; the server's writes
     // after that go nowhere and `socket-error` says so, while a clean end
-    // of input on a sound connection reports `none`.
+    // of input on a sound connection reports `None`.
     let src = format!(
         "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defvar (seen string) \"\")
 (defun talk ((l socket-listener)) ()
   (match (accept l)
-    ((ok c)
+    ((Ok c)
      (read-line c)
      (let ((i 0))
        (loop
          (write-line c \"chatter chatter chatter chatter chatter chatter chatter chatter\")
          (setf i (+ i 1))
          (when (or (is-some (socket-error c)) (> i 2000)) (return))))
-     (setf seen (match (socket-error c) ((some e) \"broken\") ((none) \"sound\")))
+     (setf seen (match (socket-error c) ((Some e) \"broken\") ((None) \"sound\")))
      (close c))
-    ((err e) (panic (message e)))))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (talk l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
@@ -688,8 +688,8 @@ fn a_peer_that_goes_away_does_not_panic_the_server() {
         "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen std::sync::after) {LISTEN}
 (defun serve-one ((l socket-listener)) ()
   (match (accept l)
-    ((ok c) (read-line c) (close c))
-    ((err e) (panic (message e)))))
+    ((Ok c) (read-line c) (close c))
+    ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (serve-one l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))
@@ -707,8 +707,8 @@ fn tls_listen_with_bad_files_is_an_error_value() {
     let Pki { cert, key, .. } = test_pki();
     let src = format!(
         "(use std::net::tls-listen) (match (tls-listen \"127.0.0.1\" 0 \"{key}\" \"{cert}\")
-  ((ok l) (progn (close l) \"listening?!\"))
-  ((err e) (if (> (length (message e)) 0) \"refused\" \"\")))"
+  ((Ok l) (progn (close l) \"listening?!\"))
+  ((Err e) (if (> (length (message e)) 0) \"refused\" \"\")))"
     );
     assert_eq!(text(&src), "refused");
 }
@@ -732,8 +732,8 @@ fn mutual_tls_admits_a_client_with_a_certificate_and_refuses_one_without() {
     (let ((admitted (unwrap (read-line c))))
       (close c)
       (let ((refused (match (tls-connect \"localhost\" (port-of l) :timeout 5.0 :ca-file \"{ca}\")
-                       ((err e) \"refused in the handshake\")
-                       ((ok c2)
+                       ((Err e) \"refused in the handshake\")
+                       ((Ok c2)
                         (write-line c2 \"without one\")
                         (let ((line (read-line c2)))
                           (let ((r (format false \"~a/~a\" (is-none line) (is-some (socket-error c2)))))
@@ -754,8 +754,8 @@ fn a_client_certificate_needs_its_key() {
         "(use std::net::tcp-listen std::net::tls-connect) {LISTEN}
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (let ((r (match (tls-connect \"localhost\" (port-of l) :ca-file \"{ca}\" :cert-file \"{client_cert}\")
-             ((ok c) (progn (close c) \"connected?!\"))
-             ((err e) (message e)))))
+             ((Ok c) (progn (close c) \"connected?!\"))
+             ((Err e) (message e)))))
     (close l)
     r))"
     );
@@ -776,14 +776,14 @@ fn the_peer_subject_names_both_sides_and_sni_picks_the_certificate() {
 (defun identify ((l socket-listener) (n int)) ()
   (dotimes (i n)
     (match (accept l)
-      ((ok c)
+      ((Ok c)
        (read-line c)
        (setf seen (format false \"~a[~a asked ~a]\" seen
                           (unwrap-or (peer-subject c) \"nobody\")
                           (unwrap-or (requested-server-name c) \"no name\")))
        (write-line c \"ok\")
        (close c))
-      ((err e) (panic (message e))))))
+      ((Err e) (panic (message e))))))
 (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\" :client-ca \"{ca}\"))))
   (unwrap (tls-add-certificate l \"alt.test\" \"{alt_cert}\" \"{alt_key}\"))
   (task (identify l 2))
@@ -814,8 +814,8 @@ fn adding_a_certificate_for_the_wrong_name_is_an_error_value() {
     let src = format!(
         "(use std::net::tls-listen) (let ((l (unwrap (tls-listen \"127.0.0.1\" 0 \"{cert}\" \"{key}\"))))
   (let ((r (match (tls-add-certificate l \"alt.test\" \"{cert}\" \"{key}\")
-             ((ok _) \"added?!\")
-             ((err e) (message e)))))
+             ((Ok _) \"added?!\")
+             ((Err e) (message e)))))
     (close l)
     r))"
     );
@@ -827,7 +827,7 @@ fn socket_options_apply_and_plain_connections_have_no_peer_subject() {
     let src = format!(
         "(use std::net::socket-listener std::net::tcp-connect std::net::tcp-listen) {LISTEN}
 (defun serve-one ((l socket-listener)) ()
-  (match (accept l) ((ok c) (read-line c) (close c)) ((err e) (panic (message e)))))
+  (match (accept l) ((Ok c) (read-line c) (close c)) ((Err e) (panic (message e)))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
   (task (serve-one l))
   (let ((c (unwrap (tcp-connect \"127.0.0.1\" (port-of l)))))

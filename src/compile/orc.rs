@@ -140,7 +140,7 @@ fn take_error(err: LLVMErrorRef) -> Result<(), String> {
     if err.is_null() {
         return Ok(());
     }
-    // SAFETY: `err` is an error ORC handed over; `LLVMGetErrorMessage`
+    // SAFETY: `Err` is an error ORC handed over; `LLVMGetErrorMessage`
     // consumes it.
     unsafe {
         let message = LLVMGetErrorMessage(err);

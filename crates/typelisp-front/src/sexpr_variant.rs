@@ -11,7 +11,7 @@
 //! keeps its number ([`NIL`], [`RETIRED_BIGNUM`]), because compiled code and
 //! the committed island artifact have the old numbers in them.
 
-/// The empty list, before it became `Option<Sexpr>`'s `none`. Still in
+/// The empty list, before it became `Option<Sexpr>`'s `None`. Still in
 /// `sexpr_def` so nothing after it renumbers; `Checker` refuses to let it be
 /// written as a constructor or a pattern.
 pub const NIL: usize = 0;

@@ -62,26 +62,26 @@ fn defun_and_call() {
 #[test]
 fn unwrap_or_some() {
     let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
-                 (match o ((some v) v) ((none) d))) \
-               (unwrap-or (Option::some 5) 0)";
+                 (match o ((Some v) v) ((None) d))) \
+               (unwrap-or (Option::Some 5) 0)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
 fn unwrap_or_none() {
     let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
-                 (match o ((some v) v) ((none) d))) \
-               (unwrap-or (Option::none) 9)";
+                 (match o ((Some v) v) ((None) d))) \
+               (unwrap-or (Option::None) 9)";
     assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn result_match() {
     let prog = "(use std::num::ParseIntError) (defun unwrap-i ((r Result<int,ParseIntError>)) int \
-                  (match r ((ok v) v) ((err e) (panic \"err\")))) ";
-    assert_eq!(eval_ok(&format!("{} (unwrap-i (Result::ok 9))", prog)), Value::Int(9));
+                  (match r ((Ok v) v) ((Err e) (panic \"err\")))) ";
+    assert_eq!(eval_ok(&format!("{} (unwrap-i (Result::Ok 9))", prog)), Value::Int(9));
     assert_eq!(
-        run(&format!("(use std::num::ParseIntError) {} (unwrap-i (Result::err (ParseIntError::ParseIntError \"boom\")))", prog)),
+        run(&format!("(use std::num::ParseIntError) {} (unwrap-i (Result::Err (ParseIntError::ParseIntError \"boom\")))", prog)),
         Err(EvalError::Panic("err".into()))
     );
 }
@@ -966,7 +966,7 @@ fn first_runtime_error_with_prelude(src: &str) -> EvalError {
 /// `(panic ...)` line, which the program cannot see or change.
 #[test]
 fn a_panic_inside_the_library_is_placed_at_the_programs_call() {
-    let src = "(defun first-or-die ((o Option<int>)) int\n  (unwrap o))\n(first-or-die (Option::none))";
+    let src = "(defun first-or-die ((o Option<int>)) int\n  (unwrap o))\n(first-or-die (Option::None))";
     let err = first_runtime_error_with_prelude(src);
     let loc = err.loc().expect("runtime error should carry a location");
     assert_eq!((&*loc.file, loc.line, loc.col), ("prog.typl", 2, 3), "{}", err);

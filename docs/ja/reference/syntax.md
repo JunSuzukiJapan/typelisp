@@ -74,7 +74,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **属性**: `#[test]` は次のフォームに付く印（Rust と同じ書き方）。今ある属性は `test` だけで、
   `defun` に付ける（[3.16 `#[test]`](#316-test--テスト関数)）。`read` で読むと
   `(%internal::attribute (test) フォーム)` というリストになる。
-- **空リスト `()`**: 文脈によって `Unit` 型の値、または `Option<Sexpr>` の `none` になる。
+- **空リスト `()`**: 文脈によって `Unit` 型の値、または `Option<Sexpr>` の `None` になる。
   **`Sexpr` に空リストの変種は無い**——`Sexpr` は「空でない S 式」を表し、S 式データの型は
   `Option<Sexpr>` である（[4.3 match](#43-match--パターンマッチ) の「`Option<Sexpr>` のパターン」参照）。
 - **quote/quasiquote/unquote**:
@@ -138,7 +138,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   位置にもそのまま渡せる（アップキャスト）。継承関係の無いトレイトへは渡せない。
   `:dyn` にできるトレイトの条件は [3.9 deftrait / impl](#39-deftrait--impl--トレイト機構) を参照。
   `:dyn` を型位置以外に書くとエラー。
-- 組み込みジェネリック型: `Option<T>`（`(some T)` / `none`）、`Result<T,E>`（`(ok T)` / `(err E)`）、
+- 組み込みジェネリック型: `Option<T>`（`(Some T)` / `None`）、`Result<T,E>`（`(Ok T)` / `(Err E)`）、
   `HashTable<K,V>`、`Vector<T>`、並行機構の `Task<T>` / `Thread<T>` / `Chan<T>`（[12 章](#12-並行機構タスク)）。
   S 式データの型 `Sexpr` もある。組み込みの具象エラー型は `ParseIntError` /
   `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`、標準ライブラリの構造体として
@@ -174,7 +174,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; デフォルト無し
-    (match suffix ((some s) (append name s)) ((none) name)))         ; 本体では Option<string>
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; 本体では Option<string>
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; デフォルト有り
   (pow 3)      ; n = 2
@@ -184,8 +184,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   (mk :b "q")  ; 呼び出し側は `:name 値`、順不同。省略した分はデフォルト
   ```
 
-  - **デフォルト式を書かなかったパラメータの型は `Option<Type>` になる**。省略すれば `none`、
-    渡せば呼び出し側が書いた裸の値が自動で `some` に包まれる。CL の「省略されたかどうかを
+  - **デフォルト式を書かなかったパラメータの型は `Option<Type>` になる**。省略すれば `None`、
+    渡せば呼び出し側が書いた裸の値が自動で `Some` に包まれる。CL の「省略されたかどうかを
     supplied-p 変数で知る」に当たるものが、静的型の側に出る形。
   - デフォルト式を書いた場合は宣言どおりの `Type` のまま。省略時はその**検査済みの式**が
     呼び出し側へそのまま埋め込まれる（呼び出しごとに評価される）。
@@ -375,7 +375,7 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 
 ```lisp
 (defstruct handle (p ptr))          ; 構造体のフィールド
-(defenum maybe (none) (some ptr))   ; 列挙型のフィールド
+(defenum maybe (None) (Some ptr))   ; 列挙型のフィールド
 (defvar (block ptr) ...)            ; グローバル
 (defffi f (Vector<ptr>) i32)        ; 型引数の内側
 ```
@@ -817,8 +817,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 
 ; ジェネリック
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - 各バリアントは `(VariantName FieldType...)` の形。フィールドは位置指定のみ（名前は持たない）。
@@ -828,8 +828,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 - `match` / `if-let` で分解できる。`match` は網羅性を検査する（全バリアントを尽くすか `_` が必要）:
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - メソッドと静的メソッドは `defstruct` と同じく `impl`（3.5）に書く。
 - 列挙型自体を `pub` にするには `(pub defenum ...)` と書く。
@@ -1009,7 +1009,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 
 - `module` は名前空間を作る。**型は名前空間ではない**（Rust と同様、型は静的メソッドとメソッドを持つのみ）。
 - `(use Type)` で取り込まれるのは、型の名前だけ。列挙型の変種と静的メソッドは
-  `Option::some` や `Chan::new` のように型の名前を通して書く。`(use std::sync::Chan)` の後でも
+  `Option::Some` や `Chan::new` のように型の名前を通して書く。`(use std::sync::Chan)` の後でも
   裸の `(new 1)` は、`new` という関数がどこにも定義されていなければエラーになる。
 - 型の構成子と静的メソッドを裸の名前で使うには、`(use std::sync::Chan::new)` のように 1 つずつ
   取り込むか、`(use Type::*)` で、構成子と公開された静的メソッドをすべて取り込む（構造体の
@@ -1017,7 +1017,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 - 同じ裸の名前を、別の型から 2 つ取り込むことはできない（`(use std::sync::Chan::* std::sync::WaitGroup::*)`
   は、どちらにも `new` があるのでエラー）。そのモジュールが定義している関数・グローバル変数・
   マクロと同じ名前を取り込むのもエラー。承知のうえで置き換えるときは `shadowing-import` を使う。
-- `Option` の `some`/`none` と `Result` の `ok`/`err` は、標準ライブラリがどのモジュールにも
+- `Option` の `Some`/`None` と `Result` の `Ok`/`Err` は、標準ライブラリがどのモジュールにも
   公開しているので、`use` しなくても裸の名前で使える（Rust の prelude が `Some`/`None`/`Ok`/`Err`
   を取り込んでいるのと同じ）。
 - **1 つの名前は 1 つの意味を持つ**。関数・グローバル変数・マクロは 1 つの名前空間に入り、
@@ -1174,7 +1174,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 
 `#[test]` を付けた `defun` はテスト関数になり、`typl test` が 1 つずつ呼ぶ（Rust の `#[test]` と
 同じ）。引数を取らず、`()` か `Result<(), E>` を返す関数でなければならない（型パラメータも取れない）。
-`pub` は要らない。`Result` を返すテストは `err` を返すと失敗になり、そのエラーを表示する。そのため
+`pub` は要らない。`Result` を返すテストは `Err` を返すと失敗になり、そのエラーを表示する。そのため
 `E` は `Error` か `print-object` を実装していなければならない（Rust がテストのエラー型に `Debug` を
 求めるのと同じ）。`Error` なら `describe-error`（メッセージと原因の連なり）で、そうでなければ
 `print-object` で表示する。`:dyn Error` も `Error` なので、いろいろなエラーを 1 つの型にまとめて返せる。
@@ -1184,15 +1184,15 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **普通に実行したとき・`compile-file` では読み飛ばす。** 中身の検査もしない（Rust がテストを
   `--test` のときだけコンパイルするのと同じ）。プログラムの側からテスト関数は呼べない。
 - テストは、関数を置くどのファイルにも、どの `module` の中にも書ける。プロジェクトの `tests/`
   フォルダに分けて書いてもよい。
-- 失敗は `panic`・実行時エラー・`err` を返すこと。`assert`、両辺を印字する `assert-equal`
+- 失敗は `panic`・実行時エラー・`Err` を返すこと。`assert`、両辺を印字する `assert-equal`
   （[システム](functions/system.md)）で確かめる。1 つが失敗しても残りのテストは走る。
 
 ```sh
@@ -1342,7 +1342,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   （`defstruct` インスタンス、グローバル、計算結果）を比較する唯一の書き方であり、
   ユーザ定義の `Equal` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
   参照できる（引数、外側の束縛、グローバル）
-- `(Ctor sub-pattern...)` — コンストラクタパターン（`(some x)` `(none)` `(cons a d)` `(ok v)` など）
+- `(Ctor sub-pattern...)` — コンストラクタパターン（`(Some x)` `(None)` `(cons a d)` `(Ok v)` など）
 - `(Type :slot pattern... :slot...)` — 構造体のパターン。型名の後にスロットをキーワードで書く。
   キーワードの次がパターンならそのスロットをそのパターンで照合し、次がキーワードか終わりなら
   スロットを同じ名前の変数に束縛する。書かなかったスロットは照合しない（フィールドの数や順序に
@@ -1353,14 +1353,14 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; x に束縛し、y は (some b) で照合する
+      ((point :x :y (Some b)) (+ x b))   ; x に束縛し、y は (Some b) で照合する
       ((point :x a) a)))                 ; a に束縛する
   ```
 - `#{p0 p1 ...}` — タプルパターン。要素ごとに部分パターンで照合する。`Sexpr` に対しては、
   同じ要素数の `#{..}` データにだけマッチする
 - `(:or p1 p2 ...)` — or パターン。どれか 1 つの選択肢にマッチすればよい。本体は 1 つなので、どの
   選択肢も同じ名前の変数を同じ型で束縛しなければならない。コンストラクタパターンの中にも書ける
-  （`(some (:or (circle r) (rect r _)))`）
+  （`(Some (:or (circle r) (rect r _)))`）
 
 `Equal` を実装しない型を値リテラル／`(:= expr)` で比較しようとすると型エラーになる
 （マッチしない腕が黙って残るより、比較できないと言うほうを選んでいる）。
@@ -1417,8 +1417,8 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   例: `(the point p)` の後で `(setf p::x 9)` すればリスト内の元インスタンスにも反映される。
 
 **`Option<Sexpr>` のパターン**: S 式データの型は `Sexpr` ではなく `Option<Sexpr>` で、空リストは
-`Sexpr` の変種ではなく `Option` の `none` である。そのため `Option<Sexpr>` を `match` するときは、
-`Sexpr` の 19 変種と `none` を**同じ腕の並びに平らに**書ける（`Option` を剥がす外側の `match` は
+`Sexpr` の変種ではなく `Option` の `None` である。そのため `Option<Sexpr>` を `match` するときは、
+`Sexpr` の 19 変種と `None` を**同じ腕の並びに平らに**書ける（`Option` を剥がす外側の `match` は
 要らない）:
 
 ```lisp
@@ -1427,12 +1427,12 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
     ((int _)    1)
     ((cons _ _) 2)
     ((str _)    3)
-    ((none)     0)          ; 空リスト
+    ((None)     0)          ; 空リスト
     (_          9)))
 ```
 
-網羅性も同じ平らな宇宙——`Sexpr` の 19 変種 ＋ `none` の 20 個——で検査する。`(none)` を
-書き忘れれば `_` が無いかぎりエラーになる。`(some x)` も書けて「空でない何か」を束縛する。
+網羅性も同じ平らな宇宙——`Sexpr` の 19 変種 ＋ `None` の 20 個——で検査する。`(None)` を
+書き忘れれば `_` が無いかぎりエラーになる。`(Some x)` も書けて「空でない何か」を束縛する。
 
 この糖衣は `Option<Sexpr>` **ちょうど**にしか掛からない。`Option<Option<Sexpr>>` では
 `(int n)` がどちらの層を剥がしたのか決まらないので、通常どおり 2 段の `match` を書く。
@@ -1463,7 +1463,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 **腕どうしの型推論**: 全ての腕は同じ型でなければならない（`panic` 等で発散する腕は除く）。
 期待型が無い位置に書かれた `match` では、腕が**互いに**足りない型引数を埋め合う——
-`(Result::ok v)` は `T` だけ、`(Result::err e)` は `E` だけを決めるが、両方を並べれば
+`(Result::Ok v)` は `T` だけ、`(Result::Err e)` は `E` だけを決めるが、両方を並べれば
 `Result<T,E>` が決まる。片方の腕だけでは決まらない型引数が最後まで残った場合は、
 その腕自身のエラー（`cannot infer type argument ...`）になる。`match` の外では、
 決まらない型引数はその場でエラー。
@@ -1581,7 +1581,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 | `:sum e` / `:count e` | 合計 / 真だった回数 |
 | `:maximize e` / `:minimize e` | 最大 / 最小。**`Option<T>`**（CL が空列に nil を返すのと同じ。任意の `Ord` 型に最小元は無い） |
 | `:always e` / `:never e` | 全部満たせば `true`、破れたら即 `false` |
-| `:thereis e` | `e` は **`Option<T>`**。最初の `some` を返し、無ければ `none`（CL の「最初の非 nil 値」に当たるのがこれ。`bool` を試すなら `:always`/`:never`） |
+| `:thereis e` | `e` は **`Option<T>`**。最初の `Some` を返し、無ければ `None`（CL の「最初の非 nil 値」に当たるのがこれ。`bool` を試すなら `:always`/`:never`） |
 | `:while e` / `:until e` | ここで**正常終了**する（`:finally` は走り、集めたものが答え） |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | 節 1 つを条件付きにする |
 | `:return e` | 即座にその値で脱出（`:finally` は走らない。CL と同じ） |
@@ -1603,7 +1603,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 （5.1）、脱出の型 `int` と、尽きたときにループが残す `()` が合わない。
 
 **ループの値**は、集約節があればその蓄積（複数あれば最初のもの）、`:always`/`:never` なら
-`true`、`:thereis` なら `none`、どれも無ければ `()`。`:finally` の最後が `(return e)` なら
+`true`、`:thereis` なら `None`、どれも無ければ `()`。`:finally` の最後が `(return e)` なら
 それが値になる——CL の `finally (return …)` の慣用で、集約しないループが自分の答えを
 名乗る唯一の方法。
 
@@ -1704,7 +1704,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 間）。同一型は無変換。**整数の幅どうし（`int` を含む）・`f32`↔`f64` は本物の変換**——`as` は
 切り詰め／丸め、`try-as` はその幅（精度）に入るかどうかを答える。`(as int x)` は固定幅からの正確な
 拡大、`(as i32 n)` は `int` からの切り詰め。整数→`char` は範囲外で失敗しうるので `as` は panic・
-`try-as` は `none`。それ以外（拡大変換や `float->int`/`ratio->int` の切り捨て）は常に成功する。
+`try-as` は `None`。それ以外（拡大変換や `float->int`/`ratio->int` の切り捨て）は常に成功する。
 `float->int`/`ratio->int`/`char->int` は `int` に着地し、より狭い幅を頼まれれば `int->W` を
 続けて呼ぶ。`rational` からは `int`（`as` は切り捨て、`try-as` は整数のときだけ成功）・`ratio`・`f64` へ、
 `int`/`ratio` からは `rational` へ変換できる。対応する変換メソッド（[数値](functions/numbers.md)の `int->char`/`int->int`/`int->W` 等）へ
@@ -1714,7 +1714,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 読む特殊形。CL の `(documentation 'name 'function)` と違い型引数は取らない——`name` を変数→関数→型
 →トレイト→マクロの順（裸識別子を式として評価するときと同じ優先順位）で解決し、見つかった定義の
 docstring を返す（`(documentation Type::method)` はメソッド専用）。解決自体に失敗する（そんな名前の
-定義が無い）のはチェック時のエラー、定義はあるが docstring が無い場合は `Option::none`。すべて
+定義が無い）のはチェック時のエラー、定義はあるが docstring が無い場合は `Option::None`。すべて
 チェック時に定数として決まる——実行時のルックアップは発生しない。モジュール修飾された自由名
 （`mod::name`、`Type::method` を除く）は非対応。
 
@@ -1901,10 +1901,10 @@ typl --image session.typld             # REPL も同じ
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => (not (equal 1 2)) と読まれる、つまり true
 ```

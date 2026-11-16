@@ -7,7 +7,7 @@
 //! Sexpr = Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr, Sexpr)
 //! ```
 //!
-//! The empty list `()` is `Option<Sexpr>`'s `none` (`Sexpr` itself has no
+//! The empty list `()` is `Option<Sexpr>`'s `None` (`Sexpr` itself has no
 //! empty variant), encoded at runtime by [`Value::Empty`] — a peer of [`Value::Cons`] in its own right, on the same
 //! footing as the other variants (not a wrapper around them). (`Empty` is the
 //! empty-list datum, **not** the removed language-level `nil`.)
@@ -472,7 +472,7 @@ pub(crate) enum BoxedObj {
     /// function values in Rust-side `RtValue::Builtin(String)`/
     /// `BuiltinMethod(Path, String)` variants with no `Value` form at all,
     /// and that gap is what made `Type::Fn` unstorable in a heap
-    /// `Enum`/`Struct` field — `(Option::some symbol->string)` had to fall back to
+    /// `Enum`/`Struct` field — `(Option::Some symbol->string)` had to fall back to
     /// the heap-invisible `RtValue::Data`. Giving them a box closes it.
     ///
     /// `name` and `recv_type` are symbols, so both are permanent and
@@ -568,7 +568,7 @@ pub(crate) enum StructPayload {
 /// A Lisp value — the runtime encoding of `Sexpr`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Value {
-    /// The empty list `()` — `Option<Sexpr>`'s `none`.
+    /// The empty list `()` — `Option<Sexpr>`'s `None`.
     Empty,
     Int(i64),
     Char(char),

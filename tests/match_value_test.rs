@@ -306,8 +306,8 @@ fn a_bare_name_that_names_no_variant_is_an_error() {
          \n(defun f ((n int)) int (match n (blues 1)))",
     );
     assert!(e.contains("`blues` is not a variant of `int`"), "{}", e);
-    let e = err("(defun f ((o Option<int>)) int (match o (None 0) ((some v) v)))");
-    assert!(e.contains("`None` is not a variant of `Option<int>`"), "{}", e);
+    let e = err("(defun f ((o Option<int>)) int (match o (none 0) ((Some v) v)))");
+    assert!(e.contains("`none` is not a variant of `Option<int>`"), "{}", e);
 }
 
 // ---- scrutinees with no variants -----------------------------------------

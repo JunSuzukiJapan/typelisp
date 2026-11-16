@@ -159,8 +159,8 @@ fn values_crossing_a_channel_survive_collections() {
                (task (close-when-done wg ch))
                (let ((total 0))
                  (loop (match (recv ch)
-                         ((none) (break))
-                         ((some l) (setf total (+ total (len l))))))
+                         ((None) (break))
+                         ((Some l) (setf total (+ total (len l))))))
                  (println "~a" total))
                0))"#,
         0,
@@ -181,8 +181,8 @@ fn a_pipeline_with_select_and_after_gives_the_same_answer() {
              (close out))
            (defun square ((in Chan<int>) (out Chan<int>) (wg WaitGroup)) ()
              (loop (match (recv in)
-                     ((none) (break))
-                     ((some v) (send out (* v v)))))
+                     ((None) (break))
+                     ((Some v) (send out (* v v)))))
              (done wg))
            (defun close-when-done ((wg WaitGroup) (ch Chan<int>)) () (wait wg) (close ch))
            (defun main () int
@@ -197,8 +197,8 @@ fn a_pipeline_with_select_and_after_gives_the_same_answer() {
                  (loop
                    (select
                      ((v (recv b)) (match v
-                                     ((none) (break))
-                                     ((some x) (setf sum (+ sum x)))))
+                                     ((None) (break))
+                                     ((Some x) (setf sum (+ sum x)))))
                      ((t (recv (after 5.0))) (setf timeouts (+ timeouts 1)))))
                  (let ((quiet (the Chan<int> (Chan::new 0))))
                    (select
@@ -310,8 +310,8 @@ fn tasks_report_the_os_thread_they_ran_on() {
                (dotimes (i 64)
                  (let ((id (unwrap (recv out))))
                    (match (find id (iter seen))
-                     ((some x) ())
-                     ((none) (push seen id)))))
+                     ((Some x) ())
+                     ((None) (push seen id)))))
                (println "~a ~a" (len seen) (if (eq (len seen) 1) (eq (get seen 0) me) true))
                0))"#,
     );
@@ -380,8 +380,8 @@ fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
              (progn (unsafe (c-usleep (as u32 500000))) (send done ()) 1))
            (defun echo ((in Chan<int>) (out Chan<int>)) ()
              (loop (match (recv in)
-                     ((none) (break))
-                     ((some v) (send out (+ v 1))))))
+                     ((None) (break))
+                     ((Some v) (send out (+ v 1))))))
            (defun main () int
              (let* ((done (the Chan<()> (Chan::new 1)))
                     (th (thread (sleeper done)))

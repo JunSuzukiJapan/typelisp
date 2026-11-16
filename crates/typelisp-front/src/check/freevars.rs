@@ -417,7 +417,7 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Resul
                 pattern_bindings(heap, inner, out)?;
             }
         }
-        // `(some P)` over a niched `Option`, which the niche turns into this
+        // `(Some P)` over a niched `Option`, which the niche turns into this
         // node rather than a `pat-ctor` (`typeck::pattern`). Missing it
         // made `P`'s names look *free* in the arm body, so a closure around
         // the whole `match` captured a name bound inside it — and then had no

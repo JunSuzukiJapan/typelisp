@@ -24,12 +24,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | 大文字小文字を無視した順序比較（CL `string-lessp` 等）。共通接頭辞なら短い方が小 |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | `c` を `n` 個並べた文字列（CL `make-string`） |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | `sub` が最初に現れる位置。**CL の `search` は引数順が逆**（`(search pattern sequence)`）。空文字列は 0。キーワードは [シーケンスのキーワード引数](sequences.md#6-キーワード引数) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | 最初に食い違う位置。`equal` なときだけ `none`。片方が接頭辞なら短い方の末尾。キーワードは同上 |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | 最初に食い違う位置。`equal` なときだけ `None`。片方が接頭辞なら短い方の末尾。キーワードは同上 |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | 両端/左/右から `bag` に含まれる文字を除く（CL `string-trim` 等）。`bag` 省略時は空白類 `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` で分割。CL に対応物は無い。連続する区切りは空要素を生む。`sep` が空なら panic |
 | `to-string` | `(to-string x)` | `T→string` | `~a` 相当の文字列化。`int`/`i32`/`f64`/`bool`/`char`/`string` に実装（CL `princ-to-string`） |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | UTF-8 に符号化（各要素 0..255） |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 復号。正しい UTF-8 でなければ `none` |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 復号。正しい UTF-8 でなければ `None` |
 
 ## 2. 文字 `char`
 
@@ -73,7 +73,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i` 番目を読む。範囲外は panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic。`(setf (get v i) x)` とも書ける |
 | `len` | `(len v)` | `Vector<T>→int` | 要素数 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `none`（`get`/`set` と異なり panic しない）（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `None`（`get`/`set` と異なり panic しない）（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` を実装するイテレータを作る |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | `x` と `eql` な要素が無ければ末尾に追加（CL `pushnew`。場所を書き換える必要が無いのでマクロではなくメソッド） |
 
@@ -131,7 +131,7 @@
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 `equal` の表でキーが同じかどうかを決めるのは**キーの型自身**（`sxhash` と、`Hash` のスーパトレイト
@@ -162,8 +162,8 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL `adjust-array`。ランクは変えられない。範囲に残る要素は添字ごと保存、増えたセルは `init`。CL と違い配列を返さない（この言語の配列は全部 adjustable なので、返す第 2 の配列が無い） |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL `vector-push-extend`。fill pointer が無ければ panic |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` と同じ（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL `vector-pop`。空なら `none`（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer（無ければ `none`）。`(setf a::fill-pointer …)` で書ける |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL `vector-pop`。空なら `None`（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer（無ければ `None`）。`(setf a::fill-pointer …)` で書ける |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | row-major 順のイテレータ。fill pointer があればそこで止まる |
 
 - **添字は `Vector<int>`**。メソッドは「末尾に同じ型の引数が何個か続く」形を宣言できないので、
@@ -255,10 +255,10 @@
 | `new` | `(Deque::new)` | `()→Deque<T>` | 空の列を作る |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 先頭／末尾に追加 |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` と同じ（[`Push`](traits.md#4-push-トレイト要素を足す) トレイトのメソッド） |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 先頭／末尾を取り除いて返す。空なら `none` |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 先頭／末尾を取り除いて返す。空なら `None` |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back` と同じ（[`Pop`](traits.md#5-pop-トレイト要素を取り出す) トレイトのメソッド） |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 先頭／末尾を見る（取り除かない） |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 先頭から数えて `i` 番目。範囲外は `none` |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 先頭から数えて `i` 番目。範囲外は `None` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic |
 | `count` | `(count d)` | `Deque<T>→int` | 要素数 |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | 全削除 |
@@ -268,5 +268,5 @@
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

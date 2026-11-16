@@ -42,7 +42,7 @@ pub(crate) fn check_loop(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Val
 /// checker's), which is checked in its place.
 ///
 /// What each accumulator starts as is a value whose type what is
-/// accumulated decides: an empty `Vector`, `none`, or a zero of any numeric
+/// accumulated decides: an empty `Vector`, `None`, or a zero of any numeric
 /// type (bound, so that the zero is one checked value outside the form).
 fn check_extended(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let raw: Vec<Value> = args.iter().map(|(v, _)| *v).collect();
@@ -53,7 +53,7 @@ fn check_extended(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Opt
     for acc in &plan.accs {
         let init = match acc.acc {
             Acc::Collect | Acc::Append => call_of(heap, &Path::builtin(wk::VECTOR), "new")?,
-            Acc::Maximize | Acc::Minimize => call_of(heap, &Path::builtin(wk::OPTION), "none")?,
+            Acc::Maximize | Acc::Minimize => call_of(heap, &Path::builtin(wk::OPTION), "None")?,
             Acc::Count => Value::Int(0),
             Acc::Sum => {
                 let zero = cx.temp();
@@ -65,7 +65,7 @@ fn check_extended(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Opt
         acc_inits.push((acc.name, init));
     }
     let thereis_none = match plan.verdict {
-        Some(Verdict::Optional) => Some(call_of(heap, &Path::builtin(wk::OPTION), "none")?),
+        Some(Verdict::Optional) => Some(call_of(heap, &Path::builtin(wk::OPTION), "None")?),
         _ => None,
     };
     let built = loop_dsl::build(heap, &plan, &loop_dsl::Resolved { acc_inits, thereis_none })?;

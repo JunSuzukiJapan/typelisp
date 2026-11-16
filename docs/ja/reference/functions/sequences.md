@@ -36,14 +36,14 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 `defmacro` の本体でフォームを組み立て・分解するときに使う。
 
 **S 式データの型は `Option<Sexpr>` である。** 空リストは `Sexpr` の変種ではなく
-`Option` の `none` であり、`Sexpr` そのものは「空でない S 式」を意味する。
+`Option` の `None` であり、`Sexpr` そのものは「空でない S 式」を意味する。
 したがって `sexpr-*` は引数も戻り値も `Option<Sexpr>` を取る。
 
-- `()` は `Option<Sexpr>` が期待される位置で空リストになる（`(Option::none)` とも書ける）
+- `()` は `Option<Sexpr>` が期待される位置で空リストになる（`(Option::None)` とも書ける）
 - `Sexpr` は `Option<Sexpr>` が期待される位置へ暗黙に広がる（実行時の変換は無い）。
   逆向き——`Option<Sexpr>` を `Sexpr` として使う——は「空リストではない」の主張なので、
   `match` か `unwrap` で明示的に示す必要がある
-- `match` では `Sexpr` の 19 変種と `none` を**同じ腕の並びに平らに**書ける
+- `match` では `Sexpr` の 19 変種と `None` を**同じ腕の並びに平らに**書ける
   （[構文リファレンス](../syntax.md#43-match--パターンマッチ)）
 
 | 名前 | 形式 | 型 | 説明 |
@@ -108,7 +108,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 条件を満たす最初の位置 |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 条件を満たす個数 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 全要素が条件を満たすか |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` に当たる。`some` 構成子と衝突しない名前） |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` に当たる） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左畳み込み |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右畳み込み |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 残りの要素をすべて集める。下の `lazy` の関数の結果を `Vector` にするのに使う |
@@ -121,7 +121,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | イテレータを連結。3 個以上も書ける |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL の `concatenate`。結果の型は**引用したシンボルのリテラル**で書く（CL は実行時の型指定子）。`'vector` は 1 個以上、`'string` は 0 個以上（0 個なら `""`）。`Sexpr` のリストは対象外（`sexpr-append`） |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反転（非破壊） |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `none`） |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `None`） |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` の引数順違い版 |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 先頭 `n` 個 |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`（`end` は長さでクランプ） |
@@ -211,7 +211,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 末尾への副作用のための写像（`maplist` 版の `mapc`） |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 末尾へ写像して連結（`maplist` 版の `mapcan`） |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub` が最初に現れる位置。受け手が `string` なら `string` のメソッドが選ばれる（[文字列](collections.md#1-文字列-string)） |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 最初に食い違う位置。等しければ `none` |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 最初に食い違う位置。等しければ `None` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 併合。CL は整列済みを要求するが、これは連結を整列する |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | 無ければ**先頭に**足す |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 集合演算。CL は順序を規定しないが、ここは**初出順**で安定 |
@@ -263,7 +263,7 @@ CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-no
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; 末尾側の 1 個だけ消す
 (position 3 (iter v) :start 1)                          ; 添字は列全体に対するもの
 ```

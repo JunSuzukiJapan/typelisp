@@ -500,7 +500,7 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         Value::Symbol(id) => check_symbol(cx, heap, locals, id, expected, loc),
         Value::Path(id) => path_call::check_path_value(cx, heap, id, expected, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
-        // Where an `Option` is expected, the empty list is its `none`.
+        // Where an `Option` is expected, the empty list is its `None`.
         Value::Empty => match solved {
             Some(Type::Named(_, args)) => {
                 let mut none = Typed::none(args[0].clone());
@@ -581,8 +581,8 @@ fn number_kind(heap: &Heap, v: Value) -> Option<Kind> {
 /// A bare name's value: a local; where a function is expected whose first
 /// parameter's type has the name as a method, that method, as a call's first
 /// argument picks it; or what the module-level name holds. A variant or a
-/// static method a `use` brought in is called, never a value: `(none)`, not
-/// `none`.
+/// static method a `use` brought in is called, never a value: `(None)`, not
+/// `None`.
 fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     if let Some((ty, bound)) = locals.lookup_bound(id)? {
         cx.note_local_ref(loc.as_ref(), bound);
@@ -948,7 +948,7 @@ pub(crate) fn agree(cx: &Cx, found: &Type, expected: Option<&Type>) -> Result<()
 /// is expected: an error is where `t` was written.
 ///
 /// What a checker decides only from what is expected was decided without
-/// it: the empty list, checked as the unit value, is `Option::none` where an
+/// it: the empty list, checked as the unit value, is `Option::None` where an
 /// `Option` is expected.
 pub(crate) fn conform_at(cx: &Cx, t: Typed, expected: &Type) -> Result<Typed, Error> {
     if matches!(t.node, Node::Literal { tag: wk::UNIT, .. }) {

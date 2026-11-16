@@ -41,7 +41,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. 展開結果も型検査される
@@ -117,14 +117,14 @@ typelisp のマクロは Common Lisp と同じく、名前の衝突を自動で�
 ## 5. 引数の形で展開を変える
 
 マクロの本体は普通の typelisp のコードなので、`if` や `match` で引数を調べて、展開する式を
-変えられます。引数の型は S 式データ（`Option<Sexpr>`）で、空のリストが `none` です。
+変えられます。引数の型は S 式データ（`Option<Sexpr>`）で、空のリストが `None` です。
 
 すべての条件が真なら `true` を返す `my-and` を作ります。
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; 引数なし
+    ((None) 'true)                                    ; 引数なし
     ((cons f more)
      (if (sexpr-null more)
          f                                            ; 1 つだけ

@@ -283,8 +283,8 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
         },
         // Every remaining representation is a heap value crossing as the
         // tagged `i64` the `rt_*` shims read. A niched `Option<T>` is one
-        // too: the empty-list immediate for `none`, and `T`'s *field*
-        // encoding for `some` — a fixnum for a narrow payload, a float
+        // too: the empty-list immediate for `None`, and `T`'s *field*
+        // encoding for `Some` — a fixnum for a narrow payload, a float
         // box for a float one — which is exactly what `decode` reads back
         // as the `Value` the interpreter represents that `Option` by.
         Repr::Sexpr
@@ -396,9 +396,9 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
         // `bignum`/`ratio`, structs, enums, closures, trait objects, and a
         // `Scope<V>` (one heap object since Phase 1a) — is already a heap
         // `Value`, and crosses as the tagged `i64` the `rt_*` shims read.
-        // A niched `Option<T>` too: its `some` is the `Value` of a `T`
+        // A niched `Option<T>` too: its `Some` is the `Value` of a `T`
         // as a field holds it (`Value::Int` for a narrow payload, which
-        // `encode` tags as a fixnum — the field encoding), its `none`
+        // `encode` tags as a fixnum — the field encoding), its `None`
         // the empty list.
         _ => Ok(typelisp_rt::encode(*v)),
     }
@@ -1858,7 +1858,7 @@ impl Interp {
 
     /// Evaluate an `&optional`/`&key` default-value body to the `Sexpr` value
     /// bound when the argument is omitted — an empty body means the empty
-    /// list (`Option<Sexpr>`'s `none`).
+    /// list (`Option<Sexpr>`'s `None`).
     ///
     /// `env` holds the parameters bound before this one, which a default may
     /// reference: `(defmacro dup (x &optional (y x)) ...)` copies `x` when `y`
@@ -2160,7 +2160,7 @@ impl Interp {
             },
             // `car`/`cdr` of the empty list is the empty list, as in CL —
             // `(car nil)` is `nil` there, and here both the argument and the
-            // result are `Option<Sexpr>`, so "the empty list" is `none` on
+            // result are `Option<Sexpr>`, so "the empty list" is `None` on
             // each side. Only a non-empty non-cons (an int, a string, ...)
             // is still an error: that is a genuine type confusion, where the
             // empty list is an ordinary end of a list walk.
@@ -2484,7 +2484,7 @@ impl Interp {
     /// so what a program sees here is exactly what checking would have seen —
     /// there is no second expander to drift from it.
     ///
-    /// `Ok(none)` means "not a macro call", which is what CL's second return
+    /// `Ok(None)` means "not a macro call", which is what CL's second return
     /// value says. Carrying it in the `Option` rather than beside the form is
     /// both what this language has (no multiple values) and strictly more
     /// informative: a macro whose expansion is its own call form is
@@ -3128,7 +3128,7 @@ fn float_to_width(heap: &mut Heap, args: &[Value], single: bool) -> Result<Value
 }
 
 /// `try-float->f32` (`registry::float_assoc`): [`float_to_width`] asked as a
-/// question — `none` when rounding to binary32 would lose something. NaN
+/// question — `None` when rounding to binary32 would lose something. NaN
 /// converts (every NaN is a NaN in either width), which is why the test is
 /// written as a round trip rather than an equality.
 fn try_float_to_f32(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
@@ -3145,7 +3145,7 @@ fn int_to_width(args: &[Value], width: u32, signed: bool) -> Result<Value, EvalE
 }
 
 /// `try-int->i8`/... (`registry::int_assoc`): [`int_to_width`] asked as a
-/// question — `none` when the value does not fit the target width, which is
+/// question — `None` when the value does not fit the target width, which is
 /// exactly when truncating would change it.
 fn try_int_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, ret_type: TypeId) -> Result<Value, EvalError> {
     let n = rt_i64(&args[0])?;
@@ -3936,7 +3936,7 @@ pub(crate) fn eval_builtin_method(
             wk::M_FLOAT_TO_F32 => Some(float_to_width(heap, args, true)),
             wk::M_FLOAT_TO_F64 => Some(float_to_width(heap, args, false)),
             wk::M_TRY_FLOAT_TO_F32 => Some(try_float_to_f32(heap, args, ret_type)),
-            // Always `some`: widening is exact.
+            // Always `Some`: widening is exact.
             wk::M_TRY_FLOAT_TO_F64 => Some(float_to_width(heap, args, false).map(|v| {
                 let some = Some(v);
                 heap.alloc_option(ret_type, some)
@@ -4298,7 +4298,7 @@ pub const MACROEXPAND_RESULT_TYPE: TypeSpec = TypeSpec::Named(
 pub const EVAL_RESULT_TYPE: TypeSpec = MACROEXPAND_RESULT_TYPE;
 
 /// `Ok(v)` of the result type `ty`, matching `result_def`'s variant order
-/// (`ok` = 0, `err` = 1).
+/// (`Ok` = 0, `Err` = 1).
 fn result_ok(heap: &mut Heap, ty: &TypeSpec, v: Value) -> Value {
     let ty = typelisp_mem::intern_spec(ty);
     crate::type_key::alloc_enum_of(heap, ty, 0, vec![v])
@@ -4308,7 +4308,7 @@ fn result_ok(heap: &mut Heap, ty: &TypeSpec, v: Value) -> Value {
 /// `Err(<ErrType>(msg))` — wraps `msg` in the concrete error type of the
 /// failing built-in (`registry::builtin_error_defs`: `parseinterror`,
 /// `parsefloaterror`, `readerror`, `evalerror`), whose single variant carries
-/// exactly that string, before wrapping *that* in `Result`'s `err` variant.
+/// exactly that string, before wrapping *that* in `Result`'s `Err` variant.
 /// `err_type` must name one of those four — its variant index is 0, the only
 /// one each has. `result` is the *whole* result type
 /// (`Result<Option<sexpr>,evalerror>`), which is what the caller's patterns

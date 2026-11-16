@@ -86,11 +86,11 @@
 //! `compile-break`/`compile-return`'s doc comments for why a `break`/
 //! `return` needs that depth, not just the block/slot pair, to unwind
 //! correctly through however many `let`/`match` scopes happen to be open
-//! above it); `compile-loop` installs a fresh `Option::some` trio when
+//! above it); `compile-loop` installs a fresh `Option::Some` trio when
 //! compiling its own body (nesting falls out of ordinary call-stack
 //! scoping, no explicit push/pop needed — see `compile-loop`'s doc
 //! comment), and `compile-lambda`/`compile-labels-bodies` reset to
-//! `Option::none` when compiling a *new* function's own body, mirroring the
+//! `Option::None` when compiling a *new* function's own body, mirroring the
 //! checker's reset exactly. `compile-labels`'s *trailing* body is not a new
 //! function boundary (`check_labels` checks it against the *unmodified*
 //! loop stack), so it forwards the trio unchanged instead.
@@ -268,7 +268,7 @@
 //! retain/GC-root treatment `compile-call-args` already gives those.
 //!
 //! **What this SOURCE may name.** Builtins (`eq`/`append`/`car`/`cdr`/
-//! `Scope`'s methods, `Option`'s `some`/`none`/pattern-matching), the
+//! `Scope`'s methods, `Option`'s `Some`/`None`/pattern-matching), the
 //! checker's native special forms (`if`/`let`/`match`/`labels`/`loop`/
 //! `break`/`return`/`setf`), and the *core macro layer*
 //! (`typelisp_front::core_macros` — `cond`/`case`/`when`/`unless`/`and`/`or`),
@@ -1148,8 +1148,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; release decisions on.
 (defun name-is-borrowed? ((env Scope<llvm-value>) (nm string)) bool
   (match (get env nm)
-    ((some _) true)
-    (none false)))
+    ((Some _) true)
+    (None false)))
 
 ;; The general-expression-form counterpart of `name-is-borrowed?`: a `var`
 ;; node is borrowed exactly when its name is (`compile-call-args`'s own
@@ -1863,7 +1863,7 @@ const SOURCE_TEMPLATE: &str = r#"
               (nm (sexpr-sym-name (sexpr-car name-pair)))
               (kind (sexpr-int (sexpr-cdr name-pair))))
          (match (get acc nm)
-         ((some slot) (let ((v (load-raw builder slot 0)))
+         ((Some slot) (let ((v (load-raw builder slot 0)))
                      (if (>= kind 10)
                          (let ((tagged (compile-tag-struct-field builder m v (- kind 10))))
                            ;; As in `bind-params`: the slot is what holds
@@ -1876,7 +1876,7 @@ const SOURCE_TEMPLATE: &str = r#"
                                (store-arg builder slot 0 cell-ref))))
                          ())
                      (set env nm slot)))
-         (none (panic "bind-let-values: missing computed value")))
+         (None (panic "bind-let-values: missing computed value")))
        (bind-let-values builder m env rest acc)))
       ()))
 
@@ -2000,18 +2000,18 @@ const SOURCE_TEMPLATE: &str = r#"
       (compile-sexpr-field builder m raw kind 0))))
 
 ;; Whether an `Option` around a value of field kind `kind` is a niche
-;; (`Repr::Niche`, `check/repr.rs`): `some` is the value's own field word
-;; and `none` the empty-list immediate, with no box. True for every kind
+;; (`Repr::Niche`, `check/repr.rs`): `Some` is the value's own field word
+;; and `None` the empty-list immediate, with no box. True for every kind
 ;; whose field word is never that immediate — a fixnum, a float box, a
 ;; char, a bool, an already-tagged word. False for a unit (its field
-;; word *is* the immediate), a niched `Option` (its `none` is), and
+;; word *is* the immediate), a niched `Option` (its `None` is), and
 ;; the unrepresentable. The island's twin of `Repr::niches`; a builder
 ;; that has only a kind (`vector-op`'s `pop`) asks this, one that has the
 ;; checker's answer (`some-of`, `pat-some`) does not need to.
 (defun niche-kind? ((kind int)) bool
   (or (eq kind #%kind-raw-int) (eq kind #%kind-f64) (eq kind #%kind-char) (eq kind #%kind-bool) (eq kind #%kind-tagged) (eq kind #%kind-f32)))
 
-;; The `(some raw)` an always-succeeding conversion returns: the niche —
+;; The `(Some raw)` an always-succeeding conversion returns: the niche —
 ;; `raw` tagged the way a field of its kind is (`compile-tag-struct-field`),
 ;; which is the whole value. Every conversion that reaches here yields a
 ;; scalar, so the niche always applies; a caller with a kind that does not
@@ -2021,12 +2021,12 @@ const SOURCE_TEMPLATE: &str = r#"
       (compile-tag-struct-field builder m raw kind)
       (panic "build-some-of: the payload kind does not niche, so this Option must be boxed by its caller")))
 
-;; The `(none)` of a niched `Option`: the empty-list immediate.
+;; The `(None)` of a niched `Option`: the empty-list immediate.
 (defun build-none-of ((builder llvm-builder) (m llvm-module)) llvm-value
   (nil-word builder))
 
-;; The `Option` a `try-*` conversion returns: `(some raw)` when `fits` is
-;; nonzero, `(none)` otherwise.
+;; The `Option` a `try-*` conversion returns: `(Some raw)` when `fits` is
+;; nonzero, `(None)` otherwise.
 ;;
 ;; Real control flow, the same `compile-if`-shaped "alloca a merge slot,
 ;; branch, store each arm's result, load after the merge block" shape
@@ -2095,9 +2095,9 @@ const SOURCE_TEMPLATE: &str = r#"
       (int (compile-int-literal m fn-name builder e))
       (untag-int (compile-untag-int m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (tag-int (tag-fixnum builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e)))))
-      ;; `(some-of KIND E)` -- a niched `Option`'s `some`: `E`'s register
+      ;; `(some-of KIND E)` -- a niched `Option`'s `Some`: `E`'s register
       ;; value tagged into its field word by `KIND`, and that word is the
-      ;; whole value (`none` is the empty-list construct, `pat-some` the
+      ;; whole value (`None` is the empty-list construct, `pat-some` the
       ;; reader). The kind is the payload's, which is what has to be tagged.
       (some-of (compile-tag-struct-field builder m
                  (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr e))))
@@ -2243,7 +2243,7 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; `(box-option TYPE E)` -- a niched `Option` value put into the
 ;; `BoxedObj::Enum` box a `Sexpr` slot holds it as, under the instantiation's
-;; own type: `none` (the empty-list word) becomes variant 1 with no field,
+;; own type: `None` (the empty-list word) becomes variant 1 with no field,
 ;; anything else variant 0 around that same word (already a tagged field
 ;; word, which is `rt_data_new`'s contract). `TYPE` builds the type form at
 ;; run time. The value is spilled to a rooted slot first: building the form
@@ -2453,13 +2453,13 @@ const SOURCE_TEMPLATE: &str = r#"
     (let* ((name (sexpr-str (sexpr-car (sexpr-cdr e))))
            (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
       (match (get env name)
-        ((some slot)
+        ((Some slot)
          (let* ((cell-ref (load-raw builder slot 0))
                 (args-ptr (alloca-args builder 1)))
            (store-arg builder args-ptr 0 cell-ref)
            (let ((raw (build-call builder (get-function m "rt_cell_get") args-ptr 1)))
              (compile-sexpr-field builder m raw kind 0))))
-        (none (panic (append "compile-cellvar: unbound variable " name))))))
+        (None (panic (append "compile-cellvar: unbound variable " name))))))
 
 ;; Resolves `name` to a value two ways, in order:
 ;; (1) an ordinary binding in `env` (a parameter, or a
@@ -2522,14 +2522,14 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; them back out at on the other side.
 (defun resolve-value ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (name string))llvm-value
     (match (get env name)
-      ((some slot) (load-raw builder slot 0))
-      (none (match (get fn-env name)
-              ((some target)
+      ((Some slot) (load-raw builder slot 0))
+      (None (match (get fn-env name)
+              ((Some target)
                (let* ((env-len (sexpr-list-length captured))
                       (env-ptr (alloca-args builder env-len)))
                  (compile-escaping-env-args m fn-name builder env fn-env captured env-ptr captured 0)
                  (build-make-closure builder m target env-ptr env-len (compute-sexpr-mask-part captured 0 0) (compute-sexpr-mask-part captured 0 32))))
-              (none (panic (append "compile-var: unbound variable " name)))))))
+              (None (panic (append "compile-var: unbound variable " name)))))))
 
 ;; Fills `env-ptr` for a *direct* (non-escaping)
 ;; call's env array — `compile-apply`'s sibling-to-
@@ -2788,7 +2788,7 @@ const SOURCE_TEMPLATE: &str = r#"
               (build-normalize-int builder a (int-wsig (width-cast-target method))))
              ;; The `Option`-returning halves of those two. `rt_int_fits*`
              ;; answers the question and nothing else: a value that fits its
-             ;; target is *unchanged* by the cast, so the `some` payload is
+             ;; target is *unchanged* by the cast, so the `Some` payload is
              ;; the operand already in hand rather than a converted one.
              ("try-int->char"
               (let ((fits-args (alloca-args builder 1)))
@@ -2929,7 +2929,7 @@ const SOURCE_TEMPLATE: &str = r#"
               a)
              ;; `try-float->f32` narrows only when the value survives the
              ;; round trip; `try-float->f64` widens, which is always exact, so
-             ;; it has no question to ask and emits the `some` directly rather
+             ;; it has no question to ask and emits the `Some` directly rather
              ;; than branching on a constant.
              ("try-float->f32"
               (let ((fits-args (alloca-args builder 1)))
@@ -3025,7 +3025,7 @@ const SOURCE_TEMPLATE: &str = r#"
              ("int->int" a)
              ("int->char" (integer-unary-call builder m "rt_integer_to_char" a))
              ;; A fixnum that is a scalar value *is* the char's payload once
-             ;; untagged, so the `some` needs no second call.
+             ;; untagged, so the `Some` needs no second call.
              ("try-int->char"
               (build-try-option builder m cur-fn
                 (integer-unary-call builder m "rt_integer_fits_char" a) (untag-fixnum builder a) 3))
@@ -3112,7 +3112,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (case method
              ("rational->int" (ratio-unary-call builder m "rt_rational_to_int" a))
              ;; A normalized `rational` that is an integer *is* the `int`'s
-             ;; word, so the `some` carries `a` itself.
+             ;; word, so the `Some` carries `a` itself.
              ("try-rational->int"
               (build-try-option builder m cur-fn (ratio-unary-call builder m "rt_rational_is_int" a) a #%kind-tagged))
              ("rational->ratio" (ratio-unary-call builder m "rt_rational_to_ratio" a))
@@ -3325,8 +3325,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; it turns into.
 (defun install-handler ((builder llvm-builder) (m llvm-module) (protect Option<llvm-basic-block>)) ()
     (match protect
-      ((some pad) (frame-set-handler builder m pad))
-      (none (frame-clear-handler builder m))))
+      ((Some pad) (frame-set-handler builder m pad))
+      (None (frame-clear-handler builder m))))
 
 ;; Says where an unwind this frame declares a handler for goes when the
 ;; handler declines it: to the enclosing region's dispatch block, which is a
@@ -3338,8 +3338,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; gets here: each pad installs it on entry. So there is nothing to restore.
 (defun emit-unwind-onward ((builder llvm-builder) (m llvm-module) (protect Option<llvm-basic-block>)) ()
     (match protect
-      ((some outer) (build-br builder outer))
-      (none (coroutine-unwind builder m))))
+      ((Some outer) (build-br builder outer))
+      (None (coroutine-unwind builder m))))
 
 ;; Leaves an `unwind-protect`'s cleanup on the *static* exit path — the one a
 ;; `break`/`return` took — once that cleanup has run.
@@ -3356,11 +3356,11 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; walker between the two would be the very conflation this design avoids.
 (defun emit-static-exit-onward ((builder llvm-builder) (loop-exit Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>)) ()
     (match exit-cleanup
-      ((some outer) (build-br builder outer))
-      (none
+      ((Some outer) (build-br builder outer))
+      (None
        (match loop-exit
-         ((some eb) (build-br builder eb))
-         (none (panic "emit-static-exit-onward: not inside a loop"))))))
+         ((Some eb) (build-br builder eb))
+         (None (panic "emit-static-exit-onward: not inside a loop"))))))
 
 
 
@@ -3418,7 +3418,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (args-ptr (frame-arg-slots builder m 0 arg-forms))
            (ignored-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 0)))
       (match (get fn-env nm)
-        ((some target)
+        ((Some target)
          (let ((env-len (sexpr-list-length captured)))
            (if (eq env-len 0)
                (let ((result (coroutine-call builder m (build-fn-address builder target) args-ptr argc)))
@@ -3427,7 +3427,7 @@ const SOURCE_TEMPLATE: &str = r#"
                  (compile-env-args m fn-name builder env fn-env captured env-ptr captured 0)
                  (let ((result (coroutine-call-env builder m (build-fn-address builder target) args-ptr argc env-ptr env-len)))
                    result)))))
-        (none (panic (append "compile-apply: no direct-callable function named " nm))))))
+        (None (panic (append "compile-apply: no direct-callable function named " nm))))))
 
 ;; `(call name (is-fn . arg-form)...)` — `Expr::Call`,
 ;; labels/closures Stage 3: a call to a *top-level*
@@ -3854,7 +3854,7 @@ const SOURCE_TEMPLATE: &str = r#"
           ;; enclosing loop at all, regardless
           ;; of whatever loop (if any) the
           ;; `lambda` form itself sits inside.
-          (let ((v (compile-value m fn-name nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::none) (Option::none) "" (Scope::new) (Scope::new) (Option::none) (Option::none) lbody)))
+          (let ((v (compile-value m fn-name nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::None) (Option::None) "" (Scope::new) (Scope::new) (Option::None) (Option::None) lbody)))
             (coroutine-end nested-builder m v))))
       (let* ((env-len (sexpr-list-length lcaptured))
              (env-ptr (alloca-args builder env-len)))
@@ -3925,7 +3925,7 @@ const SOURCE_TEMPLATE: &str = r#"
                 (param-syms (sexpr-car (sexpr-cdr def)))
                 (def-body (sexpr-car (sexpr-cdr (sexpr-cdr def)))))
            (match (get inner-fn-env nm)
-           ((some sib-fn)
+           ((Some sib-fn)
             (let* ((sib-block (append-block sib-fn "entry"))
                    (sib-builder (llvm-builder::create)))
               (position-at-end sib-builder sib-block)
@@ -3961,10 +3961,10 @@ const SOURCE_TEMPLATE: &str = r#"
                 ;; comment), so no enclosing loop
                 ;; here either.
                 (let* ((sib-fn-env (clone-frames inner-fn-env))
-                       (v (compile-value m fn-name sib-builder sib-env sib-fn-env captured sib-fn (Option::none) (Option::none) "" (Scope::new) (Scope::new) (Option::none) (Option::none) def-body)))
+                       (v (compile-value m fn-name sib-builder sib-env sib-fn-env captured sib-fn (Option::None) (Option::None) "" (Scope::new) (Scope::new) (Option::None) (Option::None) def-body)))
                   (coroutine-end sib-builder m v)
                   (compile-labels-bodies m fn-name inner-fn-env captured rest)))))
-           (none (panic (append "compile-labels-bodies: missing declaration for " nm))))))
+           (None (panic (append "compile-labels-bodies: missing declaration for " nm))))))
         ()))
 
 ;; `(labels ((captured . kind)...) ((name
@@ -4063,7 +4063,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; slot's own comment below), branches into a fresh
 ;; loop-body block, and compiles `body-forms` there in
 ;; sequence (`compile-loop-body`) — installing
-;; `(Option::some ...)` for the exit block and the
+;; `(Option::Some ...)` for the exit block and the
 ;; slot as it recurses into its own body is what makes
 ;; a nested `break`/`return` resolve to *this* loop
 ;; rather than whatever (if any) loop encloses it;
@@ -4106,7 +4106,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (slot (binding-slot builder m kind)))
       (build-br builder loop-block)
       (position-at-end builder loop-block)
-      (compile-loop-body m fn-name builder env fn-env captured cur-fn (Option::some exit-block) (Option::some slot) block-names block-exits block-slots protect (Option::none) body-forms)
+      (compile-loop-body m fn-name builder env fn-env captured cur-fn (Option::Some exit-block) (Option::Some slot) block-names block-exits block-slots protect (Option::None) body-forms)
       (if (block-terminated? builder)
           ()
           (emit-loop-safepoint m builder cur-fn loop-block))
@@ -4127,7 +4127,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; emitting its IR into an already-terminated block
 ;; would be malformed (LLVM allows only one terminator
 ;; per block). `loop-exit`/`loop-slot`/`loop-root-base`
-;; are always `Option::some` here (`compile-loop`
+;; are always `Option::Some` here (`compile-loop`
 ;; installs them right before this is first called) —
 ;; threaded as `Option` only because `compile-value`'s
 ;; shared signature must also serve every *other* call
@@ -4232,14 +4232,14 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn value-form)))
       (match (get block-exits name)
-        ((some eb)
+        ((Some eb)
          (match (get block-slots name)
-           ((some slot)
+           ((Some slot)
             (let ((stored (store-arg builder slot 0 v)))
               (build-br builder eb)
               v))
-           (none (panic "compile-return-from: no enclosing block of that name"))))
-        (none (panic "compile-return-from: no enclosing block of that name")))))
+           (None (panic "compile-return-from: no enclosing block of that name"))))
+        (None (panic "compile-return-from: no enclosing block of that name")))))
 
 ;; Rebinds every enclosing `block` name to a fresh cleanup block of this
 ;; `unwind-protect`'s own, and answers with the names it actually rebound (a
@@ -4256,8 +4256,8 @@ const SOURCE_TEMPLATE: &str = r#"
         ""
         (let ((name (names-head names)) (rest (names-tail names)))
           (match (get cleanups name)
-            ((some seen) (install-block-cleanups cur-fn rest block-exits cleanups))
-            (none
+            ((Some seen) (install-block-cleanups cur-fn rest block-exits cleanups))
+            (None
              (let ((cx (append-block cur-fn "cleanup-block-exit")))
                (set cleanups name cx)
                (set block-exits name cx)
@@ -4274,7 +4274,7 @@ const SOURCE_TEMPLATE: &str = r#"
         ()
         (let ((name (names-head names)) (rest (names-tail names)))
           (match (get cleanups name)
-            ((some cx)
+            ((Some cx)
              (progn
                (position-at-end builder cx)
                (install-handler builder m protect)
@@ -4285,9 +4285,9 @@ const SOURCE_TEMPLATE: &str = r#"
                  (if (block-terminated? builder)
                      ()
                      (match (get block-exits name)
-                       ((some outer) (build-br builder outer))
-                       (none (panic "emit-block-cleanups: the block left its own scope")))))))
-            (none ()))
+                       ((Some outer) (build-br builder outer))
+                       (None (panic "emit-block-cleanups: the block left its own scope")))))))
+            (None ()))
           (emit-block-cleanups m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup root-base-slot cleanups rest cleanup-form))))
 
 ;; `(break)` — unconditionally jumps to the nearest
@@ -4295,7 +4295,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; the same encoding `compile-unit`/`compile-bool`'s
 ;; `false` use) as the loop's result. `loop-exit`/
 ;; `loop-slot`/`loop-root-base` are always
-;; `Option::some` in any program that reaches this at
+;; `Option::Some` in any program that reaches this at
 ;; all — `typeck::looping` already rejects a
 ;; `break` outside of a loop at type-checking time,
 ;; long before this runs — so the `None` arms are
@@ -4322,17 +4322,17 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; own doc comment.
 (defun compile-break ((m llvm-module) (fn-name string) (builder llvm-builder) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (exit-cleanup Option<llvm-basic-block>))llvm-value
     (match loop-exit
-      ((some eb)
+      ((Some eb)
        (match loop-slot
-         ((some slot)
+         ((Some slot)
           (let ((zero (const-word builder 0)))
             (store-arg builder slot 0 zero)
             (match exit-cleanup
-              ((some xe) (build-br builder xe))
-              (none (build-br builder eb)))
+              ((Some xe) (build-br builder xe))
+              (None (build-br builder eb)))
             zero))
-         (none (panic "compile-break: not inside a loop"))))
-      (none (panic "compile-break: not inside a loop"))))
+         (None (panic "compile-break: not inside a loop"))))
+      (None (panic "compile-break: not inside a loop"))))
 
 ;; `(return is-fn value-form)` — `Expr::Return`,
 ;; including the implicit `Unit` `core_bridge` already
@@ -4361,17 +4361,17 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn value-form)))
       (match loop-exit
-        ((some eb)
+        ((Some eb)
          (match loop-slot
-           ((some slot)
+           ((Some slot)
             (progn
               (store-arg builder slot 0 v)
               (match exit-cleanup
-                ((some xe) (build-br builder xe))
-                (none (build-br builder eb)))
+                ((Some xe) (build-br builder xe))
+                (None (build-br builder eb)))
               v))
-           (none (panic "compile-return: not inside a loop"))))
-        (none (panic "compile-return: not inside a loop")))))
+           (None (panic "compile-return: not inside a loop"))))
+        (None (panic "compile-return: not inside a loop")))))
 
 ;; `(set name-str kind value-form)` — `Expr::Set`
 ;; (`setf`). Reuses `compile-if-branch`'s retain logic
@@ -4424,10 +4424,10 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-if-branch m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup is-fn value-form)))
       (match (get env nm)
-        ((some slot)
+        ((Some slot)
          (store-arg builder slot 0 v)
          v)
-        (none (panic (append "compile-set: unbound variable " nm))))))
+        (None (panic (append "compile-set: unbound variable " nm))))))
 
 ;; `(cellset name kind value-form)` — `setf` on a
 ;; cell-boxed name (closure-representation unification
@@ -4463,7 +4463,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup value-form)))
       (match (get env nm)
-        ((some slot)
+        ((Some slot)
          (let* ((cell-ref (load-raw builder slot 0))
                 (tagged (compile-tag-struct-field builder m v kind))
                 (args-ptr (alloca-args builder 2)))
@@ -4471,7 +4471,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (store-arg builder args-ptr 1 tagged)
            (let ((ignored (build-call builder (get-function m "rt_cell_set") args-ptr 2)))
              v)))
-        (none (panic (append "compile-cellset: unbound variable " nm))))))
+        (None (panic (append "compile-cellset: unbound variable " nm))))))
 
 ;; Tests `v` against pattern `pat`; on failure
 ;; branches to `fail-block` (jumping straight to
@@ -4498,7 +4498,7 @@ const SOURCE_TEMPLATE: &str = r#"
       ;; name a variant: the empty list outlives `Sexpr`'s `nil`.
       (pat-empty
        (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v #%sexpr-nil) fail-block))
-      ;; `(pat-some KIND P)` -- a niched `Option`'s `(some P)`. The niche
+      ;; `(pat-some KIND P)` -- a niched `Option`'s `(Some P)`. The niche
       ;; makes the payload the same word, read back through its field kind
       ;; (`compile-sexpr-field`: a fixnum untagged, a float box opened, a
       ;; tagged word as is), so this rejects the empty list and then applies
@@ -5341,8 +5341,8 @@ const SOURCE_TEMPLATE: &str = r#"
                (build-cond-br builder empty then-block else-block)
                (position-at-end builder then-block)
                ;; The `Option<T>` is a niche when `T`'s kind allows one
-               ;; (`niche-kind?`): `none` is then the empty-list immediate
-               ;; and `some` the popped field word itself. Otherwise (a
+               ;; (`niche-kind?`): `None` is then the empty-list immediate
+               ;; and `Some` the popped field word itself. Otherwise (a
                ;; `Vector<Option<T>>`, say) it is the box `rt_data_new`
                ;; builds under the instantiation's own name.
                (let ((ignored (store-arg builder slot 0
@@ -5649,8 +5649,8 @@ const SOURCE_TEMPLATE: &str = r#"
            ;; From here to the end of the body, an unwind reaching this frame
            ;; lands in `pad`. Installed after the tag is compiled: the tag
            ;; form is evaluated before the region opens.
-           (installed (install-handler builder m (Option::some pad)))
-           (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots (Option::some pad) exit-cleanup body)))
+           (installed (install-handler builder m (Option::Some pad)))
+           (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots (Option::Some pad) exit-cleanup body)))
       (if (block-terminated? builder)
           ()
           (let* ((restored (install-handler builder m protect))
@@ -5747,16 +5747,16 @@ const SOURCE_TEMPLATE: &str = r#"
            (pad (append-block cur-fn "cleanup-pad"))
            (merge (append-block cur-fn "cleanup-merge"))
            (xexit (match loop-exit
-                               ((some eb) (Option::some (append-block cur-fn "cleanup-exit")))
-                               (none (Option::none))))
+                               ((Some eb) (Option::Some (append-block cur-fn "cleanup-exit")))
+                               (None (Option::None))))
            ;; One `xexit` serves the single `break`/`return` target; a named
            ;; block needs one apiece, because each resumes somewhere else.
            (cleanups (the Scope<llvm-basic-block> (Scope::new)))
            (pushed (push-frame block-exits))
            (rebound (install-block-cleanups cur-fn block-names block-exits cleanups))
            ;; `compile-catch`'s install, for the protected body.
-           (installed (install-handler builder m (Option::some pad)))
-           (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots (Option::some pad) xexit protected-form))
+           (installed (install-handler builder m (Option::Some pad)))
+           (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots (Option::Some pad) xexit protected-form))
            ;; Popped before either ordinary copy of the cleanup is compiled: a
            ;; cleanup is not protected by its own `unwind-protect` (CLHS), so a
            ;; `return-from` written *in* it goes straight to the block.
@@ -5782,7 +5782,7 @@ const SOURCE_TEMPLATE: &str = r#"
           ()
           (emit-unwind-onward builder m protect)))
     (match xexit
-      ((some xe)
+      ((Some xe)
        (let* ((ignored5 (position-at-end builder xe))
               (restored2 (install-handler builder m protect)))
          (let ((xargs (alloca-args builder 1)))
@@ -5792,7 +5792,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (if (block-terminated? builder)
                ()
                (emit-static-exit-onward builder loop-exit exit-cleanup)))))
-      (none ()))
+      (None ()))
     (emit-block-cleanups m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup root-base-slot cleanups rebound cleanup-form)
     (position-at-end builder merge)
     (load-raw builder slot 0)))
@@ -6082,7 +6082,7 @@ const SOURCE_TEMPLATE: &str = r#"
         ((equal method ">=") `(bool ,(>= x y)))
         (:else e)))
 
-;; The node of an `(KIND . NODE)` argument, or `none` when `arg` is not one.
+;; The node of an `(KIND . NODE)` argument, or `None` when `arg` is not one.
 (defun opt-arg-node ((arg Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp arg) (sexpr-cdr arg) ()))
 
@@ -6220,7 +6220,7 @@ const SOURCE_TEMPLATE: &str = r#"
         (coroutine-begin builder m f)
         (bind-params env builder m f param-names 0)
         (let* ((fn-env (new-fn-env))
-               (v (compile-value m name builder env fn-env '() f (Option::none) (Option::none) "" (Scope::new) (Scope::new) (Option::none) (Option::none) body)))
+               (v (compile-value m name builder env fn-env '() f (Option::None) (Option::None) "" (Scope::new) (Scope::new) (Option::None) (Option::None) body)))
           (coroutine-end builder m v)
 m))))
 

@@ -394,11 +394,11 @@ pub(crate) trait CoreForms {
         f.finish(wk::PAT_CTOR)
     }
 
-    /// `(pat-some REPR SUB)`: a niched `Option<T>`'s `some`, any word but the
+    /// `(pat-some REPR SUB)`: a niched `Option<T>`'s `Some`, any word but the
     /// empty list, its payload read back through `T`'s representation
     /// `payload` — the island untags a narrow payload and opens a float box
     /// before `SUB` (already lowered and rooted) can compare or bind it. Its
-    /// `none` is `(pat-empty)`.
+    /// `None` is `(pat-empty)`.
     fn pat_some_form(&self, heap: &mut Heap, payload: &Repr, sub: Value) -> Result<Value, Error> {
         let repr = payload.write(heap)?;
         let mut s = RootScope::new(heap);

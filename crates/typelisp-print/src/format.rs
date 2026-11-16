@@ -2672,7 +2672,7 @@ impl Renderer {
     /// One field of a struct or enum box: rendered as the value it is —
     /// unless the program's definition says the field is a niche-represented
     /// `Option` (`PrintEnv::field_is_niched_option`), in which case the word
-    /// is that `Option`, and prints as `none` or `(some ...)` around the
+    /// is that `Option`, and prints as `None` or `(Some ...)` around the
     /// payload exactly as a boxed one would. The box is the only place a
     /// niched `Option` can sit with nothing static to say what it is, so
     /// this is the only place the question is asked.
@@ -2769,10 +2769,10 @@ impl Renderer {
             return self.render(heap, ctx, f, standard, depth, out);
         }
         if f == Value::Empty {
-            out.push_str("none");
+            out.push_str("None");
             return Ok(());
         }
-        out.push_str("(some ");
+        out.push_str("(Some ");
         self.render(heap, ctx, f, standard, depth + 1, out)?;
         out.push(')');
         Ok(())
@@ -3202,7 +3202,7 @@ impl Renderer {
     /// printing of a cons. A cell's cdr goes on the list when its type is
     /// another cell, ends it when it is `()`, goes on as the data list it is
     /// when it is `Option<Sexpr>`, and is a dotted tail otherwise. Its type
-    /// decides, not its value: an `Option` field's `none` is the same word
+    /// decides, not its value: an `Option` field's `None` is the same word
     /// as the empty list.
     #[allow(clippy::too_many_arguments)]
     fn render_cons_cells(

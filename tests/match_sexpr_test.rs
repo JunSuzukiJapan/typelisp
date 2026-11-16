@@ -151,7 +151,7 @@ fn match_refines_char_and_bool_payloads() {
 
 #[test]
 fn match_selects_the_none_arm_for_the_empty_list() {
-    assert_eq!(eval_ok("(match (the Option<Sexpr> ()) ((none) 10) (_ 20))"), Value::Int(10));
+    assert_eq!(eval_ok("(match (the Option<Sexpr> ()) ((None) 10) (_ 20))"), Value::Int(10));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn match_dispatches_a_runtime_chosen_variant() {
     let src = r#"
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((none) 0) ((int _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
+            ((None) 0) ((int _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((ratio _) 9)
             ((path _) 10) ((f32 _) 11)
             ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)
@@ -191,7 +191,7 @@ fn match_dispatches_a_runtime_chosen_variant() {
     "#;
     // 1 + 60 + 700: int=1, str=6, cons=7 — and the match above is
     // exhaustive without a wildcard, exercising full variant coverage: every
-    // writable `Sexpr` variant plus `none`, written in one flat
+    // writable `Sexpr` variant plus `None`, written in one flat
     // arm list (the `Option<Sexpr>` match sugar) rather than nested two deep.
     // Seven of those arms are integers: `int` (the language's, a fixnum or a
     // bignum) and the six fixed widths, which is what a `Sexpr` costs in a
@@ -311,7 +311,7 @@ fn match_on_sexpr_without_full_coverage_is_a_type_error() {
     assert!(msg.contains("non-exhaustive"), "unexpected error: {}", msg);
 }
 
-// ---- the empty list as `Option<Sexpr>`'s `none` ------------------------------
+// ---- the empty list as `Option<Sexpr>`'s `None` ------------------------------
 
 /// `car`/`cdr` of the empty list are the empty list, as in Common Lisp —
 /// they no longer panic.
@@ -341,9 +341,9 @@ fn car_and_cdr_of_the_empty_list_are_the_empty_list() {
     );
 }
 
-/// The `Option<Sexpr>` match sugar writes `Sexpr` shapes and `none` as
+/// The `Option<Sexpr>` match sugar writes `Sexpr` shapes and `None` as
 /// siblings in one arm list — and exhaustiveness is computed over that same
-/// flat universe, so omitting `none` is still an error. Without this, the
+/// flat universe, so omitting `None` is still an error. Without this, the
 /// sugar would silently turn a total `match` into a partial one.
 #[test]
 fn a_flat_match_on_an_option_sexpr_must_still_cover_none() {
@@ -355,7 +355,7 @@ fn a_flat_match_on_an_option_sexpr_must_still_cover_none() {
              ((path _) 10) ((f32 _) 11)
              ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)))",
     )
-    .expect_err("should be non-exhaustive without a `none` arm");
+    .expect_err("should be non-exhaustive without a `None` arm");
     let msg = format!("{:?}", err);
     assert!(msg.contains("non-exhaustive"), "unexpected error: {}", msg);
 }

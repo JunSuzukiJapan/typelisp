@@ -314,6 +314,6 @@ fn ratio_prints_and_reads_in_any_base() {
 fn ratio_is_a_hash_table_key() {
     assert_eq!(
         show("(let ((h (the HashTable<ratio,int> (HashTable::new)))) (set h 1/2 1) (get h 2/4))"),
-        "(some 1)"
+        "(Some 1)"
     );
 }

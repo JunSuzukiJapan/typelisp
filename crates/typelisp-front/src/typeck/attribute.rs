@@ -147,10 +147,10 @@ pub enum TestForms {
 pub enum TestReturn {
     /// `()`: only a `panic` or a runtime error fails it.
     Unit,
-    /// `Result<(), E>` with `E` an `Error` (a `:dyn Error` too): an `err`
+    /// `Result<(), E>` with `E` an `Error` (a `:dyn Error` too): an `Err`
     /// fails it, reported by `describe-error` — the message and its causes.
     ResultError,
-    /// `Result<(), E>` with `E` no `Error` but printable: an `err` fails it,
+    /// `Result<(), E>` with `E` no `Error` but printable: an `Err` fails it,
     /// reported by `print-object`.
     ResultPrinted,
 }

@@ -58,8 +58,8 @@ fn key_projects_the_element_and_the_element_still_comes_back() {
     // CL's rule for this family: `:key` is applied to the sequence element
     // before the comparison, never to the item searched for — and what
     // `find` answers is the element itself, not its projection.
-    assert_eq!(with_fixtures(&format!("(find 2 (iter neg) :key {})", ABS)), "(some -2)");
-    assert_eq!(with_fixtures(&format!("(position 3 (iter neg) :key {})", ABS)), "(some 2)");
+    assert_eq!(with_fixtures(&format!("(find 2 (iter neg) :key {})", ABS)), "(Some -2)");
+    assert_eq!(with_fixtures(&format!("(position 3 (iter neg) :key {})", ABS)), "(Some 2)");
     assert_eq!(with_fixtures(&format!("(count 2 (iter neg) :key {})", ABS)), "1");
     assert_eq!(with_fixtures(&format!("(member 3 (iter neg) :key {})", ABS)), "true");
 }
@@ -71,18 +71,18 @@ fn key_reaches_the_predicate_variants_and_the_alist_searches() {
             "(find-if (iter neg) (lambda ((x int)) bool (> x 2)) :key {})",
             ABS
         )),
-        "(some -3)"
+        "(Some -3)"
     );
     // `assoc`'s `:key` projects the *car*; `rassoc`'s projects the *cdr*.
     // Looking for 1 among cars projected by `(- k 1)` finds the pair whose
     // car is 2 — and the whole pair comes back, not the projection.
     assert_eq!(
         with_fixtures("(assoc 1 (iter al) :key (lambda ((k int)) int (- k 1)))"),
-        "(some (2 . two))"
+        "(Some (2 . two))"
     );
     assert_eq!(
         with_fixtures("(rassoc \"ONE\" (iter al) :key (lambda ((s string)) string (upcase s)) :test equal)"),
-        "(some (1 . one))"
+        "(Some (1 . one))"
     );
 }
 
@@ -111,7 +111,7 @@ fn test_replaces_the_eq_bounds_equals() {
     // `(< item element)` — the item is the first argument, as in CL.
     assert_eq!(
         with_fixtures("(find 2 (iter a) :test (lambda ((p int) (q int)) bool (< p q)))"),
-        "(some 3)"
+        "(Some 3)"
     );
     assert_eq!(
         with_fixtures("(count 1 (iter a) :test (lambda ((p int) (q int)) bool (< p q)))"),
@@ -123,7 +123,7 @@ fn test_replaces_the_eq_bounds_equals() {
 fn test_not_is_the_negation_of_test() {
     assert_eq!(
         with_fixtures("(find 2 (iter a) :test-not (lambda ((p int) (q int)) bool (< p q)))"),
-        "(some 1)"
+        "(Some 1)"
     );
     assert_eq!(
         with_fixtures("(remove 2 (iter a) :test-not (lambda ((p int) (q int)) bool (= p q)))"),
@@ -154,8 +154,8 @@ fn the_set_operations_project_both_sides() {
 
 #[test]
 fn the_window_bounds_which_elements_a_search_considers() {
-    assert_eq!(with_fixtures("(position 2 (iter a) :start 2)"), "(some 2)");
-    assert_eq!(with_fixtures("(find 3 (iter a) :end 3)"), "none");
+    assert_eq!(with_fixtures("(position 2 (iter a) :start 2)"), "(Some 2)");
+    assert_eq!(with_fixtures("(find 3 (iter a) :end 3)"), "None");
     assert_eq!(with_fixtures("(count 2 (iter a) :start 2)"), "1");
 }
 
@@ -163,7 +163,7 @@ fn the_window_bounds_which_elements_a_search_considers() {
 fn a_position_is_an_index_into_the_whole_sequence_not_the_window() {
     // CL's rule: `:start` moves where the search begins, not where counting
     // does.
-    assert_eq!(with_fixtures("(position 3 (iter a) :start 1)"), "(some 3)");
+    assert_eq!(with_fixtures("(position 3 (iter a) :start 1)"), "(Some 3)");
 }
 
 #[test]
@@ -178,8 +178,8 @@ fn an_element_outside_the_window_is_kept_rather_than_examined() {
 
 #[test]
 fn from_end_makes_a_search_answer_with_the_last_match() {
-    assert_eq!(with_fixtures("(position 2 (iter a))"), "(some 1)");
-    assert_eq!(with_fixtures("(position 2 (iter a) :from-end true)"), "(some 2)");
+    assert_eq!(with_fixtures("(position 2 (iter a))"), "(Some 1)");
+    assert_eq!(with_fixtures("(position 2 (iter a) :from-end true)"), "(Some 2)");
 }
 
 // ------------------------------------------------------------------ `:count`
@@ -218,16 +218,16 @@ fn remove_duplicates_keeps_the_last_of_each_group_as_cl_does() {
 #[test]
 fn every_function_still_answers_with_no_keywords_at_all() {
     // The defaultless-`&key` path: each omitted keyword arrives as
-    // `Option::none` and the body falls back to the `Eq` bound / the whole
+    // `Option::None` and the body falls back to the `Eq` bound / the whole
     // sequence / the first match.
-    assert_eq!(with_fixtures("(find 2 (iter a))"), "(some 2)");
-    assert_eq!(with_fixtures("(position 2 (iter a))"), "(some 1)");
+    assert_eq!(with_fixtures("(find 2 (iter a))"), "(Some 2)");
+    assert_eq!(with_fixtures("(position 2 (iter a))"), "(Some 1)");
     assert_eq!(with_fixtures("(count 2 (iter a))"), "2");
     assert_eq!(with_fixtures("(member 4 (iter a))"), "false");
     assert_eq!(with_fixtures("(remove 2 (iter a))"), "#(1 3)");
     assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#(1 9 9 3)");
     assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#(1 2 3 4)");
-    assert_eq!(with_fixtures("(assoc 2 (iter al))"), "(some (2 . two))");
+    assert_eq!(with_fixtures("(assoc 2 (iter al))"), "(Some (2 . two))");
     assert_eq!(
         with_fixtures("(sort (iter b) (lambda ((p int) (q int)) bool (> p q)))"),
         "#(4 3 2)"
@@ -240,7 +240,7 @@ fn position_if_not_exists_now_completing_the_if_pairs() {
     // every search".
     assert_eq!(
         with_fixtures("(position-if-not (iter a) (lambda ((x int)) bool (< x 2)))"),
-        "(some 1)"
+        "(Some 1)"
     );
 }
 
@@ -359,27 +359,27 @@ fn replace_takes_cls_four_windows() {
 
 #[test]
 fn search_takes_named_windows_and_the_test_keywords() {
-    assert_eq!(show(r#"(search "xabcabc" "abc")"#), "(some 1)");
-    assert_eq!(show(r#"(search "xabcabc" "abc" :from-end true)"#), "(some 4)");
-    assert_eq!(show(r#"(search "xabcabc" "abc" :start 2)"#), "(some 4)");
-    assert_eq!(show(r#"(search "xabcabc" "abc" :end 4)"#), "(some 1)");
-    assert_eq!(show(r#"(search "xyz" "abc")"#), "none");
+    assert_eq!(show(r#"(search "xabcabc" "abc")"#), "(Some 1)");
+    assert_eq!(show(r#"(search "xabcabc" "abc" :from-end true)"#), "(Some 4)");
+    assert_eq!(show(r#"(search "xabcabc" "abc" :start 2)"#), "(Some 4)");
+    assert_eq!(show(r#"(search "xabcabc" "abc" :end 4)"#), "(Some 1)");
+    assert_eq!(show(r#"(search "xyz" "abc")"#), "None");
     // CL: an empty pattern occurs at the start of the window.
-    assert_eq!(show(r#"(search "xyz" "")"#), "(some 0)");
-    assert_eq!(show(r#"(search "xyz" "" :start 2)"#), "(some 2)");
+    assert_eq!(show(r#"(search "xyz" "")"#), "(Some 0)");
+    assert_eq!(show(r#"(search "xyz" "" :start 2)"#), "(Some 2)");
     // `:sub-start`/`:sub-end` bound the pattern — CL's `:start1`/`:end1`,
     // renamed because the arguments are in the other order here.
-    assert_eq!(show(r#"(search "xbcabc" "abc" :sub-start 1)"#), "(some 1)");
+    assert_eq!(show(r#"(search "xbcabc" "abc" :sub-start 1)"#), "(Some 1)");
     assert_eq!(
         show(
             r#"(search "xABc" "abc" :test
                  (lambda ((p char) (q char)) bool (equal (downcase p) (downcase q))))"#
         ),
-        "(some 1)"
+        "(Some 1)"
     );
     assert_eq!(
         show(r#"(search "xABc" "abc" :key (lambda ((c char)) char (downcase c)))"#),
-        "(some 1)"
+        "(Some 1)"
     );
 }
 
@@ -387,21 +387,21 @@ fn search_takes_named_windows_and_the_test_keywords() {
 /// CL's `:from-end` rule: one *past* the rightmost difference.
 #[test]
 fn mismatch_takes_cls_numbered_windows() {
-    assert_eq!(show(r#"(mismatch "abc" "abc")"#), "none");
-    assert_eq!(show(r#"(mismatch "abc" "abd")"#), "(some 2)");
-    assert_eq!(show(r#"(mismatch "abcd" "ab")"#), "(some 2)");
-    assert_eq!(show(r#"(mismatch "abcd" "cd" :from-end true)"#), "(some 2)");
-    assert_eq!(show(r#"(mismatch "abcd" "abxd" :from-end true)"#), "(some 3)");
-    assert_eq!(show(r#"(mismatch "xabc" "abc" :start1 1)"#), "none");
-    assert_eq!(show(r#"(mismatch "abc" "xabc" :start2 1)"#), "none");
-    assert_eq!(show(r#"(mismatch "abcz" "abc" :end1 3)"#), "none");
+    assert_eq!(show(r#"(mismatch "abc" "abc")"#), "None");
+    assert_eq!(show(r#"(mismatch "abc" "abd")"#), "(Some 2)");
+    assert_eq!(show(r#"(mismatch "abcd" "ab")"#), "(Some 2)");
+    assert_eq!(show(r#"(mismatch "abcd" "cd" :from-end true)"#), "(Some 2)");
+    assert_eq!(show(r#"(mismatch "abcd" "abxd" :from-end true)"#), "(Some 3)");
+    assert_eq!(show(r#"(mismatch "xabc" "abc" :start1 1)"#), "None");
+    assert_eq!(show(r#"(mismatch "abc" "xabc" :start2 1)"#), "None");
+    assert_eq!(show(r#"(mismatch "abcz" "abc" :end1 3)"#), "None");
     assert_eq!(
         show(r#"(mismatch "ABC" "abc" :key (lambda ((c char)) char (downcase c)))"#),
-        "none"
+        "None"
     );
     assert_eq!(
         show(r#"(mismatch "ABC" "abd" :test (lambda ((p char) (q char)) bool (equal (downcase p) (downcase q))))"#),
-        "(some 2)"
+        "(Some 2)"
     );
 }
 

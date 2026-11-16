@@ -85,8 +85,8 @@ fn compiled_tasks_run_on_workers_and_a_thread_on_its_own() {
                         (dotimes (i 64)
                           (let ((id (unwrap (recv out))))
                             (match (find id (iter seen))
-                              ((some x) ())
-                              ((none) (push seen id)))))
+                              ((Some x) ())
+                              ((None) (push seen id)))))
                         (len seen)))
                     (defun own-thread () int (join (thread (whoami))))
                     (compile spread)
@@ -189,7 +189,7 @@ fn a_worker_prints_what_the_interpreter_s_thread_prints() {
                       (defmethod print-object (self (escape bool)) string (format false "<~a,~a>" self::x self::y)))
                     (defstruct holder (o Option<int>))
                     (defun show () string
-                      (format false "~a ~a ~a ~a" (shape::tri 3 4 5) (make-instance 'point :x 1 :y 2) (make-instance 'holder :o (Option::some 7)) (shape::dot)))
+                      (format false "~a ~a ~a ~a" (shape::tri 3 4 5) (make-instance 'point :x 1 :y 2) (make-instance 'holder :o (Option::Some 7)) (shape::dot)))
                     (defun elsewhere () string (join (thread (show))))
                     (compile point::print-object)
                     (compile elsewhere)
@@ -291,7 +291,7 @@ fn a_compiled_eval_off_the_interpreter_s_thread_moves_there_first() {
         assert_eq!(code, Some(0), "TYPELISP_THREADS={}: stderr was: {}", threads, err);
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 2, "TYPELISP_THREADS={}: stdout was: {}", threads, out);
-        assert!(lines[0].starts_with("(ok 42) "), "the interpreter's own answer: {}", lines[0]);
+        assert!(lines[0].starts_with("(Ok 42) "), "the interpreter's own answer: {}", lines[0]);
         assert_eq!(lines[1], lines[0], "TYPELISP_THREADS={}: the moved task answered differently", threads);
     }
 }

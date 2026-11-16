@@ -17,7 +17,7 @@ prelude・島・docs は段階 3 と同じコミットになっている。
 以下は、その指示を実装可能な形に落とすための調査結果と段階分けである。
 **先に結論を 3 つ**書いておく。いずれも着手前に合意しておく必要がある。
 
-1. 空リストという値は消えない。`Option<Sexpr>` の `none` に**改名**され、
+1. 空リストという値は消えない。`Option<Sexpr>` の `None` に**改名**され、
    型検査の対象になる。得られるのは「`sexpr-car`/`sexpr-cdr` の実行時パニックが
    型エラーになる」ことであって、値が 1 つ減ることではない。
 2. cdr だけでなく **car も `Option<Sexpr>`** にせざるを得ない。結果として
@@ -63,7 +63,7 @@ generic な 2 フィールド積で、`car`/`cdr` は `defstruct` が生成す�
 確実に含まれるので、この読みは成立しない。
 
 したがって cons セルは `cons-cell<Option<Sexpr>, Option<Sexpr>>` になる。
-dotted pair は保たれる（cdr が `some` の非 cons）。
+dotted pair は保たれる（cdr が `Some` の非 cons）。
 
 ### 2.2 「S 式の型」は `Option<Sexpr>` になる
 
@@ -71,7 +71,7 @@ dotted pair は保たれる（cdr が `some` の非 cons）。
 **データとして受け渡される型は `Option<Sexpr>`** になる。`read` の戻りも
 `Result<Option<Sexpr>, ReadError>` になる。
 
-これは「null を消した」というより「null に `none` という名前を与え、
+これは「null を消した」というより「null に `None` という名前を与え、
 型に現れるようにした」である。利得は 1 つだけ、ただしそれは大きい:
 島の 522 箇所の暗黙の実行時前提が、すべて型検査の対象になる。
 
@@ -83,7 +83,7 @@ dotted pair は保たれる（cdr が `some` の非 cons）。
 **ただし既定にしてはいけない。** 島の 522 箇所を機械的に
 `(unwrap (sexpr-cdr x))` へ置換すると、実行時挙動は今日と同一で、
 空リストへの car も型エラーにならない。書き換えコストだけ払って防げるバグは
-0 件になる。`unwrap` に意味があるのは、それが「ここは絶対 `some` だ」という
+0 件になる。`unwrap` に意味があるのは、それが「ここは絶対 `Some` だ」という
 **明示的で grep 可能な主張**である場合に限られる。移行の既定は
 `match` / `if-let` とし、`unwrap` は主張として書く場所にだけ置く。
 
@@ -109,8 +109,8 @@ dotted pair は保たれる（cdr が `some` の非 cons）。
 
 | 値 | 表現 |
 |---|---|
-| `(Option::none)` | `Value::Empty` / `TAG_IMMEDIATE \| IMMEDIATE_NIL`（`typelisp-abi/src/lib.rs:105`） |
-| `(Option::some v)` | `v` そのもの |
+| `(Option::None)` | `Value::Empty` / `TAG_IMMEDIATE \| IMMEDIATE_NIL`（`typelisp-abi/src/lib.rs:105`） |
+| `(Option::Some v)` | `v` そのもの |
 
 `Sexpr` から `nil` を抜いた後はタグが衝突しないので成立し、**実行時のビット表現は
 今日と完全に同一**になる。FASL/ダンプの値表現も変わらない。
@@ -121,16 +121,16 @@ dotted pair は保たれる（cdr が `some` の非 cons）。
    `Tagged { collectable: true }`＝`Repr::Sexpr` と同じなので、
    **`binding_kind`（2）も `field_kind`（6）も既存の番号のまま**。島向けの
    番号空間は動かない（§4 と併せて、ここが今回いちばん幸運な点）。
-2. 構築: `(Option::some x)` が `rt_data_new` でなく `x` を素通しし、
-   `(Option::none)` が `Value::Empty` を出す。インタプリタ（`core_eval.rs` の
+2. 構築: `(Option::Some x)` が `rt_data_new` でなく `x` を素通しし、
+   `(Option::None)` が `Value::Empty` を出す。インタプリタ（`core_eval.rs` の
    construct）と島（`compile-construct`）の両方。
-3. `match`: `((some x) ...)` は `v != Empty` のテストと `x = v` の束縛、
-   `((none) ...)` は `v == Empty` のテスト。同じく両方。
+3. `match`: `((Some x) ...)` は `v != Empty` のテストと `x = v` の束縛、
+   `((None) ...)` は `v == Empty` のテスト。同じく両方。
 
 ### 3.2 順序の制約 — niche は `nil` 削除より先に入れられない
 
 **`Sexpr` に `nil` が残っている間は niche が不健全になる。**
-`(Option::some ())` と `(Option::none)` がどちらも `Value::Empty` になり、
+`(Option::Some ())` と `(Option::None)` がどちらも `Value::Empty` になり、
 区別が付かないからである。したがって「niche だけ先に入れて green にする」ことはできない。
 
 > **2026-08-27 訂正（段階 1 実装中の調査による）。**
@@ -167,8 +167,8 @@ niche は「`Option<Sexpr>` と `Sexpr` の実行時表現が同一」という�
 
 **(2) 構築側は新しいノードが要らない。**
 
-- `(Option::some x)` は、`x` を lower したものそのもの。ノードを作らない。
-- `(Option::none)` は空リスト定数、すなわち `(construct sexpr 0 false ())`。
+- `(Option::Some x)` は、`x` を lower したものそのもの。ノードを作らない。
+- `(Option::None)` は空リスト定数、すなわち `(construct sexpr 0 false ())`。
   §4 の通り `nil` の index 0 を IR に残す限り、島の `compile-construct-sexpr` の
   variant-0 の腕が**そのまま使える**。「ソース面から `nil` を消すが IR の 0 番は残す」
   という §4 の判断が、ここで効いてくる。
@@ -179,14 +179,14 @@ niche は「`Option<Sexpr>` と `Sexpr` の実行時表現が同一」という�
 
 - `pat-lit`（`core_eval.rs:1428`）は `int`/`bool`/`char` しか受け付けない。空リストは通らない。
 - `pat-guard`（`core_eval.rs:1457`）は**束縛を捨てる**（`Ok(Some(Vec::new()))`）ので、
-  `(some p)` の `p` を束縛できない。
+  `(Some p)` の `p` を束縛できない。
 
 したがって次の 1 種類を足す（タグ 2 つでも、極性フラグ付き 1 つでもよい）:
 
 | ノード | 意味 | 対応する書き方 |
 |---|---|---|
-| `(pat-empty)` | 値が空リストなら成立 | `((none) ...)` |
-| `(pat-nonempty P)` | 値が空リストでなければ、`P` を同じ値に当てる | `((some P) ...)` |
+| `(pat-empty)` | 値が空リストなら成立 | `((None) ...)` |
+| `(pat-nonempty P)` | 値が空リストでなければ、`P` を同じ値に当てる | `((Some P) ...)` |
 
 島側は `compile-value` の `icase` ディスパッチ（`compiler.rs:1642` 付近）と同型の
 パターンコンパイラに腕を足すだけで、既存ノードのフィールド位置は動かない。
@@ -195,12 +195,12 @@ niche は「`Option<Sexpr>` と `Sexpr` の実行時表現が同一」という�
 
 印字は静的型でなく値を見る。`PrintHooks::enum_variant_name` が
 `(type_key, variant)` を box から読む形（`typelisp-print/src/runtime.rs:40`）なので、
-niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中身の S 式**として、
-`none` は `()` として印字される。
+niche を入れると `Option<Sexpr>` の値は「`(Some ...)`」でなく**中身の S 式**として、
+`None` は `()` として印字される。
 
 `Option<Sexpr>` が「S 式の型」になった後はこれが**正しい**挙動である
-（`none` は空リストなのだから `()` と出るべき）。ただし
-`(println (Option::some 42))` が `(some 42)` でなく `42` を出すようになるのは
+（`None` は空リストなのだから `()` と出るべき）。ただし
+`(println (Option::Some 42))` が `(Some 42)` でなく `42` を出すようになるのは
 `Sexpr` インスタンス化に限った可視の仕様変更なので、テストと docs に明記する。
 
 ---
@@ -226,8 +226,8 @@ niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中�
 
 ## 5. 塞ぐ穴 — `read-sexpr` の EOF
 
-`read-sexpr` は `Result<Option<Sexpr>, ReadError>` を返し、**`none` が EOF** を意味する
-（`prelude.rs:4125`、ほか `:4103` `:4115`）。`()` が `none` になると EOF と区別が付かない。
+`read-sexpr` は `Result<Option<Sexpr>, ReadError>` を返し、**`None` が EOF** を意味する
+（`prelude.rs:4125`、ほか `:4103` `:4115`）。`()` が `None` になると EOF と区別が付かない。
 
 該当は 3 箇所だけなので、EOF を専用の変種に分けて塞ぐ（`Result<ReadOutcome, ReadError>`、
 `ReadOutcome = eof | datum(Option<Sexpr>)`）。**段階 2 より前に単独で入れられる**
@@ -272,7 +272,7 @@ niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中�
 - 段階 3 は `nil` 削除と niche が同時に落ちるので、途中の状態でテストが緑にならない
   区間がある。段階 2（IR ノードに repr を足す）を先に単独で緑にしておくことで、
   その区間を「型の層だけ」に絞れる見込みだが、**まだ実際にやっていない**。
-- `sexpr-car` の新しい型。`Sexpr -> Option<Sexpr>`（非 cons でも `none` を返す）か、
+- `sexpr-car` の新しい型。`Sexpr -> Option<Sexpr>`（非 cons でも `None` を返す）か、
   `cons-cell<...> -> Option<Sexpr>`（cons であることを型で要求）か。
   後者のほうが強いが、`sexpr-consp` で分岐してから cons セルを取り出す手段
   （`match` で cons variant を剥がす）が要る。段階 2 の設計時に決める。
@@ -283,7 +283,7 @@ niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中�
 
 ### 段階 1 — `read-sexpr` の EOF と `()` を分離【完了、2026-08-27】
 
-`ReadOutcome`（`(eof)` / `(datum Sexpr)`）を prelude に新設し、
+`ReadOutcome`（`(Eof)` / `(Datum Sexpr)`）を prelude に新設し、
 `read-sexpr` / `read-sexpr-preserving-whitespace` / `reader-read-one-until` の戻りを
 `Result<Option<Sexpr>, ReadError>` から `Result<ReadOutcome, ReadError>` へ変えた。
 内部の呼び出し元は `read-delimited-list` の 1 箇所だけ。
@@ -302,10 +302,10 @@ niche を入れると `Option<Sexpr>` の値は「`(some ...)`」でなく**中�
 
 ### 段階 2 — 空リストのパターンを `pat-empty` として切り出す【完了、2026-08-27】
 
-`(none)` を照合するパターンノードを 4 層（チェッカーの `pattern_form` /
+`(None)` を照合するパターンノードを 4 層（チェッカーの `pattern_form` /
 `eval/interp/core_eval.rs` / `src/compile/core_bridge.rs` の `translate_pattern` /
 島の `compile-pattern-test`）＋番人（`tests/core_vocabulary_test.rs`）に追加した。
-段階 3 で `(some P)` 用の `pat-nonempty` が同じ 4 層に加わっている。
+段階 3 で `(Some P)` 用の `pat-nonempty` が同じ 4 層に加わっている。
 
 ### 段階 3 — `nil` 削除と niche を同時に【完了、2026-08-27】
 
@@ -329,7 +329,7 @@ prelude も島も docs も同じコミットで緑にするしかない。以下
    既存の Sexpr 拡大群に透過的な retype として加えた。逆向きは型エラーのまま。
 2. `match` 糖衣の網羅性検査が `option` の 2 変種で数えていた。10 個の `Sexpr` 腕を
    並べても「1/2」になり、**全域 match が黙って部分 match になる**。被覆の宇宙を
-   「`Sexpr` の 10 形 ＋ `none`」に変更。番号が衝突しないのは `none` が空リストの
+   「`Sexpr` の 10 形 ＋ `None`」に変更。番号が衝突しないのは `None` が空リストの
    明け渡した variant 0 にちょうど収まるからで、§4「変種番号を詰めない」がここで効いた。
 
 **`car`/`cdr` の CL 互換は両ティアに入れる必要があった**（`Interp::call_builtin` と

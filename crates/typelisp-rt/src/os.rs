@@ -777,6 +777,6 @@ mod tests {
         let me = super::file_owner(env!("CARGO_MANIFEST_DIR")).expect("the crate directory exists");
         assert!(me.is_some(), "the crate directory has no owner name");
         let missing = super::file_owner("/nonexistent-typelisp-probe-path");
-        assert!(missing.is_err(), "a missing path must be an error, not a `none`");
+        assert!(missing.is_err(), "a missing path must be an error, not a `None`");
     }
 }

@@ -431,7 +431,7 @@ fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
                 pattern_bind_names(heap, sub, scope);
             }
         }
-        // `(pat-some REPR SUB)` — a niched `Option`'s `(some SUB)`.
+        // `(pat-some REPR SUB)` — a niched `Option`'s `(Some SUB)`.
         Some(wk::PAT_SOME) => {
             if let Some(sub) = core::field(heap, pat, 1) {
                 pattern_bind_names(heap, sub, scope);

@@ -247,7 +247,7 @@ fn fixed_width(def: &mut BuiltinType, ty: Type) {
 /// two integer *widths*, which is a real conversion because a type name
 /// means its width and its signedness (`types::int_width_signed`). `int->W`
 /// truncates — that is what a width cast means, the same as Rust's `as` —
-/// and `try-int->W` answers `none` instead when the value does not fit,
+/// and `try-int->W` answers `None` instead when the value does not fit,
 /// which is the question `try-as` asks. The checker's `as` and `try-as` pick
 /// between them.
 ///
@@ -329,16 +329,16 @@ fn float(def: &mut BuiltinType, ty: Type) {
     // than a label on an `f64` (`docs/ja/reference/functions/numbers.md` §1).
     // `float->f32` rounds to nearest, `float->f64` is exact in both
     // directions (every binary32 value is a binary64 value), and
-    // `try-float->f32` answers `none` when the rounding would lose something
+    // `try-float->f32` answers `None` when the rounding would lose something
     // — the question `try-as` asks.
     def.instance("float->f32", vec![ty.clone()], Type::F32);
     def.instance("float->f64", vec![ty.clone()], Type::F64);
     def.instance("try-float->f32", vec![ty.clone()], option_of(Type::F32));
-    // `try-float->f64` can only answer `some` — widening is exact — but it is
+    // `try-float->f64` can only answer `Some` — widening is exact — but it is
     // defined all the same, because the checker names a width cast's method
     // from the target alone and has no "this direction cannot fail" case.
     // The integer side is the same shape: `try-int->i32` from an `i8` is
-    // always `some` too.
+    // always `Some` too.
     def.instance("try-float->f64", vec![ty], option_of(Type::F64));
 }
 

@@ -318,7 +318,7 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   try {
     await client.start();
     context.subscriptions.push(client);
-  } catch (err) {
+  } catch (Err) {
     client = undefined;
     output.appendLine(`language server failed to start: ${err}`);
     void vscode.window.showWarningMessage(

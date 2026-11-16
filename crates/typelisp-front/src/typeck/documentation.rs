@@ -1,5 +1,5 @@
 //! `(documentation name)`: the documentation string the definition `name`
-//! was written with, `(some text)`, or `(none)` when it has none.
+//! was written with, `(Some text)`, or `(None)` when it has none.
 //!
 //! The name is not evaluated: it is a symbol or a `::` path naming a
 //! function, a macro, a global variable, a type or a trait, or a type's or a

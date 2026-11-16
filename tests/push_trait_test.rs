@@ -120,8 +120,8 @@ const POP_ALL: &str = r##"(use std::collections::Deque std::collections::HashSet
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))"##;
 
 /// Each takes back the element `push` added last: a `Deque` its back.
@@ -135,7 +135,7 @@ fn a_generic_function_drains_each_library_collection() {
               (push d 1) (push d 2) (push-front d 0)
               (push a 5) (push a 6)
               (format false "~a ~a ~a ~a" (pop-all v) (pop-all d) (pop-all a) (pop v)))"##,
-        "#(3 2 1) #(2 1 0) #(6 5) none",
+        "#(3 2 1) #(2 1 0) #(6 5) None",
     );
 }
 
@@ -152,7 +152,7 @@ fn a_trait_object_pops_from_a_vector_and_a_deque() {
               (doiter (s (iter sources)) (push out (pop s)))
               (doiter (s (iter sources)) (push out (pop s)))
               (format false "~a" out))"##,
-        "#((some 7) (some 8) none none)",
+        "#((Some 7) (Some 8) None None)",
     );
 }
 

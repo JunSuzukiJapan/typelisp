@@ -24,7 +24,7 @@
 | 群 | 根拠 |
 |---|---|
 | **実行時の型問い合わせ** — `typep`/`type-of`/`subtypep`/`class-of`/`find-class`/MOP/`typecase`/`etypecase`/`ctypecase`/`check-type`/`numberp` 系/`characterp`/`stringp`/`arrayp`/`vectorp`/`streamp`/`hash-table-p`/`bit-vector-p`/`describe`/`describe-object`/`inspect`/`apropos`/`apropos-list` | (D1) 静的型付け。すべての式の型がコンパイル時に決まるので、実行時に型を尋ねる問い自体が成立しない。`Sexpr` に限れば `match` と `sexpr-consp`/`sexpr-symp` 等が相当する |
-| **`null` 相当** — 型としての `null`、`endp`、nil を「偽・空リスト・失敗」の三役に使う慣用 | (D2)。偽は `false`、空リストは `Option<Sexpr>` の `none`、「値が無い」は `Option<T>`。三役の合流はバグの温床でしかない |
+| **`null` 相当** — 型としての `null`、`endp`、nil を「偽・空リスト・失敗」の三役に使う慣用 | (D2)。偽は `false`、空リストは `Option<Sexpr>` の `None`、「値が無い」は `Option<T>`。三役の合流はバグの温床でしかない |
 | **多値** — `values`/`values-list`/`multiple-value-bind`/`multiple-value-call`/`multiple-value-list`/`multiple-value-prog1`/`multiple-value-setq`/`nth-value`、`floor` の商剰余多値、`read-from-string` の第2値、`gethash` の第2値 | 非採用。複数の結果は `cons-cell` か `defstruct`、「あるか無いか」は `Option<T>` で表す。既存の `floor-div` 系（`cons-cell` 返し）と `get`→`Option<V>` を正とする |
 | **コンディション本体** — `define-condition`/`make-condition`/`signal`/`cerror`/`break`/`handler-case`/`handler-bind`/`ignore-errors`/`restart-case`/`restart-bind`/`with-simple-restart`/`invoke-restart`/`find-restart`/`compute-restarts`/`abort`/`continue`/`muffle-warning`/`store-value`/`use-value`/`invoke-debugger`/`*debugger-hook*`、標準コンディション型階層 | (D3)、language-design.md §9 で 2026-08-16 に非採用が確定。「この関数が何を signal しうるか」が型に出ない。**ただし `Error` トレイトへ統合できる分は実装する — Phase 7a** |
 | **CLOS** — `defclass`/`make-instance`/`slot-value`/`with-slots`/`with-accessors`/`slot-boundp`/`slot-makunbound`/`defgeneric`/`call-next-method`/`next-method-p`/`:before` `:after` `:around`/`define-method-combination`/`initialize-instance`/`shared-initialize`/`reinitialize-instance`/`change-class`/`update-instance-for-*`/`make-load-form` | `deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置き換える既定方針（language-design.md §5.1/§5.2/§6）。単一・静的ディスパッチであることが型システムの前提になっている |
@@ -173,7 +173,7 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 | 0.1 | **裸の型変数を `defmethod` の受け手にはできない**（`defmethod: unknown type \`i\``）。`parse_defmethod_sig_inner` の「受け手は登録済みの型を名指しすること」検査を外すのは `precheck_blanket_impl` だけ。**ただしブランケット実装 `(impl<I> Len I (where (Iter I (Item A))))` は端から端まで通る**（単型化して実行まで確認） | Phase 3a は「受け手型ごとに列挙」を回避できる。CL 名 1 つにつきトレイト 1 つ＋ブランケット実装 1 つで全 `Iter` 実装型に一括で載る（1 トレイトにブランケット実装は 1 つまで、という既存規則が「名前ごとにトレイトを立てる」形を強制する） |
 | 0.1b | **できない**。受け手の*形*としてネストは通る（`cons-cell<i32,cons-cell<i32,i32>>` は動く）が、**ネスト位置に現れる自由型変数が束縛されない** — `check_defmethod` の `written_vars` は受け手の型引数の**最上位**にある裸の型変数しか拾わず、`written_vars.len() == owner_params` を満たさないと総称テンプレート化されないため、`cons-cell<B,C>` が未知の具体型として扱われて `car` が引けなくなる | 計画どおり **`caar`〜`cddddr` 28 個は `defun` に落とす**。`(defun cadr<A,B,C> ((c cons-cell<A,cons-cell<B,C>>)) B (car (cdr c)))` が動くことを確認済み。§1.1 の原則が崩れるのはここだけ |
 | 0.2 | **`+` はトレイトのメソッド名にできない** — `impl` の時点で `cannot redefine built-in method \`+\`` で弾かれる（0.2 が想定した「無限再帰になる」より手前で落ちる）。策定時の推奨案どおり `add`/`sub` 等の名前にする。**副産物で checker のバグを 1 件発見・修正**: 境界越しに呼んだトレイトメソッドの戻り型 `Self` が型変数へ置換されず、`(where (Add T))` 下の `(add a b)` が `expected t, found self` で落ちていた（`check_instance_method` の bounds 分岐が associated type しか置換していなかった）。prelude のトレイトメソッドは 1 つも `Self` を返さない（全て `bool` か関連型）ため今まで露出しなかった | Phase 1a はトレイト側を `add`/`sub`/`mul`/… の名前にし、`(+ a b)` の型変数受け手を checker で脱糖する。`Self` 戻り型の修正はこの Phase の**前提条件**だったので先に入れた |
-| 0.3 | **決まらない**。`&key` にデフォルト式を書くと、その型が自分の型パラメータに触れた時点で checker が明示的に拒否する（`&key parameter \`key\` may not default when its type mentions the function's own type parameter — declare it with no default (\`Option<...>\`) instead`）。**ただしデフォルト無し（`Option<fn>`）＋ `match` は端から端まで通る** — キーワードを渡した呼び出しと省略した呼び出しの両方を確認済み | Phase 3e の `:key` は **`-by` 系の別名関数にしなくてよい**。`(&key (key (fn (A) A)))` とデフォルト無しで宣言し、本体で `(match key ((some f) (f y)) ((none) y))` する |
+| 0.3 | **決まらない**。`&key` にデフォルト式を書くと、その型が自分の型パラメータに触れた時点で checker が明示的に拒否する（`&key parameter \`key\` may not default when its type mentions the function's own type parameter — declare it with no default (\`Option<...>\`) instead`）。**ただしデフォルト無し（`Option<fn>`）＋ `match` は端から端まで通る** — キーワードを渡した呼び出しと省略した呼び出しの両方を確認済み | Phase 3e の `:key` は **`-by` 系の別名関数にしなくてよい**。`(&key (key (fn (A) A)))` とデフォルト無しで宣言し、本体で `(match key ((Some f) (f y)) ((None) y))` する |
 | 0.4 | `Heap::set_car`/`set_cdr` は現存し安全に動く（`Cell.car`/`cdr` を書くだけ）が、**typelisp へは意図的に非公開**（`registry.rs` 650-657 行）。`cons-cell` の `set-car`/`set-cdr` は `defstruct` のアクセサとして既に存在し動く。**`Sexpr` 側の危険は所有権ではなく位置情報**: `Cell.car_loc` は「この `car` の span」なので、`set_car` すると**古い要素の span が残ったまま**新しい要素に付く（メモリ安全ではあるが診断が静かに狂う） | `rplaca`/`rplacd` は `cons-cell` の `set-car`/`set-cdr` への**薄い別名**で済む（Phase 3d）。**`Sexpr` 版の `nconc`/`rplaca` は入れない** — §1.2 の「`Sexpr` を受け手に取る CL リストメソッドを足さない」と、上の `car_loc` 陳腐化の両方が同じ結論を指す。`nconc` は `Vector<T>` 受け手（b の要素を a へ破壊的に足す）としてのみ実装する |
 | 0.5 | Phase 1a の実施と不可分なので、そこで実測して記録する（着手前の起動時間を基準値として取る） | — |
 | 0.6 | **できる**。`(loop :for i :from 1 :to 3 :collect i)` は**構文としては受理され**、本体を検査した先の `unbound variable: i` で落ちた（`loop` は本体を任意のフォーム列として受ける）。キーワードは `Value::Symbol` で名前が `:` 始まり（`checker.rs` 7322 行の自己評価分岐と同じ判定）なので、`check_loop` が `args[0]` を見て分岐できる | Phase 4b は **checker 糖衣**で実装する。`defmacro` 側には `args[0]` の種別で分岐する手段が無い |
@@ -549,7 +549,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
    で落ちた。`check_call` の該当ブロックを `Checker::infer_pinned_assoc_types` として
    括り出し、両方から呼ぶようにした。
 3. **~~`lambda` が `match` の束縛を捕獲すると compile できない。~~** → 2026-08-31 解消。
-   `(match o ((some g) (lambda ... (g ...))))` が
+   `(match o ((Some g) (lambda ... (g ...))))` が
    "compile: `g` is referenced but no binder in scope states its representation" で落ちていた。
    `core_bridge::translate_match` がアームの本体を `cx` を広げずに変換するので、パターン
    束縛の `Repr` がスコープに入らない、という食い違い。**Phase 3e の範囲外**として残した分
@@ -694,9 +694,9 @@ acc)` へ展開すれば要素型が推論で決まる」——決まらない:
 旧 `docs/functions.md` §14／§14.1（現 [system.md](../ja/reference/functions/system.md) §8・§9）。
 
 **`macroexpand-1` は `Option<Sexpr>` を返す。** CL は「展開したか」を第 2 返り値で伝えるが
-多値が無いので、`none` が「マクロ呼び出しではない」を表す。CL の真偽値より情報が多い——
+多値が無いので、`None` が「マクロ呼び出しではない」を表す。CL の真偽値より情報が多い——
 自分自身の呼び出しへ展開するマクロと非マクロを取り違えようがない。`macroexpand` は
-`none` になるまで繰り返して最終形を返す（CL と同じ）。展開そのものは
+`None` になるまで繰り返して最終形を返す（CL と同じ）。展開そのものは
 `Checker::try_expand_toplevel_macro`、つまり**検査が使うのと同じ 1 段**なので、
 プログラムが見るものと検査が見たものがずれない。コンパイル済みコードからは `eval` と
 同じ 2 経路（JIT の `with_active_interp` / AOT の `AOT_ENV`）で環境に届く。
@@ -1451,7 +1451,7 @@ readtable に「終端かどうか」の区別を持たせていないので、�
 [implementation-log.md](implementation-log.md) の「libc を取って保留 4 群を閉じた」。
 
 入ったもの: `get-internal-run-time`、`machine-instance` / `machine-version` /
-`software-version`、`short-site-name` / `long-site-name`（常に `none`＝CL が認める答え）、
+`software-version`、`short-site-name` / `long-site-name`（常に `None`＝CL が認める答え）、
 `file-author`、`timezone-offset-seconds` / `timezone-daylight-p`。
 
 **`decode-universal-time` の既定が UTC から地方時に変わった**（CL 準拠）。`decoded-time` は
@@ -1521,7 +1521,7 @@ readtable に「終端かどうか」の区別を持たせていないので、�
   「決して嘘にならない側」で、`true` は推測になり、外すと `read-char-no-hang` が
   ブロックする——その名前が唯一約束していないこと。組み込みストリーム 8 つは全部
   override する（実際に答えられる: ハンドルを持つ 4 つはネイティブへ、合成 4 つは委譲）。
-- **`read-char-no-hang`** — `CharInput` のデフォルト本体。`(if (listen self) (read-char self) none)`。
+- **`read-char-no-hang`** — `CharInput` のデフォルト本体。`(if (listen self) (read-char self) None)`。
 - **`read-sequence` / `write-sequence`** — `CharInput`/`CharOutput` と
   `ByteInput`/`ByteOutput` の 4 つに、それぞれの項目型で。
 
@@ -1615,7 +1615,7 @@ CL コードの移植と実用スクリプトで真っ先に当たる。
 | 新しい名前がエディタ定義から漏れる | `editor_keyword_sync_test` が落ちる | 完了判定 4 |
 | GC ルート漏れ（`Vec<Value>` はコレクタから見えない） | `gc_stress` でのみ再現し、通常のテストは通る | 新しい構文再構築を書いたら `checker_gc_stress_test` を回す |
 | 表面積の増加でダンプ生成・単型化が重くなる | 起動時間の退行 | **2026-08-20 実測（下記）。+9.2% で収まっている** |
-| CL 名が既存メソッド名と衝突する（`get`/`values`/`count`/`member`/`some`） | 解決順が変わって無関係な既存コードが壊れる | 名前を足す前に `registry.rs` と `prelude.rs` を grep。`some` は `Some` 構成子と衝突するので使えない（language-design.md §7.3） |
+| CL 名が既存メソッド名と衝突する（`get`/`values`/`count`/`member`） | 解決順が変わって無関係な既存コードが壊れる | 名前を足す前に `registry.rs` と `prelude.rs` を grep |
 | Phase 5a の `:include` が単型化・`repr`・パターンマッチへ波及する | 一見無関係なテストが落ちる | `:include` は Phase 5a の最後に、単独の commit で入れる |
 
 ### 起動時間の実測（2026-08-20、Phase 1c/2/3/4a/9c 完了時点）

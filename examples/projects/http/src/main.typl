@@ -39,21 +39,21 @@
 
 (defun serve-connection ((c socket-stream)) ()
   (match (read-request c)
-    ((some r)
+    ((Some r)
      (println "~a ~a ~a" (peer-address c) (method r) (target r))
      (write-response c (route r)))
-    ((none) ()))
+    ((None) ()))
   (close c))
 
 (defun serve-on ((listening Result<socket-listener, NetError>) (scheme string)) ()
   (match listening
-    ((err e) (println "cannot listen: ~a" (message e)))
-    ((ok l)
+    ((Err e) (println "cannot listen: ~a" (message e)))
+    ((Ok l)
      (println "~a server on ~a" scheme (local-address l))
      (loop
        (match (accept l)
-         ((ok c) (progn (task (serve-connection c)) ()))
-         ((err e) (println "accept failed: ~a" (message e))))))))
+         ((Ok c) (progn (task (serve-connection c)) ()))
+         ((Err e) (println "accept failed: ~a" (message e))))))))
 
 (defun serve ((port int)) ()
   (serve-on (tcp-listen "0.0.0.0" port) "http"))
@@ -66,8 +66,8 @@
 
 (defun fetch ((address string)) ()
   (match (http-get address)
-    ((err e) (println "error: ~a" (message e)))
-    ((ok r)
+    ((Err e) (println "error: ~a" (message e)))
+    ((Ok r)
      (println "~a ~a" (status r) (reason r))
      (doiter (h (iter (headers r)))
        (println "~a: ~a" (name h) (value h)))

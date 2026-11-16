@@ -130,31 +130,31 @@ fn graphic_and_standard_differ_exactly_at_newline() {
 /// predicate), which is why this is a separate name.
 #[test]
 fn digit_weight_returns_the_weight_in_the_given_radix() {
-    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\7))"), "(some 7)");
-    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\f 16))"), "(some 15)");
-    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\F 16))"), "(some 15)");
+    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\7))"), "(Some 7)");
+    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\f 16))"), "(Some 15)");
+    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\F 16))"), "(Some 15)");
     // Out of range for the radix, and not a digit character at all.
-    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\9 8))"), "none");
-    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\?))"), "none");
+    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\9 8))"), "None");
+    assert_eq!(eval_string("(use std::char::digit-weight) (format false \"~a\" (digit-weight #\\?))"), "None");
 }
 
 #[test]
 fn digit_to_char_is_the_inverse_of_digit_weight() {
-    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char 7))"), "(some 7)");
-    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char 15 16))"), "(some F)");
-    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char 9 8))"), "none");
-    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char -1))"), "none");
+    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char 7))"), "(Some 7)");
+    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char 15 16))"), "(Some F)");
+    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char 9 8))"), "None");
+    assert_eq!(eval_string("(use std::char::digit->char) (format false \"~a\" (digit->char -1))"), "None");
 }
 
 #[test]
 fn char_names_round_trip_through_the_readers_own_table() {
-    assert_eq!(eval_string("(format false \"~a\" (char->name #\\newline))"), "(some newline)");
-    assert_eq!(eval_string("(format false \"~a\" (char->name #\\a))"), "none");
+    assert_eq!(eval_string("(format false \"~a\" (char->name #\\newline))"), "(Some newline)");
+    assert_eq!(eval_string("(format false \"~a\" (char->name #\\a))"), "None");
     // `name->char` is case-insensitive and takes the reader's aliases, since
     // the reader's own lookup does both.
     assert!(eval_bool("(use std::char::name->char) (equal (unwrap (name->char \"TAB\")) #\\tab)"));
     assert!(eval_bool("(use std::char::name->char) (equal (unwrap (name->char \"linefeed\")) #\\newline)"));
-    assert_eq!(eval_string("(use std::char::name->char) (format false \"~a\" (name->char \"nope\"))"), "none");
+    assert_eq!(eval_string("(use std::char::name->char) (format false \"~a\" (name->char \"nope\"))"), "None");
 }
 
 // ----------------------------------------------------------------------
@@ -196,21 +196,21 @@ fn string_filled_is_reached_from_any_module() {
 
 #[test]
 fn search_finds_the_first_occurrence() {
-    assert_eq!(eval_string("(format false \"~a\" (search \"hello world\" \"o w\"))"), "(some 4)");
-    assert_eq!(eval_string("(format false \"~a\" (search \"hello\" \"zz\"))"), "none");
+    assert_eq!(eval_string("(format false \"~a\" (search \"hello world\" \"o w\"))"), "(Some 4)");
+    assert_eq!(eval_string("(format false \"~a\" (search \"hello\" \"zz\"))"), "None");
     // CL: the empty sequence occurs at index 0.
-    assert_eq!(eval_string("(format false \"~a\" (search \"hello\" \"\"))"), "(some 0)");
+    assert_eq!(eval_string("(format false \"~a\" (search \"hello\" \"\"))"), "(Some 0)");
     // The needle longer than the haystack must not read past the end.
-    assert_eq!(eval_string("(format false \"~a\" (search \"ab\" \"abcd\"))"), "none");
+    assert_eq!(eval_string("(format false \"~a\" (search \"ab\" \"abcd\"))"), "None");
 }
 
 #[test]
 fn mismatch_reports_the_first_differing_index() {
-    assert_eq!(eval_string("(format false \"~a\" (mismatch \"abc\" \"abd\"))"), "(some 2)");
-    assert_eq!(eval_string("(format false \"~a\" (mismatch \"abc\" \"abc\"))"), "none");
+    assert_eq!(eval_string("(format false \"~a\" (mismatch \"abc\" \"abd\"))"), "(Some 2)");
+    assert_eq!(eval_string("(format false \"~a\" (mismatch \"abc\" \"abc\"))"), "None");
     // One a prefix of the other: the mismatch is at the shorter one's end.
-    assert_eq!(eval_string("(format false \"~a\" (mismatch \"ab\" \"abc\"))"), "(some 2)");
-    assert_eq!(eval_string("(format false \"~a\" (mismatch \"abc\" \"ab\"))"), "(some 2)");
+    assert_eq!(eval_string("(format false \"~a\" (mismatch \"ab\" \"abc\"))"), "(Some 2)");
+    assert_eq!(eval_string("(format false \"~a\" (mismatch \"abc\" \"ab\"))"), "(Some 2)");
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn to_string_renders_each_scalar_the_way_tilde_a_does() {
 /// one assertion covers both arms of the `Result`.
 fn parsed(call: &str) -> String {
     eval_string(&format!(
-        "(match {} ((ok n) (to-string n)) ((err e) (append \"err:\" (message e))))",
+        "(match {} ((Ok n) (to-string n)) ((Err e) (append \"err:\" (message e))))",
         call
     ))
 }

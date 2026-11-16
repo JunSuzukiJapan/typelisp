@@ -30,8 +30,8 @@ fn a_simple_error_is_the_root_of_its_chain() {
 #[test]
 fn a_simple_error_travels_as_a_dyn_error() {
     let src = r#"(use std::error::as-dyn-error) (defun f () Result<int, :dyn Error>
-                   (as-dyn-error (the Result<int,SimpleError> (Result::err (simple-error "no")))))
-                 (equal (match (f) ((ok _) "?") ((err e) (message e))) "no")"#;
+                   (as-dyn-error (the Result<int,SimpleError> (Result::Err (simple-error "no")))))
+                 (equal (match (f) ((Ok _) "?") ((Err e) (message e))) "no")"#;
     is_true(src);
 }
 
@@ -42,8 +42,8 @@ fn a_wrapped_error_reports_its_own_message_and_keeps_the_cause() {
     is_true(r#"(use std::error::wrap-error) (equal (message (wrap-error "reading" (simple-error "no such file"))) "reading")"#);
     is_true(
         r#"(use std::error::wrap-error) (match (source (wrap-error "reading" (simple-error "no such file")))
-             ((some c) (equal (message c) "no such file"))
-             ((none) false))"#,
+             ((Some c) (equal (message c) "no such file"))
+             ((None) false))"#,
     );
 }
 
@@ -53,8 +53,8 @@ fn wrapping_works_over_any_concrete_error_type() {
     // way `as-dyn-error` does it.
     is_true(
         r#"(use std::error::wrap-error std::num::ParseIntError) (match (source (wrap-error "parsing" (ParseIntError::ParseIntError "bad digit")))
-             ((some c) (equal (message c) "bad digit"))
-             ((none) false))"#,
+             ((Some c) (equal (message c) "bad digit"))
+             ((None) false))"#,
     );
 }
 

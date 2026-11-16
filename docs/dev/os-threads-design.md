@@ -118,7 +118,7 @@ pub struct HeapShared {              // Send + Sync（unsafe impl、不変条件
   止まることは無い（mark が壊れた構造を読まない根拠）。
 - ロック順序: arena ロックを持ったまま GC しない。registry ロックを持ったままヒープを
   触らない。スケジューラロック待ちは native なので、ロック保持中の GC 要求（`recv` が
-  `some` 箱を確保する `sched.rs:881`）はデッドロックしない。
+  `Some` 箱を確保する `sched.rs:881`）はデッドロックしない。
 - debug 用 watchdog: フラグを立てて N 秒 parked にならないスレッドの名前と状態を stderr に
   出す（native 忘れの発見器）。
 

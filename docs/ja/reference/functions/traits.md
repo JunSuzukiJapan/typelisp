@@ -150,7 +150,7 @@
   (defmethod pop (self) Option<Item>))
 ```
 
-`push` で最後に足した要素を取り出せるコレクション。空なら `none`。ジェネリック関数は
+`push` で最後に足した要素を取り出せるコレクション。空なら `None`。ジェネリック関数は
 `(:where (Pop C (Item T)))` で要求する。
 
 | 型 | `pop` の意味 |
@@ -167,8 +167,8 @@
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

@@ -117,7 +117,7 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
                 }
             }
             // Out of a `Sexpr`, a struct's or a variant's name is a value
-            // of that type; `some` and `none` against an `Option<Sexpr>`
+            // of that type; `Some` and `None` against an `Option<Sexpr>`
             // are its own variants.
             if is_sexpr_expectation(&ty) && !head.is_some_and(|h| option_variant(cx, &ty, h)) {
                 if let Some(pat) = downcast(cx, heap, locals, &ty, &written, binds)? {
@@ -129,7 +129,7 @@ fn check_pattern(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, v: 
             };
             if is_sexpr_expectation(&ty) && !option_variant(cx, &ty, head) {
                 // An `Option<Sexpr>` is matched by `Sexpr`'s variants as if
-                // its `some` were peeled, beside `none` in the same arms.
+                // its `Some` were peeled, beside `None` in the same arms.
                 if is_option_of_sexpr(&ty) && is_ctor_name(head.name()) {
                     return check_pattern(cx, heap, locals, &sexpr_ty(), v, at, binds);
                 }
@@ -177,8 +177,8 @@ fn bare_variant(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, id: 
     variant_pattern(cx, heap, locals, *owner, targs.clone(), &def, variant, &[], binds).map(Some)
 }
 
-/// Whether `id` is a variant of `ty` when it is `Option<Sexpr>`: `some` and
-/// `none` are its own, not downcasts.
+/// Whether `id` is a variant of `ty` when it is `Option<Sexpr>`: `Some` and
+/// `None` are its own, not downcasts.
 fn option_variant(cx: &Cx, ty: &Type, id: SymRef) -> bool {
     is_option_of_sexpr(ty) && cx.reg.type_def(&Path::builtin(wk::OPTION)).is_some_and(|d| d.variant_index(member_symbol(id.name())).is_some())
 }
@@ -379,7 +379,7 @@ fn type_test(cx: &Cx, heap: &mut Heap, locals: &Locals, expected: &Type, parts: 
     if crate::check::lower::CoreForms::repr(cx.reg, &ty).niche_payload().is_some() {
         let must_name = || {
             Error::TypeError(format!(
-                "pattern: `(the {} ..)` on a niche-represented Option must name a constructor — `(the {} (some x))` or `(the {} (none))` — since the Sexpr holds it boxed",
+                "pattern: `(the {} ..)` on a niche-represented Option must name a constructor — `(the {} (Some x))` or `(the {} (None))` — since the Sexpr holds it boxed",
                 ty, ty, ty
             ))
         };

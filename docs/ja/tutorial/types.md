@@ -47,41 +47,41 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 ## 2. `Option<T>`：値が無いかもしれない
 
 typelisp には `nil` がありません。「値が無いかもしれない」ことは、型 `Option<T>` で表します。
-`Option<T>` の値は、`T` の値を 1 つ持つ `some` か、何も持たない `none` のどちらかです。
+`Option<T>` の値は、`T` の値を 1 つ持つ `Some` か、何も持たない `None` のどちらかです。
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
 none
 ```
 
 `Option<int>` は `int` ではないので、そのまま計算には使えません。`(+ (safe-div 10 2) 1)` は型エラー
-です。中身を使うには `match` で `some` と `none` を分けます。
+です。中身を使うには `match` で `Some` と `None` を分けます。
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- `(some q)` の腕では、中身が変数 `q` に入ります。
-- `match` は腕が**すべての場合を尽くしているか**を検査します。`(none)` の腕を書き忘れると
+- `(Some q)` の腕では、中身が変数 `q` に入ります。
+- `match` は腕が**すべての場合を尽くしているか**を検査します。`(None)` の腕を書き忘れると
   型エラーになります。
 
 ### なぜ nil が無いのか
 
 多くの言語では、`nil`（`null`）がどの型の値の代わりにもなれます。そのため、「値が無い」場合を
 扱い忘れても、実行するまで気付きません。typelisp では値が無いかもしれない場所は `Option<T>` 型に
-なり、`match` で `none` の場合を書かないと型検査を通りません。扱い忘れは実行前に見つかります。
+なり、`match` で `None` の場合を書かないと型検査を通りません。扱い忘れは実行前に見つかります。
 
 条件式も同じ考え方で、`if` の条件に書けるのは `bool` だけです。Common Lisp のように「`nil` 以外は
 真」という規則はありません。
@@ -90,12 +90,12 @@ none
 
 | 書き方 | 意味 |
 |---|---|
-| `(unwrap-or opt 既定値)` | `some` なら中身、`none` なら既定値 |
-| `(unwrap opt)` | 中身を取り出す。`none` ならプログラムが止まる |
+| `(unwrap-or opt 既定値)` | `Some` なら中身、`None` なら既定値 |
+| `(unwrap opt)` | 中身を取り出す。`None` ならプログラムが止まる |
 | `(is-some opt)` / `(is-none opt)` | どちらかを調べる |
 
 標準ライブラリにも `Option` を返す関数がたくさんあります。たとえば `position` は、見つかれば
-位置を `some` で、見つからなければ `none` を返します。
+位置を `Some` で、見つからなければ `None` を返します。
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -103,25 +103,25 @@ none
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`：失敗するかもしれない
 
-失敗する可能性のある処理は `Result<T,E>` を返します。成功なら値 `T` を持つ `ok`、失敗なら
-エラー `E` を持つ `err` です。
+失敗する可能性のある処理は `Result<T,E>` を返します。成功なら値 `T` を持つ `Ok`、失敗なら
+エラー `E` を持つ `Err` です。
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -130,8 +130,8 @@ none
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 `Option` は「無い」ことに理由が要らない場合、`Result` は失敗の理由を伝えたい場合に使います。

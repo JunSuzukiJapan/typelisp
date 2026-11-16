@@ -66,9 +66,9 @@ fn the_echo_uses_a_print_object_method() {
 
 #[test]
 fn a_niched_option_echoes_with_its_wrapper() {
-    assert_echo("", "(Option::some \"x\")", "(some \"x\")");
-    assert_echo("", "(the Option<int> (Option::none))", "none");
-    assert_echo("(defstruct holder (o Option<int>))", "(make-instance 'holder :o (Option::some 3))", "#<holder o: (some 3)>");
+    assert_echo("", "(Option::Some \"x\")", "(Some \"x\")");
+    assert_echo("", "(the Option<int> (Option::None))", "None");
+    assert_echo("(defstruct holder (o Option<int>))", "(make-instance 'holder :o (Option::Some 3))", "#<holder o: (Some 3)>");
 }
 
 #[test]

@@ -22,7 +22,7 @@ pub(crate) struct Typed {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Node {
-    /// A literal: its core tag and its value (none for the unit value).
+    /// A literal: its core tag and its value (None for the unit value).
     Literal { tag: u32, #[serde(with = "super::wire::slot::opt")] value: Option<Value> },
     /// `(quote datum)`: the datum as it was read.
     Quote { #[serde(with = "super::wire::slot")] datum: Value },
@@ -99,12 +99,12 @@ pub(crate) enum Node {
     /// `sites` say, in order: lowered with each renamed to the code it calls,
     /// which an executable registers.
     FormatCalls { text: String, sites: Vec<FormatSite> },
-    /// The function `path` as a value, `targs` its type arguments (none for
+    /// The function `path` as a value, `targs` its type arguments (None for
     /// a builtin, whose one entry serves them all); `params` are the types
     /// of the parameters it really takes, a `&rest` one as a list.
     FnRef { path: Path, targs: Vec<Type>, params: Vec<Type> },
     /// The method `method` of `owner` as a value, `targs` its type
-    /// arguments (none for a builtin, whose one entry serves them all);
+    /// arguments (None for a builtin, whose one entry serves them all);
     /// `params` are the types of the parameters it really takes, a `&rest`
     /// one as a list, and `ret` what it answers.
     MethodRef { owner: Path, #[serde(with = "crate::owned_form::sym_serde")] method: SymRef, targs: Vec<Type>, params: Vec<Type>, ret: Type },
@@ -305,7 +305,7 @@ pub(crate) enum FormatSite {
 }
 
 impl Typed {
-    /// `(some value)`, an `Option` of `value`'s type.
+    /// `(Some value)`, an `Option` of `value`'s type.
     pub(crate) fn some(value: Typed, loc: Option<Loc>) -> Typed {
         let inner = value.ty.clone();
         let node = Node::Construct {
@@ -319,7 +319,7 @@ impl Typed {
         Typed { node, ty: Type::Named(option_path(), vec![inner]), loc }
     }
 
-    /// `none`, an `Option<inner>`.
+    /// `None`, an `Option<inner>`.
     pub(crate) fn none(inner: Type) -> Typed {
         let node = Node::Construct { owner: option_path(), targs: vec![inner.clone()], variant: OPTION_NONE, mutable: false, field_tys: Vec::new(), args: Vec::new() };
         Typed { node, ty: Type::Named(option_path(), vec![inner]), loc: None }

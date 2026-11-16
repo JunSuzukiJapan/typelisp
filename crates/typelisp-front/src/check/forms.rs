@@ -368,7 +368,7 @@ pub(crate) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) ->
     f.finish(wk::DYN_UPCAST)
 }
 
-/// `(some-of REPR FORM)` — a niched `Option<T>`'s `some`: `FORM`'s value as
+/// `(some-of REPR FORM)` — a niched `Option<T>`'s `Some`: `FORM`'s value as
 /// the tagged word a field of type `T` holds (`Repr::Niche`, `check/repr.rs`).
 /// `REPR` is `T`'s representation, which is what the island tags by; the
 /// interpreter's `Value` already is that word.
@@ -380,8 +380,8 @@ pub(crate) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Res
 }
 
 /// `(box-option KEY FORM)` — a niched `Option` put into the `BoxedObj::Enum`
-/// box a `Sexpr` slot holds it as (`some` = variant 0 around the same word,
-/// `none` = variant 1), under the identity `KEY` spells. The printer, `eq`
+/// box a `Sexpr` slot holds it as (`Some` = variant 0 around the same word,
+/// `None` = variant 1), under the identity `KEY` spells. The printer, `eq`
 /// and every other consumer of a `Sexpr` datum see the same box a boxed
 /// `Option` is; the niche is a statement about typed positions only.
 pub(crate) fn box_option_form(heap: &mut Heap, option: &Type, value: Value) -> Result<Value, Error> {

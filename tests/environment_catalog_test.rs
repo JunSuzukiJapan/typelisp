@@ -203,7 +203,7 @@ fn get_decoded_time_agrees_with_the_clock() {
 
 // ---- Environment and implementation identity ---------------------------
 
-/// `getenv` answers `some` for a variable that is set and `none` for one that
+/// `getenv` answers `Some` for a variable that is set and `None` for one that
 /// is not. `PATH` is set in every environment a test runs in.
 #[test]
 fn getenv_distinguishes_set_from_unset() {
@@ -402,8 +402,8 @@ fn the_no_zone_default_decodes_into_local_time() {
     let same = show(
         "(let ((ut (get-universal-time)))
            (let ((west (match (std::time::timezone-offset-seconds ut::day ut::second)
-                         ((some w) w)
-                         ((none) (panic \"no zone\"))))
+                         ((Some w) w)
+                         ((None) (panic \"no zone\"))))
                  (local (decode-universal-time ut)))
              (let ((shifted (decode-universal-time (make-instance 'universal-time :day ut::day :second (- ut::second west)) 0)))
                (and (= local::hour shifted::hour)
@@ -481,7 +481,7 @@ fn run_time_is_cpu_time_and_not_elapsed_time() {
 }
 
 /// The three CLHS 25.1 names that have to ask the host. Each may honestly
-/// answer `none`, so the test is that the answer is well-formed and — where
+/// answer `None`, so the test is that the answer is well-formed and — where
 /// the OS certainly knows — that it is actually there.
 #[test]
 fn the_host_identifies_itself() {
@@ -489,20 +489,20 @@ fn the_host_identifies_itself() {
     assert_eq!(show("(is-some (machine-instance))"), "true");
     assert_eq!(show("(is-some (software-version))"), "true");
     assert_eq!(
-        show("(match (machine-instance) ((some h) (> (length h) 0)) ((none) false))"),
+        show("(match (machine-instance) ((Some h) (> (length h) 0)) ((None) false))"),
         "true"
     );
     // `machine-version` is the chip, which not every platform can name;
-    // `none` is CL's own permitted answer, so only the shape is pinned.
+    // `None` is CL's own permitted answer, so only the shape is pinned.
     assert!(matches!(show("(is-some (machine-version))").as_str(), "true" | "false"));
-    // A site name is what nothing records, so it is always `none` — and that
+    // A site name is what nothing records, so it is always `None` — and that
     // is the answer CL allows rather than an invented constant.
     assert_eq!(show("(is-some (short-site-name))"), "false");
     assert_eq!(show("(is-some (long-site-name))"), "false");
 }
 
 /// `file-author` keeps CL's two answers apart: a missing file is an error,
-/// and an owner with no password-database entry is `none`.
+/// and an owner with no password-database entry is `None`.
 #[test]
 fn file_author_names_the_owner() {
     let f = std::env::temp_dir().join(format!("typelisp-author-{}.txt", std::process::id()));
@@ -513,12 +513,12 @@ fn file_author_names_the_owner() {
     assert_eq!(show(&format!("(is-ok (file-author \"{}\"))", path)), "true");
     assert_eq!(
         show(&format!(
-            "(match (file-author \"{}\") ((ok who) (is-some who)) ((err _) false))",
+            "(match (file-author \"{}\") ((Ok who) (is-some who)) ((Err _) false))",
             path
         )),
         "true"
     );
     let _ = std::fs::remove_file(&f);
-    // Gone: an `Err`, not a `none`.
+    // Gone: an `Err`, not a `None`.
     assert_eq!(show(&format!("(is-ok (file-author \"{}\"))", path)), "false");
 }

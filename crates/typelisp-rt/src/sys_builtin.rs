@@ -53,14 +53,14 @@ fn type_of(name: u32) -> TypeId {
     }
 }
 
-/// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
+/// `Ok(v)`, matching `result_def`'s variant order (`Ok` = 0, `Err` = 1).
 fn result_ok(heap: &mut Heap, name: u32, v: Value) -> Value {
     let key = type_of(name);
     heap.alloc_enum(key, 0, vec![v])
 }
 
 /// `Err(<ErrType>(msg))`: the concrete single-variant error type of the
-/// failing builtin, wrapped in `Result`'s `err`. The error types take no type
+/// failing builtin, wrapped in `Result`'s `Err`. The error types take no type
 /// arguments, so their own keys are unchanged by the instantiation rule.
 fn result_err(heap: &mut Heap, name: u32, err_type_key: TypeId, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
@@ -197,12 +197,12 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
     }
 }
 
-/// `(getenv name)`: the environment variable's value, or `none` when it is
+/// `(getenv name)`: the environment variable's value, or `None` when it is
 /// unset *or* not valid Unicode. CL has no equivalent at all, so the name is
 /// the one every CL implementation's extension uses (`sb-posix:getenv`,
 /// `ccl:getenv`).
 ///
-/// The two failure modes collapse into one `none` on purpose: a `string` in
+/// The two failure modes collapse into one `None` on purpose: a `string` in
 /// this language is Rust's, so a variable holding bytes that are not UTF-8
 /// has no value that could be handed back, and "unset" is the only honest
 /// answer a `Option<string>` can give.
@@ -211,10 +211,10 @@ pub fn getenv(heap: &mut Heap, name: &str) -> Value {
     option_value(heap, wk::F_GETENV, v)
 }
 
-/// `(home-directory)`: `$HOME`, or `none` when it is unset — the primitive
+/// `(home-directory)`: `$HOME`, or `None` when it is unset — the primitive
 /// the prelude's `user-homedir-pathname` (CLHS 25.1) is built on.
 ///
-/// `none` rather than a guess: CL says `user-homedir-pathname` may return
+/// `None` rather than a guess: CL says `user-homedir-pathname` may return
 /// `NIL` when the home directory cannot be determined, and inventing `"/"` or
 /// the current directory would make an unset `$HOME` indistinguishable from a
 /// real one.
@@ -286,7 +286,7 @@ pub fn thread_available_parallelism() -> Result<i64, String> {
 //
 // The four below are the ones `std` has no equivalent of, so each is one
 // call into [`crate::os`] — the single module that owns this workspace's
-// direct C calls. Every one may honestly answer `none`; CL says so for
+// direct C calls. Every one may honestly answer `None`; CL says so for
 // `machine-instance`, `machine-version` and `software-version` in as many
 // words ("or nil if no such ... can be determined").
 
@@ -309,14 +309,14 @@ pub fn get_internal_run_time() -> i64 {
     }
 }
 
-/// `(machine-instance)` (CLHS 25.1): the host's name, or `none`.
+/// `(machine-instance)` (CLHS 25.1): the host's name, or `None`.
 pub fn machine_instance(heap: &mut Heap) -> Value {
     let v = crate::os::host_name().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_MACHINE_INSTANCE, v)
 }
 
 /// `(machine-version)` (CLHS 25.1): the hardware this is *running* on
-/// (`Apple M1`, `Intel(R) Xeon(R) …`), or `none` where nothing can say.
+/// (`Apple M1`, `Intel(R) Xeon(R) …`), or `None` where nothing can say.
 ///
 /// Distinct from `machine-type`, which is `std::env::consts::ARCH` — the
 /// architecture this binary was *built* for.
@@ -326,7 +326,7 @@ pub fn machine_version(heap: &mut Heap) -> Value {
 }
 
 /// `(software-version)` (CLHS 25.1): the OS release string (`uname -r`,
-/// e.g. `24.6.0`), or `none`. Its companion `software-type` is a
+/// e.g. `24.6.0`), or `None`. Its companion `software-type` is a
 /// compile-time constant and needs no call.
 pub fn software_version(heap: &mut Heap) -> Value {
     let v = crate::os::os_release().map(|s| heap.alloc_string(s));

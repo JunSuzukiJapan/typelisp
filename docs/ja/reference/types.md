@@ -28,8 +28,8 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 | 型 | 内容 | 詳細 |
 |---|---|---|
-| `Option<T>` | 値があるか無いか。`some` / `none` | [Option と Result](functions/option-result.md) |
-| `Result<T,E>` | 成功か失敗か。`ok` / `err` | 同上 |
+| `Option<T>` | 値があるか無いか。`Some` / `None` | [Option と Result](functions/option-result.md) |
+| `Result<T,E>` | 成功か失敗か。`Ok` / `Err` | 同上 |
 | `Vector<T>` | 可変長配列 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | ハッシュ表。キーの比べ方は作るときの `:test` で決まり、`equal` の表ではキーの型が `Hash` を実装していること | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | タプル（要素 1〜12 個）。要素は `t::0` で読む | [構文 2 章](syntax.md#2-型の書き方) |
@@ -45,7 +45,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | 型 | 内容 | 詳細 |
 |---|---|---|
 | `Sexpr` | 空でない S 式。`int`・`i8`〜`u32`・`f32`・`f64`・`char`・`bool`・`sym`・`str`・`cons`・`ratio`・`path`・`vector`・`array`・`tuple` の 19 変種 | [S 式データ](functions/sequences.md#2-s-式データ-sexpr) |
-| `Option<Sexpr>` | S 式データ一般。空リスト `()` は `none` | 同上 |
+| `Option<Sexpr>` | S 式データ一般。空リスト `()` は `None` | 同上 |
 
 ## 4. 標準ライブラリの型
 
@@ -70,7 +70,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | ストリーム | [ストリーム](functions/streams-files.md#3-具象ストリーム型) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | 合成ストリーム | [合成ストリーム](functions/streams-files.md#4-合成ストリーム) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | ネットワーク | [ネットワーク](functions/network.md#1-型) |
-| `ReadOutcome` | `read-sexpr` の結果。`datum` / `eof` | [ストリーム](functions/streams-files.md#6-ジェネリック関数とファイル操作) |
+| `ReadOutcome` | `read-sexpr` の結果。`Datum` / `Eof` | [ストリーム](functions/streams-files.md#6-ジェネリック関数とファイル操作) |
 | `universal-time` `internal-time` `decoded-time` | 時刻 | [時間](functions/system.md#1-時間) |
 | `heap-info` | ヒープの現況 | [処理系の道具](functions/system.md#51-heap-info-の欄) |
 

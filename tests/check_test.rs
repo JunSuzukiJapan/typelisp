@@ -118,7 +118,7 @@ fn ret_of(src: &str, name: &str) -> Type {
 
 /// The synthesized type of a single expression form.
 /// `Option<Sexpr>` — the type an S-expression datum has since the empty list
-/// became `Option`'s `none` rather than a `Sexpr` variant. Bare `Sexpr` still
+/// became `Option`'s `None` rather than a `Sexpr` variant. Bare `Sexpr` still
 /// exists and means *non-empty*, so the two are not interchangeable in either
 /// direction here: these tests assert which one a form actually produces.
 fn opt_sexpr() -> Type {
@@ -282,13 +282,13 @@ fn ty_program(src: &str) -> Type {
 
 #[test]
 fn construct_some_infers_type_argument() {
-    assert_eq!(ty("(Option::some 1)"), Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int]));
+    assert_eq!(ty("(Option::Some 1)"), Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int]));
 }
 
 #[test]
 fn sexpr_cons_yields_an_option_sexpr() {
     // `(sexpr-cons (int 1) ())`: both slots are `Option<Sexpr>`, and `()`
-    // adopts `none` there. (The free `cons`/`Cons` name is the generic
+    // adopts `None` there. (The free `cons`/`Cons` name is the generic
     // `cons<T,U>` pair now — the Sexpr cons cell is built through the
     // `sexpr-*` layer — Phase 4b.)
     assert_eq!(ty("(sexpr-cons (int 1) ())"), opt_sexpr());
@@ -296,7 +296,7 @@ fn sexpr_cons_yields_an_option_sexpr() {
 
 #[test]
 fn nil_is_no_longer_a_sexpr_constructor() {
-    // The empty list moved out of `Sexpr` and into `Option<Sexpr>`'s `none`.
+    // The empty list moved out of `Sexpr` and into `Option<Sexpr>`'s `None`.
     // `nil`'s variant slot is kept reserved rather than reused (so the IR's
     // variant numbering is untouched), which means `(Nil)` would otherwise
     // still *resolve* — hence an explicit gate with a migration message
@@ -339,7 +339,7 @@ fn an_option_sexpr_does_not_narrow_to_a_bare_sexpr() {
 
 #[test]
 fn the_empty_list_is_an_option_sexpr_none() {
-    // `()` adopts `none` where an S-expression is expected — which is now the
+    // `()` adopts `None` where an S-expression is expected — which is now the
     // same rule as "`()` adopts `Option::None` when an `Option<T>` is
     // expected", not a second special case beside it.
     assert_eq!(ty("(sexpr-cons () ())"), opt_sexpr());
@@ -359,8 +359,8 @@ fn match_option_exhaustive_unwrap_or() {
     // The canonical minimal goal: unwrap-or over Option<int> type-checks.
     let src = "(defun unwrap-or ((opt Option<int>) (default int)) int \
                  (match opt \
-                   ((some v) v) \
-                   ((none) default)))";
+                   ((Some v) v) \
+                   ((None) default)))";
     assert_eq!(program(src).unwrap().tag, "defun");
     assert_eq!(ret_of(src, "unwrap-or"), Type::Int);
 }
@@ -368,21 +368,21 @@ fn match_option_exhaustive_unwrap_or() {
 #[test]
 fn match_non_exhaustive_is_rejected() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((some v) v)))";
+                 (match opt ((Some v) v)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
 #[test]
 fn match_wildcard_makes_exhaustive() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((some v) v) (_ 0)))";
+                 (match opt ((Some v) v) (_ 0)))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
 #[test]
 fn match_arms_must_share_result_type() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((some v) v) ((none) true)))";
+                 (match opt ((Some v) v) ((None) true)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
@@ -390,7 +390,7 @@ fn match_arms_must_share_result_type() {
 fn match_binds_constructor_fields() {
     // `v` is bound at int inside the Some arm, so returning it as int is fine.
     let src = "(defun f ((opt Option<int>)) int \
-                 (match opt ((some v) v) ((none) 0)))";
+                 (match opt ((Some v) v) ((None) 0)))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
@@ -408,7 +408,7 @@ fn match_on_a_type_with_no_variants_needs_a_catch_all() {
 
 // ---- match arms fill each other's inference holes ---------------------------
 //
-// `(Result::ok v)` fixes `T` and says nothing about `E`; `(Result::err e)`
+// `(Result::Ok v)` fixes `T` and says nothing about `E`; `(Result::Err e)`
 // does the reverse. Neither arm can type itself where the `match` has no
 // expected type, so the arms are probed, their partial types merged, and the
 // arms re-checked against the result (`typeck::matching`'s B4).
@@ -417,9 +417,9 @@ fn match_on_a_type_with_no_variants_needs_a_catch_all() {
 fn match_arms_pool_a_results_two_type_arguments() {
     let src = "(defun f ((r Result<int, string>)) int \
                  (let ((out (match r \
-                              ((ok v) (Result::ok v)) \
-                              ((err e) (Result::err e))))) \
-                   (match out ((ok v) v) ((err e) 0))))";
+                              ((Ok v) (Result::Ok v)) \
+                              ((Err e) (Result::Err e))))) \
+                   (match out ((Ok v) v) ((Err e) 0))))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
 
@@ -429,8 +429,8 @@ fn a_lone_unpinnable_arm_is_still_rejected() {
     // second pass draws on is empty and the original error stands.
     let src = "(defun f ((opt Option<int>)) int \
                  (let ((out (match opt \
-                              ((some v) (Result::ok v)) \
-                              ((none) (panic \"no\"))))) \
+                              ((Some v) (Result::Ok v)) \
+                              ((None) (panic \"no\"))))) \
                    0))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
@@ -439,17 +439,17 @@ fn a_lone_unpinnable_arm_is_still_rejected() {
 fn an_unpinnable_constructor_outside_a_match_is_still_rejected() {
     // The hole is a `match`-arm device only — everywhere else an
     // un-inferrable type argument is as fatal as it ever was.
-    assert_type_error("(let ((r (Result::ok 1))) 0)");
+    assert_type_error("(let ((r (Result::Ok 1))) 0)");
 }
 
 #[test]
 fn a_probed_arm_takes_its_type_from_a_concrete_sibling() {
-    // The `err` arm needs nothing inferred, so the `ok` arm's missing `E`
+    // The `Err` arm needs nothing inferred, so the `Ok` arm's missing `E`
     // comes from an arm that is not itself a bare constructor.
     let src = "(defun f ((r Result<int, string>) (d Result<int, string>)) int \
                  (let ((out (match r \
-                              ((ok v) (Result::ok v)) \
-                              ((err e) d)))) \
+                              ((Ok v) (Result::Ok v)) \
+                              ((Err e) d)))) \
                    0))";
     assert_eq!(program(src).expect("check failed").tag, "defun");
 }
@@ -461,8 +461,8 @@ fn arms_of_different_shapes_are_still_rejected() {
     // both report what they could not infer.
     let src = "(defun f ((r Result<int, string>)) int \
                  (let ((out (match r \
-                              ((ok v) (Result::ok v)) \
-                              ((err e) (Option::none))))) \
+                              ((Ok v) (Result::Ok v)) \
+                              ((Err e) (Option::None))))) \
                    0))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
@@ -471,16 +471,16 @@ fn arms_of_different_shapes_are_still_rejected() {
 
 #[test]
 fn if_let_binds_in_then_branch() {
-    // if-let binding is `(pattern value)`: here pattern `(some v)`, value `opt`.
+    // if-let binding is `(pattern value)`: here pattern `(Some v)`, value `opt`.
     let src = "(defun f ((opt Option<int>)) int \
-                 (if-let ((some v) opt) v 0))";
+                 (if-let ((Some v) opt) v 0))";
     assert_eq!(program_with_prelude(src).expect("check failed").tag, "defun");
 }
 
 #[test]
 fn if_let_branches_must_agree() {
     let src = "(defun f ((opt Option<int>)) int \
-                 (if-let ((some v) opt) v true))";
+                 (if-let ((Some v) opt) v true))";
     assert!(matches!(program_with_prelude(src), Err(Error::TypeError(_))));
 }
 
@@ -955,7 +955,7 @@ fn type_error_carries_source_location() {
 ///
 /// The hole opened exactly where a mistake is hardest to see, and it made a
 /// second one possible: with `Option<Sexpr>` parameters, `(equalp opt
-/// (Option::some x))` had its constructor call take the *parameter's* type
+/// (Option::Some x))` had its constructor call take the *parameter's* type
 /// argument and become the empty-list niche — a bare datum — while `opt`
 /// crossed as a boxed enum, so a comparison between two genuinely equal
 /// values answered `false`.
@@ -967,7 +967,7 @@ fn equality_requires_its_two_arguments_to_have_one_type() {
         // Two unrelated user structs — the case that used to answer `false`.
         "(defstruct pa (x int)) (defstruct pb (y string)) (equalp (make-instance 'pa :x 1) (make-instance 'pb :y \"z\"))",
         // Two different instantiations of the same generic.
-        "(equalp (the Option<char> (Option::none)) (the Option<int> (Option::none)))",
+        "(equalp (the Option<char> (Option::None)) (the Option<int> (Option::None)))",
         // And the case that was already an error, still is.
         "(equalp 1 \"a\")",
     ] {
@@ -984,7 +984,7 @@ fn equality_requires_its_two_arguments_to_have_one_type() {
 fn equality_still_compares_every_same_typed_pair() {
     for src in [
         "(equal (quote (1 2 3)) (quote (1 2 3)))",
-        "(equalp (Option::some #\\x) (Option::some #\\x))",
+        "(equalp (Option::Some #\\x) (Option::Some #\\x))",
         "(defstruct pt (x int)) (equalp (make-instance 'pt :x 1) (make-instance 'pt :x 1))",
     ] {
         assert!(program(src).is_ok(), "should check: {}", src);

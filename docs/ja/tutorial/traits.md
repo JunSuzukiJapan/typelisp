@@ -134,12 +134,12 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-`money` を 300、900、100 の順に入れた `Vector` を渡すと、`(some 900 yen)` が返ります。
+`money` を 300、900、100 の順に入れた `Vector` を渡すと、`(Some 900 yen)` が返ります。
 
 ## 5. `:dyn`：型の違う値をまとめて扱う
 

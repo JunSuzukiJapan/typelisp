@@ -295,11 +295,11 @@ fn built_in_enum_values_print_their_variant_names() {
     // built-in definitions the checker defines them from
     // (`typeck::builtins::runtime_types`), so the
     // renderer's lookup finds them without a second table to fall back to.
-    assert_eq!(eval_string(r#"(format false "~a" (Option::some 1))"#), "(some 1)");
-    assert_eq!(eval_string(r#"(defun no-int () Option<int> (Option::none)) (format false "~a" (no-int))"#), "none");
+    assert_eq!(eval_string(r#"(format false "~a" (Option::Some 1))"#), "(Some 1)");
+    assert_eq!(eval_string(r#"(defun no-int () Option<int> (Option::None)) (format false "~a" (no-int))"#), "None");
     assert_eq!(
-        eval_string(r#"(use std::num::ParseIntError) (defun okv () Result<int,ParseIntError> (Result::ok 7)) (format false "~a" (okv))"#),
-        "(ok 7)"
+        eval_string(r#"(use std::num::ParseIntError) (defun okv () Result<int,ParseIntError> (Result::Ok 7)) (format false "~a" (okv))"#),
+        "(Ok 7)"
     );
 }
 
@@ -309,9 +309,9 @@ fn a_built_in_error_value_prints_like_an_sbcl_condition() {
     // report, `~a` is the report alone. The message text is the builtin's
     // own wording; only the shape matters.
     let s = eval_string(r#"(use std::num::parse-int) (format false "~s" (parse-int "zz"))"#);
-    assert!(s.starts_with("(err #<parseinterror \"parse-int: "), "got {}", s);
+    assert!(s.starts_with("(Err #<parseinterror \"parse-int: "), "got {}", s);
     let a = eval_string(r#"(use std::num::parse-int) (format false "~a" (parse-int "zz"))"#);
-    assert!(a.starts_with("(err parse-int: "), "got {}", a);
+    assert!(a.starts_with("(Err parse-int: "), "got {}", a);
     assert_eq!(eval_string(r#"(format false "~s" (simple-error "boom"))"#), "#<simpleerror \"boom\">");
     assert_eq!(eval_string(r#"(format false "~a" (simple-error "boom"))"#), "boom");
     assert_eq!(eval_string(r#"(use std::error::wrap-error) (format false "~s" (wrap-error "outer" (simple-error "inner")))"#), "#<wrappederror \"outer\">");
@@ -394,16 +394,16 @@ fn a_generic_handle_prints_its_type_arguments() {
 fn variant_names_resolve_inside_a_nested_structure() {
     // `Option<int>` is an ordinary boxed enum inside the list, so it prints
     // with its variant name. It has to be spelled out: a bare
-    // `(Option::some 1)` in an element position would take the element's own
+    // `(Option::Some 1)` in an element position would take the element's own
     // `Option<Sexpr>` expectation instead, and *that* is the niche.
     assert_eq!(
-        eval_string(r#"(format false "~a" (list (the Option<int> (Option::some 1)) 2))"#),
-        "((some 1) 2)"
+        eval_string(r#"(format false "~a" (list (the Option<int> (Option::Some 1)) 2))"#),
+        "((Some 1) 2)"
     );
     // The niche prints transparently: `Option<Sexpr>` *is* the S-expression,
     // so there is no wrapper to name. This is the visible spec change from
     // moving the empty list into `Option` (`docs/ja/reference/functions/printing.md` §1).
-    assert_eq!(eval_string(r#"(format false "~a" (list (Option::some 1) 2))"#), "(1 2)");
+    assert_eq!(eval_string(r#"(format false "~a" (list (Option::Some 1) 2))"#), "(1 2)");
 }
 
 #[test]
@@ -554,9 +554,9 @@ fn a_type_variable_argument_in_a_generic_body() {
 (defstruct Pair<T, U> (first T) (second U))
 (impl<T,U> Pair<T,U> (defmethod describe (self) string (format false "~a/~a" self::first self::second)))
 "#;
-    let body = r#"(format false "~a ~a ~a ~a" (show 1) (show 2.5) (show (Option::some 3))
+    let body = r#"(format false "~a ~a ~a ~a" (show 1) (show 2.5) (show (Option::Some 3))
                           (describe (make-instance 'Pair :first 1.5 :second "a")))"#;
-    let expected = "<1> <2.5> <(some 3)> 1.5/a";
+    let expected = "<1> <2.5> <(Some 3)> 1.5/a";
     assert_eq!(eval_string(&format!("{}\n{}", defs, body)), expected);
     assert_eq!(eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body)), expected);
 }

@@ -94,13 +94,13 @@ fn parses_never_type_annotation() {
 
 #[test]
 fn result_ok_infers_from_return_type() {
-    let src = "(use std::num::ParseIntError) (defun mk () Result<int,ParseIntError> (Result::ok 1))";
+    let src = "(use std::num::ParseIntError) (defun mk () Result<int,ParseIntError> (Result::Ok 1))";
     assert_eq!(ret_of(src, "mk"), Type::Named(Path::builtin(typelisp::mem::wk::RESULT), vec![Type::Int, error_ty()]));
 }
 
 #[test]
 fn result_err_takes_error_value() {
-    let src = "(use std::num::ParseIntError) (defun bad () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError \"boom\")))";
+    let src = "(use std::num::ParseIntError) (defun bad () Result<int,ParseIntError> (Result::Err (ParseIntError::ParseIntError \"boom\")))";
     assert_eq!(program(src).expect("check failed").0, "defun");
 }
 
@@ -108,20 +108,20 @@ fn result_err_takes_error_value() {
 fn match_result_exhaustive_with_panic_arm() {
     // Unwrapping a Result: the Err arm diverges, so the match has type int.
     let src = "(use std::num::ParseIntError) (defun unwrap-i ((r Result<int,ParseIntError>)) int \
-                 (match r ((ok v) v) ((err e) (panic \"unwrap on Err\"))))";
+                 (match r ((Ok v) v) ((Err e) (panic \"unwrap on Err\"))))";
     assert_eq!(ret_of(src, "unwrap-i"), Type::Int);
 }
 
 #[test]
 fn match_result_non_exhaustive_rejected() {
-    let src = "(use std::num::ParseIntError) (defun f ((r Result<int,ParseIntError>)) int (match r ((ok v) v)))";
+    let src = "(use std::num::ParseIntError) (defun f ((r Result<int,ParseIntError>)) int (match r ((Ok v) v)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
 #[test]
 fn match_result_arms_must_agree() {
     let src = "(use std::num::ParseIntError) (defun f ((r Result<int,ParseIntError>)) int \
-                 (match r ((ok v) v) ((err e) true)))";
+                 (match r ((Ok v) v) ((Err e) true)))";
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
@@ -201,9 +201,9 @@ fn builtin_errors_implement_the_error_trait() {
     // one implements `Error` — so the message is read the same way for all.
     let src = r#"(use std::num::ParseIntError) (use std::num::parse-int) 
         (defun int-msg ((r Result<int,ParseIntError>)) string
-          (match r ((ok _) "?") ((err e) (message e))))
+          (match r ((Ok _) "?") ((Err e) (message e))))
         (defun read-msg ((r Result<Option<Sexpr>,ReadError>)) string
-          (match r ((ok _) "?") ((err e) (message e))))
+          (match r ((Ok _) "?") ((Err e) (message e))))
         (list (int-msg (parse-int "zz")) (read-msg (read "(")))
         (int-msg (parse-int "zz"))
     "#;
@@ -224,10 +224,10 @@ fn a_builtin_error_has_no_source() {
     // Nothing wraps a built-in error, so it is always the root cause.
     let src = r#"
         (defun has-source ((e :dyn Error)) string
-          (match (source e) ((some _) "some") ((none) "none")))
+          (match (source e) ((Some _) "some") ((None) "none")))
         (has-source (EvalError::EvalError "boom"))
     "#;
-    assert_eq!(run_str(src), "none");
+    assert_eq!(run_str(src), "None");
 }
 
 #[test]
@@ -237,8 +237,8 @@ fn a_defstruct_error_type_rides_in_result() {
     let src = r#"
         (defstruct IoErr (path string))
         (defun open-it ((p string)) Result<int,IoErr>
-          (if (equal p "") (Result::err (make-instance 'IoErr :path "<empty>")) (Result::ok 3)))
-        (match (open-it "") ((ok _) "?") ((err e) e::path))
+          (if (equal p "") (Result::Err (make-instance 'IoErr :path "<empty>")) (Result::Ok 3)))
+        (match (open-it "") ((Ok _) "?") ((Err e) e::path))
     "#;
     assert_eq!(run_str(src), "<empty>");
 }
@@ -251,7 +251,7 @@ fn a_defenum_error_type_implements_the_error_trait() {
           (defmethod message (self) string
             (match self ((missing-key k) (append "missing key: " k))
                         ((bad-value v) (append "bad value: " v))))
-          (defmethod source (self) Option<:dyn Error> (Option::none)))
+          (defmethod source (self) Option<:dyn Error> (Option::None)))
         (defun describe ((e :dyn Error)) string (message e))
         (describe (ConfigErr::missing-key "port"))
     "#;
@@ -266,13 +266,13 @@ fn source_returns_the_wrapped_error() {
         (defstruct LowErr (detail string))
         (impl Error LowErr
           (defmethod message (self) string self::detail)
-          (defmethod source (self) Option<:dyn Error> (Option::none)))
+          (defmethod source (self) Option<:dyn Error> (Option::None)))
         (defstruct HighErr (cause LowErr))
         (impl Error HighErr
           (defmethod message (self) string "high-level failure")
-          (defmethod source (self) Option<:dyn Error> (Option::some self::cause)))
+          (defmethod source (self) Option<:dyn Error> (Option::Some self::cause)))
         (defun root-message ((e :dyn Error)) string
-          (match (source e) ((some inner) (message inner)) ((none) (message e))))
+          (match (source e) ((Some inner) (message inner)) ((None) (message e))))
         (root-message (make-instance 'HighErr :cause (make-instance 'LowErr :detail "disk offline")))
     "#;
     assert_eq!(run_str(src), "disk offline");
@@ -287,10 +287,10 @@ fn as_dyn_error_unifies_builtin_and_user_error_types() {
         (defstruct AppErr (why string))
         (impl Error AppErr
           (defmethod message (self) string self::why)
-          (defmethod source (self) Option<:dyn Error> (Option::none)))
-        (defun fail-app () Result<int,AppErr> (Result::err (make-instance 'AppErr :why "app said no")))
+          (defmethod source (self) Option<:dyn Error> (Option::None)))
+        (defun fail-app () Result<int,AppErr> (Result::Err (make-instance 'AppErr :why "app said no")))
         (defun describe ((r Result<int, :dyn Error>)) string
-          (match r ((ok _) "?") ((err e) (message e))))
+          (match r ((Ok _) "?") ((Err e) (message e))))
         (append (describe (as-dyn-error (fail-app)))
                 (if (is-err (as-dyn-error (parse-int "zz"))) " / builtin too" ""))
     "#;
@@ -301,7 +301,7 @@ fn as_dyn_error_unifies_builtin_and_user_error_types() {
 fn a_trait_written_in_type_position_is_rejected() {
     // `Error` is a trait, never a type: the old `Result<T, Error>` spelling
     // must say so rather than silently passing as an unresolved name.
-    assert_prelude_type_error("(defun f () Result<int,Error> (Result::ok 1))");
+    assert_prelude_type_error("(defun f () Result<int,Error> (Result::Ok 1))");
     assert_prelude_type_error("(defun g ((e Error)) int 1)");
 }
 

@@ -65,7 +65,7 @@ fn read_char_yields_characters_then_none() {
              (let ((a (read-char s)) (b (read-char s)) (c (read-char s)))
                (format false "~a~a~a" a b c)))"#,
     );
-    assert_eq!(v, "(some a)(some b)none");
+    assert_eq!(v, "(Some a)(Some b)None");
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn read_line_splits_on_newlines_and_keeps_a_final_unterminated_line() {
 two")))
              (format false "~a|~a|~a" (read-line s) (read-line s) (read-line s)))"#,
     );
-    assert_eq!(v, "(some one)|(some two)|none");
+    assert_eq!(v, "(Some one)|(Some two)|None");
 }
 
 #[test]
@@ -288,8 +288,8 @@ fn a_file_round_trips_through_write_and_read() {
     let p = d.path("a.txt");
     let v = eval_string(&format!(
         r#"(use std::fs::read-file-string std::fs::write-file-string) (match (write-file-string "{p}" "contents")
-             ((ok _) (match (read-file-string "{p}") ((ok s) s) ((err e) (message e))))
-             ((err e) (message e)))"#
+             ((Ok _) (match (read-file-string "{p}") ((Ok s) s) ((Err e) (message e))))
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "contents");
 }
@@ -301,8 +301,8 @@ fn read_file_lines_splits_the_file() {
     std::fs::write(&p, "x\ny\n").unwrap();
     let v = eval_string(&format!(
         r#"(use std::fs::read-file-lines) (match (read-file-lines "{p}")
-             ((ok ls) (let ((out "")) (doiter (l (iter ls)) (setf out (append out l))) out))
-             ((err e) (message e)))"#
+             ((Ok ls) (let ((out "")) (doiter (l (iter ls)) (setf out (append out l))) out))
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "xy");
 }
@@ -314,16 +314,16 @@ fn with_open_file_closes_and_yields_the_bodys_value() {
     std::fs::write(&p, "data").unwrap();
     let v = eval_string(&format!(
         r#"(use std::fs::direction-input) (match (with-open-file (f "{p}" direction-input) (read-all f))
-             ((ok s) s)
-             ((err e) (message e)))"#
+             ((Ok s) s)
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "data");
 }
 
 #[test]
 fn with_open_file_types_itself_where_nothing_expects_a_type() {
-    // The expansion's `ok` arm is a bare `(Result::ok ...)`, whose `FileError`
-    // only the sibling `err` arm knows. Bound to a `let` there is no expected
+    // The expansion's `Ok` arm is a bare `(Result::Ok ...)`, whose `FileError`
+    // only the sibling `Err` arm knows. Bound to a `let` there is no expected
     // type to supply it either, so this checks only because the two arms pool
     // what they know (`typeck::matching`'s probe) — before that, the
     // prelude had to route the arm through an `io-ok` helper whose declared
@@ -333,7 +333,7 @@ fn with_open_file_types_itself_where_nothing_expects_a_type() {
     std::fs::write(&p, "data").unwrap();
     let v = eval_string(&format!(
         r#"(use std::fs::direction-input) (let ((r (with-open-file (f "{p}" direction-input) (read-all f))))
-             (match r ((ok s) s) ((err e) (message e))))"#
+             (match r ((Ok s) s) ((Err e) (message e))))"#
     ));
     assert_eq!(v, "data");
 }
@@ -343,7 +343,7 @@ fn opening_a_missing_file_is_an_error_value_not_a_panic() {
     let d = TmpDir::new("missing");
     let p = d.path("nope.txt");
     let v = eval_string(&format!(
-        r#"(use std::fs::open-input) (match (open-input "{p}") ((ok _) "opened") ((err e) (message e)))"#
+        r#"(use std::fs::open-input) (match (open-input "{p}") ((Ok _) "opened") ((Err e) (message e)))"#
     ));
     let m = v;
     assert!(m.contains("nope.txt"), "{}", m);
@@ -356,8 +356,8 @@ fn appending_adds_to_an_existing_file() {
     std::fs::write(&p, "one").unwrap();
     let v = eval_string(&format!(
         r#"(use std::fs::direction-append std::fs::read-file-string) (match (with-open-file (f "{p}" direction-append) (write-string f "two"))
-             ((ok _) (match (read-file-string "{p}") ((ok s) s) ((err e) (message e))))
-             ((err e) (message e)))"#
+             ((Ok _) (match (read-file-string "{p}") ((Ok s) s) ((Err e) (message e))))
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "onetwo");
 }
@@ -414,8 +414,8 @@ fn write_file_string_succeeds_with_a_unit_payload() {
     let p = d.path("u.txt");
     let v = eval_string(&format!(
         r#"(use std::fs::read-file-string std::fs::write-file-string) (match (write-file-string "{p}" "contents")
-             ((ok u) (progn u (match (read-file-string "{p}") ((ok s) s) ((err e) (message e)))))
-             ((err e) (message e)))"#
+             ((Ok u) (progn u (match (read-file-string "{p}") ((Ok s) s) ((Err e) (message e)))))
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "contents");
 }
@@ -428,11 +428,11 @@ fn delete_and_rename_succeed_with_a_unit_payload() {
     std::fs::write(&from, "x").unwrap();
     let v = eval_string(&format!(
         r#"(match (rename-file "{from}" "{to}")
-             ((ok u) (progn u
+             ((Ok u) (progn u
                (match (delete-file "{to}")
-                 ((ok u2) (progn u2 (format false "~a~a" (probe-file "{from}") (probe-file "{to}"))))
-                 ((err e) (message e)))))
-             ((err e) (message e)))"#
+                 ((Ok u2) (progn u2 (format false "~a~a" (probe-file "{from}") (probe-file "{to}"))))
+                 ((Err e) (message e)))))
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "falsefalse");
 }
@@ -555,9 +555,9 @@ fn format_to_a_file_stream_goes_to_the_file() {
     let p = d.path("f.txt");
     let v = eval_string(&format!(
         r#"(use std::fs::open-output std::fs::read-file-string) (match (open-output "{p}")
-             ((ok f) (progn (format f "~d~%" 7) (close f)
-                            (match (read-file-string "{p}") ((ok s) s) ((err e) (message e)))))
-             ((err e) (message e)))"#
+             ((Ok f) (progn (format f "~d~%" 7) (close f)
+                            (match (read-file-string "{p}") ((Ok s) s) ((Err e) (message e)))))
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "7\n");
 }
@@ -571,8 +571,8 @@ fn read_sexpr_reads_one_datum_at_a_time() {
                  (out ""))
              (loop
                (match (read-sexpr s)
-                 ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s|" d))))))
-                 ((err e) (progn (setf out (append out (message e))) (break)))))
+                 ((Ok o) (match o ((Eof) (break)) ((Datum d) (setf out (append out (format false "~s|" d))))))
+                 ((Err e) (progn (setf out (append out (message e))) (break)))))
              out)"#,
     );
     assert_eq!(v, "(+ 1 2)|foo|\"bar\"|42|");
@@ -621,8 +621,8 @@ fn read_sexpr_handles_quotes_comments_strings_and_character_literals() {
         r##"(use std::reader::read-sexpr) (defun one ((text string)) string
              (let ((s (make-string-input-stream text)))
                (match (read-sexpr s)
-                 ((ok o) (match o ((eof) "<eof>") ((datum d) (format false "~s" d))))
-                 ((err e) (message e)))))
+                 ((Ok o) (match o ((Eof) "<eof>") ((Datum d) (format false "~s" d))))
+                 ((Err e) (message e)))))
            (format false "~a ~a ~a ~a ~a"
              (one "'(a b)")
              (one "`(c ,d ,@e)")
@@ -646,8 +646,8 @@ fn an_atom_ends_at_a_paren_without_losing_it() {
                  (out ""))
              (loop
                (match (read-sexpr s)
-                 ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s|" d))))))
-                 ((err e) (break))))
+                 ((Ok o) (match o ((Eof) (break)) ((Datum d) (setf out (append out (format false "~s|" d))))))
+                 ((Err e) (break))))
              out)"#,
     );
     assert_eq!(v, "1|(2 3)|");
@@ -658,8 +658,8 @@ fn read_sexpr_reports_an_incomplete_datum_as_an_error() {
     let v = eval_string(
         r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "(1 2")))
              (match (read-sexpr s)
-               ((ok _) "no error")
-               ((err e) (message e))))"#,
+               ((Ok _) "no error")
+               ((Err e) (message e))))"#,
     );
     assert!(v.contains("end of input"));
 }
@@ -669,8 +669,8 @@ fn end_of_input_is_a_value_not_an_error() {
     let v = eval_string(
         r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "   ")))
              (match (read-sexpr s)
-               ((ok o) (match o ((eof) "eof") ((datum _) "datum")))
-               ((err e) (message e))))"#,
+               ((Ok o) (match o ((Eof) "eof") ((Datum _) "datum")))
+               ((Err e) (message e))))"#,
     );
     assert_eq!(v, "eof");
 }
@@ -682,15 +682,15 @@ fn read_sexpr_reads_a_file_form_by_form() {
     std::fs::write(&p, "(one 1)\n; a comment\n(two 2)\n").unwrap();
     let v = eval_string(&format!(
         r#"(use std::fs::open-input std::reader::read-sexpr) (match (open-input "{p}")
-             ((ok f)
+             ((Ok f)
               (let ((out ""))
                 (loop
                   (match (read-sexpr f)
-                    ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s" d))))))
-                    ((err e) (break))))
+                    ((Ok o) (match o ((Eof) (break)) ((Datum d) (setf out (append out (format false "~s" d))))))
+                    ((Err e) (break))))
                 (close f)
                 out))
-             ((err e) (message e)))"#
+             ((Err e) (message e)))"#
     ));
     assert_eq!(v, "(one 1)(two 2)");
 }
@@ -703,7 +703,7 @@ fn peek_char_looks_without_consuming_and_unread_char_puts_back() {
                (unread-char s #\Q)
                (format false "~a~a~a" p r (read-all s))))"#,
     );
-    assert_eq!(v, "(some x)(some x)Qyz");
+    assert_eq!(v, "(Some x)(Some x)Qyz");
 }
 
 #[test]
@@ -733,8 +733,8 @@ fn a_stream_without_pushback_gets_it_by_wrapping() {
                    (out ""))
                (loop
                  (match (read-sexpr p)
-                   ((ok o) (match o ((eof) (break)) ((datum d) (setf out (append out (format false "~s|" d))))))
-                   ((err e) (break))))
+                   ((Ok o) (match o ((Eof) (break)) ((Datum d) (setf out (append out (format false "~s|" d))))))
+                   ((Err e) (break))))
                out))"#,
     );
     assert_eq!(v, "(1 2)|3|");
@@ -751,15 +751,15 @@ fn a_user_defined_input_stream_can_be_read_from() {
              (:type Item char)
              (defmethod read-item (self) Option<char>
                (if (>= self::at (length self::text))
-                   (Option::none)
+                   (Option::None)
                    (let ((c (ref self::text self::at)))
                      (setf self::at (+ self::at 1))
-                     (Option::some c)))))
+                     (Option::Some c)))))
            (impl CharInput fixed)
            (let ((p (make-peek-stream (make-instance 'fixed :text "(from a user stream)" :at 0))))
              (match (read-sexpr p)
-               ((ok o) (match o ((eof) "<eof>") ((datum d) (format false "~s" d))))
-               ((err e) (message e))))"#,
+               ((Ok o) (match o ((Eof) "<eof>") ((Datum d) (format false "~s" d))))
+               ((Err e) (message e))))"#,
     );
     assert_eq!(v, "(from a user stream)");
 }

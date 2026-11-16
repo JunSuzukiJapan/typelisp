@@ -82,7 +82,7 @@ fn f32_has_the_f64_catalog() {
 }
 
 /// Crossing widths converts. `300` does not fit a `u8`, so `as` truncates it
-/// to `44` and `try-as` answers `none` — the two halves of what a width cast
+/// to `44` and `try-as` answers `None` — the two halves of what a width cast
 /// means. Pinned as a test because this is the one thing about these types a
 /// reader is most likely to assume wrongly; it used to be a relabel, and a
 /// `u8` could hold `300`.
@@ -93,12 +93,12 @@ fn crossing_integer_widths_converts() {
     assert_eq!(show(r#"(format false "~a" (as i16 (the u16 42)))"#), "42");
     // A value that does fit crosses unchanged, and `try-as` says so.
     assert_eq!(show(r#"(format false "~a" (unwrap (try-as u8 (the i32 200))))"#), "200");
-    // One that does not is `none`, not a truncated `some`. Answered as text
+    // One that does not is `None`, not a truncated `Some`. Answered as text
     // rather than a sentinel number: a sentinel would have to be a `u8` too,
     // and the out-of-range one this test used to use (`-1`) is exactly the
     // thing `int_lit_in_range` now refuses.
     assert_eq!(
-        show(r#"(match (try-as u8 (the i32 300)) ((some n) (format false "some ~a" n)) ((none) "none"))"#),
+        show(r#"(match (try-as u8 (the i32 300)) ((Some n) (format false "some ~a" n)) ((None) "none"))"#),
         "none"
     );
 }
@@ -164,11 +164,11 @@ fn f32_arithmetic_rounds_to_binary32() {
     assert_eq!(show(r#"(format false "~a" (as f32 0.1))"#), "0.1");
     // `try-as` reports whether the rounding lost anything.
     assert_eq!(
-        show(r#"(format false "~a" (match (try-as f32 0.1) ((some _) "some") ((none) "none")))"#),
+        show(r#"(format false "~a" (match (try-as f32 0.1) ((Some _) "some") ((None) "none")))"#),
         "none"
     );
     assert_eq!(
-        show(r#"(format false "~a" (match (try-as f32 0.5) ((some _) "some") ((none) "none")))"#),
+        show(r#"(format false "~a" (match (try-as f32 0.5) ((Some _) "some") ((None) "none")))"#),
         "some"
     );
 }

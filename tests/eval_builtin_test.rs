@@ -31,16 +31,16 @@ fn repl_stdout(input: &str) -> String {
 #[test]
 fn evaluates_an_expression_and_returns_its_value_as_a_sexpr() {
     // `(eval (read "(+ 40 2)"))` => `Ok(Some(42))`; the REPL prints it in
-    // reader syntax as `(ok 42)` — an `Option<Sexpr>` is the S-expression
+    // reader syntax as `(Ok 42)` — an `Option<Sexpr>` is the S-expression
     // itself and prints as such, inside a `Result` as anywhere else.
     let out = repl_stdout("(eval (unwrap (read \"(+ 40 2)\")))\n:quit\n");
-    assert!(out.contains("(ok 42)"), "stdout was:\n{}", out);
+    assert!(out.contains("(Ok 42)"), "stdout was:\n{}", out);
 }
 
 #[test]
 fn sees_a_global_variable_defined_earlier() {
     let out = repl_stdout("(defvar (x int) 10)\n(eval (unwrap (read \"(+ x 5)\")))\n:quit\n");
-    assert!(out.contains("(ok 15)"), "stdout was:\n{}", out);
+    assert!(out.contains("(Ok 15)"), "stdout was:\n{}", out);
 }
 
 #[test]
@@ -51,8 +51,8 @@ fn a_definition_is_visible_to_a_direct_call_on_a_later_repl_line() {
     let out = repl_stdout(
         "(eval (unwrap (read \"(defun sq ((n int)) int (* n n))\")))\n(sq 9)\n:quit\n",
     );
-    // The define returns the name symbol; the REPL prints `(ok sq)`.
-    assert!(out.contains("(ok sq)"), "stdout was:\n{}", out);
+    // The define returns the name symbol; the REPL prints `(Ok sq)`.
+    assert!(out.contains("(Ok sq)"), "stdout was:\n{}", out);
     assert!(out.contains("81"), "stdout was:\n{}", out);
 }
 
@@ -64,7 +64,7 @@ fn a_definition_is_visible_to_a_subsequent_eval() {
     let out = repl_stdout(
         "(eval (unwrap (read \"(defun cube ((n int)) int (* n (* n n)))\")))\n(eval (unwrap (read \"(cube 3)\")))\n:quit\n",
     );
-    assert!(out.contains("(ok 27)"), "stdout was:\n{}", out);
+    assert!(out.contains("(Ok 27)"), "stdout was:\n{}", out);
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn a_global_shadowed_by_a_local_is_still_seen_by_its_global_value() {
     let out = repl_stdout(
         "(defvar (g int) 7)\n(let ((g 99)) (eval (unwrap (read \"g\"))))\n:quit\n",
     );
-    assert!(out.contains("(ok 7)"), "stdout was:\n{}", out);
+    assert!(out.contains("(Ok 7)"), "stdout was:\n{}", out);
 }
 
 // ---- `eval` from inside compiled code ----------------------------------
@@ -114,7 +114,7 @@ fn a_global_shadowed_by_a_local_is_still_seen_by_its_global_value() {
 #[test]
 fn a_compiled_function_can_call_eval() {
     let out = repl_stdout(
-        "(defun ev () int (match (eval (quote (+ 40 2))) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
+        "(defun ev () int (match (eval (quote (+ 40 2))) ((Ok v) (sexpr-int v)) ((Err _) -1)))\n\
          (ev)\n(compile ev)\n(ev)\n:quit\n",
     );
     assert_eq!(out.matches("42").count(), 2, "stdout was:\n{}", out);
@@ -126,7 +126,7 @@ fn a_compiled_function_can_call_eval() {
 fn a_compiled_function_evaluating_a_form_sees_the_programs_globals() {
     let out = repl_stdout(
         "(defvar (g int) 7)\n\
-         (defun ev () int (match (eval (quote g)) ((ok v) (sexpr-int v)) ((err _) -1)))\n\
+         (defun ev () int (match (eval (quote g)) ((Ok v) (sexpr-int v)) ((Err _) -1)))\n\
          (compile ev)\n(ev)\n:quit\n",
     );
     assert!(out.contains('7'), "stdout was:\n{}", out);
@@ -138,7 +138,7 @@ fn a_compiled_function_evaluating_a_form_sees_the_programs_globals() {
 fn a_definition_made_by_a_compiled_functions_eval_survives_the_call() {
     let out = repl_stdout(
         "(defun define-it () Option<Sexpr> \
-           (match (eval (quote (defun sq ((n int)) int (* n n)))) ((ok v) v) ((err _) ())))\n\
+           (match (eval (quote (defun sq ((n int)) int (* n n)))) ((Ok v) v) ((Err _) ())))\n\
          (compile define-it)\n(define-it)\n(sq 7)\n:quit\n",
     );
     assert!(out.contains("49"), "stdout was:\n{}", out);
@@ -153,7 +153,7 @@ fn a_struct_evaluates_to_itself() {
     let out = repl_stdout(
         "(defstruct q (x i32))\n\
          (defvar (v q) (make-instance 'q :x 7))\n\
-         (match (eval v) ((ok s) (match s ((the q w) (progn (setf w::x 8) v::x)) (_ -1))) ((err _) -2))\n\
+         (match (eval v) ((Ok s) (match s ((the q w) (progn (setf w::x 8) v::x)) (_ -1))) ((Err _) -2))\n\
          :quit\n",
     );
     assert!(out.contains('8'), "stdout was:\n{}", out);
@@ -164,7 +164,7 @@ fn a_struct_evaluates_to_itself() {
 #[test]
 fn a_result_evaluates_to_itself() {
     let out = repl_stdout("(eval (read \"(+ 1 2)\"))\n:quit\n");
-    assert!(out.contains("(ok (ok (+ 1 2)))"), "stdout was:\n{}", out);
+    assert!(out.contains("(Ok (Ok (+ 1 2)))"), "stdout was:\n{}", out);
 }
 
 /// A function holding such an object as a literal — a macro spliced it into

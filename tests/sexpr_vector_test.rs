@@ -99,8 +99,8 @@ fn a_quoted_vector_and_array_in_source() {
 fn a_ragged_array_is_a_read_error() {
     both(
         r##"(match (read-from-string "#2A((1 2) (3))")
-             ((ok d) "read")
-             ((err e) (message e)))"##,
+             ((Ok d) "read")
+             ((Err e) (message e)))"##,
         "read: <input>:1:15: read error: #2A: the contents are not rectangular — dimension 2 is 2 in one place and 1 in another",
     );
 }

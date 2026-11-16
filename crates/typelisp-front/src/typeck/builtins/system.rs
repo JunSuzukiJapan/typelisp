@@ -54,7 +54,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
     native("stream-input-p", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
     native("stream-output-p", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
 
-    // Input. `stream-read-char` returns `Ok(none)` at end of input and `Err`
+    // Input. `stream-read-char` returns `Ok(None)` at end of input and `Err`
     // only for a real failure, so end-of-input never has to be a panic.
     native(
         "stream-read-char",
@@ -62,7 +62,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
         result_of(option_of(Type::Char), file_err.clone()),
     );
     native("stream-unread-char", vec![h.clone(), Type::Char], unit_or_err.clone());
-    // Byte I/O, the same shape one level down: `Ok(none)` at end of file.
+    // Byte I/O, the same shape one level down: `Ok(None)` at end of file.
     // Only a file stream (and stdin/stdout/stderr) answers these — a string
     // stream is a sequence of characters, and CL calls `read-byte` on a
     // character stream an error rather than handing back a UTF-8 encoding
@@ -117,7 +117,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
 /// opaque `i32` handle in the same table the streams live in, and every
 /// operation on it in its **non-blocking** form. The prelude's `socket-stream`,
 /// `socket-byte-stream` and `socket-listener` are written on top of these, and the
-/// waiting is written there too: each "not yet" answer below (`none` from
+/// waiting is written there too: each "not yet" answer below (`None` from
 /// `net-fill`/`net-accept`, `some interest` from `net-flush`) is followed by
 /// a `(net-wait h interest)`, which parks the task until `poll` says the
 /// socket is ready.
@@ -143,7 +143,7 @@ fn net(reg: &mut Registry, ns: NsId) {
     // succeed). A single blocking `connect` would stop every task for as
     // long as an unreachable host takes to time out.
     // Name resolution first, on a thread the task waits for through a pipe
-    // (`Ok(none)` from `finish`: not yet), then the connect proper on the
+    // (`Ok(None)` from `finish`: not yet), then the connect proper on the
     // `ip:port` it answered with.
     native("net-resolve-begin", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
     native(
@@ -154,7 +154,7 @@ fn net(reg: &mut Registry, ns: NsId) {
     native("net-connect-begin", vec![Type::Str], result_of(h.clone(), net_err.clone()));
     native("net-connect-finish", vec![h.clone()], unit_or_err.clone());
     // TLS on a connected socket: `start` names the server the certificate
-    // must be for; `handshake` is one non-blocking step, answering `none`
+    // must be for; `handshake` is one non-blocking step, answering `None`
     // when done and `some interest` when the socket must become ready
     // before the next.
     // `start`'s options: a CA file to trust instead of the public roots, and
@@ -175,7 +175,7 @@ fn net(reg: &mut Registry, ns: NsId) {
         result_of(h.clone(), net_err.clone()),
     );
     // UDP: whole datagrams. `send-to` answers `false` when the send buffer
-    // is full (wait for writable); `recv` answers `none` when nothing has
+    // is full (wait for writable); `recv` answers `None` when nothing has
     // arrived (wait for readable), and `last-sender` says who sent what
     // `recv` last returned.
     native("net-udp-bind", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
@@ -195,12 +195,12 @@ fn net(reg: &mut Registry, ns: NsId) {
     // path. A local connect has no handshake to wait for, so it is one step.
     native("net-unix-connect", vec![Type::Str], result_of(h.clone(), net_err.clone()));
     native("net-unix-listen", vec![Type::Str], result_of(h.clone(), net_err.clone()));
-    // `Ok(none)`: nobody is waiting to be accepted — wait for readable.
+    // `Ok(None)`: nobody is waiting to be accepted — wait for readable.
     native("net-accept", vec![h.clone()], result_of(option_of(h.clone()), net_err.clone()));
 
     // Input is a buffer the OS fills and the program drains. `net-fill`
-    // answers `Ok(some 0)` at end of input and `Ok(none)` when nothing has
-    // arrived — wait for readable. The two `pop`s answer `none` when the
+    // answers `Ok(Some 0)` at end of input and `Ok(None)` when nothing has
+    // arrived — wait for readable. The two `pop`s answer `None` when the
     // buffer has no whole item (`net-pop-char` will not split a UTF-8
     // character), which is the cue to fill.
     native("net-fill", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
@@ -216,7 +216,7 @@ fn net(reg: &mut Registry, ns: NsId) {
     native("net-flush", vec![h.clone()], result_of(option_of(Type::Int), net_err.clone()));
     native("net-socket-error", vec![h.clone()], result_of(option_of(Type::Str), net_err.clone()));
     // Who the peer is (its certificate's subject) and which name the client
-    // asked for (SNI): `none` where there is no TLS or no such thing.
+    // asked for (SNI): `None` where there is no TLS or no such thing.
     native("net-peer-subject", vec![h.clone()], result_of(option_of(Type::Str), net_err.clone()));
     native("net-server-name", vec![h.clone()], result_of(option_of(Type::Str), net_err.clone()));
     // Socket options: Nagle off, keepalive on/off and its period in seconds.
@@ -256,10 +256,10 @@ fn host(reg: &mut Registry, env: NsId, thread: NsId, time: NsId, internal: NsId)
     // way and index its arguments identically. See
     // `sys_builtin::COMMAND_LINE_ARGS` for how the two are made to agree.
     native(env, "command-line-args", vec![], vector_of(Type::Str));
-    // `none` covers both "unset" and "not valid Unicode": a `string` here is
+    // `None` covers both "unset" and "not valid Unicode": a `string` here is
     // Rust's, so bytes that aren't UTF-8 have no value to hand back.
     native(env, "getenv", vec![Type::Str], option_of(Type::Str));
-    // `$HOME`, or `none` — the primitive under `user-homedir-pathname`, which
+    // `$HOME`, or `None` — the primitive under `user-homedir-pathname`, which
     // CL explicitly allows to answer `NIL`.
     native(env, "home-directory", vec![], option_of(Type::Str));
     // CL's `sleep`, in CL's unit. `f64` and not an integer type because a
@@ -287,7 +287,7 @@ fn host(reg: &mut Registry, env: NsId, thread: NsId, time: NsId, internal: NsId)
     // local time. Split into `day`/`second` because a whole universal time
     // does not fit an `i32`, and reported in *seconds* west because the
     // offset is not always a whole number of hours (India is +5:30).
-    // `none` when the C library cannot represent that instant.
+    // `None` when the C library cannot represent that instant.
     native(time, "timezone-offset-seconds", vec![Type::Int, Type::Int], option_of(Type::Int));
     native(time, "timezone-daylight-p", vec![Type::Int, Type::Int], option_of(Type::Bool));
 
@@ -324,7 +324,7 @@ fn host(reg: &mut Registry, env: NsId, thread: NsId, time: NsId, internal: NsId)
 /// two-character sequence — `#\{` for `(set-dispatch-macro-character #\# #\{ ...)`
 /// — so one function can serve several of them by looking at it.
 ///
-/// `Option<Sexpr>` rather than `Sexpr` because `()` is `none`: a macro that
+/// `Option<Sexpr>` rather than `Sexpr` because `()` is `None`: a macro that
 /// reads an empty list has to be able to say so. A macro that wants to
 /// produce *nothing at all* (CL's zero values, what a comment reader macro
 /// returns) has no way to say that and is not supported; there is one datum

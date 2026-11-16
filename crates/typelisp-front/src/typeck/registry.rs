@@ -73,7 +73,7 @@ pub struct OptKeyParam {
     /// (`(name type default-form)`), spliced into a call that omits the
     /// argument. `None` means "no default": the parameter's *effective* type
     /// is then `Option<decl_ty>` — a caller who does supply the argument
-    /// still writes a plain `decl_ty`-typed value, wrapped into `some` by the
+    /// still writes a plain `decl_ty`-typed value, wrapped into `Some` by the
     /// call.
     ///
     /// Held as an [`OwnedForm`](crate::owned_form::OwnedForm), not as the

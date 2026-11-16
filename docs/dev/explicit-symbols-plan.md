@@ -675,7 +675,7 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `compile-assoc` は型名を文字列でなくシンボルで受け、`(equal type-name (quote Sexpr))` で比べる。型変数は
      大文字（`T` `K` `V` `E`）、メソッドの受け手の型は `Self`。
      `match` の腕の一番外に裸で書いた名前は、常に被検査値の型の変種として読む（2026-10-26、ユーザー決定）。
-     変種でなければエラーで、何にでも当たるのは `_` だけ。大小を区別すると `None` と `none` は別の名前に
+     変種でなければエラーで、何にでも当たるのは `_` だけ。大小を区別すると `None` と `None` は別の名前に
      なり、`None` が黙って変数の束縛になる穴が踏みやすくなったため。構成子の中の裸の名前は従来どおり
      フィールドを束縛する。
      `string->symbol` は廃止し、文字列からシンボルを得るのは `intern` だけにした（2026-10-26、ユーザー
@@ -747,13 +747,13 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      構成子と静的メソッドは `(use Type::member)` で 1 つ、`(use Type::*)` で全部（構造体の構成子を除く）を
      裸の名前にする（`UseTarget::Members`、`importable_members`）。別の型から同じ裸の名前を取り込むのと、
      モジュール自身の定義と同じ名前を取り込むのはエラー（`shadowing-import` で置き換える）。`pub use` は
-     できない。Rust の prelude に合わせ、`Option`/`Result` の構成子 `some`/`none`/`ok`/`err` はその
-     モジュールの `ctors` に置き、`std::prelude` がどのモジュールにも公開する。このため `none`
-     （`REPR_NONE`）を `std` の語彙へ移した。`Option<Sexpr>` に対する `(some x)` は型を取り出す
+     できない。Rust の prelude に合わせ、`Option`/`Result` の構成子 `Some`/`None`/`Ok`/`Err` はその
+     モジュールの `ctors` に置き、`std::prelude` がどのモジュールにも公開する。このため `None`
+     （`REPR_NONE`）を `std` の語彙へ移した。`Option<Sexpr>` に対する `(Some x)` は型を取り出す
      パターンの候補にしない（`resolve_sexpr_downcast_ctor`）。
      `std::prelude` の名前を定義するときの `shadow` の要求は、4b の `Checker::refuse_unownable_name` が
      公開の表（`SessionNames::offers`）で決めるので、公開を狭めたことがそのまま効く。公開しない
-     ライブラリの名前（`parse-int` `trim` など）は `shadow` なしで定義でき、公開する構成子（`some` など）は
+     ライブラリの名前（`parse-int` `trim` など）は `shadow` なしで定義でき、公開する構成子（`Some` など）は
      `shadow` が要る（`shadow_test`）。6e は済み。
      利用者向け文書は書き換えた（関数一覧の README に「`use` が要る名前」の表、`syntax.md` の 3.10 に
      標準ライブラリの公開範囲と `pub use`、例のコードに `use`）。表が `prelude_offers` と合っていることは

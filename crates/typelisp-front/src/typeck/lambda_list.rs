@@ -3,7 +3,7 @@
 //!
 //! An `&optional` or `&key` parameter is `(name Type)` or `(name Type
 //! default)`. One with a default is bound at `Type` in the body; one with
-//! none at `Option<Type>`, `none` when the call leaves it out. The `&rest`
+//! none at `Option<Type>`, `None` when the call leaves it out. The `&rest`
 //! parameter is the arguments left after the optional ones, bound as one
 //! `Option<Sexpr>` list. `&key` is never written with `&optional` or
 //! `&rest`: which of them takes an argument would depend on its value.

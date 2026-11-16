@@ -34,14 +34,14 @@ fn cancel_reaches_what_was_made_from_the_context() {
     );
 }
 
-/// `done` is closed once cancelled, so a receive returns `none` at once.
+/// `done` is closed once cancelled, so a receive returns `None` at once.
 #[test]
 fn done_is_closed_by_cancel() {
     both(
         r##"(let ((c (Context::with-cancel (Context::background))))
              (cancel c)
              (format false "~s ~s" (recv (done c)) (recv (done c))))"##,
-        "none none",
+        "None None",
     );
 }
 
@@ -98,7 +98,7 @@ fn a_timed_context_can_be_cancelled_early() {
         r##"(let ((c (Context::with-timeout (Context::background) 5.0)))
              (cancel c)
              (format false "~s" (recv (done c))))"##,
-        "none",
+        "None",
     );
 }
 

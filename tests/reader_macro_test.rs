@@ -75,10 +75,10 @@ fn repl_stdout(input: &str) -> String {
 const BANG: &str = r#"(use std::reader::read-sexpr) (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 "#;
 
 // ----------------------------------------------------------------------
@@ -132,7 +132,7 @@ fn a_macro_character_wins_over_the_built_in_syntax() {
     // looking in the table *before* the built-in dispatch.
     let src = r#"(use std::reader::read-sexpr) (set-macro-character #\'
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
-    (match (read-sexpr s) ((ok o) 99) ((err e) 0))))
+    (match (read-sexpr s) ((Ok o) 99) ((Err e) 0))))
 (defvar (n int) 'whatever)
 n
 "#;
@@ -174,8 +174,8 @@ fn a_dispatch_macro_extends_the_hash_syntax() {
     let src = r#"(set-dispatch-macro-character #\# #\{
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-delimited-list #\} s)
-      ((ok l) (sexpr-cons (quote +) l))
-      ((err e) (quote ())))))
+      ((Ok l) (sexpr-cons (quote +) l))
+      ((Err e) (quote ())))))
 (defvar (n int) #{1 2 3})
 n
 "#;
@@ -228,9 +228,9 @@ n
 #[test]
 fn get_macro_character_answers_none_before_and_some_after() {
     let out = repl_stdout(concat!(
-        "(match (get-macro-character #\\!) ((some f) \"set\") ((none) \"unset\"))\n",
+        "(match (get-macro-character #\\!) ((Some f) \"set\") ((None) \"unset\"))\n",
         "(set-macro-character #\\! (lambda ((s string-input-stream) (c char)) Option<Sexpr> 1))\n",
-        "(match (get-macro-character #\\!) ((some f) \"set\") ((none) \"unset\"))\n",
+        "(match (get-macro-character #\\!) ((Some f) \"set\") ((None) \"unset\"))\n",
     ));
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines.first(), Some(&"\"unset\""), "got {:?}", lines);
@@ -241,7 +241,7 @@ fn get_macro_character_answers_none_before_and_some_after() {
 fn what_comes_back_is_the_function_that_was_stored() {
     let out = repl_stdout(concat!(
         "(set-macro-character #\\! (lambda ((s string-input-stream) (c char)) Option<Sexpr> 42))\n",
-        "(match (get-macro-character #\\!) ((some f) (f (make-string-input-stream \"\") #\\!)) ((none) 0))\n",
+        "(match (get-macro-character #\\!) ((Some f) (f (make-string-input-stream \"\") #\\!)) ((None) 0))\n",
     ));
     assert!(out.contains("42"), "got {:?}", out);
 }
@@ -250,8 +250,8 @@ fn what_comes_back_is_the_function_that_was_stored() {
 fn get_dispatch_macro_character_answers_for_the_pair() {
     let out = repl_stdout(concat!(
         "(set-dispatch-macro-character #\\# #\\{ (lambda ((s string-input-stream) (c char)) Option<Sexpr> 1))\n",
-        "(match (get-dispatch-macro-character #\\# #\\{) ((some f) \"set\") ((none) \"unset\"))\n",
-        "(match (get-dispatch-macro-character #\\# #\\}) ((some f) \"set\") ((none) \"unset\"))\n",
+        "(match (get-dispatch-macro-character #\\# #\\{) ((Some f) \"set\") ((None) \"unset\"))\n",
+        "(match (get-dispatch-macro-character #\\# #\\}) ((Some f) \"set\") ((None) \"unset\"))\n",
     ));
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[lines.len() - 2], "\"set\"", "got {:?}", lines);
@@ -281,7 +281,7 @@ fn the_read_builtin_consults_the_readtable_too() {
     // macro character means it for its own reads. This is the path with no
     // driver to hand a hook in — the interpreter registers itself instead
     // (`typelisp_read::runtime`).
-    let out = repl_stdout(&format!("{}\n(match (read \"!(a b)\") ((ok v) v) ((err e) (quote ())))\n", BANG.replace('\n', " ")));
+    let out = repl_stdout(&format!("{}\n(match (read \"!(a b)\") ((Ok v) v) ((Err e) (quote ())))\n", BANG.replace('\n', " ")));
     assert!(out.contains("(not (a b))"), "got {:?}", out);
 }
 
@@ -368,15 +368,15 @@ fn the_readtable_builtins_work_in_a_compiled_executable() {
     let out_path = dir.join("aot");
     let src = r#"(use std::reader::read-sexpr) (defun bang ((s string-input-stream) (c char)) Option<Sexpr>
   (match (read-sexpr s)
-    ((ok o) (match o
-              ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-              ((eof) (quote ()))))
-    ((err e) (quote ()))))
+    ((Ok o) (match o
+              ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+              ((Eof) (quote ()))))
+    ((Err e) (quote ()))))
 (defun main () int
   (progn
     (set-macro-character #\! bang)
-    (if (match (get-macro-character #\!) ((some f) false) ((none) true)) 2
-      (if (equal (format false "~a" (match (read "!(a b)") ((ok v) v) ((err e) (quote ())))) "(not (a b))") 0 3))))
+    (if (match (get-macro-character #\!) ((Some f) false) ((None) true)) 2
+      (if (equal (format false "~a" (match (read "!(a b)") ((Ok v) v) ((Err e) (quote ())))) "(not (a b))") 0 3))))
 "#;
     std::fs::write(&src_path, src).expect("write the aot source");
 

@@ -69,9 +69,9 @@ pub(crate) fn check_variant(
 ///
 /// What is gone is its *surface*: `(nil)` can no longer be written as a
 /// constructor or a pattern, because a writable empty-list `Sexpr` would
-/// make `Option<Sexpr>`'s niche unsound — `(Option::some (nil))` and
-/// `(Option::none)` would be the same word. The empty list is reached as
-/// `Option<Sexpr>`'s `none`, and the core IR still spells it `(construct
+/// make `Option<Sexpr>`'s niche unsound — `(Option::Some (nil))` and
+/// `(Option::None)` would be the same word. The empty list is reached as
+/// `Option<Sexpr>`'s `None`, and the core IR still spells it `(construct
 /// sexpr 0 ..)`, which the checker emits itself.
 pub(crate) const SEXPR_RESERVED_VARIANT: usize = crate::sexpr_variant::NIL;
 
@@ -86,8 +86,8 @@ pub(crate) const BIGNUM_IS_GONE: &str = "`bignum` is no longer a `Sexpr` constru
 
 /// Message for a `(nil)` that survived in source somewhere.
 pub(crate) const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty list is \
-     `Option<Sexpr>`'s `none`. Write `()` where an `Option<Sexpr>` is expected, or \
-     `(Option::none)`; match it with `((none) ...)`.";
+     `Option<Sexpr>`'s `None`. Write `()` where an `Option<Sexpr>` is expected, or \
+     `(Option::None)`; match it with `((None) ...)`.";
 
 /// Is `(adt, variant)` the retired `Sexpr::nil`?
 pub(crate) fn is_retired_nil(adt: &Path, variant: usize) -> bool {

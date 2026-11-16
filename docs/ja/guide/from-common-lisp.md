@@ -18,12 +18,12 @@ typelisp は Common Lisp（以下 CL）の構文と多くの関数名を受け�
 - **`if` の else は省略できません。** `(if c x)` はエラーです。else が要らないときは `when` /
   `unless` を使います。
 - **「値が無い」は `Option<T>` で表します。** CL で nil を返して「見つからなかった」を表して
-  いた関数は、ここでは `(some x)` か `none` を返します。
+  いた関数は、ここでは `(Some x)` か `None` を返します。
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - 空リスト `()` は、文脈によって Unit 型の値（何も返さない関数の戻り値）か、S 式データの
@@ -93,7 +93,7 @@ typelisp は関数と変数の名前空間を分けていません。関数名�
 
 ## 4. リストと Vector
 
-CL のリストに当たるものは **S 式データ**で、その型は `Option<Sexpr>` です（空リストが `none`）。
+CL のリストに当たるものは **S 式データ**で、その型は `Option<Sexpr>` です（空リストが `None`）。
 `(list 1 2 3)` や `'(a b c)` はこの型になります。S 式データはマクロや `read` で扱うもので、
 普通のデータの入れ物には **`Vector<T>`** を使います。
 
@@ -173,17 +173,17 @@ CL の `equal` です。自前の型は `(impl Equal 型 ...)` を書くと、�
 `define-condition`・`handler-case`・`handler-bind`・`restart-case`・`error`・`signal` はありません。
 静的型付けと相性が悪いためです。代わりに次の 2 つを使い分けます。
 
-- **回復できる失敗は `Result<T,E>` を返します。** 呼び出し側は `match` で `ok` / `err` を分けます。
+- **回復できる失敗は `Result<T,E>` を返します。** 呼び出し側は `match` で `Ok` / `Err` を分けます。
   Rust の `?` に当たる省略構文はありません。
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **回復できない失敗（バグ）は `panic` です。** `(panic "message")`、`unwrap` に `none` を渡す、
+- **回復できない失敗（バグ）は `panic` です。** `(panic "message")`、`unwrap` に `None` を渡す、
   0 で割る、範囲外の添字などがこれにあたり、プログラムは止まります。`unwind-protect` の後始末は
   止まる前に実行されます。
 

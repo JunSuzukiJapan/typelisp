@@ -88,7 +88,7 @@ pub(crate) fn sexpr_ty() -> Type {
 }
 
 /// `Option<Sexpr>` — the type an S-expression datum has once the empty list
-/// is `none` (see [`is_option_of_sexpr`]).
+/// is `None` (see [`is_option_of_sexpr`]).
 pub(crate) fn option_of_sexpr() -> Type {
     Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![sexpr_ty()])
 }
@@ -113,7 +113,7 @@ pub(crate) fn is_sexpr_expectation(ty: &Type) -> bool {
 /// patterns a `match` on it accepts. Were any of them drawn wider — around
 /// "an `Option` whose payload *represents* like a `Sexpr`", which
 /// `Option<Option<Sexpr>>` does — the outer level would claim the same
-/// empty-list word as the inner one and the two `none`s would collide.
+/// empty-list word as the inner one and the two `None`s would collide.
 pub(crate) fn is_option_of_sexpr(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, args)
         if crate::types::path_is_builtin(p, typelisp_mem::wk::OPTION)

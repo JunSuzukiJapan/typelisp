@@ -1258,13 +1258,13 @@ fn compile_dispatches_a_lambda_that_captures_a_match_arm_binding() {
         r#"
         (defun mk ((o Option<int>)) (fn (int) bool)
           (match o
-            ((some g) (lambda ((a int)) bool (< a g)))
-            ((none) (lambda ((a int)) bool false))))
+            ((Some g) (lambda ((a int)) bool (< a g)))
+            ((None) (lambda ((a int)) bool false))))
         (defun try-it ((o Option<int>) (a int)) int (if ((mk o) a) 1 0))
         (compile mk)
         (compile try-it)
-        (+ (* 100 (try-it (Option::some 5) 3))
-           (+ (* 10 (try-it (Option::some 5) 7)) (try-it (Option::none) 1)))
+        (+ (* 100 (try-it (Option::Some 5) 3))
+           (+ (* 10 (try-it (Option::Some 5) 7)) (try-it (Option::None) 1)))
         "#,
     );
     match v {
@@ -1306,13 +1306,13 @@ fn a_captured_match_arm_binding_is_shared_not_copied() {
         r#"
         (defun counter ((o Option<int>)) (fn () int)
           (match o
-            ((some n) (lambda () int (progn (setf n (+ n 1)) n)))
-            ((none) (lambda () int 0))))
+            ((Some n) (lambda () int (progn (setf n (+ n 1)) n)))
+            ((None) (lambda () int 0))))
         (defun run-three ((o Option<int>)) int
           (let ((f (counter o))) (+ (f) (+ (f) (f)))))
         (compile counter)
         (compile run-three)
-        (run-three (Option::some 10))
+        (run-three (Option::Some 10))
         "#,
     );
     match v {
@@ -1322,7 +1322,7 @@ fn a_captured_match_arm_binding_is_shared_not_copied() {
 }
 
 /// The mirror image: the `match` sits *inside* the closure, over an
-/// `Option<Sexpr>` — the one type whose `(some P)` is niched into a
+/// `Option<Sexpr>` — the one type whose `(Some P)` is niched into a
 /// `pat-nonempty` node instead of a `pat-ctor`. `core_freevars` did not count
 /// that node's bindings, so `g` looked free in the lambda's body and the
 /// closure captured a name bound inside itself. The `Option<int>` spelling of
@@ -1332,11 +1332,11 @@ fn a_niched_option_sexpr_pattern_binds_inside_an_enclosing_closure() {
     let v = eval_ok_with_compiler(
         r#"
         (defun pick ((o Option<Sexpr>)) (fn () Sexpr)
-          (lambda () Sexpr (match o ((some g) g) ((none) (quote nothing)))))
+          (lambda () Sexpr (match o ((Some g) g) ((None) (quote nothing)))))
         (defun hit ((o Option<Sexpr>)) int (if (equal ((pick o)) (quote hi)) 1 0))
         (compile pick)
         (compile hit)
-        (+ (* 10 (hit (Option::some (quote hi)))) (hit (Option::none)))
+        (+ (* 10 (hit (Option::Some (quote hi)))) (hit (Option::None)))
         "#,
     );
     match v {
@@ -2444,9 +2444,9 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
 fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-some ((n int)) Option<int> (Option::some n))
+        (defun make-some ((n int)) Option<int> (Option::Some n))
         (compile make-some)
-        (match (make-some 42) ((some x) x) ((none) -1))
+        (match (make-some 42) ((Some x) x) ((None) -1))
         "#,
     )
     .expect("eval failed");
@@ -2463,22 +2463,22 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
 // argument (`call_compiled`'s own argument encoding already treated
 // `RtValue::Sexpr` uniformly, but no compiled function could receive an
 // enum value produced by `Expr::Construct` before this flip made
-// `Option::some`/`none` themselves heap-repr), a nested enum, an enum
+// `Option::Some`/`None` themselves heap-repr), a nested enum, an enum
 // stored inside a `Vector<T>`/`HashTable<K,V>`/`defstruct` field, and GC
 // safety for an enum value under root-stack pressure.
 
 /// An enum-typed *parameter* — `Interp::call_compiled`'s argument encoding
 /// (already value-shape-driven, `RtValue::Sexpr` crosses uniformly) now
-/// actually receives something to encode: `Option::some`'s own construction
+/// actually receives something to encode: `Option::Some`'s own construction
 /// is heap-repr since the compiler flip, so this is the first case where a
 /// compiled function can be handed a real enum value as an argument at all.
 #[test]
 fn compile_dispatches_a_function_taking_an_enum_typed_argument_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun unwrap-or-zero ((o Option<int>)) int (match o ((some x) x) ((none) 0)))
+        (defun unwrap-or-zero ((o Option<int>)) int (match o ((Some x) x) ((None) 0)))
         (compile unwrap-or-zero)
-        (unwrap-or-zero (Option::some 99))
+        (unwrap-or-zero (Option::Some 99))
         "#,
     )
     .expect("eval failed");
@@ -2489,10 +2489,10 @@ fn compile_dispatches_a_function_taking_an_enum_typed_argument_to_native_code() 
 /// requirement the `Option<Sexpr>` niche has to earn.
 ///
 /// `Option<Sexpr>` is represented *exactly* like a `Sexpr` (`check/repr.rs`):
-/// `none` is the empty-list immediate, `some v` is `v`. That works only while
+/// `None` is the empty-list immediate, `some v` is `v`. That works only while
 /// the niche is claimed for `Option<sexpr>` and nothing else. Were the rule
 /// written as "the payload *represents* like a `Sexpr`" — which the inner
-/// `Option<Sexpr>` does — the outer level would niche too, and its `none`
+/// `Option<Sexpr>` does — the outer level would niche too, and its `None`
 /// would be the same word as the inner one's: `outer-none` and `inner-none`
 /// would become indistinguishable. Requiring the type argument to be the
 /// `sexpr` type itself drops the outer `Option` through to a real box.
@@ -2505,12 +2505,12 @@ fn a_nested_option_over_sexpr_keeps_its_two_nones_apart() {
         r#"
         (defun name ((v Option<Option<Sexpr>>)) string
           (match v
-            ((none) "outer-none")
-            ((some i) (match i ((none) "inner-none") ((some _) "inner-some")))))
+            ((None) "outer-none")
+            ((Some i) (match i ((None) "inner-none") ((Some _) "inner-some")))))
         (compile name)
-        (append (append (name (the Option<Option<Sexpr>> (Option::none)))
-                        (append " " (name (Option::some (the Option<Sexpr> (Option::none))))))
-                (append " " (name (Option::some (quote 42)))))
+        (append (append (name (the Option<Option<Sexpr>> (Option::None)))
+                        (append " " (name (Option::Some (the Option<Sexpr> (Option::None))))))
+                (append " " (name (Option::Some (quote 42)))))
         "#,
         1 << 16,
         read_str,
@@ -2528,11 +2528,11 @@ fn a_nested_option_over_sexpr_keeps_its_two_nones_apart() {
 fn compile_dispatches_a_function_constructing_a_nested_option_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun wrap ((n int)) Option<Option<int>> (Option::some (Option::some n)))
+        (defun wrap ((n int)) Option<Option<int>> (Option::Some (Option::Some n)))
         (compile wrap)
         (match (wrap 7)
-          ((some inner) (match inner ((some x) x) ((none) -1)))
-          ((none) -2))
+          ((Some inner) (match inner ((Some x) x) ((None) -1)))
+          ((None) -2))
         "#,
     )
     .expect("eval failed");
@@ -2547,9 +2547,9 @@ fn compile_dispatches_a_function_constructing_a_user_defenum_with_an_option_fiel
     let v = run_with_compiler_and_prelude(
         r#"
         (defenum wrapper (w Option<int>))
-        (defun mk ((n int)) wrapper (wrapper::w (Option::some n)))
+        (defun mk ((n int)) wrapper (wrapper::w (Option::Some n)))
         (compile mk)
-        (match (mk 5) ((w o) (match o ((some x) x) ((none) -1))))
+        (match (mk 5) ((w o) (match o ((Some x) x) ((None) -1))))
         "#,
     )
     .expect("eval failed");
@@ -2566,9 +2566,9 @@ fn compile_dispatches_vector_push_and_get_of_an_option_element_to_native_code() 
         r#"
         (defun f () int
           (let ((v (the Vector<Option<int>> (Vector::new))))
-            (push v (Option::some 3))
-            (push v (Option::none))
-            (match (get v 0) ((some x) x) ((none) -1))))
+            (push v (Option::Some 3))
+            (push v (Option::None))
+            (match (get v 0) ((Some x) x) ((None) -1))))
         (compile f)
         (f)
         "#,
@@ -2588,10 +2588,10 @@ fn compile_dispatches_hashtable_get_of_an_option_typed_value_to_native_code() {
         r#"
         (defun run () int
           (let ((ht (the HashTable<int,Option<int>> (HashTable::new))))
-            (set ht 1 (Option::some 42))
+            (set ht 1 (Option::Some 42))
             (match (get ht 1)
-              ((some inner) (match inner ((some x) x) ((none) -1)))
-              ((none) -2))))
+              ((Some inner) (match inner ((Some x) x) ((None) -1)))
+              ((None) -2))))
         (compile run)
         (run)
         "#,
@@ -2608,9 +2608,9 @@ fn compile_dispatches_a_defstruct_field_of_option_type_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct holder (val Option<int>))
-        (defun mk ((n int)) holder (make-instance 'holder :val (Option::some n)))
+        (defun mk ((n int)) holder (make-instance 'holder :val (Option::Some n)))
         (compile mk)
-        (match (val (mk 8)) ((some x) x) ((none) -1))
+        (match (val (mk 8)) ((Some x) x) ((None) -1))
         "#,
     )
     .expect("eval failed");
@@ -2633,7 +2633,7 @@ fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many
               (if (eq n 0) (break) ())
               (push scratch n)
               (setf n (- n 1)))
-            (match (Option::some (the int 123)) ((some x) x) ((none) -1))))
+            (match (Option::Some (the int 123)) ((Some x) x) ((None) -1))))
         (compile sum-after-gc)
         (sum-after-gc 5000)
         "#,
@@ -3562,8 +3562,8 @@ fn compile_dispatches_option_equals() {
         (defun same-list ((a Option<Sexpr>) (b Option<Sexpr>)) bool (equal a b))
         (compile same-list)
         (let ((l '(1 2)))
-          (+ (if (same (Option::some 3) (Option::some 3)) 1 0)
-             (+ (if (same (Option::some 3) (Option::none)) 10 0)
+          (+ (if (same (Option::Some 3) (Option::Some 3)) 1 0)
+             (+ (if (same (Option::Some 3) (Option::None)) 10 0)
                 (+ (if (same-list l l) 100 0)
                    (if (same-list '() '()) 1000 0)))))
         "#,
@@ -3739,7 +3739,7 @@ fn compile_and_interpret_agree_on_a_defenum_match() {
 fn compile_matches_a_builtin_option() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun u ((n int)) int (match (Option::some n) ((some v) v) ((none) n)))
+        (defun u ((n int)) int (match (Option::Some n) ((Some v) v) ((None) n)))
         (compile u)
         (u 5)
         "#,
@@ -3962,7 +3962,7 @@ fn compiled_sexpr_tag_tests_agree_with_the_interpreter_for_every_variant() {
         (module a)
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((none) 1) ((int _) 2) ((f64 _) 3) ((char _) 4) ((bool _) 5)
+            ((None) 1) ((int _) 2) ((f64 _) 3) ((char _) 4) ((bool _) 5)
             ((sym _) 6) ((str _) 7) ((cons _ _) 8) ((path _) 9)
             (_ 0)))
         (defun total () int
@@ -4004,7 +4004,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
         r#"
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((none) 1) ((sym _) 2) ((str _) 3) ((bool _) 4)
+            ((None) 1) ((sym _) 2) ((str _) 3) ((bool _) 4)
             (_ 0)))
         (compile tag)
         (+ (+ (tag ()) (* (the int 10) (tag (quote foo))))
@@ -4150,8 +4150,8 @@ fn compile_dispatches_a_function_that_writes_a_global_to_native_code() {
 fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
     let v = run_with_compiler(
         r#"
-        (defvar (maybe Option<int>) (Option::some 42))
-        (defun read-maybe () int (match maybe ((some x) x) ((none) 0)))
+        (defvar (maybe Option<int>) (Option::Some 42))
+        (defun read-maybe () int (match maybe ((Some x) x) ((None) 0)))
         (compile read-maybe)
         (read-maybe)
         "#,
@@ -4169,8 +4169,8 @@ fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
 fn compile_of_a_function_referencing_a_none_typed_global_round_trips() {
     let v = run_with_compiler(
         r#"
-        (defvar (maybe Option<int>) (Option::none))
-        (defun read-maybe () int (match maybe ((some x) x) ((none) -1)))
+        (defvar (maybe Option<int>) (Option::None))
+        (defun read-maybe () int (match maybe ((Some x) x) ((None) -1)))
         (compile read-maybe)
         (read-maybe)
         "#,
@@ -4191,11 +4191,11 @@ fn compile_of_a_function_referencing_a_none_typed_global_round_trips() {
 fn compile_can_set_an_option_typed_global_and_the_interpreter_sees_the_write() {
     let v = run_with_compiler(
         r#"
-        (defvar (maybe Option<int>) (Option::none))
-        (defun set-maybe () int (progn (setf maybe (Option::some 7)) 0))
+        (defvar (maybe Option<int>) (Option::None))
+        (defun set-maybe () int (progn (setf maybe (Option::Some 7)) 0))
         (compile set-maybe)
         (set-maybe)
-        (match maybe ((some x) x) ((none) -1))
+        (match maybe ((Some x) x) ((None) -1))
         "#,
     )
     .expect("eval failed");
@@ -4317,8 +4317,8 @@ fn compile_of_a_function_referencing_a_generic_defenum_global_round_trips() {
 fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
     let v = eval_string_with_compiler_and_capacity(
         r#"
-        (defvar (maybe Option<string>) (Option::some "hello"))
-        (defun touch-maybe () string (match maybe ((some s) s) ((none) "")))
+        (defvar (maybe Option<string>) (Option::Some "hello"))
+        (defun touch-maybe () string (match maybe ((Some s) s) ((None) "")))
         (compile touch-maybe)
         (defvar (scratch Vector<int>) (Vector::new))
         (defvar (n int) 20000)
@@ -4326,7 +4326,7 @@ fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
           (if (eq n 0)
               (break)
               (progn (push scratch n) (setf n (- n 1)))))
-        (match maybe ((some s) s) ((none) ""))
+        (match maybe ((Some s) s) ((None) ""))
         "#,
         1 << 14,
     );
@@ -4670,7 +4670,7 @@ fn compile_dispatches_vector_pop_to_native_code() {
             (push v 10)
             (push v 20)
             (push v 30)
-            (match (pop v) ((some x) x) ((none) -1))))
+            (match (pop v) ((Some x) x) ((None) -1))))
         (compile f)
         (f)
         "#,
@@ -4689,7 +4689,7 @@ fn compile_dispatches_vector_pop_shrinks_len_to_native_code() {
           (let ((v (the Vector<int> (Vector::new))))
             (push v 10)
             (push v 20)
-            (match (pop v) ((some x) x) ((none) -1))
+            (match (pop v) ((Some x) x) ((None) -1))
             (as int (len v))))
         (compile f)
         (f)
@@ -4708,7 +4708,7 @@ fn compile_dispatches_vector_pop_of_an_empty_vector_returns_none() {
         r#"
         (defun f () int
           (let ((v (the Vector<int> (Vector::new))))
-            (match (pop v) ((some x) x) ((none) -1))))
+            (match (pop v) ((Some x) x) ((None) -1))))
         (compile f)
         (f)
         "#,
@@ -4892,7 +4892,7 @@ fn compile_dispatches_hashtable_count_and_keys_to_native_code() {
 
 // ---- HashTable::get/remove compile (Option-returning) ----------------------
 //
-// Unlike an ordinary `Option::some`/`none` source call (a compile-time-known
+// Unlike an ordinary `Option::Some`/`None` source call (a compile-time-known
 // variant, `compile-construct-box`), `HashTable<K,V>::get`/`remove` decide
 // which variant to build from a *runtime* lookup outcome — real control flow
 // (`rt_hashtable_contains` + a branch), not a static dispatch. See
@@ -5262,10 +5262,10 @@ fn the_builtins_that_used_to_block_compilation_now_lower() {
         (defun su ((s string)) string (append (upcase s) (downcase s)))
         (defun bb ((b int)) int (+ (logcount b) (integer-length b)))
         (defun bp ((b int)) bool (if (logbitp b 3) (logtest b 7) false))
-        (defun tc ((n int)) int (match (try-as char n) ((some c) (as int (char->int c))) ((none) -1)))
-        (defun tu ((n int)) int (match (try-as u8 n) ((some v) (as int v)) ((none) -1)))
-        (defun tf ((x f64)) int (match (try-as f32 x) ((some v) 1) ((none) 0)))
-        (defun tw ((x f32)) int (match (try-as f64 x) ((some v) 1) ((none) 0)))
+        (defun tc ((n int)) int (match (try-as char n) ((Some c) (as int (char->int c))) ((None) -1)))
+        (defun tu ((n int)) int (match (try-as u8 n) ((Some v) (as int v)) ((None) -1)))
+        (defun tf ((x f64)) int (match (try-as f32 x) ((Some v) 1) ((None) 0)))
+        (defun tw ((x f32)) int (match (try-as f64 x) ((Some v) 1) ((None) 0)))
         (defun all () int
           (+ (length (su "Ab"))
              (+ (bb 255)
@@ -5913,7 +5913,7 @@ fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
           (let ((n 0))
             (loop
               (match (next it)
-                ((some x) (setf n (+ n x)))
+                ((Some x) (setf n (+ n x)))
                 (_ (break))))
             n))
         (defun make-v () Vector<int> (Vector::new))
@@ -5932,16 +5932,16 @@ fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
 
 /// A user error type as `Result`'s `E`, compiled: `Result<T, MyErr>` is an
 /// ordinary sum of a sum, so the native code has to build, match, and read a
-/// field out of a `defstruct` sitting in the `err` payload.
+/// field out of a `defstruct` sitting in the `Err` payload.
 #[test]
 fn compile_dispatches_a_result_carrying_a_user_error_type() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct io-err (code int))
         (defun open-it ((ok bool)) Result<int,io-err>
-          (if ok (Result::ok 7) (Result::err (make-instance 'io-err :code 42))))
+          (if ok (Result::Ok 7) (Result::Err (make-instance 'io-err :code 42))))
         (defun code ((ok bool)) int
-          (match (open-it ok) ((ok v) v) ((err e) e::code)))
+          (match (open-it ok) ((Ok v) v) ((Err e) e::code)))
         (compile code)
         (+ (* 100 (code true)) (code false))
         "#,
@@ -5960,7 +5960,7 @@ fn compile_dispatches_a_match_on_a_builtin_error_type() {
     let v = run_readback(
         r#"(use std::num::ParseIntError) (use std::num::parse-int) 
         (defun classify ((r Result<int,ParseIntError>)) string
-          (match r ((ok _) "ok") ((err e) (message e))))
+          (match r ((Ok _) "ok") ((Err e) (message e))))
         (compile classify)
         (append (classify (parse-int "12")) (classify (parse-int "xy")))
         "#,
@@ -5980,7 +5980,7 @@ fn compile_dispatches_message_on_a_dyn_error() {
         (defstruct app-err (why string))
         (impl Error app-err
           (defmethod message (self) string self::why)
-          (defmethod source (self) Option<:dyn Error> (Option::none)))
+          (defmethod source (self) Option<:dyn Error> (Option::None)))
         (defun describe ((e :dyn Error)) string (message e))
         (defun both () string
           (append (describe (make-instance 'app-err :why "mine"))
@@ -6043,9 +6043,9 @@ fn compile_handles_a_result_with_a_unit_ok_payload() {
     let v = run_readback(
         r#"
         (defun check ((n int)) Result<(), string>
-          (if (> n 0) (Result::ok ()) (Result::err "negative")))
+          (if (> n 0) (Result::Ok ()) (Result::Err "negative")))
         (defun describe ((n int)) string
-          (match (check n) ((ok _) "ok") ((err e) e)))
+          (match (check n) ((Ok _) "ok") ((Err e) e)))
         (compile check)
         (compile describe)
         (append (describe 1) (describe -1))
@@ -6409,7 +6409,7 @@ fn compile_function_source(name: &str, params: &str, body: &str) -> String {
 /// LLVM validated the module that came out.
 #[test]
 fn the_island_accepts_a_bridged_construct_field_and_match() {
-    let defs = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::maybe-int (none some) (() (int-any-width)))"];
+    let defs = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::maybe-int (None Some) (() (int-any-width)))"];
     let body = bridge_to_island_text_with(
         &defs,
         "(let ((p struct (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (var a) (var b))))
@@ -6630,7 +6630,7 @@ fn compile_reads_a_hashtable_field_out_of_a_struct() {
           (let ((c (make-instance 'cache :table (the HashTable<int,int> (HashTable::new)))))
             (let ((t c::table))
               (set t 1 41)
-              (match (get t 1) ((some n) (+ n 1)) (none 0)))))
+              (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
         (compile probe)
         (probe)
         "#,
@@ -6653,7 +6653,7 @@ fn compile_captures_a_hashtable_in_a_closure() {
         (defun probe () int
           (let ((t (the HashTable<int,int> (HashTable::new))))
             (set t 1 41)
-            (let ((f (lambda () int (match (get t 1) ((some n) (+ n 1)) (none 0)))))
+            (let ((f (lambda () int (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
               (f))))
         (compile probe)
         (probe)
@@ -6954,9 +6954,9 @@ fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
             (progn
               (set h (make-instance 'pt :x a :y b) 7)
               (set h (make-instance 'pt :x b :y a) 9)
-              (let ((hit (match (get h (make-instance 'pt :x a :y b)) ((some v) v) ((none) -1)))
-                    (miss (match (get h (make-instance 'pt :x 99 :y 99)) ((some v) v) ((none) 0)))
-                    (gone (match (remove h (make-instance 'pt :x b :y a)) ((some v) v) ((none) -1))))
+              (let ((hit (match (get h (make-instance 'pt :x a :y b)) ((Some v) v) ((None) -1)))
+                    (miss (match (get h (make-instance 'pt :x 99 :y 99)) ((Some v) v) ((None) 0)))
+                    (gone (match (remove h (make-instance 'pt :x b :y a)) ((Some v) v) ((None) -1))))
                 (+ hit (+ miss (+ gone (count h))))))))
     "#;
     let compiled = run_with_compiler_and_prelude(&format!("{}\n(compile probe)\n(probe 1 2)", prog))

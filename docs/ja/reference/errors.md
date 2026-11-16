@@ -98,8 +98,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | メッセージ | 意味と直し方 |
 |---|---|
 | `panic: divide by zero` | 整数・有理数のゼロ除算。浮動小数点数のゼロ除算は panic せず `inf`/`NaN` になる |
-| `panic: unwrap: called on none` | `none` に `unwrap` した。`match` か `unwrap-or` で `none` の場合を扱う |
-| `panic: Vector: index 5 out of bounds` | 範囲外の添字。`len` で長さを確かめるか、範囲外で `none` を返す関数（`nth`、`pop` など）を使う |
+| `panic: unwrap: called on none` | `None` に `unwrap` した。`match` か `unwrap-or` で `None` の場合を扱う |
+| `panic: Vector: index 5 out of bounds` | 範囲外の添字。`len` で長さを確かめるか、範囲外で `None` を返す関数（`nth`、`pop` など）を使う |
 | `panic: an integer argument does not fit a fixnum` | 添字や個数を取る引数に、63bit に入らない `int` を渡した |
 | `throw: no enclosing (catch 'oops) for this throw` | 同じタグの `catch` が囲んでいない `throw` を実行した |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` が届いた同じタグの `catch` が、別の型を運んでいた |

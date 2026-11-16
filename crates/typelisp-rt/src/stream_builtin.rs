@@ -4,7 +4,7 @@
 //! [`crate::stream`] owns the OS resources and speaks Rust types
 //! (`StreamResult<Option<char>>`, ...). This module is the layer above it,
 //! turning those into the heap values the language sees — `Result<_,
-//! FileError>` mostly, with `Ok(none)` for end of input — and it is what both
+//! FileError>` mostly, with `Ok(None)` for end of input — and it is what both
 //! `Interp::eval_stream_builtin` (interpreted) and the `rt_stream_*` shims in
 //! [`crate::lib`](crate) (compiled) call.
 //!
@@ -98,14 +98,14 @@ pub(crate) fn lookup(table: &[(u32, TypeSpec)], name: SymRef, what: &str) -> Typ
     }
 }
 
-/// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
+/// `Ok(v)`, matching `result_def`'s variant order (`Ok` = 0, `Err` = 1).
 fn result_ok(heap: &mut Heap, name: SymRef, v: Value) -> Value {
     let key = lookup(RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 0, vec![v])
 }
 
 /// `Err(FileError(msg))` — the concrete error type every stream and file
-/// operation fails with, wrapped in `Result`'s `err` variant. `FileError` has
+/// operation fails with, wrapped in `Result`'s `Err` variant. `FileError` has
 /// exactly one variant (index 0) carrying the message.
 fn result_err(heap: &mut Heap, name: SymRef, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
@@ -334,7 +334,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
         // CL's `file-author`, under a `file-`-prefixed name because that
         // prefix is what routes a builtin here at all (see the note above).
         // Two failures that CL keeps apart stay apart: a missing file is an
-        // `Err`, an owner with no password-database entry is `Ok(none)` —
+        // `Err`, an owner with no password-database entry is `Ok(None)` —
         // which is exactly what CL means by "or nil if the author's name
         // cannot be determined".
         wk::F_FILE_OWNER_NAME => {

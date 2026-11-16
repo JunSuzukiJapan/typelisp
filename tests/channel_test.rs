@@ -82,7 +82,7 @@ fn err(src: &str) -> String {
     }
 }
 
-/// [`err`] for a source that compiles something first.
+/// [`Err`] for a source that compiles something first.
 fn err_compiled(src: &str) -> String {
     match run_with(src, true, false) {
         Ok(_) => panic!("expected the program to fail"),
@@ -189,8 +189,8 @@ fn a_full_buffer_stops_the_sender_until_room_appears() {
 
 // ---- closing -------------------------------------------------------------
 
-/// Receiving from a closed, drained channel answers `none` — and goes on
-/// answering `none`.
+/// Receiving from a closed, drained channel answers `None` — and goes on
+/// answering `None`.
 #[test]
 fn a_receive_on_a_closed_and_drained_channel_is_none() {
     assert_eq!(
@@ -201,7 +201,7 @@ fn a_receive_on_a_closed_and_drained_channel_is_none() {
                    (format false "~a ~a" (recv ch) (recv ch))))
                (main)"#
         ),
-        "none none"
+        "None None"
     );
 }
 
@@ -219,7 +219,7 @@ fn closing_does_not_discard_what_is_buffered() {
                    (format false "~a ~a ~a" (recv ch) (recv ch) (recv ch))))
                (main)"#
         ),
-        "(some 1) (some 2) none"
+        "(Some 1) (Some 2) None"
     );
 }
 
@@ -415,7 +415,7 @@ fn after_delivers_one_value() {
                  (format false "~a" (recv (after 0.01))))
                (main)"#
         ),
-        "(some ())"
+        "(Some ())"
     );
 }
 
@@ -492,7 +492,7 @@ fn a_compiled_send_carries_every_element_representation() {
                      (ints a) (strs b) (floats c) (chars d)
                      (format false "~a ~a ~a ~a" (recv a) (recv b) (recv c) (recv d))))"#;
     let plain = text(&format!("{}\n(main)", src));
-    assert_eq!(plain, "(some 7) (some hi) (some 1.5) (some z)");
+    assert_eq!(plain, "(Some 7) (Some hi) (Some 1.5) (Some z)");
     assert_eq!(
         text_compiled(&format!(
             "{}\n(compile ints)(compile strs)(compile floats)(compile chars)\n(main)",
@@ -514,7 +514,7 @@ fn the_four_operations_that_never_wait_still_compile() {
                        (close ch)
                        (format false "~a ~a" a (recv ch)))))"#;
     let plain = text(&format!("{}\n(probe)", src));
-    assert_eq!(plain, "1/2 (some 1)");
+    assert_eq!(plain, "1/2 (Some 1)");
     assert_eq!(text_compiled(&format!("{}\n(compile probe)\n(probe)", src)), plain);
 }
 
@@ -525,7 +525,7 @@ fn the_four_operations_that_never_wait_still_compile() {
 /// Three places have to be roots for this to pass: the ring buffer (the
 /// scheduler's own root stack), the value a **parked sender** is still
 /// offering (its task's state slot — nothing else points at it), and the
-/// `some` box handed to a woken receiver, which exists only inside a Rust
+/// `Some` box handed to a woken receiver, which exists only inside a Rust
 /// enum until the receiver's state slot is written.
 #[test]
 fn a_channel_holds_its_values_through_gc_stress() {
@@ -565,7 +565,7 @@ fn a_receive_that_needs_no_waiting_works_under_a_rust_caller() {
                    (format false "~a" (make-instance 'probe :ch ch))))
                (main)"#
         ),
-        "<(some 3)>"
+        "<(Some 3)>"
     );
 }
 
@@ -607,7 +607,7 @@ fn a_compiled_receive_that_needs_no_waiting_works_under_a_rust_caller() {
                (compile main)
                (main)"#
         ),
-        "<(some 3)>"
+        "<(Some 3)>"
     );
 }
 

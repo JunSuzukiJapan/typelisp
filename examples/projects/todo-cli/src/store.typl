@@ -14,8 +14,8 @@
 
 (pub defun complete-todo ((tid int)) bool
   (match (get store tid)
-    ((some td) (setf td::done true) true)
-    ((none) false)))
+    ((Some td) (setf td::done true) true)
+    ((None) false)))
 
 (pub defun remove-todo ((tid int)) bool
   (is-some (remove store tid)))

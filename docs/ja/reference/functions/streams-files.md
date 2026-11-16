@@ -28,18 +28,18 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | 次の1要素。末尾なら `none`。**唯一の実装必須メソッド** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | 次の1要素。末尾なら `None`。**唯一の実装必須メソッド** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | 次の1文字 |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | 次の改行まで（改行は消費して除去）。改行で終わらない最終行も返る |
 | `read-all` | `(read-all s)` | `(S)→string` | 残り全部 |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | すでに手元にある1文字だけ。待たされるくらいなら `none` |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | すでに手元にある1文字だけ。待たされるくらいなら `None` |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | 最大 `n` 文字を `v` へ push し、実際に読めた数を返す。`n` に満たないのは末尾のときだけ |
 
 `listen` は `InputStream`（`CharInput` の親）にある:
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | 次の読みが待たされずに答えられるか。デフォルトは `false`——**決して嘘にならない側**。`true` は推測になり、外すと `read-char-no-hang` がブロックする。組み込みストリームは全て上書き済み。**上書きしないユーザ定義ストリームでは `read-char-no-hang` が常に `none` を返す** |
+| `listen` | `(listen s)` | `(S)→bool` | 次の読みが待たされずに答えられるか。デフォルトは `false`——**決して嘘にならない側**。`true` は推測になり、外すと `read-char-no-hang` がブロックする。組み込みストリームは全て上書き済み。**上書きしないユーザ定義ストリームでは `read-char-no-hang` が常に `None` を返す** |
 
 `PeekInput`（`CharInput` を継承）は**1文字の押し戻し**を足す。押し戻した文字を置く場所は
 ストリーム自身しか持たないので、デフォルト実装を持てず、別のトレイトにしてある。
@@ -87,7 +87,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` は `direction-input` / `direction-output` / `direction-append` の3定数。
-`open-file` は開けなければ `(err FileError)` を返す（存在しないファイルは普通の結果であって
+`open-file` は開けなければ `(Err FileError)` を返す（存在しないファイルは普通の結果であって
 panic ではない）。ファイル名は文字列でも `pathname` でもよい（9 章の `Pathish`）。
 
 `(get-output-stream-string s)` は `string-output-stream` に書かれた内容を返して空にする。
@@ -98,7 +98,7 @@ CL 同様、`close` 後でも取り出せる。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | 次の1バイト。ファイル終端で `None` |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | 文字版と同じものをバイトで |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | 同上 |
@@ -134,18 +134,18 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部転送 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 残り全行 |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `(ok eof)`、読めたときは `(ok (datum d))`、データでなければ `err`。datum を終わらせた**空白1文字を消費する**（CL と同じ）。`ReadOutcome` が `Option<Sexpr>` でないのは、空リスト `()` を読んだことと入力末尾とを同じ値で表さないため |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `(Ok eof)`、読めたときは `(Ok (Datum d))`、データでなければ `Err`。datum を終わらせた**空白1文字を消費する**（CL と同じ）。`ReadOutcome` が `Option<Sexpr>` でないのは、空リスト `()` を読んだことと入力末尾とを同じ値で表さないため |
 | `read-sexpr-preserving-whitespace` | 同上 | 同上 | 同上だが空白を残す（CL の `read-preserving-whitespace`） |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `Err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 全内容 |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 全行 |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | 書き出す |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 存在するか |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名（引数は `Pathish`） |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | シンボリックリンクと `.`/`..` を解いた絶対パス。存在しなければ `err` |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | シンボリックリンクと `.`/`..` を解いた絶対パス。存在しなければ `Err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 最終更新時刻。**万国時**なので `decode-universal-time`（[時間](system.md#2-日時への分解合成)）が読める |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者のログイン名。ファイルが無ければ `err`、所有者の uid にパスワードデータベースの項目が無ければ `(ok none)`——CL が分けている2つをそのまま分けている |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者のログイン名。ファイルが無ければ `Err`、所有者の uid にパスワードデータベースの項目が無ければ `(Ok none)`——CL が分けている2つをそのまま分けている |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | ディレクトリか。**無い場合も `false`** ——両者を分けるのは `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 中身を truename（`truename` と同じく、シンボリックリンクを解いた絶対パス）で並べる。リンク先の無いシンボリックリンクは入らない。`.`/`..` は入らない。順序は OS のまま |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 親ごと作る。既にあれば成功 |
@@ -197,8 +197,8 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   最後のドットで切る
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   最後のドットで切る
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -224,10 +224,10 @@ CL がパス名指定子（文字列かパス名）を受ける場所で、こ�
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | 文字列を分解する。末尾 `/`（や空名）は「名前無し」＝ディレクトリ |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | 持っている成分だけで組み立てる（全て `&key`）。省略した名前・型は「無い」ままで、`merge-pathnames` が埋める対象になる |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | 外側から順のディレクトリ成分 |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | 型を除いた名前。ディレクトリなら `none` |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | 型を除いた名前。ディレクトリなら `None` |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | 最後のドット以降。先頭のドットは対象外（`.gitignore` は全部が名前） |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | ルート始まりか |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | ホームディレクトリ。`$HOME` が無ければ `none`（CL も `NIL` を許す） |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | ホームディレクトリ。`$HOME` が無ければ `None`（CL も `NIL` を許す） |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | 最後の `/` までの部分 |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | `name.type` の部分だけ |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p` に無い成分を `default` から補う。相対の `p` は `default` のディレクトリの下に置かれ、絶対の `p` は自分のディレクトリを保つ |

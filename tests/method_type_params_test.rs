@@ -110,7 +110,7 @@ fn as_a_function_value() {
 #[test]
 fn a_parameter_nothing_decides_is_an_error() {
     let msg = check_err(&format!(
-        "{}\n(impl<T> Box<T> (defmethod make<U> (self) Option<U> (Option::none)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
+        "{}\n(impl<T> Box<T> (defmethod make<U> (self) Option<U> (Option::None)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
         DEFS
     ));
     assert!(msg.contains("cannot infer type parameter `U`"), "{}", msg);

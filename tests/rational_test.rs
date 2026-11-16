@@ -57,8 +57,8 @@ fn integer_quotients() {
 /// `as int` truncates, `as ratio` always succeeds.
 #[test]
 fn converting_a_rational() {
-    assert_eq!(show("(try-as int (/ 8 2))"), "(some 4)");
-    assert_eq!(show("(try-as int (/ 7 2))"), "none");
+    assert_eq!(show("(try-as int (/ 8 2))"), "(Some 4)");
+    assert_eq!(show("(try-as int (/ 7 2))"), "None");
     assert_eq!(show("(as int (/ -7 2))"), "-3");
     assert_eq!(show("(as ratio (/ 4 2))"), "2");
     assert_eq!(show("(as f64 (/ 1 4))"), "0.25");
@@ -95,7 +95,7 @@ fn rational_methods() {
 fn rational_is_a_hash_key() {
     assert_eq!(
         show("(let ((h (the HashTable<rational,int> (HashTable::new)))) (set h (/ 1 2) 1) (set h (/ 4 2) 2) (format false \"~a ~a\" (get h 1/2) (get h 2)))"),
-        "(some 1) (some 2)"
+        "(Some 1) (Some 2)"
     );
 }
 
@@ -136,7 +136,7 @@ fn compiled_rational_agrees_with_the_interpreter() {
                     (f 1 2) (f 2 3) (f 100000000000000000000 3)
                     (g (/ 6 3)) (g (/ 7 3)) (h 1 3/2) (k (/ 7 2)) (m -7 2) (n 1/2) (n 1/3))"#;
     let interpreted = eval_string(&format!("{src}\n{call}"));
-    assert_eq!(interpreted, "5/6 1 100000000000000000001/3 (some 2) none true 4 -4 1 2/3");
+    assert_eq!(interpreted, "5/6 1 100000000000000000001/3 (Some 2) None true 4 -4 1 2/3");
     let compiled = eval_string_compiled(&format!(
         "{src}\n(compile f)\n(compile g)\n(compile h)\n(compile k)\n(compile m)\n(compile n)\n{call}"
     ));

@@ -39,18 +39,18 @@
 （パイプ経由でも、標準入力を読む前にプロンプトが見えるように）。
 
 **`Option<Sexpr>` は透過的に印字される。** S 式データの型は `Option<Sexpr>` なので、
-`(some x)` の包みは印字に現れず、中身がそのまま出る。空リストは `()` と出る。
-他の `Option<T>` は `(some ...)` / `none` と印字する。構造体・列挙・`Vector` の中の
+`(Some x)` の包みは印字に現れず、中身がそのまま出る。空リストは `()` と出る。
+他の `Option<T>` は `(Some ...)` / `None` と印字する。構造体・列挙・`Vector` の中の
 `Option<T>` フィールドも同じ。`(eval ...)` の `Result<Option<Sexpr>,…>` は
-`(ok 42)`、`none` なら `(ok ())` と出る。
+`(Ok 42)`、`None` なら `(Ok ())` と出る。
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -300,10 +300,10 @@ CL は「無制限」を `nil` で表すが、この言語に `nil` は無いの
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a が a 自身を指す
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a が a 自身を指す
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 ラベルは**1回の印字対象ごとに 1 から振り直す**（CL と同じ）。循環していなくても、同じ

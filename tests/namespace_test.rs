@@ -135,7 +135,7 @@ fn a_module_is_not_re_exported() {
 #[test]
 fn builtins_still_resolve() {
     assert_eq!(
-        ty_program("(Option::some 1)"),
+        ty_program("(Option::Some 1)"),
         Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int])
     );
 }
@@ -144,13 +144,13 @@ fn builtins_still_resolve() {
 /// as Rust's prelude brings in `Some`/`None`/`Ok`/`Err`.
 #[test]
 fn option_and_result_constructors_are_offered_bare() {
-    assert_eq!(ty_program("(some 1)"), Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int]));
+    assert_eq!(ty_program("(Some 1)"), Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int]));
     assert_eq!(
-        ty_program("(defun f () Option<int> (none)) (f)"),
+        ty_program("(defun f () Option<int> (None)) (f)"),
         Type::Named(Path::builtin(typelisp::mem::wk::OPTION), vec![Type::Int])
     );
-    assert!(program("(defun f () Result<int,string> (ok 1)) (f)").is_ok());
-    assert!(program(r#"(defun f () Result<int,string> (err "x")) (f)"#).is_ok());
+    assert!(program("(defun f () Result<int,string> (Ok 1)) (f)").is_ok());
+    assert!(program(r#"(defun f () Result<int,string> (Err "x")) (f)"#).is_ok());
 }
 
 #[test]

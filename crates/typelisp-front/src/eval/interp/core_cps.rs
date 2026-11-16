@@ -1186,7 +1186,7 @@ impl Interp {
         {
             // Rooted *first*: a parked `send`'s value lives in the state slot
             // and nowhere else, and answering the operation allocates (the
-            // `some` box a waiting receiver gets).
+            // `Some` box a waiting receiver gets).
             set_state(heap, task.sbase, &next);
             let answered = self.scheduler.lock(heap).try_now(heap, w);
             if let Some(answer) = answered {

@@ -83,9 +83,9 @@ fn specialize<'p>(wild: &'p Pat, rows: &[Vec<&'p Pat>], variant: usize, arity: u
 /// the patterns its fields are matched by — or `None` when it matches
 /// anything.
 ///
-/// In a column of `Option<Sexpr>`, `none` and `Sexpr`'s variants are its
-/// variants, `none` in the slot `Sexpr`'s retired `nil` keeps: `(some p)`
-/// is what `p` matches, and `(some _)` every `Sexpr` variant.
+/// In a column of `Option<Sexpr>`, `None` and `Sexpr`'s variants are its
+/// variants, `None` in the slot `Sexpr`'s retired `nil` keeps: `(Some p)`
+/// is what `p` matches, and `(Some _)` every `Sexpr` variant.
 fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, Vec<&'p Pat>)>> {
     let (owner, variant, subs) = match p {
         Pat::Wild | Pat::Bind(_) => return None,
@@ -109,7 +109,7 @@ fn cases<'p>(p: &'p Pat, wild: &'p Pat, all: &[Variant]) -> Option<Vec<(usize, V
         Pat::Ctor { downcast: true, .. } => return Some(Vec::new()),
         Pat::Ctor { owner, variant, subs, .. } => (owner, variant, subs),
     };
-    let flat = all.iter().any(|(i, name, _)| *i == sexpr_variant::NIL && name == "none");
+    let flat = all.iter().any(|(i, name, _)| *i == sexpr_variant::NIL && name == "None");
     if !flat || !path_is_builtin(owner, wk::OPTION) {
         return Some(vec![(*variant, subs.iter().collect())]);
     }
@@ -132,7 +132,7 @@ type Variant = (usize, String, Vec<Type>);
 /// and field types at `ty`'s type arguments. `None` for any other type.
 ///
 /// `Sexpr`'s are the ones a pattern can write, without the retired `nil`
-/// and `bignum`; an `Option<Sexpr>`'s are those and `none` (see [`cases`]).
+/// and `bignum`; an `Option<Sexpr>`'s are those and `None` (see [`cases`]).
 fn sum_variants(reg: &Registry, ty: &Type) -> Option<Vec<Variant>> {
     let sexpr = || {
         let def = reg.type_def(&Path::builtin(wk::SEXPR)).expect("`Sexpr` is defined");
@@ -143,7 +143,7 @@ fn sum_variants(reg: &Registry, ty: &Type) -> Option<Vec<Variant>> {
             .map(|(i, v)| (i, v.name.name().to_string(), v.fields.clone()))
     };
     if is_option_of_sexpr(ty) {
-        return Some(std::iter::once((sexpr_variant::NIL, "none".to_string(), Vec::new())).chain(sexpr()).collect());
+        return Some(std::iter::once((sexpr_variant::NIL, "None".to_string(), Vec::new())).chain(sexpr()).collect());
     }
     if *ty == Type::Bool {
         return Some(vec![(0, "true".to_string(), Vec::new()), (1, "false".to_string(), Vec::new())]);

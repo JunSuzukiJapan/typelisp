@@ -91,7 +91,7 @@ pub(crate) enum Step {
     /// `:always` / `:never` — leave with `false` the moment the test fails.
     /// `never` is `always` over the negation, so only the polarity differs.
     Assert { expr: Value, want: bool },
-    /// `:thereis` — leave with `(some expr)` the moment it holds.
+    /// `:thereis` — leave with `(Some expr)` the moment it holds.
     Thereis { expr: Value },
     /// `:while` / `:until` — stop here (normally, so `:finally` still runs).
     Stop { expr: Value, when: bool },
@@ -153,7 +153,7 @@ pub(crate) struct AccVar {
 pub(crate) enum Verdict {
     /// `:always`/`:never` — `true` if the loop ran to exhaustion.
     Boolean,
-    /// `:thereis` — `(none)` if the loop ran to exhaustion. The `Option`'s
+    /// `:thereis` — `(None)` if the loop ran to exhaustion. The `Option`'s
     /// element type comes from the `:thereis` expression, which
     /// `typeck::looping` finds by walking [`Plan::steps`].
     Optional,
@@ -505,7 +505,7 @@ fn state_name(prefix: &str, n: usize) -> String {
 
 /// Everything the checker had to work out before source could be written:
 /// one initializer form per accumulator (in `Plan::accs` order), and the
-/// `(the Option<T> (Option::none))` a `:thereis` leaves with when nothing
+/// `(the Option<T> (Option::None))` a `:thereis` leaves with when nothing
 /// matched.
 pub(crate) struct Resolved {
     pub acc_inits: Vec<(SymRef, Value)>,
@@ -808,7 +808,7 @@ fn leave_normally(b: &mut Build, plan: &Plan, resolved: &Resolved) -> Result<Val
             Some(Verdict::Boolean) => Value::Bool(true),
             Some(Verdict::Optional) => resolved
                 .thereis_none
-                .ok_or_else(|| err("internal: `:thereis` left no `none` form"))?,
+                .ok_or_else(|| err("internal: `:thereis` left no `None` form"))?,
             None => Value::Empty,
         },
     };
@@ -903,8 +903,8 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: SymRef) -> Resul
         Acc::Maximize | Acc::Minimize => {
             // (let* ((tmp EXPR))
             //   (setf acc (match acc
-            //               ((some best) (Option::some (if (OP tmp best) tmp best)))
-            //               ((none) (Option::some tmp)))))
+            //               ((Some best) (Option::Some (if (OP tmp best) tmp best)))
+            //               ((None) (Option::Some tmp)))))
             //
             // `Option<T>`, not a running `T`: CL's `maximize` over an empty
             // sequence answers nil, and there is no least element of an
@@ -918,13 +918,13 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: SymRef) -> Resul
 
             let cmp = b.call(op, &[tmp_sym, best_sym])?;
             let pick = b.if_(cmp, tmp_sym, best_sym)?;
-            let some_pick = b.call_member(&crate::Path::builtin(typelisp_mem::wk::OPTION), "some", &[pick])?;
-            let some_head = b.sym("some");
+            let some_pick = b.call_member(&crate::Path::builtin(typelisp_mem::wk::OPTION), "Some", &[pick])?;
+            let some_head = b.sym("Some");
             let some_pat = b.list(&[some_head, best_sym])?;
             let some_arm = b.list(&[some_pat, some_pick])?;
 
-            let some_tmp = b.call_member(&crate::Path::builtin(typelisp_mem::wk::OPTION), "some", &[tmp_sym])?;
-            let none_head = b.sym("none");
+            let some_tmp = b.call_member(&crate::Path::builtin(typelisp_mem::wk::OPTION), "Some", &[tmp_sym])?;
+            let none_head = b.sym("None");
             let none_pat = b.list(&[none_head])?;
             let none_arm = b.list(&[none_pat, some_tmp])?;
 

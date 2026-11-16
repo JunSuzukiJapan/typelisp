@@ -46,7 +46,7 @@ compile される。したがって本課題の本質は「底のプリミティ
   `rt_struct_new`）
 - boxed-struct フィールド get/set（`rt_struct_field_get`/`rt_struct_field_set`）と Match（struct-kind、
   2026-07-12）
-- `Option::some`/`none` 構築・`Option` の match（sum-ADT box、MATCH_KIND_BOX）
+- `Option::Some`/`None` 構築・`Option` の match（sum-ADT box、MATCH_KIND_BOX）
 - ヒープクロージャ（`map`/`filter` の `f`/`pred` 引数、Stage 6b）
 - i32/string/char の `Eq`/`Ord`（`member`/`sort` 用、2026-07-09）
 - ユーザー定義メソッドのマングル名分岐（`compile-assoc-user`）
@@ -99,7 +99,7 @@ compile される。したがって本課題の本質は「底のプリミティ
   `vector-op` で歩く）。テスト: `compile_test` 2件。
 - **Stage C 追補 ✅ — `HashTable::get`/`remove`（`Option` 返し）**: 当初「反復とは別問題」として
   対象外にしていたが同日中に解消。`get`/`remove` は**実行時**の found/not-found 結果で
-  `Some`/`None` どちらの variant を構築するか決まるため、`Option::some`/`none` の通常コンパイル
+  `Some`/`None` どちらの variant を構築するか決まるため、`Option::Some`/`None` の通常コンパイル
   （`compile-construct-box`、コンパイル時定数variant）を単純に再利用できない。新設した
   `rt_hashtable_contains`（0/1）+ `rt_hashtable_get_raw`/`_remove_raw`（存在確認済み前提、
   タグ付き値を返す）を、`compile-if`と同型の「allocaでmergeスロット確保→分岐→各腕で結果を

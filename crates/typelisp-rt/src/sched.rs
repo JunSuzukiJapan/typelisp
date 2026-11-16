@@ -144,7 +144,7 @@ pub trait TaskBody: Sized {
     /// or an error to unwind with — **rooting it in the task's own stack**.
     ///
     /// Called with the task's root stack current. The root is the point: a
-    /// value handed to a woken task (a `some` box built by `recv`, say)
+    /// value handed to a woken task (a `Some` box built by `recv`, say)
     /// exists only inside a Rust enum until this runs, and the task is not
     /// stepped again until some other task has had its turn and allocated.
     fn deliver(&mut self, heap: &mut Heap, answer: Result<Value, SchedError>);
@@ -1114,7 +1114,7 @@ impl<B: TaskBody> Scheduler<B> {
             return Err(SchedError::Panic("close: the channel is already closed".to_string()));
         }
         self.chans[c.0].closed = true;
-        // Receivers get `none`: a receiver only parks with the buffer empty
+        // Receivers get `None`: a receiver only parks with the buffer empty
         // and no sender waiting, so there is nothing left for them.
         while let Some((i, arm, key)) = self.waiting_receiver(c) {
             self.wake_receiver(heap, i, arm, key, None);
@@ -1295,7 +1295,7 @@ struct IoWait {
 /// whole of the dispatch, and the value is the receive's `Option<T>` (or
 /// unit for a send or an `else`).
 ///
-/// The `cons` can collect, and until it returns the payload — a `some` box
+/// The `cons` can collect, and until it returns the payload — a `Some` box
 /// built moments ago — is reachable from nothing the collector walks, so it
 /// is rooted around the allocation.
 fn select_answer(heap: &mut Heap, arm: usize, payload: Value) -> Result<Value, SchedError> {

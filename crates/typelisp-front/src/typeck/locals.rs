@@ -32,7 +32,7 @@ pub(crate) struct Locals<'p> {
 }
 
 /// A local binding: its name, its type, and where the name was written
-/// (none for a name the checker makes).
+/// (None for a name the checker makes).
 pub(crate) type Bound = (SymRef, Type, Option<Loc>);
 
 /// Where a function's own frames end and those it captures begin.

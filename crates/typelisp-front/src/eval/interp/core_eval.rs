@@ -115,7 +115,7 @@ pub(super) enum Op {
     UntagInt,
     /// `(tag-int E)` — the boundary's other side; the identity here.
     TagInt,
-    /// `(some-of REPR E)` — a niched `Option`'s `some`: `E`'s value, which
+    /// `(some-of REPR E)` — a niched `Option`'s `Some`: `E`'s value, which
     /// already is the word the `Option` is represented by. The identity
     /// here; compiled code tags by `REPR`.
     SomeOf,
@@ -977,7 +977,7 @@ impl Interp {
     ///
     /// `repr` is the value's declared representation where the caller has
     /// one: a niched `Option` (`Repr::Niche`) is a bare word the renderer
-    /// cannot recognize, so it is written as `none`/`(some ...)` here, around
+    /// cannot recognize, so it is written as `None`/`(Some ...)` here, around
     /// the payload's own rendering. Everything else renders as itself —
     /// `Option<Sexpr>` included, which prints as the S-expression it is
     /// (`docs/ja/reference/functions/printing.md` §1).
@@ -986,9 +986,9 @@ impl Interp {
     pub fn render_readably(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> Result<String, String> {
         if matches!(repr, Some(Repr::Niche(p)) if **p != Repr::Sexpr) {
             if v == Value::Empty {
-                return Ok("none".to_string());
+                return Ok("None".to_string());
             }
-            return Ok(format!("(some {})", self.render_readably(heap, v, None)?));
+            return Ok(format!("(Some {})", self.render_readably(heap, v, None)?));
         }
         self.install_print_hooks();
         // `core::list` roots `v` across the one `cons` it takes to wrap it, and
@@ -1194,7 +1194,7 @@ pub(super) fn match_core_pattern(
         // `(pat-ctor sexpr 0 ..)` because the empty list outlives `Sexpr`'s
         // `nil` variant; see `typeck::pattern`.
         "pat-empty" => Ok(if v.is_empty() { Some(Vec::new()) } else { None }),
-        // `(pat-some REPR P)` — a niched `Option`'s `(some P)`. Under the
+        // `(pat-some REPR P)` — a niched `Option`'s `(Some P)`. Under the
         // niche the payload is the same `Value`, so this rejects the empty
         // list and then matches `P` against the value itself; `REPR` is for
         // compiled code, which has a tag to take off.

@@ -96,14 +96,14 @@ fn not_equal_on_a_type_variable_negates_equal() {
 /// `Option<Sexpr>`, compared as CL's `equal` compares one.
 #[test]
 fn option_and_result_compare_their_variant_and_contents() {
-    assert!(b("(equal (Option::some 1) (Option::some 1))"));
-    assert!(!b("(equal (Option::some 1) (Option::some 2))"));
-    assert!(!b("(equal (Option::some 1) (Option::none))"));
-    assert!(b("(equal (the Option<int> (Option::none)) (Option::none))"));
-    assert!(!b(r#"(equal (Option::some "a") (Option::some "b"))"#));
-    assert!(b("(equal (the Result<int,string> (Result::ok 1)) (Result::ok 1))"));
-    assert!(b(r#"(equal (the Result<int,string> (Result::err "e")) (Result::err "e"))"#));
-    assert!(!b(r#"(equal (the Result<int,string> (Result::ok 1)) (Result::err "e"))"#));
+    assert!(b("(equal (Option::Some 1) (Option::Some 1))"));
+    assert!(!b("(equal (Option::Some 1) (Option::Some 2))"));
+    assert!(!b("(equal (Option::Some 1) (Option::None))"));
+    assert!(b("(equal (the Option<int> (Option::None)) (Option::None))"));
+    assert!(!b(r#"(equal (Option::Some "a") (Option::Some "b"))"#));
+    assert!(b("(equal (the Result<int,string> (Result::Ok 1)) (Result::Ok 1))"));
+    assert!(b(r#"(equal (the Result<int,string> (Result::Err "e")) (Result::Err "e"))"#));
+    assert!(!b(r#"(equal (the Result<int,string> (Result::Ok 1)) (Result::Err "e"))"#));
     assert!(b("(let ((l '(1 2))) (equal l l))"));
     assert!(b("(equal '(1 2) '(1 2))"));
     assert!(b("(equal '() '())"));

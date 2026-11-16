@@ -32,7 +32,7 @@
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | 容量 `n` のチャネル。`0` はランデブー（バッファ無し） |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | 空きが出るまで待って渡す |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 値が来るまで待つ。閉じて空なら `none` |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 値が来るまで待つ。閉じて空なら `None` |
 | `close` | `(close ch)` | `(Chan<T>)→()` | 閉じる |
 | `len` | `(len ch)` | `(Chan<T>)→int` | いまバッファにある個数 |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | 容量 |
@@ -58,7 +58,7 @@
   プログラムのバグであって回復可能な失敗ではないので `Result` にしない）。
 - **`send` で待っているタスクがいるチャネルを `close` すると、そのタスクが panic する**
   （Go の規則）。
-- 閉じたチャネルからの `recv` は、バッファに残っていればそれを返し、空になったら `none` を
+- 閉じたチャネルからの `recv` は、バッファに残っていればそれを返し、空になったら `None` を
   返し続ける。
 - `close` は受け手の型で解決されるので `Stream` トレイトの `close` とは別物。`Chan<T>` は
   `Stream` を実装しない。
@@ -189,8 +189,8 @@ Go の `context.Context`。仕事を外から止めたいときに渡す。止�
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -204,7 +204,7 @@ Go の `context.Context`。仕事を外から止めたいときに渡す。止�
 - **キャンセルは子へ伝わる**。`with-cancel`/`with-timeout` で作ったコンテキストは、親が
   キャンセルされると一緒にキャンセルされる。逆向き（子から親）には伝わらない。
 - キャンセル済みのコンテキストから作った子は、最初からキャンセルされている。
-- `done` は閉じるだけで値は送られない。受信すると `none` が返る。
+- `done` は閉じるだけで値は送られない。受信すると `None` が返る。
 - `(Context::background)` は呼ぶたびに別の根を作る。Go の `Background()` は 1 つしかなく
   キャンセルできないが、ここでは根もキャンセルでき、その影響はそこから作ったものにだけ及ぶ。
 - タスク間でもスレッド間でも渡せる。

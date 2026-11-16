@@ -53,11 +53,11 @@ fn eval_ok(src: &str) -> Value {
 /// matches it back out and applies it. Both the built-in *method* case
 /// (`recv_type: Some`) and the free-built-in case (`recv_type: None`) have a
 /// variant here.
-const OP_ENUM: &str = "(use std::symbol::symbol->string) (defenum op (binary (fn (int int) int)) (naming (fn (symbol) string)) (none)) \
+const OP_ENUM: &str = "(use std::symbol::symbol->string) (defenum op (binary (fn (int int) int)) (naming (fn (symbol) string)) (None)) \
                        (defun run-binary ((o op) (a int) (b int)) int \
-                         (match o ((binary f) (f a b)) ((naming _) 0) ((none) -1))) \
+                         (match o ((binary f) (f a b)) ((naming _) 0) ((None) -1))) \
                        (defun run-naming ((o op) (s symbol)) string \
-                         (match o ((naming g) (g s)) ((binary _) (symbol->string s)) ((none) (symbol->string s))))";
+                         (match o ((naming g) (g s)) ((binary _) (symbol->string s)) ((None) (symbol->string s))))";
 
 // ---- still a function value ------------------------------------------------
 
@@ -132,7 +132,7 @@ fn a_closure_and_a_builtin_share_the_same_enum_field() {
 /// exercised on a path that never writes a function into a field at all.
 #[test]
 fn the_payload_free_variant_still_matches() {
-    let src = format!("{} (run-binary (op::none) 20 22)", OP_ENUM);
+    let src = format!("{} (run-binary (op::None) 20 22)", OP_ENUM);
     assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 

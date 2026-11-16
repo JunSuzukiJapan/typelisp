@@ -69,11 +69,11 @@ fn a_nested_or_pattern_binds_in_every_alternative() {
     both(
         r##"(let ((f (lambda ((o Option<Shape>)) f64
                      (match o
-                       ((some (:or (circle r) (rect r _))) r)
+                       ((Some (:or (circle r) (rect r _))) r)
                        (_ 0.0)))))
-             (format false "~a ~a ~a" (f (Option::some (Shape::circle 1.5)))
-                                      (f (Option::some (Shape::rect 2.5 9.0)))
-                                      (f (Option::some (Shape::dot)))))"##,
+             (format false "~a ~a ~a" (f (Option::Some (Shape::circle 1.5)))
+                                      (f (Option::Some (Shape::rect 2.5 9.0)))
+                                      (f (Option::Some (Shape::dot)))))"##,
         "1.5 2.5 0.0",
     );
 }
@@ -108,7 +108,7 @@ fn a_guard_in_a_closure_reads_a_captured_variable() {
 #[test]
 fn a_pattern_variable_captured_by_the_body_is_readable_in_the_guard() {
     both(
-        r##"(let ((g (match (Option::some 5) ((some k) :when (> k 1) (lambda () int (* k 2))) (_ (lambda () int 0)))))
+        r##"(let ((g (match (Option::Some 5) ((Some k) :when (> k 1) (lambda () int (* k 2))) (_ (lambda () int 0)))))
              (format false "~a" (g)))"##,
         "10",
     );
