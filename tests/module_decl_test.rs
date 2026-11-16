@@ -207,7 +207,7 @@ fn using_a_type_defined_here_for_its_constructors_is_not_a_collision() {
     // nothing to report.
     let files = vec![(
         "main.typl",
-        "(defenum tree (leaf) (node int))\n(use tree::*)\n(match (node 5) ((node n) n) ((leaf) 0))\n",
+        "(defenum tree (Leaf) (Node int))\n(use tree::*)\n(match (Node 5) ((Node n) n) ((Leaf) 0))\n",
     )];
     let (v, warnings) = run("use_own_type", &files, "main.typl").expect("load failed");
     assert_eq!(v, Some(Value::Int(5)));

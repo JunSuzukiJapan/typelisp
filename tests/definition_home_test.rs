@@ -17,7 +17,7 @@ fn every_definition_is_named_by_a_symbol_of_its_module() {
     s.eval(
         "(module m
            (pub defstruct Point (x int))
-           (pub defenum Shape (circle int) (square int))
+           (pub defenum Shape (Circle int) (Square int))
            (pub deftrait Area () (defmethod area (self) int))
            (pub defvar (tally int) 0)
            (pub defmacro twice (x) `(progn ,x ,x))

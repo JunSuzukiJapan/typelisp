@@ -149,9 +149,9 @@ fn defenum_docstring_is_returned_by_documentation() {
     let src = r#"
         (defenum color
           "Primary colors."
-          (red)
-          (green)
-          (blue))
+          (Red)
+          (Green)
+          (Blue))
         (unwrap-or (documentation color) "none")
     "#;
     assert_eq!(eval_string(src), "Primary colors.");

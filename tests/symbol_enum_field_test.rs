@@ -33,10 +33,10 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 /// `:hello` — a keyword, the one self-evaluating `symbol` literal
 /// (`typeck::expr`'s `Value::Symbol` arm); `(quote hello)` is a `Sexpr`, not
 /// a `symbol`, so it cannot go in this field.
-const TAG_ENUM: &str = "(defenum tag (named symbol) (anon)) \
-                        (defun make-tag ((s symbol)) tag (tag::named s)) \
+const TAG_ENUM: &str = "(defenum tag (Named symbol) (Anon)) \
+                        (defun make-tag ((s symbol)) tag (tag::Named s)) \
                         (defun tag-name ((t tag)) symbol \
-                          (match t ((named s) s) ((anon) :anon)))";
+                          (match t ((Named s) s) ((Anon) :anon)))";
 
 fn assert_named(h: &Heap, v: &Value, expected: &str) {
     match v {
@@ -50,7 +50,7 @@ fn assert_named(h: &Heap, v: &Value, expected: &str) {
 #[test]
 fn an_interpreted_enum_with_a_symbol_field_is_a_heap_box() {
     let (mut h, mut chk, mut interp) = env();
-    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (tag::named :hello)", TAG_ENUM))
+    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (tag::Named :hello)", TAG_ENUM))
         .expect("eval failed");
     match v {
         typelisp::Value::Boxed(id) => {
@@ -68,7 +68,7 @@ fn an_interpreted_enum_with_a_symbol_field_is_a_heap_box() {
 #[test]
 fn a_symbol_stored_in_an_enum_field_is_recovered() {
     let (mut h, mut chk, mut interp) = env();
-    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (tag-name (tag::named :hello))", TAG_ENUM))
+    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (tag-name (tag::Named :hello))", TAG_ENUM))
         .expect("eval failed");
     assert_named(&h, &v, ":hello");
 }
@@ -76,7 +76,7 @@ fn a_symbol_stored_in_an_enum_field_is_recovered() {
 #[test]
 fn the_payload_free_variant_still_matches() {
     let (mut h, mut chk, mut interp) = env();
-    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (tag-name (tag::anon))", TAG_ENUM))
+    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (tag-name (tag::Anon))", TAG_ENUM))
         .expect("eval failed");
     assert_named(&h, &v, ":anon");
 }
@@ -88,7 +88,7 @@ fn a_stored_symbol_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = env();
     eval_in(&mut h, &mut chk, &mut interp, TAG_ENUM).expect("definitions failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, "(tag-name (tag::named :hello))")
+    let v = eval_in(&mut h, &mut chk, &mut interp, "(tag-name (tag::Named :hello))")
         .expect("eval under gc stress failed");
     assert_named(&h, &v, ":hello");
 }

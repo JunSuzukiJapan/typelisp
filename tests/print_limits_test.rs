@@ -170,11 +170,11 @@ fn print_length_truncates_struct_fields() {
 #[test]
 fn print_length_truncates_enum_fields() {
     let src = r#"
-        (defenum shape (tri int int int))
+        (defenum shape (Tri int int int))
         (setf *print-length* 2)
-        (format false "~a" (shape::tri 3 4 5))
+        (format false "~a" (shape::Tri 3 4 5))
     "#;
-    assert_eq!(eval_string(src), "(tri 3 4 ...)");
+    assert_eq!(eval_string(src), "(Tri 3 4 ...)");
 }
 
 #[test]

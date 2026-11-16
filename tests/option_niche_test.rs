@@ -260,11 +260,11 @@ fn a_niched_option_still_prints_as_some_and_none() {
     const DEFS: &str = r#"(use std::num::ParseIntError) 
         (defstruct pair (a Option<int>) (b Option<string>))
         (defstruct gen<T> (v T))
-        (defenum shape (circle Option<f64>) (dot))
+        (defenum shape (Circle Option<f64>) (Dot))
         (defun mk-pair () pair (make-instance 'pair :a (Option::Some 1) :b (Option::None)))
         (defun mk-gen () gen<Option<int>> (make-instance 'gen :v (Option::Some 3)))
         (defun mk-gen-none () gen<Option<int>> (make-instance 'gen :v (Option::None)))
-        (defun mk-shape () shape (shape::circle (Option::Some 1.5)))
+        (defun mk-shape () shape (shape::Circle (Option::Some 1.5)))
         (defun mk-vec () Vector<Option<int>> (let ((v (the Vector<Option<int>> (Vector::new)))) (push v (Option::Some 1)) (push v (Option::None)) v))
         (defun mk-nested () Option<Option<int>> (Option::Some (Option::None)))
         (defun mk-ok () Result<Option<int>,ParseIntError> (Result::Ok (Option::Some 4)))
@@ -276,7 +276,7 @@ fn a_niched_option_still_prints_as_some_and_none() {
     assert_eq!(both(DEFS, NAMES, "(mk-pair)"), "#<pair a: (Some 1) b: None>");
     assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<Option<int>> v: (Some 3)>");
     assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<Option<int>> v: None>");
-    assert_eq!(both(DEFS, NAMES, "(mk-shape)"), "(circle (Some 1.5))");
+    assert_eq!(both(DEFS, NAMES, "(mk-shape)"), "(Circle (Some 1.5))");
     assert_eq!(both(DEFS, NAMES, "(mk-vec)"), "#((Some 1) None)");
     assert_eq!(both(DEFS, NAMES, "(mk-nested)"), "(Some None)");
     assert_eq!(both(DEFS, NAMES, "(mk-ok)"), "(Ok (Some 4))");

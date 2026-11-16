@@ -88,7 +88,7 @@ fn list_mixes_a_struct_instance_with_a_scalar() {
 #[test]
 fn list_holds_an_enum_variant() {
     let (h, v) = run_with_heap(
-        "(defenum color (red) (green) (blue)) (list (color::red) (color::blue))",
+        "(defenum color (Red) (Green) (Blue)) (list (color::Red) (color::Blue))",
     )
     .expect("eval failed");
     let car = h.car(v).expect("cons");
@@ -191,12 +191,12 @@ fn match_destructures_a_struct_downcast_pattern() {
 #[test]
 fn match_destructures_a_bare_enum_variant_after_use() {
     let v = eval_ok(
-        "(defenum color (red) (green) (blue))
+        "(defenum color (Red) (Green) (Blue))
          (use color::*)
-         (match (sexpr-car (list (color::green)))
-           ((red) 0)
-           ((green) 1)
-           ((blue) 2)
+         (match (sexpr-car (list (color::Green)))
+           ((Red) 0)
+           ((Green) 1)
+           ((Blue) 2)
            (_ 99))",
     );
     assert_eq!(v, Value::Int(1));
@@ -205,10 +205,10 @@ fn match_destructures_a_bare_enum_variant_after_use() {
 #[test]
 fn match_destructures_a_qualified_enum_variant_without_use() {
     let v = eval_ok(
-        "(defenum color (red) (green) (blue))
-         (match (sexpr-car (list (color::blue)))
-           ((color::red) 0)
-           ((color::blue) 2)
+        "(defenum color (Red) (Green) (Blue))
+         (match (sexpr-car (list (color::Blue)))
+           ((color::Red) 0)
+           ((color::Blue) 2)
            (_ 99))",
     );
     assert_eq!(v, Value::Int(2));

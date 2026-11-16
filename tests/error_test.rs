@@ -246,14 +246,14 @@ fn a_defstruct_error_type_rides_in_result() {
 #[test]
 fn a_defenum_error_type_implements_the_error_trait() {
     let src = r#"
-        (defenum ConfigErr (missing-key string) (bad-value string))
+        (defenum ConfigErr (Missing-key string) (Bad-value string))
         (impl Error ConfigErr
           (defmethod message (self) string
-            (match self ((missing-key k) (append "missing key: " k))
-                        ((bad-value v) (append "bad value: " v))))
+            (match self ((Missing-key k) (append "missing key: " k))
+                        ((Bad-value v) (append "bad value: " v))))
           (defmethod source (self) Option<:dyn Error> (Option::None)))
         (defun describe ((e :dyn Error)) string (message e))
-        (describe (ConfigErr::missing-key "port"))
+        (describe (ConfigErr::Missing-key "port"))
     "#;
     assert_eq!(run_str(src), "missing key: port");
 }
@@ -310,7 +310,7 @@ fn a_type_may_not_take_a_traits_name() {
     // Types and traits share one name space per module (Rust's rule), which
     // is why the built-in error types could not also be called `Error`.
     assert_prelude_type_error("(module m (deftrait Fault () (defmethod m (self) int)) (defstruct Fault (msg string)))");
-    assert_prelude_type_error("(module m (deftrait Fault () (defmethod m (self) int)) (defenum Fault (boom string)))");
+    assert_prelude_type_error("(module m (deftrait Fault () (defmethod m (self) int)) (defenum Fault (Boom string)))");
 }
 
 #[test]

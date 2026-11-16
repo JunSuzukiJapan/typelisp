@@ -261,10 +261,10 @@ fn a_type_without_eq_is_refused_at_the_pattern() {
 #[test]
 fn a_bare_variant_name_is_that_variant() {
     both(
-        "(defenum color (red) (blue))\
+        "(defenum color (Red) (Blue))\
          \n(use color::*)\
-         \n(defun f ((c color)) int (match c (red 1) (blue 2)))",
-        "(+ (* 10 (f (red))) (f (blue)))",
+         \n(defun f ((c color)) int (match c (Red 1) (Blue 2)))",
+        "(+ (* 10 (f (Red))) (f (Blue)))",
         12,
     );
 }
@@ -274,10 +274,10 @@ fn a_bare_variant_name_is_that_variant() {
 #[test]
 fn bare_variant_names_count_toward_exhaustiveness() {
     let e = err(
-        "(defenum color (red) (blue))\
+        "(defenum color (Red) (Blue))\
          \n(use color::*)\
-         \n(defun f ((c color)) int (match c (red 1)))\
-         \n(f (red))",
+         \n(defun f ((c color)) int (match c (Red 1)))\
+         \n(f (Red))",
     );
     assert!(e.contains("non-exhaustive"), "{}", e);
 }
@@ -287,10 +287,10 @@ fn bare_variant_names_count_toward_exhaustiveness() {
 #[test]
 fn a_bare_name_for_a_variant_with_fields_is_an_arity_error() {
     let e = err(
-        "(defenum shape (dot) (circle int))\
+        "(defenum shape (Dot) (Circle int))\
          \n(use shape)\
-         \n(defun f ((s shape)) int (match s (dot 0) (circle 1)))\
-         \n(f (dot))",
+         \n(defun f ((s shape)) int (match s (Dot 0) (Circle 1)))\
+         \n(f (Dot))",
     );
     assert!(e.contains("field"), "{}", e);
 }
@@ -301,7 +301,7 @@ fn a_bare_name_for_a_variant_with_fields_is_an_arity_error() {
 #[test]
 fn a_bare_name_that_names_no_variant_is_an_error() {
     let e = err(
-        "(defenum color (red) (blue))\
+        "(defenum color (Red) (Blue))\
          \n(use color::*)\
          \n(defun f ((n int)) int (match n (blues 1)))",
     );

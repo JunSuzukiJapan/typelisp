@@ -53,11 +53,11 @@ fn eval_ok(src: &str) -> Value {
 /// matches it back out and applies it. Both the built-in *method* case
 /// (`recv_type: Some`) and the free-built-in case (`recv_type: None`) have a
 /// variant here.
-const OP_ENUM: &str = "(use std::symbol::symbol->string) (defenum op (binary (fn (int int) int)) (naming (fn (symbol) string)) (None)) \
+const OP_ENUM: &str = "(use std::symbol::symbol->string) (defenum op (Binary (fn (int int) int)) (Naming (fn (symbol) string)) (None)) \
                        (defun run-binary ((o op) (a int) (b int)) int \
-                         (match o ((binary f) (f a b)) ((naming _) 0) ((None) -1))) \
+                         (match o ((Binary f) (f a b)) ((Naming _) 0) ((None) -1))) \
                        (defun run-naming ((o op) (s symbol)) string \
-                         (match o ((naming g) (g s)) ((binary _) (symbol->string s)) ((None) (symbol->string s))))";
+                         (match o ((Naming g) (g s)) ((Binary _) (symbol->string s)) ((None) (symbol->string s))))";
 
 // ---- still a function value ------------------------------------------------
 
@@ -105,14 +105,14 @@ fn assert_str(v: Value) {
 /// built-in goes into a field, comes back out through `match`, and is applied.
 #[test]
 fn a_builtin_method_stored_in_an_enum_field_is_recovered_and_applied() {
-    let src = format!("{} (run-binary (op::binary +) 20 22)", OP_ENUM);
+    let src = format!("{} (run-binary (op::Binary +) 20 22)", OP_ENUM);
     assert_eq!(eval_ok(&src), Value::Int(42));
 }
 
 /// The free-built-in half — `recv_type: None` rather than a receiver path.
 #[test]
 fn a_free_builtin_stored_in_an_enum_field_is_recovered_and_applied() {
-    let src = format!("(use std::symbol::symbol->string) {} (run-naming (op::naming symbol->string) (quote x))", OP_ENUM);
+    let src = format!("(use std::symbol::symbol->string) {} (run-naming (op::Naming symbol->string) (quote x))", OP_ENUM);
     assert_str(eval_ok(&src));
 }
 
@@ -122,7 +122,7 @@ fn a_free_builtin_stored_in_an_enum_field_is_recovered_and_applied() {
 #[test]
 fn a_closure_and_a_builtin_share_the_same_enum_field() {
     let src = format!(
-        "{} (+ (run-binary (op::binary +) 1 2) (run-binary (op::binary (lambda ((x int) (y int)) int (* x y))) 3 4))",
+        "{} (+ (run-binary (op::Binary +) 1 2) (run-binary (op::Binary (lambda ((x int) (y int)) int (* x y))) 3 4))",
         OP_ENUM
     );
     assert_eq!(eval_ok(&src), Value::Int(15));
@@ -142,7 +142,7 @@ fn the_payload_free_variant_still_matches() {
 #[test]
 fn an_enum_holding_a_builtin_is_a_heap_box_not_native_data() {
     let (mut h, mut chk, mut interp) = env();
-    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (op::binary +)", OP_ENUM))
+    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (op::Binary +)", OP_ENUM))
         .expect("eval failed");
     match v {
         typelisp::Value::Boxed(id) => {
@@ -172,7 +172,7 @@ fn a_stored_builtin_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = env();
     eval_in(&mut h, &mut chk, &mut interp, OP_ENUM).expect("definitions failed");
     h.set_gc_stress(true);
-    let got = eval_in(&mut h, &mut chk, &mut interp, "(run-binary (op::binary +) 20 22)")
+    let got = eval_in(&mut h, &mut chk, &mut interp, "(run-binary (op::Binary +) 20 22)")
         .expect("eval under gc stress failed");
     assert_eq!(got, Value::Int(42));
 }

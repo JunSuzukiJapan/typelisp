@@ -11,7 +11,7 @@ mod common;
 use common::{check_err, eval_string, eval_string_compiled};
 
 const DEFS: &str = r##"
-(defenum Shape (circle f64) (rect f64 f64) (dot))
+(defenum Shape (Circle f64) (Rect f64 f64) (Dot))
 (defstruct P (x int))
 (impl Equal P (defmethod equal (self (other P)) bool (= self::x other::x)))
 (defun classify ((n int)) string
@@ -22,9 +22,9 @@ const DEFS: &str = r##"
     (_ "odd")))
 (defun kind ((s Shape)) string
   (match s
-    ((:or (circle _) (dot)) "round")
-    ((rect w h) :when (= w h) "square")
-    ((rect _ _) "rect")))
+    ((:or (Circle _) (Dot)) "round")
+    ((Rect w h) :when (= w h) "square")
+    ((Rect _ _) "rect")))
 "##;
 
 /// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
@@ -52,14 +52,14 @@ fn a_guard_selects_among_arms() {
 #[test]
 fn a_guard_reads_the_patterns_bindings() {
     both(
-        r##"(format false "~a ~a" (kind (Shape::rect 2.0 2.0)) (kind (Shape::rect 2.0 3.0)))"##,
+        r##"(format false "~a ~a" (kind (Shape::Rect 2.0 2.0)) (kind (Shape::Rect 2.0 3.0)))"##,
         "square rect",
     );
 }
 
 #[test]
 fn an_or_pattern_shares_one_body() {
-    both(r##"(format false "~a ~a" (kind (Shape::circle 1.0)) (kind (Shape::dot)))"##, "round round");
+    both(r##"(format false "~a ~a" (kind (Shape::Circle 1.0)) (kind (Shape::Dot)))"##, "round round");
 }
 
 /// Alternatives that bind the same name at the same type, nested inside a
@@ -69,11 +69,11 @@ fn a_nested_or_pattern_binds_in_every_alternative() {
     both(
         r##"(let ((f (lambda ((o Option<Shape>)) f64
                      (match o
-                       ((Some (:or (circle r) (rect r _))) r)
+                       ((Some (:or (Circle r) (Rect r _))) r)
                        (_ 0.0)))))
-             (format false "~a ~a ~a" (f (Option::Some (Shape::circle 1.5)))
-                                      (f (Option::Some (Shape::rect 2.5 9.0)))
-                                      (f (Option::Some (Shape::dot)))))"##,
+             (format false "~a ~a ~a" (f (Option::Some (Shape::Circle 1.5)))
+                                      (f (Option::Some (Shape::Rect 2.5 9.0)))
+                                      (f (Option::Some (Shape::Dot)))))"##,
         "1.5 2.5 0.0",
     );
 }
@@ -132,7 +132,7 @@ fn a_value_pattern_under_the_in_a_closure_reads_a_captured_variable() {
 #[test]
 fn a_guarded_arm_does_not_count_for_exhaustiveness() {
     let msg = check_err(&format!(
-        "{}\n(defun f ((s Shape)) int (match s ((circle _) 1) ((dot) 2) ((rect w _) :when (> w 0.0) 3)))",
+        "{}\n(defun f ((s Shape)) int (match s ((Circle _) 1) ((Dot) 2) ((Rect w _) :when (> w 0.0) 3)))",
         DEFS
     ));
     assert!(msg.contains("non-exhaustive match"), "{}", msg);
@@ -141,7 +141,7 @@ fn a_guarded_arm_does_not_count_for_exhaustiveness() {
 #[test]
 fn the_alternatives_must_bind_the_same_names() {
     let msg = check_err(&format!(
-        "{}\n(defun f ((s Shape)) f64 (match s ((:or (circle r) (dot)) 1.0) (_ 0.0)))",
+        "{}\n(defun f ((s Shape)) f64 (match s ((:or (Circle r) (Dot)) 1.0) (_ 0.0)))",
         DEFS
     ));
     assert!(msg.contains("the alternatives of `(:or ...)` must bind the same variables"), "{}", msg);
@@ -171,8 +171,8 @@ fn a_guard_needs_a_condition() {
 #[test]
 fn if_let_takes_an_or_pattern() {
     both(
-        r##"(let ((f (lambda ((s Shape)) string (if-let ((:or (circle _) (dot)) s) "round" "not"))))
-             (format false "~a ~a" (f (Shape::dot)) (f (Shape::rect 1.0 1.0))))"##,
+        r##"(let ((f (lambda ((s Shape)) string (if-let ((:or (Circle _) (Dot)) s) "round" "not"))))
+             (format false "~a ~a" (f (Shape::Dot)) (f (Shape::Rect 1.0 1.0))))"##,
         "round not",
     );
 }

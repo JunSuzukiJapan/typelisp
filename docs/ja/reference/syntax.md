@@ -1333,8 +1333,8 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `_` — ワイルドカード
 - 変数名 — 束縛パターン（常にマッチ）。ただしスクルーティニーの型がその名前の変種を持つ場合は
   **下の裸変種名パターン**として解決される
-- 裸の変種名 — 引数を取らない変種にマッチ（`(match c (red 1) (blue 2))`）。フィールドを持つ変種を
-  裸名で書くとアリティエラーになるので、`(circle r)` のように括弧で書く
+- 裸の変種名 — 引数を取らない変種にマッチ（`(match c (Red 1) (Blue 2))`）。フィールドを持つ変種を
+  裸名で書くとアリティエラーになるので、`(Circle r)` のように括弧で書く
 - **即値リテラル**: 整数 / `true`/`false` / 文字 — 語の比較
 - **値リテラル**: 文字列 / 浮動小数点 / シンボル（`'foo`）/ 多倍長の整数 / ratio — その型の
   `equal`（[`Equal` トレイト](functions/traits.md#2-equal--ord比較)）による値比較。文字列は内容比較であって同一性比較ではない
@@ -1360,7 +1360,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   同じ要素数の `#{..}` データにだけマッチする
 - `(:or p1 p2 ...)` — or パターン。どれか 1 つの選択肢にマッチすればよい。本体は 1 つなので、どの
   選択肢も同じ名前の変数を同じ型で束縛しなければならない。コンストラクタパターンの中にも書ける
-  （`(Some (:or (circle r) (rect r _)))`）
+  （`(Some (:or (Circle r) (Rect r _)))`）
 
 `Equal` を実装しない型を値リテラル／`(:= expr)` で比較しようとすると型エラーになる
 （マッチしない腕が黙って残るより、比較できないと言うほうを選んでいる）。
@@ -1409,8 +1409,8 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `(TypeName :slot pattern...)` — **型名**を先頭に置くフィールド分解（struct 専用）。上の構造体の
   パターンと同じ形で書く。例: `(defstruct point (x f64) (y f64))` に対し `(point :x :y)`。
 - 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。`(use EnumType::*)` などで取り込んで
-  見えている裸の名前として解決される（構成子を呼ぶときと同じ可視性規則）。例: `(defenum color (red) (blue))` の
-  `(use color::*)` 後に `(red)` `(blue)`。修飾形 `(EnumType::VariantName ...)` なら `use` は要らない。
+  見えている裸の名前として解決される（構成子を呼ぶときと同じ可視性規則）。例: `(defenum color (Red) (Blue))` の
+  `(use color::*)` 後に `(Red)` `(Blue)`。修飾形 `(EnumType::VariantName ...)` なら `use` は要らない。
 - `(the Type pattern)` — 型全体でのdowncast（丸ごと束縛）。フィールド分解せず、値をそのまま
   `pattern` へ渡す。可変な struct の同一性を保ったまま取り出せる唯一の書き方であり、`Vector<T>`/
   `HashTable<K,V>` を `Sexpr` から取り出す唯一の手段でもある（両者はフィールド分解形を持たない）。

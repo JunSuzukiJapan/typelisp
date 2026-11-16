@@ -66,20 +66,20 @@ Rust の `?` のような省略構文はありません。`Result` を返す関�
 
 ```lisp
 (defenum config-error
-  (missing string)          ; 設定項目が無い
-  (invalid string int))     ; 値がおかしい
+  (Missing string)          ; 設定項目が無い
+  (Invalid string int))     ; 値がおかしい
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
   (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
       (Result::Ok n)
-      (Result::Err (config-error::invalid "workers" n))))
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` はエラーの説明を返します。

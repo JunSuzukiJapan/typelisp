@@ -201,28 +201,28 @@ None
 
 ```lisp
 (defenum shape
-  (circle int)        ; 半径
-  (rect int int)      ; 幅と高さ
-  (dot))              ; 値を持たない
+  (Circle int)        ; 半径
+  (Rect int int)      ; 幅と高さ
+  (Dot))              ; 値を持たない
 ```
 
-値は `shape::circle` のように型名を付けて作ります。`match` では変種の名前で分解します。
+値は `shape::Circle` のように型名を付けて作ります。`match` では変種の名前で分解します。
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 `match` はここでも網羅性を検査します。後で `shape` に変種を足すと、その変種を扱っていない
 `match` がすべて型エラーになるので、直す場所を漏らしません。
 
-`(use shape)` と書くと、それより後では型名を付けずに `(rect 5 6)` と書けます。
+`(use shape)` と書くと、それより後では型名を付けずに `(Rect 5 6)` と書けます。
 
 `Option` と `Result` も、この仕組みで作られた列挙型です。
 

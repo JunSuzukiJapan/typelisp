@@ -67,19 +67,19 @@ fn a_trait_object_inside_a_pattern_is_matched_as_the_value_it_holds() {
     let src = format!(
         "{SHAPES}
          (defstruct holder (d :dyn Drawable))
-         (defenum maybe (one :dyn Drawable) (nothing))
+         (defenum maybe (One :dyn Drawable) (Nothing))
          (defun size ((h holder)) int
            (match h
              ((holder :d (circle :r)) (* 10 r))
              ((holder :d (square :side s)) s)
              (_ 0)))
          (defun held ((m maybe)) int
-           (match m ((one (circle :r)) r) (_ 0)))
+           (match m ((One (circle :r)) r) (_ 0)))
          (defun total () int
            (+ (size (make-instance 'holder :d (make-instance 'circle :r 2)))
               (size (make-instance 'holder :d (make-instance 'square :side 5)))
-              (held (maybe::one (make-instance 'circle :r 300)))
-              (held (maybe::one (make-instance 'square :side 7)))))"
+              (held (maybe::One (make-instance 'circle :r 300)))
+              (held (maybe::One (make-instance 'square :side 7)))))"
     );
     assert_eq!(eval_ok(&format!("{src} (total)")), Value::Int(325));
     assert_eq!(eval_ok(&format!("{src} (compile size) (compile held) (total)")), Value::Int(325));

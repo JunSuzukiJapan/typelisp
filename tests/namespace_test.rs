@@ -174,23 +174,23 @@ fn use_of_a_type_brings_in_only_its_name() {
     let src = "(use std::sync::Chan) (defun new ((n int)) int n) (new 1)";
     assert_eq!(ty_program(src), Type::Int);
     // So is an enum's variant: only `Type::variant`.
-    assert!(program("(defenum color (red) (blue)) (use color) (red)").is_err());
+    assert!(program("(defenum color (Red) (Blue)) (use color) (Red)").is_err());
 }
 
 #[test]
 fn use_of_a_member_brings_in_that_member() {
     let src = "(use std::sync::Chan std::sync::Chan::new) (the Chan<int> (new 1))";
     assert!(program(src).is_ok());
-    let src = "(defenum color (red) (blue)) (use color::red) (red)";
+    let src = "(defenum color (Red) (Blue)) (use color::Red) (Red)";
     assert_eq!(ty_program(src), Type::Named(Path::of(&["color"]), vec![]));
     // The other members stay out.
-    assert!(program("(defenum color (red) (blue)) (use color::red) (blue)").is_err());
-    assert!(program("(defenum color (red) (blue)) (use color::green)").is_err());
+    assert!(program("(defenum color (Red) (Blue)) (use color::Red) (Blue)").is_err());
+    assert!(program("(defenum color (Red) (Blue)) (use color::green)").is_err());
 }
 
 #[test]
 fn use_of_every_member_brings_in_the_constructors_and_static_methods() {
-    let src = "(defenum color (red) (blue)) (use color::*) (blue)";
+    let src = "(defenum color (Red) (Blue)) (use color::*) (Blue)";
     assert_eq!(ty_program(src), Type::Named(Path::of(&["color"]), vec![]));
     let src = "(use std::sync::Chan std::sync::Chan::*) (the Chan<int> (new 1))";
     assert!(program(src).is_ok());

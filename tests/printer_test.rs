@@ -428,8 +428,8 @@ fn an_enum_variant_name_survives_an_instantiated_key() {
     is_true(r#"(equal (format false "~a" (Option::Some 1)) "(Some 1)")"#);
     is_true(r#"(equal (format false "~a" (the Option<int> (Option::None))) "None")"#);
     is_true(
-        r#"(defenum box<T> (full T) (empty))
-           (equal (format false "~a" (the box<string> (box::full "x"))) "(full x)")"#,
+        r#"(defenum box<T> (Full T) (Empty))
+           (equal (format false "~a" (the box<string> (box::Full "x"))) "(Full x)")"#,
     );
 }
 

@@ -4215,9 +4215,9 @@ fn compile_can_set_an_option_typed_global_and_the_interpreter_sees_the_write() {
 fn compile_of_a_function_referencing_a_user_defenum_global_round_trips() {
     let v = run_with_compiler(
         r#"
-        (defenum color (red) (green) (blue))
-        (defvar (c color) (color::green))
-        (defun read-c () int (match c ((red) 1) ((green) 2) ((blue) 3)))
+        (defenum color (Red) (Green) (Blue))
+        (defvar (c color) (color::Green))
+        (defun read-c () int (match c ((Red) 1) ((Green) 2) ((Blue) 3)))
         (compile read-c)
         (read-c)
         "#,
@@ -6178,21 +6178,21 @@ fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
 /// functions whose name ends in `-c`, so a call names its own side.
 const CONFORMANCE_MODULE: &str = r#"
 (module m
-  (pub defenum expr (num int) (add expr expr))
+  (pub defenum expr (Num int) (Add expr expr))
   (use expr::*)
   (pub defstruct pt (x int) (y int))
 
   ;; builders — `-i` stays interpreted, `-c` gets compiled below
-  (pub defun enum-i ((n int)) expr (num n))
-  (pub defun enum-c ((n int)) expr (num n))
+  (pub defun enum-i ((n int)) expr (Num n))
+  (pub defun enum-c ((n int)) expr (Num n))
   (pub defun struct-i ((n int)) pt (make-instance 'pt :x n :y 0))
   (pub defun struct-c ((n int)) pt (make-instance 'pt :x n :y 0))
   ;; a nested function is always compiled, whether or not anything asks
-  (pub defun enum-nested ((n int)) expr (labels ((f ((k int)) expr (num k))) (f n)))
+  (pub defun enum-nested ((n int)) expr (labels ((f ((k int)) expr (Num k))) (f n)))
 
   ;; consumers
-  (pub defun take-enum-i ((e expr)) int (match e ((num v) v) ((add a b) -1)))
-  (pub defun take-enum-c ((e expr)) int (match e ((num v) v) ((add a b) -1)))
+  (pub defun take-enum-i ((e expr)) int (match e ((Num v) v) ((Add a b) -1)))
+  (pub defun take-enum-c ((e expr)) int (match e ((Num v) v) ((Add a b) -1)))
   (pub defun downcast-c ((s Sexpr)) int (match s ((the pt p) p::x) (_ -1)))
   (pub defun downcast-i ((s Sexpr)) int (match s ((the pt p) p::x) (_ -1))))
 (compile m::enum-c)
@@ -6236,7 +6236,7 @@ fn an_enum_value_matches_an_interpreted_inline_match_whichever_side_built_it() {
     // whole, while this `match` sits at top level in the caller's own body.
     for build in ["m::enum-i", "m::enum-c", "m::enum-nested"] {
         let got = conformance_int(&format!(
-            "(use m::expr m::expr::*) (match ({build} 5) ((num v) v) ((add a b) -1))"
+            "(use m::expr m::expr::*) (match ({build} 5) ((Num v) v) ((Add a b) -1))"
         ));
         assert_eq!(got, 5, "built by {build}");
     }
@@ -6260,7 +6260,7 @@ fn a_value_prints_the_same_whichever_side_built_it() {
     // into a `Path` and looking it up, so a wrong key reads
     // `(<unknown-variant> 5)` / `#<pt ...>` instead of `#<m::pt ...>`.
     for build in ["m::enum-i", "m::enum-c", "m::enum-nested"] {
-        assert_eq!(conformance_str(&format!("(format false \"~a\" ({build} 5))")), "(num 5)", "{build}");
+        assert_eq!(conformance_str(&format!("(format false \"~a\" ({build} 5))")), "(Num 5)", "{build}");
     }
     for build in ["m::struct-i", "m::struct-c"] {
         let got = conformance_str(&format!("(format false \"~a\" ({build} 7))"));

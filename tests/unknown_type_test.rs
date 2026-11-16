@@ -23,7 +23,7 @@ fn assert_unknown(src: &str, name: &str) {
 
 #[test]
 fn a_type_defined_later_is_reported_by_name() {
-    assert_unknown("(defenum link (no-link) (to node)) (defstruct node (v int) (next link))", "node");
+    assert_unknown("(defenum link (No-link) (to node)) (defstruct node (v int) (next link))", "node");
 }
 
 #[test]
