@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -1123,7 +1123,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 模式的种类：
 - `_` —— 通配符
 - 变量名 —— 绑定模式（总是匹配）。但如果被匹配值的类型有该名字的变体，就解析为**下面的裸变体名模式**
-- 裸变体名 —— 匹配不带参数的变体（`(match c (red 1) (blue 2))`）。用裸名写带字段的变体会得到参数个数错误，所以像 `(circle r)`
+- 裸变体名 —— 匹配不带参数的变体（`(match c (Red 1) (Blue 2))`）。用裸名写带字段的变体会得到参数个数错误，所以像 `(Circle r)`
   这样用括号写
 - **立即值字面量**：整数 / `true`/`false` / 字符 —— 按字比较
 - **值字面量**：字符串 / 浮点数 / 符号（`'foo`）/ 多精度整数 / ratio —— 用该类型的 `equal`
@@ -1144,7 +1144,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
       ((point :x a) a)))                 ; 绑定到 a
   ```
 - `#{p0 p1 ...}` —— 元组模式。逐个元素用子模式匹配。对 `Sexpr` 而言，只匹配元素个数相同的 `#{..}` 数据
-- `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(Some (:or (circle r) (rect r _)))`）
+- `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(Some (:or (Circle r) (Rect r _)))`）
 
 用值字面量／`(:= expr)` 比较没有实现 `Equal` 的类型是类型错误（比起留下悄悄不匹配的分支，选择说明无法比较）。
 
@@ -1185,7 +1185,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — 以**类型名**开头的字段分解（仅限 struct）。与上面的结构体模式
   写法相同。例：对于 `(defstruct point (x f64) (y f64))`，写 `(point :x :y)`。
-- 裸变体名 `(VariantName sub-pattern...)` — 取出 `defenum` 的变体。解析为通过 `(use EnumType::*)` 等引入而可见的裸名（与调用构造函数时相同的可见性规则）。例：`(defenum color (red) (blue))` 在 `(use color::*)` 之后写 `(red)` `(blue)`。使用限定形式 `(EnumType::VariantName ...)` 则不需要 `use`。
+- 裸变体名 `(VariantName sub-pattern...)` — 取出 `defenum` 的变体。解析为通过 `(use EnumType::*)` 等引入而可见的裸名（与调用构造函数时相同的可见性规则）。例：`(defenum color (Red) (Blue))` 在 `(use color::*)` 之后写 `(Red)` `(Blue)`。使用限定形式 `(EnumType::VariantName ...)` 则不需要 `use`。
 - `(the Type pattern)` —— 以整个类型进行向下转换（整体绑定）。不拆解字段，把值原样交给 `pattern`。是在保持可变 struct 同一性的
   同时取出它的唯一写法，也是从 `Sexpr` 取出 `Vector<T>`/`HashTable<K,V>` 的唯一手段（两者没有字段拆解形式）。例：在
   `(the point p)` 之后 `(setf p::x 9)`，也会反映到列表中的原实例。

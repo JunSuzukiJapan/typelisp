@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1449,8 +1449,8 @@ Soorten patronen:
 - Een variabelenaam — een bindingspatroon (komt altijd overeen). Als het type van de scrutinee echter een
   variant met die naam heeft, wordt het opgelost als **het onderstaande patroon met kale variantnaam**
 - Een kale variantnaam — komt overeen met een variant die geen argumenten neemt
-  (`(match c (red 1) (blue 2))`). Een variant met velden op kale naam schrijven is een arityfout, dus
-  schrijf hem tussen haakjes, zoals in `(circle r)`
+  (`(match c (Red 1) (Blue 2))`). Een variant met velden op kale naam schrijven is een arityfout, dus
+  schrijf hem tussen haakjes, zoals in `(Circle r)`
 - **Directe literals**: gehele getallen / `true`/`false` / tekens — als woorden vergeleken
 - **Waardeliterals**: strings / drijvendekommagetallen / symbolen (`'foo`) / bignum-gehele getallen /
   ratio's — op waarde vergeleken met de `equal` van dat type
@@ -1479,7 +1479,7 @@ Soorten patronen:
   een `Sexpr` past het alleen op `#{..}`-data met hetzelfde aantal elementen
 - `(:or p1 p2 ...)` — een of-patroon: het past zodra een van de alternatieven past. Er is één body,
   dus elk alternatief moet dezelfde variabelen met dezelfde typen binden. Het kan ook binnen een
-  constructorpatroon staan (`(Some (:or (circle r) (rect r _)))`)
+  constructorpatroon staan (`(Some (:or (Circle r) (Rect r _)))`)
 
 Een type dat `Equal` niet implementeert vergelijken met een waardeliteral / `(:= expr)` is een typefout (deze
 taal kiest ervoor te zeggen "deze kunnen niet worden vergeleken" in plaats van een tak achter te laten die
@@ -1534,7 +1534,7 @@ krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
 - Een kale variantnaam `(VariantName sub-pattern...)` — haalt een variant van een `defenum` eruit. Wordt
   opgelost als een kale naam die zichtbaar is doordat hij is binnengehaald, bijvoorbeeld met
   `(use EnumType::*)` (dezelfde zichtbaarheidsregels als bij het aanroepen van de constructor).
-  Bijvoorbeeld voor `(defenum color (red) (blue))` na `(use color::*)` `(red)` `(blue)`. Met de
+  Bijvoorbeeld voor `(defenum color (Red) (Blue))` na `(use color::*)` `(Red)` `(Blue)`. Met de
   gekwalificeerde vorm `(EnumType::VariantName ...)` is geen `use` nodig.
 - `(the Type pattern)` — een downcast van het hele type (het als geheel bindend). Het ontleedt geen velden;
   het geeft de waarde zoals ze is aan `pattern`. De enige manier om een veranderlijke struct eruit te halen

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # त्रुटि प्रबंधन
 
 typelisp में त्रुटि प्रबंधन विफलताओं को दो प्रकारों में बाँटता है।
@@ -60,20 +60,20 @@ Rust के `?` जैसा कोई शॉर्टहैंड नहीं 
 
 ```lisp
 (defenum config-error
-  (missing string)          ; कोई सेटिंग गायब है
-  (invalid string int))     ; कोई मान गलत है
+  (Missing string)          ; कोई सेटिंग गायब है
+  (Invalid string int))     ; कोई मान गलत है
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
   (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
       (Result::Ok n)
-      (Result::Err (config-error::invalid "workers" n))))
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` त्रुटि का विवरण लौटाता है।

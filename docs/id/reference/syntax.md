@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1445,8 +1445,8 @@ Jenis pola:
 - Nama variabel — pola pengikatan (selalu cocok). Namun, jika tipe scrutinee memiliki varian bernama
   itu, ia diselesaikan sebagai **pola nama varian polos di bawah**
 - Nama varian polos — cocok dengan varian yang tidak menerima argumen
-  (`(match c (red 1) (blue 2))`). Menulis varian yang memiliki field dengan nama polosnya adalah
-  kesalahan arity, jadi tulis dalam kurung, seperti `(circle r)`
+  (`(match c (Red 1) (Blue 2))`). Menulis varian yang memiliki field dengan nama polosnya adalah
+  kesalahan arity, jadi tulis dalam kurung, seperti `(Circle r)`
 - **Literal langsung**: bilangan bulat / `true`/`false` / karakter — dibandingkan sebagai word
 - **Literal nilai**: string / bilangan floating-point / simbol (`'foo`) / bilangan bulat bignum /
   rasio — dibandingkan berdasarkan nilai dengan `equal` tipe itu
@@ -1474,7 +1474,7 @@ Jenis pola:
   ia hanya cocok dengan data `#{..}` yang jumlah elemennya sama
 - `(:or p1 p2 ...)` — pola atau: cocok bila salah satu alternatif cocok. Badannya hanya satu, jadi
   setiap alternatif harus mengikat variabel yang sama dengan tipe yang sama. Dapat juga ditulis di
-  dalam pola konstruktor (`(Some (:or (circle r) (rect r _)))`)
+  dalam pola konstruktor (`(Some (:or (Circle r) (Rect r _)))`)
 
 Membandingkan tipe yang tidak mengimplementasikan `Equal` dengan literal nilai / `(:= expr)` adalah
 kesalahan tipe (bahasa ini memilih untuk mengatakan "ini tidak dapat dibandingkan" daripada
@@ -1529,7 +1529,7 @@ instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, d
 - Nama varian polos `(VariantName sub-pattern...)` — mengekstrak varian dari `defenum`. Diresolusi
   sebagai nama polos yang terlihat karena dibawa masuk, misalnya dengan `(use EnumType::*)` (aturan
   visibilitas yang sama seperti saat memanggil konstruktor). Misalnya, untuk
-  `(defenum color (red) (blue))`, `(red)` `(blue)` setelah `(use color::*)`. Dengan bentuk
+  `(defenum color (Red) (Blue))`, `(Red)` `(Blue)` setelah `(use color::*)`. Dengan bentuk
   berkualifikasi `(EnumType::VariantName ...)`, `use` tidak diperlukan.
 - `(the Type pattern)` — downcast seluruh tipe (mengikatnya secara utuh). Ia tidak mendekomposisi
   field; ia menyerahkan nilai ke `pattern` apa adanya. Satu-satunya cara mengambil struct mutable

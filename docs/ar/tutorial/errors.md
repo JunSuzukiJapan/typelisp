@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # معالجة الأخطاء
 
 تقسم معالجة الأخطاء في typelisp الإخفاقات إلى نوعين.
@@ -66,20 +66,20 @@
 
 ```lisp
 (defenum config-error
-  (missing string)          ; إعداد مفقود
-  (invalid string int))     ; قيمة خاطئة
+  (Missing string)          ; إعداد مفقود
+  (Invalid string int))     ; قيمة خاطئة
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
   (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
       (Result::Ok n)
-      (Result::Err (config-error::invalid "workers" n))))
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - تعيد `message` وصفًا للخطأ.

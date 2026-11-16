@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 类型基础
 
 typelisp 是静态类型语言。本章介绍类型检查能为你做什么、常用的类型（`Option`、`Result`、结构体、枚举）以及
@@ -190,28 +190,28 @@ None
 
 ```lisp
 (defenum shape
-  (circle int)        ; 半径
-  (rect int int)      ; 宽和高
-  (dot))              ; 不持有值
+  (Circle int)        ; 半径
+  (Rect int int)      ; 宽和高
+  (Dot))              ; 不持有值
 ```
 
-值要像 `shape::circle` 这样加上类型名创建。在 `match` 中按变体名拆解。
+值要像 `shape::Circle` 这样加上类型名创建。在 `match` 中按变体名拆解。
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 这里 `match` 同样检查是否覆盖了所有情况。之后给 `shape` 增加变体时，所有没有处理该变体的 `match` 都会变成类型
 错误，因此不会遗漏需要修改的地方。
 
-写了 `(use shape)` 之后，就可以不带类型名写 `(rect 5 6)`。
+写了 `(use shape)` 之后，就可以不带类型名写 `(Rect 5 6)`。
 
 `Option` 和 `Result` 也是用这种机制构建的枚举。
 

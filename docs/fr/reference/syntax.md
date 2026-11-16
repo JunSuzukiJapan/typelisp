@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1410,8 +1410,8 @@ Sortes de motifs :
 - `_` — joker
 - Un nom de variable — un motif de liaison (correspond toujours). Cependant, si le type de la valeur examinée a une
   variante de ce nom, il est résolu comme **le motif de nom de variante nu ci-dessous**
-- Un nom de variante nu — correspond à une variante sans arguments (`(match c (red 1) (blue 2))`). Écrire une variante
-  à champs par son nom nu est une erreur d'arité ; écrivez-la entre parenthèses, comme `(circle r)`
+- Un nom de variante nu — correspond à une variante sans arguments (`(match c (Red 1) (Blue 2))`). Écrire une variante
+  à champs par son nom nu est une erreur d'arité ; écrivez-la entre parenthèses, comme `(Circle r)`
 - **Littéraux immédiats** : entiers / `true`/`false` / caractères — comparés comme des mots
 - **Littéraux de valeur** : chaînes / nombres à virgule flottante / symboles (`'foo`) / entiers bignum / fractions —
   comparés par valeur avec l'`equal` de ce type ([Traits standard](functions/traits.md#2-equal--ord-comparaison)).
@@ -1439,7 +1439,7 @@ Sortes de motifs :
   d'éléments
 - `(:or p1 p2 ...)` — un motif « ou » : il correspond dès qu'une des alternatives correspond. Il n'y
   a qu'un corps, donc chaque alternative doit lier les mêmes variables avec les mêmes types. Il peut
-  aussi s'écrire à l'intérieur d'un motif de constructeur (`(Some (:or (circle r) (rect r _)))`)
+  aussi s'écrire à l'intérieur d'un motif de constructeur (`(Some (:or (Circle r) (Rect r _)))`)
 
 Comparer un type qui n'implémente pas `Equal` avec un littéral de valeur / `(:= expr)` est une erreur de type (ce langage
 choisit de dire « on ne peut pas les comparer » plutôt que de laisser une branche qui ne correspond silencieusement
@@ -1494,8 +1494,8 @@ dans `(list p 42)` :
   `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
 - Un nom de variante nu `(VariantName sub-pattern...)` — extrait une variante d'un `defenum`. Résolu
   comme un nom nu rendu visible par une importation, par exemple `(use EnumType::*)` (mêmes règles de
-  visibilité que pour appeler le constructeur). Par exemple, pour `(defenum color (red) (blue))`,
-  `(red)` `(blue)` après `(use color::*)`. Avec la forme qualifiée `(EnumType::VariantName ...)`, aucun
+  visibilité que pour appeler le constructeur). Par exemple, pour `(defenum color (Red) (Blue))`,
+  `(Red)` `(Blue)` après `(use color::*)`. Avec la forme qualifiée `(EnumType::VariantName ...)`, aucun
   `use` n'est nécessaire.
 - `(the Type pattern)` — un transtypage descendant du type entier (le lie comme un tout). Il ne décompose pas les
   champs ; il passe la valeur telle quelle à `pattern`. Le seul moyen d'extraire une structure mutable en gardant son

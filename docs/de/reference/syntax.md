@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1436,9 +1436,9 @@ Arten von Mustern:
 - `_` — Platzhalter
 - Ein Variablenname — ein Bindungsmuster (passt immer). Hat der Typ des untersuchten Wertes jedoch eine
   Variante dieses Namens, wird er als **das unten beschriebene Muster mit bloßem Variantennamen** aufgelöst
-- Ein bloßer Variantenname — passt auf eine Variante ohne Argumente (`(match c (red 1) (blue 2))`). Eine Variante
+- Ein bloßer Variantenname — passt auf eine Variante ohne Argumente (`(match c (Red 1) (Blue 2))`). Eine Variante
   mit Feldern mit ihrem bloßen Namen zu schreiben, ist ein Stelligkeitsfehler; man schreibt sie in Klammern, wie
-  in `(circle r)`
+  in `(Circle r)`
 - **Direkte Literale**: Ganzzahlen / `true`/`false` / Zeichen — als Wörter verglichen
 - **Wertliterale**: Zeichenketten / Gleitkommazahlen / Symbole (`'foo`) / Bignum-Ganzzahlen / Brüche — nach
   Wert mit dem `equal` dieses Typs verglichen ([Standard-Traits](functions/traits.md#2-equal--ord-vergleich)).
@@ -1466,7 +1466,7 @@ Arten von Mustern:
   Gegen ein `Sexpr` passt es nur auf `#{..}`-Daten mit derselben Anzahl an Elementen
 - `(:or p1 p2 ...)` — ein Oder-Muster: Es passt, wenn eine der Alternativen passt. Es gibt nur einen
   Rumpf, daher muss jede Alternative dieselben Variablen mit denselben Typen binden. Es kann auch
-  innerhalb eines Konstruktormusters stehen (`(Some (:or (circle r) (rect r _)))`)
+  innerhalb eines Konstruktormusters stehen (`(Some (:or (Circle r) (Rect r _)))`)
 
 Einen Typ, der `Equal` nicht implementiert, mit einem Wertliteral / `(:= expr)` zu vergleichen, ist ein Typfehler
 (diese Sprache sagt lieber „diese lassen sich nicht vergleichen“, als einen Zweig stehen zu lassen, der
@@ -1521,8 +1521,8 @@ in `(list p 42)`:
   `(point :x :y)`.
 - Ein bloßer Variantenname `(VariantName sub-pattern...)` — entnimmt eine Variante eines `defenum`. Wird
   als bloßer Name aufgelöst, der durch Hereinholen sichtbar ist, etwa mit `(use EnumType::*)` (dieselben
-  Sichtbarkeitsregeln wie beim Aufruf des Konstruktors). Zum Beispiel für `(defenum color (red) (blue))`
-  nach `(use color::*)` `(red)` `(blue)`. Mit der qualifizierten Form `(EnumType::VariantName ...)` ist
+  Sichtbarkeitsregeln wie beim Aufruf des Konstruktors). Zum Beispiel für `(defenum color (Red) (Blue))`
+  nach `(use color::*)` `(Red)` `(Blue)`. Mit der qualifizierten Form `(EnumType::VariantName ...)` ist
   kein `use` nötig.
 - `(the Type pattern)` — ein Downcast des ganzen Typs (bindet ihn als Ganzes). Es zerlegt keine Felder; es
   übergibt den Wert unverändert an `pattern`. Die einzige Möglichkeit, eine veränderliche Struktur unter Erhalt

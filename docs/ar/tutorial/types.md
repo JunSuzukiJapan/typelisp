@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # أساسيات الأنواع
 
 typelisp لغة ذات أنواع ساكنة. يشرح هذا الفصل ما يفعله فاحص الأنواع من أجلك، والأنواع التي ستستخدمها
@@ -201,28 +201,28 @@ None
 
 ```lisp
 (defenum shape
-  (circle int)        ; نصف القطر
-  (rect int int)      ; العرض والارتفاع
-  (dot))              ; لا يحمل قيمة
+  (Circle int)        ; نصف القطر
+  (Rect int int)      ; العرض والارتفاع
+  (Dot))              ; لا يحمل قيمة
 ```
 
-تُصنع القيم بوضع اسم النوع أمامها كما في `shape::circle`. وفي `match` تُفكَّك باسم المتغاير.
+تُصنع القيم بوضع اسم النوع أمامها كما في `shape::Circle`. وفي `match` تُفكَّك باسم المتغاير.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 وهنا أيضًا يتحقق `match` من تغطية كل الحالات. فإذا أضفت لاحقًا متغايرًا إلى `shape` صار كل `match` لا
 يعالجه خطأ في الأنواع، فلا يفوتك أي موضع يحتاج إلى إصلاح.
 
-وبعد `(use shape)` يمكنك كتابة `(rect 5 6)` بدون اسم النوع.
+وبعد `(use shape)` يمكنك كتابة `(Rect 5 6)` بدون اسم النوع.
 
 `Option` و`Result` تعدادان مبنيان بهذه الآلية نفسها.
 

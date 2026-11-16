@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -1208,8 +1208,8 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `_` — 와일드카드
 - 변수 이름 — 바인딩 패턴(항상 맞는다). 다만 검사 대상의 타입에 그 이름의 변형이 있으면 **아래의 맨 변형 이름 패턴**으로
   해석된다
-- 맨 변형 이름 — 인수를 받지 않는 변형과 맞는다(`(match c (red 1) (blue 2))`). 필드가 있는 변형을 맨 이름으로 쓰면 인수 개수
-  오류가 되므로 `(circle r)`처럼 괄호로 쓴다
+- 맨 변형 이름 — 인수를 받지 않는 변형과 맞는다(`(match c (Red 1) (Blue 2))`). 필드가 있는 변형을 맨 이름으로 쓰면 인수 개수
+  오류가 되므로 `(Circle r)`처럼 괄호로 쓴다
 - **즉시값 리터럴**: 정수 / `true`/`false` / 문자 — 워드로 비교한다
 - **값 리터럴**: 문자열 / 부동소수점 수 / 심볼(`'foo`) / 다배정도 정수 / ratio — 그 타입의 `equal`
   ([표준 트레이트](functions/traits.md#2-equal--ord비교))로 값을 비교한다. 문자열은 동일성이 아니라 내용을 비교한다
@@ -1231,7 +1231,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   ```
 - `#{p0 p1 ...}` — 튜플 패턴. 요소마다 부분 패턴으로 대조한다. `Sexpr`에 대해서는 요소 수가 같은 `#{..}` 데이터에만 맞는다
 - `(:or p1 p2 ...)` — or 패턴. 선택지 중 하나라도 맞으면 맞는다. 본체가 하나뿐이므로 모든 선택지가 같은 이름의 변수를 같은 타입으로 묶어야 한다. 생성자
-  패턴 안에도 쓸 수 있다(`(Some (:or (circle r) (rect r _)))`)
+  패턴 안에도 쓸 수 있다(`(Some (:or (Circle r) (Rect r _)))`)
 
 `Equal`를 구현하지 않은 타입을 값 리터럴 / `(:= expr)`로 비교하면 타입 오류이다(조용히 맞지 않는 갈래를 남기는 대신 비교할 수
 없다고 말하는 쪽을 택한다).
@@ -1275,7 +1275,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — **타입 이름**을 앞에 두는 필드 분해(struct 전용). 위의 구조체의 패턴과
   같은 형태로 쓴다. 예: `(defstruct point (x f64) (y f64))`에 대해 `(point :x :y)`.
-- 맨 변형 이름 `(VariantName sub-pattern...)` — `defenum`의 변형을 꺼낸다. `(use EnumType::*)` 등으로 들여와 보이는 맨 이름으로 해석된다(생성자를 호출할 때와 같은 가시성 규칙). 예: `(defenum color (red) (blue))`의 `(use color::*)` 뒤에 `(red)` `(blue)`. 한정 형식 `(EnumType::VariantName ...)`이면 `use`가 필요 없다.
+- 맨 변형 이름 `(VariantName sub-pattern...)` — `defenum`의 변형을 꺼낸다. `(use EnumType::*)` 등으로 들여와 보이는 맨 이름으로 해석된다(생성자를 호출할 때와 같은 가시성 규칙). 예: `(defenum color (Red) (Blue))`의 `(use color::*)` 뒤에 `(Red)` `(Blue)`. 한정 형식 `(EnumType::VariantName ...)`이면 `use`가 필요 없다.
 - `(the Type pattern)` — 타입 전체로 다운캐스트(통째로 묶기). 필드를 분해하지 않고 값을 그대로 `pattern`에 넘긴다. 가변
   구조체를 동일성을 유지한 채 꺼내는 유일한 방법이며, `Sexpr`에서 `Vector<T>`/`HashTable<K,V>`를 꺼내는 유일한 수단이기도
   하다(둘 다 필드 분해 형식이 없다). 예: `(the point p)` 뒤에 `(setf p::x 9)`는 리스트 안의 원래 인스턴스에도 반영된다.

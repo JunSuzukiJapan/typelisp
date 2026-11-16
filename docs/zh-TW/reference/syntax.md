@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -1103,7 +1103,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 模式的種類：
 - `_` —— 萬用字元
 - 變數名稱 —— 繫結模式（一律符合）。但如果被比對值的型別有該名稱的變體，就解析為**下面的裸變體名稱模式**
-- 裸變體名稱 —— 符合不帶引數的變體（`(match c (red 1) (blue 2))`）。以裸名稱寫帶欄位的變體會得到引數個數錯誤，所以像 `(circle r)` 這樣以括號寫
+- 裸變體名稱 —— 符合不帶引數的變體（`(match c (Red 1) (Blue 2))`）。以裸名稱寫帶欄位的變體會得到引數個數錯誤，所以像 `(Circle r)` 這樣以括號寫
 - **立即值字面值**：整數 / `true`/`false` / 字元 —— 以字比較
 - **值字面值**：字串 / 浮點數 / 符號（`'foo`）/ 多倍精度整數 / ratio —— 以該型別的 `equal`（[標準 trait](functions/traits.md#2-equal--ord比較)）
   依值比較。字串比較的是內容，而不是同一性
@@ -1123,7 +1123,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
       ((point :x a) a)))                 ; 繫結到 a
   ```
 - `#{p0 p1 ...}` —— 元組模式。逐個元素用子模式比對。對 `Sexpr` 而言，只符合元素個數相同的 `#{..}` 資料
-- `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(Some (:or (circle r) (rect r _)))`）
+- `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(Some (:or (Circle r) (Rect r _)))`）
 
 以值字面值／`(:= expr)` 比較沒有實作 `Equal` 的型別是型別錯誤（比起留下默默不符合的分支，選擇說明無法比較）。
 
@@ -1164,7 +1164,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 
 - `(TypeName :slot pattern...)` — 以**型別名稱**開頭的欄位分解（僅限 struct）。與上面的結構的模式
   寫法相同。例：對於 `(defstruct point (x f64) (y f64))`，寫 `(point :x :y)`。
-- 裸變體名 `(VariantName sub-pattern...)` — 取出 `defenum` 的變體。解析為透過 `(use EnumType::*)` 等引入而可見的裸名（與呼叫建構函式時相同的可見性規則）。例：`(defenum color (red) (blue))` 在 `(use color::*)` 之後寫 `(red)` `(blue)`。使用限定形式 `(EnumType::VariantName ...)` 則不需要 `use`。
+- 裸變體名 `(VariantName sub-pattern...)` — 取出 `defenum` 的變體。解析為透過 `(use EnumType::*)` 等引入而可見的裸名（與呼叫建構函式時相同的可見性規則）。例：`(defenum color (Red) (Blue))` 在 `(use color::*)` 之後寫 `(Red)` `(Blue)`。使用限定形式 `(EnumType::VariantName ...)` 則不需要 `use`。
 - `(the Type pattern)` —— 以整個型別進行向下轉型（整體繫結）。不拆解欄位，把值原樣交給 `pattern`。是在保持可變 struct 同一性的同時取出它的唯一
   寫法，也是從 `Sexpr` 取出 `Vector<T>`/`HashTable<K,V>` 的唯一手段（兩者沒有欄位拆解形式）。例：在 `(the point p)` 之後 `(setf p::x 9)`，也會
   反映到串列中的原實例。

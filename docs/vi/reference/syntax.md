@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1357,8 +1357,8 @@ Các loại mẫu:
 - `_` — ký tự đại diện
 - Một tên biến — một mẫu gán (luôn khớp). Tuy nhiên, nếu kiểu của đối tượng được so khớp có một variant mang tên
   đó, nó được phân giải là **mẫu tên variant trần bên dưới**
-- Một tên variant trần — khớp một variant không nhận đối số (`(match c (red 1) (blue 2))`). Viết một variant có
-  trường bằng tên trần là lỗi số ngôi, nên hãy viết nó trong ngoặc, như `(circle r)`
+- Một tên variant trần — khớp một variant không nhận đối số (`(match c (Red 1) (Blue 2))`). Viết một variant có
+  trường bằng tên trần là lỗi số ngôi, nên hãy viết nó trong ngoặc, như `(Circle r)`
 - **Literal tức thời**: số nguyên / `true`/`false` / ký tự — được so sánh như các từ
 - **Literal giá trị**: chuỗi / số dấu phẩy động / symbol (`'foo`) / số nguyên bignum / ratio — được so sánh theo
   giá trị bằng `equal` của kiểu đó ([Các trait chuẩn](functions/traits.md#2-equal--ord-so-sánh)). Chuỗi so
@@ -1385,7 +1385,7 @@ Các loại mẫu:
   chỉ khớp với dữ liệu `#{..}` có cùng số phần tử
 - `(:or p1 p2 ...)` — mẫu hoặc: khớp khi bất kỳ lựa chọn nào khớp. Chỉ có một thân, nên mọi lựa chọn
   phải gắn cùng các biến với cùng kiểu. Cũng có thể viết bên trong một mẫu hàm khởi tạo
-  (`(Some (:or (circle r) (rect r _)))`)
+  (`(Some (:or (Circle r) (Rect r _)))`)
 
 So sánh một kiểu không triển khai `Equal` với một literal giá trị / `(:= expr)` là lỗi kiểu (ngôn ngữ này chọn nói
 "những thứ này không thể so sánh" thay vì để lại một nhánh âm thầm không bao giờ khớp).
@@ -1435,7 +1435,7 @@ thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy 
   với các mẫu struct ở trên. Ví dụ, với `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
 - Tên biến thể trần `(VariantName sub-pattern...)` — lấy ra một biến thể của `defenum`. Được giải như
   một tên trần đã thấy được nhờ được đưa vào, ví dụ bằng `(use EnumType::*)` (cùng quy tắc khả kiến như
-  khi gọi hàm khởi tạo). Ví dụ, với `(defenum color (red) (blue))`, `(red)` `(blue)` sau
+  khi gọi hàm khởi tạo). Ví dụ, với `(defenum color (Red) (Blue))`, `(Red)` `(Blue)` sau
   `(use color::*)`. Với dạng có tiền tố `(EnumType::VariantName ...)` thì không cần `use`.
 - `(the Type pattern)` — một downcast của toàn bộ kiểu (gán nó như một tổng thể). Nó không phân rã các trường;
   nó truyền giá trị cho `pattern` nguyên trạng. Cách duy nhất để lấy ra một struct khả biến mà vẫn giữ đồng nhất

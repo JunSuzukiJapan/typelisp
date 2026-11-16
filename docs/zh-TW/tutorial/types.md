@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 型別基礎
 
 typelisp 是靜態型別語言。本章說明型別檢查能為你做什麼、常用的型別（`Option`、`Result`、結構、列舉）以及泛型。閱讀本章前請先讀
@@ -187,27 +187,27 @@ None
 
 ```lisp
 (defenum shape
-  (circle int)        ; 半徑
-  (rect int int)      ; 寬與高
-  (dot))              ; 不持有值
+  (Circle int)        ; 半徑
+  (Rect int int)      ; 寬與高
+  (Dot))              ; 不持有值
 ```
 
-值要像 `shape::circle` 這樣加上型別名稱來建立。在 `match` 中依變體名稱拆解。
+值要像 `shape::Circle` 這樣加上型別名稱來建立。在 `match` 中依變體名稱拆解。
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 這裡 `match` 同樣會檢查是否涵蓋所有情況。之後為 `shape` 加上變體時，所有沒有處理該變體的 `match` 都會變成型別錯誤，因此不會漏掉需要修改的地方。
 
-寫了 `(use shape)` 之後，就可以不帶型別名稱寫 `(rect 5 6)`。
+寫了 `(use shape)` 之後，就可以不帶型別名稱寫 `(Rect 5 6)`。
 
 `Option` 與 `Result` 也是以這種機制建立的列舉。
 

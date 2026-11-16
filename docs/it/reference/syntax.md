@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -1446,8 +1446,8 @@ Tipi di pattern:
   scrutinee ha una variante con quel nome, viene risolto come **il pattern con nome di variante semplice
   qui sotto**
 - Un nome di variante semplice — corrisponde a una variante che non prende argomenti
-  (`(match c (red 1) (blue 2))`). Scrivere una variante con campi con il suo nome semplice è un errore di
-  arità, quindi scrivila tra parentesi, come in `(circle r)`
+  (`(match c (Red 1) (Blue 2))`). Scrivere una variante con campi con il suo nome semplice è un errore di
+  arità, quindi scrivila tra parentesi, come in `(Circle r)`
 - **Letterali immediati**: interi / `true`/`false` / caratteri — confrontati come parole
 - **Letterali di valore**: stringhe / numeri in virgola mobile / simboli (`'foo`) / interi bignum /
   rapporti — confrontati per valore con l'`equal` di quel tipo
@@ -1478,7 +1478,7 @@ Tipi di pattern:
 - `(:or p1 p2 ...)` — un pattern « or »: corrisponde quando corrisponde una qualsiasi delle
   alternative. Il corpo è uno solo, quindi ogni alternativa deve legare le stesse variabili con gli
   stessi tipi. Si può scrivere anche dentro un pattern costruttore
-  (`(Some (:or (circle r) (rect r _)))`)
+  (`(Some (:or (Circle r) (Rect r _)))`)
 
 Confrontare un tipo che non implementa `Equal` con un letterale di valore / `(:= expr)` è un errore di tipo
 (questo linguaggio sceglie di dire "questi non si possono confrontare" anziché lasciare un ramo che in
@@ -1533,8 +1533,8 @@ in `Sexpr`, come in `(list p 42)`:
   `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
 - Un nome di variante nudo `(VariantName sub-pattern...)` — estrae una variante di un `defenum`. Si
   risolve come un nome nudo reso visibile portandolo, per esempio con `(use EnumType::*)` (le stesse
-  regole di visibilità della chiamata del costruttore). Per esempio, per `(defenum color (red) (blue))`,
-  `(red)` `(blue)` dopo `(use color::*)`. Con la forma qualificata `(EnumType::VariantName ...)` non
+  regole di visibilità della chiamata del costruttore). Per esempio, per `(defenum color (Red) (Blue))`,
+  `(Red)` `(Blue)` dopo `(use color::*)`. Con la forma qualificata `(EnumType::VariantName ...)` non
   serve `use`.
 - `(the Type pattern)` — un downcast dell'intero tipo (associandolo nel suo insieme). Non scompone i
   campi; passa il valore a `pattern` così com'è. L'unico modo di estrarre una struttura mutabile

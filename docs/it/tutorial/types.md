@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Fondamenti dei tipi
 
 typelisp è un linguaggio a tipizzazione statica. Questo capitolo spiega che cosa fa il type checker per
@@ -205,30 +205,30 @@ valori.
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-I valori si creano con il nome del tipo davanti, come in `shape::circle`. In `match`, vengono scomposti
+I valori si creano con il nome del tipo davanti, come in `shape::Circle`. In `match`, vengono scomposti
 per nome di variante.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Anche qui `match` verifica che ogni caso sia coperto. Se in seguito aggiungi una variante a `shape`, ogni
 `match` che non la gestisce diventa un errore di tipo, quindi nessun punto da correggere viene
 trascurato.
 
-Dopo `(use shape)`, puoi scrivere `(rect 5 6)` senza il nome del tipo.
+Dopo `(use shape)`, puoi scrivere `(Rect 5 6)` senza il nome del tipo.
 
 `Option` e `Result` sono enumerazioni costruite con questo stesso meccanismo.
 

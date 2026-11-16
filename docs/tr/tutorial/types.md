@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Tür Temelleri
 
 typelisp statik tür denetimli bir dildir. Bu bölüm, tür denetleyicisinin sizin için ne yaptığını, en
@@ -203,29 +203,29 @@ tanımlanır. Her biçime **varyant** denir. Her varyant farklı sayıda ve tür
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-Değerler, `shape::circle` gibi önüne tür adı konarak yapılır. `match` içinde varyant adına göre
+Değerler, `shape::Circle` gibi önüne tür adı konarak yapılır. `match` içinde varyant adına göre
 ayrıştırılırlar.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Burada da `match` her durumun kapsandığını denetler. Daha sonra `shape`'e bir varyant eklerseniz, onu
 ele almayan her `match` bir tür hatası olur; böylece düzeltilmesi gereken hiçbir yer gözden kaçmaz.
 
-`(use shape)`'ten sonra tür adı olmadan `(rect 5 6)` yazabilirsiniz.
+`(use shape)`'ten sonra tür adı olmadan `(Rect 5 6)` yazabilirsiniz.
 
 `Option` ve `Result`, aynı mekanizmayla yapılmış enum'lardır.
 

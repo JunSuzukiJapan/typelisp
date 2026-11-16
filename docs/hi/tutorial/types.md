@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # टाइप की बुनियादी बातें
 
 typelisp एक स्टैटिक रूप से टाइप की गई भाषा है। यह अध्याय समझाता है कि टाइप चेकर आपके लिए क्या करता है, वे टाइप जिनका आप सबसे अधिक उपयोग करेंगे
@@ -187,27 +187,27 @@ None
 
 ```lisp
 (defenum shape
-  (circle int)        ; त्रिज्या
-  (rect int int)      ; चौड़ाई और ऊँचाई
-  (dot))              ; कोई मान नहीं रखता
+  (Circle int)        ; त्रिज्या
+  (Rect int int)      ; चौड़ाई और ऊँचाई
+  (Dot))              ; कोई मान नहीं रखता
 ```
 
-मान सामने टाइप का नाम लगाकर बनते हैं, जैसे `shape::circle`। `match` में उन्हें variant के नाम से खोला जाता है।
+मान सामने टाइप का नाम लगाकर बनते हैं, जैसे `shape::Circle`। `match` में उन्हें variant के नाम से खोला जाता है।
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 यहाँ भी `match` जाँचता है कि हर स्थिति कवर है। यदि आप बाद में `shape` में कोई variant जोड़ते हैं, तो उसे न संभालने वाला हर `match` टाइप त्रुटि बन जाता है, इसलिए सुधार की ज़रूरत वाली कोई जगह छूटती नहीं।
 
-`(use shape)` के बाद आप टाइप के नाम के बिना `(rect 5 6)` लिख सकते हैं।
+`(use shape)` के बाद आप टाइप के नाम के बिना `(Rect 5 6)` लिख सकते हैं।
 
 `Option` और `Result` इसी तंत्र से बने enum हैं।
 

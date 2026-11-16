@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Dasar-dasar Tipe
 
 typelisp adalah bahasa dengan tipe statis. Bab ini menjelaskan apa yang dilakukan pemeriksa tipe
@@ -205,30 +205,30 @@ menyimpan jumlah dan tipe nilai yang berbeda.
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-Nilai dibuat dengan nama tipe di depan, seperti `shape::circle`. Pada `match`, nilai dibongkar
+Nilai dibuat dengan nama tipe di depan, seperti `shape::Circle`. Pada `match`, nilai dibongkar
 berdasarkan nama varian.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Di sini pun, `match` memeriksa bahwa setiap kasus tercakup. Jika kemudian Anda menambahkan varian ke
 `shape`, setiap `match` yang tidak menanganinya menjadi kesalahan tipe, sehingga tidak ada tempat
 yang perlu diperbaiki yang terlewat.
 
-Setelah `(use shape)`, Anda dapat menulis `(rect 5 6)` tanpa nama tipe.
+Setelah `(use shape)`, Anda dapat menulis `(Rect 5 6)` tanpa nama tipe.
 
 `Option` dan `Result` adalah enum yang dibangun dengan mekanisme yang sama.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1394,8 +1394,8 @@ Rodzaje wzorców:
 - `_` — wieloznacznik (wildcard)
 - Nazwa zmiennej — wzorzec wiążący (zawsze pasuje). Jednak jeśli typ badanej wartości ma wariant o
   tej nazwie, jest rozstrzygana jako **poniższy wzorzec gołej nazwy wariantu**
-- Goła nazwa wariantu — pasuje do wariantu niemającego argumentów (`(match c (red 1) (blue 2))`). Zapisanie
-  wariantu z polami jego gołą nazwą jest błędem arności, więc zapisz go w nawiasach, jak w `(circle r)`
+- Goła nazwa wariantu — pasuje do wariantu niemającego argumentów (`(match c (Red 1) (Blue 2))`). Zapisanie
+  wariantu z polami jego gołą nazwą jest błędem arności, więc zapisz go w nawiasach, jak w `(Circle r)`
 - **Literały natychmiastowe**: liczby całkowite / `true`/`false` / znaki — porównywane jako słowa
 - **Literały wartościowe**: łańcuchy znaków / liczby zmiennoprzecinkowe / symbole (`'foo`) / liczby całkowite bignum / ułamki —
   porównywane według wartości za pomocą `equal` tego typu ([Traity standardowe](functions/traits.md#2-equal--ord-porównywanie)).
@@ -1422,7 +1422,7 @@ Rodzaje wzorców:
   pasuje tylko do danych `#{..}` o tej samej liczbie elementów
 - `(:or p1 p2 ...)` — wzorzec „lub”: pasuje, gdy pasuje dowolna z alternatyw. Ciało jest jedno, więc
   każda alternatywa musi wiązać te same zmienne z tymi samymi typami. Można go też zapisać wewnątrz
-  wzorca konstruktora (`(Some (:or (circle r) (rect r _)))`)
+  wzorca konstruktora (`(Some (:or (Circle r) (Rect r _)))`)
 
 Porównanie typu, który nie implementuje `Equal`, z literałem wartościowym / `(:= expr)` jest błędem typu (ten
 język woli powiedzieć „tych nie da się porównać", niż zostawić ramię, które po cichu nigdy nie pasuje).
@@ -1475,8 +1475,8 @@ instancji `defstruct`/`defenum` (rozdział 3), która została niejawnie skonwer
   `(point :x :y)`.
 - Goła nazwa wariantu `(VariantName sub-pattern...)` — wyciąga wariant `defenum`. Rozwiązywana jako goła
   nazwa widoczna dzięki dołączeniu, np. przez `(use EnumType::*)` (te same zasady widoczności co przy
-  wywołaniu konstruktora). Na przykład dla `(defenum color (red) (blue))` po `(use color::*)` `(red)`
-  `(blue)`. W formie kwalifikowanej `(EnumType::VariantName ...)` `use` nie jest potrzebne.
+  wywołaniu konstruktora). Na przykład dla `(defenum color (Red) (Blue))` po `(use color::*)` `(Red)`
+  `(Blue)`. W formie kwalifikowanej `(EnumType::VariantName ...)` `use` nie jest potrzebne.
 - `(the Type pattern)` — rzutowanie w dół całego typu (wiążące go jako całość). Nie rozkłada
   pól; przekazuje wartość do `pattern` bez zmian. Jedyny sposób wyjęcia zmiennej struktury z zachowaniem jej
   tożsamości, a także jedyny sposób wyjęcia `Vector<T>`/`HashTable<K,V>` z `Sexpr`

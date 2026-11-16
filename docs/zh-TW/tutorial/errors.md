@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 錯誤處理
 
 typelisp 的錯誤處理把失敗分成兩類來考慮。
@@ -62,20 +62,20 @@ typelisp 的錯誤處理把失敗分成兩類來考慮。
 
 ```lisp
 (defenum config-error
-  (missing string)          ; 缺少設定項目
-  (invalid string int))     ; 值不正確
+  (Missing string)          ; 缺少設定項目
+  (Invalid string int))     ; 值不正確
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
   (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
       (Result::Ok n)
-      (Result::Err (config-error::invalid "workers" n))))
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` 回傳錯誤的說明。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Grunderna i typer
 
 typelisp är ett statiskt typat språk. Det här kapitlet förklarar vad typkontrollen gör åt dig, de typer
@@ -203,29 +203,29 @@ värden.
 
 ```lisp
 (defenum shape
-  (circle int)        ; radie
-  (rect int int)      ; bredd och höjd
-  (dot))              ; håller inget värde
+  (Circle int)        ; radie
+  (Rect int int)      ; bredd och höjd
+  (Dot))              ; håller inget värde
 ```
 
-Värden skapas med typnamnet framför, som i `shape::circle`. I `match` plockas de isär efter
+Värden skapas med typnamnet framför, som i `shape::Circle`. I `match` plockas de isär efter
 variantnamn.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Också här kontrollerar `match` att alla fall är täckta. Om du senare lägger till en variant i `shape`
 blir varje `match` som inte hanterar den ett typfel, så ingen plats som behöver rättas missas.
 
-Efter `(use shape)` kan du skriva `(rect 5 6)` utan typnamnet.
+Efter `(use shape)` kan du skriva `(Rect 5 6)` utan typnamnet.
 
 `Option` och `Result` är enums som byggts med samma mekanism.
 

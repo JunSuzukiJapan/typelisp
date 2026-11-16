@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 오류 처리
 
 typelisp의 오류 처리는 실패를 두 종류로 나눈다.
@@ -65,20 +65,20 @@ Rust의 `?` 같은 줄임 표기는 없다. `Result`를 반환하는 함수를 �
 
 ```lisp
 (defenum config-error
-  (missing string)          ; 설정 항목이 없다
-  (invalid string int))     ; 값이 잘못되었다
+  (Missing string)          ; 설정 항목이 없다
+  (Invalid string int))     ; 값이 잘못되었다
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
   (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
       (Result::Ok n)
-      (Result::Err (config-error::invalid "workers" n))))
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message`는 오류의 설명을 반환한다.

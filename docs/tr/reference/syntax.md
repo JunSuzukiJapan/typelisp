@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1388,8 +1388,8 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
 - `_` — joker
 - Bir değişken adı — bir bağlama örüntüsü (her zaman eşleşir). Ancak denetlenen değerin türünde o adda bir
   varyant varsa **aşağıdaki çıplak varyant adı örüntüsü** olarak çözümlenir
-- Bir çıplak varyant adı — bağımsız değişken almayan bir varyantla eşleşir (`(match c (red 1) (blue 2))`).
-  Alanlı bir varyantı çıplak adıyla yazmak bir arity hatasıdır; bu yüzden onu `(circle r)` gibi
+- Bir çıplak varyant adı — bağımsız değişken almayan bir varyantla eşleşir (`(match c (Red 1) (Blue 2))`).
+  Alanlı bir varyantı çıplak adıyla yazmak bir arity hatasıdır; bu yüzden onu `(Circle r)` gibi
   parantez içinde yazın
 - **Anlık sabitler**: tamsayılar / `true`/`false` / karakterler — sözcük olarak karşılaştırılır
 - **Değer sabitleri**: string'ler / kayan noktalı sayılar / semboller (`'foo`) / bignum tamsayılar /
@@ -1418,7 +1418,7 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   karşı yalnızca aynı sayıda öğeli `#{..}` verisiyle eşleşir
 - `(:or p1 p2 ...)` — bir veya-örüntüsü: seçeneklerden herhangi biri eşleşince eşleşir. Gövde
   tektir, bu yüzden her seçenek aynı değişkenleri aynı türlerle bağlamalıdır. Bir yapıcı örüntüsünün
-  içine de yazılabilir (`(Some (:or (circle r) (rect r _)))`)
+  içine de yazılabilir (`(Some (:or (Circle r) (Rect r _)))`)
 
 `Equal`'i gerçekleştirmeyen bir türü bir değer sabitiyle / `(:= expr)` ile karşılaştırmak tür hatasıdır (bu
 dil, sessizce asla eşleşmeyen bir kolu bırakmak yerine "bunlar karşılaştırılamaz" demeyi seçer).
@@ -1471,8 +1471,8 @@ dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıka
   `(point :x :y)`.
 - Çıplak varyant adı `(VariantName sub-pattern...)` — bir `defenum`'un varyantını çıkarır. Örneğin
   `(use EnumType::*)` ile getirilerek görünür olan çıplak ad olarak çözülür (yapıcıyı çağırırkenki
-  görünürlük kurallarıyla aynı). Örneğin `(defenum color (red) (blue))` için `(use color::*)`'dan sonra
-  `(red)` `(blue)`. Nitelikli biçim `(EnumType::VariantName ...)` ile `use` gerekmez.
+  görünürlük kurallarıyla aynı). Örneğin `(defenum color (Red) (Blue))` için `(use color::*)`'dan sonra
+  `(Red)` `(Blue)`. Nitelikli biçim `(EnumType::VariantName ...)` ile `use` gerekmez.
 - `(the Type pattern)` — tüm türün aşağı dönüşümü (bütün olarak bağlama). Alanları ayrıştırmaz; değeri
   olduğu gibi `pattern`'e geçirir. Kimliğini koruyarak değiştirilebilir bir struct'ı çıkarmanın tek yolu
   ve ayrıca bir `Vector<T>`/`HashTable<K,V>`'yi bir `Sexpr`'ten çıkarmanın da tek yolu (alan ayrıştırma

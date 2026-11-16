@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Kiến thức cơ bản về kiểu
 
 typelisp là một ngôn ngữ có kiểu tĩnh. Chương này giải thích bộ kiểm tra kiểu làm gì cho bạn, các kiểu
@@ -202,29 +202,29 @@ và kiểu giá trị khác nhau.
 
 ```lisp
 (defenum shape
-  (circle int)        ; bán kính
-  (rect int int)      ; chiều rộng và chiều cao
-  (dot))              ; không giữ giá trị nào
+  (Circle int)        ; bán kính
+  (Rect int int)      ; chiều rộng và chiều cao
+  (Dot))              ; không giữ giá trị nào
 ```
 
-Giá trị được tạo với tên kiểu ở phía trước, như `shape::circle`. Trong `match`, chúng được tách ra theo
+Giá trị được tạo với tên kiểu ở phía trước, như `shape::Circle`. Trong `match`, chúng được tách ra theo
 tên variant.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Ở đây `match` cũng kiểm tra rằng mọi trường hợp đều được bao phủ. Nếu sau này bạn thêm một variant vào
 `shape`, mọi `match` không xử lý nó sẽ trở thành lỗi kiểu, nên không bỏ sót chỗ nào cần sửa.
 
-Sau `(use shape)`, bạn có thể viết `(rect 5 6)` mà không cần tên kiểu.
+Sau `(use shape)`, bạn có thể viết `(Rect 5 6)` mà không cần tên kiểu.
 
 `Option` và `Result` là các enum được xây dựng bằng cùng cơ chế này.
 

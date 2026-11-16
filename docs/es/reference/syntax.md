@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1418,8 +1418,8 @@ Clases de patrones:
 - Un nombre de variable — un patrón de enlace (siempre coincide). Sin embargo, si el tipo del valor examinado
   tiene una variante con ese nombre, se resuelve como **el patrón de nombre de variante simple de abajo**
 - Un nombre de variante simple — coincide con una variante que no recibe argumentos
-  (`(match c (red 1) (blue 2))`). Escribir una variante con campos por su nombre simple es un error de aridad,
-  así que escríbela entre paréntesis, como en `(circle r)`
+  (`(match c (Red 1) (Blue 2))`). Escribir una variante con campos por su nombre simple es un error de aridad,
+  así que escríbela entre paréntesis, como en `(Circle r)`
 - **Literales inmediatos**: enteros / `true`/`false` / caracteres — se comparan como palabras
 - **Literales de valor**: cadenas / números de coma flotante / símbolos (`'foo`) / enteros bignum / ratios — se
   comparan por valor con el `equal` de ese tipo ([Traits estándar](functions/traits.md#2-equal--ord-comparación)).
@@ -1446,7 +1446,7 @@ Clases de patrones:
   `Sexpr`, solo coincide con datos `#{..}` del mismo número de elementos
 - `(:or p1 p2 ...)` — un patrón o: coincide cuando coincide cualquiera de las alternativas. Hay un
   solo cuerpo, así que cada alternativa debe enlazar las mismas variables con los mismos tipos.
-  También puede escribirse dentro de un patrón de constructor (`(Some (:or (circle r) (rect r _)))`)
+  También puede escribirse dentro de un patrón de constructor (`(Some (:or (Circle r) (Rect r _)))`)
 
 Comparar un tipo que no implementa `Equal` con un literal de valor / `(:= expr)` es un error de tipos (este lenguaje
 prefiere decir "no se pueden comparar" a dejar una rama que en silencio nunca coincide).
@@ -1501,7 +1501,7 @@ implícitamente en `Sexpr`, como en `(list p 42)`:
 - Un nombre de variante desnudo `(VariantName sub-pattern...)` — extrae una variante de un `defenum`. Se
   resuelve como un nombre desnudo visible por haberlo traído, por ejemplo con `(use EnumType::*)` (las
   mismas reglas de visibilidad que al llamar al constructor). Por ejemplo, para
-  `(defenum color (red) (blue))`, `(red)` `(blue)` tras `(use color::*)`. Con la forma calificada
+  `(defenum color (Red) (Blue))`, `(Red)` `(Blue)` tras `(use color::*)`. Con la forma calificada
   `(EnumType::VariantName ...)` no hace falta `use`.
 - `(the Type pattern)` — una conversión descendente del tipo entero (ligándolo entero). No descompone los
   campos; pasa el valor a `pattern` tal cual. La única forma de sacar una estructura mutable conservando su

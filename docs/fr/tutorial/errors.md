@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Gestion des erreurs
 
 La gestion des erreurs de typelisp répartit les échecs en deux sortes.
@@ -68,20 +68,20 @@ d'erreur. Un type d'erreur est un `defenum` ou un `defstruct` ordinaire qui impl
 
 ```lisp
 (defenum config-error
-  (missing string)          ; un réglage manque
-  (invalid string int))     ; une valeur est incorrecte
+  (Missing string)          ; un réglage manque
+  (Invalid string int))     ; une valeur est incorrecte
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
   (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
       (Result::Ok n)
-      (Result::Err (config-error::invalid "workers" n))))
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` renvoie une description de l'erreur.

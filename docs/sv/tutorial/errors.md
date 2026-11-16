@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Felhantering
 
 Felhantering i typelisp delar in misslyckanden i två slag.
@@ -69,20 +69,20 @@ feltyp är en vanlig `defenum` eller `defstruct` som implementerar traitet `Erro
 
 ```lisp
 (defenum config-error
-  (missing string)          ; en inställning saknas
-  (invalid string int))     ; ett värde är fel
+  (Missing string)          ; en inställning saknas
+  (Invalid string int))     ; ett värde är fel
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
   (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
       (Result::Ok n)
-      (Result::Err (config-error::invalid "workers" n))))
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` returnerar en beskrivning av felet.

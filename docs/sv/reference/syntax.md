@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1393,9 +1393,9 @@ Slag av mönster:
 - `_` — jokertecken
 - Ett variabelnamn — ett bindningsmönster (matchar alltid). Men om scrutineens typ har en variant med det
   namnet löses det upp som **mönstret för bart variantnamn nedan**
-- Ett bart variantnamn — matchar en variant som inte tar några argument (`(match c (red 1) (blue 2))`). Att
+- Ett bart variantnamn — matchar en variant som inte tar några argument (`(match c (Red 1) (Blue 2))`). Att
   skriva en variant med fält med dess bara namn är ett aritetsfel, så skriv den inom parenteser, som i
-  `(circle r)`
+  `(Circle r)`
 - **Omedelbara literaler**: heltal / `true`/`false` / tecken — jämförs som ord
 - **Värdeliteraler**: strängar / flyttal / symboler (`'foo`) / bignum-heltal / kvoter — jämförs efter värde
   med den typens `equal` ([Standardtraits](functions/traits.md#2-equal--ord-jämförelse)). Strängar jämförs
@@ -1422,7 +1422,7 @@ Slag av mönster:
   matchar det bara `#{..}`-data med samma antal element
 - `(:or p1 p2 ...)` — ett eller-mönster: det matchar när något av alternativen matchar. Det finns en
   enda kropp, så varje alternativ måste binda samma variabler med samma typer. Det kan också skrivas
-  inuti ett konstruktormönster (`(Some (:or (circle r) (rect r _)))`)
+  inuti ett konstruktormönster (`(Some (:or (Circle r) (Rect r _)))`)
 
 Att jämföra en typ som inte implementerar `Equal` med en värdeliteral / `(:= expr)` är ett typfel (det här
 språket väljer att säga "dessa kan inte jämföras" i stället för att lämna en gren som tyst aldrig matchar).
@@ -1474,8 +1474,8 @@ som i `(list p 42)`:
   form som structmönstren ovan. Till exempel för `(defstruct point (x f64) (y f64))`: `(point :x :y)`.
 - Ett naket variantnamn `(VariantName sub-pattern...)` — tar ut en variant ur en `defenum`. Löses som
   ett naket namn som blivit synligt genom att tas in, till exempel med `(use EnumType::*)` (samma
-  synlighetsregler som när konstruktorn anropas). Till exempel för `(defenum color (red) (blue))`,
-  `(red)` `(blue)` efter `(use color::*)`. Med den kvalificerade formen `(EnumType::VariantName ...)`
+  synlighetsregler som när konstruktorn anropas). Till exempel för `(defenum color (Red) (Blue))`,
+  `(Red)` `(Blue)` efter `(use color::*)`. Med den kvalificerade formen `(EnumType::VariantName ...)`
   behövs inget `use`.
 - `(the Type pattern)` — en nedkastning av hela typen (att binda den som helhet). Den delar inte upp
   fält; den skickar värdet till `pattern` som det är. Det enda sättet att ta ut en föränderlig struct

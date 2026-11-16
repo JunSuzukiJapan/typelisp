@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1388,9 +1388,9 @@ Tipos de padrão:
 - `_` — curinga
 - Um nome de variável — um padrão de vínculo (sempre casa). Porém, se o tipo do valor examinado tiver uma
   variante com esse nome, ele é resolvido como **o padrão de nome de variante simples abaixo**
-- Um nome de variante simples — casa com uma variante que não recebe argumentos (`(match c (red 1) (blue 2))`).
+- Um nome de variante simples — casa com uma variante que não recebe argumentos (`(match c (Red 1) (Blue 2))`).
   Escrever uma variante com campos pelo nome simples é um erro de aridade, então escreva-a entre parênteses, como
-  em `(circle r)`
+  em `(Circle r)`
 - **Literais imediatos**: inteiros / `true`/`false` / caracteres — comparados como palavras
 - **Literais de valor**: strings / números de ponto flutuante / símbolos (`'foo`) / inteiros bignum / ratios —
   comparados por valor com o `equal` desse tipo ([Traits padrão](functions/traits.md#2-equal--ord-comparação)).
@@ -1417,7 +1417,7 @@ Tipos de padrão:
   `Sexpr`, casa somente com dados `#{..}` com o mesmo número de elementos
 - `(:or p1 p2 ...)` — um padrão ou: casa quando qualquer uma das alternativas casa. Há um único
   corpo, então toda alternativa precisa vincular as mesmas variáveis com os mesmos tipos. Também
-  pode ser escrito dentro de um padrão de construtor (`(Some (:or (circle r) (rect r _)))`)
+  pode ser escrito dentro de um padrão de construtor (`(Some (:or (Circle r) (Rect r _)))`)
 
 Comparar um tipo que não implementa `Equal` com um literal de valor / `(:= expr)` é um erro de tipo (esta linguagem
 prefere dizer "não podem ser comparados" a deixar um ramo que silenciosamente nunca casa).
@@ -1471,7 +1471,7 @@ instância de um `defstruct`/`defenum` (capítulo 3) que foi convertida implicit
 - Um nome de variante nu `(VariantName sub-pattern...)` — extrai uma variante de um `defenum`. É
   resolvido como um nome nu tornado visível ao ser trazido, por exemplo com `(use EnumType::*)` (as
   mesmas regras de visibilidade de quando se chama o construtor). Por exemplo, para
-  `(defenum color (red) (blue))`, `(red)` `(blue)` depois de `(use color::*)`. Com a forma qualificada
+  `(defenum color (Red) (Blue))`, `(Red)` `(Blue)` depois de `(use color::*)`. Com a forma qualificada
   `(EnumType::VariantName ...)`, não é preciso `use`.
 - `(the Type pattern)` — um downcast do tipo inteiro (vinculando-o inteiro). Não decompõe os campos; passa o
   valor a `pattern` como está. A única forma de tirar uma estrutura mutável mantendo sua identidade, e também a

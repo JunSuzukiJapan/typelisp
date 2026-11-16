@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Основы типов
 
 typelisp — язык со статической типизацией. Эта глава объясняет, что делает для вас проверка типов, какие типы вы
@@ -201,28 +201,28 @@ Common Lisp нет.
 
 ```lisp
 (defenum shape
-  (circle int)        ; радиус
-  (rect int int)      ; ширина и высота
-  (dot))              ; не содержит значений
+  (Circle int)        ; радиус
+  (Rect int int)      ; ширина и высота
+  (Dot))              ; не содержит значений
 ```
 
-Значения создаются с именем типа впереди, как `shape::circle`. В `match` они разбираются по имени варианта.
+Значения создаются с именем типа впереди, как `shape::Circle`. В `match` они разбираются по имени варианта.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 И здесь `match` проверяет, что все случаи покрыты. Если позже добавить в `shape` вариант, каждый `match`, который его
 не обрабатывает, станет ошибкой типа, так что ни одно место, требующее исправления, не будет пропущено.
 
-После `(use shape)` можно писать `(rect 5 6)` без имени типа.
+После `(use shape)` можно писать `(Rect 5 6)` без имени типа.
 
 `Option` и `Result` — перечисления, построенные тем же механизмом.
 

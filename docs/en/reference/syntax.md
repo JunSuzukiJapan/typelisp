@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1396,8 +1396,8 @@ Kinds of patterns:
 - `_` — wildcard
 - A variable name — a binding pattern (always matches). However, if the scrutinee's type has a variant of
   that name, it is resolved as **the bare variant name pattern below**
-- A bare variant name — matches a variant that takes no arguments (`(match c (red 1) (blue 2))`). Writing a
-  variant with fields by its bare name is an arity error, so write it in parentheses, as in `(circle r)`
+- A bare variant name — matches a variant that takes no arguments (`(match c (Red 1) (Blue 2))`). Writing a
+  variant with fields by its bare name is an arity error, so write it in parentheses, as in `(Circle r)`
 - **Immediate literals**: integers / `true`/`false` / characters — compared as words
 - **Value literals**: strings / floating-point numbers / symbols (`'foo`) / bignum integers / ratios —
   compared by value with that type's `equal` ([Standard Traits](functions/traits.md#2-equal--ord-comparison)).
@@ -1424,7 +1424,7 @@ Kinds of patterns:
   `Sexpr` it matches only `#{..}` data with the same number of elements
 - `(:or p1 p2 ...)` — an or-pattern: it matches when any one alternative matches. There is one body,
   so every alternative must bind the same variables at the same types. It can also be written inside
-  a constructor pattern (`(Some (:or (circle r) (rect r _)))`)
+  a constructor pattern (`(Some (:or (Circle r) (Rect r _)))`)
 
 Comparing a type that does not implement `Equal` with a value literal / `(:= expr)` is a type error (this
 language chooses to say "these cannot be compared" rather than leave an arm that silently never matches).
@@ -1477,8 +1477,8 @@ instance of a `defstruct`/`defenum` (chapter 3) that was implicitly converted to
   `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
 - A bare variant name `(VariantName sub-pattern...)` — extracts a variant of a `defenum`. Resolved as a
   bare name made visible by bringing it in, for example with `(use EnumType::*)` (the same visibility
-  rules as when calling the constructor). For example, for `(defenum color (red) (blue))`, `(red)`
-  `(blue)` after `(use color::*)`. With the qualified form `(EnumType::VariantName ...)`, no `use` is
+  rules as when calling the constructor). For example, for `(defenum color (Red) (Blue))`, `(Red)`
+  `(Blue)` after `(use color::*)`. With the qualified form `(EnumType::VariantName ...)`, no `use` is
   needed.
 - `(the Type pattern)` — a downcast of the whole type (binding it as a whole). It does not decompose
   fields; it passes the value to `pattern` as it is. The only way to take out a mutable struct while

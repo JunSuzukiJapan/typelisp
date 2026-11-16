@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 타입의 기초
 
 typelisp는 정적 타입 언어이다. 이 장에서는 타입 검사기가 해 주는 일, 자주 쓰는 타입(`Option`, `Result`, 구조체,
@@ -197,28 +197,28 @@ None
 
 ```lisp
 (defenum shape
-  (circle int)        ; 반지름
-  (rect int int)      ; 너비와 높이
-  (dot))              ; 값을 가지지 않는다
+  (Circle int)        ; 반지름
+  (Rect int int)      ; 너비와 높이
+  (Dot))              ; 값을 가지지 않는다
 ```
 
-값은 `shape::circle`처럼 타입 이름을 앞에 붙여 만든다. `match`에서는 변형 이름으로 분해한다.
+값은 `shape::Circle`처럼 타입 이름을 앞에 붙여 만든다. `match`에서는 변형 이름으로 분해한다.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 여기서도 `match`는 모든 경우를 덮는지 검사한다. 나중에 `shape`에 변형을 추가하면 그것을 처리하지 않는 `match`가
 모두 타입 오류가 되므로 고쳐야 할 곳을 놓치지 않는다.
 
-`(use shape)` 뒤에는 타입 이름 없이 `(rect 5 6)`이라고 쓸 수 있다.
+`(use shape)` 뒤에는 타입 이름 없이 `(Rect 5 6)`이라고 쓸 수 있다.
 
 `Option`과 `Result`도 이와 같은 구조로 만든 열거형이다.
 
