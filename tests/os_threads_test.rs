@@ -367,24 +367,37 @@ fn join_answers_with_the_result_every_time_it_is_asked() {
     );
 }
 
-/// (h) A thread that blocks in a C call holds up only itself. While it sleeps
-/// in `usleep`, `main` and a task hand a hundred values back and forth — on
-/// one thread too, because the thread in `usleep` is not that one — and only
-/// then does the sleeper report in.
+/// (h) A thread that blocks in a C call holds up only itself. It waits in
+/// `read` on a pipe that only `main` writes to, and `main` writes only after
+/// it and a task have handed a hundred values back and forth — on one thread
+/// too, because the thread in `read` is not that one. Had the blocked call
+/// held up the tasks, the exchange would never finish; nothing here depends
+/// on how long anything takes.
 #[test]
 fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
     same_on_one_and_four_threads(
         "threads_blocking_ffi",
-        r#"(use std::sync::Chan) (defffi (c-usleep "usleep") (u32) i32)
-           (defun sleeper ((done Chan<()>)) int
-             (progn (unsafe (c-usleep (as u32 500000))) (send done ()) 1))
+        r#"(use std::sync::Chan)
+           (defffi (c-pipe "pipe") ((ptr i32)) i32)
+           (defffi (c-read "read") (i32 (ptr u8) c-ulong) c-long)
+           (defffi (c-write "write") (i32 (ptr u8) c-ulong) c-long)
+           (defun open-pipe () cons-cell<int,int>
+             (unsafe (let ((fds (c-alloc i32 2)))
+                       (c-pipe fds)
+                       (cons (as int (c-deref (c-ref fds 0))) (as int (c-deref (c-ref fds 1)))))))
+           (defun wait-on ((fd int) (done Chan<()>)) int
+             (progn (unsafe (let ((b (c-alloc u8 1))) (c-read (as i32 fd) b 1)))
+                    (send done ()) 1))
+           (defun release ((fd int)) ()
+             (progn (unsafe (let ((b (c-alloc u8 1))) (c-write (as i32 fd) b 1))) ()))
            (defun echo ((in Chan<int>) (out Chan<int>)) ()
              (loop (match (recv in)
                      ((None) (break))
                      ((Some v) (send out (+ v 1))))))
            (defun main () int
-             (let* ((done (the Chan<()> (Chan::new 1)))
-                    (th (thread (sleeper done)))
+             (let* ((fds (open-pipe))
+                    (done (the Chan<()> (Chan::new 1)))
+                    (th (thread (wait-on (car fds) done)))
                     (to (the Chan<int> (Chan::new 0)))
                     (from (the Chan<int> (Chan::new 0)))
                     (n 0))
@@ -392,6 +405,7 @@ fn a_thread_blocked_in_a_c_call_holds_up_no_task() {
                (dotimes (i 100) (send to n) (setf n (unwrap (recv from))))
                (close to)
                (println "~a ~a" n (len done))
+               (release (cdr fds))
                (println "~a" (join th))
                0))"#,
         0,
