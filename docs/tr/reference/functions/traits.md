@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Standart Trait'ler
 
 Yineleme, karşılaştırma, aritmetik ve öğe ekleme ile çıkarma için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
@@ -163,7 +163,7 @@ trait nesnesi de olabilir.
   (defmethod pop (self) Option<Item>))
 ```
 
-`push` ile en son eklenen öğenin geri çıkarılabildiği koleksiyon. Boşsa `none`. Genel bir fonksiyon
+`push` ile en son eklenen öğenin geri çıkarılabildiği koleksiyon. Boşsa `None`. Genel bir fonksiyon
 bunu `(:where (Pop C (Item T)))` ile ister.
 
 | Tür | `pop` ne yapar |
@@ -180,8 +180,8 @@ bunu `(:where (Pop C (Item T)))` ile ister.
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Modul dan Tata Letak Berkas
 
 Panduan ini menjelaskan cara menyusun program yang terdiri dari beberapa berkas. Aturan terperinci
@@ -134,7 +134,7 @@ Bila Anda memutuskan modul itu memakai definisi Anda sendiri, tulis `shadow` seb
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first milik modul ini => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first milik pustaka standar => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first milik pustaka standar => (Some 1)
 ```
 
 Setelah `shadow`, menulis `first` di modul itu merujuk ke definisi Anda sendiri. Untuk memakai

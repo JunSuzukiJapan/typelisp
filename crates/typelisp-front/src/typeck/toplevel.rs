@@ -697,9 +697,9 @@ mod tests {
     /// the value is built.
     #[test]
     fn an_option_is_matched() {
-        let src = "(defun get ((o Option<int>)) int (match o ((some x) x) ((none) 0)))\n";
-        assert_eq!(run(&format!("{}(get (Option::some 3))", src)).1, Value::Int(3));
-        assert_eq!(run(&format!("{}(get (Option::none))", src)).1, Value::Int(0));
+        let src = "(defun get ((o Option<int>)) int (match o ((Some x) x) ((None) 0)))\n";
+        assert_eq!(run(&format!("{}(get (Option::Some 3))", src)).1, Value::Int(3));
+        assert_eq!(run(&format!("{}(get (Option::None))", src)).1, Value::Int(0));
     }
 
     #[test]
@@ -890,7 +890,7 @@ mod tests {
     }
 
     /// `as` converts through the source type's method, a narrower width
-    /// after it; `try-as` is `none` where the value would be lost.
+    /// after it; `try-as` is `None` where the value would be lost.
     #[test]
     fn as_converts_between_numbers() {
         assert_eq!(run("(as int 2.7)").1, Value::Int(2));
@@ -901,7 +901,7 @@ mod tests {
     }
 
     /// A call leaves out an `&optional` or `&key` parameter for its
-    /// default, or `none` when it has none; `&rest` takes the arguments
+    /// default, or `None` when it has none; `&rest` takes the arguments
     /// left as one list.
     #[test]
     fn optional_key_and_rest_parameters() {
@@ -918,7 +918,7 @@ mod tests {
         assert!(msg.contains("expected at most 2 argument(s), got 3"), "{}", msg);
         let msg = check_err("(defun f (&optional (a int 1) &key (b int 2)) int a)");
         assert!(msg.contains("&key cannot be combined with &optional/&rest"), "{}", msg);
-        let msg = check_err("(defun f<T> (&key (x Option<T> (Option::none))) Option<T> x)");
+        let msg = check_err("(defun f<T> (&key (x Option<T> (Option::None))) Option<T> x)");
         assert!(msg.contains("may not default when its type mentions the function's own type parameter"), "{}", msg);
     }
 
@@ -1123,31 +1123,31 @@ mod tests {
     }
 
     /// A `Sexpr` is matched by its variants; an `Option<Sexpr>` by them and
-    /// `none` in one list, which must cover both.
+    /// `None` in one list, which must cover both.
     #[test]
     fn sexpr_patterns() {
-        let f = "(defun k ((x Option<Sexpr>)) int (match x ((cons a _) 1) ((int n) n) ((none) 0) (_ 9)))\n";
+        let f = "(defun k ((x Option<Sexpr>)) int (match x ((Cons a _) 1) ((Int n) n) ((None) 0) (_ 9)))\n";
         assert_eq!(run(&format!("{}(k (quote (1)))", f)).1, Value::Int(1));
         assert_eq!(run(&format!("{}(k 5)", f)).1, Value::Int(5));
         assert_eq!(run(&format!("{}(k ())", f)).1, Value::Int(0));
         assert_eq!(run(&format!("{}(k (quote a))", f)).1, Value::Int(9));
-        assert_eq!(run("(defun m ((x Option<Sexpr>)) int (match x ((some (int n)) n) ((some _) 1) ((none) 0)))\n(m 4)").1, Value::Int(4));
-        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((some _) 1)))");
-        assert!(msg.contains("`(none)` is not covered"), "{}", msg);
-        let msg = check_err("(defun k ((x Sexpr)) int (match x ((cons a _) 1)))");
-        assert!(msg.contains("`(int _)` is not covered"), "{}", msg);
-        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((nil) 1) (_ 0)))");
-        assert!(msg.contains("`nil` is no longer a `Sexpr` constructor"), "{}", msg);
+        assert_eq!(run("(defun m ((x Option<Sexpr>)) int (match x ((Some (Int n)) n) ((Some _) 1) ((None) 0)))\n(m 4)").1, Value::Int(4));
+        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((Some _) 1)))");
+        assert!(msg.contains("`(None)` is not covered"), "{}", msg);
+        let msg = check_err("(defun k ((x Sexpr)) int (match x ((Cons a _) 1)))");
+        assert!(msg.contains("`(Int _)` is not covered"), "{}", msg);
+        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((Nil) 1) (_ 0)))");
+        assert!(msg.contains("`Nil` is no longer a `Sexpr` constructor"), "{}", msg);
     }
 
     /// A documentation string is kept, not checked as the body; `()` where
-    /// an `Option` is expected is `none`; an `Option<Sexpr>` has `Sexpr`'s
+    /// an `Option` is expected is `None`; an `Option<Sexpr>` has `Sexpr`'s
     /// methods.
     #[test]
     fn docs_none_and_sexpr_receivers() {
         assert_eq!(run("(defun f () int \"one\" 1)\n(f)").1, Value::Int(1));
         assert_eq!(run("(defvar (v int) 2 \"two\")\nv").1, Value::Int(2));
-        assert_eq!(run("(defun g ((o Option<int>)) int (match o ((some x) x) (none 0)))\n(g ())").1, Value::Int(0));
+        assert_eq!(run("(defun g ((o Option<int>)) int (match o ((Some x) x) (None 0)))\n(g ())").1, Value::Int(0));
         assert_eq!(run("(eq (quote a) (quote a))").1, Value::Bool(true));
         let msg = check_err("(defun f () string \"doc\" 1)");
         assert!(msg.contains("expected `string`, found `int`"), "{}", msg);
@@ -1158,7 +1158,7 @@ mod tests {
     #[test]
     fn default_bodies() {
         let src = "(deftrait counted () (:type Item) (defmethod item (self) Item) (defmethod n (self) int) \
-(defmethod twice (self) int (* 2 (n self))) (defmethod first (self) Option<Item> (some (item self))))
+(defmethod twice (self) int (* 2 (n self))) (defmethod first (self) Option<Item> (Some (item self))))
 (defstruct c (k int))
 (impl counted c (:type Item bool) (defmethod item (self) bool true) (defmethod n (self) int self::k))
 (defstruct w<T> (v T))
@@ -1168,7 +1168,7 @@ mod tests {
         assert_eq!(run(&format!("{}(twice (make-instance 'c :k 21))", src)).1, Value::Int(42));
         assert_eq!(run(&format!("{}(t2 (make-instance 'c :k 4))", src)).1, Value::Int(8));
         assert_eq!(run(&format!("{}(t2 (make-instance 'w :v 1))", src)).1, Value::Int(0));
-        assert_eq!(run(&format!("{}(match (first (make-instance 'w :v 7)) ((some v) v) (none 0))", src)).1, Value::Int(7));
+        assert_eq!(run(&format!("{}(match (first (make-instance 'w :v 7)) ((Some v) v) (None 0))", src)).1, Value::Int(7));
         let msg = check_err("(deftrait a () (defmethod n (self) int) (defmethod m (self) string (n self)))");
         assert!(msg.contains("expected `string`, found `int`"), "{}", msg);
         let msg = check_err("(deftrait a () (defmethod n (self) int) (defmethod m (self) int (n self)))\n(defstruct d (k int))\n(impl a d)");
@@ -1298,7 +1298,7 @@ mod tests {
     /// static method written for that one instantiation.
     #[test]
     fn a_member_of_one_instantiation() {
-        assert_eq!(check_ok("(Option<int>::none)"), Type::Named(Path::builtin(wk::OPTION), vec![Type::Int]));
+        assert_eq!(check_ok("(Option<int>::None)"), Type::Named(Path::builtin(wk::OPTION), vec![Type::Int]));
         assert_eq!(run("(let ((v (Vector<u8>::new))) (push v 3) (len v))").1, Value::Int(1));
         let pair = "(defstruct Pair<T> (a T) (b T))
                     (impl Pair<int> (defmethod make () Pair<int> (make-instance 'Pair<int> :a 1 :b 2)))
@@ -1307,7 +1307,7 @@ mod tests {
         assert_eq!(run(&format!("{} (let ((p (Pair<bool>::make))) p::a)", pair)).1, Value::Bool(true));
         let e = check_err(&format!("{} (Pair<string>::make)", pair));
         assert!(e.contains("is written for `Pair<int>`, `Pair<bool>`, not for `Pair<string>`"), "{}", e);
-        let e = check_err("(Option<int>::some \"a\")");
+        let e = check_err("(Option<int>::Some \"a\")");
         assert!(e.contains("expected `int`, found `string`"), "{}", e);
     }
 
@@ -1368,7 +1368,7 @@ mod tests {
     #[test]
     fn a_method_with_optional_key_or_rest_parameters_as_a_value() {
         let defs = "(defstruct P (x int)) (impl P (defmethod add (self &optional (n int 1)) int (+ self::x n)) \
-                    (defmethod sum (self &rest (xs int)) int (match xs ((none) self::x) (_ (+ self::x 100)))) \
+                    (defmethod sum (self &rest (xs int)) int (match xs ((None) self::x) (_ (+ self::x 100)))) \
                     (defmethod kw (self &key (k int 5)) int (* self::x k))) \
                     (defun ap ((f (fn (P int) int)) (p P)) int (f p 10))";
         let body = "(let ((p (make-instance 'P :x 2)) (s (the (fn (P &rest int) int) sum))) (+ (ap add p) (ap kw p) (s p 7 8)))";
@@ -1459,7 +1459,7 @@ mod tests {
         assert_eq!(run(&format!("{} (g (make-instance 'B<int> :v 1))", defs)).1, Value::Int(5));
         let e = check_err(&format!("{} (let ((b (make-instance 'B<bool> :v true))) b::only-int)", defs));
         assert!(e.contains("`b::only-int`: `only-int` is a method of `B<int>` only, and `b` is a `B<bool>`"), "{}", e);
-        let e = check_err(&format!("{} (let ((b (make-instance 'B :v (Option::none)))) (only-int b))", defs));
+        let e = check_err(&format!("{} (let ((b (make-instance 'B :v (Option::None)))) (only-int b))", defs));
         assert!(e.contains("`only-int` is a method of some instantiations of `B`, and the receiver's type `B<Option<_>>` does not say which yet"), "{}", e);
     }
 

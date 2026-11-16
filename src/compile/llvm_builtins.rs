@@ -2442,8 +2442,8 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
                 vec![crate::types::Type::Named(crate::Path::builtin(typelisp_mem::wk::LLVM_VALUE), vec![])],
             ),
         );
-        // A niche (`Repr::Niche`): the handle's fixnum word for `some`, the
-        // empty-list immediate for `none` — what `encode` makes of the
+        // A niche (`Repr::Niche`): the handle's fixnum word for `Some`, the
+        // empty-list immediate for `None` — what `encode` makes of the
         // `Value` `alloc_option` answers, and what the island's `pat-some`
         // reads back.
         let option = heap.alloc_option(ty, found);

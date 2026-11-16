@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 型別一覽
 
 typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的寫法見[語法參考第 2 章](syntax.md#2-型別的寫法)，各型別的函式與方法見
@@ -29,8 +29,8 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 | 型別 | 內容 | 詳情 |
 |---|---|---|
-| `Option<T>` | 有值或沒有值。`some` / `none` | [Option 與 Result](functions/option-result.md) |
-| `Result<T,E>` | 成功或失敗。`ok` / `err` | 同上 |
+| `Option<T>` | 有值或沒有值。`Some` / `None` | [Option 與 Result](functions/option-result.md) |
+| `Result<T,E>` | 成功或失敗。`Ok` / `Err` | 同上 |
 | `Vector<T>` | 可變長度陣列 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | 雜湊表。鍵的比較方式由建立時的 `:test` 決定，`equal` 表的鍵型別須實作 `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | 元組（元素 1～12 個）。元素用 `t::0` 讀取 | [語法第 2 章](syntax.md#2-型別的寫法) |
@@ -45,8 +45,8 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 | 型別 | 內容 | 詳情 |
 |---|---|---|
-| `Sexpr` | 非空的 S 運算式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array`、`tuple` 共 19 種變體 | [S 運算式資料](functions/sequences.md#2-s-運算式資料-sexpr) |
-| `Option<Sexpr>` | 一般的 S 運算式資料。空串列 `()` 是 `none` | 同上 |
+| `Sexpr` | 非空的 S 運算式。`Int`、`I8` 至 `U32`、`F32`、`F64`、`Char`、`Bool`、`Sym`、`Str`、`Cons`、`Ratio`、`Path`、`Vector`、`Array`、`Tuple` 共 19 種變體 | [S 運算式資料](functions/sequences.md#2-s-運算式資料-sexpr) |
+| `Option<Sexpr>` | 一般的 S 運算式資料。空串列 `()` 是 `None` | 同上 |
 
 ## 4. 標準函式庫中的型別
 
@@ -70,7 +70,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | 串流 | [串流](functions/streams-files.md#3-具體串流型別) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | 組合串流 | [組合串流](functions/streams-files.md#4-組合串流) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | 網路 | [網路](functions/network.md#1-型別) |
-| `ReadOutcome` | `read-sexpr` 的結果。`datum` / `eof` | [串流](functions/streams-files.md#6-泛型函式與檔案操作) |
+| `ReadOutcome` | `read-sexpr` 的結果。`Datum` / `Eof` | [串流](functions/streams-files.md#6-泛型函式與檔案操作) |
 | `universal-time` `internal-time` `decoded-time` | 時間 | [時間](functions/system.md#1-時間) |
 | `heap-info` | 堆積的現況 | [實作工具](functions/system.md#51-heap-info-的欄位) |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Foutmeldingen
 
 Wat de belangrijkste foutmeldingen van `typl` betekenen en hoe je ze oplost.
@@ -101,8 +101,8 @@ Fouten die vóór het uitvoeren worden gevonden. De vorm wordt niet uitgevoerd t
 | Melding | Betekenis en oplossing |
 |---|---|
 | `panic: divide by zero` | Deling door nul met gehele getallen of ratio's. Deling door nul met drijvende komma geeft geen panic; het geeft `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` werd op `none` toegepast. Handel het geval `none` af met `match` of `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | Een index buiten het bereik. Controleer de lengte met `len`, of gebruik een functie die bij overschrijding `none` teruggeeft (`nth`, `pop` enzovoort) |
+| `panic: unwrap: called on None` | `unwrap` werd op `None` toegepast. Handel het geval `None` af met `match` of `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | Een index buiten het bereik. Controleer de lengte met `len`, of gebruik een functie die bij overschrijding `None` teruggeeft (`nth`, `pop` enzovoort) |
 | `panic: an integer argument does not fit a fixnum` | Een `int` die niet in 63 bits past werd doorgegeven aan een argument dat een index of een aantal neemt |
 | `throw: no enclosing (catch 'oops) for this throw` | Een `throw` werd uitgevoerd zonder omsluitende `catch` met dezelfde tag |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | Een `throw` bereikte een `catch` van dezelfde tag die een ander type draagt |

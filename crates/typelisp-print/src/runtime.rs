@@ -641,7 +641,7 @@ mod tests {
 
         set_print_hooks(Some(PrintHooks {
             enum_variant_name: |ty, variant| match (ty, variant) {
-                (typelisp_mem::TypeId::OPTION, 0) => Ok("some".to_string()),
+                (typelisp_mem::TypeId::OPTION, 0) => Ok("Some".to_string()),
                 _ => Err(format!("no variant {} of {}", variant, &*typelisp_mem::type_name(ty))),
             },
             field_is_niched_option: |_, _, _| Ok(false),
@@ -652,7 +652,7 @@ mod tests {
         let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
         let args = heap.cons(boxed, Value::Empty).expect("heap has room");
         let out = build_format(&mut heap, "~a", args).expect("format should succeed");
-        assert_eq!(format::finish(out, &Opts::default()), "(some 7)");
+        assert_eq!(format::finish(out, &Opts::default()), "(Some 7)");
 
         set_print_hooks(None);
     }

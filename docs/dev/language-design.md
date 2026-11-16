@@ -18,15 +18,15 @@
   Common Lisp に合わせる。合わせられないものは [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md)
   に理由とともに記録する。
 - **真偽値は `true`/`false`**。`nil`/`t` は言語に存在しない。
-- **`nil` の代替は `Option<T>`**（組み込みの直和型。変種は `(some v)` と `none`）。
+- **`nil` の代替は `Option<T>`**（組み込みの直和型。変種は `(Some v)` と `None`）。
 - **S 式データの型は `Option<Sexpr>`**。`Sexpr` は「空でない S 式」で、空リスト `()` は
-  `Sexpr` の変種ではなく `Option` の `none` になる。`Sexpr` の変種は `int`・`i8`〜`u32`・`f32`・
+  `Sexpr` の変種ではなく `Option` の `None` になる。`Sexpr` の変種は `int`・`i8`〜`u32`・`f32`・
   `f64`・`char`・`bool`・`sym`・`str`・`cons`・`ratio`・`path`・`vector`・`array`・`tuple` の 19 個
   （変種番号は `crates/typelisp-front/src/sexpr_variant.rs` に集約）。数値の変種が幅ごとに
   分かれているのは、`Sexpr` が「値の型がほかのどこにも書かれていない唯一の場所」だから
   （[preserve-bit-width-plan.md](preserve-bit-width-plan.md)）。`read` の戻り型は
   `Result<Option<Sexpr>, ReadError>`。
-  - `()` は期待型が `Option<Sexpr>` なら `none`、それ以外の文脈では `Unit` の値。これは言語レベルで
+  - `()` は期待型が `Option<Sexpr>` なら `None`、それ以外の文脈では `Unit` の値。これは言語レベルで
     禁止した「真偽値としての `nil`」とは別物。
   - 裸の `cons`/`car`/`cdr` はジェネリックなペア `cons-cell<A,B>`（標準ライブラリの `defstruct`）の
     操作で、S 式専用ではない。S 式のセルは `sexpr-cons`/`sexpr-car`/`sexpr-cdr` などで扱う。
@@ -43,7 +43,7 @@
   CL と同様に構造体・列挙型に対して同一性（`eq`）のまま、`equalp` はスロットごとの再帰比較。
 - **大文字小文字を区別する**（2026-10-25 決定）。シンボルは書いたとおりの綴りでインターンし、
   正規化しない。型名は大文字で始まり（`Option`、`Vector`）、基本型（`int`、`string`）と変種名
-  （`some`、`none`、`ok`、`err`）は小文字。`match` の腕の一番外に裸で書いた名前は常に変種で、
+  （`Some`、`None`、`Ok`、`Err`）は小文字。`match` の腕の一番外に裸で書いた名前は常に変種で、
   何にでも当たるのは `_` だけ。
 - **キーワードは CL 同等**（2026-10-17 決定）。`:name` はどのモジュールで書いても名前空間
   `keyword` に属する同じ 1 つのシンボルで、自己評価する。
@@ -176,7 +176,7 @@
 `while-let` などは特殊形ではなくマクロで、標準ライブラリかコアマクロ層に書かれている。
 
 **特殊形よりマクロ**: 新しい構文は、既存の型推論で書けるならマクロで書く。例えば `doiter` は
-`while-let` を呼ぶだけのマクロで、ループ変数の型は展開後の `(some var)` パターンの型から
+`while-let` を呼ぶだけのマクロで、ループ変数の型は展開後の `(Some var)` パターンの型から
 `Checker::check_ctor_pattern` が推論するので、checker の特殊形にする必要が無い。
 
 確定している規則:
@@ -428,7 +428,7 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
 ## 7. エラー処理（Rust 流）
 
 ### 7.1 Result と panic の住み分け
-- **回復可能な失敗** → `Result<T, E>`（変種 `(ok v)` と `(err e)`）＋ `match`。
+- **回復可能な失敗** → `Result<T, E>`（変種 `(Ok v)` と `(Err e)`）＋ `match`。
 - **回復不能な失敗（バグ・不変条件違反）** → `panic`。
 - **`?`/try は導入しない**（Lisp の文法に馴染まないため）。失敗の分岐は `match` で明示する。
 
@@ -449,9 +449,7 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
   Scheme の作法。
 - `?` も接尾辞として使わない（Scheme の述語命名）。述語は CL 流の `-p`/`p` 接尾辞
   （`zerop`/`evenp`/`consp`/`alphap`）か、`is-` 前置（`is-some`/`is-ok`）で命名する。
-  CL の `some`（列の述語）は `Option` の変種 `some` と同じ名前になり、構成子の解決が関数より先に
-  来る（§2.5）ので使えない。`some?` に逃げず、衝突しない別名 **`any`**（Rust の `Iterator::any`）
-  を使う。
+  CL の `some`（列の述語）は **`any`**（Rust の `Iterator::any`）という名前で提供する。
 - `!` という記号自体は `Never` 型の表記（§7.2、例 `(fn (i32) !)`）として構文上の意味を持つ。
 
 ### 7.4 エラー型 E（2026-07-25 実装）
@@ -464,7 +462,7 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
 - **ユーザ定義型がそのまま E に載る**: `Result<T, MyError>` の `MyError` は `defstruct` でも
   `defenum` でもよい。`E` は最初から任意の型を取れる型引数なので、言語側の追加の機構は要らない
   （`Error` の実装すら必須ではない）。
-- **`Error` トレイト**（標準ライブラリ）: `message` と `source`（包んでいる原因。既定は `none`）の
+- **`Error` トレイト**（標準ライブラリ）: `message` と `source`（包んでいる原因。既定は `None`）の
   2 メソッド。組み込みのエラー型もユーザ定義型と同じ `impl` を標準ライブラリに書いてあるだけで、
   特別扱いは無い。
 - **複数のエラー型を一様に扱う**: `Result<T, :dyn Error>`（§5.2）。Rust の `Box<dyn Error>` に
@@ -516,7 +514,7 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
 | `/` `mod` `rem`（ゼロ除算） | panic |
 | `parse-int` / `parse-float` | `Result<_, ParseIntError>` / `Result<_, ParseFloatError>` |
 | `read` | `Result<Option<Sexpr>, ReadError>` |
-| `unwrap`（`none`/`err`） | panic |
+| `unwrap`（`None`/`Err`） | panic |
 
 原則: プログラマの誤り＝panic、予期される失敗＝`Result`、無いことが普通にある＝`Option`。
 個々の操作の方針は [functions/](../ja/reference/functions/README.md) の各表にある。

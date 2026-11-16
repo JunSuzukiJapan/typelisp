@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Types
 
 The types typelisp has, and the standard traits each type implements. How to write types is in
@@ -30,8 +30,8 @@ There is no 64-bit integer type. For integers whose width does not matter, use `
 
 | Type | Contents | Details |
 |---|---|---|
-| `Option<T>` | A value that is there or not. `some` / `none` | [Option and Result](functions/option-result.md) |
-| `Result<T,E>` | Success or failure. `ok` / `err` | Same as above |
+| `Option<T>` | A value that is there or not. `Some` / `None` | [Option and Result](functions/option-result.md) |
+| `Result<T,E>` | Success or failure. `Ok` / `Err` | Same as above |
 | `Vector<T>` | A growable array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | A hash table. How keys compare is decided by `:test` when it is made, and in an `equal` table the key type must implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 to 12 elements). Elements are read with `t::0` | [Syntax chapter 2](syntax.md#2-writing-types) |
@@ -46,8 +46,8 @@ types `(T U ...)` (the same type as `cons-cell<T,cons-cell<U,()>>`) ([Syntax Ref
 
 | Type | Contents | Details |
 |---|---|---|
-| `Sexpr` | A non-empty S-expression. 19 variants: `int`, `i8` to `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
-| `Option<Sexpr>` | S-expression data in general. The empty list `()` is `none` | Same as above |
+| `Sexpr` | A non-empty S-expression. 19 variants: `Int`, `I8` to `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
+| `Option<Sexpr>` | S-expression data in general. The empty list `()` is `None` | Same as above |
 
 ## 4. Types in the standard library
 
@@ -72,7 +72,7 @@ same as types you write yourself, and everything you can do with a `defstruct` c
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Streams | [Streams](functions/streams-files.md#3-concrete-stream-types) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Composite streams | [Composite streams](functions/streams-files.md#4-composite-streams) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Networking | [Networking](functions/network.md#1-types) |
-| `ReadOutcome` | The result of `read-sexpr`. `datum` / `eof` | [Streams](functions/streams-files.md#6-generic-functions-and-file-operations) |
+| `ReadOutcome` | The result of `read-sexpr`. `Datum` / `Eof` | [Streams](functions/streams-files.md#6-generic-functions-and-file-operations) |
 | `universal-time` `internal-time` `decoded-time` | Time | [Time](functions/system.md#1-time) |
 | `heap-info` | The current state of the heap | [Implementation tools](functions/system.md#51-fields-of-heap-info) |
 

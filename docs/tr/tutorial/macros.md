@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makrolar
 
 Bir makro, bir program alıp bir program döndüren fonksiyondur. Makrolar, fonksiyonların ifade
@@ -44,7 +44,7 @@ ilerlemenin en hızlı yoludur.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Açılımların da türleri denetlenir
@@ -121,15 +121,15 @@ Aynı şekilde, gövdesini belirli sayıda tekrarlayan bir makro şöyle yazıla
 
 Bir makro gövdesi sıradan typelisp kodudur; bu yüzden bağımsız değişkenlerini `if` ya da `match` ile
 inceleyip farklı bir açılım oluşturabilir. Bağımsız değişkenler S-ifade verisidir
-(`Option<Sexpr>`) ve boş liste `none`'dur.
+(`Option<Sexpr>`) ve boş liste `None`'dur.
 
 Tüm koşulları doğruysa `true` döndüren `my-and`'i yapalım.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
-    ((cons f more)
+    ((None) 'true)                                    ; no arguments
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -139,7 +139,7 @@ Tüm koşulları doğruysa `true` döndüren `my-and`'i yapalım.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)`, bir listenin başını `f`'ye, geri kalanını `more`'a alan bir örüntüdür.
+- `(Cons f more)`, bir listenin başını `f`'ye, geri kalanını `more`'a alan bir örüntüdür.
 - `sexpr-null`, S-ifade verisinin boş liste olup olmadığını sınar.
 - Son `_` kolu gereklidir, çünkü S-ifade verisinin listelerden başka biçimleri de vardır (sayılar,
   string'ler vb.) ve `match` bunların da kapsanmasını ister. Bir `&rest` bağımsız değişkeni her

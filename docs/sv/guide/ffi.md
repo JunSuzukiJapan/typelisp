@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # C FFI (defffi)
 
 Den här guiden förklarar hur man anropar C-funktioner från typelisp. Listan över typer som kan
@@ -68,7 +68,7 @@ att använda en som ett typelisp-heltal konverterar man den med `as`.
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int förlorar ingenting av 64-bitsvärdet
-(try-as i32 (unsafe (c-strlen s)))  ; none om det inte ryms i ett i32
+(try-as i32 (unsafe (c-strlen s)))  ; None om det inte ryms i ett i32
 (unsafe (c-malloc 16))              ; heltalsliteraler kan skickas som de är
 ```
 

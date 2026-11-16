@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 오류 처리
 
 typelisp의 오류 처리는 실패를 두 종류로 나눈다.
@@ -6,7 +6,7 @@ typelisp의 오류 처리는 실패를 두 종류로 나눈다.
 | 실패의 종류 | 예 | 나타내는 방법 |
 |---|---|---|
 | 일어날 수 있는 실패(복구 가능) | 파일이 없다, 입력이 수가 아니다 | `Result<T,E>`를 반환한다 |
-| 프로그램의 실수(복구 불가능) | 범위를 벗어난 인덱스, `none`의 `unwrap`, 0으로 나누기 | `panic`으로 멈춘다 |
+| 프로그램의 실수(복구 불가능) | 범위를 벗어난 인덱스, `None`의 `unwrap`, 0으로 나누기 | `panic`으로 멈춘다 |
 
 여기에 더해 여러 함수 호출을 한꺼번에 빠져나가는 `catch` / `throw`와, 본체를 어떻게 빠져나가든 뒷정리를 실행하는
 `unwind-protect`가 있다. 이 장은 [타입의 기초](types.md)의 `Result` 절을 읽었다고 가정한다.
@@ -19,22 +19,22 @@ typelisp의 오류 처리는 실패를 두 종류로 나눈다.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 호출하는 쪽은 `match`로 성공과 실패를 나눈다.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- `Result`를 반환하는 함수의 값은 `match`로 `err`의 경우를 처리하지 않으면 쓸 수 없다. 실패 처리를 잊으면 타입
+- `Result`를 반환하는 함수의 값은 `match`로 `Err`의 경우를 처리하지 않으면 쓸 수 없다. 실패 처리를 잊으면 타입
   오류이다.
 - `parse-int`의 오류는 `ParseIntError` 타입의 값이다. `(message e)`로 메시지 문자열을 얻는다.
 
@@ -46,17 +46,17 @@ Rust의 `?` 같은 줄임 표기는 없다. `Result`를 반환하는 함수를 �
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 실패하지 않는다는 것을 알고 있을 때나, 실패하면 멈춰도 괜찮은 작은 스크립트에서는 `unwrap`으로 안의 값을 꺼낸다.
-값이 `err`이면 panic한다. 기본값으로 충분하다면 `unwrap-or`를 쓴다.
+값이 `Err`이면 panic한다. 기본값으로 충분하다면 `unwrap-or`를 쓴다.
 
 ## 3. 자신만의 오류 타입 만들기
 
@@ -65,24 +65,24 @@ Rust의 `?` 같은 줄임 표기는 없다. `Result`를 반환하는 함수를 �
 
 ```lisp
 (defenum config-error
-  (missing string)          ; 설정 항목이 없다
-  (invalid string int))     ; 값이 잘못되었다
+  (Missing string)          ; 설정 항목이 없다
+  (Invalid string int))     ; 값이 잘못되었다
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message`는 오류의 설명을 반환한다.
-- `source`는 이 오류의 원인이 된 다른 오류를 반환한다. 원인이 없으면 `none`이다.
+- `source`는 이 오류의 원인이 된 다른 오류를 반환한다. 원인이 없으면 `None`이다.
 
 ## 4. 다른 종류의 오류를 합치기
 
@@ -94,8 +94,8 @@ Rust의 `?` 같은 줄임 표기는 없다. `Result`를 반환하는 함수를 �
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 `"4"`, `"-1"`, `"abc"`를 주면 결과는 다음과 같다.
@@ -125,7 +125,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - `panic`의 타입은 `!`(반환하지 않는다)이므로 어떤 타입이 기대되는 곳에도 쓸 수 있다. 위의 `if`의 두 갈래가 맞는
   것은 그 때문이다.
-- 다음 연산도 panic한다. `none`이나 `err`의 `unwrap`, 범위를 벗어난 인덱스의 `get`, 정수의 0으로 나누기.
+- 다음 연산도 panic한다. `None`이나 `Err`의 `unwrap`, 범위를 벗어난 인덱스의 `get`, 정수의 0으로 나누기.
 - `panic`은 프로그램을 멈춘다. 태스크 안에서 일어나도 프로그램 전체가 멈춘다.
 - REPL에서는 `panic`이 일어나도 REPL은 끝나지 않고 다음 입력을 기다린다.
 - "아직 쓰지 않았다"에는 `(todo)`, "여기에 도달할 리 없다"에는 `(unreachable)`을 쓸 수 있다. 둘 다 panic한다.
@@ -189,8 +189,8 @@ error: main.typl:4:7: panic: index 3 out of range
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: 반드시 뒷정리하기

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -30,8 +30,8 @@ Det finns ingen 64-bitars heltalstyp. För heltal där bredden inte spelar någo
 
 | Typ | Innehåll | Detaljer |
 |---|---|---|
-| `Option<T>` | Ett värde som finns eller inte. `some` / `none` | [Option och Result](functions/option-result.md) |
-| `Result<T,E>` | Lyckat eller misslyckat. `ok` / `err` | Som ovan |
+| `Option<T>` | Ett värde som finns eller inte. `Some` / `None` | [Option och Result](functions/option-result.md) |
+| `Result<T,E>` | Lyckat eller misslyckat. `Ok` / `Err` | Som ovan |
 | `Vector<T>` | En växande array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | En hashtabell. Hur nycklar jämförs avgörs av `:test` när den skapas, och i en `equal`-tabell måste nyckeltypen implementera `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tupel (1 till 12 element). Element läses med `t::0` | [Syntax kapitel 2](syntax.md#2-hur-typer-skrivs) |
@@ -46,8 +46,8 @@ Funktionstyper skrivs `(fn (argumenttyper...) returtyp)`, trait-objekt `:dyn Tra
 
 | Typ | Innehåll | Detaljer |
 |---|---|---|
-| `Sexpr` | Ett icke-tomt S-uttryck. 19 varianter: `int`, `i8` till `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-uttrycksdata](functions/sequences.md#2-s-uttrycksdata-sexpr) |
-| `Option<Sexpr>` | S-uttrycksdata i allmänhet. Den tomma listan `()` är `none` | Som ovan |
+| `Sexpr` | Ett icke-tomt S-uttryck. 19 varianter: `Int`, `I8` till `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S-uttrycksdata](functions/sequences.md#2-s-uttrycksdata-sexpr) |
+| `Option<Sexpr>` | S-uttrycksdata i allmänhet. Den tomma listan `()` är `None` | Som ovan |
 
 ## 4. Typer i standardbiblioteket
 
@@ -72,7 +72,7 @@ sätt som typer du skriver själv, och allt du kan göra med en `defstruct` kan 
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Strömmar | [Strömmar](functions/streams-files.md#3-konkreta-strömtyper) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Sammansatta strömmar | [Sammansatta strömmar](functions/streams-files.md#4-sammansatta-strömmar) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Nätverk | [Nätverk](functions/network.md#1-typer) |
-| `ReadOutcome` | Resultatet av `read-sexpr`. `datum` / `eof` | [Strömmar](functions/streams-files.md#6-generiska-funktioner-och-filoperationer) |
+| `ReadOutcome` | Resultatet av `read-sexpr`. `Datum` / `Eof` | [Strömmar](functions/streams-files.md#6-generiska-funktioner-och-filoperationer) |
 | `universal-time` `internal-time` `decoded-time` | Tid | [Tid](functions/system.md#1-tid) |
 | `heap-info` | Heapens aktuella tillstånd | [Implementationsverktyg](functions/system.md#51-fält-i-heap-info) |
 

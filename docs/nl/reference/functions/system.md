@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -56,20 +56,20 @@ te nemen. `encode-universal-time` geeft voor zo'n tijd een van de twee antwoorde
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | De opdrachtregel. **Element 0 is de programmanaam** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | Een omgevingsvariabele. `none` als niet gezet of geen UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | Een omgevingsvariabele. `None` als niet gezet of geen UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. De basis van `user-homedir-pathname` ([Padnamen](streams-files.md#92-functies)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | De versie van de implementatie |
 | `machine-type` | `(machine-type)` | `()→string` | De CPU-architectuur (`x86_64` / `aarch64` …). De waarde van het **bouwdoel** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | De hostnaam |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | De naam van de hardware die **nu draait** (`Apple M1` / `Intel(R) Xeon(R) …`). `none` waar het niet kan worden bepaald |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | De naam van de hardware die **nu draait** (`Apple M1` / `Intel(R) Xeon(R) …`). `None` waar het niet kan worden bepaald |
 | `software-type` | `(software-type)` | `()→string` | Het OS (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | De OS-release (`uname -r`, bijvoorbeeld `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Een korte naam voor de installatieplaats. **Altijd `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Idem, een lange naam. **Altijd `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Een korte naam voor de installatieplaats. **Altijd `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Idem, een lange naam. **Altijd `None`** |
 
 Degene die `Option` teruggeven zijn onderdelen waarvoor CL `NIL` toestaat (*or nil if no such name can be
-determined*). POSIX heeft geen plek om sitenamen vast te leggen, dus ze zijn altijd `none`; SBCL geeft
+determined*). POSIX heeft geen plek om sitenamen vast te leggen, dus ze zijn altijd `None`; SBCL geeft
 hetzelfde terug. Let op het verschil tussen `machine-type` en `machine-version`: de eerste is de
 architectuur waarvoor deze binary is **gebouwd**, de tweede is de chip waarop hij nu **draait**.
 
@@ -140,7 +140,7 @@ terminal is, evalueert `step` gewoon `form`**: een gedegenereerd gedrag dat CLHS
 zodat scripts en tests niet blijven hangen op een prompt die niemand kan beantwoorden.
 
 De `$VISUAL` / `$EDITOR` van `ed` wordt bij witruimte gesplitst, dus `EDITOR="code -w"` werkt. Als
-geen van beide is gezet, is het resultaat `err`: hij raadt niet `vi`. Het regelnummer wordt eerst
+geen van beide is gezet, is het resultaat `Err`: hij raadt niet `vi`. Het regelnummer wordt eerst
 doorgegeven, in de vorm `+N`.
 
 `dribble` neemt alle drie de manieren op waarop de uitvoer van de sessie het proces verlaat: wat
@@ -150,14 +150,14 @@ verbonden, en de regels die in de REPL worden getypt samen met de waarden die de
 ## 6. Parsen en evalueren
 
 Dit alles behandelt tekst en gegevens uit runtime (die het programma zelf niet beheerst), dus bij
-mislukking geven ze de `err` van een `Result` terug in plaats van een panic. De foutentypes zijn concrete
+mislukking geven ze de `Err` van een `Result` terug in plaats van een panic. De foutentypes zijn concrete
 types per bewerking ([Foutentypes](option-result.md#3-foutentypes-en-de-trait-error)).
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` van CL. Slaat voorloop- en volgwitruimte over (dezelfde verzameling als `trim`), leest hoogstens één teken `+`/`-`, dan cijfers in grondtal `radix` (standaard 10, 2 tot en met 36; cijfers boven 10 in beide hoofdlettergebruiken). Er is geen limiet aan het aantal cijfers (`int`). Alle andere overgebleven tekens geven `err`. Met `:junk-allowed true` stopt het bij het eerste niet-cijfer en negeert de rest, maar geeft `err` als er niet één cijfer is (komt overeen met `nil` van CL). Het geeft de tweede waarde van CL (de positie waar het lezen eindigde) niet terug. Een `radix` buiten het bereik geeft een panic (een fout van de aanroeper, niet in de tekst) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` van CL. Slaat voorloop- en volgwitruimte over (dezelfde verzameling als `trim`), leest hoogstens één teken `+`/`-`, dan cijfers in grondtal `radix` (standaard 10, 2 tot en met 36; cijfers boven 10 in beide hoofdlettergebruiken). Er is geen limiet aan het aantal cijfers (`int`). Alle andere overgebleven tekens geven `Err`. Met `:junk-allowed true` stopt het bij het eerste niet-cijfer en negeert de rest, maar geeft `Err` als er niet één cijfer is (komt overeen met `nil` van CL). Het geeft de tweede waarde van CL (de positie waar het lezen eindigde) niet terug. Een `radix` buiten het bereik geeft een panic (een fout van de aanroeper, niet in de tekst) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Een drijvendekommagetal. Accepteert ook `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Leest één `Sexpr` uit `s` (met dezelfde reader die broncode leest). Ongebalanceerde haakjes, niet afgesloten strings en dergelijke geven `err`. Lezen uit een stream is `read-sexpr` ([Streams](streams-files.md#6-generieke-functies-en-bestandsbewerkingen)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Leest één `Sexpr` uit `s` (met dezelfde reader die broncode leest). Ongebalanceerde haakjes, niet afgesloten strings en dergelijke geven `Err`. Lezen uit een stream is `read-sexpr` ([Streams](streams-files.md#6-generieke-functies-en-bestandsbewerkingen)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **de positie waar het lezen eindigde**. `(car r)` is de waarde en `(cdr r)` de positie van het volgende te lezen teken. `start` is standaard 0 |
 | `read-from-string-preserving-whitespace` | Idem | Idem | Hetzelfde, maar verbruikt de witruimte die het datum beëindigde niet. Het verschil blijkt uit de teruggegeven positie |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Typecheckt `form` tijdens runtime en evalueert hem. Volgt `eval` van CL |
@@ -170,9 +170,9 @@ datum voor datum lezen van een string een lus in plaats van een herscan:
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 Het verschil dat `preserving-whitespace` maakt is **één witruimteteken**: `read` van CL verbruikt de
@@ -193,16 +193,16 @@ Zowel expressies als definities (`defun`/`defvar`/`defstruct`/`defenum`/`defmacr
 geëvalueerd, en definities worden onmiddellijk en permanent in de globale omgeving geregistreerd.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; the global x is visible
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; returns the defined name
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; the definition just made is visible
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; the global x is visible
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; returns the defined name
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; the definition just made is visible
 ```
 
 - **Returnwaarde**: voor een expressie het resultaat als `Option<Sexpr>`; voor een definitie het symbool
   van de gedefinieerde naam (zoals in CL). Om het resultaat te gebruiken, haal je de `Sexpr` met `match`
-  uit elkaar (`(int n)`/`(str s)`/…).
+  uit elkaar (`(Int n)`/`(Str s)`/…).
 - **Verschillen door statische types (belangrijk)**: CL geeft de werkelijke waarde van het resultaat
   terug, maar in deze taal kan het returntype alleen uniform `Result<Option<Sexpr>,EvalError>` zijn.
   Bovendien **kan statisch geschreven code niet vooruit verwijzen naar namen die `eval` tijdens runtime
@@ -211,7 +211,7 @@ geëvalueerd, en definities worden onmiddellijk en permanent in de globale omgev
   echter zien** (hun typecontrole draait tijdens runtime, na de definitie). De REPL controleert en
   voert één regel per keer uit, dus een naam die met `eval` is gedefinieerd kan vanaf de volgende regel
   rechtstreeks worden aangeroepen.
-- **Fouten**: typefouten en syntaxisfouten geven `err` terug (ze geven geen panic). **Runtime-panics**
+- **Fouten**: typefouten en syntaxisfouten geven `Err` terug (ze geven geen panic). **Runtime-panics**
   in de geëvalueerde code (deling door nul enzovoort) planten zich voort zoals bij rechtstreeks
   geschreven code. De opruiming van elke `unwind-protect` daartussen wordt uitgevoerd
   ([Syntaxreferentie hoofdstuk 8](../syntax.md#8-niet-lokale-uitgangen-catch--throw--unwind-protect)).
@@ -262,7 +262,7 @@ zoekt de docstring van een geassocieerde of statische methode op.
 
 **De waarde wordt bij het controleren bepaald**: als de naam naar geen enkele definitie oplost, is het
 een fout bij het controleren (zoals verwijzen naar een ongedefinieerde variabele). Lost hij op maar is er
-geen docstring, dan is het resultaat `Option::none`.
+geen docstring, dan is het resultaat `Option::None`.
 
 **Niet gedekt**:
 
@@ -283,19 +283,19 @@ Hoe je macro's definieert staat in [Syntaxreferentie 3.14](../syntax.md#314-defm
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Een nieuw symbool. De naam is `" <prefix><n>"`, waarbij `n` `*gensym-counter*` is. Een voorloopspatie kan in broncode niet worden geschreven, dus de gegenereerde bindingen botsen nooit met geschreven namen |
 | `*gensym-counter*` | Variabele | `int` | Het getal dat `gensym` hierna gebruikt. Zoals in CL kan het worden gelezen en gezet |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expandeert een macro-aanroep één stap. `none` betekent "geen macro-aanroep" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expandeert een macro-aanroep één stap. `None` betekent "geen macro-aanroep" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Herhaalt totdat het geen macro meer is |
 
 `macroexpand-1` geeft een `Option` terug. CL meldt "of het expandeerde" als tweede returnwaarde, maar er
-zijn geen meervoudige waarden, dus `none` speelt die rol. **Een macro die naar een aanroep van zichzelf
+zijn geen meervoudige waarden, dus `None` speelt die rol. **Een macro die naar een aanroep van zichzelf
 expandeert kan nooit met een niet-macro worden verward.** Eén stap expansie is dezelfde als die de
 typechecker gebruikt, dus wat het programma ziet en wat de checker zag lopen nooit uiteen.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 Wat CL heeft en deze taal niet: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` vallen altijd

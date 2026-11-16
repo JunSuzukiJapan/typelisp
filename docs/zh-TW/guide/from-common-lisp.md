@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 給 Common Lisp 使用者
 
 typelisp 繼承了 Common Lisp（以下簡稱 CL）的語法與許多函式名稱，但它是靜態型別語言。因此 CL 的寫法不一定能直接通過。本指南整理了熟悉
@@ -15,12 +15,12 @@ CL 的人容易遇到的問題，以及改寫的方式。
 
 - **只有 `bool` 能作為條件。** 把 `0` 或空串列寫成條件是型別錯誤。沒有「nil 以外都為真」的規則。
 - **`if` 的 else 不能省略。** `(if c x)` 是錯誤。不需要 else 時使用 `when` / `unless`。
-- **「沒有值」以 `Option<T>` 表示。** 在 CL 中以回傳 nil 表示「沒找到」的函式，在這裡回傳 `(some x)` 或 `none`。
+- **「沒有值」以 `Option<T>` 表示。** 在 CL 中以回傳 nil 表示「沒找到」的函式，在這裡回傳 `(Some x)` 或 `None`。
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - 空串列 `()` 依上下文，或是 Unit 型別的值（不回傳任何東西的函式的回傳值），或是 S 運算式資料的空串列。它與 `false` 是不同的值。
@@ -84,7 +84,7 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
 
 ## 4. 串列與 Vector
 
-相當於 CL 串列的是 **S 運算式資料**，其型別是 `Option<Sexpr>`（空串列是 `none`）。`(list 1 2 3)` 與 `'(a b c)` 都是這個型別。S 運算式
+相當於 CL 串列的是 **S 運算式資料**，其型別是 `Option<Sexpr>`（空串列是 `None`）。`(list 1 2 3)` 與 `'(a b c)` 都是這個型別。S 運算式
 資料是給巨集與 `read` 處理的，一般的資料容器請使用 **`Vector<T>`**。
 
 | 想做的事 | CL | typelisp |
@@ -156,16 +156,16 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
 沒有 `define-condition`、`handler-case`、`handler-bind`、`restart-case`、`error`、`signal`。它們與靜態型別不相容。取而代之，分別使用
 以下兩種機制：
 
-- **可恢復的失敗回傳 `Result<T,E>`。** 呼叫端以 `match` 區分 `ok` / `err`。沒有相當於 Rust 的 `?` 的簡寫語法。
+- **可恢復的失敗回傳 `Result<T,E>`。** 呼叫端以 `match` 區分 `Ok` / `Err`。沒有相當於 Rust 的 `?` 的簡寫語法。
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **不可恢復的失敗（bug）是 `panic`。** `(panic "message")`、把 `none` 傳給 `unwrap`、除以 0、索引超出範圍等都屬於此類，程式會停止。
+- **不可恢復的失敗（bug）是 `panic`。** `(panic "message")`、把 `None` 傳給 `unwrap`、除以 0、索引超出範圍等都屬於此類，程式會停止。
   `unwind-protect` 的清理會在停止前執行。
 
 錯誤型別由 `Error` trait 統一，以 `(message e)` 取出訊息。建立自己的錯誤型別的方法見

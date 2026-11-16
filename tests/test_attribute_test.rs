@@ -167,8 +167,8 @@ fn a_misplaced_attribute_is_an_error() {
         ("#[test]\n(defvar *x* 1)\n", "`#[test]` goes on a `defun`"),
         ("#[test]\n(defun f ((x int)) () ())\n", "cannot take parameters"),
         ("#[test]\n(defun f () int 1)\n", "must return `()` or `Result<(), E>`, not `int`"),
-        ("#[test]\n(defun f () Result<int,string> (Result::ok 1))\n", "must return `()` or `Result<(), E>`"),
-        ("(defstruct Bad (n int))\n#[test]\n(defun f () Result<(),Bad> (Result::ok ()))\n", "implements neither `Error` nor `print-object`"),
+        ("#[test]\n(defun f () Result<int,string> (Result::Ok 1))\n", "must return `()` or `Result<(), E>`"),
+        ("(defstruct Bad (n int))\n#[test]\n(defun f () Result<(),Bad> (Result::Ok ()))\n", "implements neither `Error` nor `print-object`"),
         ("#[test]\n(defun f<T> () () ())\n", "cannot take type parameters"),
     ] {
         let file = write(&dir, "bad.typl", src);
@@ -207,13 +207,13 @@ fn a_test_returning_result_fails_on_err_at_its_own_definition() {
         &dir,
         "res.typl",
         r#"(defun parse ((s string)) Result<int,string>
-  (if (equal s "1") (Result::ok 1) (Result::err (format false "bad: ~a" s))))
+  (if (equal s "1") (Result::Ok 1) (Result::Err (format false "bad: ~a" s))))
 #[test]
 (defun parses () Result<(),string>
-  (match (parse "1") ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+  (match (parse "1") ((Ok _) (Result::Ok ())) ((Err e) (Result::Err e))))
 #[test]
 (defun rejects () Result<(),string>
-  (match (parse "x") ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+  (match (parse "x") ((Ok _) (Result::Ok ())) ((Err e) (Result::Err e))))
 "#,
     );
     let (code, out, err) = typl(&dir, &["test", file.to_str().unwrap()]);
@@ -231,13 +231,13 @@ fn a_test_may_return_any_error_and_is_reported_by_its_message() {
         "dyn.typl",
         r#"(use std::error::as-dyn-error std::num::parse-int std::num::ParseIntError) #[test]
 (defun concrete () Result<(),ParseIntError>
-  (match (parse-int "x") ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+  (match (parse-int "x") ((Ok _) (Result::Ok ())) ((Err e) (Result::Err e))))
 #[test]
 (defun boxed () Result<(),:dyn Error>
-  (match (as-dyn-error (parse-int "y")) ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+  (match (as-dyn-error (parse-int "y")) ((Ok _) (Result::Ok ())) ((Err e) (Result::Err e))))
 #[test]
 (defun boxed-ok () Result<(),:dyn Error>
-  (match (as-dyn-error (parse-int "1")) ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+  (match (as-dyn-error (parse-int "1")) ((Ok _) (Result::Ok ())) ((Err e) (Result::Err e))))
 "#,
     );
     let (code, out, err) = typl(&dir, &["test", file.to_str().unwrap()]);

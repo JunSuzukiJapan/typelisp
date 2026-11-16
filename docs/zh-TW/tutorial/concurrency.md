@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 並行
 
 在 typelisp 中，透過啟動**任務**（輕量級執行緒）讓多項工作並行進行，任務之間透過**通道**傳遞值。這與 Go 的 goroutine 和通道很接近。
@@ -52,7 +52,7 @@ got 30
 ```
 
 - `(send ch v)` 傳送。通道滿了時會等到有空位。
-- `(recv ch)` 接收。會等到有值抵達。回傳值是 `Option<T>`，通道關閉且變空後回傳 `none`。
+- `(recv ch)` 接收。會等到有值抵達。回傳值是 `Option<T>`，通道關閉且變空後回傳 `None`。
 - 用 `doiter` 走訪通道，會一直接收值直到通道關閉。也可以直接傳給 `map` 或 `filter`。
 - 對已關閉的通道 `send` 會 panic。
 

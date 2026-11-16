@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makros
 
 Ein Makro ist eine Funktion, die ein Programm entgegennimmt und ein Programm zurückgibt. Mit Makros lässt sich
@@ -45,7 +45,7 @@ voran, wenn man sich zuerst die Expansion ansieht.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Auch Expansionen werden typgeprüft
@@ -123,15 +123,15 @@ Ebenso lässt sich ein Makro, das seinen Rumpf eine gegebene Anzahl von Malen wi
 
 Ein Makrorumpf ist gewöhnlicher typelisp-Code und kann seine Argumente daher mit `if` oder `match`
 untersuchen und eine andere Expansion bauen. Die Argumente sind S-Ausdrucksdaten (`Option<Sexpr>`), und die
-leere Liste ist `none`.
+leere Liste ist `None`.
 
 Bauen wir `my-and`, das `true` zurückgibt, wenn alle seine Bedingungen wahr sind.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; keine Argumente
-    ((cons f more)
+    ((None) 'true)                                    ; keine Argumente
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; nur eines
          `(if ,f (my-and ,@more) false)))             ; zwei oder mehr
@@ -141,7 +141,7 @@ Bauen wir `my-and`, das `true` zurückgibt, wenn alle seine Bedingungen wahr sin
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` ist ein Muster, das den Kopf einer Liste in `f` und den Rest in `more` nimmt.
+- `(Cons f more)` ist ein Muster, das den Kopf einer Liste in `f` und den Rest in `more` nimmt.
 - `sexpr-null` prüft, ob S-Ausdrucksdaten die leere Liste sind.
 - Der abschließende Zweig `_` ist nötig, weil S-Ausdrucksdaten neben Listen auch andere Formen haben (Zahlen,
   Zeichenketten usw.), und `match` verlangt, dass auch diese abgedeckt werden. Ein `&rest`-Argument ist immer

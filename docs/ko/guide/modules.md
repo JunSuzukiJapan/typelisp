@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 모듈과 파일 구성
 
 이 가이드에서는 여러 파일로 된 프로그램을 구성하는 방법을 설명한다. 자세한 규칙은
@@ -122,7 +122,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; 이 모듈의 first => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 표준 라이브러리의 first => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 표준 라이브러리의 first => (Some 1)
 ```
 
 `shadow` 뒤에는 그 모듈 안에서 `first`라고 쓰면 자신의 정의를 가리킨다. 표준 라이브러리의 `first`를 쓸 때는 `std::seq::first`처럼 경로로

@@ -144,7 +144,7 @@ Stage 1〜4 を 1 コミットで入れた。段階を分けて出せないの�
    なくても型キーを見ている（`match_ctor` の `heap_type_is`）ので、`construct` だけ
    実体化すると enum の `match` が全部落ちる。`pat-ctor`/`pat-typetest` にも鍵を載せた。
 2. **組み込みシムは「署名で固定」だが、ヘルパを共有していた。** `stream_builtin` の
-   `ok`/`option_value` は ~40 の操作が共有していて、戻り型は操作ごとに違う。
+   `Ok`/`option_value` は ~40 の操作が共有していて、戻り型は操作ごとに違う。
    ディスパッチが組み込み名で分岐しているので、**名前 → 鍵の表**を置いてヘルパに名前を
    渡す形にした。表とレジストリの両方が組み込み名で引けるので、番人テスト
    （`the_runtime_result_keys_match_the_registry`）が全行を機械的に照合できる。
@@ -192,7 +192,7 @@ Stage 6（`scripts/test-serial.sh`、105 ターゲット）で **14 ターゲッ
    いたのは静的型だけで、`assoc` ノードが運ぶ実行時の鍵は `option<i32>` のままだった。
    この計画の前は鍵が `option` だったので両方に当たっていた——**実体化を鍵にしたことで
    初めて表に出た、元からあった不整合**。`retype_option` が鍵も書き換えるようにした。
-5. **enum の variant 名が引けない**（9 スイート 31 本）。`(some 1)` が
+5. **enum の variant 名が引けない**（9 スイート 31 本）。`(Some 1)` が
    `(<unknown-variant> 1)` と印字される。variant 名の登録は enum の**型**ごと
    （`option`）、値が運ぶ鍵は**実体化**（`option<i32>`）。`Interp::enum_variant_name`
    が基底を取らずに引いていた。AOT 側（`typelisp-print/src/aot.rs`）にも同じズレが

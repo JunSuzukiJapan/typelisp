@@ -732,7 +732,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(v);
             f.finish(tag)
         }
-        // A niched `Option`'s `some`: `(some-of REPR E)` -> `(some-of KIND E)`.
+        // A niched `Option`'s `Some`: `(some-of REPR E)` -> `(some-of KIND E)`.
         // The island tags `E`'s register value into its field word by
         // `KIND`, the same number a struct field of that type is tagged by.
         wk::SOME_OF => {
@@ -2791,7 +2791,7 @@ fn pattern_bindings(
             let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             pattern_bindings(heap, sub, value, cx, out)?;
         }
-        // The niche: `(some P)` over a niched `Option<T>` applies `P` to the
+        // The niche: `(Some P)` over a niched `Option<T>` applies `P` to the
         // payload read back at `T`'s representation — which the node carries.
         wk::PAT_SOME => {
             let repr = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
@@ -3392,7 +3392,7 @@ mod tests {
 
     /// A `point` with two int fields and an `option` over a `sexpr`, which is
     /// enough to show both a struct's and an enum's field kinds.
-    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::option::Option (none some) (() (sexpr)))"];
+    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::option::Option (None Some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {

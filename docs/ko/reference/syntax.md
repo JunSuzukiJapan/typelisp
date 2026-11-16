@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -46,17 +46,17 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   정해지고(`(the Vector<i32> #(1 2))`), 문맥이 없으면 첫 요소의 타입이 된다(`#(1 2 3)`은 `Vector<int>`). 요소의 타입은 모두 같아야
   하며 `#(1 "a")`는 타입 오류다. 요소도 문맥도 없는 `#()`도 타입 오류다. 평가할 때마다 새 벡터가 만들어진다. S 식 데이터가 기대되는
   곳(`(the Option<Sexpr> #(1 x))`, `'#(..)`, `read`로 읽은 것)에서는 요소가 모두 데이터인 `Vector<Option<Sexpr>>`, 곧
-  `Sexpr`의 `vector` 변형이 된다.
+  `Sexpr`의 `Vector` 변형이 된다.
 - **배열**: `#2A((1 2) (3 4))`(CL과 같다). `#`와 `A` 사이의 수가 차원 수이고, 내용 리스트의 중첩 중 처음 그 수만큼의 단이 각 차원이 된다.
   `#0A x`는 요소 하나를 가진 0차원 배열이다. 같은 단의 리스트 길이가 다르면 읽기 오류다. 타입은 벡터와 같은 방식으로 정해져 `Array<T>`가 된다(요소가 없으면
-  `(the Array<f64> #2A(()))`처럼 문맥이 필요하다). S 식 데이터로서는 `Array<Option<Sexpr>>`, 곧 `Sexpr`의 `array` 변형이
+  `(the Array<f64> #2A(()))`처럼 문맥이 필요하다). S 식 데이터로서는 `Array<Option<Sexpr>>`, 곧 `Sexpr`의 `Array` 변형이
   된다.
 - **튜플**: `#{"foo" 123 45.6}`. 내용은 모두 리터럴이며 평가하지 않는다(`#{a b}`의 `a`는 기호). 각 요소의 타입은 위치마다 문맥으로
   정해지고(`(the #{i32 f64} #{1 2.0})`), 문맥이 없으면 각 요소 자신의 타입이 된다(`#{"foo" 123}`는 `#{string int}`). 요소는
   1~12개. 평가할 때마다 새 튜플이 만들어진다. 계산한 값으로 만들려면 `(tuple a b)`를 쓴다. S 식 데이터가 기대되는 곳에서는 요소가 모두 데이터인 튜플, 곧
-  `Sexpr`의 `tuple` 변형이 된다.
+  `Sexpr`의 `Tuple` 변형이 된다.
 - **속성**: `#[test]`는 다음 폼에 붙는 표시입니다(Rust와 같은 표기). 현재 속성은 `test` 하나뿐이며 `defun`에 붙입니다([3.16 `#[test]`](#316-test--테스트-함수)). `read`로 읽으면 `(%internal::attribute (test) form)`이라는 리스트가 됩니다.
-- **빈 리스트 `()`**: 문맥에 따라 `Unit` 타입의 값이거나 `Option<Sexpr>`의 `none`이다. **`Sexpr`에는 빈 리스트 변형이
+- **빈 리스트 `()`**: 문맥에 따라 `Unit` 타입의 값이거나 `Option<Sexpr>`의 `None`이다. **`Sexpr`에는 빈 리스트 변형이
   없다.** `Sexpr`는 "비어 있지 않은 S 식"을 뜻하며, S 식 데이터의 타입은 `Option<Sexpr>`이다([4.3 match](#43-match--패턴-매칭)의
   "`Option<Sexpr>`의 패턴" 참고).
 - **quote/quasiquote/unquote**:
@@ -111,7 +111,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   `:dyn Sub`의 값은 그 상위 트레이트(전이적으로 상속하는 모든 것) 중 어느 `:dyn Super`가 요구되는 곳에도 그대로 넘길 수
   있다(업캐스트). 상속 관계가 없는 트레이트에는 넘길 수 없다. `:dyn`이 될 수 있는 트레이트의 조건은
   [3.9 deftrait / impl](#39-deftrait--impl--트레이트-기구)을 참고한다. 타입 위치 밖에 `:dyn`을 쓰면 오류이다.
-- 내장 제네릭 타입: `Option<T>`(`(some T)` / `none`), `Result<T,E>`(`(ok T)` / `(err E)`), `HashTable<K,V>`, `Vector<T>`, 그리고
+- 내장 제네릭 타입: `Option<T>`(`(Some T)` / `None`), `Result<T,E>`(`(Ok T)` / `(Err E)`), `HashTable<K,V>`, `Vector<T>`, 그리고
   동시성의 `Task<T>` / `Thread<T>` / `Chan<T>`([12장](#12-동시성태스크)). S 식 데이터의 타입 `Sexpr`도 있다. 내장 구체 오류
   타입은 `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`이고, 표준 라이브러리에는
   구조체 `SimpleError` / `WrappedError`가 있다(`Error`는 타입이 아니라 트레이트이다. `:dyn Error`로 쓴다). 목록은
@@ -144,7 +144,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; 기본값 없음
-    (match suffix ((some s) (append name s)) ((none) name)))         ; 본체에서는 Option<string>
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; 본체에서는 Option<string>
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; 기본값 있음
   (pow 3)      ; n = 2
@@ -154,8 +154,8 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   (mk :b "q")  ; 호출하는 쪽은 `:name 값`을 순서 없이 쓴다. 생략한 것은 기본값
   ```
 
-  - **기본값 식이 없는 매개변수의 타입은 `Option<Type>`이다.** 생략하면 `none`, 넘기면 호출하는 쪽이 쓴 맨 값이 자동으로
-    `some`에 감싸진다. CL이 supplied-p 변수("주어졌는가")로 하는 일이 여기서는 정적 타입 쪽에 나타난다.
+  - **기본값 식이 없는 매개변수의 타입은 `Option<Type>`이다.** 생략하면 `None`, 넘기면 호출하는 쪽이 쓴 맨 값이 자동으로
+    `Some`에 감싸진다. CL이 supplied-p 변수("주어졌는가")로 하는 일이 여기서는 정적 타입 쪽에 나타난다.
   - 기본값 식이 있으면 타입은 선언한 `Type` 그대로이다. 생략하면 그 **검사된 식**이 호출 지점에 그대로 들어간다(호출할
     때마다 평가된다).
   - **`&key`는 하나의 인수 목록에서 `&optional`/`&rest`와 섞을 수 없다.** CL 자체에 있는 모호함(끝의 실제 인수를 위치의
@@ -333,7 +333,7 @@ typelisp 쪽 이름과 C의 심볼 이름을 따로 쓸 수 있는 것은 typeli
 
 ```lisp
 (defstruct handle (p ptr))          ; 구조체의 필드
-(defenum maybe (none) (some ptr))   ; 열거형의 필드
+(defenum maybe (None) (Some ptr))   ; 열거형의 필드
 (defvar (block ptr) ...)            ; 전역 변수
 (defffi f (Vector<ptr>) i32)        ; 타입 인수 안
 ```
@@ -745,8 +745,8 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 ; 제네릭
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - 각 변형의 형태는 `(VariantName FieldType...)`이다. 필드는 위치로만 지정한다(이름이 없다). 변형은 하나 이상 필요하고 이름은
@@ -756,8 +756,8 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 - `match` / `if-let`으로 분해할 수 있다. `match`는 망라성을 검사한다(모든 변형을 덮거나 `_`가 있어야 한다):
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - 메서드와 정적 메서드는 `defstruct`처럼 `impl`(3.5)에 쓴다.
 - 열거형 자체를 `pub`으로 하려면 `(pub defenum ...)`이라고 쓴다.
@@ -926,17 +926,17 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 
 - `module`은 이름공간을 만든다. **타입은 이름공간이 아니다**(Rust처럼 타입은 정적 메서드와 메서드를 가질
   뿐이다).
-- `(use Type)`로 들여오는 것은 타입 이름뿐이다. 열거형의 변형과 정적 메서드는 `Option::some`이나 `Chan::new`처럼 타입 이름을 통해 쓴다. `(use std::sync::Chan)` 뒤에도 맨 `(new 1)`은 `new`라는 함수가 어디에도 정의되어 있지 않으면 오류다.
+- `(use Type)`로 들여오는 것은 타입 이름뿐이다. 열거형의 변형과 정적 메서드는 `Option::Some`이나 `Chan::new`처럼 타입 이름을 통해 쓴다. `(use std::sync::Chan)` 뒤에도 맨 `(new 1)`은 `new`라는 함수가 어디에도 정의되어 있지 않으면 오류다.
 - 타입의 생성자와 정적 메서드를 맨 이름으로 쓰려면 `(use std::sync::Chan::new)`처럼 하나씩 들여오거나, `(use Type::*)`로 생성자와 공개된 정적 메서드를 모두 들여온다(구조체의 생성자는 `make-instance`로 만들므로 포함하지 않는다). `pub use`로 다시 공개할 수는 없다.
 - 같은 맨 이름을 서로 다른 두 타입에서 들여올 수는 없다(`(use std::sync::Chan::* std::sync::WaitGroup::*)`는 둘 다 `new`가 있으므로 오류). 모듈이 정의한 함수·전역 변수·매크로와 같은 이름을 들여오는 것도 오류다. 알고서 바꾸려면 `shadowing-import`를 쓴다.
-- `Option`의 `some`/`none`과 `Result`의 `ok`/`err`는 표준 라이브러리가 모든 모듈에 공개하므로 `use` 없이 맨 이름으로 쓸 수 있다(Rust의 prelude가 `Some`/`None`/`Ok`/`Err`를 들여오는 것과 같다).
+- `Option`의 `Some`/`None`과 `Result`의 `Ok`/`Err`는 표준 라이브러리가 모든 모듈에 공개하므로 `use` 없이 맨 이름으로 쓸 수 있다(Rust의 prelude가 `Some`/`None`/`Ok`/`Err`를 들여오는 것과 같다).
 - **한 이름은 한 가지 뜻을 가진다**. 함수·전역 변수·매크로는 한 이름공간에 들어가며, 같은 모듈에서 그중
   두 개에 같은 이름을 붙일 수 없다(어떤 순서로 정의해도 오류). CL처럼 함수와 변수의 이름공간이 나뉘어
   있지 않다. 다른 모듈의 같은 이름이라면 가까운 쪽이 보인다.
 - 맨 이름 `n`의 해석(호출 `(n a ...)`의 위치. 특수 형식의 이름은 이보다 먼저 정해진다):
   1. 지역(인수, `let`·`labels`·`macrolet`·`symbol-macrolet`의 바인딩)
   2. 모듈의 이름 `n`이 매크로라면 그 매크로
-  3. 생성자와 정적 메서드: `use`로 들여온 것, 표준 라이브러리가 공개하는 `Sexpr`의 생성자(`sym`, `int` 등)와 `Option`/`Result`의 생성자
+  3. 생성자와 정적 메서드: `use`로 들여온 것, 표준 라이브러리가 공개하는 `Sexpr`의 생성자(`Sym`, `Int` 등)와 `Option`/`Result`의 생성자
   4. 첫 번째 인수의 타입의 메서드 `n`(메서드는 **첫 번째 인수의 타입만**으로 찾는다)
   5. 모듈의 이름 `n`이 함수나 전역 변수라면 그것(전역 변수라면 그 값인 함수를 호출한다)
 
@@ -1065,20 +1065,20 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   (assert-equal (+ 1 2) 3))
 ```
 
-`#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()` 또는 `Result<(), E>`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다. `Result`를 반환하는 테스트는 `err`를 반환하면 실패하며 그 오류를 표시합니다. 따라서 `E`는 `Error` 또는 `print-object`를 구현해야 합니다(Rust가 테스트의 오류 타입에 `Debug`를 요구하는 것과 같음). `Error`라면 `describe-error`(메시지와 원인의 연쇄)로, 그렇지 않으면 `print-object`로 표시합니다. `:dyn Error`도 `Error`이므로 여러 오류를 하나의 타입으로 모아 반환할 수 있습니다.
+`#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()` 또는 `Result<(), E>`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다. `Result`를 반환하는 테스트는 `Err`를 반환하면 실패하며 그 오류를 표시합니다. 따라서 `E`는 `Error` 또는 `print-object`를 구현해야 합니다(Rust가 테스트의 오류 타입에 `Debug`를 요구하는 것과 같음). `Error`라면 `describe-error`(메시지와 원인의 연쇄)로, 그렇지 않으면 `print-object`로 표시합니다. `:dyn Error`도 `Error`이므로 여러 오류를 하나의 타입으로 모아 반환할 수 있습니다.
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **일반 실행과 `compile-file`에서는 건너뜁니다.** 내용을 검사하지도 않습니다(Rust가 테스트를 `--test`일 때만 컴파일하는 것과 같음). 프로그램 쪽에서는 테스트 함수를 호출할 수 없습니다.
 - 테스트는 함수를 둘 수 있는 어느 파일에든, 어느 `module` 안에든 쓸 수 있습니다. 프로젝트의 `tests/` 폴더에 따로 써도 됩니다.
-- 실패는 `panic`, 실행 시간 오류, `err`를 반환하는 것입니다. `assert`, 또는 양변을 출력하는 `assert-equal`([시스템](functions/system.md))로 확인합니다. 하나가 실패해도 나머지 테스트는 실행됩니다.
+- 실패는 `panic`, 실행 시간 오류, `Err`를 반환하는 것입니다. `assert`, 또는 양변을 출력하는 `assert-equal`([시스템](functions/system.md))로 확인합니다. 하나가 실패해도 나머지 테스트는 실행됩니다.
 
 ```sh
 typl test                 # 이 폴더의 프로젝트 테스트를 모두 실행
@@ -1208,15 +1208,15 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `_` — 와일드카드
 - 변수 이름 — 바인딩 패턴(항상 맞는다). 다만 검사 대상의 타입에 그 이름의 변형이 있으면 **아래의 맨 변형 이름 패턴**으로
   해석된다
-- 맨 변형 이름 — 인수를 받지 않는 변형과 맞는다(`(match c (red 1) (blue 2))`). 필드가 있는 변형을 맨 이름으로 쓰면 인수 개수
-  오류가 되므로 `(circle r)`처럼 괄호로 쓴다
+- 맨 변형 이름 — 인수를 받지 않는 변형과 맞는다(`(match c (Red 1) (Blue 2))`). 필드가 있는 변형을 맨 이름으로 쓰면 인수 개수
+  오류가 되므로 `(Circle r)`처럼 괄호로 쓴다
 - **즉시값 리터럴**: 정수 / `true`/`false` / 문자 — 워드로 비교한다
 - **값 리터럴**: 문자열 / 부동소수점 수 / 심볼(`'foo`) / 다배정도 정수 / ratio — 그 타입의 `equal`
   ([표준 트레이트](functions/traits.md#2-equal--ord비교))로 값을 비교한다. 문자열은 동일성이 아니라 내용을 비교한다
 - `(:= expr)` — 아무 식이나 평가해 `equal`로 비교한다. 리터럴 구문이 없는 타입(`defstruct` 인스턴스, 전역 변수, 계산
   결과)을 비교하는 유일한 방법이며, 사용자 정의 `Equal` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
   모든 것(인수, 바깥 바인딩, 전역 변수)을 참조할 수 있다
-- `(Ctor sub-pattern...)` — 생성자 패턴(`(some x)` `(none)` `(cons a d)` `(ok v)` 등)
+- `(Ctor sub-pattern...)` — 생성자 패턴(`(Some x)` `(None)` `(Cons a d)` `(Ok v)` 등)
 - `(Type :slot pattern... :slot...)` — 구조체의 패턴. 타입 이름 뒤에 슬롯을 키워드로 쓴다. 키워드
   다음이 패턴이면 그 슬롯을 그 패턴으로 대조하고, 다음이 키워드이거나 끝이면 슬롯을 같은 이름의 변수에
   바인딩한다. 쓰지 않은 슬롯은 대조하지 않는다(필드의 수나 순서에 의존하지 않는다):
@@ -1226,12 +1226,12 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; x에 바인딩하고, y는 (some b)로 대조한다
+      ((point :x :y (Some b)) (+ x b))   ; x에 바인딩하고, y는 (Some b)로 대조한다
       ((point :x a) a)))                 ; a에 바인딩한다
   ```
 - `#{p0 p1 ...}` — 튜플 패턴. 요소마다 부분 패턴으로 대조한다. `Sexpr`에 대해서는 요소 수가 같은 `#{..}` 데이터에만 맞는다
 - `(:or p1 p2 ...)` — or 패턴. 선택지 중 하나라도 맞으면 맞는다. 본체가 하나뿐이므로 모든 선택지가 같은 이름의 변수를 같은 타입으로 묶어야 한다. 생성자
-  패턴 안에도 쓸 수 있다(`(some (:or (circle r) (rect r _)))`)
+  패턴 안에도 쓸 수 있다(`(Some (:or (Circle r) (Rect r _)))`)
 
 `Equal`를 구현하지 않은 타입을 값 리터럴 / `(:= expr)`로 비교하면 타입 오류이다(조용히 맞지 않는 갈래를 남기는 대신 비교할 수
 없다고 말하는 쪽을 택한다).
@@ -1275,29 +1275,29 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — **타입 이름**을 앞에 두는 필드 분해(struct 전용). 위의 구조체의 패턴과
   같은 형태로 쓴다. 예: `(defstruct point (x f64) (y f64))`에 대해 `(point :x :y)`.
-- 맨 변형 이름 `(VariantName sub-pattern...)` — `defenum`의 변형을 꺼낸다. `(use EnumType::*)` 등으로 들여와 보이는 맨 이름으로 해석된다(생성자를 호출할 때와 같은 가시성 규칙). 예: `(defenum color (red) (blue))`의 `(use color::*)` 뒤에 `(red)` `(blue)`. 한정 형식 `(EnumType::VariantName ...)`이면 `use`가 필요 없다.
+- 맨 변형 이름 `(VariantName sub-pattern...)` — `defenum`의 변형을 꺼낸다. `(use EnumType::*)` 등으로 들여와 보이는 맨 이름으로 해석된다(생성자를 호출할 때와 같은 가시성 규칙). 예: `(defenum color (Red) (Blue))`의 `(use color::*)` 뒤에 `(Red)` `(Blue)`. 한정 형식 `(EnumType::VariantName ...)`이면 `use`가 필요 없다.
 - `(the Type pattern)` — 타입 전체로 다운캐스트(통째로 묶기). 필드를 분해하지 않고 값을 그대로 `pattern`에 넘긴다. 가변
   구조체를 동일성을 유지한 채 꺼내는 유일한 방법이며, `Sexpr`에서 `Vector<T>`/`HashTable<K,V>`를 꺼내는 유일한 수단이기도
   하다(둘 다 필드 분해 형식이 없다). 예: `(the point p)` 뒤에 `(setf p::x 9)`는 리스트 안의 원래 인스턴스에도 반영된다.
 
 **`Option<Sexpr>`의 패턴**: S 식 데이터의 타입은 `Sexpr`가 아니라 `Option<Sexpr>`이며, 빈 리스트는 `Sexpr`의 변형이 아니라
-`Option`의 `none`이다. 그래서 `Option<Sexpr>`를 `match`할 때는 `Sexpr`의 19개 변형과 `none`을 **같은 갈래 목록에 평평하게**
+`Option`의 `None`이다. 그래서 `Option<Sexpr>`를 `match`할 때는 `Sexpr`의 19개 변형과 `None`을 **같은 갈래 목록에 평평하게**
 쓸 수 있다(`Option`을 벗기는 바깥 `match`가 필요 없다).
 
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
-    ((none)     0)          ; 빈 리스트
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
+    ((None)     0)          ; 빈 리스트
     (_          9)))
 ```
 
-망라성도 같은 평평한 전체 집합 — `Sexpr`의 19개 변형에 `none`을 더한 20개 — 에서 검사된다. `(none)`을 잊으면 `_`가 없는 한
-오류이다. `(some x)`도 쓸 수 있으며 "비어 있지 않은 무언가"를 묶는다.
+망라성도 같은 평평한 전체 집합 — `Sexpr`의 19개 변형에 `None`을 더한 20개 — 에서 검사된다. `(None)`을 잊으면 `_`가 없는 한
+오류이다. `(Some x)`도 쓸 수 있으며 "비어 있지 않은 무언가"를 묶는다.
 
-이 편의 표기는 **정확히** `Option<Sexpr>`에만 적용된다. `Option<Option<Sexpr>>`에서는 `(int n)`이 어느 층을 벗겼는지 정할 수
+이 편의 표기는 **정확히** `Option<Sexpr>`에만 적용된다. `Option<Option<Sexpr>>`에서는 `(Int n)`이 어느 층을 벗겼는지 정할 수
 없으므로 평소처럼 `match`를 두 겹으로 쓴다.
 
 **트레이트 객체(`:dyn Trait`, 2장)의 검사 대상**에도 같은 다운캐스트 패턴을 그대로 쓸 수 있다. `match`가 상자를 연 뒤 위의
@@ -1324,7 +1324,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 **갈래 사이의 타입 추론**: 모든 갈래는 같은 타입이어야 한다(`panic` 같은 발산하는 갈래는 제외). 기대 타입이 없는 곳에 쓴
-`match`에서는 갈래들이 모자란 타입 인수를 **서로** 채운다. `(Result::ok v)`는 `T`만, `(Result::err e)`는 `E`만 정하지만 둘이
+`match`에서는 갈래들이 모자란 타입 인수를 **서로** 채운다. `(Result::Ok v)`는 `T`만, `(Result::Err e)`는 `E`만 정하지만 둘이
 나란히 있으면 `Result<T,E>`가 정해진다. 끝까지 어느 갈래도 정할 수 없는 타입 인수가 있으면 그 갈래 자체의 오류가 된다
 (`cannot infer type argument ...`). `match` 밖에서는 정할 수 없는 타입 인수가 그 자리에서 오류이다.
 
@@ -1437,7 +1437,7 @@ CL은 절 단어를 맨 심볼로 쓰지만(`(loop for i from 1 to 3 collect i)`
 | `:sum e` / `:count e` | 합계 / 참이었던 횟수 |
 | `:maximize e` / `:minimize e` | 최대 / 최소. **`Option<T>`**(CL이 빈 열에 nil을 반환하는 것과 같다. 임의의 `Ord` 타입에는 최소 원소가 없다) |
 | `:always e` / `:never e` | 모두 만족하면 `true`, 하나라도 만족하지 않으면 그 즉시 `false` |
-| `:thereis e` | `e`는 **`Option<T>`**. 첫 `some`을 반환하고, 없으면 `none`(CL의 "첫 nil이 아닌 값"에 해당하는 것이 이것. `bool`을 검사하려면 `:always`/`:never`) |
+| `:thereis e` | `e`는 **`Option<T>`**. 첫 `Some`을 반환하고, 없으면 `None`(CL의 "첫 nil이 아닌 값"에 해당하는 것이 이것. `bool`을 검사하려면 `:always`/`:never`) |
 | `:while e` / `:until e` | 여기서 **정상 종료**(`:finally`가 실행되고 모은 것이 답) |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | 절 하나를 조건부로 한다 |
 | `:return e` | 그 값으로 즉시 빠져나간다(`:finally`는 실행되지 않는다. CL과 같다) |
@@ -1457,7 +1457,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 `:finally (return 0)`을 생략하면 **타입 오류**이다. `block`의 규칙이 작동할 뿐이다(5.1). 탈출의 타입 `int`와 루프가 다했을 때
 남기는 `()`가 맞지 않는다.
 
-**루프의 값**: 누적 절이 있으면 그 누적(여러 개면 첫 번째), `:always`/`:never`면 `true`, `:thereis`면 `none`, 아무것도 없으면
+**루프의 값**: 누적 절이 있으면 그 누적(여러 개면 첫 번째), `:always`/`:never`면 `true`, `:thereis`면 `None`, 아무것도 없으면
 `()`이다. `:finally`의 마지막이 `(return e)`이면 그것이 값이다. CL의 `finally (return …)` 관용구이며, 누적하지 않는 루프가
 자신의 답을 밝히는 유일한 방법이다.
 
@@ -1521,7 +1521,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 (unreachable)                       ; (panic "unreachable")로 전개된다. defmacro
 (todo)                              ; (panic "todo")로 전개된다. defmacro
 (as Type expr)                      ; 수/문자의 타입 변환. 실패할 수 있는 변환은 실패하면 panic
-(try-as Type expr)                  ; as와 같지만 결과를 Option<Type>으로 반환한다(실패하면 none)
+(try-as Type expr)                  ; as와 같지만 결과를 Option<Type>으로 반환한다(실패하면 None)
 (print control args...)             ; 서식을 전개해 표준 출력에 쓴다(줄바꿈 없음)
 (println control args...)           ; 같다(끝에 줄바꿈)
 (format dest control args...)       ; CL의 format. 전개한 string을 반환한다
@@ -1557,7 +1557,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 `as`/`try-as`가 다루는 것은 수와 문자의 카탈로그(`int`, 고정 폭 정수 타입, `f32`/`f64`/`ratio`/`char` 사이)뿐이다. 같은
 타입은 변환하지 않는다. **정수 폭 사이(`int` 포함)와 `f32`↔`f64`는 진짜 변환이다.** `as`는 자르거나 반올림하고, `try-as`는
 그 폭(정밀도)에 들어가는지 답한다. `(as int x)`는 고정 폭에서의 정확한 확대이고 `(as i32 n)`은 `int`에서의 절단이다. 정수 →
-`char`는 범위를 벗어나 실패할 수 있으므로 `as`는 panic하고 `try-as`는 `none`이 된다. 그 밖(확대와
+`char`는 범위를 벗어나 실패할 수 있으므로 `as`는 panic하고 `try-as`는 `None`이 된다. 그 밖(확대와
 `float->int`/`ratio->int`의 절단)은 항상 성공한다. `float->int`/`ratio->int`/`char->int`는 `int`에 내려앉으며, 더 좁은 폭을
 요구하면 그 뒤에 `int->W`를 호출한다. 대응하는 변환 메서드([수](functions/numbers.md)의 `int->char`/`int->int`/`int->W` 등)로
 전개되는 편의 표기이다.
@@ -1569,7 +1569,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 `(documentation 'name 'function)`과 달리 타입 인수를 받지 않는다. `name`을 변수 → 함수 → 타입 → 트레이트 → 매크로 순서로
 해석하고(맨 식별자를 식으로 평가할 때와 같은 우선순위) 찾은 정의의 문서 문자열을 반환한다(`(documentation Type::method)`는
 메서드 전용). 해석 자체가 실패하면(그 이름의 정의가 없으면) 검사 시 오류이고, 정의는 있지만 문서 문자열이 없으면
-`Option::none`이다. 모두 검사 시에 상수로 정해지며 실행 시의 조회는 일어나지 않는다. 모듈로 한정한 자유 이름(`mod::name`.
+`Option::None`이다. 모두 검사 시에 상수로 정해지며 실행 시의 조회는 일어나지 않는다. 모듈로 한정한 자유 이름(`mod::name`.
 `Type::method` 제외)은 지원하지 않는다.
 
 ## 8. 비지역 탈출(catch / throw / unwind-protect)
@@ -1589,7 +1589,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; 찾지 못하면 평소대로 마지막 값
 ```
 
@@ -1739,10 +1739,10 @@ AOT 컴파일할 수 있다. 시작점 파일 자신의 정의도 `typl file.typ
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => (not (equal 1 2))로 읽혀 true
 ```

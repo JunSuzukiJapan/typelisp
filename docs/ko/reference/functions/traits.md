@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 표준 트레이트
 
 반복, 비교, 산술, 요소의 추가와 꺼내기를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
@@ -147,7 +147,7 @@
   (defmethod pop (self) Option<Item>))
 ```
 
-`push`로 마지막에 추가한 요소를 꺼낼 수 있는 컬렉션. 비어 있으면 `none`. 제네릭 함수는 `(:where (Pop C (Item T)))`로 요구한다.
+`push`로 마지막에 추가한 요소를 꺼낼 수 있는 컬렉션. 비어 있으면 `None`. 제네릭 함수는 `(:where (Pop C (Item T)))`로 요구한다.
 
 | 타입 | `pop`의 의미 |
 |---|---|
@@ -163,8 +163,8 @@
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

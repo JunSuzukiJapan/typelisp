@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # trait
 
 trait 是「這個型別支援這些操作」的約定。它讓多個型別擁有同名的操作，使用這些操作的函式就不必為每個型別分別撰寫。其機制與 Rust 的
@@ -130,12 +130,12 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-傳入依 300、900、100 的順序放入 `money` 的 `Vector`，會回傳 `(some 900 yen)`。
+傳入依 300、900、100 的順序放入 `money` 的 `Vector`，會回傳 `(Some 900 yen)`。
 
 ## 5. `:dyn`：統一處理不同型別的值
 

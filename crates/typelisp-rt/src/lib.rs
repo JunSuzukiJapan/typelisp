@@ -206,7 +206,7 @@ pub unsafe extern "C-unwind" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
 /// read.
 ///
 /// The empty list's `car` and `cdr` are the empty list, as in CL. Both sides
-/// are `Option<Sexpr>` now, so this is `none` in and `none` out — and it has
+/// are `Option<Sexpr>` now, so this is `None` in and `None` out — and it has
 /// to agree with the interpreter's `sexpr-car`/`sexpr-cdr`, or the same walk
 /// would end differently depending on whether its caller was compiled.
 unsafe fn cons_half(
@@ -3674,7 +3674,7 @@ pub unsafe extern "C" fn rt_int_integer_length(args: *const i64, argc: u32) -> i
 /// The *answer* is all a compiled `try-int->W` needs from a shim: when it is
 /// yes the value is already the result (an integer that fits its target is
 /// unchanged by the cast — `interp::try_int_to_width`), so the island builds
-/// the `some` box around the operand it already has rather than calling back
+/// the `Some` box around the operand it already has rather than calling back
 /// for a converted one.
 ///
 /// # Safety
@@ -3984,7 +3984,7 @@ pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(args: *const i64, argc:
     encode(t)
 }
 
-/// The payload a `(tuple v)` pattern binds: a fresh `Vector<Option<Sexpr>>`
+/// The payload a `(Tuple v)` pattern binds: a fresh `Vector<Option<Sexpr>>`
 /// of the elements of the tuple box `args[0]` — the interpreter's
 /// `match_sexpr_core` `tuple` arm, for compiled code.
 ///
@@ -5208,8 +5208,8 @@ stream_shim!(rt_file_create_directories, typelisp_mem::wk::F_FILE_CREATE_DIRECTO
 stream_shim!(rt_net_resolve_begin, typelisp_mem::wk::F_NET_RESOLVE_BEGIN, "net-resolve-begin", [str, int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_resolve_finish, typelisp_mem::wk::F_NET_RESOLVE_FINISH, "net-resolve-finish", [int], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_connect_begin, typelisp_mem::wk::F_NET_CONNECT_BEGIN, "net-connect-begin", [str], tagged, via crate::net_builtin::net_builtin);
-// The `Option<string>` arguments niche (`typelisp_mem::option`): `none` is
-// the empty word and `some` the string, so they cross as any tagged word.
+// The `Option<string>` arguments niche (`typelisp_mem::option`): `None` is
+// the empty word and `Some` the string, so they cross as any tagged word.
 stream_shim!(rt_net_tls_start, typelisp_mem::wk::F_NET_TLS_START, "net-tls-start", [int, str, tagged, tagged, tagged], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_tls_listen, typelisp_mem::wk::F_NET_TLS_LISTEN, "net-tls-listen", [str, int, str, str, tagged], tagged, via crate::net_builtin::net_builtin);
 stream_shim!(rt_net_socket_error, typelisp_mem::wk::F_NET_SOCKET_ERROR, "net-socket-error", [int], tagged, via crate::net_builtin::net_builtin);

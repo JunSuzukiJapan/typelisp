@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # FFI de C (defffi)
 
 Este guia explica como chamar funções C a partir do typelisp. A lista de tipos que podem ser declarados e as
@@ -67,7 +67,7 @@ deles como inteiro do typelisp, converta-o com `as`.
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int não perde nada do valor de 64 bits
-(try-as i32 (unsafe (c-strlen s)))  ; none se não couber em um i32
+(try-as i32 (unsafe (c-strlen s)))  ; None se não couber em um i32
 (unsafe (c-malloc 16))              ; literais inteiros podem ser passados como estão
 ```
 

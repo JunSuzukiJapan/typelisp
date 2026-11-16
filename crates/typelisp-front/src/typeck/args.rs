@@ -6,8 +6,8 @@
 //! position, a `&key` one as `:name value`, and the arguments left after the
 //! optional ones go to `&rest`, as one `Sexpr` list. A parameter the call
 //! leaves out is given its default, the core form its definition checked,
-//! or `none` when it has no default; one with no default that the call
-//! gives is given as `(some value)`. A function has `&key` parameters or
+//! or `None` when it has no default; one with no default that the call
+//! gives is given as `(Some value)`. A function has `&key` parameters or
 //! `&optional` and `&rest` ones, never both.
 
 use crate::typeck::registry::OptKeyParam;
@@ -143,8 +143,8 @@ fn check_keys(
 }
 
 /// The argument for the `&optional` or `&key` parameter `p`: `arg` when the
-/// call gives it, `(some arg)` when `p` has no default; `p`'s default, or
-/// `none`, when the call leaves it out.
+/// call gives it, `(Some arg)` when `p` has no default; `p`'s default, or
+/// `None`, when the call leaves it out.
 fn given_or_default(
     cx: &Cx,
     heap: &mut Heap,

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # السمات القياسية
 
 سمات التكرار والمقارنة والحساب وإضافة العناصر وإخراجها. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
@@ -151,7 +151,7 @@ Rust. تُستعملان في قيود `:where` للدوال العامة لاش
   (defmethod pop (self) Option<Item>))
 ```
 
-مجموعة يمكن أن يُخرَج منها العنصر الذي أضافه `push` أخيرًا. تعطي `none` إذا كانت فارغة. تطلبها الدالة العامة بـ `(:where (Pop C (Item T)))`.
+مجموعة يمكن أن يُخرَج منها العنصر الذي أضافه `push` أخيرًا. تعطي `None` إذا كانت فارغة. تطلبها الدالة العامة بـ `(:where (Pop C (Item T)))`.
 
 | النوع | ما يفعله `pop` |
 |---|---|
@@ -167,8 +167,8 @@ Rust. تُستعملان في قيود `:where` للدوال العامة لاش
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

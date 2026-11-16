@@ -1,29 +1,29 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Option、Result 與錯誤型別
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-建構函式：`Option<T>` 是 `(some T)` / `none`，`Result<T,E>` 是 `(ok T)` / `(err E)`。`E` 可以是任何型別——內建的具體錯誤型別，以及以
+建構函式：`Option<T>` 是 `(Some T)` / `None`，`Result<T,E>` 是 `(Ok T)` / `(Err E)`。`E` 可以是任何型別——內建的具體錯誤型別，以及以
 `defstruct`/`defenum` 撰寫的自己的型別，都可以直接放進去（第 3 章）。
 
 | 名稱 | 形式 | Option | Result | 說明 |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | 取出值。`none`/`err` 時 panic |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | 取出值。`None`/`Err` 時 panic |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | 值，或預設值 |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | 是否為 `some` |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | 是否為 `none` |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | 是否為 `ok` |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | 是否為 `err` |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 取出值。遇到 `none`/`err` 時以 `msg` panic |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 值，或 `f` 的結果。`f` 只在 `none`/`err` 時呼叫 |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | 對 `some`/`ok` 的內容套用 `f` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | 對 `err` 的內容套用 `f` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | 遇到 `some`/`ok` 時把內容交給 `f`，傳回其結果 |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | 遇到 `none`/`err` 時傳回 `f` 的結果 |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | 把 `(some v)` 變成 `(ok v)`，把 `none` 變成 `(err e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | 是否為 `Some` |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | 是否為 `None` |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | 是否為 `Ok` |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | 是否為 `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 取出值。遇到 `None`/`Err` 時以 `msg` panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 值，或 `f` 的結果。`f` 只在 `None`/`Err` 時呼叫 |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | 對 `Some`/`Ok` 的內容套用 `f` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | 對 `Err` 的內容套用 `f` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | 遇到 `Some`/`Ok` 時把內容交給 `f`，傳回其結果 |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | 遇到 `None`/`Err` 時傳回 `f` 的結果 |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | 把 `(Some v)` 變成 `(Ok v)`，把 `None` 變成 `(Err e)` |
 
-建構函式 `some`/`none`/`ok`/`err` 不需 `use`，在任何模組中都可以用裸名稱使用。
-也可以像 `Option::some` 這樣加上型別名稱書寫。
+建構函式 `Some`/`None`/`Ok`/`Err` 不需 `use`，在任何模組中都可以用裸名稱使用。
+也可以像 `Option::Some` 這樣加上型別名稱書寫。
 
 分支用 `match` 明確寫出，或用上面的 `map`/`and-then` 等串起來。沒有相當於 Rust 的 `?` 的語法。
 
@@ -34,12 +34,12 @@
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
+  (if (= 0 (mod n 2)) (Option::Some (truncate n 2)) (Option::None)))
 
-(-> (Option::some 8)
-    (and-then half)                          ; (some 4)
-    (and-then half)                          ; (some 2)
-    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+(-> (Option::Some 8)
+    (and-then half)                          ; (Some 4)
+    (and-then half)                          ; (Some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (Some 20)
     (unwrap-or 0))                           ; => 20
 
 (-> (parse-int "x")
@@ -49,22 +49,22 @@
 
 ## 2. `Option<T>` 的執行期表示
 
-與 Rust 一樣，**`Option<T>` 大多數情況下不建立盒子**。`some v` 就是 `v` 本身，`none` 是空串列的值，既沒有配置也沒有間接存取。
-`Option<Sexpr>`（空串列為 `none`）、`Option<int>`、`Option<string>`、`Option<my-struct>`、`Option<f64>`、`Option<(fn ...)>` 都是這種形式。
+與 Rust 一樣，**`Option<T>` 大多數情況下不建立盒子**。`Some v` 就是 `v` 本身，`None` 是空串列的值，既沒有配置也沒有間接存取。
+`Option<Sexpr>`（空串列為 `None`）、`Option<int>`、`Option<string>`、`Option<my-struct>`、`Option<f64>`、`Option<(fn ...)>` 都是這種形式。
 
 只有當 `T` 的值無法與空串列的值區分時才裝箱：
 
 | `T` | 表示 | 原因 |
 |---|---|---|
-| `Option<U>`（巢狀） | 盒子 | 內層的 `none` 會與外層的 `none` 成為同一個值 |
+| `Option<U>`（巢狀） | 盒子 | 內層的 `None` 會與外層的 `None` 成為同一個值 |
 | `()` | 盒子 | `()` 的值就是空串列的值本身 |
 | `ptr` / `c-long` / `c-ulong` | 盒子 | 64 位元全部都是值，沒有用於區分的餘地 |
 | 其他 | 無盒子 | — |
 
-表示只由型別決定，無法從值讀出。列印時依靜態型別還原 `(some ...)`/`none`，所以 `(format false "~a" opt)` 輸出 `(some 1)`。有兩個限制：
+表示只由型別決定，無法從值讀出。列印時依靜態型別還原 `(Some ...)`/`None`，所以 `(format false "~a" opt)` 輸出 `(Some 1)`。有兩個限制：
 
 - **不能放進 `:dyn Trait`**（把 `(impl Speak Option<int> ...)` 過的值傳給 `:dyn Speak` 是錯誤）。
-- 從 `Sexpr` 進行 `(the Option<T> ...)` 向下轉型時要**指明建構函式**——`(the Option<int> (some x))` / `(the Option<int> (none))`。繫結整體的
+- 從 `Sexpr` 進行 `(the Option<T> ...)` 向下轉型時要**指明建構函式**——`(the Option<int> (Some x))` / `(the Option<int> (None))`。繫結整體的
   `(the Option<int> o)` 形式是錯誤。
 
 ## 3. 錯誤型別與 `Error` trait
@@ -89,7 +89,7 @@
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | 錯誤訊息（`Error` trait 的方法） |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | 這個錯誤包裝的原因，沒有時為 `none`（Rust 的 `Error::source`） |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | 這個錯誤包裝的原因，沒有時為 `None`（Rust 的 `Error::source`） |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>`（`E` 實作 `Error`） | 把具體錯誤型別擴大為 trait 物件 |
 | `describe-error` | `(describe-error e)` | `E→string`（`E` 實作 `Error`） | 訊息以及沿 `source` 追溯的原因鏈，每行一個原因。CL 中沒有對應物（Rust 的 "caused by"） |
 
@@ -100,10 +100,10 @@
 (defstruct io-err (path string))
 (impl Error io-err
   (defmethod message (self) string (append "io failed: " self::path))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; 把具體型別直接放進 E
-  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
+  (if (equal p "") (Result::Err (make-instance 'io-err :path "<empty>")) (Result::Ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; 不區分種類統一處理
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -117,8 +117,8 @@
 (use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
-    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((Err e) (Result::Err e))))
 ```
 
 **型別與 trait 共享一個命名空間**（與 Rust 相同）。在同一模組中，`defstruct`/`defenum` 與 trait 不能同名，在型別的位置寫 trait 名稱會回報

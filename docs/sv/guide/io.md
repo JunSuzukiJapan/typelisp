@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Fil-I/O, strömmar och nätverk
 
 Den här guiden visar grunderna i att läsa och skriva filer, pathnames och socketkommunikation.
@@ -13,14 +13,14 @@ Operationer som kan misslyckas beroende på miljön, som att öppna en fil eller
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; om filen saknas:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
 När du vet att en operation inte kan misslyckas, eller i ett litet skript där det är i sin ordning att
-stoppa vid misslyckande, tar `unwrap` ut värdet. Om det är ett `err` ger det panic.
+stoppa vid misslyckande, tar `unwrap` ut värdet. Om det är ett `Err` ger det panic.
 
 ## 2. Läsa och skriva en hel fil
 
@@ -29,8 +29,8 @@ De enklaste funktionerna hanterar hela filen på en gång.
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. Läsa och skriva med strömmar
@@ -45,23 +45,23 @@ stängs strömmen. Värdet är `Result<kroppens värde, FileError>`.
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; läsa en rad i taget
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - Det finns tre riktningar för att öppna en fil: `direction-input` (läsa), `direction-output`
   (skriva; befintligt innehåll kastas) och `direction-append` (lägga till sist).
-- `read-line` returnerar `none` vid filslut.
+- `read-line` returnerar `None` vid filslut.
 - Om du öppnar en fil med `open-file` i stället för `with-open-file`, anropa alltid `close`. GC stänger
   inte strömmar.
 
@@ -77,7 +77,7 @@ byte från en teckenström är ett typfel.
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### Standard in och ut
@@ -94,8 +94,8 @@ tar sitt argument med `(:where (CharInput S))` kan läsa från en fil, en strän
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -107,8 +107,8 @@ för att dela upp en sökväg i delar eller bygga en.
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; byt bara ut filändelsen
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -147,14 +147,14 @@ Det grundläggande mönstret är att starta en task per anslutning. `accept` och
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; andra sidan stängde
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; andra sidan stängde
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` tar emot anslutningar bara från den här maskinen, och `"0.0.0.0"` tar emot dem på alla
@@ -170,8 +170,8 @@ gränssnitt. För tasks, se [Syntaxreferens kapitel 12](../reference/syntax.md#1
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 För att sätta en tidsgräns på en operation skickar man `:timeout` (i sekunder).
@@ -180,13 +180,13 @@ För att sätta en tidsgräns på en operation skickar man `:timeout` (i sekunde
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; sätt en klocka på nästa läsning
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; sätt en klocka på nästa läsning
 ```
 
 ### När andra sidan kopplar ner
 
 Om andra sidan återställer anslutningen eller släpper den på vägen ger det inte `panic`. Senare läsningar
-returnerar `none`, och skrivningar kastas tyst. För att avgöra om anslutningen stängdes rent eller
+returnerar `None`, och skrivningar kastas tyst. För att avgöra om anslutningen stängdes rent eller
 misslyckades, kontrollera `(socket-error c)`.
 
 ## 6. Namnuppslagning (DNS)
@@ -195,13 +195,13 @@ Det finns ingen dedikerad funktion för namnuppslagning. Att skicka ett värdnam
 `tls-connect` eller `send-to` löser upp det inuti dem. Uppslagningen sker på en annan tråd, så andra
 tasks fortsätter köra medan den väntar. Om ett namn har flera adresser prövas de i tur och ordning.
 
-Om namnet inte kan lösas upp returneras ett `err`.
+Om namnet inte kan lösas upp returneras ett `Err`.
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -214,12 +214,12 @@ läsning och skrivning fungerar som med TCP.
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 En TLS-server skapas genom att skicka certifikat- och privatnyckelfiler (PEM) till `tls-listen`.
@@ -228,8 +228,8 @@ En TLS-server skapas genom att skicka certifikat- och privatnyckelfiler (PEM) ti
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; TCP-varianten av serve fungerar som den är
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; TCP-varianten av serve fungerar som den är
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 När man prövar med ett självsignerat certifikat skickar man `:ca-file "cert.pem"` på klientsidan så att
@@ -247,8 +247,8 @@ UDP är inte en ström; det skickar och tar emot ett datagram i taget. Datan är
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -257,5 +257,5 @@ UDP är inte en ström; det skickar och tar emot ett datagram i taget. Datan är
 ## 9. Unix-domänsocketar
 
 Skicka sökvägen till socketfilen till `unix-listen` / `unix-connect`. Värdet du får är samma
-`socket-stream` som med TCP. `unix-listen` returnerar ett `err` om filen redan finns. Att stänga
+`socket-stream` som med TCP. `unix-listen` returnerar ett `Err` om filen redan finns. Att stänga
 lyssnaren tar bort filen.

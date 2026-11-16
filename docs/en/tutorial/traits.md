@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Traits
 
 A trait is a promise that "this type supports these operations". Traits let several types share
@@ -139,12 +139,12 @@ Combined with a trait bound, you can write a function that works for any type im
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-Given a `Vector` with `money` values of 300, 900 and 100 in that order, it returns `(some 900 yen)`.
+Given a `Vector` with `money` values of 300, 900 and 100 in that order, it returns `(Some 900 yen)`.
 
 ## 5. `:dyn`: handling values of different types together
 

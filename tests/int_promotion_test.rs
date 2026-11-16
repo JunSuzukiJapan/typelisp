@@ -104,11 +104,11 @@ fn narrow_widens_to_int_with_as_and_narrows_back_with_try_as() {
     assert_eq!(eval_ok("(as i32 (the int 70000))"), Value::Int(70000));
     // Truncation is what a width cast means; the question form says so.
     assert_eq!(eval_ok("(as u8 (the int 300))"), Value::Int(44));
-    assert_eq!(eval_string("(format false \"~a\" (try-as u8 (the int 300)))"), "none");
-    assert_eq!(eval_string("(format false \"~a\" (try-as u8 (the int 200)))"), "(some 200)");
+    assert_eq!(eval_string("(format false \"~a\" (try-as u8 (the int 300)))"), "None");
+    assert_eq!(eval_string("(format false \"~a\" (try-as u8 (the int 200)))"), "(Some 200)");
     assert_eq!(
         eval_string("(format false \"~a\" (try-as i32 (+ (the int 4611686018427387903) 1)))"),
-        "none"
+        "None"
     );
     assert_eq!(eval_string("(format false \"~a\" (as f64 (the int 3)))"), "3.0");
 }
@@ -137,8 +137,8 @@ fn conversions_and_bit_ops_agree_in_both_tiers() {
         (defun big () int (the int 4611686018427387903))
         (defun widen ((x i32)) int (as int x))
         (defun narrow ((x int)) u8 (as u8 x))
-        (defun fits ((x int)) bool (match (try-as i32 x) ((some _) true) ((none) false)))
-        (defun as-char ((x int)) bool (match (try-as char x) ((some c) (equal c #\A)) ((none) false)))
+        (defun fits ((x int)) bool (match (try-as i32 x) ((Some _) true) ((None) false)))
+        (defun as-char ((x int)) bool (match (try-as char x) ((Some c) (equal c #\A)) ((None) false)))
         (defun to-float ((x int)) f64 (as f64 x))
         (defun band ((a int) (b int)) int (logand a b))
         (defun bor ((a int) (b int)) int (logior a b))

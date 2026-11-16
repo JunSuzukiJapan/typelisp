@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macros
 
 Une macro est une fonction qui prend un programme et renvoie un programme. Les macros permettent de créer une
@@ -45,7 +45,7 @@ le moyen le plus rapide d'avancer.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Les expansions sont elles aussi vérifiées
@@ -123,15 +123,15 @@ De la même façon, une macro qui répète son corps un nombre donné de fois pe
 
 Le corps d'une macro est du code typelisp ordinaire ; il peut donc examiner ses arguments avec `if` ou `match` et
 construire une expansion différente. Les arguments sont des données S-expression (`Option<Sexpr>`), et la liste
-vide est `none`.
+vide est `None`.
 
 Créons `my-and`, qui renvoie `true` si toutes ses conditions sont vraies.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; pas d'arguments
-    ((cons f more)
+    ((None) 'true)                                    ; pas d'arguments
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; un seul
          `(if ,f (my-and ,@more) false)))             ; deux ou plus
@@ -141,7 +141,7 @@ Créons `my-and`, qui renvoie `true` si toutes ses conditions sont vraies.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` est un motif qui place la tête d'une liste dans `f` et le reste dans `more`.
+- `(Cons f more)` est un motif qui place la tête d'une liste dans `f` et le reste dans `more`.
 - `sexpr-null` teste si une donnée S-expression est la liste vide.
 - La branche finale `_` est nécessaire parce que les données S-expression ont d'autres formes que les listes
   (nombres, chaînes, etc.), et `match` exige qu'elles soient couvertes aussi. Un argument `&rest` est toujours une

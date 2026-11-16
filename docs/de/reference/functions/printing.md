@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Ausgabe
 
 `print`/`println`/`format`, die einstelligen Ausgabefunktionen, der Pretty Printer, `print-object` und die
@@ -45,18 +45,18 @@ ausgegeben**, daher schreibt ein Programm durch Aufrufe dieser Funktionen auf di
 sichtbar ist, bevor die Standardeingabe gelesen wird, auch über eine Pipe).
 
 **`Option<Sexpr>` wird transparent ausgegeben.** Der Typ von S-Ausdrucksdaten ist `Option<Sexpr>`, daher
-erscheint die Hülle `(some x)` nicht in der Ausgabe, und der Inhalt wird unverändert ausgegeben. Die leere Liste
-wird als `()` ausgegeben. Andere `Option<T>` werden als `(some ...)` / `none` ausgegeben. Dasselbe gilt für
+erscheint die Hülle `(Some x)` nicht in der Ausgabe, und der Inhalt wird unverändert ausgegeben. Die leere Liste
+wird als `()` ausgegeben. Andere `Option<T>` werden als `(Some ...)` / `None` ausgegeben. Dasselbe gilt für
 `Option<T>`-Felder innerhalb von Strukturen, Enums und `Vector`s. Ein `Result<Option<Sexpr>,…>` aus
-`(eval ...)` wird als `(ok 42)` ausgegeben, oder bei `none` als `(ok ())`.
+`(eval ...)` wird als `(Ok 42)` ausgegeben, oder bei `None` als `(Ok ())`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -318,10 +318,10 @@ sein):
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a zeigt auf a selbst
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a zeigt auf a selbst
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Marken **beginnen bei jeder Ausgabe wieder bei 1** (wie in CL). Auch ohne Zyklus bekommt dasselbe Objekt, das

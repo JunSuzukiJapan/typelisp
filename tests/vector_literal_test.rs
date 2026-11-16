@@ -64,7 +64,7 @@ fn every_evaluation_is_a_fresh_vector() {
 fn a_literal_where_data_is_expected_is_a_data_vector() {
     both(
         r##"(match (the Option<Sexpr> #(1 x (2 3)))
-             ((vector v) (match (get v 2) ((cons _ _) (format false "~a" (len v))) (_ "?")))
+             ((Vector v) (match (get v 2) ((Cons _ _) (format false "~a" (len v))) (_ "?")))
              (_ "not a vector"))"##,
         "3",
     );

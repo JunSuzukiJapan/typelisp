@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -29,8 +29,8 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 타입 | 내용 | 자세히 |
 |---|---|---|
-| `Option<T>` | 있거나 없는 값. `some` / `none` | [Option과 Result](functions/option-result.md) |
-| `Result<T,E>` | 성공 또는 실패. `ok` / `err` | 위와 같음 |
+| `Option<T>` | 있거나 없는 값. `Some` / `None` | [Option과 Result](functions/option-result.md) |
+| `Result<T,E>` | 성공 또는 실패. `Ok` / `Err` | 위와 같음 |
 | `Vector<T>` | 늘어나는 배열 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | 해시 테이블. 키 비교 방법은 만들 때의 `:test`로 정해지고, `equal` 테이블에서는 키 타입이 `Hash`를 구현해야 한다 | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | 튜플(요소 1~12개). 요소는 `t::0`로 읽는다 | [구문 2장](syntax.md#2-타입-표기) |
@@ -45,8 +45,8 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 타입 | 내용 | 자세히 |
 |---|---|---|
-| `Sexpr` | 비어 있지 않은 S 식. 19개 변형: `int`, `i8`~`u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S 식 데이터](functions/sequences.md#2-s-식-데이터-sexpr) |
-| `Option<Sexpr>` | S 식 데이터 전반. 빈 리스트 `()`는 `none` | 위와 같음 |
+| `Sexpr` | 비어 있지 않은 S 식. 19개 변형: `Int`, `I8`~`U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S 식 데이터](functions/sequences.md#2-s-식-데이터-sexpr) |
+| `Option<Sexpr>` | S 식 데이터 전반. 빈 리스트 `()`는 `None` | 위와 같음 |
 
 ## 4. 표준 라이브러리의 타입
 
@@ -71,7 +71,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | 스트림 | [스트림](functions/streams-files.md#3-구체적인-스트림-타입) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | 합성 스트림 | [합성 스트림](functions/streams-files.md#4-합성-스트림) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | 네트워크 | [네트워크](functions/network.md#1-타입) |
-| `ReadOutcome` | `read-sexpr`의 결과. `datum` / `eof` | [스트림](functions/streams-files.md#6-제네릭-함수와-파일-조작) |
+| `ReadOutcome` | `read-sexpr`의 결과. `Datum` / `Eof` | [스트림](functions/streams-files.md#6-제네릭-함수와-파일-조작) |
 | `universal-time` `internal-time` `decoded-time` | 시간 | [시간](functions/system.md#1-시간) |
 | `heap-info` | 힙의 현재 상태 | [구현 도구](functions/system.md#51-heap-info의-필드) |
 

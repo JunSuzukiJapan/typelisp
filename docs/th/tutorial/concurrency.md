@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # การทำงานพร้อมกัน
 
 ใน typelisp คุณทำงานพร้อมกันโดยเริ่ม **task** (เธรดน้ำหนักเบา) และ task ส่งค่าให้กัน
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` ส่ง หาก channel เต็ม จะรอจนมีที่ว่าง
 - `(recv ch)` รับ จะรอจนกว่าค่าจะมาถึง ผลลัพธ์เป็น `Option<T>` เมื่อ
-  channel ถูกปิดและว่างเปล่า จะคืน `none`
+  channel ถูกปิดและว่างเปล่า จะคืน `None`
 - การวนซ้ำ channel ด้วย `doiter` รับค่าต่อไปเรื่อย ๆ จนกว่าจะถูกปิด ส่งตรง ๆ ให้ `map` หรือ `filter`
   ก็ได้
 - `send` บน channel ที่ปิดแล้วจะ panic

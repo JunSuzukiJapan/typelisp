@@ -307,7 +307,7 @@ fn the_runtime_result_types_match_the_registry() {
     }
     check(&typelisp_read::shim::READ_DATUM_RESULT_TYPE, &sig_of("read-datum-at").ret, "`read-datum-at`'s result");
 
-    // The *inner* types: the box a `Result`'s `ok` payload is, taken from the
+    // The *inner* types: the box a `Result`'s `Ok` payload is, taken from the
     // registry's own type.
     let ok_payload = |name: &str| -> typelisp::Type {
         match sig_of(name).ret {

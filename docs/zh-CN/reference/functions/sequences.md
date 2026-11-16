@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 序对、S 表达式与序列
 
 泛型序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、构建在 `Iter` 之上的序列函数，以及高阶函数。
@@ -26,19 +26,19 @@
 ## 2. S 表达式数据 `Sexpr`
 
 `read` 返回的数据类型 `Sexpr` 有 19 种变体：
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`。
-`vector` 和 `array` 是用 `#(..)` 和 `#nA(..)` 写的数据（[语法参考](../syntax.md#1-词法元素)），内容分别是 `Vector<Option<Sexpr>>` 和 `Array<Option<Sexpr>>`——对 `(vector v)` 绑定的 `v` 可以直接使用 `len`、`get` 等。
-`tuple` 是用 `#{..}` 写的数据，`(tuple v)` 绑定的 `v` 是按顺序排列元素的新 `Vector<Option<Sexpr>>`（为了用同一个类型接收任意长度的元组）。
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`。
+`Vector` 和 `Array` 是用 `#(..)` 和 `#nA(..)` 写的数据（[语法参考](../syntax.md#1-词法元素)），内容分别是 `Vector<Option<Sexpr>>` 和 `Array<Option<Sexpr>>`——对 `(Vector v)` 绑定的 `v` 可以直接使用 `len`、`get` 等。
+`Tuple` 是用 `#{..}` 写的数据，`(Tuple v)` 绑定的 `v` 是按顺序排列元素的新 `Vector<Option<Sexpr>>`（为了用同一个类型接收任意长度的元组）。
 处理 S 表达式单元的不是第 1 章通用的 `cons`/`car`/`cdr`，而是 `sexpr-*` 函数。主要在 `defmacro` 的函数体中用于组装
 和拆解形式。
 
-**S 表达式数据的类型是 `Option<Sexpr>`。** 空列表不是 `Sexpr` 的变体，而是 `Option` 的 `none`，`Sexpr` 本身表示
+**S 表达式数据的类型是 `Option<Sexpr>`。** 空列表不是 `Sexpr` 的变体，而是 `Option` 的 `None`，`Sexpr` 本身表示
 "非空的 S 表达式"。因此 `sexpr-*` 的参数和返回值都是 `Option<Sexpr>`。
 
-- 在期望 `Option<Sexpr>` 的位置，`()` 是空列表（也可以写成 `(Option::none)`）
+- 在期望 `Option<Sexpr>` 的位置，`()` 是空列表（也可以写成 `(Option::None)`）
 - 在期望 `Option<Sexpr>` 的位置，`Sexpr` 会隐式扩展（没有运行时转换）。反方向——把 `Option<Sexpr>` 当作 `Sexpr`
   使用——是在声称"不是空列表"，需要用 `match` 或 `unwrap` 明确表示
-- 在 `match` 中，`Sexpr` 的 19 种变体和 `none` 可以**平铺在同一组分支中**
+- 在 `match` 中，`Sexpr` 的 19 种变体和 `None` 可以**平铺在同一组分支中**
   （[语法参考](../syntax.md#43-match--模式匹配)）
 
 | 名称 | 形式 | 类型 | 说明 |
@@ -50,7 +50,7 @@
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 是否为空列表 |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | 是否不是 `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | 是否为 `Sym`（符号） |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` 变体的内容（fixnum 或多精度）。类型不符时 panic |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` 变体的内容（fixnum 或多精度）。类型不符时 panic |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | 该宽度变体的内容。类型不符时 panic |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | 浮点变体的内容。类型不符时 panic |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` 的内容。类型不符时 panic |
@@ -64,8 +64,8 @@
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | 对 `Sexpr` 列表的每个元素应用 `f` 得到的新 `Sexpr` 列表（第 4 章的 `map` 用于 `Iter`，不能遍历 `Sexpr` 列表） |
 
 数值访问器按类型分为 9 个，是因为 `Sexpr` 是"值的类型在其他任何地方都没有写出的唯一场所"。放入 `Sexpr` 的 `u8` 作为
-`u8` 变体放入，只能用 `(sexpr-u8 s)` 取出。传给 `(sexpr-int s)` 会 panic——不会悄悄扩展宽度来作答。读入的数据
-（`'(1 2 3)`、宏的参数）中的整数是 `int` 变体，用 `(sexpr-int s)` 读取。
+`U8` 变体放入，只能用 `(sexpr-u8 s)` 取出。传给 `(sexpr-int s)` 会 panic——不会悄悄扩展宽度来作答。读入的数据
+（`'(1 2 3)`、宏的参数）中的整数是 `Int` 变体，用 `(sexpr-int s)` 读取。
 
 `Sexpr` 列表没有 `rplaca`/`nconc` 之类的破坏性操作。`Sexpr` 单元创建后不能修改。
 
@@ -98,7 +98,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 第一个满足条件的位置 |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 满足条件的个数 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否所有元素都满足条件 |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否有元素满足条件（相当于 CL 的 `some`。是不与 `some` 构造函数冲突的名字） |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否有元素满足条件（相当于 CL 的 `some`） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左折叠 |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右折叠 |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 收集剩下的全部元素。用来把下面 `lazy` 函数的结果变成 `Vector` |
@@ -111,7 +111,7 @@
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | 连接迭代器。也可以写 3 个以上 |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL 的 `concatenate`。结果类型写成**引用符号的字面量**（CL 是运行时的类型说明符）。`'vector` 需要 1 个以上，`'string` 0 个以上（0 个时为 `""`）。`Sexpr` 列表不适用（用 `sexpr-append`） |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反转（非破坏性） |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | 第 `n` 个元素（越界时为 `none`） |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | 第 `n` 个元素（越界时为 `None`） |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | 参数顺序不同的 `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 前 `n` 个 |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`（`end` 按长度截断） |
@@ -195,7 +195,7 @@
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 对尾部的副作用映射（`maplist` 版的 `mapc`） |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 对尾部映射后连接（`maplist` 版的 `mapcan`） |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub` 第一次出现的位置。接收者是 `string` 时选择 `string` 的方法（[字符串](collections.md#1-字符串-string)） |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 第一个不一致的位置。相等时为 `none` |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 第一个不一致的位置。相等时为 `None` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 合并。CL 要求已排序，这里对连接结果排序 |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | 没有时添加**到开头** |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 集合运算。CL 不规定顺序，这里按**首次出现顺序**保持稳定 |
@@ -245,7 +245,7 @@ CL 中有而这里没有的：`list*`（没有替换末尾的非正规列表这�
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; 只删除末尾一侧的 1 个
 (position 3 (iter v) :start 1)                          ; 下标相对于整个序列
 ```

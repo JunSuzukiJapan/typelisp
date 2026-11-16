@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # त्रुटि प्रबंधन
 
 typelisp में त्रुटि प्रबंधन विफलताओं को दो प्रकारों में बाँटता है।
@@ -6,7 +6,7 @@ typelisp में त्रुटि प्रबंधन विफलता�
 | विफलता का प्रकार | उदाहरण | इसे कैसे व्यक्त किया जाता है |
 |---|---|---|
 | ऐसी विफलताएँ जो हो सकती हैं (पुनर्प्राप्त की जा सकने वाली) | फ़ाइल गायब है, इनपुट संख्या नहीं है | `Result<T,E>` लौटाएँ |
-| प्रोग्राम में गलतियाँ (पुनर्प्राप्त नहीं की जा सकने वाली) | सीमा से बाहर इंडेक्स, `none` पर `unwrap`, शून्य से भाग | `panic` से रुकें |
+| प्रोग्राम में गलतियाँ (पुनर्प्राप्त नहीं की जा सकने वाली) | सीमा से बाहर इंडेक्स, `None` पर `unwrap`, शून्य से भाग | `panic` से रुकें |
 
 इनके ऊपर `catch` / `throw` हैं, जो कई फ़ंक्शन कॉल से एक साथ बाहर निकलते हैं, और `unwind-protect`, जो बॉडी जिस भी तरह छोड़ी जाए, क्लीनअप चलाता है। यह अध्याय मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) का `Result` खंड पढ़ लिया है।
 
@@ -18,22 +18,22 @@ typelisp में त्रुटि प्रबंधन विफलता�
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 कॉल करने वाला `match` से सफलता और विफलता को अलग करता है।
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- `Result` लौटाने वाले फ़ंक्शन का मान तब तक उपयोग नहीं किया जा सकता जब तक `match` `err` स्थिति को न संभाले। विफलता को संभालना भूल जाना टाइप त्रुटि है।
+- `Result` लौटाने वाले फ़ंक्शन का मान तब तक उपयोग नहीं किया जा सकता जब तक `match` `Err` स्थिति को न संभाले। विफलता को संभालना भूल जाना टाइप त्रुटि है।
 - `parse-int` की त्रुटि `ParseIntError` टाइप का मान है। `(message e)` उसकी संदेश स्ट्रिंग देता है।
 
 ## 2. विफलता को कॉल करने वाले तक ऊपर पहुँचाना
@@ -43,16 +43,16 @@ Rust के `?` जैसा कोई शॉर्टहैंड नहीं 
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
-जब आप जानते हों कि कोई ऑपरेशन विफल नहीं हो सकता, या किसी छोटी स्क्रिप्ट में जहाँ विफलता पर रुक जाना ठीक है, `unwrap` सामग्री बाहर निकाल लेता है। यदि मान `err` है, तो वह panic करता है। यदि डिफ़ॉल्ट मान से काम चल जाए, तो `unwrap-or` का उपयोग करें।
+जब आप जानते हों कि कोई ऑपरेशन विफल नहीं हो सकता, या किसी छोटी स्क्रिप्ट में जहाँ विफलता पर रुक जाना ठीक है, `unwrap` सामग्री बाहर निकाल लेता है। यदि मान `Err` है, तो वह panic करता है। यदि डिफ़ॉल्ट मान से काम चल जाए, तो `unwrap-or` का उपयोग करें।
 
 ## 3. अपना त्रुटि टाइप बनाना
 
@@ -60,24 +60,24 @@ Rust के `?` जैसा कोई शॉर्टहैंड नहीं 
 
 ```lisp
 (defenum config-error
-  (missing string)          ; कोई सेटिंग गायब है
-  (invalid string int))     ; कोई मान गलत है
+  (Missing string)          ; कोई सेटिंग गायब है
+  (Invalid string int))     ; कोई मान गलत है
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` त्रुटि का विवरण लौटाता है।
-- `source` वह दूसरी त्रुटि लौटाता है जिसके कारण यह त्रुटि हुई। कोई कारण न हो तो वह `none` है।
+- `source` वह दूसरी त्रुटि लौटाता है जिसके कारण यह त्रुटि हुई। कोई कारण न हो तो वह `None` है।
 
 ## 4. अलग-अलग प्रकार की त्रुटियों को मिलाना
 
@@ -87,8 +87,8 @@ Rust के `?` जैसा कोई शॉर्टहैंड नहीं 
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 `"4"`, `"-1"` और `"abc"` देने पर परिणाम ये होते हैं:
@@ -117,7 +117,7 @@ error: main.typl:4:7: panic: index 3 out of range
 ```
 
 - `panic` का टाइप `!` है (यह लौटता नहीं), इसलिए इसे वहाँ लिखा जा सकता है जहाँ कोई भी टाइप अपेक्षित हो। इसीलिए ऊपर `if` की दोनों शाखाएँ मेल खाती हैं।
-- ये ऑपरेशन भी panic करते हैं: `none` या `err` पर `unwrap`, सीमा से बाहर इंडेक्स वाला `get`, और शून्य से पूर्णांक भाग।
+- ये ऑपरेशन भी panic करते हैं: `None` या `Err` पर `unwrap`, सीमा से बाहर इंडेक्स वाला `get`, और शून्य से पूर्णांक भाग।
 - `panic` प्रोग्राम को रोक देता है। यह किसी टास्क के भीतर हो तब भी पूरा प्रोग्राम रुक जाता है।
 - REPL में `panic` REPL को समाप्त नहीं करता; वह अगले इनपुट की प्रतीक्षा करता है।
 - आप "अभी लिखा नहीं गया" के लिए `(todo)` और "यहाँ कभी नहीं पहुँचना चाहिए" के लिए `(unreachable)` लिख सकते हैं। दोनों panic करते हैं।
@@ -178,8 +178,8 @@ error: main.typl:4:7: panic: index 3 out of range
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: हमेशा क्लीनअप करें

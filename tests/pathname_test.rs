@@ -47,7 +47,7 @@ fn an_absolute_name_splits_into_directory_name_and_type() {
                (directory-namestring p) (pathname-name p) (pathname-type p) (pathname-absolute-p p)))"#,
     );
     // The last dot separates, so the name keeps the inner one.
-    assert_eq!(v, "/usr/local/lib/|(some thing.tar)|(some gz)|true");
+    assert_eq!(v, "/usr/local/lib/|(Some thing.tar)|(Some gz)|true");
 }
 
 #[test]
@@ -67,13 +67,13 @@ fn a_trailing_slash_means_no_name() {
              (pathname-name "a/b/")
              (file-namestring "a/b/"))"#,
     );
-    assert_eq!(v, "a/b/|none|");
+    assert_eq!(v, "a/b/|None|");
 }
 
 #[test]
 fn a_leading_dot_is_all_name_as_in_cl() {
     let v = eval_string(r#"(format false "~a|~a" (pathname-name ".gitignore") (pathname-type ".gitignore"))"#);
-    assert_eq!(v, "(some .gitignore)|none");
+    assert_eq!(v, "(Some .gitignore)|None");
 }
 
 #[test]
@@ -151,11 +151,11 @@ fn a_pathname_can_be_used_wherever_a_string_can() {
     let v = eval_string(&format!(
         r#"(use std::fs::read-file-string std::fs::write-file-string) (let ((p (merge-pathnames (make-pathname :name "note" :type "txt") "{dir}")))
              (match (write-file-string p "hello")
-               ((ok _)
+               ((Ok _)
                 (match (read-file-string p)
-                  ((ok s) (format false "~a|~a" s (probe-file p)))
-                  ((err e) (message e))))
-               ((err e) (message e))))"#
+                  ((Ok s) (format false "~a|~a" s (probe-file p)))
+                  ((Err e) (message e))))
+               ((Err e) (message e))))"#
     ));
     assert_eq!(v, "hello|true");
 }
@@ -167,11 +167,11 @@ fn a_pathname_opens_a_stream_like_a_string_does() {
     let v = eval_string(&format!(
         r#"(use std::fs::open-output std::fs::read-file-lines) (let ((p (merge-pathnames "out.log" "{dir}")))
              (match (open-output p)
-               ((ok f) (progn (write-line f "line") (close f)
+               ((Ok f) (progn (write-line f "line") (close f)
                               (match (read-file-lines p)
-                                ((ok ls) (get ls 0))
-                                ((err e) (message e)))))
-               ((err e) (message e))))"#
+                                ((Ok ls) (get ls 0))
+                                ((Err e) (message e)))))
+               ((Err e) (message e))))"#
     ));
     assert_eq!(v, "line");
 }
@@ -183,7 +183,7 @@ fn with_open_file_accepts_a_pathname_too() {
     let v = eval_string(&format!(
         r#"(use std::fs::direction-output std::fs::read-file-string) (let ((p (merge-pathnames "w.txt" "{dir}")))
              (with-open-file (f p direction-output) (write-string f "written"))
-             (match (read-file-string p) ((ok s) s) ((err e) (message e))))"#
+             (match (read-file-string p) ((Ok s) s) ((Err e) (message e))))"#
     ));
     assert_eq!(v, "written");
 }
@@ -195,11 +195,11 @@ fn rename_can_mix_a_pathname_and_a_string() {
     let v = eval_string(&format!(
         r#"(use std::fs::write-file-string) (let ((from (merge-pathnames "a.txt" "{dir}")))
              (match (write-file-string from "x")
-               ((ok _)
+               ((Ok _)
                 (match (rename-file from "{dir}b.txt")
-                  ((ok _) (format false "~a|~a" (probe-file from) (probe-file "{dir}b.txt")))
-                  ((err e) (message e))))
-               ((err e) (message e))))"#
+                  ((Ok _) (format false "~a|~a" (probe-file from) (probe-file "{dir}b.txt")))
+                  ((Err e) (message e))))
+               ((Err e) (message e))))"#
     ));
     assert_eq!(v, "false|true");
 }

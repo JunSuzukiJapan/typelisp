@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # الأنواع
 
 الأنواع الموجودة في typelisp، والسمات القياسية التي ينفّذها كل نوع. وطريقة كتابة الأنواع في
@@ -30,8 +30,8 @@
 
 | النوع | المحتوى | التفاصيل |
 |---|---|---|
-| `Option<T>` | قيمة موجودة أو غير موجودة. `some` / `none` | [Option وResult](functions/option-result.md) |
-| `Result<T,E>` | نجاح أو فشل. `ok` / `err` | مثل ما سبق |
+| `Option<T>` | قيمة موجودة أو غير موجودة. `Some` / `None` | [Option وResult](functions/option-result.md) |
+| `Result<T,E>` | نجاح أو فشل. `Ok` / `Err` | مثل ما سبق |
 | `Vector<T>` | مصفوفة قابلة للنمو | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | جدول تجزئة. تحدد `:test` عند إنشائه كيفية مقارنة المفاتيح، وفي جدول `equal` يجب أن ينفّذ نوع المفاتيح `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | صف (من 1 إلى 12 عنصرًا). تُقرأ العناصر بـ `t::0` | [الصياغة، الفصل 2](syntax.md#2-كتابة-الأنواع) |
@@ -46,8 +46,8 @@
 
 | النوع | المحتوى | التفاصيل |
 |---|---|---|
-| `Sexpr` | تعبير رمزي غير فارغ. 19 متغايرًا: `int` و`i8` إلى `u32` و`f32` و`f64` و`char` و`bool` و`sym` و`str` و`cons` و`ratio` و`path` و`vector` و`array` و`tuple` | [بيانات التعبيرات الرمزية](functions/sequences.md#2-بيانات-التعبيرات-الرمزية-sexpr) |
-| `Option<Sexpr>` | بيانات تعبيرات رمزية عمومًا. والقائمة الفارغة `()` هي `none` | مثل ما سبق |
+| `Sexpr` | تعبير رمزي غير فارغ. 19 متغايرًا: `Int` و`I8` إلى `U32` و`F32` و`F64` و`Char` و`Bool` و`Sym` و`Str` و`Cons` و`Ratio` و`Path` و`Vector` و`Array` و`Tuple` | [بيانات التعبيرات الرمزية](functions/sequences.md#2-بيانات-التعبيرات-الرمزية-sexpr) |
+| `Option<Sexpr>` | بيانات تعبيرات رمزية عمومًا. والقائمة الفارغة `()` هي `None` | مثل ما سبق |
 
 ## 4. الأنواع في المكتبة القياسية
 
@@ -72,7 +72,7 @@
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | تدفقات | [التدفقات](functions/streams-files.md#3-أنواع-التدفقات-الملموسة) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | تدفقات مركّبة | [التدفقات المركّبة](functions/streams-files.md#4-التدفقات-المركبة) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | الشبكات | [الشبكات](functions/network.md#1-الأنواع) |
-| `ReadOutcome` | نتيجة `read-sexpr`. `datum` / `eof` | [التدفقات](functions/streams-files.md#6-الدوال-العامة-وعمليات-الملفات) |
+| `ReadOutcome` | نتيجة `read-sexpr`. `Datum` / `Eof` | [التدفقات](functions/streams-files.md#6-الدوال-العامة-وعمليات-الملفات) |
 | `universal-time` `internal-time` `decoded-time` | الزمن | [الزمن](functions/system.md#1-الزمن) |
 | `heap-info` | الحالة الراهنة للـ heap | [أدوات التنفيذ](functions/system.md#51-حقول-heap-info) |
 

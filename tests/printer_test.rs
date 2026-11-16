@@ -425,11 +425,11 @@ fn print_object_reaches_a_builtin_generic_type() {
 /// the serial full run.
 #[test]
 fn an_enum_variant_name_survives_an_instantiated_key() {
-    is_true(r#"(equal (format false "~a" (Option::some 1)) "(some 1)")"#);
-    is_true(r#"(equal (format false "~a" (the Option<int> (Option::none))) "none")"#);
+    is_true(r#"(equal (format false "~a" (Option::Some 1)) "(Some 1)")"#);
+    is_true(r#"(equal (format false "~a" (the Option<int> (Option::None))) "None")"#);
     is_true(
-        r#"(defenum box<T> (full T) (empty))
-           (equal (format false "~a" (the box<string> (box::full "x"))) "(full x)")"#,
+        r#"(defenum box<T> (Full T) (Empty))
+           (equal (format false "~a" (the box<string> (box::Full "x"))) "(Full x)")"#,
     );
 }
 
@@ -517,7 +517,7 @@ fn an_array_of_a_type_with_no_print_object_still_builds() {
              (progn (push d 1)
                (let ((a (Array::new d (make-instance 'plain :n 1))))
                  (equal (format false "~a" a)
-                        "#<Array<plain> dims: #(1) data: #(#<plain n: 1>) fill-pointer: none>"))))"##,
+                        "#<Array<plain> dims: #(1) data: #(#<plain n: 1>) fill-pointer: None>"))))"##,
     );
 }
 

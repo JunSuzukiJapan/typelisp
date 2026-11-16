@@ -41,7 +41,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. 展開結果も型検査される
@@ -117,15 +117,15 @@ typelisp のマクロは Common Lisp と同じく、名前の衝突を自動で�
 ## 5. 引数の形で展開を変える
 
 マクロの本体は普通の typelisp のコードなので、`if` や `match` で引数を調べて、展開する式を
-変えられます。引数の型は S 式データ（`Option<Sexpr>`）で、空のリストが `none` です。
+変えられます。引数の型は S 式データ（`Option<Sexpr>`）で、空のリストが `None` です。
 
 すべての条件が真なら `true` を返す `my-and` を作ります。
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; 引数なし
-    ((cons f more)
+    ((None) 'true)                                    ; 引数なし
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; 1 つだけ
          `(if ,f (my-and ,@more) false)))             ; 2 つ以上
@@ -135,7 +135,7 @@ typelisp のマクロは Common Lisp と同じく、名前の衝突を自動で�
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` は、リストの先頭を `f` に、残りを `more` に取り出すパターンです。
+- `(Cons f more)` は、リストの先頭を `f` に、残りを `more` に取り出すパターンです。
 - `sexpr-null` は、S 式データが空のリストかどうかを調べます。
 - 最後の `_` の腕が必要なのは、S 式データにはリスト以外（数や文字列など）の形もあり、
   `match` がそれらも尽くすよう求めるからです。`&rest` の引数は必ずリストなので、この腕が

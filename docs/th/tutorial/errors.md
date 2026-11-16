@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # การจัดการข้อผิดพลาด
 
 การจัดการข้อผิดพลาดใน typelisp แบ่งความล้มเหลวเป็นสองประเภท
@@ -6,7 +6,7 @@
 | ประเภทของความล้มเหลว | ตัวอย่าง | วิธีแสดง |
 |---|---|---|
 | ความล้มเหลวที่เกิดขึ้นได้ (กู้คืนได้) | ไม่พบไฟล์, อินพุตไม่ใช่ตัวเลข | คืน `Result<T,E>` |
-| ความผิดพลาดในโปรแกรม (กู้คืนไม่ได้) | ดัชนีเกินช่วง, `unwrap` ของ `none`, การหารด้วยศูนย์ | หยุดด้วย `panic` |
+| ความผิดพลาดในโปรแกรม (กู้คืนไม่ได้) | ดัชนีเกินช่วง, `unwrap` ของ `None`, การหารด้วยศูนย์ | หยุดด้วย `panic` |
 
 นอกจากนี้ยังมี `catch` / `throw` ที่ออกจากการเรียกฟังก์ชันหลายชั้นในคราวเดียว และ
 `unwind-protect` ที่รันการล้างทรัพยากรไม่ว่าตัวเนื้อหาจะออกด้วยวิธีใด บทนี้สมมติว่าคุณอ่าน
@@ -21,22 +21,22 @@
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 ผู้เรียกแยกความสำเร็จออกจากความล้มเหลวด้วย `match`
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- ค่าของฟังก์ชันที่คืน `Result` ใช้ไม่ได้เว้นแต่ `match` จัดการกรณี `err`
+- ค่าของฟังก์ชันที่คืน `Result` ใช้ไม่ได้เว้นแต่ `match` จัดการกรณี `Err`
   การลืมจัดการความล้มเหลวเป็นข้อผิดพลาดของชนิด
 - ข้อผิดพลาดจาก `parse-int` เป็นค่าชนิด `ParseIntError` `(message e)` ให้สตริงข้อความของมัน
 
@@ -48,17 +48,17 @@
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 เมื่อรู้ว่าการดำเนินการไม่มีทางล้มเหลว หรือในสคริปต์เล็ก ๆ ที่หยุดเมื่อล้มเหลวได้
-`unwrap` จะดึงเนื้อหาออกมา หากค่าเป็น `err` จะ panic หากค่าเริ่มต้นก็เพียงพอ
+`unwrap` จะดึงเนื้อหาออกมา หากค่าเป็น `Err` จะ panic หากค่าเริ่มต้นก็เพียงพอ
 ให้ใช้ `unwrap-or`
 
 ## 3. การสร้างชนิดข้อผิดพลาดของคุณเอง
@@ -68,24 +68,24 @@
 
 ```lisp
 (defenum config-error
-  (missing string)          ; a setting is missing
-  (invalid string int))     ; a value is wrong
+  (Missing string)          ; a setting is missing
+  (Invalid string int))     ; a value is wrong
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` คืนคำอธิบายของข้อผิดพลาด
-- `source` คืนข้อผิดพลาดอื่นที่ทำให้เกิดข้อผิดพลาดนี้ หากไม่มีสาเหตุ จะเป็น `none`
+- `source` คืนข้อผิดพลาดอื่นที่ทำให้เกิดข้อผิดพลาดนี้ หากไม่มีสาเหตุ จะเป็น `None`
 
 ## 4. การรวมข้อผิดพลาดหลายประเภท
 
@@ -98,8 +98,8 @@
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 เมื่อให้ `"4"`, `"-1"` และ `"abc"` ผลลัพธ์คือ:
@@ -129,7 +129,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - ชนิดของ `panic` คือ `!` (ไม่คืนค่า) จึงเขียนได้ทุกที่ที่คาดหวังชนิดใดก็ได้ นั่นคือเหตุผล
   ที่สองกิ่งของ `if` ข้างต้นเข้ากันได้
-- การดำเนินการเหล่านี้ก็ panic เช่นกัน: `unwrap` ของ `none` หรือ `err`, `get` ที่ดัชนีเกินช่วง
+- การดำเนินการเหล่านี้ก็ panic เช่นกัน: `unwrap` ของ `None` หรือ `Err`, `get` ที่ดัชนีเกินช่วง
   และการหารจำนวนเต็มด้วยศูนย์
 - `panic` หยุดโปรแกรม แม้เกิดขึ้นภายใน task ทั้งโปรแกรมก็หยุด
 - ใน REPL `panic` ไม่ได้จบ REPL แต่รออินพุตถัดไป
@@ -195,8 +195,8 @@ error: main.typl:4:7: panic: index 3 out of range
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: ล้างทรัพยากรเสมอ

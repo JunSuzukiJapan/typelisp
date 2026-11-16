@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # الوحدات وتنظيم الملفات
 
 يشرح هذا الدليل كيفية تجميع برنامج مكوّن من عدة ملفات. القواعد التفصيلية موجودة في الأقسام من 3.10 إلى
@@ -127,7 +127,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first الخاصة بهذه الوحدة => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first المكتبة القياسية => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first المكتبة القياسية => (Some 1)
 ```
 
 بعد `shadow` تشير كتابة `first` في تلك الوحدة إلى تعريفك الخاص. ولاستعمال `first` المكتبة القياسية

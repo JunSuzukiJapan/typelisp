@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -33,9 +33,9 @@ fast bredd (tabellen för `int` finns i kapitel 3).
 | `int->int` | `(int->int x)` | `T→int` | Vidgande konvertering till `int` (alltid exakt). Det `(as int x)` gör |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Vidgande konvertering till `ratio` (alltid exakt) |
 | `int->char` | `(int->char x)` | `T→char` | Tolkar värdet som ett skalärt Unicode-värde. Ger panic vid ogiltigt värde |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | En version av `int->char` som returnerar `none` vid misslyckande |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | En version av `int->char` som returnerar `None` vid misslyckande |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Breddkonvertering. Värden som inte ryms trunkeras (som Rusts `as`) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Samma konvertering som en fråga. `none` om värdet inte ryms i den bredden |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Samma konvertering som en fråga. `None` om värdet inte ryms i den bredden |
 
 Dessa konverteringar är också vad specialformerna `(as Type x)`/`(try-as Type x)`
 ([Syntaxreferens](../syntax.md#7-övriga-specialformer)) gör. Bitoperationer (`logand`/`ash`/`ldb` och så
@@ -101,7 +101,7 @@ konvertering: `(as int x)` är den exakta vidgningen från en fast bredd, och `(
 `(try-as i32 n)` är trunkeringen / kontrollen från `int` (samma betydelse som `int->W` / `try-int->W` i
 kapitel 1).
 
-Heltalsvarianten av `Sexpr` är också bara `int` (`(int n)` accepterar både fixnums och bignums).
+Heltalsvarianten av `Sexpr` är också bara `Int` (`(Int n)` accepterar både fixnums och bignums).
 
 Inbyggda funktioner som tar ett index eller ett antal (`substring`, `get` för `Vector`, skiftantalet i
 `ash` och så vidare) accepterar `int`, men att skicka ett värde som inte ryms i ett fixnum är ett fel vid
@@ -146,7 +146,7 @@ körning ("an integer argument does not fit a fixnum").
 | `float->int` | `(float->int x)` | `f64→int` | Konverterar till `int` genom att trunkera mot noll (CL:s `truncate`; exakt för ändliga värden av vilken storlek som helst). Ger panic vid oändlighet och NaN. För en fast bredd, använd `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Konverterar till en `ratio` som det exakta binära rationella talet (CL:s `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Konverterar mellan flyttalsbredder. `float->f32` avrundar till närmaste, `float->f64` är alltid exakt. Det `(as f32 x)` gör |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Samma konvertering som en fråga. `none` om avrundningen ändrar värdet (vidgning till `f64` är alltid `some`). Det `(try-as f32 x)` gör |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Samma konvertering som en fråga. `None` om avrundningen ändrar värdet (vidgning till `f64` är alltid `Some`). Det `(try-as f32 x)` gör |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL:s funktioner med samma namn. Alias för `floor`/`ceiling`/`round`/`truncate` ovan: i CL returnerar de utan prefix heltal, så de med prefixet `f` stämmer med det här språkets beteende |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | 2 / 53 / 53 respektive (bara precisionen för `0.0` är 0). `f64` är alltid IEEE-754 binary64, så dessa är konstanter |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` eller `-1.0` |
@@ -227,7 +227,7 @@ skickas till `(defun f ((q rational)) ...)`). Åt andra hållet tar man ut värd
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Jämförelse |
 | `numerator` `denominator` | `(op x)` | `rational→int` | Täljaren och nämnaren förkortade |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Avkortat mot noll, som `ratio`, till `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` för ett heltal, annars `none` (CL:s `integerp`) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` för ett heltal, annars `None` (CL:s `integerp`) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Som för `ratio` (exponenten till `expt` är en `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Som för `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Som för `ratio` |

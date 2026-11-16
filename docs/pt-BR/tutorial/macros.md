@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macros
 
 Uma macro é uma função que recebe um programa e devolve um programa. As macros permitem criar uma sintaxe
@@ -44,7 +44,7 @@ caminho mais rápido.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. As expansões também passam pela verificação de tipos
@@ -121,15 +121,15 @@ Da mesma forma, uma macro que repete o corpo um dado número de vezes pode ser e
 
 O corpo de uma macro é código typelisp comum, então pode examinar seus argumentos com `if` ou `match` e
 construir uma expansão diferente. Os argumentos são dados de expressões S (`Option<Sexpr>`), e a lista vazia
-é `none`.
+é `None`.
 
 Vamos fazer `my-and`, que devolve `true` se todas as suas condições forem verdadeiras.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; sem argumentos
-    ((cons f more)
+    ((None) 'true)                                    ; sem argumentos
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; só um
          `(if ,f (my-and ,@more) false)))             ; dois ou mais
@@ -139,7 +139,7 @@ Vamos fazer `my-and`, que devolve `true` se todas as suas condições forem verd
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` é um padrão que pega a cabeça de uma lista em `f` e o resto em `more`.
+- `(Cons f more)` é um padrão que pega a cabeça de uma lista em `f` e o resto em `more`.
 - `sexpr-null` testa se um dado de expressão S é a lista vazia.
 - O ramo final `_` é necessário porque os dados de expressões S têm formas além das listas (números, strings
   etc.), e `match` exige que elas também sejam cobertas. Um argumento `&rest` é sempre uma lista, então esse

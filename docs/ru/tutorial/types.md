@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Основы типов
 
 typelisp — язык со статической типизацией. Эта глава объясняет, что делает для вас проверка типов, какие типы вы
@@ -47,41 +47,41 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 
 ## 2. `Option<T>`: значение, которого может не быть
 
-В typelisp нет `nil`. «Значения может не быть» выражается типом `Option<T>`. Значение `Option<T>` — это либо `some`,
-содержащее одно значение `T`, либо `none`, не содержащее ничего.
+В typelisp нет `nil`. «Значения может не быть» выражается типом `Option<T>`. Значение `Option<T>` — это либо `Some`,
+содержащее одно значение `T`, либо `None`, не содержащее ничего.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` — это не `int`, поэтому в арифметике его как есть использовать нельзя. `(+ (safe-div 10 2) 1)` —
-ошибка типа. Чтобы использовать содержимое, разделите `some` и `none` с помощью `match`.
+ошибка типа. Чтобы использовать содержимое, разделите `Some` и `None` с помощью `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- В ветви `(some q)` содержимое связывается с переменной `q`.
-- `match` проверяет, что его ветви **покрывают все случаи**. Забытая ветвь `(none)` — ошибка типа.
+- В ветви `(Some q)` содержимое связывается с переменной `q`.
+- `match` проверяет, что его ветви **покрывают все случаи**. Забытая ветвь `(None)` — ошибка типа.
 
 ### Почему нет nil
 
 Во многих языках `nil` (`null`) может заменять значение любого типа. В результате забытая обработка случая «нет
 значения» остаётся незамеченной до запуска программы. В typelisp место, где значения может не быть, имеет тип
-`Option<T>`, и код не пройдёт проверку типов, пока `match` не обработает случай `none`. Забытый случай находится до
+`Option<T>`, и код не пройдёт проверку типов, пока `match` не обработает случай `None`. Забытый случай находится до
 запуска программы.
 
 Условия следуют той же идее: условием `if` может быть только `bool`. Правила вроде «всё, кроме `nil`, истинно» из
@@ -91,12 +91,12 @@ Common Lisp нет.
 
 | Форма | Смысл |
 |---|---|
-| `(unwrap-or opt default)` | Содержимое для `some`; значение по умолчанию для `none` |
-| `(unwrap opt)` | Извлекает содержимое. На `none` останавливает программу |
+| `(unwrap-or opt default)` | Содержимое для `Some`; значение по умолчанию для `None` |
+| `(unwrap opt)` | Извлекает содержимое. На `None` останавливает программу |
 | `(is-some opt)` / `(is-none opt)` | Проверяет, какой это случай |
 
-Многие функции стандартной библиотеки возвращают `Option`. Например, `position` возвращает позицию в `some`, если
-элемент найден, и `none`, если нет.
+Многие функции стандартной библиотеки возвращают `Option`. Например, `position` возвращает позицию в `Some`, если
+элемент найден, и `None`, если нет.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -104,25 +104,25 @@ Common Lisp нет.
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: операция, которая может не удаться
 
-Операция, которая может не удаться, возвращает `Result<T,E>`: `ok` со значением `T` при успехе или `err` с ошибкой
+Операция, которая может не удаться, возвращает `Result<T,E>`: `Ok` со значением `T` при успехе или `Err` с ошибкой
 `E` при неудаче.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -131,8 +131,8 @@ Common Lisp нет.
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Используйте `Option`, когда отсутствие значения не требует объяснений, и `Result`, когда нужно сказать, почему
@@ -201,28 +201,28 @@ Common Lisp нет.
 
 ```lisp
 (defenum shape
-  (circle int)        ; радиус
-  (rect int int)      ; ширина и высота
-  (dot))              ; не содержит значений
+  (Circle int)        ; радиус
+  (Rect int int)      ; ширина и высота
+  (Dot))              ; не содержит значений
 ```
 
-Значения создаются с именем типа впереди, как `shape::circle`. В `match` они разбираются по имени варианта.
+Значения создаются с именем типа впереди, как `shape::Circle`. В `match` они разбираются по имени варианта.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 И здесь `match` проверяет, что все случаи покрыты. Если позже добавить в `shape` вариант, каждый `match`, который его
 не обрабатывает, станет ошибкой типа, так что ни одно место, требующее исправления, не будет пропущено.
 
-После `(use shape)` можно писать `(rect 5 6)` без имени типа.
+После `(use shape)` можно писать `(Rect 5 6)` без имени типа.
 
 `Option` и `Result` — перечисления, построенные тем же механизмом.
 

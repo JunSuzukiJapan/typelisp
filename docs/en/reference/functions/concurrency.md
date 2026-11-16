@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tasks and Channels
 
 The vocabulary of tasks (lightweight threads). `task` and `thread`, which start them, and `select`,
@@ -36,7 +36,7 @@ switch and how this differs from Go are in
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | A channel of capacity `n`. `0` is a rendezvous (no buffer) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Waits until there is room, then hands the value over |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Waits until a value arrives. `none` once it is closed and empty |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Waits until a value arrives. `None` once it is closed and empty |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Closes it |
 | `len` | `(len ch)` | `(Chan<T>)→int` | How many values are in the buffer now |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | The capacity |
@@ -62,7 +62,7 @@ switch and how this differs from Go are in
   bugs in the program, not recoverable failures, so they are not `Result`s.
 - **Closing a channel that a task is waiting to `send` on makes that task panic** (Go's rule).
 - `recv` on a closed channel returns what is left in the buffer, and once it is empty, keeps returning
-  `none`.
+  `None`.
 - `close` is resolved by the receiver's type, so it is a different thing from the `close` of the
   `Stream` trait. `Chan<T>` does not implement `Stream`.
 - **A negative capacity panics** (it is not silently rounded to 0).
@@ -195,8 +195,8 @@ itself or by receiving on `done`.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -210,7 +210,7 @@ itself or by receiving on `done`.
 - **Cancellation reaches the children.** A context made with `with-cancel`/`with-timeout` is
   cancelled along with its parent. It does not go the other way (from child to parent).
 - A child made from a context already cancelled starts out cancelled.
-- `done` is only closed; no value is sent. A receive returns `none`.
+- `done` is only closed; no value is sent. A receive returns `None`.
 - Each call of `(Context::background)` makes a separate root. Go's `Background()` is a single one
   that cannot be cancelled; here a root can be cancelled too, and that affects only what was made
   from it.

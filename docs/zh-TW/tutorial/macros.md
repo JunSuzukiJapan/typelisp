@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 巨集
 
 巨集是接收程式並回傳程式的函式。用巨集可以自己創造函式做不到的新語法。typelisp 的巨集與 Common Lisp 的 `defmacro` 是同一種機制。
@@ -38,7 +38,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. 展開結果也會經過型別檢查
@@ -110,15 +110,15 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 ## 5. 依引數的形狀改變展開
 
 巨集的本體是一般的 typelisp 程式碼，所以可以用 `if` 或 `match` 檢查引數，改變要展開的運算式。引數的型別是 S 運算式資料
-（`Option<Sexpr>`），空串列是 `none`。
+（`Option<Sexpr>`），空串列是 `None`。
 
 建立一個所有條件都為真時回傳 `true` 的 `my-and`。
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; 沒有引數
-    ((cons f more)
+    ((None) 'true)                                    ; 沒有引數
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; 只有一個
          `(if ,f (my-and ,@more) false)))             ; 兩個以上
@@ -128,7 +128,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` 是把串列開頭取到 `f`、其餘取到 `more` 的模式。
+- `(Cons f more)` 是把串列開頭取到 `f`、其餘取到 `more` 的模式。
 - `sexpr-null` 判斷 S 運算式資料是否為空串列。
 - 最後的 `_` 分支是必要的，因為 S 運算式資料還有串列以外的形狀（數字、字串等），`match` 要求涵蓋它們。`&rest` 的引數一定是串列，
   所以這個分支實際上不會執行。

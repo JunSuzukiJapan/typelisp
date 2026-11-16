@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Trait
 
 Trait एक वादा है कि "यह टाइप ये ऑपरेशन सपोर्ट करता है"। Trait कई टाइप को एक ही नाम के ऑपरेशन साझा करने देते हैं, ताकि उन्हें इस्तेमाल करने वाले फ़ंक्शन को हर टाइप के लिए अलग-अलग न लिखना पड़े। वे लगभग ठीक Rust के trait की तरह काम करते हैं। यह अध्याय मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -129,12 +129,12 @@ trait बाउंड के साथ मिलाकर आप ऐसा फ�
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-300, 900 और 100 के `money` मानों वाले `Vector` को इसी क्रम में देने पर यह `(some 900 yen)` लौटाता है।
+300, 900 और 100 के `money` मानों वाले `Vector` को इसी क्रम में देने पर यह `(Some 900 yen)` लौटाता है।
 
 ## 5. `:dyn`: अलग-अलग टाइप के मानों को साथ संभालना
 

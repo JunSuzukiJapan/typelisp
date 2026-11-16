@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Kiến thức cơ bản về kiểu
 
 typelisp là một ngôn ngữ có kiểu tĩnh. Chương này giải thích bộ kiểm tra kiểu làm gì cho bạn, các kiểu
@@ -48,41 +48,41 @@ mọi kiểu đã được biết trước khi chương trình chạy.
 ## 2. `Option<T>`: giá trị có thể không có
 
 typelisp không có `nil`. "Có thể không có giá trị" được biểu diễn bằng kiểu `Option<T>`. Một giá trị
-`Option<T>` hoặc là `some`, giữ một giá trị kiểu `T`, hoặc là `none`, không giữ gì.
+`Option<T>` hoặc là `Some`, giữ một giá trị kiểu `T`, hoặc là `None`, không giữ gì.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` không phải `int`, nên không thể dùng nguyên trạng trong phép tính số học.
-`(+ (safe-div 10 2) 1)` là lỗi kiểu. Để dùng thứ bên trong, hãy tách `some` khỏi `none` bằng `match`.
+`(+ (safe-div 10 2) 1)` là lỗi kiểu. Để dùng thứ bên trong, hãy tách `Some` khỏi `None` bằng `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- Ở nhánh `(some q)`, nội dung được gán vào biến `q`.
-- `match` kiểm tra rằng các nhánh của nó **bao phủ mọi trường hợp**. Quên nhánh `(none)` là lỗi kiểu.
+- Ở nhánh `(Some q)`, nội dung được gán vào biến `q`.
+- `match` kiểm tra rằng các nhánh của nó **bao phủ mọi trường hợp**. Quên nhánh `(None)` là lỗi kiểu.
 
 ### Vì sao không có nil
 
 Trong nhiều ngôn ngữ, `nil` (`null`) có thể thế chỗ cho giá trị của bất kỳ kiểu nào. Kết quả là việc
 quên xử lý trường hợp "không có giá trị" không bị phát hiện cho đến khi chương trình chạy. Trong
 typelisp, một chỗ có thể thiếu giá trị có kiểu `Option<T>`, và mã không qua được bộ kiểm tra kiểu trừ
-khi `match` xử lý trường hợp `none`. Một trường hợp bị quên được phát hiện trước khi chương trình chạy.
+khi `match` xử lý trường hợp `None`. Một trường hợp bị quên được phát hiện trước khi chương trình chạy.
 
 Điều kiện cũng theo cùng ý tưởng: chỉ một `bool` mới có thể là điều kiện của `if`. Không có quy tắc
 như "mọi thứ khác `nil` đều đúng" của Common Lisp.
@@ -91,12 +91,12 @@ như "mọi thứ khác `nil` đều đúng" của Common Lisp.
 
 | Dạng | Ý nghĩa |
 |---|---|
-| `(unwrap-or opt default)` | Nội dung với `some`; giá trị mặc định với `none` |
-| `(unwrap opt)` | Lấy nội dung ra. Dừng chương trình với `none` |
+| `(unwrap-or opt default)` | Nội dung với `Some`; giá trị mặc định với `None` |
+| `(unwrap opt)` | Lấy nội dung ra. Dừng chương trình với `None` |
 | `(is-some opt)` / `(is-none opt)` | Kiểm tra nó là cái nào |
 
-Nhiều hàm của thư viện chuẩn trả về `Option`. Ví dụ, `position` trả về vị trí trong `some` nếu tìm thấy
-phần tử và `none` nếu không.
+Nhiều hàm của thư viện chuẩn trả về `Option`. Ví dụ, `position` trả về vị trí trong `Some` nếu tìm thấy
+phần tử và `None` nếu không.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -104,25 +104,25 @@ phần tử và `none` nếu không.
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: thao tác có thể thất bại
 
-Một thao tác có thể thất bại trả về `Result<T,E>`: `ok` giữ một giá trị kiểu `T` khi thành công, hoặc
-`err` giữ một lỗi `E` khi thất bại.
+Một thao tác có thể thất bại trả về `Result<T,E>`: `Ok` giữ một giá trị kiểu `T` khi thành công, hoặc
+`Err` giữ một lỗi `E` khi thất bại.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -131,8 +131,8 @@ Các hàm của riêng bạn cũng có thể trả về `Result`.
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Hãy dùng `Option` khi giá trị bị thiếu không cần giải thích, và `Result` khi bạn muốn nói vì sao một việc
@@ -202,29 +202,29 @@ và kiểu giá trị khác nhau.
 
 ```lisp
 (defenum shape
-  (circle int)        ; bán kính
-  (rect int int)      ; chiều rộng và chiều cao
-  (dot))              ; không giữ giá trị nào
+  (Circle int)        ; bán kính
+  (Rect int int)      ; chiều rộng và chiều cao
+  (Dot))              ; không giữ giá trị nào
 ```
 
-Giá trị được tạo với tên kiểu ở phía trước, như `shape::circle`. Trong `match`, chúng được tách ra theo
+Giá trị được tạo với tên kiểu ở phía trước, như `shape::Circle`. Trong `match`, chúng được tách ra theo
 tên variant.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Ở đây `match` cũng kiểm tra rằng mọi trường hợp đều được bao phủ. Nếu sau này bạn thêm một variant vào
 `shape`, mọi `match` không xử lý nó sẽ trở thành lỗi kiểu, nên không bỏ sót chỗ nào cần sửa.
 
-Sau `(use shape)`, bạn có thể viết `(rect 5 6)` mà không cần tên kiểu.
+Sau `(use shape)`, bạn có thể viết `(Rect 5 6)` mà không cần tên kiểu.
 
 `Option` và `Result` là các enum được xây dựng bằng cùng cơ chế này.
 

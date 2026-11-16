@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Streams und Dateien
 
 Stream-Traits und -Methoden, konkrete Stream-Typen, Dateioperationen und Pfadnamen. Netzwerk-Sockets sind
@@ -30,18 +30,18 @@ Jede Methode von `CharInput` hat eine Standardimplementierung. Eine Implementier
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Das nächste Element. `none` am Ende. **Die einzige Methode, die implementiert werden muss** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Das nächste Element. `None` am Ende. **Die einzige Methode, die implementiert werden muss** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Das nächste Zeichen |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | Bis zum nächsten Zeilenumbruch (der Zeilenumbruch wird verbraucht und entfernt). Auch eine letzte Zeile, die nicht mit einem Zeilenumbruch endet, wird zurückgegeben |
 | `read-all` | `(read-all s)` | `(S)→string` | Alles, was übrig ist |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Nur ein Zeichen, das bereits vorliegt. Lieber `none` als warten |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Nur ein Zeichen, das bereits vorliegt. Lieber `None` als warten |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Legt bis zu `n` Zeichen auf `v` und gibt zurück, wie viele tatsächlich gelesen wurden. Weniger als `n` nur am Ende |
 
 `listen` liegt in `InputStream` (dem Eltern-Trait von `CharInput`):
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Ob das nächste Lesen ohne Warten beantwortet werden kann. Der Standard ist `false`, **die Seite, die nie lügt**: `true` wäre eine Vermutung, und eine falsche Vermutung würde `read-char-no-hang` blockieren lassen. Alle eingebauten Streams überschreiben es. **Bei benutzerdefinierten Streams, die es nicht überschreiben, gibt `read-char-no-hang` immer `none` zurück** |
+| `listen` | `(listen s)` | `(S)→bool` | Ob das nächste Lesen ohne Warten beantwortet werden kann. Der Standard ist `false`, **die Seite, die nie lügt**: `true` wäre eine Vermutung, und eine falsche Vermutung würde `read-char-no-hang` blockieren lassen. Alle eingebauten Streams überschreiben es. **Bei benutzerdefinierten Streams, die es nicht überschreiben, gibt `read-char-no-hang` immer `None` zurück** |
 
 `PeekInput` (erbt von `CharInput`) fügt **das Zurückstellen eines Zeichens** hinzu. Nur der Stream selbst hat
 einen Ort, an dem er das zurückgestellte Zeichen aufbewahren kann, daher kann dies keine
@@ -91,7 +91,7 @@ hat. Man bleibt bei einem von beiden.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` ist eine der drei Konstanten `direction-input` / `direction-output` / `direction-append`.
-`open-file` gibt `(err FileError)` zurück, wenn sich die Datei nicht öffnen lässt (eine fehlende Datei ist ein
+`open-file` gibt `(Err FileError)` zurück, wenn sich die Datei nicht öffnen lässt (eine fehlende Datei ist ein
 gewöhnliches Ergebnis, kein Panic). Der Dateiname kann eine Zeichenkette oder ein `pathname` sein (`Pathish`
 in Kapitel 9).
 
@@ -103,7 +103,7 @@ ihn. Wie in CL lässt es sich auch nach `close` noch herausholen.
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Das nächste Byte. `none` am Dateiende |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Das nächste Byte. `None` am Dateiende |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Schreibt ein Byte. Ein Fehler außerhalb von 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | Die Zeichenfassung, in Bytes |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | Wie oben |
@@ -139,18 +139,18 @@ Alle sind `defstruct`s der Standardbibliothek und lassen sich verschachteln.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Überträgt alles |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Alle verbleibenden Zeilen |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Liest ein `Sexpr` (CLs `read`). `(ok eof)` am Ende der Eingabe, `(ok (datum d))`, wenn eines gelesen wurde, `err`, wenn es keine Daten sind. Es **verbraucht das eine Leerraumzeichen**, das das Datum beendet hat (wie in CL). `ReadOutcome` ist kein `Option<Sexpr>`, damit das Lesen der leeren Liste `()` und das Ende der Eingabe nicht derselbe Wert sind |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Liest ein `Sexpr` (CLs `read`). `(Ok eof)` am Ende der Eingabe, `(Ok (Datum d))`, wenn eines gelesen wurde, `Err`, wenn es keine Daten sind. Es **verbraucht das eine Leerraumzeichen**, das das Datum beendet hat (wie in CL). `ReadOutcome` ist kein `Option<Sexpr>`, damit das Lesen der leeren Liste `()` und das Ende der Eingabe nicht derselbe Wert sind |
 | `read-sexpr-preserving-whitespace` | Wie oben | Wie oben | Dasselbe, lässt aber den Leerraum stehen (CLs `read-preserving-whitespace`) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Liest bis `ch` und bildet eine Liste. `ch` wird verbraucht. `err`, wenn die Eingabe zu Ende geht |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Liest bis `ch` und bildet eine Liste. `ch` wird verbraucht. `Err`, wenn die Eingabe zu Ende geht |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Schreibt Zeile für Zeile |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Der ganze Inhalt |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Alle Zeilen |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Schreibt ihn hinaus |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Ob sie existiert |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Löschen, umbenennen (Argumente sind `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Der absolute Pfad mit aufgelösten symbolischen Links und `.`/`..`. `err`, wenn er nicht existiert |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Der absolute Pfad mit aufgelösten symbolischen Links und `.`/`..`. `Err`, wenn er nicht existiert |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Der Zeitpunkt der letzten Änderung. Es ist **Universalzeit**, daher kann `decode-universal-time` ([Zeit](system.md#2-datumsangaben-zerlegen-und-zusammensetzen)) sie lesen |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Der Anmeldename des Besitzers. `err`, wenn die Datei nicht existiert, `(ok none)`, wenn die uid des Besitzers keinen Eintrag in der Passwortdatenbank hat: Die beiden Fälle, die CL unterscheidet, bleiben getrennt |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Der Anmeldename des Besitzers. `Err`, wenn die Datei nicht existiert, `(Ok none)`, wenn die uid des Besitzers keinen Eintrag in der Passwortdatenbank hat: Die beiden Fälle, die CL unterscheidet, bleiben getrennt |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Ob es ein Verzeichnis ist. **Auch `false`, wenn es nicht existiert**; um beides zu unterscheiden, verwendet man `probe-file` |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Listet den Inhalt nach truename auf (der absolute Pfad mit aufgelösten symbolischen Links, wie bei `truename`). Symbolische Links, deren Ziel fehlt, werden ausgelassen. `.`/`..` werden ausgelassen. Die Reihenfolge ist die, die das BS liefert |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Legt es samt Eltern an. Gelingt, wenn es bereits existiert |
@@ -204,8 +204,8 @@ Ein in Teile zerlegter Dateiname. Er hält die durch `/` getrennten Verzeichnisk
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   am letzten Punkt geteilt
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   am letzten Punkt geteilt
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -232,10 +232,10 @@ Zeichenkette übergibt, findet also kein Parsen statt.
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Zerlegt eine Zeichenkette in Teile. Ein abschließendes `/` (oder ein leerer Name) bedeutet „kein Name“, also ein Verzeichnis |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Baut einen aus genau den angegebenen Komponenten (alle `&key`). Ein weggelassener Name oder Typ bleibt „abwesend“ und ist etwas, das `merge-pathnames` ergänzt |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Die Verzeichniskomponenten, die äußerste zuerst |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Der Name ohne den Typ. `none` bei einem Verzeichnis |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Der Name ohne den Typ. `None` bei einem Verzeichnis |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Nach dem letzten Punkt. Ein führender Punkt zählt nicht (ganz `.gitignore` ist der Name) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Ob er an der Wurzel beginnt |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Das Home-Verzeichnis. `none`, wenn es kein `$HOME` gibt (CL erlaubt auch `NIL`) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Das Home-Verzeichnis. `None`, wenn es kein `$HOME` gibt (CL erlaubt auch `NIL`) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Der Teil bis zum letzten `/` |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Nur der Teil `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Ergänzt die in `p` fehlenden Komponenten aus `default`. Ein relatives `p` kommt unter das Verzeichnis von `default`; ein absolutes `p` behält sein eigenes Verzeichnis |

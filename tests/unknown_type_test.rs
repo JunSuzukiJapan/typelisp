@@ -23,7 +23,7 @@ fn assert_unknown(src: &str, name: &str) {
 
 #[test]
 fn a_type_defined_later_is_reported_by_name() {
-    assert_unknown("(defenum link (no-link) (to node)) (defstruct node (v int) (next link))", "node");
+    assert_unknown("(defenum link (No-link) (to node)) (defstruct node (v int) (next link))", "node");
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn a_trait_s_type_variables_are_self_and_its_associated_types() {
 #[test]
 fn a_type_may_name_itself() {
     let src = "(defstruct node (v int) (next Option<node>))
-               (let ((a (make-instance 'node :v 1 :next (Option::none)))) (progn (setf a::next (Option::some a)) a::v))";
+               (let ((a (make-instance 'node :v 1 :next (Option::None)))) (progn (setf a::next (Option::Some a)) a::v))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
@@ -104,7 +104,7 @@ fn a_type_may_name_itself() {
 fn a_mismatch_names_types_as_they_are_written() {
     let err = check_err("(defun f () int true)");
     assert!(err.contains("expected `int`, found `bool`"), "{}", err);
-    let err = check_err("(defun f () Vector<int> (the Option<string> (Option::none)))");
+    let err = check_err("(defun f () Vector<int> (the Option<string> (Option::None)))");
     assert!(err.contains("expected `Vector<int>`, found `Option<string>`"), "{}", err);
 }
 

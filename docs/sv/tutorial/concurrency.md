@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Samtidighet
 
 I typelisp kör man arbete samtidigt genom att starta **tasks** (lättviktstrådar), och tasks skickar
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` skickar. Om kanalen är full väntar den tills det finns plats.
 - `(recv ch)` tar emot. Den väntar tills ett värde kommer. Resultatet är ett `Option<T>`; när kanalen är
-  stängd och tom returnerar den `none`.
+  stängd och tom returnerar den `None`.
 - Att iterera över en kanal med `doiter` fortsätter ta emot värden tills den stängs. Den kan också
   skickas direkt till `map` eller `filter`.
 - `send` på en stängd kanal ger panic.

@@ -3,7 +3,7 @@
 //! `typeck::lambda_list` registers each `&optional`/`&key`
 //! parameter as a `typeck::registry::OptKeyParam` (its declared type plus a
 //! checked default expression, if written); `typeck::args`
-//! resolves every call site — filling in a default or `Option::none` for
+//! resolves every call site — filling in a default or `Option::None` for
 //! whatever's omitted, auto-wrapping a supplied value into `Some` for a
 //! defaultless parameter — into an ordinary fully-saturated `Expr::Call`, so
 //! the compile pipeline (exercised by the `_compiled` variants below) never
@@ -220,12 +220,12 @@ fn generic_optional_where_bound_is_validated() {
 #[test]
 fn generic_key_default_referencing_type_param_is_rejected() {
     // `x`'s declared type `Option<T>` mentions `f`'s own type parameter, and
-    // it has a default (`(Option::none)`) — rejected by `Checker::
+    // it has a default (`(Option::None)`) — rejected by `Checker::
     // check_defun_opt_key`'s `type_has_param` restriction (see the module's
     // doc comment for why: a call site that omits `x` would splice this
     // default's checked `Typed` node in verbatim, and its `.ty` would stay
     // the abstract `Option<T>` instead of the call's concrete instantiation).
-    let msg = check_err("(defun f<T> (&key (x Option<T> (Option::none))) Option<T> x)");
+    let msg = check_err("(defun f<T> (&key (x Option<T> (Option::None))) Option<T> x)");
     assert!(msg.contains("may not default"), "unexpected message: {}", msg);
 }
 
@@ -307,7 +307,7 @@ fn method_defaultless_optional_arrives_as_an_option() {
         (defstruct counter (n int))
         (impl counter
   (defmethod bump (self &optional (by int)) int
-            (match by ((some k) (+ self::n k)) ((none) self::n))))
+            (match by ((Some k) (+ self::n k)) ((None) self::n))))
         (+ (bump (make-instance 'counter :n 10)) (bump (make-instance 'counter :n 10) 5))
     ";
     assert_eq!(eval_ok(src), Value::Int(25));
@@ -504,8 +504,8 @@ fn a_defaultless_optional_is_an_option_in_the_function_value_too() {
     // Inside the body such a parameter is `Option<T>`; a function value's
     // caller sees the same type, since it is the same parameter.
     let src = "(defun tag ((n int) &optional (extra int)) int
-                 (match extra ((some e) (+ n e)) ((none) n)))
-               (defun call2 ((f (fn (int Option<int>) int))) int (f 10 (Option::some 5)))
+                 (match extra ((Some e) (+ n e)) ((None) n)))
+               (defun call2 ((f (fn (int Option<int>) int))) int (f 10 (Option::Some 5)))
                (call2 tag)";
     assert_eq!(eval_ok(src), Value::Int(15));
 }

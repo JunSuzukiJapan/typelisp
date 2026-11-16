@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Обробка помилок
 
 Обробка помилок у typelisp ділить збої на два види.
@@ -6,7 +6,7 @@
 | Вид збою | Приклади | Як виражається |
 |---|---|---|
 | Збої, що можуть статися (відновлювані) | Файлу немає, ввід не є числом | Повернути `Result<T,E>` |
-| Помилки в програмі (невідновлювані) | Індекс поза межами, `unwrap` для `none`, ділення на нуль | Зупинитися через `panic` |
+| Помилки в програмі (невідновлювані) | Індекс поза межами, `unwrap` для `None`, ділення на нуль | Зупинитися через `panic` |
 
 Крім цього, є `catch` / `throw`, що залишають одразу багато викликів функцій, і `unwind-protect`, що
 виконує очищення, як би не залишили його тіло. Цей розділ припускає, що ви прочитали розділ про `Result`
@@ -21,22 +21,22 @@
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 Викликач відокремлює успіх від невдачі через `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- Значення функції, що повертає `Result`, не можна використати, якщо `match` не обробляє випадок `err`.
+- Значення функції, що повертає `Result`, не можна використати, якщо `match` не обробляє випадок `Err`.
   Забути обробити невдачу — це помилка типів.
 - Помилка від `parse-int` — це значення типу `ParseIntError`. `(message e)` дає її рядок повідомлення.
 
@@ -48,17 +48,17 @@
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 Коли ви знаєте, що операція не може зазнати невдачі, або в невеликому скрипті, де зупинка при невдачі
-припустима, `unwrap` виймає вміст. Якщо значення — `err`, він завершується через panic. Якщо
+припустима, `unwrap` виймає вміст. Якщо значення — `Err`, він завершується через panic. Якщо
 достатньо типового значення, використовуйте `unwrap-or`.
 
 ## 3. Створення власного типу помилки
@@ -68,24 +68,24 @@
 
 ```lisp
 (defenum config-error
-  (missing string)          ; a setting is missing
-  (invalid string int))     ; a value is wrong
+  (Missing string)          ; a setting is missing
+  (Invalid string int))     ; a value is wrong
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` повертає опис помилки.
-- `source` повертає іншу помилку, яка спричинила цю. Якщо причини немає, це `none`.
+- `source` повертає іншу помилку, яка спричинила цю. Якщо причини немає, це `None`.
 
 ## 4. Поєднання різних видів помилок
 
@@ -98,8 +98,8 @@
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 Для `"4"`, `"-1"` і `"abc"` результати такі:
@@ -129,7 +129,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - Тип `panic` — це `!` (він не повертається), тож його можна писати всюди, де очікується будь-який тип.
   Тому дві гілки наведеного вище `if` узгоджуються.
-- Також завершуються через panic такі операції: `unwrap` для `none` або `err`, `get` з індексом поза
+- Також завершуються через panic такі операції: `unwrap` для `None` або `Err`, `get` з індексом поза
   межами та цілочисельне ділення на нуль.
 - `panic` зупиняє програму. Навіть коли це відбувається всередині задачі, зупиняється вся програма.
 - У REPL `panic` не завершує REPL; він чекає наступного вводу.
@@ -197,8 +197,8 @@ error: main.typl:4:7: panic: index 3 out of range
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: завжди очищати

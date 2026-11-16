@@ -15,8 +15,8 @@
   (println "~a connected" (peer-address c))
   (loop
     (match (read-line c)
-      ((none) (break))
-      ((some line)
+      ((None) (break))
+      ((Some line)
        (if (equal line "quit")
            (break)
            (write-line c line)))))
@@ -26,8 +26,8 @@
 (defun accept-loop ((l socket-listener)) ()
   (loop
     (match (accept l)
-      ((ok c) (progn (task (serve c)) ()))
-      ((err e) (println "accept failed: ~a" (message e))))))
+      ((Ok c) (progn (task (serve c)) ()))
+      ((Err e) (println "accept failed: ~a" (message e))))))
 
 (defun heartbeat () ()
   (loop
@@ -38,8 +38,8 @@
   (let ((args (command-line-args)))
     (let ((port (if (> (len args) 1) (unwrap-or (parse-int (get args 1)) 7777) 7777)))
       (match (tcp-listen "0.0.0.0" port)
-        ((err e) (println "cannot listen: ~a" (message e)))
-        ((ok l)
+        ((Err e) (println "cannot listen: ~a" (message e)))
+        ((Ok l)
          (println "echo server on ~a" (local-address l))
          (task (heartbeat))
          (accept-loop l))))))

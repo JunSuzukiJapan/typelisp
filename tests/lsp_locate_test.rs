@@ -118,7 +118,7 @@ fn goto_definition_on_a_labels_function_and_parameter_resolves_to_their_bindings
 
 #[test]
 fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() {
-    let src = "(defun f ((o Option<int>)) int (match o ((some x) x) (_ 0)))\n";
+    let src = "(defun f ((o Option<int>)) int (match o ((Some x) x) (_ 0)))\n";
     let (h, body, def_locs, _docs) = program(src);
     // Column 51 is the arm body's `x` reference; its pattern binding — the
     // `x` inside `(Some x)` — is at column 48 (`check_ctor_pattern`'s

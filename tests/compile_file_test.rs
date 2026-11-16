@@ -256,8 +256,8 @@ fn the_entry_files_types_print_with_its_module_as_under_typl() {
            (defun main () ()
              (println "~s" (make-instance 'point :x 1 :y 2))
              (match (eval (quote (make-instance 'point :x 3 :y 4)))
-               ((ok v) (println "~s" v))
-               ((err e) (println "~a" (message e)))))
+               ((Ok v) (println "~s" v))
+               ((Err e) (println "~a" (message e)))))
            (main)"#,
     )
     .expect("failed to write test source file");
@@ -278,7 +278,7 @@ fn an_enum_variant_name_survives_an_instantiated_key_in_an_executable() {
         compile_and_run(
             "enum_variant_key",
             r#"(defun main () int
-                 (if (equal (format false "~a" (Option::some 1)) "(some 1)") 0 1))"#,
+                 (if (equal (format false "~a" (Option::Some 1)) "(Some 1)") 0 1))"#,
         ),
         0
     );
@@ -1208,8 +1208,8 @@ fn an_aot_executable_evaluates_a_form_at_runtime() {
             r#"
             (defun main () int
               (match (eval (quote (+ 40 2)))
-                ((ok v) (as int (sexpr-int v)))
-                ((err _) -1)))
+                ((Ok v) (as int (sexpr-int v)))
+                ((Err _) -1)))
             "#
         ),
         42
@@ -1228,8 +1228,8 @@ fn an_aot_executable_evaluates_a_call_to_its_own_function() {
             (defun double ((n int)) int (* n 2))
             (defun main () int
               (match (eval (quote (double 21)))
-                ((ok v) (as int (sexpr-int v)))
-                ((err _) -1)))
+                ((Ok v) (as int (sexpr-int v)))
+                ((Err _) -1)))
             "#
         ),
         42
@@ -1251,8 +1251,8 @@ fn an_aot_executable_evaluates_a_read_of_a_global_the_program_wrote() {
               (progn
                 (setf counter 42)
                 (match (eval (quote counter))
-                  ((ok v) (as int (sexpr-int v)))
-                  ((err _) -1))))
+                  ((Ok v) (as int (sexpr-int v)))
+                  ((Err _) -1))))
             "#
         ),
         42
@@ -1294,8 +1294,8 @@ fn an_aot_executable_runs_each_defvar_initializer_once() {
             (defvar (v int) (bump))
             (defun main () int
               (match (eval (quote times))
-                ((ok r) (as int (sexpr-int r)))
-                ((err _) -1)))
+                ((Ok r) (as int (sexpr-int r)))
+                ((Err _) -1)))
             "#
         ),
         1
@@ -1314,8 +1314,8 @@ fn an_aot_executable_keeps_definitions_made_by_an_evaluated_form() {
               (progn
                 (eval (quote (defun tripled ((n int)) int (* n 3))))
                 (match (eval (quote (tripled 14)))
-                  ((ok v) (as int (sexpr-int v)))
-                  ((err _) -1))))
+                  ((Ok v) (as int (sexpr-int v)))
+                  ((Err _) -1))))
             "#
         ),
         42
@@ -1342,8 +1342,8 @@ fn an_evaluated_task_runs_while_the_program_waits() {
             (defun main () int
               (progn
                 (match (eval (quote (task (mark))))
-                  ((ok _) ())
-                  ((err _) ()))
+                  ((Ok _) ())
+                  ((Err _) ()))
                 (sleep 0.05)
                 (if (equal trail "e") 0 1)))
             "#
@@ -1472,8 +1472,8 @@ fn an_evaluated_form_resolves_a_used_module() {
         (use eval_used_lib)
         (defun main () int
           (match (eval (quote (eval_used_lib::helper 5)))
-            ((ok v) (as int (sexpr-int v)))
-            ((err _) -1)))
+            ((Ok v) (as int (sexpr-int v)))
+            ((Err _) -1)))
         "#,
     )
     .expect("failed to write test source file");
@@ -1559,8 +1559,8 @@ fn an_aot_executable_instantiates_a_generic_from_a_restored_template() {
             r#"
             (defun main () int
               (match (eval (quote (if (is-some (pathname-name "/a/b.txt")) 42 0)))
-                ((ok v) (as int (sexpr-int v)))
-                ((err _) -1)))
+                ((Ok v) (as int (sexpr-int v)))
+                ((Err _) -1)))
             "#
         ),
         42
@@ -1580,8 +1580,8 @@ fn an_aot_executable_expands_a_prelude_macro_from_a_snapshot() {
             r#"
             (defun main () int
               (match (eval (quote (length (with-output-to-string (s) (write-string s "hello")))))
-                ((ok v) (as int (sexpr-int v)))
-                ((err _) -1)))
+                ((Ok v) (as int (sexpr-int v)))
+                ((Err _) -1)))
             "#
         ),
         5
@@ -1670,8 +1670,8 @@ fn the_system_information_builtins_run_in_an_executable() {
   (let ((host (is-some (machine-instance)))
         (rel (is-some (software-version)))
         (cpu (> (internal-time-seconds (get-internal-run-time)) 0.0))
-        (zone (match (timezone-offset-seconds 46000 0) ((some _) true) ((none) false)))
-        (dst (match (timezone-daylight-p 46000 0) ((some _) true) ((none) false)))
+        (zone (match (timezone-offset-seconds 46000 0) ((Some _) true) ((None) false)))
+        (dst (match (timezone-daylight-p 46000 0) ((Some _) true) ((None) false)))
         (owner (is-ok (file-author "Cargo.toml"))))
     (if (and host (and rel (and cpu (and zone (and dst owner))))) 0 1)))
 "#;
@@ -1780,8 +1780,8 @@ fn channels_and_select_run_in_a_standalone_executable() {
            (defun drain ((ch Chan<int>)) int
              (let ((acc 0))
                (loop (match (recv ch)
-                       ((none) (return acc))
-                       ((some v) (setf acc (+ acc v)))))))
+                       ((None) (return acc))
+                       ((Some v) (setf acc (+ acc v)))))))
            (defun main () int
              (let ((r (the Chan<int> (Chan::new 0)))
                    (b (the Chan<string> (Chan::new 1))))
@@ -1789,7 +1789,7 @@ fn channels_and_select_run_in_a_standalone_executable() {
                (send b "x")
                (let ((sum (drain r))
                      (picked (select ((v (recv r)) "r") ((v (recv b)) (format false "b=~a" v)))))
-                 (if (and (= sum 3) (equal picked "b=(some x)")) 0 1))))"#,
+                 (if (and (= sum 3) (equal picked "b=(Some x)")) 0 1))))"#,
     );
     assert_eq!(code, 0, "stderr was: {}", err);
 }
@@ -1827,8 +1827,8 @@ fn a_defvar_initialiser_may_make_a_channel_in_a_standalone_executable() {
            (defun main () int
              (progn (send ch 5)
                     (match (recv ch)
-                      ((some v) (if (= v 5) 0 1))
-                      ((none) 2))))"#,
+                      ((Some v) (if (= v 5) 0 1))
+                      ((None) 2))))"#,
     );
     assert_eq!(code, 0, "stderr was: {}", err);
 }
@@ -1866,7 +1866,7 @@ fn a_print_object_method_may_use_a_channel_in_a_standalone_executable() {
         &[],
     );
     assert_eq!(code, Some(0), "stderr was: {}", err);
-    assert_eq!(out.trim(), "#<p 1 (some 7)>");
+    assert_eq!(out.trim(), "#<p 1 (Some 7)>");
 }
 
 /// The same door, but the operation genuinely would have to wait (an empty,
@@ -1920,19 +1920,19 @@ fn an_echo_server_runs_in_a_standalone_executable() {
         r#"(use std::env::command-line-args std::net::socket-stream std::net::tcp-listen std::num::parse-int) (defun serve ((c socket-stream)) int
              (loop
                (match (read-line c)
-                 ((none) (break))
-                 ((some line) (write-line c line))))
+                 ((None) (break))
+                 ((Some line) (write-line c line))))
              (close c)
              0)
            (defun main () int
              (let ((args (command-line-args)))
                (let ((port (unwrap-or (parse-int (get args 1)) 0)))
                  (match (tcp-listen "127.0.0.1" port)
-                   ((err e) 2)
-                   ((ok l)
+                   ((Err e) 2)
+                   ((Ok l)
                     (match (accept l)
-                      ((err e) 3)
-                      ((ok c) (wait (task (serve c))))))))))"#,
+                      ((Err e) 3)
+                      ((Ok c) (wait (task (serve c))))))))))"#,
     );
     // A free port, found the usual racy way: bind to 0, read it back, let go.
     let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
@@ -1993,11 +1993,11 @@ fn an_eval_carrying_program_runs_main_once_and_never_at_compile_time() {
         r#"(use std::fs::direction-append) 
         (defun main () ()
           (match (with-open-file (o "{}" direction-append) (write-string o "x"))
-            ((ok _) ())
-            ((err e) (panic (message e))))
+            ((Ok _) ())
+            ((Err e) (panic (message e))))
           (match (eval (quote (+ 1 2)))
-            ((ok _) ())
-            ((err e) (panic (message e)))))
+            ((Ok _) ())
+            ((Err e) (panic (message e)))))
         (main)
         "#,
         marks_s
@@ -2021,8 +2021,8 @@ fn an_eval_carrying_unit_main_exits_zero() {
         r#"
         (defun main () ()
           (match (eval (quote (+ 1 2)))
-            ((ok _) ())
-            ((err e) (panic (message e)))))
+            ((Ok _) ())
+            ((Err e) (panic (message e)))))
         "#,
     );
     assert_eq!(code, 0, "stderr was: {}", err);
@@ -2040,10 +2040,10 @@ fn an_aot_executable_evaluates_a_struct_to_itself() {
         (defun main () int
           (let ((v (make-instance 'q :x 7)))
             (match (eval v)
-              ((ok s) (match s
+              ((Ok s) (match s
                         ((the q w) (progn (setf w::x 8) (as int v::x)))
                         (_ -1)))
-              ((err _) -2))))
+              ((Err _) -2))))
         "#,
     );
     assert_eq!(code, 8, "stderr was: {}", err);
@@ -2062,8 +2062,8 @@ fn an_eval_carrying_program_can_use_a_macro_that_calls_gensym() {
         (defun main () int
           (let ((s (with-output-to-string (o) (write-string o "ab"))))
             (match (eval (quote (+ 1 2)))
-              ((ok _) (length s))
-              ((err _) -1))))
+              ((Ok _) (length s))
+              ((Err _) -1))))
         "#,
     );
     assert_eq!(code, 2, "stderr was: {}", err);
@@ -2264,8 +2264,8 @@ fn pop_drains_each_collection_in_a_compiled_executable() {
              (let ((out (the Vector<T> (Vector::new))) (more true))
                (while more
                  (match (pop c)
-                   ((some x) (push out x))
-                   ((none) (progn (setf more false) ()))))
+                   ((Some x) (push out x))
+                   ((None) (progn (setf more false) ()))))
                out))
            (defun main () int
              (let ((v (the Vector<int> #(1 2 3)))
@@ -2283,7 +2283,7 @@ fn pop_drains_each_collection_in_a_compiled_executable() {
         &[],
     );
     assert_eq!(code, Some(0), "stderr was: {}", err);
-    assert_eq!(out.trim(), "#((some 6) (some 2)) #(3 2 1)\n#(1 0) #(5)");
+    assert_eq!(out.trim(), "#((Some 6) (Some 2)) #(3 2 1)\n#(1 0) #(5)");
 }
 
 /// A connection to the server `child` starts on `port`, once it listens.

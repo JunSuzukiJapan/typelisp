@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -30,8 +30,8 @@ Không có kiểu số nguyên 64 bit. Với các số nguyên mà độ rộng 
 
 | Kiểu | Nội dung | Chi tiết |
 |---|---|---|
-| `Option<T>` | Một giá trị có mặt hoặc không. `some` / `none` | [Option và Result](functions/option-result.md) |
-| `Result<T,E>` | Thành công hoặc thất bại. `ok` / `err` | Như trên |
+| `Option<T>` | Một giá trị có mặt hoặc không. `Some` / `None` | [Option và Result](functions/option-result.md) |
+| `Result<T,E>` | Thành công hoặc thất bại. `Ok` / `Err` | Như trên |
 | `Vector<T>` | Một mảng có thể tăng trưởng | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Bảng băm. Cách so sánh khóa do `:test` quyết định khi tạo, và trong bảng `equal` kiểu khóa phải cài đặt `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tuple (1 đến 12 phần tử). Phần tử được đọc bằng `t::0` | [Cú pháp chương 2](syntax.md#2-cách-viết-kiểu) |
@@ -46,8 +46,8 @@ sách `(T U ...)` (cùng kiểu với `cons-cell<T,cons-cell<U,()>>`) ([Tham chi
 
 | Kiểu | Nội dung | Chi tiết |
 |---|---|---|
-| `Sexpr` | Một S-expression không rỗng. 19 variant: `int`, `i8` đến `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Dữ liệu S-expression](functions/sequences.md#2-dữ-liệu-s-expression-sexpr) |
-| `Option<Sexpr>` | Dữ liệu S-expression nói chung. Danh sách rỗng `()` là `none` | Như trên |
+| `Sexpr` | Một S-expression không rỗng. 19 variant: `Int`, `I8` đến `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [Dữ liệu S-expression](functions/sequences.md#2-dữ-liệu-s-expression-sexpr) |
+| `Option<Sexpr>` | Dữ liệu S-expression nói chung. Danh sách rỗng `()` là `None` | Như trên |
 
 ## 4. Các kiểu trong thư viện chuẩn
 
@@ -72,7 +72,7 @@ như các kiểu bạn tự viết, và mọi thứ bạn làm được với m�
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Các stream | [Stream](functions/streams-files.md#3-các-kiểu-stream-cụ-thể) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Các stream tổ hợp | [Stream tổ hợp](functions/streams-files.md#4-các-stream-tổ-hợp) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Mạng | [Mạng](functions/network.md#1-kiểu) |
-| `ReadOutcome` | Kết quả của `read-sexpr`. `datum` / `eof` | [Stream](functions/streams-files.md#6-hàm-generic-và-thao-tác-tệp) |
+| `ReadOutcome` | Kết quả của `read-sexpr`. `Datum` / `Eof` | [Stream](functions/streams-files.md#6-hàm-generic-và-thao-tác-tệp) |
 | `universal-time` `internal-time` `decoded-time` | Thời gian | [Thời gian](functions/system.md#1-thời-gian) |
 | `heap-info` | Trạng thái hiện tại của heap | [Công cụ triển khai](functions/system.md#51-các-trường-của-heap-info) |
 

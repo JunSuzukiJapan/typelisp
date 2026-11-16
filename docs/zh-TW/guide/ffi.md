@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # C FFI（defffi）
 
 本指南說明如何從 typelisp 呼叫 C 函式。可以宣告的型別與限制一覽見[語法參考 3.3](../reference/syntax.md#33-defffi--宣告-c-函式ffi)。
@@ -61,7 +61,7 @@
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int 不會失去 64 位元的值
-(try-as i32 (unsafe (c-strlen s)))  ; 放不進 i32 時為 none
+(try-as i32 (unsafe (c-strlen s)))  ; 放不進 i32 時為 None
 (unsafe (c-malloc 16))              ; 整數字面值可以直接傳遞
 ```
 

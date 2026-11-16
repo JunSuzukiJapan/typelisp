@@ -83,7 +83,7 @@ fn keywords_are_case_sensitive_like_every_other_symbol() {
 fn a_keyword_can_be_stored_in_a_sexpr_datum() {
     // The `Symbol -> Sexpr` transparent retype already in `check_inner`
     // covers this — a keyword needs no wrapping constructor.
-    let out = eval_string("(use std::symbol::symbol->string) (match (sexpr-car (list :a :b)) ((sym s) (symbol->string s)) (_ \"not a symbol\"))");
+    let out = eval_string("(use std::symbol::symbol->string) (match (sexpr-car (list :a :b)) ((Sym s) (symbol->string s)) (_ \"not a symbol\"))");
     assert_eq!(out, "a");
 }
 

@@ -66,14 +66,14 @@ fn values_are_evaluated_in_the_order_written() {
 }
 
 /// A value is typed by its slot, written in slot order or not: a bare
-/// `(Option::none)` needs the slot's type to know what it holds.
+/// `(Option::None)` needs the slot's type to know what it holds.
 #[test]
 fn a_value_is_typed_by_its_slot() {
     both(
-        r##"(let ((a (make-instance 'Holder :o (Option::none) :n 1))
-                  (b (make-instance 'Holder :n 2 :o (Option::none))))
+        r##"(let ((a (make-instance 'Holder :o (Option::None) :n 1))
+                  (b (make-instance 'Holder :n 2 :o (Option::None))))
              (format false "~s ~s" a::o b::n))"##,
-        "none 2",
+        "None 2",
     );
 }
 

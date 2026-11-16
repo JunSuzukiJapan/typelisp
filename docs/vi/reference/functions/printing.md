@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -42,18 +42,18 @@ trình ghi ra đầu ra chuẩn bằng cách gọi các hàm này. `print`/`prin
 lần gọi (để một dấu nhắc hiện ra trước khi đọc đầu vào chuẩn, ngay cả qua một pipe).
 
 **`Option<Sexpr>` được in trong suốt.** Kiểu của dữ liệu S-expression là `Option<Sexpr>`, nên lớp bọc
-`(some x)` không xuất hiện trong đầu ra và nội dung được in nguyên trạng. Danh sách rỗng được in là `()`. Các
-`Option<T>` khác được in là `(some ...)` / `none`. Điều tương tự áp dụng cho các trường `Option<T>` bên trong
-struct, enum và `Vector`. Một `Result<Option<Sexpr>,…>` từ `(eval ...)` được in là `(ok 42)`, hoặc `(ok ())`
-với `none`.
+`(Some x)` không xuất hiện trong đầu ra và nội dung được in nguyên trạng. Danh sách rỗng được in là `()`. Các
+`Option<T>` khác được in là `(Some ...)` / `None`. Điều tương tự áp dụng cho các trường `Option<T>` bên trong
+struct, enum và `Vector`. Một `Result<Option<Sexpr>,…>` từ `(eval ...)` được in là `(Ok 42)`, hoặc `(Ok ())`
+với `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -308,10 +308,10 @@ Một vòng chỉ có thể được tạo bằng cách "cho một trường `de
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a trỏ vào chính a
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a trỏ vào chính a
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Các nhãn **bắt đầu lại từ 1 cho mỗi thứ được in** (như trong CL). Ngay cả khi không có vòng, nếu cùng một đối

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -69,23 +69,23 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   `Vector<int>`). Alle elementen moeten hetzelfde type hebben: `#(1 "a")` is een typefout, net als
   `#()` zonder elementen en zonder context. Elke evaluatie maakt een nieuwe vector. Waar
   S-expressiedata worden verwacht (`(the Option<Sexpr> #(1 x))`, `'#(..)`, wat `read` teruggeeft),
-  is het een `Vector<Option<Sexpr>>` waarvan alle elementen data zijn: de variant `vector` van
+  is het een `Vector<Option<Sexpr>>` waarvan alle elementen data zijn: de variant `Vector` van
   `Sexpr`.
 - **Arrays**: `#2A((1 2) (3 4))` (zoals in CL). Het getal tussen `#` en `A` is de rang, en evenveel
   eerste niveaus van lijstnesting in de inhoud zijn de dimensies. `#0A x` is een nuldimensionale
   array met één element. Lijsten op hetzelfde niveau met verschillende lengtes zijn een leesfout.
   Het type wordt bepaald zoals bij vectoren en is een `Array<T>` (zonder elementen moet de context
   het geven, zoals in `(the Array<f64> #2A(()))`). Als S-expressiedata is het een
-  `Array<Option<Sexpr>>`: de variant `array` van `Sexpr`.
+  `Array<Option<Sexpr>>`: de variant `Array` van `Sexpr`.
 - **Tuples**: `#{"foo" 123 45.6}`. De inhoud bestaat geheel uit literals en wordt niet geëvalueerd
   (de `a` van `#{a b}` is een symbool). Het type van elk element wordt per positie door de context
   bepaald (`(the #{i32 f64} #{1 2.0})`), en zonder context is het het eigen type van het element
   (`#{"foo" 123}` is `#{string int}`). Een tuple heeft 1 tot 12 elementen. Elke evaluatie maakt een
   nieuwe tuple. Om er een te bouwen uit berekende waarden gebruik je `(tuple a b)`. Waar
   S-expressiedata worden verwacht, is het een tuple waarvan alle elementen data zijn: de variant
-  `tuple` van `Sexpr`.
+  `Tuple` van `Sexpr`.
 - **Attributen**: `#[test]` is een markering die aan de volgende vorm vastzit (geschreven zoals in Rust). Het enige attribuut tot nu toe is `test`, en dat hoort bij een `defun` ([3.16 `#[test]`](#316-test--testfuncties)). Gelezen met `read` wordt het de lijst `(%internal::attribute (test) form)`.
-- **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `none` van
+- **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `None` van
   `Option<Sexpr>`. **`Sexpr` heeft geen variant voor de lege lijst**: `Sexpr` betekent "een niet-lege
   S-expressie", en het type van S-expressiedata is `Option<Sexpr>` (zie "Patronen voor
   `Option<Sexpr>`" in [4.3 match](#43-match--patroonherkenning)).
@@ -158,7 +158,7 @@ In de broncode worden types als gewone symbolen of lijsten geschreven.
   verwante trait worden doorgegeven.
   Voor de voorwaarden waaraan een trait moet voldoen om met `:dyn` te worden gebruikt, zie
   [3.9 deftrait / impl](#39-deftrait--impl--traits). `:dyn` buiten een typepositie schrijven is een fout.
-- Ingebouwde generieke types: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
+- Ingebouwde generieke types: `Option<T>` (`(Some T)` / `None`), `Result<T,E>` (`(Ok T)` / `(Err E)`),
   `HashTable<K,V>`, `Vector<T>`, en de gelijktijdigheidstypes `Task<T>` / `Thread<T>` / `Chan<T>`
   ([hoofdstuk 12](#12-gelijktijdigheid-taken)). Er is ook `Sexpr`, het type van S-expressiedata. De
   ingebouwde concrete foutentypes zijn `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -197,7 +197,7 @@ De namen van speciale vormen (gereserveerde woorden zoals `if`, `let` en `step`,
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; no default
-    (match suffix ((some s) (append name s)) ((none) name)))         ; Option<string> in the body
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; Option<string> in the body
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; with a default
   (pow 3)      ; n = 2
@@ -207,8 +207,8 @@ De namen van speciale vormen (gereserveerde woorden zoals `if`, `let` en `step`,
   (mk :b "q")  ; the caller writes `:name value`, in any order; omitted ones take their defaults
   ```
 
-  - **Een parameter zonder standaardexpressie heeft het type `Option<Type>`.** Weggelaten is hij `none`;
-    doorgegeven wordt de kale waarde die de aanroeper schreef automatisch in `some` gewikkeld. Wat CL met
+  - **Een parameter zonder standaardexpressie heeft het type `Option<Type>`.** Weggelaten is hij `None`;
+    doorgegeven wordt de kale waarde die de aanroeper schreef automatisch in `Some` gewikkeld. Wat CL met
     een supplied-p-variabele doet ("is hij opgegeven?") verschijnt in plaats daarvan aan de kant van het
     statische type.
   - Met een standaardexpressie blijft het type `Type` zoals gedeclareerd. Wanneer weggelaten, wordt die
@@ -424,7 +424,7 @@ variabelen. Elk van het volgende is een fout:
 
 ```lisp
 (defstruct handle (p ptr))          ; a struct field
-(defenum maybe (none) (some ptr))   ; an enum field
+(defenum maybe (None) (Some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
 (defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
@@ -898,8 +898,8 @@ Een lijst `(Name option...)` op de plaats van de naam geeft opties op (dezelfde 
 
 ; generic
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - Elke variant heeft de vorm `(VariantName FieldType...)`. Velden zijn alleen positioneel (ze hebben geen
@@ -910,8 +910,8 @@ Een lijst `(Name option...)` op de plaats van de naam geeft opties op (dezelfde 
   elke variant dekken of een `_` hebben):
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - Methoden en statische methoden worden in `impl` (3.5) geschreven, zoals bij `defstruct`.
 - Om de enum zelf `pub` te maken, schrijf je `(pub defenum ...)`.
@@ -1105,7 +1105,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
 - `module` maakt een naamruimte. **Types zijn geen naamruimten** (zoals in Rust heeft een type alleen statische
   methoden en methoden).
 - `(use Type)` haalt alleen de naam van het type binnen. De varianten van een enum en de statische
-  methoden schrijf je via de typenaam, zoals `Option::some` of `Chan::new`. Ook na
+  methoden schrijf je via de typenaam, zoals `Option::Some` of `Chan::new`. Ook na
   `(use std::sync::Chan)` is een kale `(new 1)` een fout, tenzij er ergens een functie met de naam `new`
   is gedefinieerd.
 - Om de constructors en statische methoden van een type onder de kale naam te gebruiken, haal je ze één
@@ -1116,7 +1116,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   (`(use std::sync::Chan::* std::sync::WaitGroup::*)` is een fout, want beide hebben `new`). Een naam
   binnenhalen die gelijk is aan een functie, globale variabele of macro die de module definieert, is ook
   een fout. Om bewust te vervangen gebruik je `shadowing-import`.
-- De standaardbibliotheek biedt `some`/`none` van `Option` en `ok`/`err` van `Result` aan elke module
+- De standaardbibliotheek biedt `Some`/`None` van `Option` en `Ok`/`Err` van `Result` aan elke module
   aan, dus ze zijn zonder `use` onder de kale naam te gebruiken (zoals de prelude van Rust
   `Some`/`None`/`Ok`/`Err` binnenhaalt).
 - **Een naam heeft één betekenis.** Functies, globale variabelen en macro's delen één naamruimte, en binnen
@@ -1128,7 +1128,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   1. Lokalen (parameters, en de bindingen van `let`, `labels`, `macrolet` en `symbol-macrolet`)
   2. Als de modulenaam `n` een macro is, die macro
   3. Constructors en statische methoden: de met `use` binnengehaalde, en de constructors van `Sexpr`
-     (`sym`, `int` enzovoort) en van `Option`/`Result` die de standaardbibliotheek aanbiedt
+     (`Sym`, `Int` enzovoort) en van `Option`/`Result` die de standaardbibliotheek aanbiedt
   4. De methode `n` van het type van het eerste argument (methoden worden **alleen via het type van het
      eerste argument** gezocht)
   5. Als de modulenaam `n` een functie of een globale variabele is, die (bij een globale variabele wordt de
@@ -1295,20 +1295,20 @@ regels en voorbeelden staan in
   (assert-equal (+ 1 2) 3))
 ```
 
-Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` of `Result<(), E>` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig. Een test die een `Result` teruggeeft, faalt door een `err` terug te geven, en de fout wordt getoond; daarom moet `E` `Error` of `print-object` implementeren (zoals Rust `Debug` vraagt van het fouttype van een test). Een `Error` wordt getoond met `describe-error` (het bericht en de keten van oorzaken), al het andere met `print-object`. Ook `:dyn Error` is een `Error`, dus een test kan verschillende fouten in één type verzamelen en teruggeven.
+Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` of `Result<(), E>` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig. Een test die een `Result` teruggeeft, faalt door een `Err` terug te geven, en de fout wordt getoond; daarom moet `E` `Error` of `print-object` implementeren (zoals Rust `Debug` vraagt van het fouttype van een test). Een `Error` wordt getoond met `describe-error` (het bericht en de keten van oorzaken), al het andere met `print-object`. Ook `:dyn Error` is een `Error`, dus een test kan verschillende fouten in één type verzamelen en teruggeven.
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **Een gewone run en `compile-file` slaan haar over**, zonder zelfs de inhoud te controleren (zoals Rust tests alleen onder `--test` compileert). Het programma zelf kan een testfunctie niet aanroepen.
 - Een test kan in elk bestand staan dat functies bevat, binnen elke `module`. Tests kunnen ook apart in de map `tests/` van het project staan.
-- Een test faalt door een `panic`, een runtimefout of het teruggeven van een `err`. Controleer met `assert`, of met `assert-equal`, dat beide kanten afdrukt ([Systeem](functions/system.md)). Als één test faalt, lopen de andere toch.
+- Een test faalt door een `panic`, een runtimefout of het teruggeven van een `Err`. Controleer met `assert`, of met `assert-equal`, dat beide kanten afdrukt ([Systeem](functions/system.md)). Als één test faalt, lopen de andere toch.
 
 ```sh
 typl test                 # voer alle tests van het project in deze map uit
@@ -1449,8 +1449,8 @@ Soorten patronen:
 - Een variabelenaam — een bindingspatroon (komt altijd overeen). Als het type van de scrutinee echter een
   variant met die naam heeft, wordt het opgelost als **het onderstaande patroon met kale variantnaam**
 - Een kale variantnaam — komt overeen met een variant die geen argumenten neemt
-  (`(match c (red 1) (blue 2))`). Een variant met velden op kale naam schrijven is een arityfout, dus
-  schrijf hem tussen haakjes, zoals in `(circle r)`
+  (`(match c (Red 1) (Blue 2))`). Een variant met velden op kale naam schrijven is een arityfout, dus
+  schrijf hem tussen haakjes, zoals in `(Circle r)`
 - **Directe literals**: gehele getallen / `true`/`false` / tekens — als woorden vergeleken
 - **Waardeliterals**: strings / drijvendekommagetallen / symbolen (`'foo`) / bignum-gehele getallen /
   ratio's — op waarde vergeleken met de `equal` van dat type
@@ -1461,7 +1461,7 @@ Soorten patronen:
   berekende resultaten), en een door de gebruiker gedefinieerde `Equal`-implementatie wordt zoals ze is de
   vergelijkingsregel. `expr` kan naar alles verwijzen wat zichtbaar is vanaf de positie van de tak
   (argumenten, buitenste bindingen, globale variabelen)
-- `(Ctor sub-pattern...)` — constructorpatronen (`(some x)` `(none)` `(cons a d)` `(ok v)` enzovoort)
+- `(Ctor sub-pattern...)` — constructorpatronen (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` enzovoort)
 - `(Type :slot pattern... :slot...)` — structpatronen. Schrijf de slots na de typenaam als sleutelwoorden.
   Volgt op een sleutelwoord een patroon, dan wordt dat slot met het patroon vergeleken; volgt er een ander
   sleutelwoord of niets, dan wordt het slot gebonden aan een variabele met zijn eigen naam. Niet-geschreven
@@ -1472,14 +1472,14 @@ Soorten patronen:
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; bindt x, en vergelijkt y met (some b)
+      ((point :x :y (Some b)) (+ x b))   ; bindt x, en vergelijkt y met (Some b)
       ((point :x a) a)))                 ; bindt a
   ```
 - `#{p0 p1 ...}` — een tuplepatroon. Elk element wordt met zijn eigen deelpatroon vergeleken. Tegen
   een `Sexpr` past het alleen op `#{..}`-data met hetzelfde aantal elementen
 - `(:or p1 p2 ...)` — een of-patroon: het past zodra een van de alternatieven past. Er is één body,
   dus elk alternatief moet dezelfde variabelen met dezelfde typen binden. Het kan ook binnen een
-  constructorpatroon staan (`(some (:or (circle r) (rect r _)))`)
+  constructorpatroon staan (`(Some (:or (Circle r) (Rect r _)))`)
 
 Een type dat `Equal` niet implementeert vergelijken met een waardeliteral / `(:= expr)` is een typefout (deze
 taal kiest ervoor te zeggen "deze kunnen niet worden vergeleken" in plaats van een tak achter te laten die
@@ -1534,7 +1534,7 @@ krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
 - Een kale variantnaam `(VariantName sub-pattern...)` — haalt een variant van een `defenum` eruit. Wordt
   opgelost als een kale naam die zichtbaar is doordat hij is binnengehaald, bijvoorbeeld met
   `(use EnumType::*)` (dezelfde zichtbaarheidsregels als bij het aanroepen van de constructor).
-  Bijvoorbeeld voor `(defenum color (red) (blue))` na `(use color::*)` `(red)` `(blue)`. Met de
+  Bijvoorbeeld voor `(defenum color (Red) (Blue))` na `(use color::*)` `(Red)` `(Blue)`. Met de
   gekwalificeerde vorm `(EnumType::VariantName ...)` is geen `use` nodig.
 - `(the Type pattern)` — een downcast van het hele type (het als geheel bindend). Het ontleedt geen velden;
   het geeft de waarde zoals ze is aan `pattern`. De enige manier om een veranderlijke struct eruit te halen
@@ -1543,26 +1543,26 @@ krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
   `(setf p::x 9)` ook in de oorspronkelijke instantie in de lijst weerspiegeld.
 
 **Patronen voor `Option<Sexpr>`**: het type van S-expressiedata is niet `Sexpr` maar `Option<Sexpr>`, en
-de lege lijst is geen variant van `Sexpr` maar de `none` van `Option`. Wanneer je dus een `Option<Sexpr>`
-matcht, kunnen de 19 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden geschreven
+de lege lijst is geen variant van `Sexpr` maar de `None` van `Option`. Wanneer je dus een `Option<Sexpr>`
+matcht, kunnen de 19 varianten van `Sexpr` en `None` **plat in dezelfde lijst takken** worden geschreven
 (er is geen buitenste `match` nodig om de `Option` af te pellen):
 
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
-    ((none)     0)          ; the empty list
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
+    ((None)     0)          ; the empty list
     (_          9)))
 ```
 
-Volledigheid wordt in hetzelfde platte universum gecontroleerd: de 19 varianten van `Sexpr` plus `none`,
-20 in totaal. `(none)` vergeten is een fout tenzij er een `_` is. `(some x)` kan ook worden geschreven en
+Volledigheid wordt in hetzelfde platte universum gecontroleerd: de 19 varianten van `Sexpr` plus `None`,
+20 in totaal. `(None)` vergeten is een fout tenzij er een `_` is. `(Some x)` kan ook worden geschreven en
 bindt "iets niet-leegs".
 
 Deze suiker is **precies** alleen van toepassing op `Option<Sexpr>`. Bij `Option<Option<Sexpr>>` zou
-onduidelijk zijn welke laag `(int n)` afpelde, dus schrijf twee niveaus `match` zoals gebruikelijk.
+onduidelijk zijn welke laag `(Int n)` afpelde, dus schrijf twee niveaus `match` zoals gebruikelijk.
 
 Dezelfde downcast-patronen kunnen zoals ze zijn worden gebruikt op **een scrutinee van een trait-object
 (`:dyn Trait`, hoofdstuk 2)**: `match` pakt het uit en geeft het dan aan de bovenstaande
@@ -1591,8 +1591,8 @@ gematcht. Ook hier is de verzameling implementerende typen open, dus een `_`-arm
 
 **Typeafleiding over takken heen**: alle takken moeten hetzelfde type hebben (behalve takken die
 divergeren, zoals met `panic`). In een `match` die is geschreven waar geen type wordt verwacht, vullen de
-takken elkaars ontbrekende typeargumenten in: `(Result::ok v)` legt alleen `T` vast, en
-`(Result::err e)` alleen `E`, maar samen leggen ze `Result<T,E>` vast. Een typeargument dat aan het eind
+takken elkaars ontbrekende typeargumenten in: `(Result::Ok v)` legt alleen `T` vast, en
+`(Result::Err e)` alleen `E`, maar samen leggen ze `Result<T,E>` vast. Een typeargument dat aan het eind
 door geen enkele tak kan worden vastgelegd is een fout van die tak (`cannot infer type argument ...`).
 Buiten `match` is een typeargument dat niet kan worden vastgelegd meteen een fout.
 
@@ -1716,7 +1716,7 @@ Met meerdere `:for`s gaan ze **parallel** vooruit, en de lus eindigt zodra er é
 | `:sum e` / `:count e` | De som / het aantal keren dat het waar was |
 | `:maximize e` / `:minimize e` | Het maximum / minimum. **`Option<T>`** (net zoals CL nil teruggeeft voor een lege reeks; een willekeurig `Ord`-type heeft geen kleinste element) |
 | `:always e` / `:never e` | `true` als ze allemaal gelden; `false` zodra er één faalt |
-| `:thereis e` | `e` is een **`Option<T>`**. Geeft de eerste `some` terug, of `none` als die er niet is (dit komt overeen met de "eerste niet-nil waarde" van CL; gebruik `:always`/`:never` om een `bool` te testen) |
+| `:thereis e` | `e` is een **`Option<T>`**. Geeft de eerste `Some` terug, of `None` als die er niet is (dit komt overeen met de "eerste niet-nil waarde" van CL; gebruik `:always`/`:never` om een `bool` te testen) |
 | `:while e` / `:until e` | **Eindigt hier normaal** (`:finally` wordt uitgevoerd, en wat is verzameld is het antwoord) |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | Maakt één clausule voorwaardelijk |
 | `:return e` | Vertrekt onmiddellijk met die waarde (`:finally` wordt niet uitgevoerd, zoals in CL) |
@@ -1738,7 +1738,7 @@ de binnenste lus".
 (5.1): het uitgangstype `int` past niet bij de `()` die de lus achterlaat wanneer hij is uitgeput.
 
 **De waarde van de lus** is de accumulatie van de accumulerende clausule als die er is (de eerste, als er
-meerdere zijn), `true` voor `:always`/`:never`, `none` voor `:thereis`, en `()` als er geen is. Als het
+meerdere zijn), `true` voor `:always`/`:never`, `None` voor `:thereis`, en `()` als er geen is. Als het
 laatste in `:finally` `(return e)` is, is dat de waarde: het idioom `finally (return …)` van CL, de enige
 manier waarop een lus die niet accumuleert zijn eigen antwoord kan noemen.
 
@@ -1806,7 +1806,7 @@ hogere orde enzovoort).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1850,7 +1850,7 @@ breedte, `f32`/`f64`/`ratio`/`char`). Hetzelfde type is geen conversie. **Conver
 geheeltalbreedtes (inclusief `int`) en tussen `f32`↔`f64` zijn echte conversies**: `as` kapt af / rondt af,
 en `try-as` antwoordt of het in die breedte (precisie) past. `(as int x)` is de exacte verbreding vanuit een
 vaste breedte, en `(as i32 n)` het afkappen vanuit `int`. Geheel getal → `char` kan buiten het bereik
-mislukken, dus `as` geeft een panic en `try-as` geeft `none`. Al het andere (verbreden, en het afkappen van
+mislukken, dus `as` geeft een panic en `try-as` geeft `None`. Al het andere (verbreden, en het afkappen van
 `float->int`/`ratio->int`) slaagt altijd. `float->int`/`ratio->int`/`char->int` landen op `int`, en als een
 smallere breedte wordt gevraagd, wordt daarna `int->W` aangeroepen. Dit is suiker die naar de
 overeenkomstige conversiemethoden expandeert (`int->char`/`int->int`/`int->W` enzovoort in
@@ -1865,7 +1865,7 @@ typeargument: het lost `name` op in de volgorde variabele → functie → type �
 prioriteit als wanneer een kale identifier als expressie wordt geëvalueerd) en geeft de docstring van de
 gevonden definitie terug (`(documentation Type::method)` is voor methoden). Niet kunnen oplossen (geen
 definitie met die naam) is een fout bij het controleren; een definitie die bestaat maar geen docstring
-heeft geeft `Option::none`. Alles wordt bij het controleren als constante bepaald: er vindt geen
+heeft geeft `Option::None`. Alles wordt bij het controleren als constante bepaald: er vindt geen
 opzoeking tijdens runtime plaats. Vrije namen met modulekwalificatie (`mod::name`, behalve
 `Type::method`) worden niet ondersteund.
 
@@ -1887,7 +1887,7 @@ functieaanroepen heen.
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; if not found, the value at the end as usual
 ```
 
@@ -2070,10 +2070,10 @@ plaats van `:dyn PeekInput` omdat de reader altijd deze ene soort doorgeeft:
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => read as (not (equal 1 2)), that is, true
 ```

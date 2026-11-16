@@ -93,8 +93,8 @@ fn with_binds_once_and_can_read_an_earlier_clause() {
 fn every_accumulation_clause_answers() {
     assert_eq!(show("(loop :for i :from 1 :to 4 :sum i)"), "10");
     assert_eq!(show("(loop :for i :from 1 :to 5 :count (evenp i))"), "2");
-    assert_eq!(with_v("(loop :for x :in (iter v) :maximize x)"), "(some 3)");
-    assert_eq!(with_v("(loop :for x :in (iter v) :minimize x)"), "(some 0)");
+    assert_eq!(with_v("(loop :for x :in (iter v) :maximize x)"), "(Some 3)");
+    assert_eq!(with_v("(loop :for x :in (iter v) :minimize x)"), "(Some 0)");
     assert_eq!(with_v("(loop :for i :from 1 :to 2 :append (iter v))"),
                "#(0 1 2 3 0 1 2 3)");
 }
@@ -105,7 +105,7 @@ fn maximize_over_nothing_is_none_rather_than_a_least_element() {
     // honest answer — an arbitrary `Ord` type has no bottom to start from.
     assert_eq!(
         show("(loop :for x :in (iter (the Vector<int> (Vector::new))) :maximize x)"),
-        "none"
+        "None"
     );
 }
 
@@ -152,12 +152,12 @@ fn always_never_and_thereis_leave_early_with_their_verdict() {
     assert_eq!(show("(loop :for i :from 1 :to 3 :never (> i 5))"), "true");
     assert_eq!(show("(loop :for i :from 1 :to 3 :never (> i 2))"), "false");
     assert_eq!(
-        show("(loop :for i :from 1 :to 5 :thereis (if (> i 3) (Option::some i) (Option::none)))"),
-        "(some 4)"
+        show("(loop :for i :from 1 :to 5 :thereis (if (> i 3) (Option::Some i) (Option::None)))"),
+        "(Some 4)"
     );
     assert_eq!(
-        show("(loop :for i :from 1 :to 2 :thereis (if (> i 3) (Option::some i) (Option::none)))"),
-        "none"
+        show("(loop :for i :from 1 :to 2 :thereis (if (> i 3) (Option::Some i) (Option::None)))"),
+        "None"
     );
 }
 

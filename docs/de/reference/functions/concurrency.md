@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tasks und Kanäle
 
 Das Vokabular der Tasks (leichtgewichtigen Threads). `task` und `thread`, die sie starten, und `select`, das
@@ -36,7 +36,7 @@ und wie sich das von Go unterscheidet, steht in
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | Ein Kanal mit Kapazität `n`. `0` ist ein Rendezvous (ohne Puffer) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Wartet, bis Platz ist, und übergibt dann den Wert |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Wartet, bis ein Wert ankommt. `none`, sobald er geschlossen und leer ist |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Wartet, bis ein Wert ankommt. `None`, sobald er geschlossen und leer ist |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Schließt ihn |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Wie viele Werte gerade im Puffer sind |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | Die Kapazität |
@@ -63,7 +63,7 @@ und wie sich das von Go unterscheidet, steht in
 - **Einen Kanal zu schließen, auf dem ein Task mit `send` wartet, lässt diesen Task einen Panic auslösen**
   (Gos Regel).
 - `recv` auf einem geschlossenen Kanal gibt zurück, was noch im Puffer ist, und gibt danach, sobald er leer
-  ist, fortwährend `none` zurück.
+  ist, fortwährend `None` zurück.
 - `close` wird über den Typ des Empfängers aufgelöst und ist daher etwas anderes als das `close` des Traits
   `Stream`. `Chan<T>` implementiert `Stream` nicht.
 - **Eine negative Kapazität löst einen Panic aus** (sie wird nicht stillschweigend auf 0 gerundet).
@@ -196,8 +196,8 @@ selbst `is-cancelled` prüft oder auf `done` empfängt.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -212,7 +212,7 @@ selbst `is-cancelled` prüft oder auf `done` empfängt.
   zusammen mit seinem Elternkontext abgebrochen. In die andere Richtung (vom Kind zum Elternteil)
   geht es nicht.
 - Ein Kind eines bereits abgebrochenen Kontexts ist von Anfang an abgebrochen.
-- `done` wird nur geschlossen; es wird kein Wert gesendet. Ein Empfang liefert `none`.
+- `done` wird nur geschlossen; es wird kein Wert gesendet. Ein Empfang liefert `None`.
 - Jeder Aufruf von `(Context::background)` erzeugt eine eigene Wurzel. Gos `Background()` gibt es
   nur einmal und es ist nicht abbrechbar; hier lässt sich auch eine Wurzel abbrechen, und das
   betrifft nur, was aus ihr erzeugt wurde.

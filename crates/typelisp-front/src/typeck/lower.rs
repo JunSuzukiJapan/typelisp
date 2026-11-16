@@ -242,7 +242,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let field_tys: Vec<Type> = field_tys.iter().map(|t| lw.settle(t)).collect();
             let args = args.iter().map(|a| lower_rooted(heap, lw, a)).collect::<Result<Vec<_>, _>>()?;
             // A niched `Option<T>` builds no box: `some v` is `v` as the
-            // word a field of type `T` holds, and `none` is the empty list.
+            // word a field of type `T` holds, and `None` is the empty list.
             // Only the settled type says whether it is niched.
             if let Some(payload) = option_niche(lw, owner, &targs) {
                 return match args[..] {

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tipos
 
 Os tipos que o typelisp tem e os traits padrão que cada tipo implementa. Como escrever tipos está no
@@ -30,8 +30,8 @@ Não há tipo inteiro de 64 bits. Para inteiros cuja largura não importa, use `
 
 | Tipo | Conteúdo | Detalhes |
 |---|---|---|
-| `Option<T>` | Um valor que existe ou não. `some` / `none` | [Option e Result](functions/option-result.md) |
-| `Result<T,E>` | Sucesso ou falha. `ok` / `err` | Igual ao acima |
+| `Option<T>` | Um valor que existe ou não. `Some` / `None` | [Option e Result](functions/option-result.md) |
+| `Result<T,E>` | Sucesso ou falha. `Ok` / `Err` | Igual ao acima |
 | `Vector<T>` | Um array que pode crescer | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Uma tabela hash. Como as chaves são comparadas é decidido por `:test` na criação, e numa tabela `equal` o tipo das chaves deve implementar `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Tupla (de 1 a 12 elementos). Os elementos são lidos com `t::0` | [Sintaxe, capítulo 2](syntax.md#2-escrita-de-tipos) |
@@ -46,8 +46,8 @@ e tipos lista `(T U ...)` (o mesmo tipo que `cons-cell<T,cons-cell<U,()>>`) ([ca
 
 | Tipo | Conteúdo | Detalhes |
 |---|---|---|
-| `Sexpr` | Uma expressão S não vazia. 19 variantes: `int`, `i8` a `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Dados de expressões S](functions/sequences.md#2-dados-de-expressões-s-sexpr) |
-| `Option<Sexpr>` | Os dados de expressões S em geral. A lista vazia `()` é `none` | Igual ao acima |
+| `Sexpr` | Uma expressão S não vazia. 19 variantes: `Int`, `I8` a `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [Dados de expressões S](functions/sequences.md#2-dados-de-expressões-s-sexpr) |
+| `Option<Sexpr>` | Os dados de expressões S em geral. A lista vazia `()` é `None` | Igual ao acima |
 
 ## 4. Tipos da biblioteca padrão
 
@@ -72,7 +72,7 @@ que você mesmo escreve, e tudo o que se pode fazer com um `defstruct` pode ser 
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Streams | [Streams](functions/streams-files.md#3-tipos-de-stream-concretos) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Streams compostos | [Streams compostos](functions/streams-files.md#4-streams-compostos) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Rede | [Rede](functions/network.md#1-tipos) |
-| `ReadOutcome` | O resultado de `read-sexpr`. `datum` / `eof` | [Streams](functions/streams-files.md#6-funções-genéricas-e-operações-com-arquivos) |
+| `ReadOutcome` | O resultado de `read-sexpr`. `Datum` / `Eof` | [Streams](functions/streams-files.md#6-funções-genéricas-e-operações-com-arquivos) |
 | `universal-time` `internal-time` `decoded-time` | Tempo | [Tempo](functions/system.md#1-tempo) |
 | `heap-info` | O estado atual do heap | [Ferramentas da implementação](functions/system.md#51-campos-de-heap-info) |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Traits
 
 Ein Trait ist das Versprechen „dieser Typ unterstützt diese Operationen“. Mit Traits können mehrere Typen
@@ -140,13 +140,13 @@ Zusammen mit einer Trait-Schranke lässt sich eine Funktion schreiben, die für 
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
 Für einen `Vector` mit den `money`-Werten 300, 900 und 100 in dieser Reihenfolge liefert sie
-`(some 900 yen)`.
+`(Some 900 yen)`.
 
 ## 5. `:dyn`: Werte verschiedener Typen gemeinsam behandeln
 

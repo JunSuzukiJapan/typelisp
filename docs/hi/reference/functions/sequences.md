@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # जोड़ियाँ, S-एक्सप्रेशन और अनुक्रम
 
 जेनेरिक जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, `Iter` के ऊपर लिखे अनुक्रम फ़ंक्शन, और उच्च-क्रम फ़ंक्शन।
@@ -23,17 +23,17 @@
 
 ## 2. S-एक्सप्रेशन डेटा `Sexpr`
 
-`read` द्वारा लौटाए जाने वाले डेटा टाइप `Sexpr` के 19 variant हैं: `int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`। S-एक्सप्रेशन सेल को अध्याय 1 के सामान्य `cons`/`car`/`cdr` से नहीं बल्कि `sexpr-*` फ़ंक्शन से संभाला जाता है। इनका उपयोग मुख्य रूप से `defmacro` बॉडी में फ़ॉर्म बनाने और खोलने के लिए होता है।
-`vector` और `array` `#(..)` और `#nA(..)` के रूप में लिखा गया डेटा हैं ([सिंटैक्स
+`read` द्वारा लौटाए जाने वाले डेटा टाइप `Sexpr` के 19 variant हैं: `Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`। S-एक्सप्रेशन सेल को अध्याय 1 के सामान्य `cons`/`car`/`cdr` से नहीं बल्कि `sexpr-*` फ़ंक्शन से संभाला जाता है। इनका उपयोग मुख्य रूप से `defmacro` बॉडी में फ़ॉर्म बनाने और खोलने के लिए होता है।
+`Vector` और `Array` `#(..)` और `#nA(..)` के रूप में लिखा गया डेटा हैं ([सिंटैक्स
 संदर्भ](../syntax.md#1-लेक्सिकल-तत्व)), जिनमें क्रमशः एक `Vector<Option<Sexpr>>` और एक
-`Array<Option<Sexpr>>` होता है: `(vector v)` से बँधे `v` पर `len`, `get` आदि सीधे काम करते हैं।
-`tuple` `#{..}` से लिखा गया डेटा है, और `(tuple v)` द्वारा बाँधा गया `v` तत्वों का नया `Vector<Option<Sexpr>>` है (ताकि किसी भी लंबाई का टपल एक ही टाइप से लिया जा सके)।
+`Array<Option<Sexpr>>` होता है: `(Vector v)` से बँधे `v` पर `len`, `get` आदि सीधे काम करते हैं।
+`Tuple` `#{..}` से लिखा गया डेटा है, और `(Tuple v)` द्वारा बाँधा गया `v` तत्वों का नया `Vector<Option<Sexpr>>` है (ताकि किसी भी लंबाई का टपल एक ही टाइप से लिया जा सके)।
 
-**S-एक्सप्रेशन डेटा का टाइप `Option<Sexpr>` है।** खाली सूची `Sexpr` का variant नहीं बल्कि `Option` का `none` है, और `Sexpr` का अर्थ स्वयं "एक गैर-खाली S-एक्सप्रेशन" है। इसलिए `sexpr-*` फ़ंक्शन `Option<Sexpr>` लेते और लौटाते हैं।
+**S-एक्सप्रेशन डेटा का टाइप `Option<Sexpr>` है।** खाली सूची `Sexpr` का variant नहीं बल्कि `Option` का `None` है, और `Sexpr` का अर्थ स्वयं "एक गैर-खाली S-एक्सप्रेशन" है। इसलिए `sexpr-*` फ़ंक्शन `Option<Sexpr>` लेते और लौटाते हैं।
 
-- जहाँ `Option<Sexpr>` अपेक्षित हो वहाँ `()` खाली सूची है (इसे `(Option::none)` भी लिखा जा सकता है)
+- जहाँ `Option<Sexpr>` अपेक्षित हो वहाँ `()` खाली सूची है (इसे `(Option::None)` भी लिखा जा सकता है)
 - जहाँ `Option<Sexpr>` अपेक्षित हो वहाँ `Sexpr` अपने-आप चौड़ा हो जाता है (बिना रन-टाइम रूपांतरण के)। उलटी दिशा, `Option<Sexpr>` को `Sexpr` की तरह उपयोग करना, यह दावा करता है कि "यह खाली सूची नहीं है", इसलिए इसे `match` या `unwrap` से स्पष्ट रूप से कहना पड़ता है
-- `match` में, `Sexpr` के 19 variant और `none` **शाखाओं की एक ही सूची में समतल रूप से** लिखे जा सकते हैं ([सिंटैक्स संदर्भ](../syntax.md#43-match--पैटर्न-मिलान))
+- `match` में, `Sexpr` के 19 variant और `None` **शाखाओं की एक ही सूची में समतल रूप से** लिखे जा सकते हैं ([सिंटैक्स संदर्भ](../syntax.md#43-match--पैटर्न-मिलान))
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
@@ -44,7 +44,7 @@
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | क्या यह खाली सूची है |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | क्या यह `Cons` नहीं है |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | क्या यह `Sym` (सिंबल) है |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` variant की सामग्री (fixnum या bignum)। दूसरे टाइप पर panic करता है |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` variant की सामग्री (fixnum या bignum)। दूसरे टाइप पर panic करता है |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | उस चौड़ाई के variant की सामग्री। दूसरे टाइप पर panic करता है |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | फ़्लोटिंग-पॉइंट variant की सामग्री। दूसरे टाइप पर panic करता है |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` की सामग्री। दूसरे टाइप पर panic करता है |
@@ -57,7 +57,7 @@
 | `sexpr-append` | `(sexpr-append a b)` | `(Option<Sexpr>,Option<Sexpr>)→Option<Sexpr>` | दो `Sexpr` सूचियों को जोड़ता है (अविनाशकारी रूप से)। `,@` इसी में विस्तारित होता है |
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | `Sexpr` सूची के हर तत्व पर `f` लगाकर नई `Sexpr` सूची (अध्याय 4 का `map` `Iter` के लिए है और `Sexpr` सूची पर नहीं चल सकता) |
 
-नौ संख्यात्मक एक्सेसर हैं, हर टाइप के लिए एक, क्योंकि `Sexpr` "वह एकमात्र जगह है जहाँ मान का टाइप और कहीं नहीं लिखा जाता"। `Sexpr` में रखा `u8` `u8` variant के रूप में जाता है और केवल `(sexpr-u8 s)` से बाहर आता है। उसे `(sexpr-int s)` को देने पर panic होता है; वह कभी चुपचाप उत्तर को चौड़ा नहीं करता। पढ़े गए डेटा (`'(1 2 3)`, macro आर्ग्युमेंट) के पूर्णांक `int` variant के होते हैं और `(sexpr-int s)` से पढ़े जाते हैं।
+नौ संख्यात्मक एक्सेसर हैं, हर टाइप के लिए एक, क्योंकि `Sexpr` "वह एकमात्र जगह है जहाँ मान का टाइप और कहीं नहीं लिखा जाता"। `Sexpr` में रखा `u8` `U8` variant के रूप में जाता है और केवल `(sexpr-u8 s)` से बाहर आता है। उसे `(sexpr-int s)` को देने पर panic होता है; वह कभी चुपचाप उत्तर को चौड़ा नहीं करता। पढ़े गए डेटा (`'(1 2 3)`, macro आर्ग्युमेंट) के पूर्णांक `Int` variant के होते हैं और `(sexpr-int s)` से पढ़े जाते हैं।
 
 `Sexpr` सूचियों में `rplaca`/`nconc` जैसे विनाशकारी ऑपरेशन नहीं हैं। `Sexpr` सेल बनने के बाद बदला नहीं जा सकता।
 
@@ -88,7 +88,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | प्रेडिकेट को संतुष्ट करने वाली पहली स्थिति |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | कितने प्रेडिकेट को संतुष्ट करते हैं |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | क्या हर तत्व प्रेडिकेट को संतुष्ट करता है |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | क्या कोई तत्व प्रेडिकेट को संतुष्ट करता है (CL के `some` के अनुरूप; ऐसा नाम जो `some` कंस्ट्रक्टर से नहीं टकराता) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | क्या कोई तत्व प्रेडिकेट को संतुष्ट करता है (CL के `some` के अनुरूप) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | बायाँ फ़ोल्ड |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | दायाँ फ़ोल्ड |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | बचे हुए सभी तत्व इकट्ठा करता है। नीचे के किसी `lazy` फ़ंक्शन के परिणाम को `Vector` बनाने के लिए |
@@ -101,7 +101,7 @@
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | इटरेटर जोड़ता है। तीन या अधिक दिए जा सकते हैं |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL का `concatenate`। परिणाम का टाइप **उद्धृत सिंबल लिटरल** के रूप में लिखा जाता है (CL रन-टाइम टाइप स्पेसिफ़ायर उपयोग करता है)। `'vector` एक या अधिक लेता है, `'string` शून्य या अधिक (शून्य के लिए `""`)। `Sexpr` सूचियाँ कवर नहीं हैं (`sexpr-append` उपयोग करें) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | उलटना (अविनाशकारी) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | तत्व `n` (सीमा से बाहर `none`) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | तत्व `n` (सीमा से बाहर `None`) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | उलटे क्रम के आर्ग्युमेंट वाला `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | पहले `n` तत्व |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` को लंबाई तक सीमित किया जाता है) |
@@ -185,7 +185,7 @@
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | साइड इफ़ेक्ट के लिए टेल पर मैप करता है (`mapc` का `maplist` समकक्ष) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | टेल पर मैप करता है और जोड़ता है (`mapcan` का `maplist` समकक्ष) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | वह स्थिति जहाँ `sub` पहली बार आता है। यदि रिसीवर `string` है, तो `string` मेथड चुना जाता है ([स्ट्रिंग](collections.md#1-स्ट्रिंग-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | पहली स्थिति जहाँ वे भिन्न हैं। बराबर हों तो `none` |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | पहली स्थिति जहाँ वे भिन्न हैं। बराबर हों तो `None` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | मर्ज करना। CL को क्रमबद्ध इनपुट चाहिए; यह जोड़े हुए को सॉर्ट करता है |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | यदि `x` नहीं है तो उसे **सामने** जोड़ता है |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | समुच्चय ऑपरेशन। CL क्रम निर्दिष्ट नहीं करता; यहाँ यह स्थिर है, **पहली आवृत्ति के क्रम में** |
@@ -230,7 +230,7 @@
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; केवल एक हटाता है, अंत से
 (position 3 (iter v) :start 1)                          ; इंडेक्स पूरे अनुक्रम के सापेक्ष है
 ```

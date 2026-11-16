@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Moduli e organizzazione dei file
 
 Questa guida spiega come mettere insieme un programma composto da più file. Le regole dettagliate si
@@ -134,7 +134,7 @@ Quando decidi che il modulo deve usare la tua definizione, scrivi `shadow` prima
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; il first di questo modulo => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; il first della libreria standard => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; il first della libreria standard => (Some 1)
 ```
 
 Dopo `shadow`, scrivere `first` in quel modulo indica la tua definizione. Per usare il `first` della

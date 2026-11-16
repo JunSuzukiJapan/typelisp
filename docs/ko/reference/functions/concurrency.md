@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 태스크와 채널
 
 태스크(경량 스레드)의 어휘. 태스크를 시작하는 `task`와 `thread`, 여러 가지를 기다리는 `select`는 특수 형식이며
@@ -32,7 +32,7 @@
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | 용량 `n`의 채널. `0`은 랑데부(버퍼 없음) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | 빈자리가 생길 때까지 기다린 뒤 건넨다 |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 값이 올 때까지 기다린다. 닫히고 비면 `none` |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 값이 올 때까지 기다린다. 닫히고 비면 `None` |
 | `close` | `(close ch)` | `(Chan<T>)→()` | 닫는다 |
 | `len` | `(len ch)` | `(Chan<T>)→int` | 지금 버퍼에 있는 값의 개수 |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | 용량 |
@@ -56,7 +56,7 @@
 - **닫힌 채널에 `send`하면 panic하고**, **두 번째 `close`도 panic한다**(둘 다 Go와 같다). 복구할 수 있는 실패가 아니라
   프로그램의 버그이므로 `Result`가 아니다.
 - **태스크가 `send`하려고 기다리는 채널을 닫으면 그 태스크가 panic한다**(Go의 규칙).
-- 닫힌 채널에서 `recv`하면 버퍼에 남은 것을 반환하고, 비고 나면 계속 `none`을 반환한다.
+- 닫힌 채널에서 `recv`하면 버퍼에 남은 것을 반환하고, 비고 나면 계속 `None`을 반환한다.
 - `close`는 받는 쪽의 타입으로 해석되므로 `Stream` 트레이트의 `close`와는 다른 것이다. `Chan<T>`는 `Stream`을 구현하지
   않는다.
 - **음수 용량은 panic한다**(조용히 0으로 반올림되지 않는다).
@@ -182,8 +182,8 @@ Go의 `context.Context`. 밖에서 멈추고 싶은 작업에 넘긴다. 멈추�
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -197,7 +197,7 @@ Go의 `context.Context`. 밖에서 멈추고 싶은 작업에 넘긴다. 멈추�
 - **취소는 자식에게 전해진다.** `with-cancel`/`with-timeout`으로 만든 컨텍스트는 부모가 취소되면 함께 취소된다. 반대 방향(자식에서 부모로)으로는
   전해지지 않는다.
 - 이미 취소된 컨텍스트에서 만든 자식은 처음부터 취소되어 있다.
-- `done`은 닫힐 뿐 값은 보내지 않는다. 수신하면 `none`이 돌아온다.
+- `done`은 닫힐 뿐 값은 보내지 않는다. 수신하면 `None`이 돌아온다.
 - `(Context::background)`는 부를 때마다 별개의 루트를 만든다. Go의 `Background()`는 하나뿐이고 취소할 수 없지만, 여기서는 루트도 취소할 수
   있으며 그 영향은 거기서 만든 것에만 미친다.
 - 태스크 사이에서도 스레드 사이에서도 넘길 수 있다.

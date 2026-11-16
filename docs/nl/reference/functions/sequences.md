@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Paren, S-expressies en sequenties
 
 Het generieke paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, de sequentiefuncties die bovenop
@@ -32,12 +32,12 @@ S-expressiedata (`(cons 'a '(b c))` is `(a b c)`).
 ## 2. S-expressiedata `Sexpr`
 
 Het gegevenstype `Sexpr` dat `read` teruggeeft heeft 19 varianten:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` en `array` zijn data die als `#(..)` en `#nA(..)` geschreven zijn
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` en `Array` zijn data die als `#(..)` en `#nA(..)` geschreven zijn
 ([syntaxreferentie](../syntax.md#1-lexicale-elementen)) en een `Vector<Option<Sexpr>>`
 respectievelijk een `Array<Option<Sexpr>>` bevatten: `len`, `get` enzovoort werken direct op de `v`
-die `(vector v)` bindt.
-`tuple` zijn data geschreven met `#{..}`, en de `v` die `(tuple v)` bindt is een nieuwe
+die `(Vector v)` bindt.
+`Tuple` zijn data geschreven met `#{..}`, en de `v` die `(Tuple v)` bindt is een nieuwe
 `Vector<Option<Sexpr>>` van de elementen (zodat een tuple van elke lengte met één type wordt
 ontvangen).
 S-expressiecellen worden niet met de algemene `cons`/`car`/`cdr` van hoofdstuk 1 behandeld maar met de
@@ -45,15 +45,15 @@ S-expressiecellen worden niet met de algemene `cons`/`car`/`cdr` van hoofdstuk 1
 te halen.
 
 **Het type van S-expressiedata is `Option<Sexpr>`.** De lege lijst is geen variant van `Sexpr` maar de
-`none` van `Option`, en `Sexpr` zelf betekent "een niet-lege S-expressie". De `sexpr-*`-functies
+`None` van `Option`, en `Sexpr` zelf betekent "een niet-lege S-expressie". De `sexpr-*`-functies
 nemen en geven dus `Option<Sexpr>`.
 
-- `()` is de lege lijst waar een `Option<Sexpr>` wordt verwacht (het kan ook als `(Option::none)`
+- `()` is de lege lijst waar een `Option<Sexpr>` wordt verwacht (het kan ook als `(Option::None)`
   worden geschreven)
 - `Sexpr` verbreedt impliciet waar een `Option<Sexpr>` wordt verwacht (zonder runtimeconversie). De
   omgekeerde richting, een `Option<Sexpr>` als `Sexpr` gebruiken, beweert "dit is niet de lege lijst",
   dus dat moet expliciet met `match` of `unwrap` worden gesteld
-- In `match` kunnen de 19 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden
+- In `match` kunnen de 19 varianten van `Sexpr` en `None` **plat in dezelfde lijst takken** worden
   geschreven ([Syntaxreferentie](../syntax.md#43-match--patroonherkenning))
 
 | Naam | Vorm | Type | Beschrijving |
@@ -65,7 +65,7 @@ nemen en geven dus `Option<Sexpr>`.
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Of het de lege lijst is |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Of het geen `Cons` is |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Of het een `Sym` (symbool) is |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | De inhoud van de variant `int` (fixnum of bignum). Geeft een panic bij een ander type |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | De inhoud van de variant `Int` (fixnum of bignum). Geeft een panic bij een ander type |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | De inhoud van de variant met die breedte. Geeft een panic bij een ander type |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | De inhoud van de drijvendekommavarianten. Geeft een panic bij een ander type |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | De inhoud van een `Char`. Geeft een panic bij een ander type |
@@ -80,9 +80,9 @@ nemen en geven dus `Option<Sexpr>`.
 
 Er zijn negen numerieke accessors, een per type, omdat een `Sexpr` "de ene plek is waar het type van
 een waarde nergens anders wordt geschreven". Een `u8` die in een `Sexpr` wordt gezet gaat erin als de
-variant `u8` en komt er alleen met `(sexpr-u8 s)` uit. Hem aan `(sexpr-int s)` doorgeven geeft een
+variant `U8` en komt er alleen met `(sexpr-u8 s)` uit. Hem aan `(sexpr-int s)` doorgeven geeft een
 panic; het verbreedt het antwoord nooit stilzwijgend. De gehele getallen in gelezen data (`'(1 2 3)`,
-macroargumenten) zijn van de variant `int` en worden met `(sexpr-int s)` gelezen.
+macroargumenten) zijn van de variant `Int` en worden met `(sexpr-int s)` gelezen.
 
 `Sexpr`-lijsten hebben geen destructieve bewerkingen zoals `rplaca`/`nconc`. Een `Sexpr`-cel kan na
 het maken niet worden gewijzigd.
@@ -120,7 +120,7 @@ Functies die een predicaat nemen (overeenkomend met de `-if`-familie van CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | De eerste positie die aan het predicaat voldoet |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Hoeveel aan het predicaat voldoen |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Of elk element aan het predicaat voldoet |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Of enig element aan het predicaat voldoet (komt overeen met `some` van CL; een naam die niet botst met de constructor `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Of enig element aan het predicaat voldoet (komt overeen met `some` van CL) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Linkse vouwing |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Rechtse vouwing |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Verzamelt alle resterende elementen. Hiermee maak je van het resultaat van een `lazy`-functie hieronder een `Vector` |
@@ -133,7 +133,7 @@ Indexeren, lengte en uitsnijden:
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Voegt iterators samen. Er kunnen er drie of meer worden gegeven |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` van CL. Het resultaattype wordt geschreven als **een gequote symboolliteral** (CL gebruikt een runtime-typespecificatie). `'vector` neemt een of meer, `'string` nul of meer (`""` bij nul). `Sexpr`-lijsten worden niet gedekt (gebruik `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Omkeren (niet-destructief) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` buiten het bereik) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` buiten het bereik) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` met de argumenten andersom |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | De eerste `n` elementen |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` wordt tot de lengte beperkt) |
@@ -227,7 +227,7 @@ Allemaal generieke functies op `Iter`, zoals in hoofdstuk 4. Resulterende collec
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Beeldt af over staarten voor neveneffecten (de `maplist`-tegenhanger van `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Beeldt af over staarten en voegt samen (de `maplist`-tegenhanger van `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | De positie waar `sub` het eerst voorkomt. Is de ontvanger een `string`, dan wordt de `string`-methode gekozen ([Strings](collections.md#1-strings-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | De eerste positie waar ze verschillen. `none` als ze gelijk zijn |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | De eerste positie waar ze verschillen. `None` als ze gelijk zijn |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Samenvoegen. CL vereist gesorteerde invoer; dit sorteert de aaneenschakeling |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Voegt `x` **vooraan** toe als het er niet is |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Verzamelingsbewerkingen. CL specificeert de volgorde niet; hier is ze stabiel, **in volgorde van eerste voorkomen** |
@@ -280,7 +280,7 @@ Welke functie welke neemt volgt CL:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; removes only one, from the end
 (position 3 (iter v) :start 1)                          ; the index is relative to the whole sequence
 ```

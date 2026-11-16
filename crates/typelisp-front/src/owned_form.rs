@@ -333,7 +333,7 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => OwnedForm::Tuple(struct_fields_to_owned(heap, id)?),
         Value::Boxed(id) if type_key::heap_type_is_id(heap, id, TypeId::SEXPR_ARRAY) => {
             // The fields of `typelisp_read::alloc_sexpr_array`'s box: `dims`
-            // (a box of `Value::Int`s), `data`, `fill-pointer` (always `none`).
+            // (a box of `Value::Int`s), `data`, `fill-pointer` (always `None`).
             let dims = match heap.struct_field(id, 0) {
                 Value::Boxed(d) => (0..heap.struct_field_count(d))
                     .map(|i| match heap.struct_field(d, i) {

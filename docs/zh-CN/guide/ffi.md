@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # C FFI（defffi）
 
 本指南说明如何从 typelisp 调用 C 函数。可以声明的类型和限制一览见
@@ -62,7 +62,7 @@
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int 不会丢失 64 位的值
-(try-as i32 (unsafe (c-strlen s)))  ; 放不进 i32 时为 none
+(try-as i32 (unsafe (c-strlen s)))  ; 放不进 i32 时为 None
 (unsafe (c-malloc 16))              ; 整数字面量可以直接传递
 ```
 

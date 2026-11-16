@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -54,20 +54,20 @@ inte vilken som ska tas. `encode-universal-time` returnerar ett av de två svare
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | Kommandoraden. **Element 0 är programnamnet** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | En miljövariabel. `none` om den inte är satt eller inte är UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | En miljövariabel. `None` om den inte är satt eller inte är UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. Grunden för `user-homedir-pathname` ([Pathnames](streams-files.md#92-funktioner)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Implementationens version |
 | `machine-type` | `(machine-type)` | `()→string` | CPU-arkitekturen (`x86_64` / `aarch64` …). Värdet för **bygg-målet** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | Värdnamnet |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | Namnet på den hårdvara som **körs nu** (`Apple M1` / `Intel(R) Xeon(R) …`). `none` där det inte kan avgöras |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | Namnet på den hårdvara som **körs nu** (`Apple M1` / `Intel(R) Xeon(R) …`). `None` där det inte kan avgöras |
 | `software-type` | `(software-type)` | `()→string` | OS (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | OS-utgåvan (`uname -r`, till exempel `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Ett kort namn på installationsplatsen. **Alltid `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | På samma sätt ett långt namn. **Alltid `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Ett kort namn på installationsplatsen. **Alltid `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | På samma sätt ett långt namn. **Alltid `None`** |
 
 De som returnerar `Option` är poster där CL tillåter `NIL` (*or nil if no such name can be determined*).
-POSIX har ingen plats att registrera platsnamn, så de är alltid `none`; SBCL returnerar detsamma. Notera
+POSIX har ingen plats att registrera platsnamn, så de är alltid `None`; SBCL returnerar detsamma. Notera
 skillnaden mellan `machine-type` och `machine-version`: det förra är den arkitektur den här binären
 **byggdes** för, det senare är det chip som **kör** den nu.
 
@@ -131,7 +131,7 @@ anropet), `c` (sluta fråga härifrån) och `q` (avbryt). **Om standard in inte 
 hänger sig på en prompt som ingen kan svara på.
 
 `$VISUAL` / `$EDITOR` i `ed` delas vid blanktecken, så `EDITOR="code -w"` fungerar. Om ingen av dem är satt
-blir resultatet `err`: den gissar inte `vi`. Radnumret skickas först, i formen `+N`.
+blir resultatet `Err`: den gissar inte `vi`. Radnumret skickas först, i formen `+N`.
 
 `dribble` spelar in alla tre sätt som sessionens utdata lämnar processen: det som
 `print`/`println`/`format` skriver, det som skrivs till strömmar kopplade till standard ut, och raderna som
@@ -140,14 +140,14 @@ skrivs in i REPL tillsammans med de värden REPL skriver tillbaka.
 ## 6. Tolkning och utvärdering
 
 Alla dessa hanterar text och data från körning (som programmet självt inte styr), så vid misslyckande
-returnerar de `err` i ett `Result` i stället för att ge panic. Feltyperna är konkreta typer per operation
+returnerar de `Err` i ett `Result` i stället för att ge panic. Feltyperna är konkreta typer per operation
 ([Feltyper](option-result.md#3-feltyper-och-traitet-error)).
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL:s `parse-integer`. Hoppar över inledande och avslutande blanktecken (samma mängd som `trim`), läser högst ett tecken `+`/`-`, sedan siffror i basen `radix` (standard 10, 2 till 36; siffror över 10 i endera skiftläget). Det finns ingen gräns för antalet siffror (`int`). Alla andra tecken som blir över ger `err`. Med `:junk-allowed true` stannar den vid den första icke-siffran och ignorerar resten, men ger `err` om det inte finns en enda siffra (motsvarar CL:s `nil`). Den returnerar inte CL:s andra värde (positionen där läsningen slutade). En `radix` utanför intervallet ger panic (ett fel hos anroparen, inte i texten) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL:s `parse-integer`. Hoppar över inledande och avslutande blanktecken (samma mängd som `trim`), läser högst ett tecken `+`/`-`, sedan siffror i basen `radix` (standard 10, 2 till 36; siffror över 10 i endera skiftläget). Det finns ingen gräns för antalet siffror (`int`). Alla andra tecken som blir över ger `Err`. Med `:junk-allowed true` stannar den vid den första icke-siffran och ignorerar resten, men ger `Err` om det inte finns en enda siffra (motsvarar CL:s `nil`). Den returnerar inte CL:s andra värde (positionen där läsningen slutade). En `radix` utanför intervallet ger panic (ett fel hos anroparen, inte i texten) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Ett flyttal. Accepterar också `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Läser en `Sexpr` från `s` (med samma läsare som läser källkod). Obalanserade parenteser, oavslutade strängar och liknande ger `err`. Att läsa från en ström är `read-sexpr` ([Strömmar](streams-files.md#6-generiska-funktioner-och-filoperationer)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Läser en `Sexpr` från `s` (med samma läsare som läser källkod). Obalanserade parenteser, oavslutade strängar och liknande ger `Err`. Att läsa från en ström är `read-sexpr` ([Strömmar](streams-files.md#6-generiska-funktioner-och-filoperationer)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **positionen där läsningen slutade**. `(car r)` är värdet och `(cdr r)` positionen för nästa tecken att läsa. `start` är som standard 0 |
 | `read-from-string-preserving-whitespace` | Som ovan | Som ovan | Samma, men förbrukar inte det blanktecken som avslutade datumet. Skillnaden syns i den returnerade positionen |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Typkontrollerar `form` vid körning och utvärderar den. Följer CL:s `eval` |
@@ -160,9 +160,9 @@ blir en slinga i stället för en omskanning:
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 Skillnaden som `preserving-whitespace` gör är **ett blanktecken**: CL:s `read` förbrukar det blanktecken som
@@ -182,16 +182,16 @@ typer och makron, inklusive definitioner som lagts till vid körning) och i **de
 globala miljön omedelbart och permanent.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; den globala x syns
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; returnerar det definierade namnet
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; definitionen som just gjordes syns
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; den globala x syns
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; returnerar det definierade namnet
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; definitionen som just gjordes syns
 ```
 
 - **Returvärde**: för ett uttryck resultatet som en `Option<Sexpr>`; för en definition symbolen för det
   definierade namnet (som i CL). För att använda resultatet plockar man isär `Sexpr` med `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Skillnader på grund av statiska typer (viktigt)**: CL returnerar det faktiska värdet av resultatet,
   men i det här språket kan returtypen bara vara enhetligt `Result<Option<Sexpr>,EvalError>`. Dessutom
   **kan kod som skrivs statiskt inte referera framåt till namn som `eval` definierar vid körning**: ett
@@ -199,7 +199,7 @@ globala miljön omedelbart och permanent.
   "odefinierat". **Senare `eval` kan dock se det** (deras typkontroll körs vid körning, efter
   definitionen). REPL kontrollerar och kör en rad i taget, så ett namn som definierats med `eval` kan
   anropas direkt från nästa rad.
-- **Fel**: typfel och syntaxfel returnerar `err` (de ger inte panic). **Panics vid körning** i den
+- **Fel**: typfel och syntaxfel returnerar `Err` (de ger inte panic). **Panics vid körning** i den
   utvärderade koden (division med noll och så vidare) fortplantar sig som de skulle från kod skriven
   direkt. Uppstädningen i varje `unwind-protect` däremellan körs
   ([Syntaxreferens kapitel 8](../syntax.md#8-icke-lokala-utgångar-catch--throw--unwind-protect)).
@@ -249,7 +249,7 @@ för en associerad eller statisk metod.
 
 **Värdet avgörs vid kontrolltillfället**: om namnet inte löses upp till någon definition är det ett fel vid
 kontrolltillfället (som att referera till en odefinierad variabel). Om det löses upp men det inte finns
-någon dokumentationssträng blir resultatet `Option::none`.
+någon dokumentationssträng blir resultatet `Option::None`.
 
 **Omfattas inte**:
 
@@ -269,19 +269,19 @@ Hur man definierar makron finns i [Syntaxreferens 3.14](../syntax.md#314-defmacr
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | En ny symbol. Dess namn är `" <prefix><n>"`, där `n` är `*gensym-counter*`. Ett inledande mellanslag kan inte skrivas i källkod, så de genererade bindningarna krockar aldrig med skrivna namn |
 | `*gensym-counter*` | Variabel | `int` | Numret som `gensym` använder härnäst. Som i CL kan det läsas och sättas |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expanderar ett makroanrop ett steg. `none` betyder "inte ett makroanrop" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expanderar ett makroanrop ett steg. `None` betyder "inte ett makroanrop" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Upprepar tills det inte längre är ett makro |
 
 `macroexpand-1` returnerar ett `Option`. CL rapporterar "om det expanderade" som ett andra returvärde, men
-det finns inga flera värden, så `none` spelar den rollen. **Ett makro som expanderar till ett anrop av sig
+det finns inga flera värden, så `None` spelar den rollen. **Ett makro som expanderar till ett anrop av sig
 självt kan aldrig förväxlas med ett icke-makro.** Ett expansionssteg är samma som typkontrollen använder, så
 det programmet ser och det kontrollen såg divergerar aldrig.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none visas som den tomma listan (Option<Sexpr> är transparent)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none visas som den tomma listan (Option<Sexpr> är transparent)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 Vad CL har och det här språket inte har: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

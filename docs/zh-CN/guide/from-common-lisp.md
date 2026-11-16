@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 写给 Common Lisp 用户
 
 typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名，但它是静态类型语言。因此，CL 的写法并不总能直接通过。
@@ -15,12 +15,12 @@ typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名�
 
 - **只有 `bool` 能作为条件。** 把 `0` 或空列表写作条件是类型错误。没有"nil 以外都为真"的规则。
 - **`if` 的 else 不能省略。** `(if c x)` 是错误。不需要 else 时使用 `when` / `unless`。
-- **"没有值"用 `Option<T>` 表示。** 在 CL 中通过返回 nil 表示"没找到"的函数，在这里返回 `(some x)` 或 `none`。
+- **"没有值"用 `Option<T>` 表示。** 在 CL 中通过返回 nil 表示"没找到"的函数，在这里返回 `(Some x)` 或 `None`。
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - 空列表 `()` 根据上下文，或者是 Unit 类型的值（不返回任何东西的函数的返回值），或者是 S 表达式数据的空列表。它与
@@ -86,7 +86,7 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 
 ## 4. 列表与 Vector
 
-相当于 CL 列表的是 **S 表达式数据**，其类型是 `Option<Sexpr>`（空列表是 `none`）。`(list 1 2 3)` 和 `'(a b c)` 都
+相当于 CL 列表的是 **S 表达式数据**，其类型是 `Option<Sexpr>`（空列表是 `None`）。`(list 1 2 3)` 和 `'(a b c)` 都
 是这个类型。S 表达式数据是供宏和 `read` 处理的，普通的数据容器请使用 **`Vector<T>`**。
 
 | 想做的事 | CL | typelisp |
@@ -158,16 +158,16 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 没有 `define-condition`、`handler-case`、`handler-bind`、`restart-case`、`error`、`signal`。它们与静态类型不相容。
 取而代之，分别使用以下两种机制：
 
-- **可恢复的失败返回 `Result<T,E>`。** 调用方用 `match` 区分 `ok` / `err`。没有相当于 Rust 的 `?` 的简写语法。
+- **可恢复的失败返回 `Result<T,E>`。** 调用方用 `match` 区分 `Ok` / `Err`。没有相当于 Rust 的 `?` 的简写语法。
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **不可恢复的失败（bug）是 `panic`。** `(panic "message")`、把 `none` 传给 `unwrap`、除以 0、下标越界等都属于此类，
+- **不可恢复的失败（bug）是 `panic`。** `(panic "message")`、把 `None` 传给 `unwrap`、除以 0、下标越界等都属于此类，
   程序会停止。`unwind-protect` 的清理在停止前执行。
 
 错误类型由 `Error` trait 统一，用 `(message e)` 取出消息。创建自己的错误类型的方法见

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Common Lisp Programcıları İçin
 
 typelisp, Common Lisp'in (CL) sözdizimini ve fonksiyon adlarının çoğunu devralır, ancak statik tür
@@ -19,12 +19,12 @@ Mantıksal değerler `true` ve `false`'tur. `nil` ve `t` tanımlı değildir.
 - **`if`'in else dalı atlanamaz.** `(if c x)` bir hatadır. Else dalına gerek olmadığında
   `when` / `unless` kullanın.
 - **"Değer yok", `Option<T>` ile ifade edilir.** CL'de "bulunamadı" anlamında nil döndüren bir
-  fonksiyon burada `(some x)` ya da `none` döndürür.
+  fonksiyon burada `(Some x)` ya da `None` döndürür.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - Boş liste `()`, bağlama göre ya Unit türünün değeridir (hiçbir şey döndürmeyen bir fonksiyonun
@@ -98,7 +98,7 @@ fonksiyonun yanında `list` adlı bir değişken olamaz).
 ## 4. Listeler ve Vector
 
 CL listesine karşılık gelen şey, türü `Option<Sexpr>` olan **S-ifade verisidir** (boş liste
-`none`'dur). `(list 1 2 3)` ve `'(a b c)` bu türdedir. S-ifade verisi, makroların ve `read`'in
+`None`'dur). `(list 1 2 3)` ve `'(a b c)` bu türdedir. S-ifade verisi, makroların ve `read`'in
 çalıştığı şeydir; sıradan bir veri kabı için **`Vector<T>`** kullanın.
 
 | İstediğiniz | CL | typelisp |
@@ -181,17 +181,17 @@ atar ve gövdeden nasıl çıkılırsa çıkılsın özgün değeri geri yükler
 `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error` ve `signal` yoktur.
 Bunlar statik tür denetimiyle kötü uyuşur. Bunun yerine şu ikisi farklı amaçlarla kullanılır:
 
-- **Kurtarılabilir başarısızlıklar `Result<T,E>` döndürür.** Çağıran `ok` / `err`'i `match` ile
+- **Kurtarılabilir başarısızlıklar `Result<T,E>` döndürür.** Çağıran `Ok` / `Err`'i `match` ile
   ayırır. Rust'ın `?`'si gibi bir kısayol yoktur.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Kurtarılamayan başarısızlıklar (hatalar) `panic`'tir.** `(panic "message")`, `unwrap`'a `none`
+- **Kurtarılamayan başarısızlıklar (hatalar) `panic`'tir.** `(panic "message")`, `unwrap`'a `None`
   geçirmek, 0'a bölmek ve aralık dışı bir indeks bu türdendir ve program durur. `unwind-protect`'in
   temizliği durmadan önce çalışır.
 

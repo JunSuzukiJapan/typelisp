@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/network.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/network.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Nätverk (TCP / TLS / Unix-domän / UDP)
 
 Socketar är medlemmar av [strömmarna](streams-files.md). En anslutning ses i **två vyer av samma
@@ -22,7 +22,7 @@ anslutning ([Syntaxreferens 12.5](../syntax.md#125-var-tasks-byter)).
 | `socket-listener` | `Stream` (`close` / `open-stream-p`) | `tcp-listen` / `tls-listen` / `unix-listen` |
 | `udp-socket` | `Stream` | `udp-bind` |
 | `datagram` | — (`bytes`: `Vector<int>`, `from`: `string`) | `recv-from` |
-| `NetError` | `Error` | `err` från funktionerna nedan |
+| `NetError` | `Error` | `Err` från funktionerna nedan |
 
 En strömtyp har en elementtyp (av samma skäl som `file-stream`/`binary-file-stream`), så tecken och byte
 är olika typer. `byte-stream-of`/`char-stream-of` returnerar värden som pekar på **samma anslutning** och
@@ -34,22 +34,22 @@ som för filer).
 
 | Namn | Användning | Typ | Betydelse |
 |---|---|---|---|
-| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Ansluter. `host` kan vara ett namn eller en adress. Om ett namn har flera adresser prövas de i tur och ordning (`localhost` är `::1` och `127.0.0.1`). En misslyckad namnuppslagning, en nekad anslutning eller att `:timeout` sekunder överskrids ger `err` |
-| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS efter `tcp-connect`. Certifikatet verifieras mot `host`-namnet (`:server-name` om namnet som ska verifieras skiljer sig från där du ansluter) med Mozillas rotcertifikat. Med `:ca-file` (PEM) litar den på **bara certifikaten i den** (en privat CA, eller just det certifikat som din egen `tls-listen` presenterar). `:cert-file`/`:key-file` (båda eller ingen) är vårt certifikat, som presenteras när servern ber om ett (ömsesidig TLS). Handskakningen slutförs här, så om serverns certifikat inte godkänns returnerar det här anropet `err`. Resultatet är en vanlig `socket-stream` |
+| `tcp-connect` | `(tcp-connect host port &key timeout)` | `(string,int,&key f64)→Result<socket-stream,NetError>` | Ansluter. `host` kan vara ett namn eller en adress. Om ett namn har flera adresser prövas de i tur och ordning (`localhost` är `::1` och `127.0.0.1`). En misslyckad namnuppslagning, en nekad anslutning eller att `:timeout` sekunder överskrids ger `Err` |
+| `tls-connect` | `(tls-connect host port &key timeout ca-file cert-file key-file server-name)` | `(string,int,&key f64 string string string string)→Result<socket-stream,NetError>` | TLS efter `tcp-connect`. Certifikatet verifieras mot `host`-namnet (`:server-name` om namnet som ska verifieras skiljer sig från där du ansluter) med Mozillas rotcertifikat. Med `:ca-file` (PEM) litar den på **bara certifikaten i den** (en privat CA, eller just det certifikat som din egen `tls-listen` presenterar). `:cert-file`/`:key-file` (båda eller ingen) är vårt certifikat, som presenteras när servern ber om ett (ömsesidig TLS). Handskakningen slutförs här, så om serverns certifikat inte godkänns returnerar det här anropet `Err`. Resultatet är en vanlig `socket-stream` |
 | `unix-connect` | `(unix-connect path)` | `(string)→Result<socket-stream,NetError>` | Ansluter till Unix-domänsocketen `path`. Den är lokal, så det finns ingen väntan på handskakning och ingen timeout |
 | `tcp-listen` | `(tcp-listen host port)` | `(string,int)→Result<socket-listener,NetError>` | Lyssnar. `"127.0.0.1"` är bara den här maskinen, `"0.0.0.0"` är alla gränssnitt. Att skicka `0` som `port` låter OS välja |
-| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | TLS-versionen av `tcp-listen`. `cert-file` är certifikatkedjan (PEM, eget certifikat först) och `key-file` den privata nyckeln. Båda läses och kontrolleras här, så en nyckel som inte stämmer ger `err` från det här anropet, inte vid den första klienten. `accept` returnerar **före handskakningen**, och den första läsningen eller skrivningen av tasken som hanterar anslutningen slutför handskakningen (som Gos `tls.Conn`), så en klient som är långsam med handskakningen håller inte upp andra `accept`. Med `:client-ca` (PEM) **kräver den att varje klient** presenterar ett certifikat utfärdat av en CA i den (ömsesidig TLS). Utan den efterfrågas inget |
-| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | Lyssnar vid `path`. **`err` om filen redan finns** (den kan tillhöra en annan process som körs, så den ersätts inte tyst). `close` tar bort filen |
-| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Nästa anslutning. Stoppar tasken tills en kommer. Ger upp med `err` efter `:timeout` sekunder |
+| `tls-listen` | `(tls-listen host port cert-file key-file &key client-ca)` | `(string,int,string,string,&key string)→Result<socket-listener,NetError>` | TLS-versionen av `tcp-listen`. `cert-file` är certifikatkedjan (PEM, eget certifikat först) och `key-file` den privata nyckeln. Båda läses och kontrolleras här, så en nyckel som inte stämmer ger `Err` från det här anropet, inte vid den första klienten. `accept` returnerar **före handskakningen**, och den första läsningen eller skrivningen av tasken som hanterar anslutningen slutför handskakningen (som Gos `tls.Conn`), så en klient som är långsam med handskakningen håller inte upp andra `accept`. Med `:client-ca` (PEM) **kräver den att varje klient** presenterar ett certifikat utfärdat av en CA i den (ömsesidig TLS). Utan den efterfrågas inget |
+| `unix-listen` | `(unix-listen path)` | `(string)→Result<socket-listener,NetError>` | Lyssnar vid `path`. **`Err` om filen redan finns** (den kan tillhöra en annan process som körs, så den ersätts inte tyst). `close` tar bort filen |
+| `accept` | `(accept l &key timeout)` | `(socket-listener,&key f64)→Result<socket-stream,NetError>` | Nästa anslutning. Stoppar tasken tills en kommer. Ger upp med `Err` efter `:timeout` sekunder |
 | `wait-readable` | `(wait-readable s secs)` | `(socket-stream,f64)→bool` | Tills det kan läsas utan att vänta, eller `secs` sekunder. `true` betyder det förra (inklusive data som redan ligger i bufferten). Sättet att sätta en klocka på en läsning: `(if (wait-readable c 5.0) (read-line c) ...)`. Det den lovar är att **nästa läsning inte stoppar**; `read-line` kan vänta på resten av raden |
 | `wait-writable` | `(wait-writable s secs)` | `(socket-stream,f64)→bool` | Tills det kan skrivas, eller `secs` sekunder |
-| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Lägger till ytterligare ett certifikat till en `tls-listen`-lyssnare, som presenteras för klienter som ber om `name` (SNI): flera webbplatser på en lyssnare. Om kedjan är för `name` kontrolleras här, och om inte returnerar det här anropet `err`. Klienter som ber om ett namn som ingen lagt till, eller om inget namn, får certifikatet från `tls-listen` |
-| `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | Subjektet i motpartens certifikat (`CN=client,O=Example,C=JP`, RFC 4514-form, mest specifikt först). Så får en server med ömsesidig TLS veta "vem som anslöt" (efter den första läsningen, som slutför handskakningen). På klientsidan, servercertifikatets namn. `none` för vanliga anslutningar, före handskakningen, eller om motparten inte presenterade något certifikat |
-| `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | På en TLS-anslutning på serversidan, namnet klienten bad om (SNI). Så får en server med flera webbplatser som lagts till med `tls-add-certificate` veta "vilken webbplats". `none` för vanliga anslutningar, på klientsidan, eller utan namn (ansluten via adress) |
+| `tls-add-certificate` | `(tls-add-certificate l name cert-file key-file)` | `(socket-listener,string,string,string)→Result<(),NetError>` | Lägger till ytterligare ett certifikat till en `tls-listen`-lyssnare, som presenteras för klienter som ber om `name` (SNI): flera webbplatser på en lyssnare. Om kedjan är för `name` kontrolleras här, och om inte returnerar det här anropet `Err`. Klienter som ber om ett namn som ingen lagt till, eller om inget namn, får certifikatet från `tls-listen` |
+| `peer-subject` | `(peer-subject s)` | `(socket-stream)→Option<string>` | Subjektet i motpartens certifikat (`CN=client,O=Example,C=JP`, RFC 4514-form, mest specifikt först). Så får en server med ömsesidig TLS veta "vem som anslöt" (efter den första läsningen, som slutför handskakningen). På klientsidan, servercertifikatets namn. `None` för vanliga anslutningar, före handskakningen, eller om motparten inte presenterade något certifikat |
+| `requested-server-name` | `(requested-server-name s)` | `(socket-stream)→Option<string>` | På en TLS-anslutning på serversidan, namnet klienten bad om (SNI). Så får en server med flera webbplatser som lagts till med `tls-add-certificate` veta "vilken webbplats". `None` för vanliga anslutningar, på klientsidan, eller utan namn (ansluten via adress) |
 | `set-nodelay` | `(set-nodelay s on)` | `(socket-stream,bool)→()` | Stänger av Nagle (`TCP_NODELAY`). `write-string` går hela vägen till socketen varje gång, så med Nagle på väntar ett svar som skrivs i två delar, rubrik och innehåll, på motpartens fördröjda ACK: använd `true` för begäran/svar-protokoll. Unix-domänsocketar har ingen Nagle, och det lyckas bara |
 | `set-keepalive` | `(set-keepalive s on)` | `(socket-stream,bool)→()` | Sonderar motparten under inaktivitet (`SO_KEEPALIVE`). Upptäcker en motpart som försvunnit utan att stänga (en utdragen kabel, en stoppad värd) och återställer anslutningen. OS-standardperioden är lång (ofta 2 timmar), så kombinera med `set-keepalive-period` nedan. Unix-domänsocketar har det inte, så det ger panic |
 | `set-keepalive-period` | `(set-keepalive-period s secs)` | `(socket-stream,int)→()` | Antalet inaktiva sekunder före den första sonderingen och intervallet mellan sonderingar (hela sekunder, minst 1). Som Gos `SetKeepAlivePeriod` sätts båda till samma värde |
-| `socket-error` | `(socket-error s)` | `(socket-stream \| socket-byte-stream)→Option<NetError>` | Om **motparten** bröt den här anslutningen, dess första misslyckande (en återställning, ett TLS-larm, en nedkoppling under en skrivning). `none` om den är frisk: ett EOF från att motparten stängde rent är inte ett misslyckande. Se "Misslyckanden hos motparten" nedan |
+| `socket-error` | `(socket-error s)` | `(socket-stream \| socket-byte-stream)→Option<NetError>` | Om **motparten** bröt den här anslutningen, dess första misslyckande (en återställning, ett TLS-larm, en nedkoppling under en skrivning). `None` om den är frisk: ett EOF från att motparten stängde rent är inte ett misslyckande. Se "Misslyckanden hos motparten" nedan |
 | `local-address` | `(local-address s)` | `(socket-stream \| socket-listener \| udp-socket)→string` | Vår sidas `host:port`. Sättet att få veta den valda porten efter `(tcp-listen h 0)`. För Unix-socketar, sökvägen (den anslutande änden är `(unnamed)`) |
 | `peer-address` | `(peer-address s)` | `(socket-stream)→string` | Motpartens `host:port`, eller sökvägen för Unix-socketar |
 | `shutdown-output` | `(shutdown-output s)` | `(socket-stream)→()` | Stänger bara sändsidan (en halvstängning). Motparten läser EOF, och den här sidan kan fortfarande läsa. Signalen för "jag har skickat hela begäran". För TLS skickar den också `close_notify` |
@@ -65,7 +65,7 @@ bunta ihop små skrivningar samlar man dem i en `string-output-stream` och skriv
 **Misslyckanden hos motparten ger inte panic.** Om andra änden återställer anslutningen, avvisar
 TLS-handskakningen eller släpper den mitt i en skrivning är det inget fel i det här programmet, så
 servern stoppar inte tillsammans med sina andra klienter. Det första misslyckandet registreras på
-anslutningen; senare läsningar returnerar `none` (ser likadant ut som EOF), och skrivningar går ingenstans
+anslutningen; senare läsningar returnerar `None` (ser likadant ut som EOF), och skrivningar går ingenstans
 och returnerar tyst. För att skilja dem åt används `socket-error`, samma form som Gos
 `bufio.Scanner.Err` (`read-item` är ett `Option` och har ingen annan kanal att rapportera genom). Bara
 fel i själva programmet ger panic (ett stängt handtag, att läsa ett byte direkt efter `unread-char`).
@@ -80,21 +80,21 @@ ta emot anslutningar och "nästa läsning", och vart och ett har ett argument f�
 ;; server: en task per anslutning
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c line))
-          ((none) (break))))
+          ((Some line) (write-line c line))
+          ((None) (break))))
   (close c))
 
 (let ((l (unwrap (tcp-listen "0.0.0.0" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 
 ;; klient
 (match (with-connection (c "127.0.0.1" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "~a" reply))
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "~a" reply))
+  ((Err e) (println "~a" (message e))))
 
 ;; HTTPS
 (let ((c (unwrap (tls-connect "example.com" 443 :timeout 10.0))))
@@ -107,8 +107,8 @@ ta emot anslutningar och "nästa läsning", och vart och ett har ett argument f�
 ;;           -addext subjectAltName=DNS:localhost -keyout key.pem -out cert.pem)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))        ; serve ovan som den är; den första read-line är handskakningen
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))        ; serve ovan som den är; den första read-line är handskakningen
+          ((Err e) (println "accept: ~a" (message e))))))
 ;; dess klient: anslut och lita på dess eget certifikat
 (unwrap (tls-connect "localhost" 8443 :timeout 5.0 :ca-file "cert.pem"))
 
@@ -125,9 +125,9 @@ ta emot anslutningar och "nästa läsning", och vart och ett har ett argument f�
 ```
 
 Med ömsesidig TLS slutför en klient som inte presenterar något certifikat (eller ett som inte godkänns)
-sin egen sida av handskakningen innan servern avgör, under TLS 1.3, så `tls-connect` returnerar `ok` och
-**den första läsningen returnerar `none`** (med larmet i `socket-error`). På serversidan returnerar den
-första läsningen av samma anslutning också `none`. Ingen av sidorna ger panic.
+sin egen sida av handskakningen innan servern avgör, under TLS 1.3, så `tls-connect` returnerar `Ok` och
+**den första läsningen returnerar `None`** (med larmet i `socket-error`). På serversidan returnerar den
+första läsningen av samma anslutning också `None`. Ingen av sidorna ger panic.
 
 ## 3. UDP
 
@@ -145,8 +145,8 @@ Konvertera mellan strängar och bytesekvenser med `string->utf8` / `utf8->string
 (let ((s (unwrap (udp-bind "127.0.0.1" 0))))
   (unwrap (send-to s "127.0.0.1" 9999 (string->utf8 "ping")))
   (match (recv-from s :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ```
 
 ## 4. Vad som inte finns

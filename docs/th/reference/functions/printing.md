@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # การพิมพ์
 
 `print`/`println`/`format`, ตัวพิมพ์แบบหนึ่งอาร์กิวเมนต์, pretty printer, `print-object` และ
@@ -42,18 +42,18 @@
 ทุกครั้งที่เรียก (เพื่อให้เห็น prompt ก่อนอ่านอินพุตมาตรฐาน แม้ผ่านไปป์)
 
 **`Option<Sexpr>` พิมพ์แบบโปร่งใส** ชนิดของข้อมูล S-expression คือ `Option<Sexpr>` ดังนั้น
-ตัวห่อ `(some x)` ไม่ปรากฏในเอาต์พุตและเนื้อหาถูกพิมพ์ตามที่เป็น ลิสต์ว่าง
-พิมพ์เป็น `()` `Option<T>` อื่นพิมพ์เป็น `(some ...)` / `none` เช่นเดียวกับฟิลด์ `Option<T>`
+ตัวห่อ `(Some x)` ไม่ปรากฏในเอาต์พุตและเนื้อหาถูกพิมพ์ตามที่เป็น ลิสต์ว่าง
+พิมพ์เป็น `()` `Option<T>` อื่นพิมพ์เป็น `(Some ...)` / `None` เช่นเดียวกับฟิลด์ `Option<T>`
 ภายใน struct, enum และ `Vector` `Result<Option<Sexpr>,…>` จาก `(eval ...)` พิมพ์เป็น
-`(ok 42)` หรือ `(ok ())` สำหรับ `none`
+`(Ok 42)` หรือ `(Ok ())` สำหรับ `None`
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -312,10 +312,10 @@ CL ใช้ `nil` สำหรับ "ไม่จำกัด" แต่ภา
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a points to a itself
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a points to a itself
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 ป้ายกำกับ **เริ่มใหม่จาก 1 สำหรับแต่ละสิ่งที่พิมพ์** (เหมือนใน CL) แม้ไม่มีวงจร หากออบเจ็กต์เดียวกัน

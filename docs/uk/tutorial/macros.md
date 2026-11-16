@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Макроси
 
 Макрос — це функція, що приймає програму й повертає програму. Макроси дозволяють створювати новий
@@ -43,7 +43,7 @@ Lisp. Цей розділ припускає, що ви прочитали «С�
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Розгортання теж перевіряються за типами
@@ -121,15 +121,15 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 
 Тіло макроса — це звичайний код typelisp, тому воно може досліджувати свої аргументи через `if` чи
 `match` і будувати різні розгортання. Аргументи — це дані у вигляді S-виразів (`Option<Sexpr>`), а
-порожній список — це `none`.
+порожній список — це `None`.
 
 Створимо `my-and`, що повертає `true`, якщо всі його умови істинні.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
-    ((cons f more)
+    ((None) 'true)                                    ; no arguments
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -139,7 +139,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` — це візерунок, що бере голову списку в `f`, а решту в `more`.
+- `(Cons f more)` — це візерунок, що бере голову списку в `f`, а решту в `more`.
 - `sexpr-null` перевіряє, чи є дані у вигляді S-виразів порожнім списком.
 - Фінальна гілка `_` потрібна, бо дані у вигляді S-виразів мають й інші форми, ніж списки (числа,
   рядки тощо), і `match` вимагає охопити також їх. Аргумент `&rest` завжди є списком, тож ця гілка

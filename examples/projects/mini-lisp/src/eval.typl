@@ -9,9 +9,9 @@
 
 (pub defun eval ((e lexpr) (env HashTable<string,int>)) int
   (match e
-    ((lit v) v)
-    ((var name) (unwrap (get env name)))
-    ((binop op a b)
+    ((Lit v) v)
+    ((Var name) (unwrap (get env name)))
+    ((Binop op a b)
      (let ((x (eval a env)))
        (let ((y (eval b env)))
          (cond
@@ -23,12 +23,12 @@
            ((equal op ">") (if (> x y) 1 0))
            ((equal op "=") (if (= x y) 1 0))
            (:else (panic (append "unknown operator: " op)))))))
-    ((iff test then els) (if (/= (eval test env) 0) (eval then env) (eval els env)))
-    ((def name val)
+    ((Iff test then els) (if (/= (eval test env) 0) (eval then env) (eval els env)))
+    ((Def name val)
      (let ((v (eval val env)))
        (set env name v)
        v))
-    ((begin es)
+    ((Begin es)
      (let ((result 0))
        (doiter (sub (iter es)) (setf result (eval sub env)))
        result))))

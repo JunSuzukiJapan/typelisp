@@ -1522,7 +1522,7 @@ fn read_elements(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, close: char, o
 /// is an error: an array is rectangular. The cursor is just past the `A`.
 ///
 /// The box has the fields of the prelude's `defstruct Array` in its order —
-/// `dims`, `data` (row-major), `fill-pointer` (`none`).
+/// `dims`, `data` (row-major), `fill-pointer` (`None`).
 fn read_array(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, rank: usize) -> Result<Value, Error> {
     let mark = heap.root_count();
     let datum = read_datum(cur, heap, ctx)?;
@@ -1543,7 +1543,7 @@ fn read_array(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, rank: usize) -> R
 
 /// The `Sexpr` `array` variant's box: an `Array<Option<Sexpr>>` with the
 /// prelude's `defstruct Array` fields in its order — `dims` (a `Vector<int>`
-/// of `Value::Int`s), `data` (row-major), `fill-pointer` (`none`). The one
+/// of `Value::Int`s), `data` (row-major), `fill-pointer` (`None`). The one
 /// place that layout is written outside the prelude; the reader and compiled
 /// code's quoted arrays both build through here.
 ///

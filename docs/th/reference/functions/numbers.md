@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -32,9 +32,9 @@ literal จำนวนเต็มที่ไม่มีคำอธิบา
 | `int->int` | `(int->int x)` | `T→int` | การแปลงขยายเป็น `int` (ถูกต้องแม่นยำเสมอ) สิ่งที่ `(as int x)` ทำ |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | การแปลงขยายเป็น `ratio` (ถูกต้องแม่นยำเสมอ) |
 | `int->char` | `(int->char x)` | `T→char` | ตีความค่าเป็น Unicode scalar value panic เมื่อค่าไม่ถูกต้อง |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | เวอร์ชันของ `int->char` ที่คืน `none` เมื่อล้มเหลว |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | เวอร์ชันของ `int->char` ที่คืน `None` เมื่อล้มเหลว |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | การแปลงความกว้าง ค่าที่ไม่พอดีถูกตัดทอน (เหมือน `as` ของ Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | การแปลงเดียวกันในรูปของคำถาม `none` หากค่าไม่พอดีกับความกว้างนั้น |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | การแปลงเดียวกันในรูปของคำถาม `None` หากค่าไม่พอดีกับความกว้างนั้น |
 
 การแปลงเหล่านี้คือสิ่งที่ฟอร์มพิเศษ `(as Type x)`/`(try-as Type x)`
 ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#7-ฟอร์มพิเศษอื่น-ๆ)) ทำ การดำเนินการระดับบิต (`logand`/`ash`/`ldb` และ
@@ -96,7 +96,7 @@ literal จำนวนเต็มที่ไม่มีคำอธิบา
 `(try-as i32 n)` คือการตัดทอน / การตรวจสอบจาก `int` (ความหมายเดียวกับ `int->W` / `try-int->W`
 ในบทที่ 1)
 
-variant จำนวนเต็มของ `Sexpr` ก็เป็นเพียง `int` (`(int n)` รับทั้ง fixnum และ bignum)
+variant จำนวนเต็มของ `Sexpr` ก็เป็นเพียง `Int` (`(Int n)` รับทั้ง fixnum และ bignum)
 
 ฟังก์ชันที่มีให้ในตัวที่รับดัชนีหรือจำนวนนับ (`substring`, `get` ของ `Vector`, จำนวนการเลื่อนของ `ash` และ
 อื่น ๆ) รับ `int` แต่การส่งค่าที่ไม่พอดี fixnum เป็นข้อผิดพลาดตอนรัน ("an integer
@@ -141,7 +141,7 @@ argument does not fit a fixnum")
 | `float->int` | `(float->int x)` | `f64→int` | แปลงเป็น `int` โดยตัดไปทางศูนย์ (`truncate` ของ CL; ถูกต้องแม่นยำสำหรับค่าจำกัดทุกขนาด) panic เมื่อเป็นอนันต์และ NaN สำหรับความกว้างคงที่ ใช้ `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | แปลงเป็น `ratio` ในรูปจำนวนตรรกยะฐานสองที่ถูกต้องแม่นยำ (`rational` ของ CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | แปลงระหว่างความกว้างของจำนวนทศนิยม `float->f32` ปัดไปค่าที่ใกล้ที่สุด `float->f64` ถูกต้องแม่นยำเสมอ สิ่งที่ `(as f32 x)` ทำ |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | การแปลงเดียวกันในรูปของคำถาม `none` หากการปัดเปลี่ยนค่า (การขยายเป็น `f64` เป็น `some` เสมอ) สิ่งที่ `(try-as f32 x)` ทำ |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | การแปลงเดียวกันในรูปของคำถาม `None` หากการปัดเปลี่ยนค่า (การขยายเป็น `f64` เป็น `Some` เสมอ) สิ่งที่ `(try-as f32 x)` ทำ |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | ฟังก์ชันชื่อเดียวกันของ CL เป็นชื่อแทนของ `floor`/`ceiling`/`round`/`truncate` ข้างบน: ใน CL ตัวที่ไม่มี prefix คืนจำนวนเต็ม ดังนั้นตัวที่มี prefix `f` ตรงกับพฤติกรรมของภาษานี้ |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | 2 / 53 / 53 ตามลำดับ (เฉพาะความแม่นยำของ `0.0` เป็น 0) `f64` เป็น IEEE-754 binary64 เสมอ จึงเป็นค่าคงที่ |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` หรือ `-1.0` |
@@ -220,7 +220,7 @@ argument does not fit a fixnum")
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | การเปรียบเทียบ |
 | `numerator` `denominator` | `(op x)` | `rational→int` | เศษและส่วนในรูปอย่างต่ำ |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | ตัดเข้าหาศูนย์ ในรูป `ratio` และแปลงเป็น `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` เมื่อเป็นจำนวนเต็ม มิฉะนั้น `none` (`integerp` ของ CL) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` เมื่อเป็นจำนวนเต็ม มิฉะนั้น `None` (`integerp` ของ CL) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | เหมือน `ratio` (เลขชี้กำลังของ `expt` เป็น `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | เหมือน `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | เหมือน `ratio` |

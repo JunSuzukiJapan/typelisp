@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # I/O Berkas, Stream, dan Jaringan
 
 Panduan ini menunjukkan dasar-dasar membaca dan menulis berkas, pathname, dan komunikasi socket.
@@ -14,14 +14,14 @@ Pisahkan hasilnya dengan `match`.
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; if the file is missing:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
 Ketika Anda tahu operasinya tidak mungkin gagal, atau pada skrip kecil yang berhenti saat gagal
-tidak masalah, `unwrap` mengambil nilainya. Jika berupa `err`, ia melakukan panic.
+tidak masalah, `unwrap` mengambil nilainya. Jika berupa `Err`, ia melakukan panic.
 
 ## 2. Membaca dan menulis seluruh berkas
 
@@ -30,8 +30,8 @@ Fungsi yang paling mudah menangani seluruh berkas sekaligus.
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. Membaca dan menulis dengan stream
@@ -46,23 +46,23 @@ badannya ditinggalkan, stream ditutup. Nilainya adalah `Result<nilai dari badan,
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; read one line at a time
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - Ada tiga arah untuk membuka berkas: `direction-input` (baca), `direction-output` (tulis; isi yang
   ada dibuang), dan `direction-append` (tambahkan di akhir).
-- `read-line` mengembalikan `none` di akhir berkas.
+- `read-line` mengembalikan `None` di akhir berkas.
 - Jika Anda membuka berkas dengan `open-file` dan bukan `with-open-file`, selalu panggil `close`. GC
   tidak menutup stream.
 
@@ -78,7 +78,7 @@ mencoba membaca byte dari stream karakter adalah kesalahan tipe.
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### Masukan dan keluaran standar
@@ -96,8 +96,8 @@ atau socket.
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -109,8 +109,8 @@ path menjadi bagian-bagian atau untuk menyusunnya.
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; replace just the extension
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -150,14 +150,14 @@ task itu** sampai data tiba, sehingga penanganan koneksi lain terus berlanjut.
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; the other side closed
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; the other side closed
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` hanya menerima koneksi dari mesin ini, dan `"0.0.0.0"` menerimanya di setiap
@@ -173,8 +173,8 @@ antarmuka. Untuk task, lihat [Referensi Sintaks bab 12](../reference/syntax.md#1
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 Untuk memberi batas waktu pada suatu operasi, berikan `:timeout` (dalam detik).
@@ -183,13 +183,13 @@ Untuk memberi batas waktu pada suatu operasi, berikan `:timeout` (dalam detik).
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; put a clock on the next read
 ```
 
 ### Ketika pihak seberang terputus
 
 Jika pihak seberang mereset koneksi atau memutusnya di tengah jalan, tidak terjadi `panic`.
-Pembacaan berikutnya mengembalikan `none`, dan penulisan dibuang tanpa pemberitahuan. Untuk
+Pembacaan berikutnya mengembalikan `None`, dan penulisan dibuang tanpa pemberitahuan. Untuk
 membedakan apakah koneksi ditutup dengan baik atau gagal, periksa `(socket-error c)`.
 
 ## 6. Resolusi nama (DNS)
@@ -199,13 +199,13 @@ atau `send-to` menyelesaikannya di dalamnya. Resolusi berlangsung di thread lain
 terus berjalan selama menunggu. Jika sebuah nama memiliki beberapa alamat, alamat-alamat itu dicoba
 bergiliran.
 
-Jika nama tidak dapat diselesaikan, `err` dikembalikan.
+Jika nama tidak dapat diselesaikan, `Err` dikembalikan.
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -218,12 +218,12 @@ biasa, sehingga membaca dan menulis bekerja seperti pada TCP.
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 Server TLS dibuat dengan memberikan berkas sertifikat dan kunci privat (PEM) ke `tls-listen`.
@@ -232,8 +232,8 @@ Server TLS dibuat dengan memberikan berkas sertifikat dan kunci privat (PEM) ke 
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 Saat mencobanya dengan sertifikat yang ditandatangani sendiri, berikan `:ca-file "cert.pem"` di sisi
@@ -251,8 +251,8 @@ UDP bukan stream; ia mengirim dan menerima satu datagram sekali waktu. Datanya a
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -261,5 +261,5 @@ UDP bukan stream; ia mengirim dan menerima satu datagram sekali waktu. Datanya a
 ## 9. Socket domain Unix
 
 Berikan path berkas socket ke `unix-listen` / `unix-connect`. Nilai yang Anda peroleh adalah
-`socket-stream` yang sama seperti pada TCP. `unix-listen` mengembalikan `err` jika berkasnya sudah
+`socket-stream` yang sama seperti pada TCP. `unix-listen` mengembalikan `Err` jika berkasnya sudah
 ada. Menutup listener menghapus berkasnya.

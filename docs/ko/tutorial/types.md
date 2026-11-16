@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 타입의 기초
 
 typelisp는 정적 타입 언어이다. 이 장에서는 타입 검사기가 해 주는 일, 자주 쓰는 타입(`Option`, `Result`, 구조체,
@@ -46,39 +46,39 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 ## 2. `Option<T>`: 없을 수도 있는 값
 
 typelisp에는 `nil`이 없다. "값이 없을 수도 있다"는 것은 `Option<T>` 타입으로 나타낸다. `Option<T>`의 값은 `T`의
-값을 하나 가진 `some`이거나, 아무것도 가지지 않은 `none` 중 하나이다.
+값을 하나 가진 `Some`이거나, 아무것도 가지지 않은 `None` 중 하나이다.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>`는 `int`가 아니므로 그대로는 계산에 쓸 수 없다. `(+ (safe-div 10 2) 1)`은 타입 오류이다. 안의 값을
-쓰려면 `match`로 `some`과 `none`을 나눈다.
+쓰려면 `match`로 `Some`과 `None`을 나눈다.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- `(some q)` 갈래에서는 안의 값이 변수 `q`에 묶인다.
-- `match`는 갈래가 **모든 경우를 덮는지** 검사한다. `(none)` 갈래를 잊으면 타입 오류이다.
+- `(Some q)` 갈래에서는 안의 값이 변수 `q`에 묶인다.
+- `match`는 갈래가 **모든 경우를 덮는지** 검사한다. `(None)` 갈래를 잊으면 타입 오류이다.
 
 ### nil이 없는 이유
 
 많은 언어에서 `nil`(`null`)은 어떤 타입의 값 대신으로도 쓸 수 있다. 그 결과 "값이 없는" 경우의 처리를 잊어도
-실행할 때까지 알아차리지 못한다. typelisp에서는 값이 없을 수 있는 곳은 `Option<T>` 타입이 되고, `match`로 `none`의
+실행할 때까지 알아차리지 못한다. typelisp에서는 값이 없을 수 있는 곳은 `Option<T>` 타입이 되고, `match`로 `None`의
 경우를 처리하지 않으면 타입 검사를 통과하지 못한다. 잊은 경우는 실행 전에 발견된다.
 
 조건도 같은 생각을 따른다. `if`의 조건이 될 수 있는 것은 `bool`뿐이다. Common Lisp의 "`nil` 이외에는 참" 같은
@@ -88,12 +88,12 @@ none
 
 | 형식 | 의미 |
 |---|---|
-| `(unwrap-or opt default)` | `some`이면 안의 값, `none`이면 기본값 |
-| `(unwrap opt)` | 안의 값을 꺼낸다. `none`이면 프로그램이 멈춘다 |
+| `(unwrap-or opt default)` | `Some`이면 안의 값, `None`이면 기본값 |
+| `(unwrap opt)` | 안의 값을 꺼낸다. `None`이면 프로그램이 멈춘다 |
 | `(is-some opt)` / `(is-none opt)` | 어느 쪽인지 검사한다 |
 
 표준 라이브러리 함수 중에는 `Option`을 반환하는 것이 많다. 예를 들어 `position`은 요소가 발견되면 그 위치를
-`some`으로, 발견되지 않으면 `none`을 반환한다.
+`Some`으로, 발견되지 않으면 `None`을 반환한다.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -101,24 +101,24 @@ none
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: 실패할 수 있는 처리
 
-실패할 수 있는 처리는 `Result<T,E>`를 반환한다. 성공하면 `T`의 값을 가진 `ok`, 실패하면 오류 `E`를 가진 `err`이다.
+실패할 수 있는 처리는 `Result<T,E>`를 반환한다. 성공하면 `T`의 값을 가진 `Ok`, 실패하면 오류 `E`를 가진 `Err`이다.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -127,8 +127,8 @@ none
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 값이 없는 이유를 설명할 필요가 없으면 `Option`, 실패한 이유를 전하고 싶으면 `Result`를 쓴다. 오류 처리는
@@ -197,28 +197,28 @@ none
 
 ```lisp
 (defenum shape
-  (circle int)        ; 반지름
-  (rect int int)      ; 너비와 높이
-  (dot))              ; 값을 가지지 않는다
+  (Circle int)        ; 반지름
+  (Rect int int)      ; 너비와 높이
+  (Dot))              ; 값을 가지지 않는다
 ```
 
-값은 `shape::circle`처럼 타입 이름을 앞에 붙여 만든다. `match`에서는 변형 이름으로 분해한다.
+값은 `shape::Circle`처럼 타입 이름을 앞에 붙여 만든다. `match`에서는 변형 이름으로 분해한다.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 여기서도 `match`는 모든 경우를 덮는지 검사한다. 나중에 `shape`에 변형을 추가하면 그것을 처리하지 않는 `match`가
 모두 타입 오류가 되므로 고쳐야 할 곳을 놓치지 않는다.
 
-`(use shape)` 뒤에는 타입 이름 없이 `(rect 5 6)`이라고 쓸 수 있다.
+`(use shape)` 뒤에는 타입 이름 없이 `(Rect 5 6)`이라고 쓸 수 있다.
 
 `Option`과 `Result`도 이와 같은 구조로 만든 열거형이다.
 

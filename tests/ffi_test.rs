@@ -219,7 +219,7 @@ fn a_c_word_is_read_as_an_int_by_the_declaration_s_signedness() {
     // `atol("-1")` puts all ones in the register. What that word *means* is
     // whatever the declaration claimed, and `bignum` is the only target that
     // can hold either reading — `as i32` truncates and `try-as i32` answers
-    // `none`, so without this there is no way to read a `size_t` at all.
+    // `None`, so without this there is no way to read a `size_t` at all.
     //
     // This is the one width where "unsigned" and "the word's own sign bit"
     // disagree: every narrower unsigned type is already non-negative in the
@@ -318,7 +318,7 @@ fn a_pointer_cannot_be_a_struct_field() {
 
 #[test]
 fn a_pointer_cannot_be_an_enum_field() {
-    let e = err("(defenum maybe-ptr (none) (some ptr))");
+    let e = err("(defenum maybe-ptr (None) (Some ptr))");
     assert!(e.contains("tags what it holds"), "unexpected error: {}", e);
 }
 
@@ -665,7 +665,7 @@ fn a_local_macro_passes_a_callback() {
                         (let ((txt (unsafe (let ((buf (c-strdup (sexpr-str s))))
                                              (c-qsort buf 4 1 (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1)))
                                              (let ((r (text-of buf \"\"))) (c-free buf) r)))))
-                          (str (format false \"~/bang/\" txt)))))
+                          (Str (format false \"~/bang/\" txt)))))
              (sorted \"cadb\")))
          (f)",
         QSORT

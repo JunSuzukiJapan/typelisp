@@ -11,8 +11,8 @@
       (print "lisp> ")
       (let ((line (read-line *standard-input*)))
         (match line
-          ((none) (println "") (break))
-          ((some s)
+          ((None) (println "") (break))
+          ((Some s)
            (if (equal s "")
                (break)
                (println "~a" (eval (parse (tokenize s)) env)))))))))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -30,8 +30,8 @@
 
 | ชนิด | เนื้อหา | รายละเอียด |
 |---|---|---|
-| `Option<T>` | ค่าที่มีอยู่หรือไม่มี `some` / `none` | [Option และ Result](functions/option-result.md) |
-| `Result<T,E>` | สำเร็จหรือล้มเหลว `ok` / `err` | เหมือนข้างบน |
+| `Option<T>` | ค่าที่มีอยู่หรือไม่มี `Some` / `None` | [Option และ Result](functions/option-result.md) |
+| `Result<T,E>` | สำเร็จหรือล้มเหลว `Ok` / `Err` | เหมือนข้างบน |
 | `Vector<T>` | อาร์เรย์ที่ขยายได้ | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | ตารางแฮช วิธีเปรียบเทียบคีย์กำหนดด้วย `:test` ตอนสร้าง และในตาราง `equal` ชนิดของคีย์ต้อง implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | ทูเพิล (สมาชิก 1 ถึง 12 ตัว) อ่านสมาชิกด้วย `t::0` | [ไวยากรณ์ บทที่ 2](syntax.md#2-การเขียนชนิด) |
@@ -46,8 +46,8 @@
 
 | ชนิด | เนื้อหา | รายละเอียด |
 |---|---|---|
-| `Sexpr` | S-expression ที่ไม่ว่าง มี 19 variant: `int`, `i8` ถึง `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [ข้อมูล S-expression](functions/sequences.md#2-ข้อมูล-s-expression-sexpr) |
-| `Option<Sexpr>` | ข้อมูล S-expression โดยทั่วไป ลิสต์ว่าง `()` คือ `none` | เหมือนข้างบน |
+| `Sexpr` | S-expression ที่ไม่ว่าง มี 19 variant: `Int`, `I8` ถึง `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [ข้อมูล S-expression](functions/sequences.md#2-ข้อมูล-s-expression-sexpr) |
+| `Option<Sexpr>` | ข้อมูล S-expression โดยทั่วไป ลิสต์ว่าง `()` คือ `None` | เหมือนข้างบน |
 
 ## 4. ชนิดในไลบรารีมาตรฐาน
 
@@ -72,7 +72,7 @@
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | สตรีม | [สตรีม](functions/streams-files.md#3-ชนิดสตรีมที่เป็นรูปธรรม) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | สตรีมแบบประกอบ | [สตรีมแบบประกอบ](functions/streams-files.md#4-สตรีมแบบประกอบ) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | เครือข่าย | [เครือข่าย](functions/network.md#1-ชนิด) |
-| `ReadOutcome` | ผลลัพธ์ของ `read-sexpr` `datum` / `eof` | [สตรีม](functions/streams-files.md#6-ฟังก์ชัน-generic-และการดำเนินการกับไฟล์) |
+| `ReadOutcome` | ผลลัพธ์ของ `read-sexpr` `Datum` / `Eof` | [สตรีม](functions/streams-files.md#6-ฟังก์ชัน-generic-และการดำเนินการกับไฟล์) |
 | `universal-time` `internal-time` `decoded-time` | เวลา | [เวลา](functions/system.md#1-เวลา) |
 | `heap-info` | สถานะปัจจุบันของฮีป | [เครื่องมือของการ implement](functions/system.md#51-ฟิลด์ของ-heap-info) |
 

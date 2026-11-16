@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Час, середовище та реалізація
 
 Функції для часу, запитів про середовище виконання, засобів реалізації, розбору й обчислення тексту,
@@ -55,20 +55,20 @@ CL (*If a time-zone is supplied, daylight saving time information is ignored*).
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | Командний рядок. **Елемент 0 — це назва програми** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | Змінна середовища. `none`, якщо не задана або не UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | Змінна середовища. `None`, якщо не задана або не UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. Основа `user-homedir-pathname` ([Шляхи](streams-files.md#92-функції)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Версія реалізації |
 | `machine-type` | `(machine-type)` | `()→string` | Архітектура процесора (`x86_64` / `aarch64` …). Значення **цілі збирання** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | Ім'я хоста |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | Назва обладнання, що **працює зараз** (`Apple M1` / `Intel(R) Xeon(R) …`). `none`, де визначити не вдається |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | Назва обладнання, що **працює зараз** (`Apple M1` / `Intel(R) Xeon(R) …`). `None`, де визначити не вдається |
 | `software-type` | `(software-type)` | `()→string` | ОС (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | Випуск ОС (`uname -r`, наприклад `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Коротка назва місця встановлення. **Завжди `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Так само, довга назва. **Завжди `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Коротка назва місця встановлення. **Завжди `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Так само, довга назва. **Завжди `None`** |
 
 Ті, що повертають `Option`, — це пункти, для яких CL дозволяє `NIL` (*or nil if no such name can be
-determined*). У POSIX немає місця для запису назв сайтів, тож вони завжди `none`; SBCL повертає те саме.
+determined*). У POSIX немає місця для запису назв сайтів, тож вони завжди `None`; SBCL повертає те саме.
 Зверніть увагу на різницю між `machine-type` і `machine-version`: перша — архітектура, для якої цей
 двійковий файл **зібрано**, друга — чип, що **виконує** його зараз.
 
@@ -135,7 +135,7 @@ determined*). У POSIX немає місця для запису назв сай
 запиті, на який ніхто не може відповісти.
 
 `$VISUAL` / `$EDITOR` для `ed` розбивається за пробілами, тож `EDITOR="code -w"` працює. Якщо жодного не
-задано, результат — `err`: `vi` не вгадується. Номер рядка передається першим у формі `+N`.
+задано, результат — `Err`: `vi` не вгадується. Номер рядка передається першим у формі `+N`.
 
 `dribble` записує всі три способи, якими вивід сеансу залишає процес: те, що пишуть
 `print`/`println`/`format`, те, що записується в потоки, під'єднані до стандартного виводу, і рядки,
@@ -144,14 +144,14 @@ determined*). У POSIX немає місця для запису назв сай
 ## 6. Розбір і обчислення
 
 Усі вони обробляють текст і дані з часу виконання (яких сама програма не контролює), тож у разі невдачі
-повертають `err` з `Result`, а не завершуються через panic. Типи помилок — конкретні типи для кожної
+повертають `Err` з `Result`, а не завершуються через panic. Типи помилок — конкретні типи для кожної
 операції ([Типи помилок](option-result.md#3-типи-помилок-і-трейт-error)).
 
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` з CL. Пропускає початкові й кінцеві пробільні знаки (той самий набір, що й `trim`), читає щонайбільше один знак `+`/`-`, потім цифри в системі числення `radix` (типово 10, 2–36; цифри понад 10 у будь-якому регістрі). Кількість цифр не обмежена (`int`). Будь-які інші знаки, що залишилися, дають `err`. З `:junk-allowed true` зупиняється на першій не-цифрі й ігнорує решту, але дає `err`, якщо немає жодної цифри (відповідає `nil` з CL). Не повертає другого значення CL (позиції, де читання закінчилося). `radix` поза діапазоном спричиняє panic (помилка викликача, а не тексту) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` з CL. Пропускає початкові й кінцеві пробільні знаки (той самий набір, що й `trim`), читає щонайбільше один знак `+`/`-`, потім цифри в системі числення `radix` (типово 10, 2–36; цифри понад 10 у будь-якому регістрі). Кількість цифр не обмежена (`int`). Будь-які інші знаки, що залишилися, дають `Err`. З `:junk-allowed true` зупиняється на першій не-цифрі й ігнорує решту, але дає `Err`, якщо немає жодної цифри (відповідає `nil` з CL). Не повертає другого значення CL (позиції, де читання закінчилося). `radix` поза діапазоном спричиняє panic (помилка викликача, а не тексту) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Число з рухомою комою. Також приймає `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Читає один `Sexpr` з `s` (тим самим читачем, що читає вихідний код). Незбалансовані дужки, незавершені рядки тощо дають `err`. Читання з потоку — це `read-sexpr` ([Потоки](streams-files.md#6-узагальнені-функції-та-файлові-операції)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Читає один `Sexpr` з `s` (тим самим читачем, що читає вихідний код). Незбалансовані дужки, незавершені рядки тощо дають `Err`. Читання з потоку — це `read-sexpr` ([Потоки](streams-files.md#6-узагальнені-функції-та-файлові-операції)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` плюс **позиція, де читання закінчилося**. `(car r)` — значення, а `(cdr r)` — позиція наступного знака для читання. `start` типово 0 |
 | `read-from-string-preserving-whitespace` | Так само | Так само | Те саме, але не споживає пробільний знак, що завершив дані. Різниця видна в поверненій позиції |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Перевіряє типи `form` під час виконання й обчислює його. Слідує `eval` з CL |
@@ -164,9 +164,9 @@ CL повертає **два значення** (значення й позиц�
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 Різниця, яку робить `preserving-whitespace`, — це **один пробільний знак**: `read` з CL споживає пробільний
@@ -186,16 +186,16 @@ CL повертає **два значення** (значення й позиц�
 негайно й назавжди.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; the global x is visible
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; returns the defined name
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; the definition just made is visible
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; the global x is visible
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; returns the defined name
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; the definition just made is visible
 ```
 
 - **Значення, що повертається**: для виразу — результат як `Option<Sexpr>`; для визначення — символ
   визначеної назви (як у CL). Щоб скористатися результатом, розберіть `Sexpr` через `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Відмінності через статичні типи (важливо)**: CL повертає справжнє значення результату, але в цій мові
   тип результату може бути лише єдиним `Result<Option<Sexpr>,EvalError>`. Крім того, **код, написаний
   статично, не може посилатися наперед на назви, які `eval` визначає під час виконання**: `(sq 9)`,
@@ -203,7 +203,7 @@ CL повертає **два значення** (значення й позиц�
   «невизначеним». Однак **пізніші `eval` його бачать** (їхня перевірка типів виконується під час
   виконання, після визначення). REPL перевіряє й виконує по одному рядку, тож назву, визначену через
   `eval`, можна викликати прямо з наступного рядка.
-- **Помилки**: помилки типів і синтаксичні помилки повертають `err` (panic не виникає). **Panic під час
+- **Помилки**: помилки типів і синтаксичні помилки повертають `Err` (panic не виникає). **Panic під час
   виконання** в обчислюваному коді (ділення на нуль тощо) поширюються так само, як із коду, написаного
   напряму. Очищення будь-яких `unwind-protect` між ними виконується
   ([Довідник із синтаксису, розділ 8](../syntax.md#8-нелокальні-виходи-catch--throw--unwind-protect)).
@@ -254,7 +254,7 @@ CL повертає **два значення** (значення й позиц�
 
 **Значення визначається під час перевірки**: якщо назва не розв'язується в жодне визначення, це помилка
 під час перевірки (як посилання на невизначену змінну). Якщо вона розв'язується, але рядка документації
-немає, результат — `Option::none`.
+немає, результат — `Option::None`.
 
 **Не охоплено**:
 
@@ -274,19 +274,19 @@ CL повертає **два значення** (значення й позиц�
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Новий символ. Його назва — `" <prefix><n>"`, де `n` — `*gensym-counter*`. Початковий пробіл не можна записати у вихідному коді, тож згенеровані зв'язування ніколи не конфліктують із записаними назвами |
 | `*gensym-counter*` | Змінна | `int` | Число, яке `gensym` використає наступним. Як у CL, його можна читати й задавати |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Розгортає виклик макроса на один крок. `none` означає «це не виклик макроса» |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Розгортає виклик макроса на один крок. `None` означає «це не виклик макроса» |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Повторює, доки це більше не макрос |
 
 `macroexpand-1` повертає `Option`. CL повідомляє «чи розгорнуто» як друге значення, але множинних значень
-немає, тож цю роль виконує `none`. **Макрос, що розгортається у виклик самого себе, ніколи не можна
+немає, тож цю роль виконує `None`. **Макрос, що розгортається у виклик самого себе, ніколи не можна
 сплутати з не-макросом.** Один крок розгортання — той самий, що використовує перевіряльник типів, тож те,
 що бачить програма, і те, що бачив перевіряльник, ніколи не розходяться.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 Що є в CL, а в цій мові немає: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` завжди

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Основи типів
 
 typelisp — це мова зі статичною типізацією. Цей розділ пояснює, що для вас робить перевіряльник типів,
@@ -48,41 +48,41 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 ## 2. `Option<T>`: значення, якого може не бути
 
 У typelisp немає `nil`. «Значення може бути відсутнє» виражається типом `Option<T>`. Значення
-`Option<T>` — це або `some`, що містить одне значення типу `T`, або `none`, що не містить нічого.
+`Option<T>` — це або `Some`, що містить одне значення типу `T`, або `None`, що не містить нічого.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` — це не `int`, тож у арифметиці його використати як є не можна. `(+ (safe-div 10 2) 1)` —
-це помилка типів. Щоб скористатися вмістом, розділіть `some` і `none` через `match`.
+це помилка типів. Щоб скористатися вмістом, розділіть `Some` і `None` через `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- У гілці `(some q)` вміст зв'язується зі змінною `q`.
-- `match` перевіряє, що його гілки **охоплюють усі випадки**. Забута гілка `(none)` — це помилка типів.
+- У гілці `(Some q)` вміст зв'язується зі змінною `q`.
+- `match` перевіряє, що його гілки **охоплюють усі випадки**. Забута гілка `(None)` — це помилка типів.
 
 ### Чому немає nil
 
 У багатьох мовах `nil` (`null`) може підставлятися замість значення будь-якого типу. Через це забутий
 випадок «значення немає» лишається непоміченим, доки програма не запуститься. У typelisp місце, де
 значення може бути відсутнє, має тип `Option<T>`, і код не проходить перевірку типів, поки `match` не
-обробить випадок `none`. Забутий випадок знаходиться до запуску програми.
+обробить випадок `None`. Забутий випадок знаходиться до запуску програми.
 
 Умови підкоряються тій самій ідеї: умовою `if` може бути лише `bool`. Правила на кшталт «усе, крім
 `nil`, — істина» з Common Lisp немає.
@@ -91,12 +91,12 @@ none
 
 | Форма | Значення |
 |---|---|
-| `(unwrap-or opt default)` | Вміст для `some`; типове значення для `none` |
-| `(unwrap opt)` | Виймає вміст. Зупиняє програму на `none` |
+| `(unwrap-or opt default)` | Вміст для `Some`; типове значення для `None` |
+| `(unwrap opt)` | Виймає вміст. Зупиняє програму на `None` |
 | `(is-some opt)` / `(is-none opt)` | Перевіряє, який це випадок |
 
 Багато функцій стандартної бібліотеки повертають `Option`. Наприклад, `position` повертає позицію в
-`some`, якщо елемент знайдено, і `none`, якщо ні.
+`Some`, якщо елемент знайдено, і `None`, якщо ні.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -104,25 +104,25 @@ none
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: операція, яка може завершитися невдачею
 
-Операція, що може зазнати невдачі, повертає `Result<T,E>`: `ok` зі значенням типу `T` у разі успіху або
-`err` з помилкою `E` у разі невдачі.
+Операція, що може зазнати невдачі, повертає `Result<T,E>`: `Ok` зі значенням типу `T` у разі успіху або
+`Err` з помилкою `E` у разі невдачі.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -131,8 +131,8 @@ none
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Використовуйте `Option`, коли відсутність значення не потребує пояснення, і `Result`, коли хочете
@@ -203,30 +203,30 @@ none
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-Значення створюються з назвою типу попереду, як-от `shape::circle`. У `match` їх розбирають за назвою
+Значення створюються з назвою типу попереду, як-от `shape::Circle`. У `match` їх розбирають за назвою
 варіанта.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 І тут `match` перевіряє, що всі випадки охоплено. Якщо згодом додати варіант до `shape`, кожен `match`,
 що його не обробляє, стане помилкою типів, тож жодне місце, яке потребує виправлення, не буде
 пропущене.
 
-Після `(use shape)` можна писати `(rect 5 6)` без назви типу.
+Після `(use shape)` можна писати `(Rect 5 6)` без назви типу.
 
 `Option` і `Result` — це переліки, побудовані тим самим механізмом.
 

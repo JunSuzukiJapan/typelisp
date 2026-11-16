@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tareas y canales
 
 El vocabulario de las tareas (hilos ligeros). `task` y `thread`, que las inician, y `select`, que espera
@@ -36,7 +36,7 @@ cambian y en qué se diferencia de Go está en
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | Un canal de capacidad `n`. `0` es un encuentro (sin búfer) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Espera hasta que haya sitio y entrega el valor |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Espera hasta que llega un valor. `none` una vez cerrado y vacío |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Espera hasta que llega un valor. `None` una vez cerrado y vacío |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Lo cierra |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Cuántos valores hay ahora en el búfer |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | La capacidad |
@@ -63,7 +63,7 @@ escriben `(Chan::new 0)` y `(Chan::new 16)`.
 - **Cerrar un canal en el que una tarea espera para hacer `send` provoca un panic en esa tarea** (la regla de
   Go).
 - `recv` sobre un canal cerrado devuelve lo que queda en el búfer y, una vez vacío, sigue devolviendo
-  `none`.
+  `None`.
 - `close` se resuelve por el tipo del receptor, así que es algo distinto del `close` del trait `Stream`.
   `Chan<T>` no implementa `Stream`.
 - **Una capacidad negativa provoca un panic** (no se redondea en silencio a 0).
@@ -197,8 +197,8 @@ mismo `is-cancelled` o recibiendo de `done`.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -212,7 +212,7 @@ mismo `is-cancelled` o recibiendo de `done`.
 - **La cancelación llega a los hijos.** Un contexto creado con `with-cancel`/`with-timeout` se
   cancela junto con su padre. En sentido contrario (de hijo a padre) no se propaga.
 - Un hijo creado a partir de un contexto ya cancelado nace cancelado.
-- `done` solo se cierra; no se envía ningún valor. Recibir devuelve `none`.
+- `done` solo se cierra; no se envía ningún valor. Recibir devuelve `None`.
 - Cada llamada a `(Context::background)` crea una raíz distinta. El `Background()` de Go es uno solo
   y no se puede cancelar; aquí también una raíz se puede cancelar, y eso solo afecta a lo creado a
   partir de ella.

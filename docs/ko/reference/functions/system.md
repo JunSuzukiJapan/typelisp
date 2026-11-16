@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -52,20 +52,20 @@ saving time information is ignored*).
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | 명령줄. **0번째 요소는 프로그램 이름** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | 환경 변수. 설정되지 않았거나 UTF-8이 아니면 `none` |
+| `getenv` | `(getenv name)` | `string→Option<string>` | 환경 변수. 설정되지 않았거나 UTF-8이 아니면 `None` |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. `user-homedir-pathname`([경로명](streams-files.md#92-함수))의 바탕 |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | 구현의 버전 |
 | `machine-type` | `(machine-type)` | `()→string` | CPU 아키텍처(`x86_64` / `aarch64` …). **빌드 대상**의 값 |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | 호스트 이름 |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | **지금 실행 중인** 하드웨어의 이름(`Apple M1` / `Intel(R) Xeon(R) …`). 알 수 없는 곳에서는 `none` |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | **지금 실행 중인** 하드웨어의 이름(`Apple M1` / `Intel(R) Xeon(R) …`). 알 수 없는 곳에서는 `None` |
 | `software-type` | `(software-type)` | `()→string` | OS(`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | OS의 릴리스(`uname -r`, 예를 들어 `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | 설치 장소의 짧은 이름. **항상 `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | 마찬가지로 긴 이름. **항상 `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | 설치 장소의 짧은 이름. **항상 `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | 마찬가지로 긴 이름. **항상 `None`** |
 
 `Option`을 반환하는 것은 CL이 `NIL`을 허용하는 항목이다(*or nil if no such name can be determined*). POSIX에는 사이트 이름을
-기록할 곳이 없으므로 항상 `none`이며, SBCL도 같은 것을 반환한다. `machine-type`과 `machine-version`의 차이에 주의한다.
+기록할 곳이 없으므로 항상 `None`이며, SBCL도 같은 것을 반환한다. `machine-type`과 `machine-version`의 차이에 주의한다.
 앞의 것은 이 바이너리가 **빌드된** 아키텍처이고, 뒤의 것은 지금 그것을 **실행하는** 칩이다.
 
 `command-line-args`의 0번째 요소는 `typl script.typl a b`에서는 스크립트의 경로, `./prog a b`로 실행하는 AOT 실행 파일에서는
@@ -126,7 +126,7 @@ saving time information is ignored*).
 **표준 입력이 터미널이 아니면 `step`은 그냥 `form`을 평가한다.** 아무도 답할 수 없는 프롬프트에서 스크립트와 테스트가
 멈추지 않도록 CLHS가 명시적으로 허용하는 퇴화한 동작이다.
 
-`ed`의 `$VISUAL` / `$EDITOR`는 공백에서 나뉘므로 `EDITOR="code -w"`도 동작한다. 둘 다 설정되지 않았으면 결과는 `err`이며
+`ed`의 `$VISUAL` / `$EDITOR`는 공백에서 나뉘므로 `EDITOR="code -w"`도 동작한다. 둘 다 설정되지 않았으면 결과는 `Err`이며
 `vi`를 추측하지 않는다. 줄 번호는 `+N` 형태로 먼저 넘긴다.
 
 `dribble`은 세션의 출력이 프로세스를 떠나는 세 가지 길을 모두 기록한다. `print`/`println`/`format`이 쓰는 것, 표준 출력에
@@ -134,14 +134,14 @@ saving time information is ignored*).
 
 ## 6. 해석과 평가
 
-모두 실행 시의 텍스트와 데이터(프로그램 자신이 통제하지 않는 것)를 다루므로 실패하면 panic하지 않고 `Result`의 `err`을
+모두 실행 시의 텍스트와 데이터(프로그램 자신이 통제하지 않는 것)를 다루므로 실패하면 panic하지 않고 `Result`의 `Err`을
 반환한다. 오류 타입은 연산마다의 구체 타입이다([오류 타입](option-result.md#3-오류-타입과-error-트레이트)).
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL의 `parse-integer`. 앞뒤의 공백(`trim`과 같은 집합)을 건너뛰고, 부호 `+`/`-`를 최대 하나, 그다음 기수 `radix`(기본 10, 2~36. 10 이상의 숫자는 대소문자 어느 쪽이든)의 숫자를 읽는다. 자릿수에 제한은 없다(`int`). 다른 문자가 남으면 `err`. `:junk-allowed true`면 첫 숫자가 아닌 문자에서 멈추고 나머지를 무시하지만 숫자가 하나도 없으면 `err`(CL의 `nil`에 해당). CL의 두 번째 값(읽기가 끝난 위치)은 반환하지 않는다. 범위를 벗어난 `radix`는 panic(텍스트가 아니라 호출한 쪽의 실수) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL의 `parse-integer`. 앞뒤의 공백(`trim`과 같은 집합)을 건너뛰고, 부호 `+`/`-`를 최대 하나, 그다음 기수 `radix`(기본 10, 2~36. 10 이상의 숫자는 대소문자 어느 쪽이든)의 숫자를 읽는다. 자릿수에 제한은 없다(`int`). 다른 문자가 남으면 `Err`. `:junk-allowed true`면 첫 숫자가 아닌 문자에서 멈추고 나머지를 무시하지만 숫자가 하나도 없으면 `Err`(CL의 `nil`에 해당). CL의 두 번째 값(읽기가 끝난 위치)은 반환하지 않는다. 범위를 벗어난 `radix`는 panic(텍스트가 아니라 호출한 쪽의 실수) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 부동소수점 수. `inf`/`nan`도 받는다 |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`에서 `Sexpr`를 하나 읽는다(소스 코드를 읽는 것과 같은 리더로). 괄호의 짝이 맞지 않거나 끝나지 않은 문자열 등은 `err`. 스트림에서 읽기는 `read-sexpr`([스트림](streams-files.md#6-제네릭-함수와-파일-조작)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s`에서 `Sexpr`를 하나 읽는다(소스 코드를 읽는 것과 같은 리더로). 괄호의 짝이 맞지 않거나 끝나지 않은 문자열 등은 `Err`. 스트림에서 읽기는 `read-sexpr`([스트림](streams-files.md#6-제네릭-함수와-파일-조작)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read`에 **읽기가 끝난 위치**를 더한 것. `(car r)`가 값, `(cdr r)`가 다음에 읽을 문자의 위치. `start`의 기본값은 0 |
 | `read-from-string-preserving-whitespace` | 위와 같음 | 위와 같음 | 같지만 데이터를 끝낸 공백을 소비하지 않는다. 차이는 반환하는 위치에 나타난다 |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | `form`을 실행 시에 타입 검사해 평가한다. CL의 `eval`을 따른다 |
@@ -153,9 +153,9 @@ CL은 `read-from-string`에서 **두 값**(값과 위치)을 반환하지만 이
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 `preserving-whitespace`가 만드는 차이는 **공백 한 글자**이다. CL의 `read`는 데이터를 끝낸 공백을 소비하고
@@ -172,21 +172,21 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
 `defenum`/`defmacro`)도 평가할 수 있으며, 정의는 즉시 그리고 영구히 전역 환경에 등록된다.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; 전역 x가 보인다
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; 정의한 이름을 반환한다
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; 방금 만든 정의가 보인다
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; 전역 x가 보인다
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; 정의한 이름을 반환한다
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; 방금 만든 정의가 보인다
 ```
 
 - **반환값**: 식이면 결과를 `Option<Sexpr>`로, 정의면 정의한 이름의 심볼(CL과 같다). 결과를 쓰려면 `Sexpr`를 `match`로
-  분해한다(`(int n)`/`(str s)`/…).
+  분해한다(`(Int n)`/`(Str s)`/…).
 - **정적 타입에 의한 차이(중요)**: CL은 결과의 실제 값을 반환하지만 이 언어에서는 반환 타입이 한결같이
   `Result<Option<Sexpr>,EvalError>`일 수밖에 없다. 또 **정적으로 쓴 코드는 `eval`이 실행 시에 정의하는 이름을 앞질러
   참조할 수 없다**. 파일에 직접 쓴 `(sq 9)`는 `sq`를 정의하는 `eval`이 실행되기 전에 검사되어 "정의되지 않음"이 된다.
   다만 **나중의 `eval`에서는 보인다**(그 타입 검사는 정의 뒤인 실행 시에 돌기 때문이다). REPL은 한 줄씩 검사하고 실행하므로
   `eval`로 정의한 이름을 다음 줄에서 바로 호출할 수 있다.
-- **오류**: 타입 오류와 구문 오류는 `err`을 반환한다(panic하지 않는다). 평가한 코드 안의 **실행 시 panic**(0으로 나누기
+- **오류**: 타입 오류와 구문 오류는 `Err`을 반환한다(panic하지 않는다). 평가한 코드 안의 **실행 시 panic**(0으로 나누기
   등)은 직접 쓴 코드에서처럼 전파된다. 사이에 있는 `unwind-protect`의 뒷정리는 실행된다
   ([문법 레퍼런스 8장](../syntax.md#8-비지역-탈출catch--throw--unwind-protect)).
 - **이름공간**: `typl file.typl`로 실행할 때와 AOT 실행 파일 안에서 `eval`은 스크립트의 모듈의 이름공간에서 평가한다
@@ -232,7 +232,7 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
 ```
 
 **값은 검사 시에 정해진다.** 이름이 어떤 정의로도 해석되지 않으면 검사 시 오류이다(정의되지 않은 변수를 참조할 때처럼).
-해석되지만 문서 문자열이 없으면 결과는 `Option::none`이다.
+해석되지만 문서 문자열이 없으면 결과는 `Option::None`이다.
 
 **대상이 아닌 것**:
 
@@ -251,18 +251,18 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 새 심볼. 이름은 `" <prefix><n>"`이며 `n`은 `*gensym-counter*`. 맨 앞의 공백은 소스에 쓸 수 없으므로 생성된 바인딩이 쓰인 이름과 겹치는 일은 없다 |
 | `*gensym-counter*` | 변수 | `int` | `gensym`이 다음에 쓰는 수. CL처럼 읽고 설정할 수 있다 |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 매크로 호출을 한 단계 전개한다. `none`은 "매크로 호출이 아니다"라는 뜻 |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 매크로 호출을 한 단계 전개한다. `None`은 "매크로 호출이 아니다"라는 뜻 |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 매크로가 아니게 될 때까지 반복한다 |
 
-`macroexpand-1`은 `Option`을 반환한다. CL은 "전개했는지"를 두 번째 반환값으로 알리지만 다중 값이 없으므로 `none`이 그 역할을
+`macroexpand-1`은 `Option`을 반환한다. CL은 "전개했는지"를 두 번째 반환값으로 알리지만 다중 값이 없으므로 `None`이 그 역할을
 한다. **자기 자신의 호출로 전개되는 매크로가 매크로 아닌 것과 혼동되는 일은 결코 없다.** 한 단계의 전개는 타입 검사기가 쓰는
 것과 같은 것이므로 프로그램이 보는 것과 검사기가 본 것이 어긋나지 않는다.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none은 빈 리스트로 보인다(Option<Sexpr>는 투명)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none은 빈 리스트로 보인다(Option<Sexpr>는 투명)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 CL에 있고 이 언어에 없는 것: `eval-when`(`:compile-toplevel`/`:load-toplevel`/`:execute`가 항상 일치하므로 고를 구별이

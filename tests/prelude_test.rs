@@ -502,62 +502,62 @@ fn eval_true(src: &str) {
 
 #[test]
 fn unwrap_returns_the_some_payload() {
-    assert_eq!(eval_ok("(unwrap (Option::some 5))"), Value::Int(5));
+    assert_eq!(eval_ok("(unwrap (Option::Some 5))"), Value::Int(5));
 }
 
 #[test]
 fn unwrap_panics_on_none() {
-    let src = "(defun get-opt () Option<int> (Option::none)) (unwrap (get-opt))";
+    let src = "(defun get-opt () Option<int> (Option::None)) (unwrap (get-opt))";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn unwrap_or_returns_the_payload_when_some() {
-    assert_eq!(eval_ok("(unwrap-or (Option::some 5) 9)"), Value::Int(5));
+    assert_eq!(eval_ok("(unwrap-or (Option::Some 5) 9)"), Value::Int(5));
 }
 
 #[test]
 fn unwrap_or_returns_the_default_when_none() {
-    let src = "(defun get-opt () Option<int> (Option::none)) (unwrap-or (get-opt) 9)";
+    let src = "(defun get-opt () Option<int> (Option::None)) (unwrap-or (get-opt) 9)";
     assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn is_some_distinguishes_some_from_none() {
-    eval_true("(is-some (Option::some 1))");
-    let src = "(defun get-opt () Option<int> (Option::none)) (is-some (get-opt))";
+    eval_true("(is-some (Option::Some 1))");
+    let src = "(defun get-opt () Option<int> (Option::None)) (is-some (get-opt))";
     assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
 fn is_none_distinguishes_none_from_some() {
-    let src = "(defun get-opt () Option<int> (Option::none)) (is-none (get-opt))";
+    let src = "(defun get-opt () Option<int> (Option::None)) (is-none (get-opt))";
     eval_true(src);
-    assert_eq!(eval_ok("(is-none (Option::some 1))"), Value::Bool(false));
+    assert_eq!(eval_ok("(is-none (Option::Some 1))"), Value::Bool(false));
 }
 
 #[test]
 fn result_unwrap_returns_the_ok_payload() {
-    let src = "(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::ok 7)) (unwrap (get-r))";
+    let src = "(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::Ok 7)) (unwrap (get-r))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn result_unwrap_panics_on_err() {
-    let src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
+    let src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::Err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn result_unwrap_or_returns_the_default_on_err() {
-    let src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
+    let src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::Err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn result_is_ok_and_is_err() {
-    let ok_src = "(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::ok 7)) (is-ok (get-r))";
-    let err_src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
+    let ok_src = "(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::Ok 7)) (is-ok (get-r))";
+    let err_src = r#"(use std::num::ParseIntError) (defun get-r () Result<int,ParseIntError> (Result::Err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
     eval_true(ok_src);
     eval_true(err_src);
 }
@@ -568,8 +568,8 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     // disambiguated by `typeck::method` from each call's
     // receiver type, like any other type's instance methods.
     let src = r#"(use std::num::ParseIntError) 
-        (defun get-r () Result<int,ParseIntError> (Result::ok 3))
-        (+ (unwrap (Option::some 4)) (unwrap (get-r)))
+        (defun get-r () Result<int,ParseIntError> (Result::Ok 3))
+        (+ (unwrap (Option::Some 4)) (unwrap (get-r)))
     "#;
     assert_eq!(eval_ok(src), Value::Int(7));
 }
@@ -669,9 +669,9 @@ fn until_does_not_run_the_body_when_the_test_is_already_true() {
 #[test]
 fn while_let_drains_an_option_producing_call_until_none() {
     let src = r#"
-        (defun next ((n int)) Option<int> (if (> n 0) (Option::some n) (Option::none)))
+        (defun next ((n int)) Option<int> (if (> n 0) (Option::Some n) (Option::None)))
         (let ((i 5) (sum 0))
-          (while-let ((some x) (next i))
+          (while-let ((Some x) (next i))
             (setf sum (+ sum x))
             (setf i (- i 1)))
           sum)
@@ -683,9 +683,9 @@ fn while_let_drains_an_option_producing_call_until_none() {
 #[test]
 fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
     let src = r#"
-        (defun get-opt () Option<int> (Option::none))
+        (defun get-opt () Option<int> (Option::None))
         (let ((ran false))
-          (while-let ((some x) (get-opt)) (setf ran true))
+          (while-let ((Some x) (get-opt)) (setf ran true))
           ran)
     "#;
     assert_eq!(eval_ok(src), Value::Bool(false));

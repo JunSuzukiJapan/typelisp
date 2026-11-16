@@ -134,7 +134,7 @@ pub enum Repr {
     /// [`Repr::Ratio`] and collectable like both. It has no `Type::Named`
     /// spelling, which is why it needs a variant of its own rather than
     /// falling into the struct arm; without one it landed on [`Repr::None`]
-    /// and `(match state ((some s) ...))` over an `Option<random-state>` —
+    /// and `(match state ((Some s) ...))` over an `Option<random-state>` —
     /// the prelude's `random` — aborted the island with "field type is not
     /// representable in compiled code yet".
     RandomState,
@@ -159,7 +159,7 @@ pub enum Repr {
     /// `Option<T>` with no box: `some v` is `v`'s **field** encoding — the
     /// tagged word a `defstruct` field of type `T` holds (a fixnum for a
     /// narrow integer, a float box, the tagged word itself for anything
-    /// already tagged) — and `none` is the empty-list immediate
+    /// already tagged) — and `None` is the empty-list immediate
     /// (`Value::Empty`, `NIL_WORD`). The element is `T`'s own
     /// representation, which is what the constructing and matching nodes
     /// (`some-of`/`pat-some`) tag and untag by.
@@ -169,7 +169,7 @@ pub enum Repr {
     /// `typelisp_mem::option_payload_niches` does from a type *key*, for
     /// the runtime producers that only have one (a test pins the two
     /// together). `Option<sexpr>` is the founding case: the empty list left
-    /// `Sexpr` precisely so it could be this `Option`'s `none`.
+    /// `Sexpr` precisely so it could be this `Option`'s `None`.
     ///
     /// Every consumer that only asks "tagged or not" sees a tagged word
     /// (`field_kind` `101`, a passthrough like `6` that the island can still
@@ -229,13 +229,13 @@ impl Repr {
             Type::RandomState => Repr::RandomState,
             Type::Named(p, _) if crate::types::path_is_builtin(p, typelisp_mem::wk::SEXPR) => Repr::Sexpr,
             // `Option<T>` is a niche whenever `T`'s values can be told from
-            // the empty-list immediate: `none` is that immediate, `some v`
+            // the empty-list immediate: `None` is that immediate, `some v`
             // is `v`'s tagged word, and no box is built. Decided from the
             // *payload's representation* rather than by naming types, so
             // that the same rule — Rust's own niche rule — covers every `T`
             // at once; `Repr::niches` lists the exclusions, and a nested
             // `Option<Option<T>>` is the one that matters most: its inner
-            // `none` is the very word the outer would use, so the outer one
+            // `None` is the very word the outer would use, so the outer one
             // drops through to `Repr::Enum` (a real box). `Option<Option<i32>>`
             // is an existing, tested shape (`tests/compile_test.rs`) and
             // `HashTable<K,Option<V>>::get` produces one, so this is
@@ -400,7 +400,7 @@ impl Repr {
 
     /// Whether an `Option` over this representation is a [`Repr::Niche`]:
     /// whether no value of it can be the empty-list word. The `Option`
-    /// itself is excluded (its `none` *is* that word); so are `Unit` (one
+    /// itself is excluded (its `None` *is* that word); so are `Unit` (one
     /// value, and it is the empty list), a raw C word (no tag to keep it
     /// apart), and the unrepresentable. Everything else is a tagged word or
     /// a raw scalar that tags into one — including `Sexpr`, whose empty

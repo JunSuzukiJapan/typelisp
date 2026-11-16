@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macro
 
 Macro là một hàm nhận một chương trình và trả về một chương trình. Macro cho phép bạn tạo cú pháp mới
@@ -43,7 +43,7 @@ nhanh nhất để tiến tới.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Khai triển cũng được kiểm tra kiểu
@@ -120,15 +120,15 @@ Tương tự, một macro lặp lại thân của nó một số lần cho trư�
 
 Thân macro là mã typelisp thông thường, nên nó có thể xem xét các đối số của mình bằng `if` hoặc `match`
 và dựng một khai triển khác. Các đối số là dữ liệu S-expression (`Option<Sexpr>`), và danh sách rỗng là
-`none`.
+`None`.
 
 Hãy tạo `my-and`, trả về `true` nếu mọi điều kiện của nó đều đúng.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; không có đối số
-    ((cons f more)
+    ((None) 'true)                                    ; không có đối số
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; chỉ có một
          `(if ,f (my-and ,@more) false)))             ; hai hoặc nhiều hơn
@@ -138,7 +138,7 @@ Hãy tạo `my-and`, trả về `true` nếu mọi điều kiện của nó đ�
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` là một mẫu lấy đầu của danh sách vào `f` và phần còn lại vào `more`.
+- `(Cons f more)` là một mẫu lấy đầu của danh sách vào `f` và phần còn lại vào `more`.
 - `sexpr-null` kiểm tra xem dữ liệu S-expression có phải là danh sách rỗng hay không.
 - Nhánh `_` cuối cùng là cần thiết vì dữ liệu S-expression có những dạng khác ngoài danh sách (số,
   chuỗi, v.v.), và `match` yêu cầu phải bao phủ cả chúng. Đối số `&rest` luôn là một danh sách, nên

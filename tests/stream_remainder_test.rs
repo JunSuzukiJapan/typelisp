@@ -60,7 +60,7 @@ fn read_char_no_hang_yields_what_is_there() {
             r#"(let ((s (make-string-input-stream "x")))
                  (format false "~a ~a" (read-char-no-hang s) (read-char-no-hang s)))"#
         ),
-        "(some x) none"
+        "(Some x) None"
     );
 }
 
@@ -75,7 +75,7 @@ fn a_pushed_back_character_counts_as_ready() {
                  (unread-char p #\z)
                  (format false "~a ~a" (listen p) (read-char-no-hang p)))"#
         ),
-        "true (some z)"
+        "true (Some z)"
     );
 }
 
@@ -93,15 +93,15 @@ fn a_user_stream_that_says_nothing_reports_nothing_ready() {
                  (:type Item char)
                  (defmethod read-item (self) Option<char>
                    (if (>= self::at (length self::text))
-                       (Option::none)
+                       (Option::None)
                        (let ((c (ref self::text self::at)))
                          (setf self::at (+ self::at 1))
-                         (Option::some c)))))
+                         (Option::Some c)))))
                (impl CharInput fixed)
                (let ((s (make-instance 'fixed :text "abc" :at 0)))
                  (format false "~a ~a ~a" (listen s) (read-char-no-hang s) (read-char s)))"#
         ),
-        "false none (some a)"
+        "false None (Some a)"
     );
 }
 
@@ -115,13 +115,13 @@ fn a_user_stream_that_answers_is_believed() {
                  (defmethod close (self) () ()))
                (impl InputStream always
                  (:type Item char)
-                 (defmethod read-item (self) Option<char> (Option::some #\q))
+                 (defmethod read-item (self) Option<char> (Option::Some #\q))
                  (defmethod listen (self) bool true))
                (impl CharInput always)
                (let ((s (make-instance 'always :n 0)))
                  (format false "~a ~a" (listen s) (read-char-no-hang s)))"#
         ),
-        "true (some q)"
+        "true (Some q)"
     );
 }
 
@@ -160,7 +160,7 @@ fn read_sequence_leaves_the_rest_of_the_stream_where_it_was() {
                  (read-sequence s v 2)
                  (format false "~a" (read-char s)))"#
         ),
-        "(some c)"
+        "(Some c)"
     );
 }
 
@@ -199,18 +199,18 @@ fn the_byte_layer_has_the_same_pair() {
     let path_str = path.to_string_lossy().replace('\\', "/");
     let src = format!(
         r#"(use std::fs::open-binary-input std::fs::open-binary-output) (match (open-binary-output "{p}")
-             ((ok o) (let ((v (the Vector<int> (Vector::new))))
+             ((Ok o) (let ((v (the Vector<int> (Vector::new))))
                        (push v 65)
                        (push v 66)
                        (write-sequence o v)
                        (close o)))
-             ((err e) (panic (message e))))
+             ((Err e) (panic (message e))))
            (match (open-binary-input "{p}")
-             ((ok i) (let ((w (the Vector<int> (Vector::new))))
+             ((Ok i) (let ((w (the Vector<int> (Vector::new))))
                        (let ((got (read-sequence i w 8)))
                          (close i)
                          (format false "~a ~a ~a" got (get w 0) (get w 1)))))
-             ((err e) (message e)))"#,
+             ((Err e) (message e)))"#,
         p = path_str
     );
     assert_eq!(eval_string(&src), "2 65 66");

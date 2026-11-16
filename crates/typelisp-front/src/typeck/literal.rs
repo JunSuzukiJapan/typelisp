@@ -9,7 +9,7 @@
 use crate::types::Type;
 use crate::{wk, Error, Heap, Value};
 
-/// A literal: its core tag, its value (none for the unit value) and its type.
+/// A literal: its core tag, its value (None for the unit value) and its type.
 pub(crate) struct Literal {
     pub(crate) tag: u32,
     pub(crate) value: Option<Value>,
@@ -25,7 +25,7 @@ impl Literal {
 /// The literal `v` is where `expected` is expected, or `None` when `v` is not
 /// a literal: a symbol that is not a keyword, a vector, array or tuple
 /// literal, an object put into S-expression data, or the empty list where an
-/// `Option` is expected (that is `Option::none`).
+/// `Option` is expected (that is `Option::None`).
 ///
 /// A value this allocates (an `f32` box) comes back unrooted.
 pub(crate) fn literal(heap: &mut Heap, v: Value, expected: Option<&Type>) -> Result<Option<Literal>, Error> {
@@ -84,7 +84,7 @@ pub(crate) fn literal(heap: &mut Heap, v: Value, expected: Option<&Type>) -> Res
         Value::Str(_) => Literal::of(wk::STR, v, Type::Str),
         // A keyword is self-evaluating (CL): it never names a variable.
         Value::Symbol(id) if id.is_keyword() => Literal::of(wk::SYM, v, Type::Symbol),
-        // The empty list is `Option::none` where an `Option` is expected, and
+        // The empty list is `Option::None` where an `Option` is expected, and
         // the unit value anywhere else. It is not an empty `Sexpr`: `Sexpr`
         // means a non-empty S-expression.
         Value::Empty => match expected {

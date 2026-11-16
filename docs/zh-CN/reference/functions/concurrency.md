@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 任务与通道
 
 任务（轻量级线程）的词汇。启动它们的 `task`・`thread` 和多路等待的 `select` 是特殊形式，见
@@ -31,7 +31,7 @@
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | 容量为 `n` 的通道。`0` 是会合（无缓冲） |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | 等到有空位再交出 |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 等到有值到达。关闭且为空时为 `none` |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 等到有值到达。关闭且为空时为 `None` |
 | `close` | `(close ch)` | `(Chan<T>)→()` | 关闭 |
 | `len` | `(len ch)` | `(Chan<T>)→int` | 当前缓冲区中的个数 |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | 容量 |
@@ -55,7 +55,7 @@
 - **向已关闭的通道 `send` 会 panic**，**第 2 次 `close` 也会 panic**（都与 Go 相同。这是程序的 bug 而不是可恢复的失败，所以
   不用 `Result`）。
 - **关闭有任务正在等待 `send` 的通道，该任务会 panic**（Go 的规则）。
-- 从已关闭的通道 `recv`，缓冲区中有剩余就返回它，变空之后一直返回 `none`。
+- 从已关闭的通道 `recv`，缓冲区中有剩余就返回它，变空之后一直返回 `None`。
 - `close` 按接收者的类型解析，所以与 `Stream` trait 的 `close` 是不同的东西。`Chan<T>` 没有实现 `Stream`。
 - **负的容量会 panic**（不会悄悄舍入为 0）。
 
@@ -176,8 +176,8 @@ Go 的 `context.Context`。传给想要能从外部停止的工作。停止是**
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -190,7 +190,7 @@ Go 的 `context.Context`。传给想要能从外部停止的工作。停止是**
 
 - **取消会传给子上下文**。用 `with-cancel`/`with-timeout` 创建的上下文会随父上下文一起被取消。反方向（从子到父）不会传递。
 - 从已取消的上下文创建的子上下文，一开始就是已取消的。
-- `done` 只会被关闭，不发送值。接收时返回 `none`。
+- `done` 只会被关闭，不发送值。接收时返回 `None`。
 - `(Context::background)` 每次调用都创建一个不同的根。Go 的 `Background()` 只有一个且不能取消；这里根也可以取消，影响只及于从它创建的东西。
 - 可以在任务之间、线程之间传递。
 

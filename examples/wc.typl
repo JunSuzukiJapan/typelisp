@@ -20,10 +20,10 @@
           (line-count 0)
           (in-word false))
       (match (open-binary-input path)
-        ((ok file)
+        ((Ok file)
          (progn
            (loop (match (read-byte file)
-                   ((some b)
+                   ((Some b)
                     (progn
                       (incf char-count)
                       (when (= b #x0a)
@@ -34,10 +34,10 @@
                           (unless (is-whitespace b)
                             (setf in-word true)
                             (incf word-count)))))
-                   ((none) (break))))
+                   ((None) (break))))
            (close file)
            (println "~10d ~10d ~10d ~a" line-count word-count char-count path)))
-        ((err e)
+        ((Err e)
          (progn
            (println "wc: ~a" (message e))
            (exit 1)))))))

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macros
 
 A macro is a function that takes a program and returns a program. Macros let you create new syntax
@@ -43,7 +43,7 @@ first is the quickest way forward.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Expansions are type-checked too
@@ -121,15 +121,15 @@ In the same way, a macro that repeats its body a given number of times can be wr
 
 A macro body is ordinary typelisp code, so it can inspect its arguments with `if` or `match` and
 build a different expansion. The arguments are S-expression data (`Option<Sexpr>`), and the empty
-list is `none`.
+list is `None`.
 
 Let us make `my-and`, which returns `true` if all its conditions are true.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
-    ((cons f more)
+    ((None) 'true)                                    ; no arguments
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -139,7 +139,7 @@ Let us make `my-and`, which returns `true` if all its conditions are true.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` is a pattern that takes the head of a list into `f` and the rest into `more`.
+- `(Cons f more)` is a pattern that takes the head of a list into `f` and the rest into `more`.
 - `sexpr-null` tests whether S-expression data is the empty list.
 - The final `_` arm is needed because S-expression data has forms other than lists (numbers,
   strings and so on), and `match` requires those to be covered too. A `&rest` argument is always a

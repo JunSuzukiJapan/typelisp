@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 错误处理
 
 typelisp 的错误处理把失败分为两类来考虑。
@@ -6,7 +6,7 @@ typelisp 的错误处理把失败分为两类来考虑。
 | 失败的种类 | 例子 | 表示方式 |
 |---|---|---|
 | 可能发生的失败（可恢复） | 文件不存在、输入不是数字 | 返回 `Result<T,E>` |
-| 程序的错误（不可恢复） | 下标越界、对 `none` 的 `unwrap`、除以 0 | 用 `panic` 停止 |
+| 程序的错误（不可恢复） | 下标越界、对 `None` 的 `unwrap`、除以 0 | 用 `panic` 停止 |
 
 此外还有一次性跨越多层函数调用跳出的 `catch` / `throw`，以及无论如何退出都会执行清理的 `unwind-protect`。
 阅读本章前请先读[类型基础](types.md)中 `Result` 一节。
@@ -19,22 +19,22 @@ typelisp 的错误处理把失败分为两类来考虑。
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 调用方用 `match` 区分成功和失败。
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- 返回 `Result` 的函数的值，不在 `match` 中处理 `err` 的情况就无法使用。忘记处理失败是类型错误。
+- 返回 `Result` 的函数的值，不在 `match` 中处理 `Err` 的情况就无法使用。忘记处理失败是类型错误。
 - `parse-int` 的错误是 `ParseIntError` 类型的值。用 `(message e)` 取出消息字符串。
 
 ## 2. 把失败传给调用方
@@ -44,16 +44,16 @@ typelisp 的错误处理把失败分为两类来考虑。
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
-知道不会失败时，或者在失败了停止也无妨的小脚本中，可以用 `unwrap` 取出内容。如果是 `err` 则会 panic。用默认值
+知道不会失败时，或者在失败了停止也无妨的小脚本中，可以用 `unwrap` 取出内容。如果是 `Err` 则会 panic。用默认值
 就够的话，使用 `unwrap-or`。
 
 ## 3. 创建自己的错误类型
@@ -63,24 +63,24 @@ typelisp 的错误处理把失败分为两类来考虑。
 
 ```lisp
 (defenum config-error
-  (missing string)          ; 缺少设置项
-  (invalid string int))     ; 值不正确
+  (Missing string)          ; 缺少设置项
+  (Invalid string int))     ; 值不正确
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` 返回错误的说明。
-- `source` 返回导致这个错误的另一个错误。没有原因时为 `none`。
+- `source` 返回导致这个错误的另一个错误。没有原因时为 `None`。
 
 ## 4. 合并不同种类的错误
 
@@ -92,8 +92,8 @@ typelisp 的错误处理把失败分为两类来考虑。
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 传入 `"4"`、`"-1"`、`"abc"` 的结果如下：
@@ -122,7 +122,7 @@ error: main.typl:4:7: panic: index 3 out of range
 ```
 
 - `panic` 的类型是 `!`（不返回），可以写在需要任何类型的地方。上例中 `if` 两边的类型能对上就是这个原因。
-- 下列操作也会 panic：对 `none` 或 `err` 的 `unwrap`、用越界下标 `get`、整数除以 0。
+- 下列操作也会 panic：对 `None` 或 `Err` 的 `unwrap`、用越界下标 `get`、整数除以 0。
 - `panic` 会停止程序。即使发生在任务中，整个程序也会停止。
 - 在 REPL 中，panic 不会结束 REPL，而是等待下一个输入。
 - "还没写"可以写成 `(todo)`，"不应该到达这里"可以写成 `(unreachable)`。两者都会 panic。
@@ -184,8 +184,8 @@ error: main.typl:4:7: panic: index 3 out of range
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`：一定执行清理

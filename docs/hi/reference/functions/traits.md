@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # स्टैंडर्ड trait
 
 इटरेशन, तुलना, अंकगणित और तत्व जोड़ने व निकालने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
@@ -140,7 +140,7 @@ trait मेथड का नाम `+` नहीं है क्योंक�
   (defmethod pop (self) Option<Item>))
 ```
 
-ऐसा संग्रह जिससे `push` द्वारा सबसे बाद में जोड़ा गया तत्व वापस निकाला जा सके। खाली होने पर `none`। जेनेरिक फ़ंक्शन इसे `(:where (Pop C (Item T)))` से माँगता है।
+ऐसा संग्रह जिससे `push` द्वारा सबसे बाद में जोड़ा गया तत्व वापस निकाला जा सके। खाली होने पर `None`। जेनेरिक फ़ंक्शन इसे `(:where (Pop C (Item T)))` से माँगता है।
 
 | टाइप | `pop` क्या करता है |
 |---|---|
@@ -156,8 +156,8 @@ trait मेथड का नाम `+` नहीं है क्योंक�
   (let ((out (the Vector<T> (Vector::new))) (more true))
     (while more
       (match (pop c)
-        ((some x) (push out x))
-        ((none) (progn (setf more false) ()))))
+        ((Some x) (push out x))
+        ((None) (progn (setf more false) ()))))
     out))
 
 (let ((v (the Vector<int> #(1 2 3)))

@@ -79,7 +79,7 @@ fn stdout_of(src: &str) -> String {
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *standard-output* (%internal::standard-stream-of *cap*))\n\
          {}\n\
-         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (match (%internal::stream-take-output-string *cap*) ((Ok s) s) ((Err _) \"<capture failed>\"))",
         src
     ))
 }
@@ -161,10 +161,10 @@ fn dribble_records_both_kinds_of_output_until_it_is_closed() {
     let path = temp_path("session.log");
     let _ = std::fs::remove_file(&path);
     let (h, _) = eval(&format!(
-        "(match (dribble \"{}\") ((ok _) ()) ((err e) (println \"start failed: ~a\" (message e))))\n\
+        "(match (dribble \"{}\") ((Ok _) ()) ((Err e) (println \"start failed: ~a\" (message e))))\n\
          (println \"through the printer\")\n\
          (write-line *standard-output* \"through the stream\")\n\
-         (match (dribble) ((ok _) ()) ((err e) (println \"stop failed: ~a\" (message e))))\n\
+         (match (dribble) ((Ok _) ()) ((Err e) (println \"stop failed: ~a\" (message e))))\n\
          (println \"after the dribble closed\")",
         path.display()
     ));
@@ -183,10 +183,10 @@ fn dribble_records_a_builtin_print_method_used_as_a_value() {
     let path = temp_path("method.log");
     let _ = std::fs::remove_file(&path);
     let (h, _) = eval(&format!(
-        "(match (dribble \"{}\") ((ok _) ()) ((err e) (println \"start failed: ~a\" (message e))))\n\
+        "(match (dribble \"{}\") ((Ok _) ()) ((Err e) (println \"start failed: ~a\" (message e))))\n\
          (defun call-it ((f (fn (bool) ())) (b bool)) () (f b))\n\
          (call-it println true)\n\
-         (match (dribble) ((ok _) ()) ((err e) (println \"stop failed: ~a\" (message e))))",
+         (match (dribble) ((Ok _) ()) ((Err e) (println \"stop failed: ~a\" (message e))))",
         path.display()
     ));
     drop(h);
@@ -204,11 +204,11 @@ fn a_second_dribble_closes_the_first() {
         let _ = std::fs::remove_file(p);
     }
     let (h, _) = eval(&format!(
-        "(match (dribble \"{}\") ((ok _) ()) ((err _) ()))\n\
+        "(match (dribble \"{}\") ((Ok _) ()) ((Err _) ()))\n\
          (println \"one\")\n\
-         (match (dribble \"{}\") ((ok _) ()) ((err _) ()))\n\
+         (match (dribble \"{}\") ((Ok _) ()) ((Err _) ()))\n\
          (println \"two\")\n\
-         (match (dribble) ((ok _) ()) ((err _) ()))",
+         (match (dribble) ((Ok _) ()) ((Err _) ()))",
         first.display(),
         second.display()
     ));
@@ -230,8 +230,8 @@ fn an_unopenable_dribble_path_is_an_error_value() {
     assert!(
         eval_string(
             "(match (dribble \"/no/such/directory/session.log\")\n\
-               ((ok _) \"unexpectedly opened\")\n\
-               ((err e) (message e)))"
+               ((Ok _) \"unexpectedly opened\")\n\
+               ((Err e) (message e)))"
         )
         .starts_with("dribble: /no/such/directory/session.log:")
     );
@@ -277,7 +277,7 @@ fn ed_opens_a_definition_at_its_own_line() {
     let (h, _) = eval(
         "(defun first-one () int 1)\n\
          (defun second-one () int 2)\n\
-         (match (ed second-one) ((ok _) ()) ((err e) (println \"ed failed: ~a\" (message e))))",
+         (match (ed second-one) ((Ok _) ()) ((Err e) (println \"ed failed: ~a\" (message e))))",
     );
     drop(h);
     let args = std::fs::read_to_string(&record).expect("the fake editor should have run");
@@ -299,7 +299,7 @@ fn ed_without_an_editor_variable_is_an_error() {
     assert_eq!(
         eval_string(
             "(defun anything () int 1)\n\
-             (match (ed anything) ((ok _) \"unexpectedly ran\") ((err e) (message e)))"
+             (match (ed anything) ((Ok _) \"unexpectedly ran\") ((Err e) (message e)))"
         ),
         "ed: neither $VISUAL nor $EDITOR is set"
     );
@@ -323,7 +323,7 @@ fn ed_takes_a_path_as_well_as_a_name() {
     let editor = fake_editor(&record);
     std::env::set_var("EDITOR", &editor);
     std::env::remove_var("VISUAL");
-    let (h, _) = eval("(match (ed \"notes.typl\") ((ok _) ()) ((err _) ()))");
+    let (h, _) = eval("(match (ed \"notes.typl\") ((Ok _) ()) ((Err _) ()))");
     drop(h);
     let args = std::fs::read_to_string(&record).expect("the fake editor should have run");
     let _ = std::fs::remove_file(&record);
@@ -384,7 +384,7 @@ fn disassemble_leaves_the_definition_interpreted() {
          (setf *standard-output* (%internal::standard-stream-of (%internal::stream-string-output)))\n\
          (disassemble f)\n\
          (trace f)\n\
-         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (match (%internal::stream-take-output-string *cap*) ((Ok s) s) ((Err _) \"<capture failed>\"))",
     );
     assert!(
         !after_disassemble.contains("has a compiled body"),

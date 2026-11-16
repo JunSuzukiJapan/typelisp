@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -64,20 +64,20 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   cùng kiểu: `#(1 "a")` là lỗi kiểu, `#()` không có phần tử lẫn ngữ cảnh cũng vậy. Mỗi lần đánh giá
   tạo ra một vector mới. Ở chỗ mong đợi dữ liệu S-expression (`(the Option<Sexpr> #(1 x))`,
   `'#(..)`, thứ `read` trả về), nó là `Vector<Option<Sexpr>>` mà mọi phần tử đều là dữ liệu: variant
-  `vector` của `Sexpr`.
+  `Vector` của `Sexpr`.
 - **Mảng**: `#2A((1 2) (3 4))` (giống CL). Số giữa `#` và `A` là hạng, và chừng ấy tầng lồng nhau
   đầu tiên của các danh sách trong nội dung là các chiều. `#0A x` là mảng không chiều chứa một phần
   tử. Các danh sách cùng tầng có độ dài khác nhau là lỗi đọc. Kiểu được quyết định như với vector và
   là `Array<T>` (khi không có phần tử, ngữ cảnh phải cho kiểu, như `(the Array<f64> #2A(()))`). Dưới
-  dạng dữ liệu S-expression nó là `Array<Option<Sexpr>>`: variant `array` của `Sexpr`.
+  dạng dữ liệu S-expression nó là `Array<Option<Sexpr>>`: variant `Array` của `Sexpr`.
 - **Tuple**: `#{"foo" 123 45.6}`. Nội dung toàn là literal và không được đánh giá (`a` của `#{a b}`
   là một ký hiệu). Kiểu của mỗi phần tử do ngữ cảnh quyết định theo từng vị trí
   (`(the #{i32 f64} #{1 2.0})`), và khi không có ngữ cảnh thì là kiểu của chính phần tử
   (`#{"foo" 123}` là `#{string int}`). Một tuple có từ 1 đến 12 phần tử. Mỗi lần đánh giá tạo ra một
   tuple mới. Để dựng từ các giá trị đã tính, dùng `(tuple a b)`. Ở nơi mong đợi dữ liệu
-  S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `tuple` của `Sexpr`.
+  S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `Tuple` của `Sexpr`.
 - **Thuộc tính**: `#[test]` là một dấu gắn vào dạng tiếp theo (viết như trong Rust). Hiện chỉ có một thuộc tính là `test`, và nó đặt lên một `defun` ([3.16 `#[test]`](#316-test--hàm-kiểm-thử)). Khi đọc bằng `read`, nó trở thành danh sách `(%internal::attribute (test) form)`.
-- **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `none` của `Option<Sexpr>`.
+- **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `None` của `Option<Sexpr>`.
   **`Sexpr` không có variant danh sách rỗng**: `Sexpr` nghĩa là "một S-expression không rỗng", và kiểu của dữ
   liệu S-expression là `Option<Sexpr>` (xem "Mẫu cho `Option<Sexpr>`" ở
   [4.3 match](#43-match--so-khớp-mẫu)).
@@ -145,7 +145,7 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
   của nó (mọi thứ nó kế thừa, bắc cầu) (upcasting). Nó không thể được truyền cho một trait không liên quan.
   Về các điều kiện một trait phải đáp ứng để dùng với `:dyn`, xem
   [3.9 deftrait / impl](#39-deftrait--impl--trait). Viết `:dyn` ngoài vị trí kiểu là lỗi.
-- Các kiểu generic dựng sẵn: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
+- Các kiểu generic dựng sẵn: `Option<T>` (`(Some T)` / `None`), `Result<T,E>` (`(Ok T)` / `(Err E)`),
   `HashTable<K,V>`, `Vector<T>`, và các kiểu đồng thời `Task<T>` / `Thread<T>` / `Chan<T>`
   ([chương 12](#12-lập-trình-đồng-thời-task)). Cũng có `Sexpr`, kiểu của dữ liệu S-expression. Các kiểu lỗi cụ thể
   dựng sẵn là `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`, và
@@ -181,7 +181,7 @@ Tên của các dạng đặc biệt (từ dành riêng như `if`, `let` và `st
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; không có mặc định
-    (match suffix ((some s) (append name s)) ((none) name)))         ; Option<string> trong thân
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; Option<string> trong thân
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; có mặc định
   (pow 3)      ; n = 2
@@ -191,8 +191,8 @@ Tên của các dạng đặc biệt (từ dành riêng như `if`, `let` và `st
   (mk :b "q")  ; bên gọi viết `:name value`, theo thứ tự bất kỳ; các tham số bị bỏ qua nhận mặc định
   ```
 
-  - **Một tham số không có biểu thức mặc định có kiểu `Option<Type>`.** Khi bị bỏ qua, nó là `none`; khi được
-    truyền, giá trị trần mà bên gọi viết được bọc tự động vào `some`. Những gì CL làm với một biến supplied-p
+  - **Một tham số không có biểu thức mặc định có kiểu `Option<Type>`.** Khi bị bỏ qua, nó là `None`; khi được
+    truyền, giá trị trần mà bên gọi viết được bọc tự động vào `Some`. Những gì CL làm với một biến supplied-p
     ("có được cung cấp không?") thì ở đây hiện ra ở phía kiểu tĩnh.
   - Với một biểu thức mặc định, kiểu vẫn là `Type` như đã khai báo. Khi bị bỏ qua, **biểu thức đã được kiểm
     tra** đó được nhúng vào lời gọi nguyên trạng (được đánh giá ở mỗi lần gọi).
@@ -388,7 +388,7 @@ sau là lỗi:
 
 ```lisp
 (defstruct handle (p ptr))          ; một trường struct
-(defenum maybe (none) (some ptr))   ; một trường enum
+(defenum maybe (None) (Some ptr))   ; một trường enum
 (defvar (block ptr) ...)            ; một biến toàn cục
 (defffi f (Vector<ptr>) i32)        ; bên trong một đối số kiểu
 ```
@@ -839,8 +839,8 @@ Viết một danh sách `(Name option...)` ở vị trí tên sẽ chỉ định
 
 ; generic
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - Mỗi variant có dạng `(VariantName FieldType...)`. Các trường chỉ theo vị trí (chúng không có tên). Cần ít
@@ -851,8 +851,8 @@ Viết một danh sách `(Name option...)` ở vị trí tên sẽ chỉ định
   hoặc có một `_`):
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - Phương thức và phương thức tĩnh được viết trong `impl` (3.5), như với `defstruct`.
 - Để làm cho chính enum là `pub`, hãy viết `(pub defenum ...)`.
@@ -1038,7 +1038,7 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 - `module` tạo một không gian tên. **Kiểu không phải là không gian tên** (như trong Rust, một kiểu chỉ có
   phương thức tĩnh và phương thức).
 - `(use Type)` chỉ đưa vào tên của kiểu. Các biến thể của enum và các phương thức tĩnh được viết thông
-  qua tên kiểu, như `Option::some` hay `Chan::new`. Ngay cả sau `(use std::sync::Chan)`, `(new 1)` trần
+  qua tên kiểu, như `Option::Some` hay `Chan::new`. Ngay cả sau `(use std::sync::Chan)`, `(new 1)` trần
   vẫn là lỗi trừ khi có một hàm tên `new` được định nghĩa ở đâu đó.
 - Để dùng hàm khởi tạo và phương thức tĩnh của kiểu bằng tên trần, hãy đưa từng cái vào, như
   `(use std::sync::Chan::new)`, hoặc đưa vào toàn bộ hàm khởi tạo và phương thức tĩnh công khai bằng
@@ -1048,7 +1048,7 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
   (`(use std::sync::Chan::* std::sync::WaitGroup::*)` là lỗi, vì cả hai đều có `new`). Đưa vào một tên
   trùng với hàm, biến toàn cục hay macro mà mô-đun định nghĩa cũng là lỗi. Muốn cố ý thay thế thì dùng
   `shadowing-import`.
-- Thư viện chuẩn cung cấp `some`/`none` của `Option` và `ok`/`err` của `Result` cho mọi mô-đun, nên có
+- Thư viện chuẩn cung cấp `Some`/`None` của `Option` và `Ok`/`Err` của `Result` cho mọi mô-đun, nên có
   thể dùng chúng bằng tên trần mà không cần `use` (giống như prelude của Rust đưa vào
   `Some`/`None`/`Ok`/`Err`).
 - **Một tên chỉ có một nghĩa.** Hàm, biến toàn cục và macro dùng chung một không gian tên, và trong một
@@ -1059,7 +1059,7 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
   1. Biến cục bộ (tham số, và các ràng buộc của `let`, `labels`, `macrolet` và `symbol-macrolet`)
   2. Nếu tên module `n` là một macro, macro đó
   3. Hàm khởi tạo và phương thức tĩnh: những cái được đưa vào bằng `use`, và hàm khởi tạo của `Sexpr`
-     (`sym`, `int`, v.v.) cùng của `Option`/`Result` mà thư viện chuẩn cung cấp
+     (`Sym`, `Int`, v.v.) cùng của `Option`/`Result` mà thư viện chuẩn cung cấp
   4. Phương thức `n` của kiểu đối số đầu tiên (phương thức được tìm **chỉ theo kiểu của đối số đầu
      tiên**)
   5. Nếu tên module `n` là một hàm hoặc biến toàn cục, thì đó (với biến toàn cục, hàm là giá trị của nó
@@ -1211,20 +1211,20 @@ triển của thân). Danh sách lambda giống như của `defmacro`. Các quy 
   (assert-equal (+ 1 2) 3))
 ```
 
-Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` hoặc `Result<(), E>` (cũng không thể nhận tham số kiểu). Không cần `pub`. Một kiểm thử trả về `Result` sẽ thất bại khi trả về `err`, và lỗi được hiển thị, nên `E` phải cài đặt `Error` hoặc `print-object` (giống như Rust yêu cầu kiểu lỗi của kiểm thử có `Debug`). `Error` được hiển thị bằng `describe-error` (thông điệp và chuỗi nguyên nhân), còn lại bằng `print-object`. `:dyn Error` cũng là `Error`, nên một kiểm thử có thể gom các lỗi khác nhau vào một kiểu rồi trả về.
+Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` hoặc `Result<(), E>` (cũng không thể nhận tham số kiểu). Không cần `pub`. Một kiểm thử trả về `Result` sẽ thất bại khi trả về `Err`, và lỗi được hiển thị, nên `E` phải cài đặt `Error` hoặc `print-object` (giống như Rust yêu cầu kiểu lỗi của kiểm thử có `Debug`). `Error` được hiển thị bằng `describe-error` (thông điệp và chuỗi nguyên nhân), còn lại bằng `print-object`. `:dyn Error` cũng là `Error`, nên một kiểm thử có thể gom các lỗi khác nhau vào một kiểu rồi trả về.
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **Lần chạy thông thường và `compile-file` bỏ qua nó**, thậm chí không kiểm tra nội dung (giống như Rust chỉ biên dịch các kiểm thử khi có `--test`). Bản thân chương trình không thể gọi một hàm kiểm thử.
 - Có thể viết kiểm thử trong bất kỳ tệp nào chứa hàm, bên trong bất kỳ `module` nào. Cũng có thể để kiểm thử riêng trong thư mục `tests/` của dự án.
-- Một kiểm thử thất bại khi có `panic`, lỗi lúc chạy, hoặc khi trả về `err`. Kiểm tra bằng `assert`, hoặc bằng `assert-equal` (in ra cả hai vế) ([Hệ thống](functions/system.md)). Khi một kiểm thử thất bại, các kiểm thử còn lại vẫn chạy.
+- Một kiểm thử thất bại khi có `panic`, lỗi lúc chạy, hoặc khi trả về `Err`. Kiểm tra bằng `assert`, hoặc bằng `assert-equal` (in ra cả hai vế) ([Hệ thống](functions/system.md)). Khi một kiểm thử thất bại, các kiểm thử còn lại vẫn chạy.
 
 ```sh
 typl test                 # chạy mọi kiểm thử của dự án trong thư mục này
@@ -1357,8 +1357,8 @@ Các loại mẫu:
 - `_` — ký tự đại diện
 - Một tên biến — một mẫu gán (luôn khớp). Tuy nhiên, nếu kiểu của đối tượng được so khớp có một variant mang tên
   đó, nó được phân giải là **mẫu tên variant trần bên dưới**
-- Một tên variant trần — khớp một variant không nhận đối số (`(match c (red 1) (blue 2))`). Viết một variant có
-  trường bằng tên trần là lỗi số ngôi, nên hãy viết nó trong ngoặc, như `(circle r)`
+- Một tên variant trần — khớp một variant không nhận đối số (`(match c (Red 1) (Blue 2))`). Viết một variant có
+  trường bằng tên trần là lỗi số ngôi, nên hãy viết nó trong ngoặc, như `(Circle r)`
 - **Literal tức thời**: số nguyên / `true`/`false` / ký tự — được so sánh như các từ
 - **Literal giá trị**: chuỗi / số dấu phẩy động / symbol (`'foo`) / số nguyên bignum / ratio — được so sánh theo
   giá trị bằng `equal` của kiểu đó ([Các trait chuẩn](functions/traits.md#2-equal--ord-so-sánh)). Chuỗi so
@@ -1367,7 +1367,7 @@ Các loại mẫu:
   không có cú pháp literal (các thể hiện `defstruct`, biến toàn cục, kết quả được tính), và một triển khai `Equal`
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
-- `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`(some x)` `(none)` `(cons a d)` `(ok v)`, v.v.)
+- `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`(Some x)` `(None)` `(Cons a d)` `(Ok v)`, v.v.)
 - `(Type :slot pattern... :slot...)` — mẫu struct. Viết các slot sau tên kiểu dưới dạng từ khóa. Nếu sau
   từ khóa là một mẫu, slot đó được so khớp với mẫu; nếu sau đó là một từ khóa khác hoặc không có gì, slot
   được ràng buộc với một biến cùng tên. Các slot không viết không được so khớp (mẫu không phụ thuộc vào
@@ -1378,14 +1378,14 @@ Các loại mẫu:
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; ràng buộc x, và so khớp y với (some b)
+      ((point :x :y (Some b)) (+ x b))   ; ràng buộc x, và so khớp y với (Some b)
       ((point :x a) a)))                 ; ràng buộc a
   ```
 - `#{p0 p1 ...}` — mẫu tuple. Mỗi phần tử được khớp bằng mẫu con của riêng nó. Đối với `Sexpr`, nó
   chỉ khớp với dữ liệu `#{..}` có cùng số phần tử
 - `(:or p1 p2 ...)` — mẫu hoặc: khớp khi bất kỳ lựa chọn nào khớp. Chỉ có một thân, nên mọi lựa chọn
   phải gắn cùng các biến với cùng kiểu. Cũng có thể viết bên trong một mẫu hàm khởi tạo
-  (`(some (:or (circle r) (rect r _)))`)
+  (`(Some (:or (Circle r) (Rect r _)))`)
 
 So sánh một kiểu không triển khai `Equal` với một literal giá trị / `(:= expr)` là lỗi kiểu (ngôn ngữ này chọn nói
 "những thứ này không thể so sánh" thay vì để lại một nhánh âm thầm không bao giờ khớp).
@@ -1435,7 +1435,7 @@ thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy 
   với các mẫu struct ở trên. Ví dụ, với `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
 - Tên biến thể trần `(VariantName sub-pattern...)` — lấy ra một biến thể của `defenum`. Được giải như
   một tên trần đã thấy được nhờ được đưa vào, ví dụ bằng `(use EnumType::*)` (cùng quy tắc khả kiến như
-  khi gọi hàm khởi tạo). Ví dụ, với `(defenum color (red) (blue))`, `(red)` `(blue)` sau
+  khi gọi hàm khởi tạo). Ví dụ, với `(defenum color (Red) (Blue))`, `(Red)` `(Blue)` sau
   `(use color::*)`. Với dạng có tiền tố `(EnumType::VariantName ...)` thì không cần `use`.
 - `(the Type pattern)` — một downcast của toàn bộ kiểu (gán nó như một tổng thể). Nó không phân rã các trường;
   nó truyền giá trị cho `pattern` nguyên trạng. Cách duy nhất để lấy ra một struct khả biến mà vẫn giữ đồng nhất
@@ -1444,25 +1444,25 @@ thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy 
   sách.
 
 **Các mẫu cho `Option<Sexpr>`**: kiểu của dữ liệu S-expression không phải `Sexpr` mà là `Option<Sexpr>`, và
-danh sách rỗng không phải một variant của `Sexpr` mà là `none` của `Option`. Vì vậy khi so khớp một
-`Option<Sexpr>`, 19 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
+danh sách rỗng không phải một variant của `Sexpr` mà là `None` của `Option`. Vì vậy khi so khớp một
+`Option<Sexpr>`, 19 variant của `Sexpr` và `None` có thể được viết **phẳng trong cùng một danh sách nhánh**
 (không cần một `match` ngoài để bóc `Option`):
 
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
-    ((none)     0)          ; danh sách rỗng
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
+    ((None)     0)          ; danh sách rỗng
     (_          9)))
 ```
 
-Tính đầy đủ được kiểm tra trong cùng vũ trụ phẳng đó: 19 variant của `Sexpr` cộng `none`, tổng cộng 20. Quên
-`(none)` là lỗi trừ khi có một `_`. `(some x)` cũng có thể viết và gán "một thứ không rỗng".
+Tính đầy đủ được kiểm tra trong cùng vũ trụ phẳng đó: 19 variant của `Sexpr` cộng `None`, tổng cộng 20. Quên
+`(None)` là lỗi trừ khi có một `_`. `(Some x)` cũng có thể viết và gán "một thứ không rỗng".
 
 Đường cú pháp này áp dụng **chính xác** chỉ cho `Option<Sexpr>`. Với `Option<Option<Sexpr>>`, sẽ không rõ
-`(int n)` đã bóc lớp nào, nên hãy viết hai tầng `match` như thường.
+`(Int n)` đã bóc lớp nào, nên hãy viết hai tầng `match` như thường.
 
 Các mẫu downcast tương tự có thể dùng nguyên trạng trên **một đối tượng trait object (`:dyn Trait`, chương
 2)**: `match` mở hộp nó rồi đưa cho bộ máy mẫu `Sexpr` ở trên, nên không có cú pháp bổ sung. Tập các kiểu triển
@@ -1490,7 +1490,7 @@ khai là mở, nên nó không bao giờ có thể đầy đủ, và cần `_`:
 
 **Suy luận kiểu giữa các nhánh**: mọi nhánh phải có cùng kiểu (trừ các nhánh không hội tụ, như với `panic`).
 Trong một `match` viết ở nơi không có kiểu mong đợi, các nhánh điền các đối số kiểu còn thiếu cho nhau:
-`(Result::ok v)` chỉ cố định `T`, và `(Result::err e)` chỉ cố định `E`, nhưng cùng nhau chúng cố định
+`(Result::Ok v)` chỉ cố định `T`, và `(Result::Err e)` chỉ cố định `E`, nhưng cùng nhau chúng cố định
 `Result<T,E>`. Một đối số kiểu mà không nhánh nào cố định được đến cuối là lỗi của nhánh đó
 (`cannot infer type argument ...`). Ngoài `match`, một đối số kiểu không thể cố định là lỗi ngay tại chỗ.
 
@@ -1609,7 +1609,7 @@ Với nhiều `:for`, chúng tiến **song song**, và vòng lặp kết thúc n
 | `:sum e` / `:count e` | Tổng / số lần nó là true |
 | `:maximize e` / `:minimize e` | Lớn nhất / nhỏ nhất. **`Option<T>`** (như CL trả về nil cho một dãy rỗng; một kiểu `Ord` bất kỳ không có phần tử nhỏ nhất) |
 | `:always e` / `:never e` | `true` nếu tất cả đều đúng; `false` ngay khi một cái thất bại |
-| `:thereis e` | `e` là một **`Option<T>`**. Trả về `some` đầu tiên, hoặc `none` nếu không có (đây là thứ tương ứng với "giá trị khác nil đầu tiên" của CL; để kiểm tra một `bool`, hãy dùng `:always`/`:never`) |
+| `:thereis e` | `e` là một **`Option<T>`**. Trả về `Some` đầu tiên, hoặc `None` nếu không có (đây là thứ tương ứng với "giá trị khác nil đầu tiên" của CL; để kiểm tra một `bool`, hãy dùng `:always`/`:never`) |
 | `:while e` / `:until e` | **Kết thúc bình thường** ở đây (`:finally` chạy, và thứ đã thu thập là đáp án) |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | Làm cho một mệnh đề có điều kiện |
 | `:return e` | Thoát ngay với giá trị đó (`:finally` không chạy, như trong CL) |
@@ -1631,7 +1631,7 @@ Bỏ `:finally (return 0)` là một **lỗi kiểu**. Đó chỉ là các quy t
 thoát `int` không vừa với `()` mà vòng lặp để lại khi nó cạn.
 
 **Giá trị của vòng lặp** là sự tích lũy của mệnh đề tích lũy nếu có (cái đầu tiên, nếu có nhiều), `true` với
-`:always`/`:never`, `none` với `:thereis`, và `()` nếu không có. Nếu thứ cuối trong `:finally` là `(return e)`,
+`:always`/`:never`, `None` với `:thereis`, và `()` nếu không có. Nếu thứ cuối trong `:finally` là `(return e)`,
 đó là giá trị: thành ngữ `finally (return …)` của CL, cách duy nhất để một vòng lặp không tích lũy nêu tên đáp
 án của chính nó.
 
@@ -1696,7 +1696,7 @@ Các hàm có tên cũng có thể được truyền như giá trị nguyên tr�
 (unreachable)                       ; khai triển thành (panic "unreachable"). defmacro
 (todo)                              ; khai triển thành (panic "todo"). defmacro
 (as Type expr)                      ; chuyển đổi kiểu số/ký tự. các chuyển đổi có thể thất bại thì panic khi thất bại
-(try-as Type expr)                  ; như as, nhưng trả về kết quả dưới dạng Option<Type> (none khi thất bại)
+(try-as Type expr)                  ; như as, nhưng trả về kết quả dưới dạng Option<Type> (None khi thất bại)
 (print control args...)             ; khai triển định dạng và ghi ra đầu ra chuẩn (không có dòng mới)
 (println control args...)           ; giống vậy (với một dòng mới ở cuối)
 (format dest control args...)       ; format của CL. trả về chuỗi đã khai triển
@@ -1738,7 +1738,7 @@ Họ `print`/`println`/`format`/`pprint` là các dạng đặc biệt, nên cá
 nguyên (gồm `int`) và giữa `f32`↔`f64` là các chuyển đổi thật**: `as` cắt cụt / làm tròn, và `try-as` trả lời
 liệu nó có vừa độ rộng (độ chính xác) đó không. `(as int x)` là phép mở rộng chính xác từ một độ rộng cố định,
 và `(as i32 n)` là phép cắt cụt từ `int`. Số nguyên → `char` có thể thất bại khi ngoài phạm vi, nên `as` panic và
-`try-as` cho `none`. Mọi thứ khác (mở rộng, và phép cắt cụt của `float->int`/`ratio->int`) luôn thành công.
+`try-as` cho `None`. Mọi thứ khác (mở rộng, và phép cắt cụt của `float->int`/`ratio->int`) luôn thành công.
 `float->int`/`ratio->int`/`char->int` hạ xuống `int`, và nếu cần độ rộng hẹp hơn, `int->W` được gọi sau chúng.
 Đây là đường cú pháp khai triển thành các phương thức chuyển đổi tương ứng (`int->char`/`int->int`/`int->W`, v.v.
 trong [Số](functions/numbers.md)).
@@ -1751,7 +1751,7 @@ Từ `rational`, `as`/`try-as` chuyển sang `int` (`as` cắt bớt, `try-as` c
 phân giải `name` theo thứ tự biến → hàm → kiểu → trait → macro (cùng độ ưu tiên như khi một định danh trần được
 đánh giá như một biểu thức) và trả về docstring của định nghĩa tìm được (`(documentation Type::method)` dành cho
 phương thức). Không phân giải được (không có định nghĩa nào mang tên đó) là lỗi lúc kiểm tra; một định nghĩa
-tồn tại nhưng không có docstring cho `Option::none`. Mọi thứ được quyết định như một hằng số lúc kiểm tra:
+tồn tại nhưng không có docstring cho `Option::None`. Mọi thứ được quyết định như một hằng số lúc kiểm tra:
 không có tra cứu lúc chạy. Các tên tự do có tiền tố module (`mod::name`, trừ `Type::method`) không được hỗ trợ.
 
 ## 8. Lối thoát phi cục bộ (catch / throw / unwind-protect)
@@ -1771,7 +1771,7 @@ nghĩa từ vựng, và với tới một `catch` cùng tag xuyên qua bất k�
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; nếu không tìm thấy, giá trị ở cuối như thường lệ
 ```
 
@@ -1939,10 +1939,10 @@ trở thành dữ liệu được đọc tại điểm đó. Stream là một ki
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => được đọc là (not (equal 1 2)), tức là true
 ```

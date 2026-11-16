@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Макросы
 
 Макрос — это функция, которая принимает программу и возвращает программу. Макросы позволяют создавать новый
@@ -42,7 +42,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Раскрытия тоже проверяются по типам
@@ -118,15 +118,15 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 ## 5. Раскрытие, зависящее от аргументов
 
 Тело макроса — обычный код typelisp, поэтому оно может исследовать аргументы с помощью `if` или `match` и строить
-разные раскрытия. Аргументы — данные S-выражений (`Option<Sexpr>`), а пустой список — это `none`.
+разные раскрытия. Аргументы — данные S-выражений (`Option<Sexpr>`), а пустой список — это `None`.
 
 Создадим `my-and`, который возвращает `true`, если все его условия истинны.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; нет аргументов
-    ((cons f more)
+    ((None) 'true)                                    ; нет аргументов
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; ровно один
          `(if ,f (my-and ,@more) false)))             ; два и больше
@@ -136,7 +136,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` — образец, который помещает голову списка в `f`, а остаток в `more`.
+- `(Cons f more)` — образец, который помещает голову списка в `f`, а остаток в `more`.
 - `sexpr-null` проверяет, является ли данное S-выражения пустым списком.
 - Последняя ветвь `_` нужна, потому что у данных S-выражений есть формы помимо списков (числа, строки и т. д.), и
   `match` требует покрыть и их. Аргумент `&rest` всегда список, так что эта ветвь на деле никогда не выполняется.

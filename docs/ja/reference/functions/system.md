@@ -52,20 +52,20 @@
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | コマンドライン。**要素0はプログラム名** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | 環境変数。未設定でも非UTF-8でも `none` |
+| `getenv` | `(getenv name)` | `string→Option<string>` | 環境変数。未設定でも非UTF-8でも `None` |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`。`user-homedir-pathname`（[パス名](streams-files.md#92-関数)）の土台 |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | 処理系の版数 |
 | `machine-type` | `(machine-type)` | `()→string` | CPU アーキテクチャ（`x86_64` / `aarch64` …）。**ビルド先**の値 |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | ホスト名 |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | **実行中**のハードウェア名（`Apple M1` / `Intel(R) Xeon(R) …`）。分からない環境では `none` |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | **実行中**のハードウェア名（`Apple M1` / `Intel(R) Xeon(R) …`）。分からない環境では `None` |
 | `software-type` | `(software-type)` | `()→string` | OS（`macos` / `linux` …） |
 | `software-version` | `(software-version)` | `()→Option<string>` | OS のリリース（`uname -r`、例 `24.6.0`） |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | 設置場所の短い名前。**常に `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | 同じく長い名前。**常に `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | 設置場所の短い名前。**常に `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | 同じく長い名前。**常に `None`** |
 
 `Option` を返すものは CL が `NIL` を許している項目（*or nil if no such name can be
-determined*）。site 名は POSIX に記録場所が無いので常に `none`——SBCL も同じものを返す。
+determined*）。site 名は POSIX に記録場所が無いので常に `None`——SBCL も同じものを返す。
 `machine-type` と `machine-version` の違いに注意: 前者はこのバイナリが**ビルドされた**
 アーキテクチャ、後者はいま**動いている**チップ。
 
@@ -129,7 +129,7 @@ determined*）。site 名は POSIX に記録場所が無いので常に `none`�
 固まらないため。
 
 `ed` の `$VISUAL`／`$EDITOR` は空白で分割されるので `EDITOR="code -w"` も書ける。
-どちらも未設定なら `err`——`vi` を推測しない。行番号は `+N` の形で先頭に渡す。
+どちらも未設定なら `Err`——`vi` を推測しない。行番号は `+N` の形で先頭に渡す。
 
 `dribble` が記録するのは、セッションの出力がプロセスを出る 3 つの経路すべて:
 `print`/`println`/`format` が書くもの、標準出力へつながるストリームへ書いたもの、
@@ -138,13 +138,13 @@ determined*）。site 名は POSIX に記録場所が無いので常に `none`�
 ## 6. 解析・評価
 
 いずれも実行時の（プログラム自身は制御できない）テキスト・データを扱うため、失敗時は panic では
-なく `Result` の `err` を返す。エラー型は操作ごとの具象型（[エラー型](option-result.md#3-エラー型と-error-トレイト)）。
+なく `Result` の `Err` を返す。エラー型は操作ごとの具象型（[エラー型](option-result.md#3-エラー型と-error-トレイト)）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL の `parse-integer`。前後の空白（`trim` と同じ集合）を読み飛ばし、符号 `+`/`-` を 1 つ、続けて `radix` 進（既定 10、2〜36。10 より上の桁は大文字小文字どちらでも）の数字を読む。桁数に上限は無い（`int`）。それ以外の文字が残れば `err`。`:junk-allowed true` なら最初の非数字で読むのをやめて残りを無視する——ただし数字が 1 つも無ければ `err`（CL の `nil` に当たる）。CL の第 2 値（読み終わり位置）は返さない。範囲外の `radix` は panic（テキストではなく呼び出し側の誤り） |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL の `parse-integer`。前後の空白（`trim` と同じ集合）を読み飛ばし、符号 `+`/`-` を 1 つ、続けて `radix` 進（既定 10、2〜36。10 より上の桁は大文字小文字どちらでも）の数字を読む。桁数に上限は無い（`int`）。それ以外の文字が残れば `Err`。`:junk-allowed true` なら最初の非数字で読むのをやめて残りを無視する——ただし数字が 1 つも無ければ `Err`（CL の `nil` に当たる）。CL の第 2 値（読み終わり位置）は返さない。範囲外の `radix` は panic（テキストではなく呼び出し側の誤り） |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。`inf`/`nan` も受ける |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s` から `Sexpr` を1つ読む（ソースを読むのと同じリーダ）。不完全な括弧・文字列などは `err`。ストリームから読むのは `read-sexpr`（[ストリーム](streams-files.md#6-ジェネリック関数とファイル操作)） |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s` から `Sexpr` を1つ読む（ソースを読むのと同じリーダ）。不完全な括弧・文字列などは `Err`。ストリームから読むのは `read-sexpr`（[ストリーム](streams-files.md#6-ジェネリック関数とファイル操作)） |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
 | `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上だが datum を終わらせた空白を消費しない。違いは返る位置に出る |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
@@ -157,9 +157,9 @@ CL は `read-from-string` から**2 値**（値と位置）を返すが、この
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 `preserving-whitespace` の違いは**空白 1 文字**だけ——CL の `read` は datum を終わらせた空白を
@@ -177,22 +177,22 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
 でき、定義は即座かつ永続的にグローバル環境へ登録される。
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; グローバル x が見える
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; 定義名を返す
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; 直前の定義が見える
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; グローバル x が見える
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; 定義名を返す
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; 直前の定義が見える
 ```
 
 - **戻り値**: 式なら評価結果を `Option<Sexpr>` として、定義なら定義名シンボルを返す（CL と同じ）。
-  結果を使うには `Sexpr` を `match`（`(int n)`/`(str s)`/…）で分解する。
+  結果を使うには `Sexpr` を `match`（`(Int n)`/`(Str s)`/…）で分解する。
 - **静的型ゆえの違い（重要）**: CL は結果の実値を返すが、この言語では戻り型を一律
   `Result<Option<Sexpr>,EvalError>` にするしかない。また **静的に書いたコードは、実行時に `eval` が定義する
   名前を前方参照できない**——ファイル中に直接書いた `(sq 9)` は、`sq` を定義する `eval` が
   走る前に検査され「未定義」になる。ただし **後続の `eval` からは見える**（その `eval` の型チェックは
   実行時、定義後に走るため）。REPL は1行ずつ検査・実行するので、`eval` で定義した名前を次の行から
   直接呼べる。
-- **エラーの扱い**: 型エラー・構文エラーは `err` を返す（panic しない）。評価したコード内の
+- **エラーの扱い**: 型エラー・構文エラーは `Err` を返す（panic しない）。評価したコード内の
   **実行時の panic**（ゼロ除算など）は、直接書いたコードと同様にそのまま伝わる。途中の
   `unwind-protect` の cleanup は走る（[構文リファレンス 8 章](../syntax.md#8-非局所脱出catch--throw--unwind-protect)）。
 - **名前空間**: `typl file.typl` の実行時と AOT 実行ファイルの中では、`eval` はそのスクリプトの
@@ -239,7 +239,7 @@ CL の `(documentation 'name 'function)` と異なり型引数を取らない代
 ```
 
 **チェック時に値が決まる**: 名前が何の定義にも解決できない場合はチェック時のエラー（未定義変数の
-参照などと同様）。解決はできたが docstring が無い場合は `Option::none`。
+参照などと同様）。解決はできたが docstring が無い場合は `Option::None`。
 
 **対象外**:
 
@@ -258,18 +258,18 @@ CL の `(documentation 'name 'function)` と異なり型引数を取らない代
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 新しいシンボル。名前は `" <prefix><n>"` で `n` は `*gensym-counter*`。先頭の空白はソースに書けないので、生成した束縛が書かれた名前と衝突しない |
 | `*gensym-counter*` | 変数 | `int` | `gensym` が次に使う番号。CL 同様、読んでも設定してもよい |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`none` は「マクロ呼び出しではない」 |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`None` は「マクロ呼び出しではない」 |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | マクロでなくなるまで繰り返す |
 
 `macroexpand-1` が返すのは `Option`——CL は「展開したか」を第 2 返り値で伝えるが、多値が
-無いので `none` がそれに当たる。**自分自身の呼び出しへ展開するマクロと非マクロを取り違えようが
+無いので `None` がそれに当たる。**自分自身の呼び出しへ展開するマクロと非マクロを取り違えようが
 ない**。展開の 1 段は型検査が使うのと同じもので、プログラムが見るものと検査が見たものはずれない。
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none は空リストとして出る（Option<Sexpr> は透過）
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none は空リストとして出る（Option<Sexpr> は透過）
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 CL にあってここに無いもの: `eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` が

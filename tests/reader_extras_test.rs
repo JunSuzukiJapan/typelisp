@@ -30,8 +30,8 @@ fn over(text: &str) -> String {
 fn read_from_string_reports_where_it_stopped() {
     is_true(
         r#"(match (read-from-string "12 34")
-             ((ok p) (and (equal (car p) (quote 12)) (= (cdr p) 3)))
-             ((err e) false))"#,
+             ((Ok p) (and (equal (car p) (quote 12)) (= (cdr p) 3)))
+             ((Err e) false))"#,
     );
 }
 
@@ -39,8 +39,8 @@ fn read_from_string_reports_where_it_stopped() {
 fn read_from_string_starts_where_it_is_told() {
     is_true(
         r#"(match (read-from-string "12 34" 3)
-             ((ok p) (and (equal (car p) (quote 34)) (= (cdr p) 5)))
-             ((err e) false))"#,
+             ((Ok p) (and (equal (car p) (quote 34)) (= (cdr p) 5)))
+             ((Err e) false))"#,
     );
 }
 
@@ -53,9 +53,9 @@ fn the_returned_index_is_where_the_next_read_begins() {
              (progn
                (while going
                  (match (read-from-string s i)
-                   ((ok p) (progn (setf n (+ n 1)) (setf i (cdr p))
+                   ((Ok p) (progn (setf n (+ n 1)) (setf i (cdr p))
                                   (if (>= i (as int (length s))) (progn (setf going false) ()) ()) ()))
-                   ((err e) (progn (setf going false) ()))))
+                   ((Err e) (progn (setf going false) ()))))
                (= n 3)))"#,
     );
 }
@@ -64,8 +64,8 @@ fn the_returned_index_is_where_the_next_read_begins() {
 fn preserving_whitespace_stops_one_character_earlier() {
     is_true(
         r#"(use std::reader::read-from-string-preserving-whitespace) (match (read-from-string-preserving-whitespace "12 34")
-             ((ok p) (= (cdr p) 2))
-             ((err e) false))"#,
+             ((Ok p) (= (cdr p) 2))
+             ((Err e) false))"#,
     );
 }
 
@@ -73,10 +73,10 @@ fn preserving_whitespace_stops_one_character_earlier() {
 fn the_two_forms_read_the_same_datum() {
     is_true(
         r#"(use std::reader::read-from-string-preserving-whitespace) (match (read-from-string "12 34")
-             ((ok a) (match (read-from-string-preserving-whitespace "12 34")
-                       ((ok b) (equal (car a) (car b)))
-                       ((err e) false)))
-             ((err e) false))"#,
+             ((Ok a) (match (read-from-string-preserving-whitespace "12 34")
+                       ((Ok b) (equal (car a) (car b)))
+                       ((Err e) false)))
+             ((Err e) false))"#,
     );
 }
 
@@ -86,8 +86,8 @@ fn only_whitespace_is_consumed_past_the_datum() {
     // stops before it in both forms.
     is_true(
         r#"(match (read-from-string "(1)x" 1)
-             ((ok p) (= (cdr p) 2))
-             ((err e) false))"#,
+             ((Ok p) (= (cdr p) 2))
+             ((Err e) false))"#,
     );
 }
 
@@ -95,8 +95,8 @@ fn only_whitespace_is_consumed_past_the_datum() {
 fn a_start_past_the_end_is_an_err_not_a_panic() {
     is_true(
         r#"(match (read-from-string "12" 99)
-             ((ok p) false)
-             ((err e) true))"#,
+             ((Ok p) false)
+             ((Err e) true))"#,
     );
 }
 
@@ -104,8 +104,8 @@ fn a_start_past_the_end_is_an_err_not_a_panic() {
 fn a_compound_datum_reports_the_index_past_its_close() {
     is_true(
         r#"(match (read-from-string "(1 2) tail")
-             ((ok p) (= (cdr p) 6))
-             ((err e) false))"#,
+             ((Ok p) (= (cdr p) 6))
+             ((Err e) false))"#,
     );
 }
 
@@ -113,8 +113,8 @@ fn a_compound_datum_reports_the_index_past_its_close() {
 fn unreadable_text_is_an_err() {
     is_true(
         r#"(match (read-from-string "(1 2")
-             ((ok p) false)
-             ((err e) true))"#,
+             ((Ok p) false)
+             ((Err e) true))"#,
     );
 }
 
@@ -124,7 +124,7 @@ fn unreadable_text_is_an_err() {
 fn read_sexpr_consumes_the_whitespace_that_ended_the_datum() {
     is_true(
         r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "1 2")))
-             (progn (read-sexpr s) (equalp (read-char s) (Option::some #\2))))"#,
+             (progn (read-sexpr s) (equalp (read-char s) (Option::Some #\2))))"#,
     );
 }
 
@@ -133,7 +133,7 @@ fn read_sexpr_preserving_whitespace_leaves_it() {
     is_true(
         r#"(use std::reader::read-sexpr-preserving-whitespace) (let ((s (make-string-input-stream "1 2")))
              (progn (read-sexpr-preserving-whitespace s)
-                    (equalp (read-char s) (Option::some #\space))))"#,
+                    (equalp (read-char s) (Option::Some #\space))))"#,
     );
 }
 
@@ -141,7 +141,7 @@ fn read_sexpr_preserving_whitespace_leaves_it() {
 fn only_one_whitespace_character_is_consumed() {
     is_true(
         r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "1  2")))
-             (progn (read-sexpr s) (equalp (read-char s) (Option::some #\space))))"#,
+             (progn (read-sexpr s) (equalp (read-char s) (Option::Some #\space))))"#,
     );
 }
 
@@ -149,7 +149,7 @@ fn only_one_whitespace_character_is_consumed() {
 fn a_non_whitespace_terminator_is_left_alone() {
     is_true(
         r#"(use std::reader::read-sexpr) (let ((s (make-string-input-stream "1)2")))
-             (progn (read-sexpr s) (equalp (read-char s) (Option::some #\)))))"#,
+             (progn (read-sexpr s) (equalp (read-char s) (Option::Some #\)))))"#,
     );
 }
 
@@ -158,10 +158,10 @@ fn both_stream_forms_read_the_same_datum() {
     is_true(
         r#"(use std::reader::read-sexpr std::reader::read-sexpr-preserving-whitespace) (let ((a (make-string-input-stream "42 x")) (b (make-string-input-stream "42 x")))
              (match (read-sexpr a)
-               ((ok x) (match (read-sexpr-preserving-whitespace b)
-                         ((ok y) (equalp x y))
-                         ((err e) false)))
-               ((err e) false)))"#,
+               ((Ok x) (match (read-sexpr-preserving-whitespace b)
+                         ((Ok y) (equalp x y))
+                         ((Err e) false)))
+               ((Err e) false)))"#,
     );
 }
 
@@ -172,8 +172,8 @@ fn a_delimited_list_stops_at_its_terminator() {
     is_true(&format!(
         r#"(let ((s {}))
              (match (read-delimited-list #\] s)
-               ((ok l) (equal l (quote (1 2 3))))
-               ((err e) false)))"#,
+               ((Ok l) (equal l (quote (1 2 3))))
+               ((Err e) false)))"#,
         over("1 2 3] rest")
     ));
 }
@@ -182,7 +182,7 @@ fn a_delimited_list_stops_at_its_terminator() {
 fn the_terminator_is_consumed() {
     is_true(&format!(
         r#"(let ((s {}))
-             (progn (read-delimited-list #\] s) (equalp (read-char s) (Option::some #\x))))"#,
+             (progn (read-delimited-list #\] s) (equalp (read-char s) (Option::Some #\x))))"#,
         over("1]x")
     ));
 }
@@ -192,8 +192,8 @@ fn a_delimited_list_reads_compound_data() {
     is_true(&format!(
         r#"(let ((s {}))
              (match (read-delimited-list #\] s)
-               ((ok l) (equal l (quote (1 (2 3) "s"))))
-               ((err e) false)))"#,
+               ((Ok l) (equal l (quote (1 (2 3) "s"))))
+               ((Err e) false)))"#,
         over(r#"1 (2 3) \"s\"]"#)
     ));
 }
@@ -203,8 +203,8 @@ fn an_empty_delimited_list_is_the_empty_list() {
     is_true(&format!(
         r#"(let ((s {}))
              (match (read-delimited-list #\] s)
-               ((ok l) (sexpr-null l))
-               ((err e) false)))"#,
+               ((Ok l) (sexpr-null l))
+               ((Err e) false)))"#,
         over("]")
     ));
 }
@@ -214,8 +214,8 @@ fn whitespace_before_the_terminator_is_skipped() {
     is_true(&format!(
         r#"(let ((s {}))
              (match (read-delimited-list #\] s)
-               ((ok l) (equal l (quote (1))))
-               ((err e) false)))"#,
+               ((Ok l) (equal l (quote (1))))
+               ((Err e) false)))"#,
         over("1   ]")
     ));
 }
@@ -227,8 +227,8 @@ fn running_out_of_input_is_an_err_not_a_short_list() {
     is_true(&format!(
         r#"(let ((s {}))
              (match (read-delimited-list #\] s)
-               ((ok l) false)
-               ((err e) true)))"#,
+               ((Ok l) false)
+               ((Err e) true)))"#,
         over("1 2")
     ));
 }
@@ -238,8 +238,8 @@ fn the_error_names_the_terminator_it_wanted() {
     is_true(&format!(
         r#"(let ((s {}))
              (match (read-delimited-list #\] s)
-               ((ok l) false)
-               ((err e) (is-some (search (message e) "]")))))"#,
+               ((Ok l) false)
+               ((Err e) (is-some (search (message e) "]")))))"#,
         over("1 2")
     ));
 }
@@ -249,8 +249,8 @@ fn a_different_terminator_works_the_same() {
     is_true(&format!(
         r#"(let ((s {}))
              (match (read-delimited-list #\> s)
-               ((ok l) (equal l (quote (a b))))
-               ((err e) false)))"#,
+               ((Ok l) (equal l (quote (a b))))
+               ((Err e) false)))"#,
         over("a b>")
     ));
 }

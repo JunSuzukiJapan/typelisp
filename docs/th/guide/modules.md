@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # โมดูลและการจัดวางไฟล์
 
 คู่มือนี้อธิบายวิธีประกอบโปรแกรมที่ประกอบด้วยหลายไฟล์ กฎโดยละเอียดอยู่ในหัวข้อ 3.10 ถึง 3.13 ของ
@@ -130,7 +130,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first ของโมดูลนี้ => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first ของไลบรารีมาตรฐาน => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first ของไลบรารีมาตรฐาน => (Some 1)
 ```
 
 หลัง `shadow` การเขียน `first` ในโมดูลนั้นจะหมายถึงนิยามของตัวเอง ถ้าจะใช้ `first` ของไลบรารีมาตรฐาน

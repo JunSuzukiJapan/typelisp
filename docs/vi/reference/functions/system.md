@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -54,20 +54,20 @@ chọn cái nào. `encode-universal-time` trả về một trong hai đáp án c
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | Dòng lệnh. **Phần tử 0 là tên chương trình** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | Một biến môi trường. `none` nếu chưa đặt hoặc không phải UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | Một biến môi trường. `None` nếu chưa đặt hoặc không phải UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. Cơ sở của `user-homedir-pathname` ([Pathname](streams-files.md#92-hàm)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | Phiên bản của triển khai |
 | `machine-type` | `(machine-type)` | `()→string` | Kiến trúc CPU (`x86_64` / `aarch64` …). Giá trị của **đích build** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | Tên host |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | Tên phần cứng **đang chạy** (`Apple M1` / `Intel(R) Xeon(R) …`). `none` ở nơi không xác định được |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | Tên phần cứng **đang chạy** (`Apple M1` / `Intel(R) Xeon(R) …`). `None` ở nơi không xác định được |
 | `software-type` | `(software-type)` | `()→string` | HĐH (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | Bản phát hành của HĐH (`uname -r`, ví dụ `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Một tên ngắn cho địa điểm cài đặt. **Luôn là `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Tương tự, một tên dài. **Luôn là `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | Một tên ngắn cho địa điểm cài đặt. **Luôn là `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Tương tự, một tên dài. **Luôn là `None`** |
 
 Những hàm trả về `Option` là các mục mà CL cho phép `NIL` (*or nil if no such name can be determined*). POSIX
-không có chỗ ghi tên địa điểm, nên chúng luôn là `none`; SBCL trả về giống vậy. Hãy lưu ý sự khác nhau giữa
+không có chỗ ghi tên địa điểm, nên chúng luôn là `None`; SBCL trả về giống vậy. Hãy lưu ý sự khác nhau giữa
 `machine-type` và `machine-version`: cái trước là kiến trúc mà tệp nhị phân này được **build** cho, cái sau là
 con chip đang **chạy** nó.
 
@@ -131,7 +131,7 @@ Các lệnh của `step` là `s` (bước vào lời gọi này; một dòng tr�
 nhắc mà không ai trả lời được.
 
 `$VISUAL` / `$EDITOR` của `ed` được tách tại khoảng trắng, nên `EDITOR="code -w"` hoạt động. Nếu cả hai đều
-chưa đặt, kết quả là `err`: nó không đoán `vi`. Số dòng được truyền đầu tiên, dưới dạng `+N`.
+chưa đặt, kết quả là `Err`: nó không đoán `vi`. Số dòng được truyền đầu tiên, dưới dạng `+N`.
 
 `dribble` ghi lại cả ba cách mà đầu ra của phiên rời khỏi tiến trình: những gì `print`/`println`/`format` ghi,
 những gì được ghi vào các stream nối với đầu ra chuẩn, và các dòng gõ vào REPL cùng với các giá trị mà REPL in
@@ -140,14 +140,14 @@ trả lại.
 ## 6. Phân tích và đánh giá
 
 Tất cả các hàm này xử lý văn bản và dữ liệu từ lúc chạy (mà chính chương trình không kiểm soát), nên khi thất
-bại chúng trả về `err` của một `Result` thay vì panic. Các kiểu lỗi là các kiểu cụ thể theo từng phép toán
+bại chúng trả về `Err` của một `Result` thay vì panic. Các kiểu lỗi là các kiểu cụ thể theo từng phép toán
 ([Các kiểu lỗi](option-result.md#3-các-kiểu-lỗi-và-trait-error)).
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` của CL. Bỏ qua khoảng trắng ở đầu và cuối (cùng tập như `trim`), đọc tối đa một dấu `+`/`-`, rồi các chữ số theo cơ số `radix` (mặc định 10, 2 đến 36; các chữ số trên 10 ở dạng hoa hoặc thường đều được). Không có giới hạn về số chữ số (`int`). Bất kỳ ký tự nào khác còn lại cho `err`. Với `:junk-allowed true`, nó dừng ở ký tự không phải chữ số đầu tiên và bỏ qua phần còn lại, nhưng cho `err` nếu không có một chữ số nào (tương ứng với `nil` của CL). Nó không trả về giá trị thứ hai của CL (vị trí nơi việc đọc kết thúc). Một `radix` ngoài phạm vi sẽ panic (sai sót của bên gọi, không phải của văn bản) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | `parse-integer` của CL. Bỏ qua khoảng trắng ở đầu và cuối (cùng tập như `trim`), đọc tối đa một dấu `+`/`-`, rồi các chữ số theo cơ số `radix` (mặc định 10, 2 đến 36; các chữ số trên 10 ở dạng hoa hoặc thường đều được). Không có giới hạn về số chữ số (`int`). Bất kỳ ký tự nào khác còn lại cho `Err`. Với `:junk-allowed true`, nó dừng ở ký tự không phải chữ số đầu tiên và bỏ qua phần còn lại, nhưng cho `Err` nếu không có một chữ số nào (tương ứng với `nil` của CL). Nó không trả về giá trị thứ hai của CL (vị trí nơi việc đọc kết thúc). Một `radix` ngoài phạm vi sẽ panic (sai sót của bên gọi, không phải của văn bản) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | Một số dấu phẩy động. Cũng chấp nhận `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Đọc một `Sexpr` từ `s` (bằng cùng reader đọc mã nguồn). Ngoặc không cân bằng, chuỗi không kết thúc và những thứ tương tự cho `err`. Đọc từ một stream là `read-sexpr` ([Stream](streams-files.md#6-hàm-generic-và-thao-tác-tệp)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Đọc một `Sexpr` từ `s` (bằng cùng reader đọc mã nguồn). Ngoặc không cân bằng, chuỗi không kết thúc và những thứ tương tự cho `Err`. Đọc từ một stream là `read-sexpr` ([Stream](streams-files.md#6-hàm-generic-và-thao-tác-tệp)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` cộng **vị trí nơi việc đọc kết thúc**. `(car r)` là giá trị và `(cdr r)` là vị trí của ký tự tiếp theo cần đọc. `start` mặc định là 0 |
 | `read-from-string-preserving-whitespace` | Như trên | Như trên | Giống vậy, nhưng không tiêu thụ khoảng trắng đã kết thúc datum. Sự khác biệt thể hiện ở vị trí được trả về |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Kiểm tra kiểu `form` lúc chạy và đánh giá nó. Theo `eval` của CL |
@@ -160,9 +160,9 @@ quét lại:
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 Sự khác biệt do `preserving-whitespace` tạo ra là **một ký tự khoảng trắng**: `read` của CL tiêu thụ khoảng
@@ -182,23 +182,23 @@ gồm cả các định nghĩa được thêm lúc chạy) và trong **môi trư
 ngay lập tức và vĩnh viễn vào môi trường toàn cục.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; x toàn cục nhìn thấy được
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; trả về tên đã định nghĩa
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; định nghĩa vừa tạo nhìn thấy được
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; x toàn cục nhìn thấy được
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; trả về tên đã định nghĩa
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; định nghĩa vừa tạo nhìn thấy được
 ```
 
 - **Giá trị trả về**: với một biểu thức, kết quả dưới dạng một `Option<Sexpr>`; với một định nghĩa, symbol của
   tên đã định nghĩa (như trong CL). Để dùng kết quả, hãy tách `Sexpr` ra bằng `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Khác biệt do kiểu tĩnh (quan trọng)**: CL trả về giá trị thực của kết quả, nhưng trong ngôn ngữ này kiểu
   trả về chỉ có thể là `Result<Option<Sexpr>,EvalError>` đồng nhất. Ngoài ra, **mã viết tĩnh không thể tham
   chiếu tiến tới các tên mà `eval` định nghĩa lúc chạy**: một `(sq 9)` viết trực tiếp trong tệp được kiểm
   tra trước khi `eval` định nghĩa `sq` chạy, và là "chưa định nghĩa". Tuy nhiên, **các `eval` sau đó thì thấy
   được** (việc kiểm tra kiểu của chúng chạy lúc chạy, sau định nghĩa). REPL kiểm tra và chạy từng dòng một,
   nên một tên được định nghĩa bằng `eval` có thể được gọi trực tiếp từ dòng tiếp theo.
-- **Lỗi**: lỗi kiểu và lỗi cú pháp trả về `err` (chúng không panic). **Panic lúc chạy** trong mã được đánh
+- **Lỗi**: lỗi kiểu và lỗi cú pháp trả về `Err` (chúng không panic). **Panic lúc chạy** trong mã được đánh
   giá (chia cho không, v.v.) lan truyền như từ mã viết trực tiếp. Phần dọn dẹp của mọi `unwind-protect` ở giữa
   đều chạy ([Tham chiếu cú pháp chương 8](../syntax.md#8-lối-thoát-phi-cục-bộ-catch--throw--unwind-protect)).
 - **Không gian tên**: khi chạy bằng `typl file.typl` và bên trong một tệp thực thi AOT, `eval` đánh giá trong
@@ -247,7 +247,7 @@ một biểu thức). Dạng `Type::method` tra docstring của một phương t
 
 **Giá trị được quyết định lúc kiểm tra**: nếu tên không phân giải được thành định nghĩa nào, đó là lỗi lúc kiểm
 tra (như tham chiếu một biến chưa định nghĩa). Nếu nó phân giải được nhưng không có docstring, kết quả là
-`Option::none`.
+`Option::None`.
 
 **Không được bao phủ**:
 
@@ -267,19 +267,19 @@ Cách định nghĩa macro nằm ở [Tham chiếu cú pháp 3.14](../syntax.md#
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Một symbol mới. Tên của nó là `" <prefix><n>"`, trong đó `n` là `*gensym-counter*`. Một dấu cách ở đầu không thể viết trong mã nguồn, nên các ràng buộc được sinh ra không bao giờ xung đột với các tên đã viết |
 | `*gensym-counter*` | Biến | `int` | Số mà `gensym` dùng tiếp theo. Như trong CL, nó có thể đọc và đặt |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Khai triển một lời gọi macro một bước. `none` nghĩa là "không phải một lời gọi macro" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Khai triển một lời gọi macro một bước. `None` nghĩa là "không phải một lời gọi macro" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Lặp lại cho đến khi không còn là macro |
 
 `macroexpand-1` trả về một `Option`. CL báo "có khai triển hay không" dưới dạng giá trị trả về thứ hai, nhưng
-không có đa giá trị, nên `none` đóng vai trò đó. **Một macro khai triển thành một lời gọi chính nó không bao giờ
+không có đa giá trị, nên `None` đóng vai trò đó. **Một macro khai triển thành một lời gọi chính nó không bao giờ
 bị nhầm với một thứ không phải macro.** Một bước khai triển là cùng bước mà bộ kiểm tra kiểu dùng, nên những gì
 chương trình thấy và những gì bộ kiểm tra thấy không bao giờ khác nhau.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none hiển thị là danh sách rỗng (Option<Sexpr> là trong suốt)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none hiển thị là danh sách rỗng (Option<Sexpr> là trong suốt)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 Những gì CL có mà ngôn ngữ này không có: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` luôn

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macro's
 
 Een macro is een functie die een programma neemt en een programma teruggeeft. Met macro's kun je
@@ -45,7 +45,7 @@ zijn expansie kijken de snelste weg vooruit.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Expansies worden ook getypechecked
@@ -125,15 +125,15 @@ geschreven:
 
 Een macrobody is gewone typelisp-code, dus ze kan haar argumenten met `if` of `match` inspecteren en
 een andere expansie bouwen. De argumenten zijn S-expressiedata (`Option<Sexpr>`), en de lege lijst is
-`none`.
+`None`.
 
 Laten we `my-and` maken, dat `true` teruggeeft als al zijn voorwaarden waar zijn.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
-    ((cons f more)
+    ((None) 'true)                                    ; no arguments
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -143,7 +143,7 @@ Laten we `my-and` maken, dat `true` teruggeeft als al zijn voorwaarden waar zijn
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` is een patroon dat de kop van een lijst in `f` en de rest in `more` neemt.
+- `(Cons f more)` is een patroon dat de kop van een lijst in `f` en de rest in `more` neemt.
 - `sexpr-null` test of S-expressiedata de lege lijst is.
 - De laatste `_`-tak is nodig omdat S-expressiedata andere vormen heeft dan lijsten (getallen,
   strings enzovoort), en `match` eist dat ook die zijn gedekt. Een `&rest`-argument is altijd een

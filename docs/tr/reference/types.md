@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -30,8 +30,8 @@ typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart tr
 
 | Tür | İçerik | Ayrıntılar |
 |---|---|---|
-| `Option<T>` | Var olan ya da olmayan bir değer. `some` / `none` | [Option ve Result](functions/option-result.md) |
-| `Result<T,E>` | Başarı ya da başarısızlık. `ok` / `err` | Yukarıdakiyle aynı |
+| `Option<T>` | Var olan ya da olmayan bir değer. `Some` / `None` | [Option ve Result](functions/option-result.md) |
+| `Result<T,E>` | Başarı ya da başarısızlık. `Ok` / `Err` | Yukarıdakiyle aynı |
 | `Vector<T>` | Büyüyebilen bir dizi | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Bir karma tablo. Anahtarların nasıl karşılaştırılacağını oluşturulurken `:test` belirler; `equal` tablosunda anahtar türü `Hash`'i uygulamalıdır | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Demet (1 ile 12 arası öğe). Öğeler `t::0` ile okunur | [Sözdizimi 2. bölüm](syntax.md#2-türlerin-yazımı) |
@@ -46,8 +46,8 @@ Fonksiyon türleri `(fn (argüman-türleri...) dönüş-türü)`, trait nesneler
 
 | Tür | İçerik | Ayrıntılar |
 |---|---|---|
-| `Sexpr` | Boş olmayan bir S-ifade. 19 varyant: `int`, `i8`'den `u32`'ye, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-ifade verisi](functions/sequences.md#2-s-ifade-verisi-sexpr) |
-| `Option<Sexpr>` | Genel olarak S-ifade verisi. Boş liste `()`, `none`'dır | Yukarıdakiyle aynı |
+| `Sexpr` | Boş olmayan bir S-ifade. 19 varyant: `Int`, `I8`'den `U32`'ye, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S-ifade verisi](functions/sequences.md#2-s-ifade-verisi-sexpr) |
+| `Option<Sexpr>` | Genel olarak S-ifade verisi. Boş liste `()`, `None`'dır | Yukarıdakiyle aynı |
 
 ## 4. Standart kütüphanedeki türler
 
@@ -72,7 +72,7 @@ aynı şekilde ele alınırlar ve bir `defstruct` ile yapabileceğiniz her şey 
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Akışlar | [Akışlar](functions/streams-files.md#3-somut-akış-türleri) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Bileşik akışlar | [Bileşik akışlar](functions/streams-files.md#4-bileşik-akışlar) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Ağ | [Ağ](functions/network.md#1-türler) |
-| `ReadOutcome` | `read-sexpr`'in sonucu. `datum` / `eof` | [Akışlar](functions/streams-files.md#6-jenerik-fonksiyonlar-ve-dosya-işlemleri) |
+| `ReadOutcome` | `read-sexpr`'in sonucu. `Datum` / `Eof` | [Akışlar](functions/streams-files.md#6-jenerik-fonksiyonlar-ve-dosya-işlemleri) |
 | `universal-time` `internal-time` `decoded-time` | Zaman | [Zaman](functions/system.md#1-zaman) |
 | `heap-info` | Heap'in geçerli durumu | [Gerçekleştirim araçları](functions/system.md#51-heap-info-alanları) |
 

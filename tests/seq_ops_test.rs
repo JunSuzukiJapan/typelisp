@@ -436,8 +436,8 @@ fn a_literal_takes_the_element_type_of_the_sequence() {
     let src = "(defun make-w () Vector<i32> (Vector::new))
                (defvar (w Vector<i32>) (make-w))
                (push w 1) (push w 2)";
-    assert_eq!(eval_string(&format!("{} (format false \"~a\" (find 2 (iter w)))", src)), "(some 2)");
-    assert_eq!(eval_string(&format!("{} (format false \"~a\" (position 2 (iter w)))", src)), "(some 1)");
+    assert_eq!(eval_string(&format!("{} (format false \"~a\" (find 2 (iter w)))", src)), "(Some 2)");
+    assert_eq!(eval_string(&format!("{} (format false \"~a\" (position 2 (iter w)))", src)), "(Some 1)");
     assert_eq!(eval_string(&format!("{} (format false \"~a\" (count 1 (iter w)))", src)), "1");
     // A literal the element type cannot hold is still refused.
     let e = check(&format!("{} (find 300 (iter (the Vector<u8> (Vector::new))))", src)).map(|_| ()).unwrap_err();

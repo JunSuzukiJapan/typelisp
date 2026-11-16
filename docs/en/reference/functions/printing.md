@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Printing
 
 `print`/`println`/`format`, the one-argument printers, the pretty printer, `print-object`, and the
@@ -42,18 +42,18 @@ program writes to standard output by calling these. `print`/`println`/`format` s
 on every call (so that a prompt is visible before standard input is read, even through a pipe).
 
 **`Option<Sexpr>` prints transparently.** The type of S-expression data is `Option<Sexpr>`, so the
-`(some x)` wrapper does not appear in the output and the contents are printed as they are. The empty
-list prints as `()`. Other `Option<T>` print as `(some ...)` / `none`. The same goes for `Option<T>`
+`(Some x)` wrapper does not appear in the output and the contents are printed as they are. The empty
+list prints as `()`. Other `Option<T>` print as `(Some ...)` / `None`. The same goes for `Option<T>`
 fields inside structs, enums and `Vector`s. A `Result<Option<Sexpr>,…>` from `(eval ...)` prints as
-`(ok 42)`, or `(ok ())` for `none`.
+`(Ok 42)`, or `(Ok ())` for `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -312,10 +312,10 @@ be changed after creation, so a list like `'(1 2 3)` can never be circular):
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a points to a itself
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a points to a itself
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Labels **start again from 1 for each thing printed** (as in CL). Even without a cycle, if the same

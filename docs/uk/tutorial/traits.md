@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Трейти
 
 Трейт — це обіцянка, що «цей тип підтримує ці операції». Трейти дозволяють кільком типам ділити операції
@@ -140,13 +140,13 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
 Якщо передати `Vector` зі значеннями `money` 300, 900 і 100 у цьому порядку, вона повертає
-`(some 900 yen)`.
+`(Some 900 yen)`.
 
 ## 5. `:dyn`: спільна робота зі значеннями різних типів
 

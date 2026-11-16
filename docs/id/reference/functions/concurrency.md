@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Task dan Kanal
 
 Kosakata task (thread ringan). `task` dan `thread`, yang memulainya, dan `select`, yang menunggu
@@ -36,7 +36,7 @@ ke thread lain). Tempat task berpindah dan perbedaannya dengan Go ada di
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | Kanal berkapasitas `n`. `0` adalah rendezvous (tanpa buffer) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Menunggu sampai ada ruang, lalu menyerahkan nilai |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Menunggu sampai nilai tiba. `none` setelah ditutup dan kosong |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Menunggu sampai nilai tiba. `None` setelah ditutup dan kosong |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Menutupnya |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Berapa banyak nilai di buffer saat ini |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | Kapasitas |
@@ -65,7 +65,7 @@ ke thread lain). Tempat task berpindah dan perbedaannya dengan Go ada di
 - **Menutup kanal yang sedang ditunggu sebuah task untuk `send` membuat task itu melakukan panic**
   (aturan Go).
 - `recv` pada kanal yang sudah ditutup mengembalikan apa yang tersisa di buffer, dan setelah kosong,
-  terus mengembalikan `none`.
+  terus mengembalikan `None`.
 - `close` diselesaikan berdasarkan tipe penerima, sehingga ia berbeda dari `close` pada trait
   `Stream`. `Chan<T>` tidak mengimplementasikan `Stream`.
 - **Kapasitas negatif melakukan panic** (tidak dibulatkan diam-diam ke 0).
@@ -202,8 +202,8 @@ memeriksa `is-cancelled` sendiri atau dengan menerima dari `done`.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -217,7 +217,7 @@ memeriksa `is-cancelled` sendiri atau dengan menerima dari `done`.
 - **Pembatalan sampai ke anak-anaknya.** Context yang dibuat dengan `with-cancel`/`with-timeout`
   ikut dibatalkan bersama induknya. Arah sebaliknya (dari anak ke induk) tidak.
 - Anak yang dibuat dari context yang sudah dibatalkan sudah dibatalkan sejak awal.
-- `done` hanya ditutup; tidak ada nilai yang dikirim. Penerimaan mengembalikan `none`.
+- `done` hanya ditutup; tidak ada nilai yang dikirim. Penerimaan mengembalikan `None`.
 - Setiap panggilan `(Context::background)` membuat akar tersendiri. `Background()` milik Go hanya
   satu dan tidak bisa dibatalkan; di sini akar pun bisa dibatalkan, dan itu hanya memengaruhi apa
   yang dibuat darinya.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Wypisywanie
 
 `print`/`println`/`format`, drukarki jednoargumentowe, pretty printer, `print-object` oraz
@@ -42,18 +42,18 @@ program zapisuje na standardowe wyjście, wywołując te funkcje. `print`/`print
 przy każdym wywołaniu (aby zachęta była widoczna przed odczytem standardowego wejścia, nawet przez potok).
 
 **`Option<Sexpr>` wypisuje się przezroczyście.** Typem danych w postaci S-wyrażeń jest `Option<Sexpr>`, więc
-opakowanie `(some x)` nie pojawia się na wyjściu, a zawartość jest wypisywana bez zmian. Pusta
-lista wypisuje się jako `()`. Inne `Option<T>` wypisują się jako `(some ...)` / `none`. To samo dotyczy pól `Option<T>`
+opakowanie `(Some x)` nie pojawia się na wyjściu, a zawartość jest wypisywana bez zmian. Pusta
+lista wypisuje się jako `()`. Inne `Option<T>` wypisują się jako `(Some ...)` / `None`. To samo dotyczy pól `Option<T>`
 wewnątrz struktur, enumeracji i `Vector`. `Result<Option<Sexpr>,…>` z `(eval ...)` wypisuje się jako
-`(ok 42)`, albo `(ok ())` dla `none`.
+`(Ok 42)`, albo `(Ok ())` dla `None`.
 
 ```lisp
-(println "~a" (the Option<Sexpr> (Option::some 42)))   ; => 42
+(println "~a" (the Option<Sexpr> (Option::Some 42)))   ; => 42
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
-(println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
+(println "~a" (the Option<i32>   (Option::Some 42)))   ; => (Some 42)
 (defstruct p (x Option<int>))
-(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::Some 1)))               ; => #<p x: (Some 1)>
+(println "~a" (make-instance 'p :x (Option::None)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -312,10 +312,10 @@ zmienić po utworzeniu, więc lista taka jak `'(1 2 3)` nigdy nie może być cyk
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (make-instance 'node :val 1 :next (Option::none))))
-  (setf a::next (Option::some a))   ; a wskazuje na samo a
+(let ((a (make-instance 'node :val 1 :next (Option::None))))
+  (setf a::next (Option::Some a))   ; a wskazuje na samo a
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (Some #1#)>
 ```
 
 Etykiety **zaczynają się od 1 dla każdej wypisywanej rzeczy** (jak w CL). Nawet bez cyklu, jeśli ten sam

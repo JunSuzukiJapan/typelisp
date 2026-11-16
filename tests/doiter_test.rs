@@ -172,8 +172,8 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
     // element, exercising exactly this "element type known only through the
     // iterator" path.
     let src = "(defun last-of<I,A> ((it I)) Option<A> (:where (Iter I (Item A)))
-                 (let ((r (the Option<A> (Option::none))))
-                   (doiter (x it) (setf r (Option::some x)))
+                 (let ((r (the Option<A> (Option::None))))
+                   (doiter (x it) (setf r (Option::Some x)))
                    r))
                (defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (push v 30)
@@ -185,16 +185,16 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
 fn an_argument_after_one_waiting_on_a_pin_reads_its_type_from_that_argument() {
     // `foldl`'s `(f (fn (B A) B))` waits for `A`'s pin, and `(init B)` shares
     // `B` with it, so `init` waits too: checked after the lambda, the bare
-    // `(Option::none)` is read as the `Option<int>` the lambda says `B` is.
+    // `(Option::None)` is read as the `Option<int>` the lambda says `B` is.
     // Checked first, it had nothing to learn its type argument from.
     let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 3) (push v 9) (push v 1)
                  (unwrap-or (foldl (iter v)
                                    (lambda ((best Option<int>) (x int)) Option<int>
                                      (match best
-                                       ((some b) (if (< b x) (Option::some x) best))
-                                       ((none) (Option::some x))))
-                                   (Option::none))
+                                       ((Some b) (if (< b x) (Option::Some x) best))
+                                       ((None) (Option::Some x))))
+                                   (Option::None))
                             -1))";
     assert_eq!(eval_ok(src), Value::Int(9));
 }
@@ -208,9 +208,9 @@ fn an_argument_waiting_with_a_pinned_one_also_reads_a_generic_callers_parameter(
                  (foldl (iter v)
                         (lambda ((best Option<T>) (x T)) Option<T>
                           (match best
-                            ((some b) (if (less b x) (Option::some x) best))
-                            ((none) (Option::some x))))
-                        (Option::none)))
+                            ((Some b) (if (less b x) (Option::Some x) best))
+                            ((None) (Option::Some x))))
+                        (Option::None)))
                (defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 3) (push v 9) (push v 1)
                  (unwrap-or (largest v) -1))";

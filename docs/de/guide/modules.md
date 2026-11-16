@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Module und Dateiaufteilung
 
 Dieser Leitfaden erklärt, wie man ein Programm aus mehreren Dateien zusammenstellt. Die genauen Regeln stehen
@@ -134,7 +134,7 @@ Wenn das Modul die eigene Definition verwenden soll, schreibt man `shadow` vor d
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first dieses Moduls => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first der Standardbibliothek => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first der Standardbibliothek => (Some 1)
 ```
 
 Nach `shadow` bezeichnet `first` in diesem Modul die eigene Definition. Das `first` der

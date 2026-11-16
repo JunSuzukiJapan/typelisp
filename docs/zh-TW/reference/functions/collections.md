@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 字串、字元與集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -25,12 +25,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | 忽略大小寫的順序比較（CL 的 `string-lessp` 等）。有共同前綴時較短者較小 |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | 由 `n` 個 `c` 組成的字串（CL 的 `make-string`） |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | `sub` 第一次出現的位置。**CL 的 `search` 引數順序相反**（`(search pattern sequence)`）。空字串在 0 找到。關鍵字見[序列的關鍵字引數](sequences.md#6-關鍵字引數) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | 第一個不一致的位置。只有 `equal` 時為 `none`。一方是另一方的前綴時為較短者的結尾。關鍵字同上 |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | 第一個不一致的位置。只有 `equal` 時為 `None`。一方是另一方的前綴時為較短者的結尾。關鍵字同上 |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | 從兩端／左端／右端去掉 `bag` 中包含的字元（CL 的 `string-trim` 等）。省略 `bag` 時為空白字元 `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | 以 `sep` 分割。CL 中沒有對應物。連續的分隔符號會產生空元素。`sep` 為空時 panic |
 | `to-string` | `(to-string x)` | `T→string` | 相當於 `~a` 的字串化。實作於 `int`/`i32`/`f64`/`bool`/`char`/`string`（CL 的 `princ-to-string`） |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | 編碼為 UTF-8（每個元素 0..255） |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 解碼。不是合法的 UTF-8 時為 `none` |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 解碼。不是合法的 UTF-8 時為 `None` |
 
 ## 2. 字元 `char`
 
@@ -74,7 +74,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | 讀取第 `i` 個。超出範圍時 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | 修改第 `i` 個。超出範圍時 panic。也可以寫成 `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | 元素個數 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉尾端元素並回傳。為空時為 `none`（與 `get`/`set` 不同，不會 panic）（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 去掉尾端元素並回傳。為空時為 `None`（與 `get`/`set` 不同，不會 panic）（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | 建立實作了 `Iter` 的迭代器 |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | 若沒有與 `x` `eql` 的元素則附加到末尾（CL `pushnew`。不需改寫位置，所以是方法而非巨集） |
 
@@ -131,7 +131,7 @@
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 在 `equal` 表中，決定鍵是否相同的是**鍵的型別本身**（`sxhash`，以及 `Hash` 的超 trait `Equal` 的
@@ -160,8 +160,8 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL 的 `adjust-array`。不能改變秩。仍在範圍內的元素依索引保留，新增的單元為 `init`。與 CL 不同，不回傳陣列（這個語言的陣列都是可調整的，沒有要回傳的第二個陣列） |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL 的 `vector-push-extend`。沒有填充指標時 panic |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | 與 `push-extend` 相同（[`Push`](traits.md#4-push-trait新增元素) trait 的方法） |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL 的 `vector-pop`。為空時為 `none`（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 填充指標（沒有時為 `none`）。可以用 `(setf a::fill-pointer …)` 寫入 |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL 的 `vector-pop`。為空時為 `None`（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 填充指標（沒有時為 `None`）。可以用 `(setf a::fill-pointer …)` 寫入 |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | 依列優先順序的迭代器。有填充指標時在那裡停止 |
 
 - **索引是 `Vector<int>`。** 方法無法宣告「尾端跟著若干個同型別引數」的形式，`aref` 語法糖彌補了這個落差。
@@ -245,10 +245,10 @@
 | `new` | `(Deque::new)` | `()→Deque<T>` | 建立空序列 |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 加到開頭／末尾 |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | 與 `push-back` 相同（[`Push`](traits.md#4-push-trait新增元素) trait 的方法） |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 取出開頭／末尾的元素並傳回。為空時為 `none` |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 取出開頭／末尾的元素並傳回。為空時為 `None` |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | 與 `pop-back` 相同（[`Pop`](traits.md#5-pop-trait取出元素) trait 的方法） |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 查看開頭／末尾的元素（不取出） |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 從開頭數第 `i` 個。越界時為 `none` |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 從開頭數第 `i` 個。越界時為 `None` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | 覆寫第 `i` 個。越界時 panic |
 | `count` | `(count d)` | `Deque<T>→int` | 元素個數 |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | 全部刪除 |
@@ -258,5 +258,5 @@
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

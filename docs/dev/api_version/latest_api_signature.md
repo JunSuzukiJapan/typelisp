@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.59
+# ABI バージョン 0.3.61
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.59 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.61 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `bf1d58131af7aa92`
+内容ハッシュ (FNV-1a 64): `4ba7f940be322e72`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1484,8 +1484,8 @@
 
 ### `std::option::Option` (sum, 型引数 [T])
 
-- 変種 0 `some`: `T`
-- 変種 1 `none`: 
+- 変種 0 `Some`: `T`
+- 変種 1 `None`: 
 
 ### `std::primitive::bool` (sum, 型引数 [])
 
@@ -2074,32 +2074,32 @@
 
 ### `std::result::Result` (sum, 型引数 [T, E])
 
-- 変種 0 `ok`: `T`
-- 変種 1 `err`: `E`
+- 変種 0 `Ok`: `T`
+- 変種 1 `Err`: `E`
 
 ### `std::sexpr::Sexpr` (sum, 型引数 [])
 
-- 変種 0 `nil`: 
-- 変種 1 `int`: `int`
-- 変種 2 `f64`: `f64`
-- 変種 3 `char`: `char`
-- 変種 4 `bool`: `bool`
-- 変種 5 `sym`: `symbol`
-- 変種 6 `str`: `string`
-- 変種 7 `cons`: `std::option::Option<std::sexpr::Sexpr>`, `std::option::Option<std::sexpr::Sexpr>`
-- 変種 8 `bignum`: `int`
-- 変種 9 `ratio`: `ratio`
-- 変種 10 `path`: `std::option::Option<std::sexpr::Sexpr>`
-- 変種 11 `f32`: `f32`
-- 変種 12 `i8`: `i8`
-- 変種 13 `i16`: `i16`
-- 変種 14 `u8`: `u8`
-- 変種 15 `u16`: `u16`
-- 変種 16 `u32`: `u32`
-- 変種 17 `i32`: `i32`
-- 変種 18 `vector`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
-- 変種 19 `array`: `std::array::Array<std::option::Option<std::sexpr::Sexpr>>`
-- 変種 20 `tuple`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
+- 変種 0 `Nil`: 
+- 変種 1 `Int`: `int`
+- 変種 2 `F64`: `f64`
+- 変種 3 `Char`: `char`
+- 変種 4 `Bool`: `bool`
+- 変種 5 `Sym`: `symbol`
+- 変種 6 `Str`: `string`
+- 変種 7 `Cons`: `std::option::Option<std::sexpr::Sexpr>`, `std::option::Option<std::sexpr::Sexpr>`
+- 変種 8 `Bignum`: `int`
+- 変種 9 `Ratio`: `ratio`
+- 変種 10 `Path`: `std::option::Option<std::sexpr::Sexpr>`
+- 変種 11 `F32`: `f32`
+- 変種 12 `I8`: `i8`
+- 変種 13 `I16`: `i16`
+- 変種 14 `U8`: `u8`
+- 変種 15 `U16`: `u16`
+- 変種 16 `U32`: `u32`
+- 変種 17 `I32`: `i32`
+- 変種 18 `Vector`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
+- 変種 19 `Array`: `std::array::Array<std::option::Option<std::sexpr::Sexpr>>`
+- 変種 20 `Tuple`: `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>`
 - インスタンス `eq`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
 - インスタンス `eql`: `(std::option::Option<std::sexpr::Sexpr>, std::option::Option<std::sexpr::Sexpr>) -> bool`
 - インスタンス `equal`: `(std::sexpr::Sexpr, std::sexpr::Sexpr) -> bool`

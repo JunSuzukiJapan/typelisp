@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Çiftler, S-İfadeler ve Diziler
 
 Jenerik çift `cons-cell`, S-ifade verisi `Sexpr`, semboller, `Iter` üzerine yazılmış dizi fonksiyonları ve
@@ -31,25 +31,25 @@ cons'larıyla aynıdır: `(cons 1 (cons "a" ()))` `(1 "a")`, `(cons 3 1)` ise `(
 ## 2. S-ifade verisi `Sexpr`
 
 `read`'in döndürdüğü `Sexpr` veri türünün 19 varyantı vardır:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` ve `array`, `#(..)` ve `#nA(..)` olarak yazılmış verilerdir ([Sözdizimi
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` ve `Array`, `#(..)` ve `#nA(..)` olarak yazılmış verilerdir ([Sözdizimi
 Başvurusu](../syntax.md#1-sözcüksel-öğeler)); sırasıyla bir `Vector<Option<Sexpr>>` ve bir
-`Array<Option<Sexpr>>` tutarlar: `(vector v)`'nin bağladığı `v` üzerinde `len`, `get` ve diğerleri
-`tuple`, `#{..}` ile yazılmış veridir ve `(tuple v)`'nin bağladığı `v`, öğelerden oluşan yeni bir
+`Array<Option<Sexpr>>` tutarlar: `(Vector v)`'nin bağladığı `v` üzerinde `len`, `get` ve diğerleri
+`Tuple`, `#{..}` ile yazılmış veridir ve `(Tuple v)`'nin bağladığı `v`, öğelerden oluşan yeni bir
 `Vector<Option<Sexpr>>`'dir (her uzunluktaki demet tek bir türle alınsın diye).
 doğrudan çalışır.
 S-ifade hücreleri, 1. bölümün genel `cons`/`car`/`cdr`'siyle değil, `sexpr-*` fonksiyonlarıyla ele alınır.
 Esas olarak `defmacro` gövdelerinde formları oluşturmak ve ayrıştırmak için kullanılırlar.
 
 **S-ifade verisinin türü `Option<Sexpr>`'dir.** Boş liste `Sexpr`'in bir varyantı değil, `Option`'ın
-`none`'dır ve `Sexpr`'in kendisi "boş olmayan bir S-ifade" demektir. Bu yüzden `sexpr-*` fonksiyonları
+`None`'dır ve `Sexpr`'in kendisi "boş olmayan bir S-ifade" demektir. Bu yüzden `sexpr-*` fonksiyonları
 `Option<Sexpr>` alır ve döndürür.
 
-- `()`, bir `Option<Sexpr>` beklenen yerde boş listedir (`(Option::none)` olarak da yazılabilir)
+- `()`, bir `Option<Sexpr>` beklenen yerde boş listedir (`(Option::None)` olarak da yazılabilir)
 - `Sexpr`, bir `Option<Sexpr>` beklenen yerde örtük olarak genişler (çalışma zamanı dönüşümü olmadan).
   Ters yön, yani bir `Option<Sexpr>`'i `Sexpr` olarak kullanmak, "bu boş liste değildir" iddiasında
   bulunur; bu yüzden `match` ya da `unwrap` ile açıkça belirtilmelidir
-- `match` içinde `Sexpr`'in 19 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir
+- `match` içinde `Sexpr`'in 19 varyantı ve `None` **aynı kol listesinde düz olarak** yazılabilir
   ([Sözdizimi Başvurusu](../syntax.md#43-match--örüntü-eşleme))
 
 | Ad | Biçim | Tür | Açıklama |
@@ -61,7 +61,7 @@ Esas olarak `defmacro` gövdelerinde formları oluşturmak ve ayrıştırmak iç
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Boş liste olup olmadığı |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons` olmayıp olmadığı |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Bir `Sym` (sembol) olup olmadığı |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` varyantının içeriği (fixnum ya da bignum). Başka bir türde panic olur |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` varyantının içeriği (fixnum ya da bignum). Başka bir türde panic olur |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | O genişlikteki varyantın içeriği. Başka bir türde panic olur |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Kayan noktalı varyantların içeriği. Başka bir türde panic olur |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Bir `Char`'ın içeriği. Başka bir türde panic olur |
@@ -75,9 +75,9 @@ Esas olarak `defmacro` gövdelerinde formları oluşturmak ve ayrıştırmak iç
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | Bir `Sexpr` listesinin her elemanına `f` uygulanmış yeni bir `Sexpr` listesi (4. bölümün `map`'i `Iter` içindir ve bir `Sexpr` listesinde gezemez) |
 
 Tür başına bir tane olmak üzere dokuz sayısal erişimci vardır; çünkü bir `Sexpr`, "bir değerin türünün
-başka hiçbir yerde yazılmadığı tek yer"dir. Bir `Sexpr` içine konan bir `u8`, `u8` varyantı olarak girer ve
+başka hiçbir yerde yazılmadığı tek yer"dir. Bir `Sexpr` içine konan bir `u8`, `U8` varyantı olarak girer ve
 yalnızca `(sexpr-u8 s)` ile çıkar. Onu `(sexpr-int s)`'e geçirmek panic olur; yanıtı asla sessizce
-genişletmez. Okunan verideki tamsayılar (`'(1 2 3)`, makro bağımsız değişkenleri) `int` varyantındandır ve
+genişletmez. Okunan verideki tamsayılar (`'(1 2 3)`, makro bağımsız değişkenleri) `Int` varyantındandır ve
 `(sexpr-int s)` ile okunur.
 
 `Sexpr` listelerinin `rplaca`/`nconc` gibi yıkıcı işlemleri yoktur. Bir `Sexpr` hücresi oluşturulduktan
@@ -115,7 +115,7 @@ Bir yüklem alan fonksiyonlar (CL'nin `-if` ailesine karşılık gelir):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Yüklemi sağlayan ilk konum |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Kaçının yüklemi sağladığı |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Her elemanın yüklemi sağlayıp sağlamadığı |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Herhangi bir elemanın yüklemi sağlayıp sağlamadığı (CL'nin `some`'una karşılık gelir; `some` yapıcısıyla çakışmayan bir ad) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Herhangi bir elemanın yüklemi sağlayıp sağlamadığı (CL'nin `some`'una karşılık gelir) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Soldan katlama |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Sağdan katlama |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Kalan tüm öğeleri toplar. Aşağıdaki bir `lazy` fonksiyonunun sonucunu `Vector`'a çevirmek için kullanılır |
@@ -128,7 +128,7 @@ Bir yüklem alan fonksiyonlar (CL'nin `-if` ailesine karşılık gelir):
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Yineleyicileri birleştirir. Üç ya da daha fazlası verilebilir |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL'nin `concatenate`'i. Sonuç türü **tırnaklı bir sembol sabiti** olarak yazılır (CL çalışma zamanı tür belirleyicisi kullanır). `'vector` bir ya da daha fazlasını, `'string` sıfır ya da daha fazlasını alır (sıfır için `""`). `Sexpr` listeleri kapsanmaz (`sexpr-append` kullanın) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Tersine çevirme (yıkıcı olmayan) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`'inci eleman (aralık dışında `none`) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n`'inci eleman (aralık dışında `None`) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | Bağımsız değişkenleri ters sırada `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | İlk `n` eleman |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` uzunluğa kırpılır) |
@@ -222,7 +222,7 @@ Hepsi 4. bölümdeki gibi `Iter` üzerinde jenerik fonksiyonlardır. Ortaya çı
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Yan etkiler için kuyruklar üzerinde eşler (`mapc`'nin `maplist` karşılığı) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Kuyruklar üzerinde eşler ve birleştirir (`mapcan`'ın `maplist` karşılığı) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub`'ın ilk göründüğü konum. Alıcı bir `string` ise `string` metodu seçilir ([String'ler](collections.md#1-stringler-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | İlk farklılaşma konumu. Eşitlerse `none` |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | İlk farklılaşma konumu. Eşitlerse `None` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Birleştirme. CL sıralı girdiler ister; bu, birleştirmeyi sıralar |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Orada değilse `x`'i **başa** ekler |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Küme işlemleri. CL sırayı belirtmez; burada kararlıdır, **ilk görünüm sırasına göre** |
@@ -274,7 +274,7 @@ Hangi fonksiyonun hangisini aldığı CL'yi izler:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; removes only one, from the end
 (position 3 (iter v) :start 1)                          ; the index is relative to the whole sequence
 ```

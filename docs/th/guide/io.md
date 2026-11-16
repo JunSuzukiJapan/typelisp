@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # I/O ของไฟล์ สตรีม และเครือข่าย
 
 คู่มือนี้แสดงพื้นฐานของการอ่านและเขียนไฟล์ pathname และการสื่อสารผ่านซ็อกเก็ต รายการ
@@ -14,14 +14,14 @@
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; if the file is missing:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
 เมื่อรู้ว่าการดำเนินการไม่มีทางล้มเหลว หรือในสคริปต์เล็ก ๆ ที่หยุดเมื่อล้มเหลวได้
-`unwrap` จะดึงค่าออกมา หากเป็น `err` จะ panic
+`unwrap` จะดึงค่าออกมา หากเป็น `Err` จะ panic
 
 ## 2. การอ่านและเขียนทั้งไฟล์
 
@@ -30,8 +30,8 @@
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. การอ่านและเขียนด้วยสตรีม
@@ -46,23 +46,23 @@
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; read one line at a time
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - ทิศทางการเปิดไฟล์มีสามแบบ: `direction-input` (อ่าน), `direction-output` (เขียน;
   เนื้อหาเดิมถูกทิ้ง) และ `direction-append` (ต่อท้าย)
-- `read-line` คืน `none` เมื่อถึงจุดสิ้นสุดของไฟล์
+- `read-line` คืน `None` เมื่อถึงจุดสิ้นสุดของไฟล์
 - หากเปิดไฟล์ด้วย `open-file` แทน `with-open-file` ต้องเรียก `close` เสมอ GC
   ไม่ปิดสตรีมให้
 
@@ -78,7 +78,7 @@
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### อินพุตและเอาต์พุตมาตรฐาน
@@ -95,8 +95,8 @@
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -108,8 +108,8 @@
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; replace just the extension
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -148,14 +148,14 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; the other side closed
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; the other side closed
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` รับการเชื่อมต่อจากเครื่องนี้เท่านั้น และ `"0.0.0.0"` รับการเชื่อมต่อบนทุก
@@ -171,8 +171,8 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 หากต้องการจำกัดเวลาของการดำเนินการ ให้ส่ง `:timeout` (หน่วยเป็นวินาที)
@@ -181,13 +181,13 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; put a clock on the next read
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; put a clock on the next read
 ```
 
 ### เมื่อปลายทางอีกฝั่งตัดการเชื่อมต่อ
 
 หากอีกฝั่งรีเซ็ตการเชื่อมต่อหรือตัดกลางคัน จะไม่ `panic` การอ่านต่อจากนั้นคืน
-`none` และการเขียนถูกทิ้งโดยไม่แจ้ง หากต้องการแยกว่าการเชื่อมต่อถูกปิดอย่างเรียบร้อยหรือ
+`None` และการเขียนถูกทิ้งโดยไม่แจ้ง หากต้องการแยกว่าการเชื่อมต่อถูกปิดอย่างเรียบร้อยหรือ
 ล้มเหลว ให้ตรวจสอบ `(socket-error c)`
 
 ## 6. การแปลงชื่อ (DNS)
@@ -196,13 +196,13 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 `tls-connect` หรือ `send-to` จะแปลงชื่อภายในฟังก์ชันเหล่านั้น การแปลงทำงานบนอีกเธรดหนึ่ง ดังนั้น task
 อื่นยังคงทำงานต่อขณะรอ หากชื่อหนึ่งมีหลายที่อยู่ จะลองทีละที่อยู่ตามลำดับ
 
-หากแปลงชื่อไม่ได้ จะคืน `err`
+หากแปลงชื่อไม่ได้ จะคืน `Err`
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -215,12 +215,12 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 เซิร์ฟเวอร์ TLS สร้างโดยส่งไฟล์ใบรับรองและกุญแจส่วนตัว (PEM) ให้ `tls-listen`
@@ -229,8 +229,8 @@ task นั้น** จนกว่าข้อมูลจะมาถึง �
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; the TCP serve works as it is
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 เมื่อทดลองด้วยใบรับรองที่ลงนามด้วยตนเอง ให้ส่ง `:ca-file "cert.pem"` ที่ฝั่งไคลเอนต์เพื่อ
@@ -248,8 +248,8 @@ UDP ไม่ใช่สตรีม แต่ส่งและรับที
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -258,5 +258,5 @@ UDP ไม่ใช่สตรีม แต่ส่งและรับที
 ## 9. Unix domain socket
 
 ส่งพาธของไฟล์ซ็อกเก็ตให้ `unix-listen` / `unix-connect` ค่าที่ได้เป็น
-`socket-stream` ชนิดเดียวกับ TCP `unix-listen` คืน `err` หากไฟล์มีอยู่แล้ว การปิด
+`socket-stream` ชนิดเดียวกับ TCP `unix-listen` คืน `Err` หากไฟล์มีอยู่แล้ว การปิด
 ลิสเทนเนอร์จะลบไฟล์

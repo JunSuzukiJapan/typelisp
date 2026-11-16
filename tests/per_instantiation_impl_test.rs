@@ -239,7 +239,7 @@ const DOCUMENTED: &str = r##"
 #[test]
 fn documentation_names_one_instantiations_method() {
     let doc = |name: &str| {
-        eval_string(&format!("{}(match (documentation {}) ((some d) d) (none \"none\"))", DOCUMENTED, name))
+        eval_string(&format!("{}(match (documentation {}) ((Some d) d) (None \"none\"))", DOCUMENTED, name))
     };
     assert_eq!(doc("Box<int>::twice"), "doubles the int");
     assert_eq!(doc("Box<string>::twice"), "repeats the string");

@@ -294,7 +294,7 @@ fn narrowing_an_int_past_the_width_truncates_and_try_as_says_none() {
     // how a program asks first.
     let src = "(defun f ((a int)) i32 (as i32 a)) (f 4294967297)";
     assert_eq!(eval_ok(src), Value::Int(1));
-    let src = "(defun f ((a int)) bool (match (try-as i32 a) ((some _) true) ((none) false))) \
+    let src = "(defun f ((a int)) bool (match (try-as i32 a) ((Some _) true) ((None) false))) \
                (f 999999999999999999999999999999)";
     assert_eq!(eval_ok(src), Value::Bool(false));
 }

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 类型基础
 
 typelisp 是静态类型语言。本章介绍类型检查能为你做什么、常用的类型（`Option`、`Result`、结构体、枚举）以及
@@ -44,39 +44,39 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 ## 2. `Option<T>`：可能没有的值
 
 typelisp 中没有 `nil`。"可能没有值"用 `Option<T>` 类型表示。`Option<T>` 的值要么是持有一个 `T` 值的
-`some`，要么是什么都不持有的 `none`。
+`Some`，要么是什么都不持有的 `None`。
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` 不是 `int`，不能直接用于计算。`(+ (safe-div 10 2) 1)` 是类型错误。要使用其中的值，用
-`match` 区分 `some` 和 `none`。
+`match` 区分 `Some` 和 `None`。
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- 在 `(some q)` 分支中，内容被绑定到变量 `q`。
-- `match` 会检查各分支是否**覆盖了所有情况**。忘写 `(none)` 分支是类型错误。
+- 在 `(Some q)` 分支中，内容被绑定到变量 `q`。
+- `match` 会检查各分支是否**覆盖了所有情况**。忘写 `(None)` 分支是类型错误。
 
 ### 为什么没有 nil
 
 在许多语言中，`nil`（`null`）可以充当任何类型的值。因此，即使忘了处理"没有值"的情况，也要到运行时才会发现。
-在 typelisp 中，可能没有值的地方是 `Option<T>` 类型，不在 `match` 中处理 `none` 的情况就无法通过类型检查。
+在 typelisp 中，可能没有值的地方是 `Option<T>` 类型，不在 `match` 中处理 `None` 的情况就无法通过类型检查。
 遗漏在运行前就会被发现。
 
 条件也遵循同样的思路：`if` 的条件只能是 `bool`。没有 Common Lisp 那种"`nil` 以外都为真"的规则。
@@ -85,11 +85,11 @@ none
 
 | 写法 | 含义 |
 |---|---|
-| `(unwrap-or opt 默认值)` | `some` 时取内容，`none` 时取默认值 |
-| `(unwrap opt)` | 取出内容。`none` 时程序停止 |
+| `(unwrap-or opt 默认值)` | `Some` 时取内容，`None` 时取默认值 |
+| `(unwrap opt)` | 取出内容。`None` 时程序停止 |
 | `(is-some opt)` / `(is-none opt)` | 判断是哪一种 |
 
-标准库中也有很多返回 `Option` 的函数。例如 `position` 找到时用 `some` 返回位置，找不到时返回 `none`。
+标准库中也有很多返回 `Option` 的函数。例如 `position` 找到时用 `Some` 返回位置，找不到时返回 `None`。
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -97,24 +97,24 @@ none
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`：可能失败的操作
 
-可能失败的操作返回 `Result<T,E>`：成功时是持有值 `T` 的 `ok`，失败时是持有错误 `E` 的 `err`。
+可能失败的操作返回 `Result<T,E>`：成功时是持有值 `T` 的 `Ok`，失败时是持有错误 `E` 的 `Err`。
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -123,8 +123,8 @@ none
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 "没有"不需要理由时用 `Option`，想说明失败原因时用 `Result`。错误的处理方式在[错误处理](errors.md)中详细介绍。
@@ -190,28 +190,28 @@ none
 
 ```lisp
 (defenum shape
-  (circle int)        ; 半径
-  (rect int int)      ; 宽和高
-  (dot))              ; 不持有值
+  (Circle int)        ; 半径
+  (Rect int int)      ; 宽和高
+  (Dot))              ; 不持有值
 ```
 
-值要像 `shape::circle` 这样加上类型名创建。在 `match` 中按变体名拆解。
+值要像 `shape::Circle` 这样加上类型名创建。在 `match` 中按变体名拆解。
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 这里 `match` 同样检查是否覆盖了所有情况。之后给 `shape` 增加变体时，所有没有处理该变体的 `match` 都会变成类型
 错误，因此不会遗漏需要修改的地方。
 
-写了 `(use shape)` 之后，就可以不带类型名写 `(rect 5 6)`。
+写了 `(use shape)` 之后，就可以不带类型名写 `(Rect 5 6)`。
 
 `Option` 和 `Result` 也是用这种机制构建的枚举。
 

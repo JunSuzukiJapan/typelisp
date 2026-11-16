@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # พื้นฐานของชนิด
 
 typelisp เป็นภาษาที่มีระบบชนิดแบบสถิต บทนี้อธิบายสิ่งที่ตัวตรวจสอบชนิดทำให้คุณ
@@ -48,40 +48,40 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 ## 2. `Option<T>`: ค่าที่อาจหายไป
 
 typelisp ไม่มี `nil` "อาจไม่มีค่า" แสดงด้วยชนิด `Option<T>` ค่าของ
-`Option<T>` เป็นได้ทั้ง `some` ที่เก็บค่า `T` หนึ่งค่า หรือ `none` ที่ไม่เก็บอะไร
+`Option<T>` เป็นได้ทั้ง `Some` ที่เก็บค่า `T` หนึ่งค่า หรือ `None` ที่ไม่เก็บอะไร
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` ไม่ใช่ `int` จึงใช้ในการคำนวณตามที่เป็นไม่ได้ `(+ (safe-div 10 2) 1)` เป็น
-ข้อผิดพลาดของชนิด หากต้องการใช้สิ่งที่อยู่ข้างใน ให้แยก `some` จาก `none` ด้วย `match`
+ข้อผิดพลาดของชนิด หากต้องการใช้สิ่งที่อยู่ข้างใน ให้แยก `Some` จาก `None` ด้วย `match`
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- ในกิ่ง `(some q)` เนื้อหาถูกผูกกับตัวแปร `q`
-- `match` ตรวจสอบว่ากิ่งของมัน **ครอบคลุมทุกกรณี** การลืมกิ่ง `(none)` เป็นข้อผิดพลาดของชนิด
+- ในกิ่ง `(Some q)` เนื้อหาถูกผูกกับตัวแปร `q`
+- `match` ตรวจสอบว่ากิ่งของมัน **ครอบคลุมทุกกรณี** การลืมกิ่ง `(None)` เป็นข้อผิดพลาดของชนิด
 
 ### ทำไมจึงไม่มี nil
 
 ในหลายภาษา `nil` (`null`) แทนค่าของชนิดใดก็ได้ ผลคือการลืมจัดการกรณี "ไม่มีค่า" จะไม่ถูกสังเกต
 จนกว่าโปรแกรมจะรัน ใน typelisp ที่ใดที่ค่าอาจหายไปจะมีชนิด `Option<T>` และโค้ดจะไม่ผ่านตัวตรวจสอบชนิด
-เว้นแต่ `match` จัดการกรณี `none` กรณีที่ลืมจะถูกพบก่อนที่โปรแกรมจะรัน
+เว้นแต่ `match` จัดการกรณี `None` กรณีที่ลืมจะถูกพบก่อนที่โปรแกรมจะรัน
 
 เงื่อนไขก็ยึดแนวคิดเดียวกัน: มีเพียง `bool` เท่านั้นที่เป็นเงื่อนไขของ `if` ได้ ไม่มีกฎอย่างของ
 Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช่ `nil` เป็นจริง"
@@ -90,12 +90,12 @@ Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช
 
 | ฟอร์ม | ความหมาย |
 |---|---|
-| `(unwrap-or opt default)` | เนื้อหาสำหรับ `some`; ค่าเริ่มต้นสำหรับ `none` |
-| `(unwrap opt)` | ดึงเนื้อหาออกมา หยุดโปรแกรมเมื่อเป็น `none` |
+| `(unwrap-or opt default)` | เนื้อหาสำหรับ `Some`; ค่าเริ่มต้นสำหรับ `None` |
+| `(unwrap opt)` | ดึงเนื้อหาออกมา หยุดโปรแกรมเมื่อเป็น `None` |
 | `(is-some opt)` / `(is-none opt)` | ทดสอบว่าเป็นแบบใด |
 
 ฟังก์ชันของไลบรารีมาตรฐานจำนวนมากคืน `Option` ตัวอย่างเช่น `position` คืนตำแหน่งใน
-`some` หากพบสมาชิก และ `none` หากไม่พบ
+`Some` หากพบสมาชิก และ `None` หากไม่พบ
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -103,25 +103,25 @@ Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: การดำเนินการที่อาจล้มเหลว
 
-การดำเนินการที่อาจล้มเหลวคืน `Result<T,E>`: `ok` ที่เก็บค่า `T` เมื่อสำเร็จ หรือ `err`
+การดำเนินการที่อาจล้มเหลวคืน `Result<T,E>`: `Ok` ที่เก็บค่า `T` เมื่อสำเร็จ หรือ `Err`
 ที่เก็บข้อผิดพลาด `E` เมื่อล้มเหลว
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -130,8 +130,8 @@ Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 ใช้ `Option` เมื่อค่าที่หายไปไม่ต้องการคำอธิบาย และใช้ `Result` เมื่อต้องการบอกว่าทำไม
@@ -199,28 +199,28 @@ Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-ค่าสร้างโดยมีชื่อชนิดนำหน้า เช่น `shape::circle` ใน `match` จะแยกตามชื่อ variant
+ค่าสร้างโดยมีชื่อชนิดนำหน้า เช่น `shape::Circle` ใน `match` จะแยกตามชื่อ variant
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 ในกรณีนี้ `match` ก็ตรวจสอบว่าครอบคลุมทุกกรณี หากภายหลังคุณเพิ่ม variant ให้ `shape`
 ทุก `match` ที่ไม่จัดการมันจะกลายเป็นข้อผิดพลาดของชนิด ดังนั้นจึงไม่พลาดจุดที่ต้องแก้
 
-หลัง `(use shape)` คุณเขียน `(rect 5 6)` โดยไม่มีชื่อชนิดได้
+หลัง `(use shape)` คุณเขียน `(Rect 5 6)` โดยไม่มีชื่อชนิดได้
 
 `Option` และ `Result` เป็น enum ที่สร้างด้วยกลไกเดียวกันนี้
 

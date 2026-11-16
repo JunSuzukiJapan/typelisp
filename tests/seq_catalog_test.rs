@@ -55,11 +55,11 @@ fn with_fixtures(expr: &str) -> String {
 
 #[test]
 fn the_named_positional_accessors_delegate_to_nth() {
-    assert_eq!(with_fixtures("(first (iter a))"), "(some 1)");
-    assert_eq!(with_fixtures("(second (iter a))"), "(some 2)");
-    assert_eq!(with_fixtures("(fourth (iter a))"), "(some 3)");
-    // Past the end is `none`, matching `nth`, not CL's `nil`.
-    assert_eq!(with_fixtures("(tenth (iter a))"), "none");
+    assert_eq!(with_fixtures("(first (iter a))"), "(Some 1)");
+    assert_eq!(with_fixtures("(second (iter a))"), "(Some 2)");
+    assert_eq!(with_fixtures("(fourth (iter a))"), "(Some 3)");
+    // Past the end is `None`, matching `nth`, not CL's `nil`.
+    assert_eq!(with_fixtures("(tenth (iter a))"), "None");
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn the_cxr_family_walks_nested_pairs() {
 fn the_negated_search_variants_mirror_their_positives() {
     assert_eq!(with_fixtures("(notany (iter a) (lambda ((x int)) bool (> x 9)))"), "true");
     assert_eq!(with_fixtures("(notevery (iter a) (lambda ((x int)) bool (> x 1)))"), "true");
-    assert_eq!(with_fixtures("(find-if-not (iter a) (lambda ((x int)) bool (< x 2)))"), "(some 2)");
+    assert_eq!(with_fixtures("(find-if-not (iter a) (lambda ((x int)) bool (< x 2)))"), "(Some 2)");
     assert_eq!(with_fixtures("(count-if-not (iter a) (lambda ((x int)) bool (< x 2)))"), "3");
     assert_eq!(
         with_fixtures("(remove-if-not (iter a) (lambda ((x int)) bool (> x 1)))"),
@@ -133,12 +133,12 @@ fn substitute_replaces_by_value_and_by_predicate() {
 fn the_alist_catalog_searches_by_key_value_and_predicate() {
     assert_eq!(
         with_fixtures("(assoc-if (iter al) (lambda ((k int)) bool (= k 2)))"),
-        "(some (2 . two))"
+        "(Some (2 . two))"
     );
-    assert_eq!(with_fixtures("(rassoc \"two\" (iter al) :test equal)"), "(some (2 . two))");
+    assert_eq!(with_fixtures("(rassoc \"two\" (iter al) :test equal)"), "(Some (2 . two))");
     assert_eq!(
         with_fixtures("(rassoc-if (iter al) (lambda ((s string)) bool (equal s \"one\")))"),
-        "(some (1 . one))"
+        "(Some (1 . one))"
     );
     // `acons` puts the new pair in front, as CL's cons does.
     assert_eq!(
@@ -338,26 +338,26 @@ fn with_patterns(expr: &str) -> String {
 
 #[test]
 fn search_finds_a_subsequence_of_any_sequence() {
-    assert_eq!(with_patterns("(search (iter a) (iter p))"), "(some 2)");
-    assert_eq!(with_patterns("(search (iter a) (iter b))"), "none");
-    assert_eq!(with_patterns("(search (iter a) (iter q))"), "(some 1)");
-    assert_eq!(with_patterns("(search (iter a) (iter q) :from-end true)"), "(some 2)");
-    assert_eq!(with_patterns("(search (iter a) (iter q) :start 3)"), "none");
+    assert_eq!(with_patterns("(search (iter a) (iter p))"), "(Some 2)");
+    assert_eq!(with_patterns("(search (iter a) (iter b))"), "None");
+    assert_eq!(with_patterns("(search (iter a) (iter q))"), "(Some 1)");
+    assert_eq!(with_patterns("(search (iter a) (iter q) :from-end true)"), "(Some 2)");
+    assert_eq!(with_patterns("(search (iter a) (iter q) :start 3)"), "None");
     // `:key` projects both sides: the first odd element of `a` is at 0.
-    assert_eq!(with_patterns("(search (iter a) (iter b) :key (lambda ((x int)) int (mod x 2)) :sub-start 1 :sub-end 2)"), "(some 0)");
+    assert_eq!(with_patterns("(search (iter a) (iter b) :key (lambda ((x int)) int (mod x 2)) :sub-start 1 :sub-end 2)"), "(Some 0)");
     // A `string` receiver still reaches `string`'s own method.
-    assert_eq!(show("(search \"hello\" \"ll\")"), "(some 2)");
+    assert_eq!(show("(search \"hello\" \"ll\")"), "(Some 2)");
 }
 
 #[test]
 fn mismatch_compares_any_two_sequences() {
-    assert_eq!(with_patterns("(mismatch (iter a) (iter a))"), "none");
-    assert_eq!(with_patterns("(mismatch (iter a) (iter b))"), "(some 0)");
+    assert_eq!(with_patterns("(mismatch (iter a) (iter a))"), "None");
+    assert_eq!(with_patterns("(mismatch (iter a) (iter b))"), "(Some 0)");
     // A proper prefix mismatches at its end.
-    assert_eq!(with_patterns("(mismatch (iter p) (iter b))"), "(some 2)");
+    assert_eq!(with_patterns("(mismatch (iter p) (iter b))"), "(Some 2)");
     // Aligned at the ends: `3` against `4` is the rightmost difference.
-    assert_eq!(with_patterns("(mismatch (iter a) (iter b) :from-end true)"), "(some 4)");
-    assert_eq!(with_patterns("(mismatch (iter a) (iter p) :start1 2)"), "none");
+    assert_eq!(with_patterns("(mismatch (iter a) (iter b) :from-end true)"), "(Some 4)");
+    assert_eq!(with_patterns("(mismatch (iter a) (iter p) :start1 2)"), "None");
 }
 
 #[test]

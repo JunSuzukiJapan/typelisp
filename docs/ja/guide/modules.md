@@ -130,7 +130,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; このモジュールの first => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 標準ライブラリの first => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 標準ライブラリの first => (Some 1)
 ```
 
 `shadow` の後は、そのモジュールの中で `first` と書けば自分の定義を指します。標準ライブラリの

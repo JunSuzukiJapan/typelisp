@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Felhantering
 
 Felhantering i typelisp delar in misslyckanden i två slag.
@@ -6,7 +6,7 @@ Felhantering i typelisp delar in misslyckanden i två slag.
 | Slag av misslyckande | Exempel | Hur det uttrycks |
 |---|---|---|
 | Misslyckanden som kan inträffa (återhämtningsbara) | En fil saknas, indata är inte ett tal | Returnera ett `Result<T,E>` |
-| Fel i programmet (inte återhämtningsbara) | Ett index utanför intervallet, `unwrap` av `none`, division med noll | Stoppa med `panic` |
+| Fel i programmet (inte återhämtningsbara) | Ett index utanför intervallet, `unwrap` av `None`, division med noll | Stoppa med `panic` |
 
 Utöver dessa finns `catch` / `throw`, som lämnar många funktionsanrop på en gång, och
 `unwind-protect`, som kör en uppstädning hur kroppen än lämnas. Det här kapitlet förutsätter att du har
@@ -21,23 +21,23 @@ inte ett tal, eller så ligger det utanför intervallet.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 Anroparen skiljer lyckat från misslyckat med `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
 - Värdet från en funktion som returnerar `Result` kan inte användas om inte `match` hanterar
-  `err`-fallet. Att glömma att hantera misslyckande är ett typfel.
+  `Err`-fallet. Att glömma att hantera misslyckande är ett typfel.
 - Felet från `parse-int` är ett värde av typen `ParseIntError`. `(message e)` ger dess
   meddelandesträng.
 
@@ -49,17 +49,17 @@ och ordning skriver man delen "returnera misslyckandet som det är" med `match`.
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 När du vet att en operation inte kan misslyckas, eller i ett litet skript där det är i sin ordning att
-stoppa vid misslyckande, tar `unwrap` ut innehållet. Om värdet är ett `err` ger det panic. Räcker ett
+stoppa vid misslyckande, tar `unwrap` ut innehållet. Om värdet är ett `Err` ger det panic. Räcker ett
 standardvärde används `unwrap-or`.
 
 ## 3. Göra en egen feltyp
@@ -69,24 +69,24 @@ feltyp är en vanlig `defenum` eller `defstruct` som implementerar traitet `Erro
 
 ```lisp
 (defenum config-error
-  (missing string)          ; en inställning saknas
-  (invalid string int))     ; ett värde är fel
+  (Missing string)          ; en inställning saknas
+  (Invalid string int))     ; ett värde är fel
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` returnerar en beskrivning av felet.
-- `source` returnerar ett annat fel som orsakade det här. Utan orsak är det `none`.
+- `source` returnerar ett annat fel som orsakade det här. Utan orsak är det `None`.
 
 ## 4. Kombinera olika slag av fel
 
@@ -99,8 +99,8 @@ två feltyper, och de kan inte båda vara `E` i ett och samma `Result<T,E>`. Gö
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 Med `"4"`, `"-1"` och `"abc"` blir resultaten:
@@ -130,7 +130,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - Typen på `panic` är `!` (den returnerar inte), så den kan skrivas varhelst vilken typ som helst
   förväntas. Därför passar de två grenarna i `if` ovan ihop.
-- Dessa operationer ger också panic: `unwrap` av `none` eller `err`, `get` med ett index utanför
+- Dessa operationer ger också panic: `unwrap` av `None` eller `Err`, `get` med ett index utanför
   intervallet och heltalsdivision med noll.
 - `panic` stoppar programmet. Även när det sker inuti en task stoppar hela programmet.
 - I REPL avslutar en `panic` inte REPL; den väntar på nästa indata.
@@ -198,8 +198,8 @@ att läsa källkoden.
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: städa alltid upp

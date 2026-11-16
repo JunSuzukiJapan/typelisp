@@ -106,7 +106,7 @@ fn hash_inherits_equal() {
 fn a_scalar_key_is_accepted() {
     let src = "
         (defvar (h HashTable<string,int>) (HashTable::new :test 'equal))
-        (progn (set h \"a\" 1) (match (get h \"a\") ((some v) v) ((none) 0)))
+        (progn (set h \"a\" 1) (match (get h \"a\") ((Some v) v) ((None) 0)))
     ";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -187,7 +187,7 @@ fn a_user_type_that_implements_hash_is_a_key() {
          (progn
            (set h (make-instance 'point :x 1 :y 2) \"a\")
            (set h (make-instance 'point :x 3 :y 4) \"b\")
-           (match (get h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) \"missing\")))",
+           (match (get h (make-instance 'point :x 1 :y 2)) ((Some v) v) ((None) \"missing\")))",
         POINT
     );
     match eval_ok(&src) {
@@ -201,7 +201,7 @@ fn a_user_type_that_implements_hash_is_a_key() {
         "{}
          (defvar (h HashTable<point,int>) (HashTable::new :test 'equal))
          (progn (set h (make-instance 'point :x 1 :y 2) 7)
-                (match (get h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) -1)))",
+                (match (get h (make-instance 'point :x 1 :y 2)) ((Some v) v) ((None) -1)))",
         POINT
     );
     assert_eq!(eval_ok(&src), Value::Int(7));
@@ -217,9 +217,9 @@ fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
            (set h (make-instance 'point :x 3 :y 4) 2)
            (set h (make-instance 'point :x 1 :y 2) 9)          ; overwrite, not a second entry
            (let ((after-overwrite (count h))
-                 (removed (match (remove h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) -1)))
+                 (removed (match (remove h (make-instance 'point :x 1 :y 2)) ((Some v) v) ((None) -1)))
                  (after-remove (count h))
-                 (gone (match (remove h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) -1))))
+                 (gone (match (remove h (make-instance 'point :x 1 :y 2)) ((Some v) v) ((None) -1))))
              (+ (* 1000 after-overwrite) (+ (* 100 removed) (+ (* 10 after-remove) (+ 1 gone))))))",
         POINT
     );
@@ -242,8 +242,8 @@ fn colliding_keys_stay_separate_entries() {
           (set h (make-instance 'k :n 1) 10)
           (set h (make-instance 'k :n 2) 20)
           (+ (* 100 (count h))
-             (+ (match (get h (make-instance 'k :n 1)) ((some v) v) ((none) 0))
-                (match (get h (make-instance 'k :n 2)) ((some v) v) ((none) 0)))))
+             (+ (match (get h (make-instance 'k :n 1)) ((Some v) v) ((None) 0))
+                (match (get h (make-instance 'k :n 2)) ((Some v) v) ((None) 0)))))
     "#;
     assert_eq!(eval_ok(src), Value::Int(230));
 }
@@ -257,8 +257,8 @@ fn a_symbol_key_works() {
     let src = "
         (defvar (h HashTable<symbol,int>) (HashTable::new))
         (progn (set h 'a 1) (set h 'b 2)
-               (+ (match (get h 'a) ((some v) v) ((none) 0))
-                  (match (get h 'b) ((some v) v) ((none) 0))))
+               (+ (match (get h 'a) ((Some v) v) ((None) 0))
+                  (match (get h 'b) ((Some v) v) ((None) 0))))
     ";
     assert_eq!(eval_ok(src), Value::Int(3));
 }

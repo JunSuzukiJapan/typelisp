@@ -1,5 +1,5 @@
 //! `as` and `try-as`: `(as Type expr)` converts `expr` to `Type`, between
-//! the numeric types and `char`; `try-as` gives `Option<Type>`, `none` where
+//! the numeric types and `char`; `try-as` gives `Option<Type>`, `None` where
 //! the conversion would lose the value.
 //!
 //! Each conversion is a method of the source type (`int->float`,
@@ -101,7 +101,7 @@ fn call_conversion(cx: &Cx, heap: &mut Heap, locals: &Locals, src: Typed, name: 
     check_method_call(cx, heap, locals, owner, method, def, Some(src), &[], &[], None, loc)
 }
 
-/// `value`, or `(some value)` for `try-as`.
+/// `value`, or `(Some value)` for `try-as`.
 fn wrapped(value: Typed, try_variant: bool, loc: Option<Loc>) -> Typed {
     if try_variant {
         Typed::some(value, loc)
@@ -138,7 +138,7 @@ pub(crate) fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Opt
         // A C word can be *read* as a `bignum`, and as nothing else here. It is
         // the only target that never loses anything, which is the whole point:
         // it is how a `size_t` too large for `i32` is read at all (`as i32`
-        // truncates and `try-as i32` answers `none`). `f64` would round,
+        // truncates and `try-as i32` answers `None`). `f64` would round,
         // `ratio` and `char` are not what a machine word means, and none of
         // the three is registered for these types anyway
         // (`registry::c_word_assoc`). Ahead of the integer arm, which these

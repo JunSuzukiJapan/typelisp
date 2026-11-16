@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Nebenläufigkeit
 
 In typelisp lässt man Arbeit nebenläufig ablaufen, indem man **Tasks** (leichtgewichtige Threads) startet,
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` sendet. Ist der Kanal voll, wartet es, bis Platz frei ist.
 - `(recv ch)` empfängt. Es wartet, bis ein Wert ankommt. Das Ergebnis ist ein `Option<T>`; sobald der Kanal
-  geschlossen und leer ist, gibt es `none` zurück.
+  geschlossen und leer ist, gibt es `None` zurück.
 - Ein Kanal, der mit `doiter` durchlaufen wird, empfängt so lange Werte, bis er geschlossen wird. Er lässt sich
   auch direkt an `map` oder `filter` übergeben.
 - `send` auf einem geschlossenen Kanal löst einen Panic aus.

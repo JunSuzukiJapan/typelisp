@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Повідомлення про помилки
 
 Що означають основні повідомлення про помилки від `typl` і як їх виправити.
@@ -100,8 +100,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | Повідомлення | Значення та виправлення |
 |---|---|
 | `panic: divide by zero` | Ділення на нуль для цілих чи раціональних чисел. Ділення на нуль для чисел з рухомою комою не спричиняє panic; воно дає `inf`/`NaN` |
-| `panic: unwrap: called on none` | `unwrap` застосовано до `none`. Обробіть випадок `none` через `match` або `unwrap-or` |
-| `panic: Vector: index 5 out of bounds` | Індекс поза межами. Перевірте довжину через `len` або використайте функцію, що повертає `none` поза межами (`nth`, `pop` тощо) |
+| `panic: unwrap: called on None` | `unwrap` застосовано до `None`. Обробіть випадок `None` через `match` або `unwrap-or` |
+| `panic: Vector: index 5 out of bounds` | Індекс поза межами. Перевірте довжину через `len` або використайте функцію, що повертає `None` поза межами (`nth`, `pop` тощо) |
 | `panic: an integer argument does not fit a fixnum` | В аргумент, що приймає індекс або кількість, передано `int`, який не вміщується в 63 біти |
 | `throw: no enclosing (catch 'oops) for this throw` | `throw` виконався без охоплювального `catch` із тим самим тегом |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` досяг `catch` з тією ж міткою, який несе інший тип |

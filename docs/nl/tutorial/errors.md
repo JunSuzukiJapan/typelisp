@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/errors.md @ 5a479c63ca607333cb76775249acffc693ec1898 -->
+<!-- translated-from: docs/ja/tutorial/errors.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Foutafhandeling
 
 Foutafhandeling in typelisp verdeelt fouten in twee soorten.
@@ -6,7 +6,7 @@ Foutafhandeling in typelisp verdeelt fouten in twee soorten.
 | Soort fout | Voorbeelden | Hoe het wordt uitgedrukt |
 |---|---|---|
 | Fouten die kunnen gebeuren (herstelbaar) | Een bestand ontbreekt, invoer is geen getal | Een `Result<T,E>` teruggeven |
-| Fouten in het programma (niet herstelbaar) | Een index buiten het bereik, `unwrap` van `none`, deling door nul | Stoppen met `panic` |
+| Fouten in het programma (niet herstelbaar) | Een index buiten het bereik, `unwrap` van `None`, deling door nul | Stoppen met `panic` |
 
 Daarbovenop zijn er `catch` / `throw`, die in één keer veel functieaanroepen verlaten, en
 `unwind-protect`, dat opruimcode uitvoert hoe zijn body ook wordt verlaten. Dit hoofdstuk gaat ervan
@@ -21,23 +21,23 @@ invoer is geen getal, of ze valt buiten het bereik.
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 De aanroeper scheidt succes van mislukking met `match`.
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
 - De waarde van een functie die `Result` teruggeeft kan niet worden gebruikt tenzij `match` het geval
-  `err` afhandelt. Vergeten een mislukking af te handelen is een typefout.
+  `Err` afhandelt. Vergeten een mislukking af te handelen is een typefout.
 - De fout van `parse-int` is een waarde van het type `ParseIntError`. `(message e)` geeft de
   meldingsstring.
 
@@ -49,17 +49,17 @@ elkaar aanroept, schrijf je het deel "geef de mislukking ongewijzigd terug" met 
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 Wanneer je weet dat een bewerking niet kan mislukken, of in een klein script waarin stoppen bij een
-fout prima is, haalt `unwrap` de inhoud eruit. Is de waarde een `err`, dan geeft het een panic. Als
+fout prima is, haalt `unwrap` de inhoud eruit. Is de waarde een `Err`, dan geeft het een panic. Als
 een standaardwaarde volstaat, gebruik dan `unwrap-or`.
 
 ## 3. Een eigen foutentype maken
@@ -69,24 +69,24 @@ foutentype is een gewone `defenum` of `defstruct` die de trait `Error` implement
 
 ```lisp
 (defenum config-error
-  (missing string)          ; a setting is missing
-  (invalid string int))     ; a value is wrong
+  (Missing string)          ; a setting is missing
+  (Invalid string int))     ; a value is wrong
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` geeft een beschrijving van de fout terug.
-- `source` geeft een andere fout terug die deze veroorzaakte. Zonder oorzaak is het `none`.
+- `source` geeft een andere fout terug die deze veroorzaakte. Zonder oorzaak is het `None`.
 
 ## 4. Verschillende soorten fouten combineren
 
@@ -99,8 +99,8 @@ fout met `as-dyn-error`.
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 Bij `"4"`, `"-1"` en `"abc"` zijn de resultaten:
@@ -130,7 +130,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - Het type van `panic` is `!` (het keert niet terug), dus het kan overal worden geschreven waar een
   willekeurig type wordt verwacht. Daarom passen de twee takken van de bovenstaande `if`.
-- Deze bewerkingen geven ook een panic: `unwrap` van `none` of `err`, `get` met een index buiten het
+- Deze bewerkingen geven ook een panic: `unwrap` van `None` of `Err`, `get` met een index buiten het
   bereik, en gehele deling door nul.
 - `panic` stopt het programma. Ook wanneer het in een taak gebeurt, stopt het hele programma.
 - In de REPL beëindigt een `panic` de REPL niet; hij wacht op de volgende invoer.
@@ -198,8 +198,8 @@ broncode zien waarheen het terugkeert.
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`: altijd opruimen

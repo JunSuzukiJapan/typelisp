@@ -117,14 +117,14 @@ fn recursive_generic_defun() {
 
 #[test]
 fn unwrap_option_propagates_bound_type_through_match() {
-    // `opt`'s static type is `Option<T>`; the `some` arm's bound variable
+    // `opt`'s static type is `Option<T>`; the `Some` arm's bound variable
     // must come back out as `T` (not the ADT's own internal param name),
     // confirming `check_ctor_pattern`'s subst chain composes correctly with
     // a defun-level type parameter.
     let src = r#"
         (defun unwrap<T> ((opt Option<T>)) T
-          (match opt ((some x) x) ((none) (panic "unwrap: None"))))
-        (unwrap (Option::some 5))
+          (match opt ((Some x) x) ((None) (panic "unwrap: None"))))
+        (unwrap (Option::Some 5))
     "#;
     assert_eq!(eval_ok(src), Value::Int(5));
 }
@@ -132,8 +132,8 @@ fn unwrap_option_propagates_bound_type_through_match() {
 #[test]
 fn generic_defun_returning_option() {
     let src = r#"
-        (defun wrap<T> ((x T)) Option<T> (Option::some x))
-        (match (wrap 9) ((some x) x) ((none) 0))
+        (defun wrap<T> ((x T)) Option<T> (Option::Some x))
+        (match (wrap 9) ((Some x) x) ((None) 0))
     "#;
     assert_eq!(eval_ok(src), Value::Int(9));
 }
@@ -145,7 +145,7 @@ fn unused_type_param_is_uninferable() {
     // `T` appears only in the return type, with no argument and no expected
     // type to seed it from — `check_construct` has the same "cannot infer"
     // failure mode for an ADT's unconstrained params.
-    assert_type_error("(defun make-none<T> () Option<T> (Option::none)) (make-none)");
+    assert_type_error("(defun make-none<T> () Option<T> (Option::None)) (make-none)");
 }
 
 #[test]
@@ -199,8 +199,8 @@ fn a_bounded_generic_can_delegate_with_a_structured_associated_type_pin() {
         eval_ok_with_prelude(
             "(defun firstkey<I,K,V> ((it I)) Option<K> (:where (Iter I (Item cons-cell<K,V>)))
                (match (find-if it (lambda ((p cons-cell<K,V>)) bool true))
-                 ((some p) (Option::some (car p)))
-                 ((none) (Option::none))))
+                 ((Some p) (Option::Some (car p)))
+                 ((None) (Option::None))))
              (let ((al (the Vector<cons-cell<int,int>> (Vector::new))))
                (push al (cons 7 8))
                (unwrap (firstkey (iter al))))"

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Akışlar ve Dosyalar
 
 Akış trait'leri ve metotları, somut akış türleri, dosya işlemleri ve yol adları. Ağ soketleri de
@@ -31,18 +31,18 @@ kullanıcı tanımlı her akış türünü kabul eder.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Sıradaki eleman. Sonda `none`. **Gerçekleştirilmesi gereken tek metot** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Sıradaki eleman. Sonda `None`. **Gerçekleştirilmesi gereken tek metot** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Sıradaki karakter |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | Sıradaki yeni satıra kadar (yeni satır tüketilir ve çıkarılır). Yeni satırla bitmeyen son satır da döndürülür |
 | `read-all` | `(read-all s)` | `(S)→string` | Kalan her şey |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Yalnızca zaten elde olan bir karakter. Beklemek yerine `none` |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Yalnızca zaten elde olan bir karakter. Beklemek yerine `None` |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | `v`'ye en fazla `n` karakter iter ve gerçekte kaç tanesinin okunduğunu döndürür. `n`'den azı yalnızca sonda |
 
 `listen`, `InputStream`'dedir (`CharInput`'un ebeveyni):
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Sonraki okumanın beklemeden yanıtlanıp yanıtlanamayacağı. Varsayılan `false`'tur, **asla yalan olmayan taraf**: `true` bir tahmin olurdu ve yanlış bir tahmin `read-char-no-hang`'ı bloke ederdi. Tüm yerleşik akışlar onu geçersiz kılar. **Onu geçersiz kılmayan kullanıcı tanımlı akışlar için `read-char-no-hang` her zaman `none` döndürür** |
+| `listen` | `(listen s)` | `(S)→bool` | Sonraki okumanın beklemeden yanıtlanıp yanıtlanamayacağı. Varsayılan `false`'tur, **asla yalan olmayan taraf**: `true` bir tahmin olurdu ve yanlış bir tahmin `read-char-no-hang`'ı bloke ederdi. Tüm yerleşik akışlar onu geçersiz kılar. **Onu geçersiz kılmayan kullanıcı tanımlı akışlar için `read-char-no-hang` her zaman `None` döndürür** |
 
 `PeekInput` (`CharInput`'tan miras alır) **bir karakteri geri itme** ekler. Geri itilen karakteri tutacak
 yer yalnızca akışın kendisinde vardır; bu yüzden bunun varsayılan bir gerçekleştirmesi olamaz ve ayrı bir
@@ -91,7 +91,7 @@ kalın.
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction`, `direction-input` / `direction-output` / `direction-append` üç sabitinden biridir.
-`open-file`, dosya açılamazsa `(err FileError)` döndürür (eksik bir dosya sıradan bir sonuçtur, panic
+`open-file`, dosya açılamazsa `(Err FileError)` döndürür (eksik bir dosya sıradan bir sonuçtur, panic
 değil). Dosya adı bir string ya da bir `pathname` olabilir (9. bölümdeki `Pathish`).
 
 `(get-output-stream-string s)`, bir `string-output-stream`'e yazılanı döndürür ve onu boşaltır. CL'deki
@@ -102,7 +102,7 @@ gibi `close`'dan sonra bile alınabilir.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Sıradaki bayt. Dosyanın sonunda `none` |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Sıradaki bayt. Dosyanın sonunda `None` |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Bir bayt yazar. 0..255 dışında hata |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | Karakter sürümü, bayt olarak |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | Yukarıdakiyle aynı |
@@ -138,18 +138,18 @@ Hepsi standart kütüphanedeki `defstruct`'lardır ve iç içe geçirilebilir.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Her şeyi aktarır |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Kalan tüm satırlar |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Bir `Sexpr` okur (CL'nin `read`'i). Girdinin sonunda `(ok eof)`, biri okunduğunda `(ok (datum d))`, veri değilse `err`. Veriyi bitiren **tek boşluk karakterini tüketir** (CL'deki gibi). `ReadOutcome`, boş listeyi `()` okumakla girdinin sonu aynı değer olmasın diye bir `Option<Sexpr>` değildir |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Bir `Sexpr` okur (CL'nin `read`'i). Girdinin sonunda `(Ok eof)`, biri okunduğunda `(Ok (Datum d))`, veri değilse `Err`. Veriyi bitiren **tek boşluk karakterini tüketir** (CL'deki gibi). `ReadOutcome`, boş listeyi `()` okumakla girdinin sonu aynı değer olmasın diye bir `Option<Sexpr>` değildir |
 | `read-sexpr-preserving-whitespace` | Yukarıdakiyle aynı | Yukarıdakiyle aynı | Aynısı, ancak boşluğu bırakır (CL'nin `read-preserving-whitespace`'i) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch`'ye kadar okur ve bir liste yapar. `ch` tüketilir. Girdi biterse `err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch`'ye kadar okur ve bir liste yapar. `ch` tüketilir. Girdi biterse `Err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Her seferinde bir satır yazar |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Tüm içerik |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Tüm satırlar |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Yazar |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Var olup olmadığı |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Sil, yeniden adlandır (bağımsız değişkenler `Pathish`'tir) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Sembolik bağlantıları ve `.`/`..`'ı çözülmüş mutlak yol. Yoksa `err` |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Sembolik bağlantıları ve `.`/`..`'ı çözülmüş mutlak yol. Yoksa `Err` |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Son değiştirilme zamanı. **Evrensel zaman**dır; bu yüzden `decode-universal-time` ([Zaman](system.md#2-tarihleri-çözme-ve-kodlama)) onu okuyabilir |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Sahibin oturum açma adı. Dosya yoksa `err`, sahibin uid'sinin parola veritabanında girdisi yoksa `(ok none)`: CL'nin ayırt ettiği iki durum ayrı tutulur |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Sahibin oturum açma adı. Dosya yoksa `Err`, sahibin uid'sinin parola veritabanında girdisi yoksa `(Ok none)`: CL'nin ayırt ettiği iki durum ayrı tutulur |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Bir dizin olup olmadığı. **Yoksa da `false`**; ikisini ayırt etmek için `probe-file` kullanın |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | İçeriği truename ile listeler (`truename`'deki gibi sembolik bağlantıları çözülmüş mutlak yol). Hedefi eksik olan sembolik bağlantılar dışarıda bırakılır. `.`/`..` dışarıda bırakılır. Sıra işletim sisteminin verdiği şeydir |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Ebeveynleriyle birlikte oluşturur. Zaten varsa başarılı olur |
@@ -203,8 +203,8 @@ başlayıp başlamadığını tutar.
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   split at the last dot
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   split at the last dot
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -231,10 +231,10 @@ string geçirdiğiniz sürece hiçbir ayrıştırma olmaz.
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Bir string'i parçalara ayırır. Sondaki bir `/` (ya da boş bir ad) "ad yok", yani bir dizin demektir |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Yalnızca verilen bileşenlerden bir tane kurar (hepsi `&key`). Atlanan bir ad ya da tür "yok" kalır ve `merge-pathnames`'in doldurduğu bir şeydir |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Dizin bileşenleri, en dıştakinden başlayarak |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Tür olmadan ad. Bir dizin için `none` |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Tür olmadan ad. Bir dizin için `None` |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Son noktadan sonrası. Baştaki nokta sayılmaz (`.gitignore`'un tamamı addır) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Kökten başlayıp başlamadığı |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Ev dizini. `$HOME` yoksa `none` (CL de `NIL`'e izin verir) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Ev dizini. `$HOME` yoksa `None` (CL de `NIL`'e izin verir) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Son `/`'a kadar olan kısım |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Yalnızca `name.type` kısmı |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p`'de eksik bileşenleri `default`'tan doldurur. Göreli bir `p`, `default`'un dizininin altına gider; mutlak bir `p` kendi dizinini korur |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -31,26 +31,26 @@ conses: `(cons 1 (cons "a" ()))` skrivs ut som `(1 "a")` och `(cons 3 1)` som `(
 ## 2. S-uttrycksdata `Sexpr`
 
 Datatypen `Sexpr` som `read` returnerar har 19 varianter:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` och `array` är data skrivna som `#(..)` och `#nA(..)` (se
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` och `Array` är data skrivna som `#(..)` och `#nA(..)` (se
 [syntaxreferensen](../syntax.md#1-lexikaliska-element)) som innehåller en `Vector<Option<Sexpr>>`
 respektive en `Array<Option<Sexpr>>`: `len`, `get` och resten fungerar direkt på den `v` som
-`(vector v)` binder.
-`tuple` är data skrivna med `#{..}`, och `v` som `(tuple v)` binder är en ny `Vector<Option<Sexpr>>`
+`(Vector v)` binder.
+`Tuple` är data skrivna med `#{..}`, och `v` som `(Tuple v)` binder är en ny `Vector<Option<Sexpr>>`
 av elementen (så att en tupel av vilken längd som helst tas emot med en typ).
 S-uttrycksceller hanteras inte med de allmänna `cons`/`car`/`cdr` i kapitel 1 utan med
 `sexpr-*`-funktionerna. De används främst i `defmacro`-kroppar för att bygga och plocka isär former.
 
 **Typen för S-uttrycksdata är `Option<Sexpr>`.** Den tomma listan är inte en variant av `Sexpr` utan
-`none` i `Option`, och `Sexpr` självt betyder "ett icke-tomt S-uttryck". Så `sexpr-*`-funktionerna tar
+`None` i `Option`, och `Sexpr` självt betyder "ett icke-tomt S-uttryck". Så `sexpr-*`-funktionerna tar
 och returnerar `Option<Sexpr>`.
 
 - `()` är den tomma listan där en `Option<Sexpr>` förväntas (den kan också skrivas
-  `(Option::none)`)
+  `(Option::None)`)
 - `Sexpr` vidgas implicit där en `Option<Sexpr>` förväntas (utan konvertering vid körning). Den motsatta
   riktningen, att använda en `Option<Sexpr>` som en `Sexpr`, påstår "det här är inte den tomma listan",
   så det måste anges explicit med `match` eller `unwrap`
-- I `match` kan de 19 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar**
+- I `match` kan de 19 varianterna av `Sexpr` och `None` skrivas **platt i samma lista av grenar**
   ([Syntaxreferens](../syntax.md#43-match--mönstermatchning))
 
 | Namn | Form | Typ | Beskrivning |
@@ -62,7 +62,7 @@ och returnerar `Option<Sexpr>`.
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Om det är den tomma listan |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Om det inte är en `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Om det är en `Sym` (symbol) |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Innehållet i varianten `int` (fixnum eller bignum). Ger panic på en annan typ |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Innehållet i varianten `Int` (fixnum eller bignum). Ger panic på en annan typ |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | Innehållet i varianten med den bredden. Ger panic på en annan typ |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Innehållet i flyttalsvarianterna. Ger panic på en annan typ |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Innehållet i en `Char`. Ger panic på en annan typ |
@@ -76,9 +76,9 @@ och returnerar `Option<Sexpr>`.
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | En ny `Sexpr`-lista med `f` tillämpad på varje element i en `Sexpr`-lista (`map` i kapitel 4 är för `Iter` och kan inte gå igenom en `Sexpr`-lista) |
 
 Det finns nio numeriska accessorer, en per typ, eftersom en `Sexpr` är "det enda ställe där ett värdes typ
-inte skrivs någon annanstans". En `u8` som läggs i en `Sexpr` går in som varianten `u8` och kommer bara ut
+inte skrivs någon annanstans". En `u8` som läggs i en `Sexpr` går in som varianten `U8` och kommer bara ut
 med `(sexpr-u8 s)`. Att skicka den till `(sexpr-int s)` ger panic; det vidgar aldrig svaret tyst. Heltalen i
-data som lästs (`'(1 2 3)`, makroargument) är av varianten `int` och läses med `(sexpr-int s)`.
+data som lästs (`'(1 2 3)`, makroargument) är av varianten `Int` och läses med `(sexpr-int s)`.
 
 `Sexpr`-listor har inga destruktiva operationer som `rplaca`/`nconc`. En `Sexpr`-cell kan inte ändras
 efter att den skapats.
@@ -115,7 +115,7 @@ Funktioner som tar ett predikat (motsvarar CL:s `-if`-familj):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Den första position som uppfyller predikatet |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Hur många som uppfyller predikatet |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om varje element uppfyller predikatet |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om något element uppfyller predikatet (motsvarar CL:s `some`; ett namn som inte krockar med konstruktorn `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om något element uppfyller predikatet (motsvarar CL:s `some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Vänstervikning |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Högervikning |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Samlar alla återstående element. Används för att göra en `Vector` av resultatet från en `lazy`-funktion nedan |
@@ -128,7 +128,7 @@ Indexering, längd och delning:
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Konkatenerar iteratorer. Tre eller fler kan anges |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL:s `concatenate`. Resultattypen skrivs som **en citerad symbolliteral** (CL använder en typspecificerare vid körning). `'vector` tar en eller fler, `'string` noll eller fler (`""` för noll). `Sexpr`-listor omfattas inte (använd `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Omvändning (icke-destruktiv) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`none` utanför intervallet) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Element `n` (`None` utanför intervallet) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` med argumenten tvärtom |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | De första `n` elementen |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` begränsas till längden) |
@@ -221,7 +221,7 @@ Alla är generiska funktioner på `Iter`, som i kapitel 4. Resulterande samlinga
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Avbildar över svansar för sidoeffekter (`maplist`-motsvarigheten till `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Avbildar över svansar och konkatenerar (`maplist`-motsvarigheten till `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Positionen där `sub` först förekommer. Om mottagaren är en `string` väljs `string`-metoden ([Strängar](collections.md#1-strängar-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Den första position där de skiljer sig. `none` om de är lika |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Den första position där de skiljer sig. `None` om de är lika |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Sammanslagning. CL kräver sorterade indata; den här sorterar konkateneringen |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Lägger till `x` **först** om det inte finns där |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Mängdoperationer. CL specificerar inte ordningen; här är den stabil, **i ordning efter första förekomst** |
@@ -273,7 +273,7 @@ Vilken funktion som tar vilka följer CL:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; tar bara bort ett, från slutet
 (position 3 (iter v) :start 1)                          ; indexet är relativt hela sekvensen
 ```

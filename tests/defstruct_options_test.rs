@@ -46,7 +46,7 @@ fn an_option_list_with_no_options_behaves_like_a_bare_name() {
 fn a_docstring_still_follows_the_option_list() {
     let src = "
         (defstruct (point) \"a place\" (x int) (y int))
-        (match (documentation point) ((some s) (length s)) ((none) 0))
+        (match (documentation point) ((Some s) (length s)) ((None) 0))
     ";
     assert_eq!(eval_ok(src), Value::Int(7));
 }

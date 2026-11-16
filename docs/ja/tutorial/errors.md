@@ -5,7 +5,7 @@ typelisp のエラー処理は、失敗を 2 種類に分けて考えます。
 | 失敗の種類 | 例 | 表し方 |
 |---|---|---|
 | 起こりうる失敗（回復できる） | ファイルが無い、入力が数でない | `Result<T,E>` を返す |
-| プログラムの誤り（回復できない） | 範囲外の添字、`none` の `unwrap`、0 での割り算 | `panic` で止まる |
+| プログラムの誤り（回復できない） | 範囲外の添字、`None` の `unwrap`、0 での割り算 | `panic` で止まる |
 
 これに加えて、関数を何段もまたいで一気に抜け出す `catch` / `throw` と、どう抜けても後始末を
 実行する `unwind-protect` があります。[型の基本](types.md) の `Result` の節を読んでいることを
@@ -20,22 +20,22 @@ typelisp のエラー処理は、失敗を 2 種類に分けて考えます。
 (use std::num::parse-int)
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)
-    ((ok n) (if (and (>= n 1) (<= n 65535))
-                (Result::ok n)
-                (Result::err (format false "port out of range: ~a" n))))
-    ((err e) (Result::err (message e)))))
+    ((Ok n) (if (and (>= n 1) (<= n 65535))
+                (Result::Ok n)
+                (Result::Err (format false "port out of range: ~a" n))))
+    ((Err e) (Result::Err (message e)))))
 ```
 
 呼び出し側は `match` で成功と失敗を分けます。
 
 ```lisp
 (match (parse-port "99999")
-  ((ok p) (println "port ~a" p))
-  ((err m) (println "error: ~a" m)))
+  ((Ok p) (println "port ~a" p))
+  ((Err m) (println "error: ~a" m)))
 ;; error: port out of range: 99999
 ```
 
-- `Result` を返す関数の値は、`match` で `err` の場合を書かなければ使えません。失敗の扱い忘れは
+- `Result` を返す関数の値は、`match` で `Err` の場合を書かなければ使えません。失敗の扱い忘れは
   型エラーになります。
 - `parse-int` のエラーは `ParseIntError` 型の値です。`(message e)` でメッセージの文字列を取り出せます。
 
@@ -47,17 +47,17 @@ Rust の `?` のような省略構文はありません。`Result` を返す関�
 ```lisp
 (defun add-ports ((a string) (b string)) Result<int,string>
   (match (parse-port a)
-    ((err m) (Result::err m))
-    ((ok x) (match (parse-port b)
-              ((err m) (Result::err m))
-              ((ok y) (Result::ok (+ x y)))))))
+    ((Err m) (Result::Err m))
+    ((Ok x) (match (parse-port b)
+              ((Err m) (Result::Err m))
+              ((Ok y) (Result::Ok (+ x y)))))))
 
-(add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
+(add-ports "1" "2")       ; => (Ok 3)
+(add-ports "1" "x")       ; => (Err "parse-int: invalid integer literal: \"x\"")
 ```
 
 失敗しないと分かっている場合や、失敗したら止まってよい小さなスクリプトでは、`unwrap` で中身を
-取り出せます。`err` だった場合は `panic` します。既定値で済むなら `unwrap-or` を使います。
+取り出せます。`Err` だった場合は `panic` します。既定値で済むなら `unwrap-or` を使います。
 
 ## 3. 自分のエラー型を作る
 
@@ -66,24 +66,24 @@ Rust の `?` のような省略構文はありません。`Result` を返す関�
 
 ```lisp
 (defenum config-error
-  (missing string)          ; 設定項目が無い
-  (invalid string int))     ; 値がおかしい
+  (Missing string)          ; 設定項目が無い
+  (Invalid string int))     ; 値がおかしい
 
 (impl Error config-error
   (defmethod message (self) string
     (match self
-      ((missing key) (format false "missing key: ~a" key))
-      ((invalid key v) (format false "invalid value for ~a: ~a" key v))))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+      ((Missing key) (format false "missing key: ~a" key))
+      ((Invalid key v) (format false "invalid value for ~a: ~a" key v))))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun check-workers ((n int)) Result<int,config-error>
   (if (> n 0)
-      (Result::ok n)
-      (Result::err (config-error::invalid "workers" n))))
+      (Result::Ok n)
+      (Result::Err (config-error::Invalid "workers" n))))
 ```
 
 - `message` はエラーの説明を返します。
-- `source` は、このエラーの原因になった別のエラーを返します。原因が無ければ `none` です。
+- `source` は、このエラーの原因になった別のエラーを返します。原因が無ければ `None` です。
 
 ## 4. 種類の違うエラーをまとめる
 
@@ -96,8 +96,8 @@ Rust の `?` のような省略構文はありません。`Result` を返す関�
 (use std::error::as-dyn-error std::num::parse-int)
 (defun load-count ((s string)) Result<int, :dyn Error>
   (match (as-dyn-error (parse-int s))
-    ((ok n) (as-dyn-error (check-workers n)))
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (check-workers n)))
+    ((Err e) (Result::Err e))))
 ```
 
 `"4"`、`"-1"`、`"abc"` を渡すと、次のようになります。
@@ -127,7 +127,7 @@ error: main.typl:4:7: panic: index 3 out of range
 
 - `panic` の型は `!`（戻らない）で、どの型が求められる場所にも書けます。上の例で `if` の両側の型が
   合うのはこのためです。
-- 次の操作も `panic` します：`none` や `err` への `unwrap`、範囲外の添字での `get`、整数の
+- 次の操作も `panic` します：`None` や `Err` への `unwrap`、範囲外の添字での `get`、整数の
   0 での割り算。
 - `panic` はプログラムを止めます。タスクの中で起きても、プログラム全体が止まります。
 - REPL では、`panic` しても REPL は終わらず、次の入力を待ちます。
@@ -194,8 +194,8 @@ error: main.typl:4:7: panic: index 3 out of range
 ```lisp
 (defun first-negative ((v Vector<int>)) Option<int>
   (doiter (x (iter v))
-    (if (< x 0) (return-from first-negative (Option::some x)) ()))
-  (Option::none))
+    (if (< x 0) (return-from first-negative (Option::Some x)) ()))
+  (Option::None))
 ```
 
 ## 7. `unwind-protect`：必ず後始末をする

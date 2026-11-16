@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
@@ -25,12 +25,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | 대소문자를 무시한 순서(CL의 `string-lessp` 등). 공통 접두사가 있으면 짧은 쪽이 작다 |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | `c`를 `n`개 늘어놓은 문자열(CL의 `make-string`) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | `sub`가 처음 나타나는 위치. **CL의 `search`는 인수 순서가 반대**(`(search pattern sequence)`). 빈 문자열은 0에서 발견된다. 키워드는 [시퀀스의 키워드 인수](sequences.md#6-키워드-인수) 참고 |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | 처음으로 다른 위치. `equal`일 때만 `none`. 한쪽이 다른 쪽의 접두사이면 짧은 쪽의 끝. 키워드는 위와 같다 |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | 처음으로 다른 위치. `equal`일 때만 `None`. 한쪽이 다른 쪽의 접두사이면 짧은 쪽의 끝. 키워드는 위와 같다 |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | `bag`에 포함된 문자를 양 끝 / 왼쪽 / 오른쪽에서 없앤다(CL의 `string-trim` 등). `bag`이 없으면 공백 `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep`로 나눈다. CL에는 대응하는 것이 없다. 구분자가 이어지면 빈 요소가 생긴다. `sep`가 비어 있으면 panic |
 | `to-string` | `(to-string x)` | `T→string` | `~a`처럼 문자열로 바꾼다. `int`/`i32`/`f64`/`bool`/`char`/`string`에 구현되어 있다(CL의 `princ-to-string`) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | UTF-8로 부호화한다(각 요소는 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 복호화한다. 올바른 UTF-8이 아니면 `none` |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | 복호화한다. 올바른 UTF-8이 아니면 `None` |
 
 ## 2. 문자 `char`
 
@@ -75,7 +75,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`번째 요소를 읽는다. 범위를 벗어나면 panic |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`번째 요소를 바꾼다. 범위를 벗어나면 panic. `(setf (get v i) x)`로도 쓸 수 있다 |
 | `len` | `(len v)` | `Vector<T>→int` | 요소 수 |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 마지막 요소를 없애고 반환한다. 비어 있으면 `none`(`get`/`set`과 달리 panic하지 않는다)([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 마지막 요소를 없애고 반환한다. 비어 있으면 `None`(`get`/`set`과 달리 panic하지 않는다)([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`를 구현한 이터레이터를 만든다 |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | `x`와 `eql`인 요소가 없으면 끝에 추가(CL `pushnew`. 장소를 다시 쓸 필요가 없으므로 매크로가 아니라 메서드) |
 
@@ -133,7 +133,7 @@
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 `equal` 테이블에서 키가 같은지를 정하는 것은 **키의 타입 자신**(`sxhash`와, `Hash`의 슈퍼트레이트
@@ -163,8 +163,8 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL의 `adjust-array`. 랭크는 바꿀 수 없다. 범위 안에 남는 요소는 같은 인덱스에 남고 새 칸은 `init`이 된다. CL과 달리 배열을 반환하지 않는다(이 언어의 배열은 모두 크기를 바꿀 수 있으므로 반환할 두 번째 배열이 없다) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL의 `vector-push-extend`. 채움 포인터가 없으면 panic |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend`와 같다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL의 `vector-pop`. 비어 있으면 `none`([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 채움 포인터(없으면 `none`). `(setf a::fill-pointer …)`로 쓸 수 있다 |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL의 `vector-pop`. 비어 있으면 `None`([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | 채움 포인터(없으면 `None`). `(setf a::fill-pointer …)`로 쓸 수 있다 |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | 행 우선 순서의 이터레이터. 채움 포인터가 있으면 거기서 멈춘다 |
 
 - **인덱스는 `Vector<int>`이다.** 메서드는 "같은 타입의 인수를 끝에 몇 개든"이라고 선언할 수 없으며, `aref` 표기가 그
@@ -254,10 +254,10 @@
 | `new` | `(Deque::new)` | `()→Deque<T>` | 빈 열을 만든다 |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 앞 / 뒤에 추가한다 |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back`과 같다([`Push`](traits.md#4-push-트레이트요소-추가) 트레이트의 메서드) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 꺼내 돌려준다. 비어 있으면 `none` |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 꺼내 돌려준다. 비어 있으면 `None` |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back`과 같다([`Pop`](traits.md#5-pop-트레이트요소-꺼내기) 트레이트의 메서드) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 본다(꺼내지 않는다) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 앞에서부터 `i`번째. 범위 밖이면 `none` |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 앞에서부터 `i`번째. 범위 밖이면 `None` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`번째를 덮어쓴다. 범위 밖이면 panic |
 | `count` | `(count d)` | `Deque<T>→int` | 요소 수 |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | 모두 지운다 |
@@ -267,5 +267,5 @@
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

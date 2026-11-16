@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # संख्याएँ
 
 पूर्णांक, फ़्लोटिंग-पॉइंट संख्याओं, परिमेय संख्याओं, कॉम्प्लेक्स संख्याओं और बूलियन पर ऑपरेशन, और अन्य संख्या-संबंधित फ़ंक्शन। कॉल के रूप कैसे पढ़ें इसके लिए [बिल्ट-इन फ़ंक्शन](README.md) देखें।
@@ -25,9 +25,9 @@
 | `int->int` | `(int->int x)` | `T→int` | `int` में विस्तार रूपांतरण (हमेशा सटीक)। जो `(as int x)` करता है |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio` में विस्तार रूपांतरण (हमेशा सटीक) |
 | `int->char` | `(int->char x)` | `T→char` | मान को Unicode स्केलर मान के रूप में व्याख्यायित करता है। अमान्य मान पर panic करता है |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` का संस्करण जो विफल होने पर `none` लौटाता है |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` का संस्करण जो विफल होने पर `None` लौटाता है |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | चौड़ाई रूपांतरण। जो मान नहीं समाते वे काट दिए जाते हैं (Rust के `as` की तरह) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | वही रूपांतरण प्रश्न के रूप में। यदि मान उस चौड़ाई में नहीं समाता तो `none` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | वही रूपांतरण प्रश्न के रूप में। यदि मान उस चौड़ाई में नहीं समाता तो `None` |
 
 ये रूपांतरण वही भी हैं जो विशेष फ़ॉर्म `(as Type x)`/`(try-as Type x)` ([सिंटैक्स संदर्भ](../syntax.md#7-अन्य-विशेष-फ़ॉर्म)) करते हैं। बिट ऑपरेशन (`logand`/`ash`/`ldb` आदि) और प्रेडिकेट (`zerop`/`evenp` आदि) का आकार टाइपों में समान है, इसलिए वे अध्याय 11 और 9 में इकट्ठे हैं।
 
@@ -61,7 +61,7 @@
 
 CL का `integer`, और इस भाषा का **पूर्णांक**: बिना एनोटेशन वाले पूर्णांक लिटरल का यही टाइप है, और संख्या लौटाने वाले बिल्ट-इन, जैसे `length` और `char->int`, यही टाइप लौटाते हैं। मान तब तक 63-बिट तत्काल मान (fixnum) के रूप में रखा जाता है जब तक वह समाता है, ऑपरेशन का परिणाम न समाने पर अपने-आप bignum में बदल जाता है, और फिर से समाने पर तत्काल मान में लौट आता है। `eq` fixnum सीमा के भीतर हमेशा मान पहचान है, और `eql`/`=` पूरी सीमा पर संख्यात्मक पहचान हैं। यह निश्चित चौड़ाई वाले पूर्णांक टाइप (अध्याय 1) से भिन्न टाइप है, बिना अंतर्निहित रूपांतरण के: `(as int x)` निश्चित चौड़ाई से सटीक विस्तार है, और `(as i32 n)` / `(try-as i32 n)` `int` से कटाव / जाँच हैं (अध्याय 1 के `int->W` / `try-int->W` जैसा ही अर्थ)।
 
-`Sexpr` का पूर्णांक variant भी केवल `int` है (`(int n)` fixnum और bignum दोनों स्वीकार करता है)।
+`Sexpr` का पूर्णांक variant भी केवल `Int` है (`(Int n)` fixnum और bignum दोनों स्वीकार करता है)।
 
 इंडेक्स या गिनती लेने वाले बिल्ट-इन (`substring`, `Vector` का `get`, `ash` की शिफ़्ट गिनती आदि) `int` स्वीकार करते हैं, लेकिन fixnum में न समाने वाला मान पास करना रन-टाइम त्रुटि है ("an integer argument does not fit a fixnum")।
 
@@ -104,7 +104,7 @@ CL का `integer`, और इस भाषा का **पूर्णां�
 | `float->int` | `(float->int x)` | `f64→int` | शून्य की ओर काटकर `int` में बदलता है (CL का `truncate`; किसी भी आकार के परिमित मानों के लिए सटीक)। अनंत और NaN पर panic करता है। निश्चित चौड़ाई के लिए `(as i32 x)` का उपयोग करें |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | सटीक द्विआधारी परिमेय के रूप में `ratio` में बदलता है (CL का `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | फ़्लोटिंग-पॉइंट चौड़ाइयों के बीच बदलता है। `float->f32` निकटतम पर पूर्णांकित करता है, `float->f64` हमेशा सटीक है। जो `(as f32 x)` करता है |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | वही रूपांतरण प्रश्न के रूप में। यदि पूर्णांकन मान बदल दे तो `none` (`f64` में विस्तार हमेशा `some` है)। जो `(try-as f32 x)` करता है |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | वही रूपांतरण प्रश्न के रूप में। यदि पूर्णांकन मान बदल दे तो `None` (`f64` में विस्तार हमेशा `Some` है)। जो `(try-as f32 x)` करता है |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL के समान नाम वाले फ़ंक्शन। ऊपर के `floor`/`ceiling`/`round`/`truncate` के उपनाम: CL में बिना उपसर्ग वाले पूर्णांक लौटाते हैं, इसलिए `f`-उपसर्ग वाले इस भाषा के व्यवहार से मेल खाते हैं |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | क्रमशः 2 / 53 / 53 (केवल `0.0` की सटीकता 0 है)। `f64` हमेशा IEEE-754 binary64 है, इसलिए ये स्थिरांक हैं |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` या `-1.0` |
@@ -184,7 +184,7 @@ CL के `rational` के अनुरूप प्रकार। मान `
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | तुलना |
 | `numerator` `denominator` | `(op x)` | `rational→int` | न्यूनतम रूप का अंश और हर |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | शून्य की ओर काटा गया, `ratio` के रूप में, `f64` में |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | पूर्णांक हो तो `(some n)`, वरना `none` (CL का `integerp`) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | पूर्णांक हो तो `(Some n)`, वरना `None` (CL का `integerp`) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio` जैसा (`expt` का घातांक `int` है) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio` जैसा |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio` जैसा |

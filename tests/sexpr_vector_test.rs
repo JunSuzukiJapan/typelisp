@@ -1,7 +1,7 @@
 //! `#(..)` and `#nA(..)` as data: the `Sexpr` `vector` and `array` variants.
 //!
 //! The reader builds a `Vector<Option<Sexpr>>` / `Array<Option<Sexpr>>` box,
-//! and `match` takes it apart with `(vector v)` / `(array a)`. Every case runs
+//! and `match` takes it apart with `(Vector v)` / `(Array a)`. Every case runs
 //! interpreted and compiled: compiled code tests the variant through
 //! `rt_box_kind`, and rebuilds a quoted literal from its parts
 //! (`core_bridge::quoted_form`), which are separate paths from the
@@ -14,9 +14,9 @@ use common::{eval_string, eval_string_compiled};
 const DESCRIBE: &str = r##"
 (defun describe ((d Option<Sexpr>)) string
   (match d
-    ((vector v) (format false "vector ~a" (len v)))
-    ((array a) (format false "array ~a/~a" (rank a) (len a)))
-    ((int n) (format false "int ~a" n))
+    ((Vector v) (format false "vector ~a" (len v)))
+    ((Array a) (format false "array ~a/~a" (rank a) (len a)))
+    ((Int n) (format false "int ~a" n))
     (_ "other")))
 (defun rd ((s string)) Option<Sexpr> (car (unwrap (read-from-string s))))
 "##;
@@ -66,7 +66,7 @@ fn other_data_are_not_vectors() {
 fn a_vectors_elements_are_data() {
     both(
         r##"(match (rd "#(10 20)")
-             ((vector v) (match (get v 1) ((int n) (format false "~a" n)) (_ "?")))
+             ((Vector v) (match (get v 1) ((Int n) (format false "~a" n)) (_ "?")))
              (_ "no"))"##,
         "20",
     );
@@ -77,7 +77,7 @@ fn a_vectors_elements_are_data() {
 fn an_arrays_elements_are_in_row_major_order() {
     both(
         r##"(match (rd "#2A((1 2) (3 4))")
-             ((array a) (format false "~a ~a" (aref a 1 0) (dimensions a)))
+             ((Array a) (format false "~a ~a" (aref a 1 0) (dimensions a)))
              (_ "no"))"##,
         "3 #(2 2)",
     );
@@ -99,8 +99,8 @@ fn a_quoted_vector_and_array_in_source() {
 fn a_ragged_array_is_a_read_error() {
     both(
         r##"(match (read-from-string "#2A((1 2) (3))")
-             ((ok d) "read")
-             ((err e) (message e)))"##,
+             ((Ok d) "read")
+             ((Err e) (message e)))"##,
         "read: <input>:1:15: read error: #2A: the contents are not rectangular — dimension 2 is 2 in one place and 1 in another",
     );
 }

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Type Basics
 
 typelisp is a statically typed language. This chapter explains what the type checker does for
@@ -48,41 +48,41 @@ because every type is already known before the program runs.
 ## 2. `Option<T>`: a value that may be missing
 
 typelisp has no `nil`. "There may be no value" is expressed with the type `Option<T>`. A value of
-`Option<T>` is either `some`, holding one value of `T`, or `none`, holding nothing.
+`Option<T>` is either `Some`, holding one value of `T`, or `None`, holding nothing.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` is not `int`, so it cannot be used in arithmetic as it is. `(+ (safe-div 10 2) 1)` is
-a type error. To use what is inside, separate `some` from `none` with `match`.
+a type error. To use what is inside, separate `Some` from `None` with `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- In the `(some q)` arm, the contents are bound to the variable `q`.
-- `match` checks that its arms **cover every case**. Forgetting the `(none)` arm is a type error.
+- In the `(Some q)` arm, the contents are bound to the variable `q`.
+- `match` checks that its arms **cover every case**. Forgetting the `(None)` arm is a type error.
 
 ### Why there is no nil
 
 In many languages, `nil` (`null`) can stand in for a value of any type. As a result, forgetting to
 handle the "no value" case goes unnoticed until the program runs. In typelisp, a place where a
 value may be missing has type `Option<T>`, and the code does not pass the type checker unless
-`match` handles the `none` case. A forgotten case is found before the program runs.
+`match` handles the `None` case. A forgotten case is found before the program runs.
 
 Conditions follow the same idea: only a `bool` can be the condition of `if`. There is no rule like
 Common Lisp's "anything other than `nil` is true".
@@ -91,12 +91,12 @@ Common Lisp's "anything other than `nil` is true".
 
 | Form | Meaning |
 |---|---|
-| `(unwrap-or opt default)` | The contents for `some`; the default for `none` |
-| `(unwrap opt)` | Takes out the contents. Stops the program on `none` |
+| `(unwrap-or opt default)` | The contents for `Some`; the default for `None` |
+| `(unwrap opt)` | Takes out the contents. Stops the program on `None` |
 | `(is-some opt)` / `(is-none opt)` | Tests which one it is |
 
 Many standard library functions return `Option`. For example, `position` returns the position in
-`some` if the element is found and `none` if it is not.
+`Some` if the element is found and `None` if it is not.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -104,25 +104,25 @@ Many standard library functions return `Option`. For example, `position` returns
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: an operation that may fail
 
-An operation that can fail returns `Result<T,E>`: `ok` holding a value of `T` on success, or `err`
+An operation that can fail returns `Result<T,E>`: `Ok` holding a value of `T` on success, or `Err`
 holding an error `E` on failure.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -131,8 +131,8 @@ Your own functions can return `Result` too.
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Use `Option` when a missing value needs no explanation, and `Result` when you want to say why
@@ -203,29 +203,29 @@ values.
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-Values are made with the type name in front, as in `shape::circle`. In `match`, they are taken apart
+Values are made with the type name in front, as in `shape::Circle`. In `match`, they are taken apart
 by variant name.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Here too, `match` checks that every case is covered. If you later add a variant to `shape`, every
 `match` that does not handle it becomes a type error, so no place that needs fixing is missed.
 
-After `(use shape)`, you can write `(rect 5 6)` without the type name.
+After `(use shape)`, you can write `(Rect 5 6)` without the type name.
 
 `Option` and `Result` are enums built with this same mechanism.
 

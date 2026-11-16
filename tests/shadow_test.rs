@@ -46,9 +46,9 @@ fn a_library_name_that_is_not_offered_needs_no_shadow() {
 /// `Option`'s and `Result`'s constructors are offered like a function is.
 #[test]
 fn an_offered_constructor_needs_shadow_too() {
-    let msg = check_err("(defun some ((x int)) int x)");
-    assert!(msg.contains("defun: `some` is a name the standard library offers every module"), "{}", msg);
-    assert_eq!(eval_ok("(shadow some)\n(defun some ((x int)) int (* x 2))\n(some 21)"), Value::Int(42));
+    let msg = check_err("(defun Some ((x int)) int x)");
+    assert!(msg.contains("defun: `Some` is a name the standard library offers every module"), "{}", msg);
+    assert_eq!(eval_ok("(shadow Some)\n(defun Some ((x int)) int (* x 2))\n(Some 21)"), Value::Int(42));
 }
 
 /// After `shadow`, the name is the module's own: the definition is allowed,

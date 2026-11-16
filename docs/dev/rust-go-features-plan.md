@@ -211,7 +211,7 @@ typelisp で書けるものは typelisp で書く（Rust 組み込みは Rust �
   追加）。`E` には定義の時点で `Error` か `print-object` を要求する（Rust の `Debug` に当たる）。
   `Error` なら `describe-error`、そうでなければ `print-object` で表示する（`:dyn Error` は
   `print-object` を持たないので、`Error` を受け付けないと返せない）。ランナーは
-  `(match (NAME) ((ok _) ()) ((err e) (panic ...)))` を組み立て、`panic` の cons にテスト関数の
+  `(match (NAME) ((Ok _) ()) ((Err e) (panic ...)))` を組み立て、`panic` の cons にテスト関数の
   定義の位置を付ける。prelude の補助関数で `panic` すると、失敗の位置が `<prelude>:行` になるため。
 - その確認の途中で、`where` 境界の検証（`validate_where_bounds`）が名前の無い型（trait object・
   `()`・関数型など）を `continue` で素通りさせていた不具合を見つけて直した。`:dyn Error` が

@@ -355,7 +355,7 @@ fn the_fill_pointer_is_a_settable_field() {
     // `fill-pointer` is a `pub` slot, so CL's `(setf (fill-pointer v) n)` is
     // this language's ordinary field place.
     let src = "(let ((a (Array::new (dims1 4) 0 :fill-pointer 0)))
-                 (progn (setf a::fill-pointer (Option::some 3)) (len a)))";
+                 (progn (setf a::fill-pointer (Option::Some 3)) (len a)))";
     assert_eq!(eval_ok(&with_dims(src)), Value::Int(3));
 }
 

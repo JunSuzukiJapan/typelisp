@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -71,21 +71,21 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   `Vector<int>`). Semua elemen harus bertipe sama: `#(1 "a")` adalah galat tipe, begitu pula `#()`
   tanpa elemen dan tanpa konteks. Setiap evaluasi membuat vektor baru. Di tempat yang mengharapkan
   data S-expression (`(the Option<Sexpr> #(1 x))`, `'#(..)`, hasil `read`), ia menjadi
-  `Vector<Option<Sexpr>>` yang semua elemennya data: varian `vector` dari `Sexpr`.
+  `Vector<Option<Sexpr>>` yang semua elemennya data: varian `Vector` dari `Sexpr`.
 - **Array**: `#2A((1 2) (3 4))` (seperti di CL). Angka di antara `#` dan `A` adalah rank, dan
   sejumlah itu tingkat pertama sarang list dalam isinya menjadi dimensi-dimensinya. `#0A x` adalah
   array berdimensi nol yang memuat satu elemen. List pada tingkat yang sama dengan panjang berbeda
   adalah galat pembacaan. Tipenya ditentukan seperti vektor dan berupa `Array<T>` (tanpa elemen,
   konteks harus memberikannya, seperti `(the Array<f64> #2A(()))`). Sebagai data S-expression ia
-  adalah `Array<Option<Sexpr>>`: varian `array` dari `Sexpr`.
+  adalah `Array<Option<Sexpr>>`: varian `Array` dari `Sexpr`.
 - **Tuple**: `#{"foo" 123 45.6}`. Isinya semuanya literal dan tidak dievaluasi (`a` pada `#{a b}`
   adalah simbol). Tipe setiap elemen ditentukan oleh konteks, posisi demi posisi
   (`(the #{i32 f64} #{1 2.0})`), dan tanpa konteks adalah tipe elemen itu sendiri (`#{"foo" 123}`
   adalah `#{string int}`). Tuple memiliki 1 sampai 12 elemen. Setiap evaluasi membuat tuple baru.
   Untuk membangunnya dari nilai yang dihitung, gunakan `(tuple a b)`. Di tempat yang mengharapkan
-  data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `tuple` dari `Sexpr`.
+  data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `Tuple` dari `Sexpr`.
 - **Atribut**: `#[test]` adalah tanda yang melekat pada bentuk berikutnya (ditulis seperti di Rust). Satu-satunya atribut sejauh ini adalah `test`, dan dipasang pada `defun` ([3.16 `#[test]`](#316-test--fungsi-uji)). Jika dibaca dengan `read`, ia menjadi daftar `(%internal::attribute (test) form)`.
-- **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `none` pada `Option<Sexpr>`.
+- **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `None` pada `Option<Sexpr>`.
   **`Sexpr` tidak memiliki varian daftar kosong**: `Sexpr` berarti "S-expression tak kosong", dan
   tipe data S-expression adalah `Option<Sexpr>` (lihat "Pola untuk `Option<Sexpr>`" pada
   [4.3 match](#43-match--pencocokan-pola)).
@@ -157,7 +157,7 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
   tidak dapat diserahkan ke trait yang tidak berkaitan. Untuk syarat yang harus dipenuhi sebuah trait
   agar dapat dipakai dengan `:dyn`, lihat [3.9 deftrait / impl](#39-deftrait--impl--trait). Menulis
   `:dyn` di luar posisi tipe adalah kesalahan.
-- Tipe generik bawaan: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
+- Tipe generik bawaan: `Option<T>` (`(Some T)` / `None`), `Result<T,E>` (`(Ok T)` / `(Err E)`),
   `HashTable<K,V>`, `Vector<T>`, dan tipe konkurensi `Task<T>` / `Thread<T>` / `Chan<T>`
   ([bab 12](#12-konkurensi-task)). Ada juga `Sexpr`, tipe data S-expression. Tipe kesalahan konkret
   bawaan adalah `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` /
@@ -194,7 +194,7 @@ Nama bentuk khusus (kata cadangan seperti `if`, `let`, dan `step`, yang berarti 
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; no default
-    (match suffix ((some s) (append name s)) ((none) name)))         ; Option<string> in the body
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; Option<string> in the body
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; with a default
   (pow 3)      ; n = 2
@@ -204,8 +204,8 @@ Nama bentuk khusus (kata cadangan seperti `if`, `let`, dan `step`, yang berarti 
   (mk :b "q")  ; the caller writes `:name value`, in any order; omitted ones take their defaults
   ```
 
-  - **Parameter tanpa ekspresi bawaan bertipe `Option<Type>`.** Jika dihilangkan, ia `none`; jika
-    diberikan, nilai polos yang ditulis pemanggil dibungkus dalam `some` secara otomatis. Apa yang
+  - **Parameter tanpa ekspresi bawaan bertipe `Option<Type>`.** Jika dihilangkan, ia `None`; jika
+    diberikan, nilai polos yang ditulis pemanggil dibungkus dalam `Some` secara otomatis. Apa yang
     dilakukan CL dengan variabel supplied-p ("apakah diberikan?") muncul pada sisi tipe statis.
   - Dengan ekspresi bawaan, tipenya tetap `Type` sebagaimana dideklarasikan. Ketika dihilangkan,
     **ekspresi yang sudah diperiksa** itu disematkan pada pemanggilan apa adanya (dievaluasi pada
@@ -423,7 +423,7 @@ berikut adalah kesalahan:
 
 ```lisp
 (defstruct handle (p ptr))          ; a struct field
-(defenum maybe (none) (some ptr))   ; an enum field
+(defenum maybe (None) (Some ptr))   ; an enum field
 (defvar (block ptr) ...)            ; a global
 (defffi f (Vector<ptr>) i32)        ; inside a type argument
 ```
@@ -894,8 +894,8 @@ Menulis list `(Name option...)` di posisi nama menentukan opsi (posisi yang sama
 
 ; generic
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - Setiap varian berbentuk `(VariantName FieldType...)`. Field hanya posisional (tidak memiliki nama).
@@ -906,8 +906,8 @@ Menulis list `(Name option...)` di posisi nama menentukan opsi (posisi yang sama
   setiap varian atau memiliki `_`):
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - Metode dan metode statis ditulis di `impl` (3.5), sama seperti `defstruct`.
 - Untuk menjadikan enum itu sendiri `pub`, tulis `(pub defenum ...)`.
@@ -1106,7 +1106,7 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 - `module` membuat ruang nama. **Tipe bukan ruang nama** (seperti di Rust, tipe hanya memiliki metode statis
   dan metode).
 - `(use Type)` hanya membawa masuk nama tipenya. Varian enum dan metode statis ditulis melalui nama
-  tipe, seperti `Option::some` atau `Chan::new`. Bahkan setelah `(use std::sync::Chan)`, `(new 1)` polos
+  tipe, seperti `Option::Some` atau `Chan::new`. Bahkan setelah `(use std::sync::Chan)`, `(new 1)` polos
   adalah galat kecuali ada fungsi bernama `new` yang didefinisikan di suatu tempat.
 - Untuk memakai konstruktor dan metode statis sebuah tipe dengan nama polos, bawa masuk satu per satu,
   seperti `(use std::sync::Chan::new)`, atau bawa masuk semua konstruktor dan metode statis publik
@@ -1116,7 +1116,7 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
   (`(use std::sync::Chan::* std::sync::WaitGroup::*)` adalah galat, karena keduanya memiliki `new`).
   Membawa masuk nama yang sama dengan fungsi, variabel global, atau makro yang didefinisikan modul juga
   galat. Untuk menggantinya dengan sengaja, gunakan `shadowing-import`.
-- Pustaka standar menawarkan `some`/`none` milik `Option` dan `ok`/`err` milik `Result` ke setiap modul,
+- Pustaka standar menawarkan `Some`/`None` milik `Option` dan `Ok`/`Err` milik `Result` ke setiap modul,
   sehingga dapat dipakai dengan nama polos tanpa `use` (sama seperti prelude Rust yang membawa masuk
   `Some`/`None`/`Ok`/`Err`).
 - **Sebuah nama hanya punya satu arti.** Fungsi, variabel global, dan makro berbagi satu ruang nama, dan
@@ -1126,8 +1126,8 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 - Resolusi nama polos `n` (di posisi pemanggilan `(n a ...)`; nama bentuk khusus ditetapkan sebelumnya):
   1. Lokal (parameter, dan pengikatan `let`, `labels`, `macrolet`, serta `symbol-macrolet`)
   2. Jika nama modul `n` adalah makro, makro itu
-  3. Konstruktor dan metode statis: yang dibawa masuk dengan `use`, serta konstruktor `Sexpr` (`sym`,
-     `int`, dan sebagainya) dan `Option`/`Result` yang ditawarkan pustaka standar
+  3. Konstruktor dan metode statis: yang dibawa masuk dengan `use`, serta konstruktor `Sexpr` (`Sym`,
+     `Int`, dan sebagainya) dan `Option`/`Result` yang ditawarkan pustaka standar
   4. Metode `n` dari tipe argumen pertama (metode dicari **hanya berdasarkan tipe argumen pertama**)
   5. Jika nama modul `n` adalah fungsi atau variabel global, itulah (untuk variabel global, fungsi yang
      menjadi nilainya dipanggil)
@@ -1290,20 +1290,20 @@ terperinci dan contohnya ada di
   (assert-equal (+ 1 2) 3))
 ```
 
-`defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `err`, dan galatnya ditampilkan, sehingga `E` harus mengimplementasikan `Error` atau `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian). `Error` ditampilkan dengan `describe-error` (pesan dan rantai penyebabnya), selain itu dengan `print-object`. `:dyn Error` juga merupakan `Error`, sehingga pengujian dapat mengumpulkan berbagai galat ke dalam satu tipe lalu mengembalikannya.
+`defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `Err`, dan galatnya ditampilkan, sehingga `E` harus mengimplementasikan `Error` atau `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian). `Error` ditampilkan dengan `describe-error` (pesan dan rantai penyebabnya), selain itu dengan `print-object`. `:dyn Error` juga merupakan `Error`, sehingga pengujian dapat mengumpulkan berbagai galat ke dalam satu tipe lalu mengembalikannya.
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **Eksekusi biasa dan `compile-file` melewatinya**, bahkan tanpa memeriksa isinya (sama seperti Rust hanya mengompilasi pengujian dengan `--test`). Program itu sendiri tidak dapat memanggil fungsi uji.
 - Pengujian dapat ditulis di file mana pun yang berisi fungsi, di dalam `module` mana pun. Pengujian juga bisa disimpan terpisah di folder `tests/` proyek.
-- Pengujian gagal karena `panic`, galat waktu jalan, atau mengembalikan `err`. Periksa dengan `assert`, atau dengan `assert-equal` yang mencetak kedua sisi ([Sistem](functions/system.md)). Jika satu pengujian gagal, sisanya tetap berjalan.
+- Pengujian gagal karena `panic`, galat waktu jalan, atau mengembalikan `Err`. Periksa dengan `assert`, atau dengan `assert-equal` yang mencetak kedua sisi ([Sistem](functions/system.md)). Jika satu pengujian gagal, sisanya tetap berjalan.
 
 ```sh
 typl test                 # jalankan semua pengujian proyek di folder ini
@@ -1445,8 +1445,8 @@ Jenis pola:
 - Nama variabel — pola pengikatan (selalu cocok). Namun, jika tipe scrutinee memiliki varian bernama
   itu, ia diselesaikan sebagai **pola nama varian polos di bawah**
 - Nama varian polos — cocok dengan varian yang tidak menerima argumen
-  (`(match c (red 1) (blue 2))`). Menulis varian yang memiliki field dengan nama polosnya adalah
-  kesalahan arity, jadi tulis dalam kurung, seperti `(circle r)`
+  (`(match c (Red 1) (Blue 2))`). Menulis varian yang memiliki field dengan nama polosnya adalah
+  kesalahan arity, jadi tulis dalam kurung, seperti `(Circle r)`
 - **Literal langsung**: bilangan bulat / `true`/`false` / karakter — dibandingkan sebagai word
 - **Literal nilai**: string / bilangan floating-point / simbol (`'foo`) / bilangan bulat bignum /
   rasio — dibandingkan berdasarkan nilai dengan `equal` tipe itu
@@ -1456,7 +1456,7 @@ Jenis pola:
   membandingkan tipe yang tidak memiliki sintaks literal (instans `defstruct`, variabel global, hasil
   komputasi), dan implementasi `Equal` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
-- `(Ctor sub-pattern...)` — pola konstruktor (`(some x)` `(none)` `(cons a d)` `(ok v)` dan sebagainya)
+- `(Ctor sub-pattern...)` — pola konstruktor (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` dan sebagainya)
 - `(Type :slot pattern... :slot...)` — pola struct. Tulis slot setelah nama tipe sebagai kata kunci. Jika
   sebuah kata kunci diikuti pola, slot itu dicocokkan dengan pola tersebut; jika diikuti kata kunci lain
   atau tidak ada apa-apa, slot diikat ke variabel bernama sama. Slot yang tidak ditulis tidak dicocokkan
@@ -1467,14 +1467,14 @@ Jenis pola:
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; mengikat x, dan mencocokkan y dengan (some b)
+      ((point :x :y (Some b)) (+ x b))   ; mengikat x, dan mencocokkan y dengan (Some b)
       ((point :x a) a)))                 ; mengikat a
   ```
 - `#{p0 p1 ...}` — pola tuple. Setiap elemen dicocokkan dengan subpolanya sendiri. Terhadap `Sexpr`,
   ia hanya cocok dengan data `#{..}` yang jumlah elemennya sama
 - `(:or p1 p2 ...)` — pola atau: cocok bila salah satu alternatif cocok. Badannya hanya satu, jadi
   setiap alternatif harus mengikat variabel yang sama dengan tipe yang sama. Dapat juga ditulis di
-  dalam pola konstruktor (`(some (:or (circle r) (rect r _)))`)
+  dalam pola konstruktor (`(Some (:or (Circle r) (Rect r _)))`)
 
 Membandingkan tipe yang tidak mengimplementasikan `Equal` dengan literal nilai / `(:= expr)` adalah
 kesalahan tipe (bahasa ini memilih untuk mengatakan "ini tidak dapat dibandingkan" daripada
@@ -1529,7 +1529,7 @@ instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, d
 - Nama varian polos `(VariantName sub-pattern...)` — mengekstrak varian dari `defenum`. Diresolusi
   sebagai nama polos yang terlihat karena dibawa masuk, misalnya dengan `(use EnumType::*)` (aturan
   visibilitas yang sama seperti saat memanggil konstruktor). Misalnya, untuk
-  `(defenum color (red) (blue))`, `(red)` `(blue)` setelah `(use color::*)`. Dengan bentuk
+  `(defenum color (Red) (Blue))`, `(Red)` `(Blue)` setelah `(use color::*)`. Dengan bentuk
   berkualifikasi `(EnumType::VariantName ...)`, `use` tidak diperlukan.
 - `(the Type pattern)` — downcast seluruh tipe (mengikatnya secara utuh). Ia tidak mendekomposisi
   field; ia menyerahkan nilai ke `pattern` apa adanya. Satu-satunya cara mengambil struct mutable
@@ -1538,26 +1538,26 @@ instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, d
   Misalnya, setelah `(the point p)`, `(setf p::x 9)` tercermin pada instans asli di dalam daftar juga.
 
 **Pola untuk `Option<Sexpr>`**: tipe data S-expression bukan `Sexpr` melainkan `Option<Sexpr>`, dan
-daftar kosong bukan varian `Sexpr` melainkan `none` pada `Option`. Jadi ketika mencocokkan
-`Option<Sexpr>`, 19 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
+daftar kosong bukan varian `Sexpr` melainkan `None` pada `Option`. Jadi ketika mencocokkan
+`Option<Sexpr>`, 19 varian `Sexpr` dan `None` dapat ditulis **rata dalam daftar cabang yang sama**
 (tidak perlu `match` luar untuk mengupas `Option`):
 
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
-    ((none)     0)          ; the empty list
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
+    ((None)     0)          ; the empty list
     (_          9)))
 ```
 
-Kelengkapan diperiksa dalam semesta rata yang sama: 19 varian `Sexpr` ditambah `none`, 20 seluruhnya.
-Melupakan `(none)` adalah kesalahan kecuali ada `_`. `(some x)` juga dapat ditulis dan mengikat
+Kelengkapan diperiksa dalam semesta rata yang sama: 19 varian `Sexpr` ditambah `None`, 20 seluruhnya.
+Melupakan `(None)` adalah kesalahan kecuali ada `_`. `(Some x)` juga dapat ditulis dan mengikat
 "sesuatu yang tak kosong".
 
 Gula sintaks ini berlaku **tepat** hanya untuk `Option<Sexpr>`. Untuk `Option<Option<Sexpr>>`, tidak
-jelas lapisan mana yang dikupas `(int n)`, jadi tulis dua tingkat `match` seperti biasa.
+jelas lapisan mana yang dikupas `(Int n)`, jadi tulis dua tingkat `match` seperti biasa.
 
 Pola downcast yang sama dapat dipakai apa adanya pada **scrutinee objek trait (`:dyn Trait`, bab 2)**:
 `match` membuka kotaknya lalu menyerahkannya ke mesin pola `Sexpr` di atas, sehingga tidak ada
@@ -1586,8 +1586,8 @@ pun himpunan tipe yang mengimplementasikannya terbuka, jadi diperlukan cabang `_
 
 **Inferensi tipe lintas cabang**: semua cabang harus bertipe sama (kecuali cabang yang diverge,
 seperti dengan `panic`). Pada `match` yang ditulis di tempat tidak ada tipe yang diharapkan, cabang
-saling mengisi argumen tipe yang hilang: `(Result::ok v)` hanya menetapkan `T`, dan
-`(Result::err e)` hanya `E`, tetapi bersama-sama keduanya menetapkan `Result<T,E>`. Argumen tipe yang
+saling mengisi argumen tipe yang hilang: `(Result::Ok v)` hanya menetapkan `T`, dan
+`(Result::Err e)` hanya `E`, tetapi bersama-sama keduanya menetapkan `Result<T,E>`. Argumen tipe yang
 tidak dapat ditetapkan cabang mana pun sampai akhir adalah kesalahan pada cabang itu
 (`cannot infer type argument ...`). Di luar `match`, argumen tipe yang tidak dapat ditetapkan adalah
 kesalahan saat itu juga.
@@ -1712,7 +1712,7 @@ habis.
 | `:sum e` / `:count e` | Jumlah / banyaknya kali bernilai benar |
 | `:maximize e` / `:minimize e` | Maksimum / minimum. **`Option<T>`** (seperti CL mengembalikan nil untuk sekuens kosong; tipe `Ord` sembarang tidak memiliki elemen terkecil) |
 | `:always e` / `:never e` | `true` jika semuanya berlaku; `false` segera setelah satu gagal |
-| `:thereis e` | `e` adalah **`Option<T>`**. Mengembalikan `some` pertama, atau `none` jika tidak ada (ini yang sepadan dengan "nilai non-nil pertama" pada CL; untuk menguji `bool`, gunakan `:always`/`:never`) |
+| `:thereis e` | `e` adalah **`Option<T>`**. Mengembalikan `Some` pertama, atau `None` jika tidak ada (ini yang sepadan dengan "nilai non-nil pertama" pada CL; untuk menguji `bool`, gunakan `:always`/`:never`) |
 | `:while e` / `:until e` | **Berakhir secara normal** di sini (`:finally` dijalankan, dan apa yang dikumpulkan adalah jawabannya) |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | Menjadikan satu klausa bersyarat |
 | `:return e` | Meninggalkan segera dengan nilai itu (`:finally` tidak dijalankan, seperti di CL) |
@@ -1734,7 +1734,7 @@ Menghilangkan `:finally (return 0)` adalah **kesalahan tipe**. Ini hanyalah atur
 bekerja (5.1): tipe keluar `int` tidak cocok dengan `()` yang ditinggalkan perulangan ketika habis.
 
 **Nilai perulangan** adalah akumulasi dari klausa pengakumulasi jika ada (yang pertama, jika ada
-beberapa), `true` untuk `:always`/`:never`, `none` untuk `:thereis`, dan `()` jika tidak ada. Jika
+beberapa), `true` untuk `:always`/`:never`, `None` untuk `:thereis`, dan `()` jika tidak ada. Jika
 hal terakhir di `:finally` adalah `(return e)`, itulah nilainya: idiom `finally (return …)` pada CL,
 satu-satunya cara perulangan yang tidak mengakumulasi dapat menamai jawabannya sendiri.
 
@@ -1801,7 +1801,7 @@ dan sebagainya).
 (unreachable)                       ; expands to (panic "unreachable"). defmacro
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
-(try-as Type expr)                  ; like as, but returns the result as Option<Type> (none on failure)
+(try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1845,7 +1845,7 @@ berlebar tetap, `f32`/`f64`/`ratio`/`char`). Tipe yang sama bukan konversi. **Ko
 bilangan bulat (termasuk `int`) dan antara `f32`↔`f64` adalah konversi sungguhan**: `as` memotong /
 membulatkan, dan `try-as` menjawab apakah muat pada lebar (presisi) itu. `(as int x)` adalah pelebaran
 tepat dari lebar tetap, dan `(as i32 n)` pemotongan dari `int`. Bilangan bulat → `char` dapat gagal di
-luar rentang, sehingga `as` melakukan panic dan `try-as` menghasilkan `none`. Semua yang lain
+luar rentang, sehingga `as` melakukan panic dan `try-as` menghasilkan `None`. Semua yang lain
 (pelebaran, dan pemotongan `float->int`/`ratio->int`) selalu berhasil. `float->int`/`ratio->int`/
 `char->int` mendarat pada `int`, dan jika lebar yang lebih sempit diminta, `int->W` dipanggil
 setelahnya. Ini adalah gula sintaks yang diekspansi menjadi metode konversi yang sesuai
@@ -1861,7 +1861,7 @@ dengan urutan variabel → fungsi → tipe → trait → makro (prioritas yang s
 pengenal polos dievaluasi sebagai ekspresi) dan mengembalikan docstring definisi yang ditemukan
 (`(documentation Type::method)` untuk metode). Gagal menyelesaikan (tidak ada definisi bernama itu)
 adalah kesalahan saat pemeriksaan; definisi yang ada tetapi tanpa docstring menghasilkan
-`Option::none`. Semuanya ditentukan sebagai konstanta saat pemeriksaan: tidak ada pencarian saat
+`Option::None`. Semuanya ditentukan sebagai konstanta saat pemeriksaan: tidak ada pencarian saat
 dijalankan. Nama bebas yang dikualifikasi modul (`mod::name`, kecuali `Type::method`) tidak didukung.
 
 ## 8. Keluar non-lokal (catch / throw / unwind-protect)
@@ -1882,7 +1882,7 @@ fungsi.
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; if not found, the value at the end as usual
 ```
 
@@ -2064,10 +2064,10 @@ sehingga semuanya bekerja pada tipe konkret apa adanya.
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => read as (not (equal 1 2)), that is, true
 ```

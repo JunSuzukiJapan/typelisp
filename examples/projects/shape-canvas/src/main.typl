@@ -24,8 +24,8 @@
 (defun explain ((e :dyn Error)) ()
   (println "error: ~a" (message e))
   (match (source e)
-    ((some inner) (println "  caused by: ~a" (message inner)))
-    ((none) ())))
+    ((Some inner) (println "  caused by: ~a" (message inner)))
+    ((None) ())))
 
 ;; To just widen a concrete error without adding context, prelude's as-dyn-error
 ;; is all it takes (for an example that adds context, see bad-number in shapes.typl,
@@ -44,16 +44,16 @@
 
 (defun run ((width string) (lines Vector<string>)) ()
   (match (canvas-width width)
-    ((err e) (explain e))
-    ((ok w)
+    ((Err e) (explain e))
+    ((Ok w)
      (match (parse-scene lines)
-       ((ok scene)
+       ((Ok scene)
         (let ((cv (make-canvas w 11)))
           (draw-scene cv scene)
           (render cv))
         (println "shapes:")
         (list-scene scene))
-       ((err e) (explain e))))))
+       ((Err e) (explain e))))))
 
 (run "24" (lines-of "rect 0 0 24 11" "circle 11 5 4" "hline 3 8 18"))
 

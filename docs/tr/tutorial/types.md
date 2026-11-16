@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Tür Temelleri
 
 typelisp statik tür denetimli bir dildir. Bu bölüm, tür denetleyicisinin sizin için ne yaptığını, en
@@ -48,41 +48,41 @@ Başlıca türler:
 ## 2. `Option<T>`: eksik olabilen bir değer
 
 typelisp'te `nil` yoktur. "Değer olmayabilir" durumu `Option<T>` türüyle ifade edilir. Bir
-`Option<T>` değeri ya `T`'den tek bir değer tutan `some`'dır ya da hiçbir şey tutmayan `none`'dır.
+`Option<T>` değeri ya `T`'den tek bir değer tutan `Some`'dır ya da hiçbir şey tutmayan `None`'dır.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>`, `int` değildir; bu yüzden olduğu gibi aritmetikte kullanılamaz.
-`(+ (safe-div 10 2) 1)` bir tür hatasıdır. İçindekini kullanmak için `some` ile `none`'u `match` ile
+`(+ (safe-div 10 2) 1)` bir tür hatasıdır. İçindekini kullanmak için `Some` ile `None`'u `match` ile
 ayırın.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- `(some q)` kolunda içerik `q` değişkenine bağlanır.
-- `match`, kollarının **her durumu kapsadığını** denetler. `(none)` kolunu unutmak bir tür hatasıdır.
+- `(Some q)` kolunda içerik `q` değişkenine bağlanır.
+- `match`, kollarının **her durumu kapsadığını** denetler. `(None)` kolunu unutmak bir tür hatasıdır.
 
 ### Neden nil yok
 
 Birçok dilde `nil` (`null`) herhangi bir türün değerinin yerine geçebilir. Sonuç olarak "değer yok"
 durumunu ele almayı unutmak, program çalışana kadar fark edilmez. typelisp'te bir değerin eksik
-olabileceği yer `Option<T>` türündedir ve kod, `match` `none` durumunu ele almadıkça tür
+olabileceği yer `Option<T>` türündedir ve kod, `match` `None` durumunu ele almadıkça tür
 denetleyicisinden geçmez. Unutulan bir durum program çalışmadan önce bulunur.
 
 Koşullar da aynı fikri izler: `if`'in koşulu yalnızca bir `bool` olabilir. Common Lisp'in "`nil`
@@ -92,12 +92,12 @@ dışındaki her şey doğrudur" gibi bir kuralı yoktur.
 
 | Form | Anlamı |
 |---|---|
-| `(unwrap-or opt default)` | `some` için içerik; `none` için varsayılan |
-| `(unwrap opt)` | İçeriği çıkarır. `none` durumunda programı durdurur |
+| `(unwrap-or opt default)` | `Some` için içerik; `None` için varsayılan |
+| `(unwrap opt)` | İçeriği çıkarır. `None` durumunda programı durdurur |
 | `(is-some opt)` / `(is-none opt)` | Hangisi olduğunu sınar |
 
 Birçok standart kütüphane fonksiyonu `Option` döndürür. Örneğin `position`, eleman bulunursa konumu
-`some` içinde, bulunmazsa `none` döndürür.
+`Some` içinde, bulunmazsa `None` döndürür.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -105,25 +105,25 @@ Birçok standart kütüphane fonksiyonu `Option` döndürür. Örneğin `positio
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: başarısız olabilen bir işlem
 
-Başarısız olabilen bir işlem `Result<T,E>` döndürür: başarıda `T` türünde bir değer tutan `ok`, ya da
-başarısızlıkta bir `E` hatası tutan `err`.
+Başarısız olabilen bir işlem `Result<T,E>` döndürür: başarıda `T` türünde bir değer tutan `Ok`, ya da
+başarısızlıkta bir `E` hatası tutan `Err`.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -132,8 +132,8 @@ Kendi fonksiyonlarınız da `Result` döndürebilir.
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Eksik bir değerin açıklamaya ihtiyaç duymadığı durumlarda `Option`, bir şeyin neden başarısız
@@ -203,29 +203,29 @@ tanımlanır. Her biçime **varyant** denir. Her varyant farklı sayıda ve tür
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-Değerler, `shape::circle` gibi önüne tür adı konarak yapılır. `match` içinde varyant adına göre
+Değerler, `shape::Circle` gibi önüne tür adı konarak yapılır. `match` içinde varyant adına göre
 ayrıştırılırlar.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Burada da `match` her durumun kapsandığını denetler. Daha sonra `shape`'e bir varyant eklerseniz, onu
 ele almayan her `match` bir tür hatası olur; böylece düzeltilmesi gereken hiçbir yer gözden kaçmaz.
 
-`(use shape)`'ten sonra tür adı olmadan `(rect 5 6)` yazabilirsiniz.
+`(use shape)`'ten sonra tür adı olmadan `(Rect 5 6)` yazabilirsiniz.
 
 `Option` ve `Result`, aynı mekanizmayla yapılmış enum'lardır.
 

@@ -6,8 +6,8 @@
 //! `defstruct` registers a single-variant `AdtKind::Struct` type whose sole
 //! constructor is named `new` — reached only as `Type::new` (no bare name),
 //! consistent with the "don't pollute the namespace" rule this redesign
-//! followed throughout (see also `Option`/`Result` moving to `Option::some`/
-//! `Result::ok` in `namespace_test.rs`).
+//! followed throughout (see also `Option`/`Result` moving to `Option::Some`/
+//! `Result::Ok` in `namespace_test.rs`).
 
 extern crate typelisp;
 use typelisp::check::core;
@@ -471,8 +471,8 @@ fn match_on_a_struct_binds_a_slot_to_its_own_name() {
 #[test]
 fn match_on_a_struct_tests_a_slots_nested_pattern() {
     let src = "(defstruct holder (o Option<int>) (n int)) \
-               (defun f ((h holder)) int (match h ((holder :o (some v) :n) (+ v n)) ((holder :n) n))) \
-               (+ (f (make-instance 'holder :o (Option::some 10) :n 1)) (f (make-instance 'holder :o (Option::none) :n 100)))";
+               (defun f ((h holder)) int (match h ((holder :o (Some v) :n) (+ v n)) ((holder :n) n))) \
+               (+ (f (make-instance 'holder :o (Option::Some 10) :n 1)) (f (make-instance 'holder :o (Option::None) :n 100)))";
     assert_eq!(eval_ok(src), Value::Int(111));
 }
 
@@ -510,7 +510,7 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
 // A unit-typed slot is the one field encoding whose *stored shape* doesn't
 // identify it: it holds a `Value::Empty`, exactly what an
 // `Option<Sexpr>`-declared slot holding the empty list would — the two have
-// been the same word since the empty list became `none` under the niche. Both read paths therefore decide from
+// been the same word since the empty list became `None` under the niche. Both read paths therefore decide from
 // the declared type — the accessor via `decode_field_typed`, `match` via
 // `Pattern::Ctor::field_types` — and these tests pin that down by asserting
 // on `RtValue::Unit` itself, which a shape-driven decode would return as
@@ -548,7 +548,7 @@ fn match_reads_the_fields_beside_a_unit_one_correctly() {
 fn a_unit_payload_keeps_an_enum_heap_representable() {
     // `()` has a field encoding, so `Result<(), E>` is a heap enum box like
     // any other and can cross into compiled code.
-    let src = "(defun f () Result<(), string> (Result::ok ())) (f)";
+    let src = "(defun f () Result<(), string> (Result::Ok ())) (f)";
     assert!(
         matches!(eval_ok(src), Value::Boxed(_)),
         "a `()` payload must leave the enum a heap box"
@@ -557,7 +557,7 @@ fn a_unit_payload_keeps_an_enum_heap_representable() {
 
 #[test]
 fn a_unit_payload_matches_and_binds() {
-    let src = "(defun f () Result<(), string> (Result::ok ())) \
-               (match (f) ((ok u) u) ((err _) ()))";
+    let src = "(defun f () Result<(), string> (Result::Ok ())) \
+               (match (f) ((Ok u) u) ((Err _) ()))";
     assert_eq!(eval_ok(src), Value::Empty);
 }

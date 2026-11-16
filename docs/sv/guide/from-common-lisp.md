@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # För Common Lisp-programmerare
 
 typelisp ärver syntaxen och många av funktionsnamnen från Common Lisp (CL), men är ett statiskt typat
@@ -19,12 +19,12 @@ De booleska värdena är `true` och `false`. `nil` och `t` är inte definierade.
 - **Else-grenen i `if` kan inte utelämnas.** `(if c x)` är ett fel. När ingen else-gren behövs används
   `when` / `unless`.
 - **"Inget värde" uttrycks med `Option<T>`.** En funktion som i CL returnerade nil för att betyda "hittades
-  inte" returnerar här `(some x)` eller `none`.
+  inte" returnerar här `(Some x)` eller `None`.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - Den tomma listan `()` är, beroende på sammanhang, antingen värdet av typen Unit (returvärdet från en
@@ -98,7 +98,7 @@ bredvid en variabel `list`).
 ## 4. Listor och Vector
 
 Det som motsvarar en CL-lista är **S-uttrycksdata**, vars typ är `Option<Sexpr>` (den tomma listan är
-`none`). `(list 1 2 3)` och `'(a b c)` har den här typen. S-uttrycksdata är något som makron och `read`
+`None`). `(list 1 2 3)` och `'(a b c)` har den här typen. S-uttrycksdata är något som makron och `read`
 arbetar med; för en vanlig databehållare används **`Vector<T>`**.
 
 | Vad du vill ha | CL | typelisp |
@@ -180,17 +180,17 @@ För att tillfälligt ändra en kontrollvariabel som `*print-base*` används `dl
 Det finns inget `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error` eller
 `signal`. De passar dåligt med statisk typning. I stället används dessa två för olika syften:
 
-- **Återhämtningsbara misslyckanden returnerar `Result<T,E>`.** Anroparen skiljer `ok` / `err` med
+- **Återhämtningsbara misslyckanden returnerar `Result<T,E>`.** Anroparen skiljer `Ok` / `Err` med
   `match`. Det finns ingen genväg som Rusts `?`.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Icke återhämtningsbara misslyckanden (buggar) är `panic`.** `(panic "message")`, att skicka `none`
+- **Icke återhämtningsbara misslyckanden (buggar) är `panic`.** `(panic "message")`, att skicka `None`
   till `unwrap`, division med 0 och ett index utanför intervallet är av det slaget, och programmet
   stoppar. Uppstädningen i `unwind-protect` körs innan det stoppar.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # String'ler, Karakterler ve Koleksiyonlar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` ve `Deque<T>`.
@@ -25,12 +25,12 @@ String'ler değiştirilemezdir.
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | Büyük/küçük harf duyarsız sıralama (CL'nin `string-lessp`'i vb.). Ortak bir önek varsa kısa olan küçüktür |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | `c`'nin `n` kopyasından oluşan bir string (CL'nin `make-string`'i) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | `sub`'ın ilk göründüğü konum. **CL'nin `search`'ünde bağımsız değişkenler ters sıradadır** (`(search pattern sequence)`). Boş string 0'da bulunur. Anahtar sözcükler için [dizilerin anahtar sözcüklü bağımsız değişkenlerine](sequences.md#6-anahtar-sözcüklü-bağımsız-değişkenler) bakın |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | İlk farklılaşma konumu. Yalnızca `equal` olduklarında `none`. Biri diğerinin önekiyse kısa olanın sonu. Anahtar sözcükler yukarıdaki gibi |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | İlk farklılaşma konumu. Yalnızca `equal` olduklarında `None`. Biri diğerinin önekiyse kısa olanın sonu. Anahtar sözcükler yukarıdaki gibi |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | `bag` içindeki karakterleri iki uçtan / soldan / sağdan kaldırır (CL'nin `string-trim`'i vb.). `bag` olmadan boşluk `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` noktalarından böler. CL'de karşılığı yoktur. Ardışık ayırıcılar boş elemanlar üretir. `sep` boşsa panic olur |
 | `to-string` | `(to-string x)` | `T→string` | `~a`'nın yaptığı gibi bir string'e çevirir. `int`/`i32`/`f64`/`bool`/`char`/`string` için gerçekleştirilmiştir (CL'nin `princ-to-string`'i) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | UTF-8 olarak kodlar (her eleman 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Çözer. Geçerli UTF-8 değilse `none` |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Çözer. Geçerli UTF-8 değilse `None` |
 
 ## 2. Karakterler `char`
 
@@ -76,7 +76,7 @@ Yazdırıldığında da `#(1 2 3)` olur.
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | `i`'inci elemanı okur. Aralık dışında panic olur |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i`'inci elemanı değiştirir. Aralık dışında panic olur. `(setf (get v i) x)` olarak da yazılabilir |
 | `len` | `(len v)` | `Vector<T>→int` | Eleman sayısı |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Son elemanı kaldırır ve döndürür. Boşsa `none` (`get`/`set`'ten farklı olarak panic olmaz) ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Son elemanı kaldırır ve döndürür. Boşsa `None` (`get`/`set`'ten farklı olarak panic olmaz) ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter`'i gerçekleştiren bir yineleyici yapar |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | `x`'e `eql` olan bir eleman yoksa sona ekler (CL'in `pushnew`'u. Bir yeri yeniden yazması gerekmediği için makro değil metottur) |
 
@@ -137,7 +137,7 @@ kullandığı `(sxhash-string s)`'i (FNV-1a 32 bit) çağırabilirsiniz.
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 Bir `equal` tablosunda iki anahtarın aynı olup olmadığına nesne kimliği değil, **anahtar türünün
@@ -170,8 +170,8 @@ Başvurusu](../syntax.md#1-sözcüksel-öğeler)).
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL'nin `adjust-array`'i. Rank değişemez. Aralıkta kalan elemanlar indekslerinde korunur ve yeni hücreler `init` alır. CL'den farklı olarak diziyi döndürmez (bu dildeki her dizi ayarlanabilirdir; bu yüzden döndürülecek ikinci bir dizi yoktur) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL'nin `vector-push-extend`'i. Doldurma işaretçisi olmadan panic olur |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` ile aynı ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL'nin `vector-pop`'u. Boşsa `none` ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Doldurma işaretçisi (yoksa `none`). `(setf a::fill-pointer …)` ile yazılabilir |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL'nin `vector-pop`'u. Boşsa `None` ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Doldurma işaretçisi (yoksa `None`). `(setf a::fill-pointer …)` ile yazılabilir |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Satır öncelikli sırayla bir yineleyici. Varsa doldurma işaretçisinde durur |
 
 - **İndeksler bir `Vector<int>`'tir.** Bir metot "sonda aynı türden bağımsız değişkenin istenen sayıda
@@ -264,10 +264,10 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 | `new` | `(Deque::new)` | `()→Deque<T>` | Boş bir dizi oluşturur |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Başa / sona ekler |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` ile aynı ([`Push`](traits.md#4-push-traiti-öğe-ekleme) trait'inin bir metodu) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeyi çıkarıp döndürür. Boşsa `none` |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeyi çıkarıp döndürür. Boşsa `None` |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back` ile aynı ([`Pop`](traits.md#5-pop-traiti-öğe-çıkarma) trait'inin bir metodu) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeye bakar (çıkarmadan) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Baştan `i`'nci öğe. Aralık dışındaysa `none` |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Baştan `i`'nci öğe. Aralık dışındaysa `None` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`'nci öğenin üzerine yazar. Aralık dışındaysa panic |
 | `count` | `(count d)` | `Deque<T>→int` | Öğe sayısı |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | Her şeyi siler |
@@ -277,5 +277,5 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

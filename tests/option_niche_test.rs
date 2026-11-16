@@ -1,7 +1,7 @@
 //! The `Option<T>` niche (`check/repr.rs`'s `Repr::Niche`,
 //! `typelisp-mem`'s `option`): an `Option` whose payload can never be the
-//! empty-list word is represented as that payload's tagged word for `some`
-//! and the empty-list immediate for `none`, with no box — in the
+//! empty-list word is represented as that payload's tagged word for `Some`
+//! and the empty-list immediate for `None`, with no box — in the
 //! interpreter, in compiled code, and across the boundary between them. The
 //! exclusions are the payloads that *can* be that word: a nested `Option`,
 //! `()`, a raw C word.
@@ -74,12 +74,12 @@ fn the_type_side_and_the_id_side_agree_on_what_niches() {
     }
 }
 
-/// `(some 5)` typed `Option<int>` is the fixnum `5` and `(none)` the empty
+/// `(Some 5)` typed `Option<int>` is the fixnum `5` and `(None)` the empty
 /// list — nothing is allocated for either.
 #[test]
 fn option_of_int_is_a_fixnum_or_nil_with_no_allocation() {
     let mut s = Session::new(Load::Prelude);
-    s.eval("(defun s () Option<int> (Option::some 5))\n(defun n () Option<int> (Option::none))").expect("defs");
+    s.eval("(defun s () Option<int> (Option::Some 5))\n(defun n () Option<int> (Option::None))").expect("defs");
     let before = s.heap.box_count();
     assert_eq!(s.eval("(s)").expect("some"), Value::Int(5));
     assert_eq!(s.eval("(n)").expect("none"), Value::Empty);
@@ -91,21 +91,21 @@ fn option_of_int_is_a_fixnum_or_nil_with_no_allocation() {
 #[test]
 fn option_of_f64_carries_the_float_box_directly() {
     let mut s = Session::new(Load::Prelude);
-    s.eval("(defun s () Option<f64> (Option::some 1.5))").expect("defs");
+    s.eval("(defun s () Option<f64> (Option::Some 1.5))").expect("defs");
     let Value::Boxed(id) = s.eval("(s)").expect("some") else { panic!("expected the float box") };
     assert!(s.heap.is_f64(id));
     assert_eq!(s.heap.f64_value(id), 1.5);
 }
 
-/// The inner `Option`'s `none` is the word the outer one would use, so the
-/// outer stays a box — and its two `none`s are different values.
+/// The inner `Option`'s `None` is the word the outer one would use, so the
+/// outer stays a box — and its two `None`s are different values.
 #[test]
 fn option_of_option_still_boxes_and_its_two_nones_differ() {
     let mut s = Session::new(Load::Prelude);
     s.eval(
-        "(defun outer-none () Option<Option<int>> (Option::none))\n\
-         (defun inner-none () Option<Option<int>> (Option::some (Option::none)))\n\
-         (defun both () Option<Option<int>> (Option::some (Option::some 7)))",
+        "(defun outer-none () Option<Option<int>> (Option::None))\n\
+         (defun inner-none () Option<Option<int>> (Option::Some (Option::None)))\n\
+         (defun both () Option<Option<int>> (Option::Some (Option::Some 7)))",
     )
     .expect("defs");
     let Value::Boxed(outer) = s.eval("(outer-none)").expect("outer") else { panic!("the outer none is a box") };
@@ -113,12 +113,12 @@ fn option_of_option_still_boxes_and_its_two_nones_differ() {
     assert_eq!(s.heap.enum_variant(outer), 1);
     let Value::Boxed(inner) = s.eval("(inner-none)").expect("inner") else { panic!("the outer some is a box") };
     assert_eq!(s.heap.enum_variant(inner), 0);
-    // The inner `none` rides inside as the empty word.
+    // The inner `None` rides inside as the empty word.
     assert_eq!(s.heap.enum_field(inner, 0), Value::Empty);
     let Value::Boxed(some) = s.eval("(both)").expect("both") else { panic!("boxed") };
     assert_eq!(s.heap.enum_field(some, 0), Value::Int(7));
     assert_eq!(
-        eval_string("(defun f ((o Option<Option<int>>)) int (match o ((some (some n)) n) ((some (none)) -1) ((none) -2)))\n(format false \"~a ~a ~a\" (f (Option::some (Option::some 7))) (f (Option::some (Option::none))) (f (Option::none)))"),
+        eval_string("(defun f ((o Option<Option<int>>)) int (match o ((Some (Some n)) n) ((Some (None)) -1) ((None) -2)))\n(format false \"~a ~a ~a\" (f (Option::Some (Option::Some 7))) (f (Option::Some (Option::None))) (f (Option::None)))"),
         "7 -1 -2"
     );
 }
@@ -127,7 +127,7 @@ fn option_of_option_still_boxes_and_its_two_nones_differ() {
 #[test]
 fn option_of_unit_still_boxes() {
     let mut s = Session::new(Load::Prelude);
-    s.eval("(defun s () Option<()> (Option::some ()))\n(defun n () Option<()> (Option::none))").expect("defs");
+    s.eval("(defun s () Option<()> (Option::Some ()))\n(defun n () Option<()> (Option::None))").expect("defs");
     let Value::Boxed(some) = s.eval("(s)").expect("some") else { panic!("boxed") };
     assert_eq!(s.heap.enum_variant(some), 0);
     let Value::Boxed(none) = s.eval("(n)").expect("none") else { panic!("boxed") };
@@ -145,24 +145,24 @@ fn option_of_unit_still_boxes() {
 fn some_and_none_round_trip_through_compiled_and_interpreted_code_for_every_niche_kind() {
     const DEFS: &str = r#"
         (defstruct pt (x int))
-        (defun u8-of ((o Option<u8>)) int (match o ((some v) (as int v)) ((none) -1)))
-        (defun int-of ((o Option<int>)) int (match o ((some v) v) ((none) -1)))
-        (defun f64-of ((o Option<f64>)) f64 (match o ((some v) v) ((none) -1.0)))
-        (defun f32-of ((o Option<f32>)) f32 (match o ((some v) v) ((none) (as f32 -1.0))))
-        (defun char-of ((o Option<char>)) char (match o ((some v) v) ((none) #\-)))
-        (defun bool-of ((o Option<bool>)) int (match o ((some true) 1) ((some _) 0) ((none) -1)))
-        (defun str-of ((o Option<string>)) string (match o ((some v) v) ((none) "-")))
-        (defun pt-of ((o Option<pt>)) int (match o ((some p) p::x) ((none) -1)))
-        (defun sexpr-of ((o Option<Sexpr>)) Sexpr (match o ((some v) v) ((none) 0)))
-        (defun mk-u8 ((b bool)) Option<u8> (if b (Option::some (the u8 200)) (Option::none)))
-        (defun mk-int ((b bool)) Option<int> (if b (Option::some 100000000000000000000) (Option::none)))
-        (defun mk-f64 ((b bool)) Option<f64> (if b (Option::some 2.5) (Option::none)))
-        (defun mk-f32 ((b bool)) Option<f32> (if b (Option::some (as f32 0.5)) (Option::none)))
-        (defun mk-char ((b bool)) Option<char> (if b (Option::some #\z) (Option::none)))
-        (defun mk-bool ((b bool)) Option<bool> (if b (Option::some false) (Option::none)))
-        (defun mk-str ((b bool)) Option<string> (if b (Option::some "hi") (Option::none)))
-        (defun mk-pt ((b bool)) Option<pt> (if b (Option::some (make-instance 'pt :x 9)) (Option::none)))
-        (defun mk-sexpr ((b bool)) Option<Sexpr> (if b (Option::some (unwrap (list 1 2))) (Option::none)))
+        (defun u8-of ((o Option<u8>)) int (match o ((Some v) (as int v)) ((None) -1)))
+        (defun int-of ((o Option<int>)) int (match o ((Some v) v) ((None) -1)))
+        (defun f64-of ((o Option<f64>)) f64 (match o ((Some v) v) ((None) -1.0)))
+        (defun f32-of ((o Option<f32>)) f32 (match o ((Some v) v) ((None) (as f32 -1.0))))
+        (defun char-of ((o Option<char>)) char (match o ((Some v) v) ((None) #\-)))
+        (defun bool-of ((o Option<bool>)) int (match o ((Some true) 1) ((Some _) 0) ((None) -1)))
+        (defun str-of ((o Option<string>)) string (match o ((Some v) v) ((None) "-")))
+        (defun pt-of ((o Option<pt>)) int (match o ((Some p) p::x) ((None) -1)))
+        (defun sexpr-of ((o Option<Sexpr>)) Sexpr (match o ((Some v) v) ((None) 0)))
+        (defun mk-u8 ((b bool)) Option<u8> (if b (Option::Some (the u8 200)) (Option::None)))
+        (defun mk-int ((b bool)) Option<int> (if b (Option::Some 100000000000000000000) (Option::None)))
+        (defun mk-f64 ((b bool)) Option<f64> (if b (Option::Some 2.5) (Option::None)))
+        (defun mk-f32 ((b bool)) Option<f32> (if b (Option::Some (as f32 0.5)) (Option::None)))
+        (defun mk-char ((b bool)) Option<char> (if b (Option::Some #\z) (Option::None)))
+        (defun mk-bool ((b bool)) Option<bool> (if b (Option::Some false) (Option::None)))
+        (defun mk-str ((b bool)) Option<string> (if b (Option::Some "hi") (Option::None)))
+        (defun mk-pt ((b bool)) Option<pt> (if b (Option::Some (make-instance 'pt :x 9)) (Option::None)))
+        (defun mk-sexpr ((b bool)) Option<Sexpr> (if b (Option::Some (unwrap (list 1 2))) (Option::None)))
     "#;
     const NAMES: &[&str] = &[
         "u8-of", "int-of", "f64-of", "f32-of", "char-of", "bool-of", "str-of", "pt-of", "sexpr-of", "mk-u8",
@@ -191,19 +191,19 @@ fn some_and_none_round_trip_through_compiled_and_interpreted_code_for_every_nich
     assert_eq!(both(DEFS, NAMES, "(sexpr-of (mk-sexpr false))"), "0");
 }
 
-/// A literal sub-pattern under `some` compares the payload after it is read
+/// A literal sub-pattern under `Some` compares the payload after it is read
 /// back through the niche — a narrow integer untagged, a float box opened.
 #[test]
 fn a_literal_under_some_compares_the_untagged_payload() {
     const DEFS: &str = r#"
-        (defun is-seven ((o Option<u8>)) bool (match o ((some 7) true) (_ false)))
-        (defun is-half ((o Option<f64>)) bool (match o ((some 0.5) true) (_ false)))
-        (defun is-a ((o Option<char>)) bool (match o ((some #\a) true) (_ false)))
+        (defun is-seven ((o Option<u8>)) bool (match o ((Some 7) true) (_ false)))
+        (defun is-half ((o Option<f64>)) bool (match o ((Some 0.5) true) (_ false)))
+        (defun is-a ((o Option<char>)) bool (match o ((Some #\a) true) (_ false)))
     "#;
     const NAMES: &[&str] = &["is-seven", "is-half", "is-a"];
-    assert_eq!(both(DEFS, NAMES, "(list (is-seven (Option::some (the u8 7))) (is-seven (Option::some (the u8 8))) (is-seven (Option::none)))"), "(true false false)");
-    assert_eq!(both(DEFS, NAMES, "(list (is-half (Option::some 0.5)) (is-half (Option::some 0.25)) (is-half (Option::none)))"), "(true false false)");
-    assert_eq!(both(DEFS, NAMES, "(list (is-a (Option::some #\\a)) (is-a (Option::some #\\b)) (is-a (Option::none)))"), "(true false false)");
+    assert_eq!(both(DEFS, NAMES, "(list (is-seven (Option::Some (the u8 7))) (is-seven (Option::Some (the u8 8))) (is-seven (Option::None)))"), "(true false false)");
+    assert_eq!(both(DEFS, NAMES, "(list (is-half (Option::Some 0.5)) (is-half (Option::Some 0.25)) (is-half (Option::None)))"), "(true false false)");
+    assert_eq!(both(DEFS, NAMES, "(list (is-a (Option::Some #\\a)) (is-a (Option::Some #\\b)) (is-a (Option::None)))"), "(true false false)");
 }
 
 /// The builtins that answer an `Option` from Rust — `HashTable::get`,
@@ -213,15 +213,15 @@ fn a_literal_under_some_compares_the_untagged_payload() {
 #[test]
 fn builtin_option_results_use_the_niche_in_both_tiers() {
     const DEFS: &str = r#"
-        (defun lookup ((h HashTable<string,int>) (k string)) int (match (get h k) ((some v) v) ((none) -1)))
-        (defun popped ((v Vector<int>)) int (match (pop v) ((some x) x) ((none) -1)))
-        (defun narrow ((n int)) int (match (try-as u8 n) ((some x) (as int x)) ((none) -1)))
+        (defun lookup ((h HashTable<string,int>) (k string)) int (match (get h k) ((Some v) v) ((None) -1)))
+        (defun popped ((v Vector<int>)) int (match (pop v) ((Some x) x) ((None) -1)))
+        (defun narrow ((n int)) int (match (try-as u8 n) ((Some x) (as int x)) ((None) -1)))
         (defun nested ((h HashTable<string,Option<int>>) (k string)) int
-          (match (get h k) ((some (some v)) v) ((some (none)) -2) ((none) -1)))
+          (match (get h k) ((Some (Some v)) v) ((Some (None)) -2) ((None) -1)))
         (defun table () HashTable<string,int> (let ((h (the HashTable<string,int> (HashTable::new :test 'equal)))) (set h "a" 1) h))
         (defun vec () Vector<int> (let ((v (the Vector<int> (Vector::new)))) (push v 5) v))
         (defun nested-table () HashTable<string,Option<int>>
-          (let ((h (the HashTable<string,Option<int>> (HashTable::new :test 'equal)))) (set h "a" (Option::some 1)) (set h "b" (Option::none)) h))
+          (let ((h (the HashTable<string,Option<int>> (HashTable::new :test 'equal)))) (set h "a" (Option::Some 1)) (set h "b" (Option::None)) h))
     "#;
     const NAMES: &[&str] = &["lookup", "popped", "narrow", "nested", "table", "vec", "nested-table"];
     assert_eq!(both(DEFS, NAMES, "(list (lookup (table) \"a\") (lookup (table) \"z\"))"), "(1 -1)");
@@ -234,15 +234,15 @@ fn builtin_option_results_use_the_niche_in_both_tiers() {
 }
 
 /// An omitted defaultless `&optional`/`&key` argument is an `Option<T>` the
-/// *call site* builds — `typeck::variant`, the same producer `(some x)`
+/// *call site* builds — `typeck::variant`, the same producer `(Some x)`
 /// goes through — so the callee's `pat-some`/`pat-empty` read the shape they
 /// expect. (The first full run of this stage had the call site still
 /// boxing, and every prelude function with an omitted optional failed.)
 #[test]
 fn an_omitted_optional_argument_is_the_niche_the_callee_matches() {
     const DEFS: &str = r#"
-        (defun opt ((a int) &optional (b int)) int (match b ((some v) (+ a v)) ((none) (- a))))
-        (defun key ((a int) &key (b string)) string (match b ((some s) s) ((none) "none")))
+        (defun opt ((a int) &optional (b int)) int (match b ((Some v) (+ a v)) ((None) (- a))))
+        (defun key ((a int) &key (b string)) string (match b ((Some s) s) ((None) "none")))
     "#;
     assert_eq!(both(DEFS, &["opt", "key"], "(list (opt 1) (opt 1 2))"), "(-1 3)");
     assert_eq!(both(DEFS, &["opt", "key"], "(list (key 1) (key 1 :b \"x\"))"), "(none x)");
@@ -250,7 +250,7 @@ fn an_omitted_optional_argument_is_the_niche_the_callee_matches() {
 
 // ---- the places a value is looked at without its type --------------------
 
-/// A niched `Option` handed to the printer prints as `(some ...)`/`none`,
+/// A niched `Option` handed to the printer prints as `(Some ...)`/`None`,
 /// exactly as a boxed one does: as a direct argument (boxed at the `Sexpr`
 /// boundary by `box-option`), as a struct field, as an enum field, as a
 /// `Vector` element, and nested inside a boxed `Option` — the renderer is
@@ -260,36 +260,36 @@ fn a_niched_option_still_prints_as_some_and_none() {
     const DEFS: &str = r#"(use std::num::ParseIntError) 
         (defstruct pair (a Option<int>) (b Option<string>))
         (defstruct gen<T> (v T))
-        (defenum shape (circle Option<f64>) (dot))
-        (defun mk-pair () pair (make-instance 'pair :a (Option::some 1) :b (Option::none)))
-        (defun mk-gen () gen<Option<int>> (make-instance 'gen :v (Option::some 3)))
-        (defun mk-gen-none () gen<Option<int>> (make-instance 'gen :v (Option::none)))
-        (defun mk-shape () shape (shape::circle (Option::some 1.5)))
-        (defun mk-vec () Vector<Option<int>> (let ((v (the Vector<Option<int>> (Vector::new)))) (push v (Option::some 1)) (push v (Option::none)) v))
-        (defun mk-nested () Option<Option<int>> (Option::some (Option::none)))
-        (defun mk-ok () Result<Option<int>,ParseIntError> (Result::ok (Option::some 4)))
-        (defun opt ((b bool)) Option<int> (if b (Option::some 5) (Option::none)))
+        (defenum shape (Circle Option<f64>) (Dot))
+        (defun mk-pair () pair (make-instance 'pair :a (Option::Some 1) :b (Option::None)))
+        (defun mk-gen () gen<Option<int>> (make-instance 'gen :v (Option::Some 3)))
+        (defun mk-gen-none () gen<Option<int>> (make-instance 'gen :v (Option::None)))
+        (defun mk-shape () shape (shape::Circle (Option::Some 1.5)))
+        (defun mk-vec () Vector<Option<int>> (let ((v (the Vector<Option<int>> (Vector::new)))) (push v (Option::Some 1)) (push v (Option::None)) v))
+        (defun mk-nested () Option<Option<int>> (Option::Some (Option::None)))
+        (defun mk-ok () Result<Option<int>,ParseIntError> (Result::Ok (Option::Some 4)))
+        (defun opt ((b bool)) Option<int> (if b (Option::Some 5) (Option::None)))
     "#;
     const NAMES: &[&str] = &["mk-pair", "mk-gen", "mk-gen-none", "mk-shape", "mk-vec", "mk-nested", "mk-ok", "opt"];
-    assert_eq!(both(DEFS, NAMES, "(opt true)"), "(some 5)");
-    assert_eq!(both(DEFS, NAMES, "(opt false)"), "none");
-    assert_eq!(both(DEFS, NAMES, "(mk-pair)"), "#<pair a: (some 1) b: none>");
-    assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<Option<int>> v: (some 3)>");
-    assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<Option<int>> v: none>");
-    assert_eq!(both(DEFS, NAMES, "(mk-shape)"), "(circle (some 1.5))");
-    assert_eq!(both(DEFS, NAMES, "(mk-vec)"), "#((some 1) none)");
-    assert_eq!(both(DEFS, NAMES, "(mk-nested)"), "(some none)");
-    assert_eq!(both(DEFS, NAMES, "(mk-ok)"), "(ok (some 4))");
+    assert_eq!(both(DEFS, NAMES, "(opt true)"), "(Some 5)");
+    assert_eq!(both(DEFS, NAMES, "(opt false)"), "None");
+    assert_eq!(both(DEFS, NAMES, "(mk-pair)"), "#<pair a: (Some 1) b: None>");
+    assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<Option<int>> v: (Some 3)>");
+    assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<Option<int>> v: None>");
+    assert_eq!(both(DEFS, NAMES, "(mk-shape)"), "(Circle (Some 1.5))");
+    assert_eq!(both(DEFS, NAMES, "(mk-vec)"), "#((Some 1) None)");
+    assert_eq!(both(DEFS, NAMES, "(mk-nested)"), "(Some None)");
+    assert_eq!(both(DEFS, NAMES, "(mk-ok)"), "(Ok (Some 4))");
     // In a list, the element's own expectation is `Option<Sexpr>`, so a bare
-    // `(some 5)` *is* the niche `5`; spelled as an `Option<int>` it is boxed
+    // `(Some 5)` *is* the niche `5`; spelled as an `Option<int>` it is boxed
     // for the slot and keeps its wrapper.
-    assert_eq!(both(DEFS, NAMES, "(list (opt true) (opt false))"), "((some 5) none)");
+    assert_eq!(both(DEFS, NAMES, "(list (opt true) (opt false))"), "((Some 5) None)");
 }
 
 /// `macroexpand-1`'s `Option<Sexpr>` was built as a box by the interpreter
 /// even though the type niches (`tests/macro_tools_test.rs` noted the
 /// mismatch); `Heap::alloc_option` builds every Rust-side `Option` the way
-/// its type says, so it is the empty word now — and still prints as `none`.
+/// its type says, so it is the empty word now — and still prints as `None`.
 #[test]
 fn macroexpand_1_result_uses_the_niche() {
     let mut s = Session::new(Load::Prelude);
@@ -299,7 +299,7 @@ fn macroexpand_1_result_uses_the_niche() {
     typelisp::load_prelude(&mut s.heap, &mut chk.borrow_mut(), &mut interp);
     interp.set_checker(std::rc::Rc::clone(&chk));
     let r = typelisp::Reader::new();
-    let vs = r.read_all(&mut s.heap, "(match (macroexpand-1 '(+ 1 2)) ((ok o) o) ((err _) (Option::some 0)))").expect("read");
+    let vs = r.read_all(&mut s.heap, "(match (macroexpand-1 '(+ 1 2)) ((Ok o) o) ((Err _) (Option::Some 0)))").expect("read");
     let mut last = Value::Bool(false);
     for v in vs {
         let tl = chk.borrow_mut().check_form(&mut s.heap, &interp, v).expect("check");
@@ -307,26 +307,26 @@ fn macroexpand_1_result_uses_the_niche() {
             last = val;
         }
     }
-    assert_eq!(last, Value::Empty, "the `none` of a niched Option<Sexpr> is the empty word");
+    assert_eq!(last, Value::Empty, "the `None` of a niched Option<Sexpr> is the empty word");
 }
 
 /// A trace line renders a niched `Option` argument or result by the
-/// function's declared representation — `(some 5)`, not `5`.
+/// function's declared representation — `(Some 5)`, not `5`.
 #[test]
 fn a_traced_call_prints_a_niched_option_by_its_declared_type() {
     let out = eval_string(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *trace-output* (%internal::standard-stream-of *cap*))\n\
-         (defun opt ((o Option<int>)) Option<int> (match o ((some n) (Option::some (+ n 1))) ((none) (Option::none))))\n\
+         (defun opt ((o Option<int>)) Option<int> (match o ((Some n) (Option::Some (+ n 1))) ((None) (Option::None))))\n\
          (trace opt)\n\
-         (opt (Option::some 5))\n\
-         (opt (Option::none))\n\
-         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (opt (Option::Some 5))\n\
+         (opt (Option::None))\n\
+         (match (%internal::stream-take-output-string *cap*) ((Ok s) s) ((Err _) \"<capture failed>\"))",
     );
-    assert!(out.contains("(opt (some 5))"), "{:?}", out);
-    assert!(out.contains("opt returned (some 6)"), "{:?}", out);
-    assert!(out.contains("(opt none)"), "{:?}", out);
-    assert!(out.contains("opt returned none"), "{:?}", out);
+    assert!(out.contains("(opt (Some 5))"), "{:?}", out);
+    assert!(out.contains("opt returned (Some 6)"), "{:?}", out);
+    assert!(out.contains("(opt None)"), "{:?}", out);
+    assert!(out.contains("opt returned None"), "{:?}", out);
 }
 
 /// A niched `Option` has no box to carry a type key, so it cannot be a
@@ -337,7 +337,7 @@ fn a_niched_option_cannot_be_boxed_as_a_trait_object() {
         "(deftrait Speak () (defmethod say (self) string))\n\
          (impl Speak Option<int> (defmethod say (self) string \"opt\"))\n\
          (defun hear ((s :dyn Speak)) string (say s))\n\
-         (hear (the Option<int> (Option::some 1)))",
+         (hear (the Option<int> (Option::Some 1)))",
     );
     assert!(msg.contains("niche-represented Option"), "{}", msg);
 }
@@ -349,9 +349,9 @@ fn a_niched_option_cannot_be_boxed_as_a_trait_object() {
 #[test]
 fn a_downcast_out_of_a_sexpr_reads_the_box_through_a_constructor() {
     const DEFS: &str = r#"
-        (defun opt ((b bool)) Option<int> (if b (Option::some 5) (Option::none)))
+        (defun opt ((b bool)) Option<int> (if b (Option::Some 5) (Option::None)))
         (defun back ((s Sexpr)) int
-          (match s ((the Option<int> (some n)) n) ((the Option<int> (none)) -1) (_ -2)))
+          (match s ((the Option<int> (Some n)) n) ((the Option<int> (None)) -1) (_ -2)))
     "#;
     assert_eq!(both(DEFS, &["opt", "back"], "(list (back (unwrap (list (opt true)))) (back (unwrap (list (opt false)))) (back 7))"), "(-2 -2 -2)");
     assert_eq!(
@@ -362,11 +362,11 @@ fn a_downcast_out_of_a_sexpr_reads_the_box_through_a_constructor() {
     assert!(msg.contains("must name a constructor"), "{}", msg);
 }
 
-/// `eq`/`equal` see the payload: two `some`s of the same fixnum are the same
-/// word, and `none` is never a `some`.
+/// `eq`/`equal` see the payload: two `Some`s of the same fixnum are the same
+/// word, and `None` is never a `Some`.
 #[test]
 fn equality_on_a_niched_option_compares_the_payload() {
-    assert_eq!(eval_ok("(equal (the Option<int> (Option::some 1)) (the Option<int> (Option::some 1)))"), Value::Bool(true));
-    assert_eq!(eval_ok("(equal (the Option<int> (Option::some 1)) (the Option<int> (Option::none)))"), Value::Bool(false));
-    assert_eq!(eval_ok("(equal (the Option<string> (Option::some \"a\")) (the Option<string> (Option::some \"a\")))"), Value::Bool(true));
+    assert_eq!(eval_ok("(equal (the Option<int> (Option::Some 1)) (the Option<int> (Option::Some 1)))"), Value::Bool(true));
+    assert_eq!(eval_ok("(equal (the Option<int> (Option::Some 1)) (the Option<int> (Option::None)))"), Value::Bool(false));
+    assert_eq!(eval_ok("(equal (the Option<string> (Option::Some \"a\")) (the Option<string> (Option::Some \"a\")))"), Value::Bool(true));
 }

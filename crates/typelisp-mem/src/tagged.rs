@@ -76,7 +76,7 @@ pub const LAYOUT_THREE_BIT: u8 = 0;
 pub const LAYOUT_FIXNUM_ONE_BIT: u8 = 1;
 /// [`LAYOUT_FIXNUM_ONE_BIT`]'s words, plus the `Option<T>` niche: an
 /// `Option` whose payload can be told from the empty-list immediate is
-/// *that payload's tagged word* for `some` and [`NIL_WORD`] for `none`,
+/// *that payload's tagged word* for `Some` and [`NIL_WORD`] for `None`,
 /// with no box (`crate::option`). A body compiled under the previous
 /// layout builds and expects boxes for those same types, so it cannot run
 /// under this one.
@@ -114,7 +114,7 @@ pub const IMMEDIATE_FALSE: i64 = 1;
 pub const IMMEDIATE_TRUE: i64 = 2;
 
 /// The empty list as a word — `Value::Empty`'s encoding, and `Option<T>`'s
-/// `none` under the niche. The island writes the same constant.
+/// `None` under the niche. The island writes the same constant.
 pub const NIL_WORD: i64 = (IMMEDIATE_NIL << SMALL_SHIFT) | TAG_IMMEDIATE;
 
 /// Whether `n` survives `encode` as a fixnum.

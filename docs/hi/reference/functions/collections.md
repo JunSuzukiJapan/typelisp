@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -25,12 +25,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | अक्षर-भेद के बिना क्रमण (CL का `string-lessp` आदि)। उभयनिष्ठ उपसर्ग के साथ, छोटा वाला छोटा है |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | `c` की `n` प्रतियों की स्ट्रिंग (CL का `make-string`) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | वह स्थिति जहाँ `sub` पहली बार आता है। **CL के `search` में आर्ग्युमेंट उलटे क्रम में हैं** (`(search pattern sequence)`)। खाली स्ट्रिंग 0 पर मिलती है। कीवर्ड के लिए [अनुक्रमों के कीवर्ड आर्ग्युमेंट](sequences.md#6-कीवर्ड-आर्ग्युमेंट) देखें |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | पहली स्थिति जहाँ वे भिन्न हैं। `none` केवल तब जब वे `equal` हों। यदि एक दूसरे का उपसर्ग है, तो छोटे वाले का अंत। कीवर्ड ऊपर जैसे |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | पहली स्थिति जहाँ वे भिन्न हैं। `None` केवल तब जब वे `equal` हों। यदि एक दूसरे का उपसर्ग है, तो छोटे वाले का अंत। कीवर्ड ऊपर जैसे |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | `bag` में शामिल कैरेक्टर को दोनों सिरों से / बाएँ से / दाएँ से हटाता है (CL का `string-trim` आदि)। `bag` के बिना, रिक्त स्थान `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` पर बाँटता है। CL में कोई समकक्ष नहीं है। लगातार विभाजक खाली तत्व बनाते हैं। `sep` खाली हो तो panic करता है |
 | `to-string` | `(to-string x)` | `T→string` | `~a` की तरह स्ट्रिंग में बदलता है। `int`/`i32`/`f64`/`bool`/`char`/`string` के लिए लागू है (CL का `princ-to-string`) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | UTF-8 के रूप में एन्कोड करता है (हर तत्व 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | डीकोड करता है। यदि वह वैध UTF-8 नहीं है तो `none` |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | डीकोड करता है। यदि वह वैध UTF-8 नहीं है तो `None` |
 
 ## 2. कैरेक्टर `char`
 
@@ -76,7 +76,7 @@
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | तत्व `i` पढ़ता है। सीमा से बाहर panic करता है |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | तत्व `i` बदलता है। सीमा से बाहर panic करता है। `(setf (get v i) x)` भी लिखा जा सकता है |
 | `len` | `(len v)` | `Vector<T>→int` | तत्वों की संख्या |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | अंतिम तत्व हटाकर लौटाता है। खाली हो तो `none` (`get`/`set` के विपरीत, यह panic नहीं करता) ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | अंतिम तत्व हटाकर लौटाता है। खाली हो तो `None` (`get`/`set` के विपरीत, यह panic नहीं करता) ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` लागू करने वाला इटरेटर बनाता है |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | यदि `x` से `eql` कोई तत्व नहीं है तो अंत में जोड़ता है (CL का `pushnew`। किसी जगह को फिर से लिखना नहीं पड़ता, इसलिए मैक्रो नहीं, मेथड है) |
 
@@ -134,7 +134,7 @@
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 `equal` टेबल में दो कुंजियाँ एक हैं या नहीं, यह ऑब्जेक्ट की पहचान नहीं बल्कि **कुंजी का टाइप स्वयं**
@@ -165,8 +165,8 @@
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL का `adjust-array`। रैंक नहीं बदल सकता। जो तत्व सीमा में रहते हैं वे अपने इंडेक्स पर रखे जाते हैं, और नए सेल `init` पाते हैं। CL के विपरीत, यह ऐरे को नहीं लौटाता (इस भाषा का हर ऐरे समायोज्य है, इसलिए लौटाने को दूसरा ऐरे नहीं है) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL का `vector-push-extend`। fill pointer के बिना panic करता है |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | `push-extend` जैसा ही ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL का `vector-pop`। खाली हो तो `none` ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer (यदि नहीं है तो `none`)। `(setf a::fill-pointer …)` से लिखा जा सकता है |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | CL का `vector-pop`। खाली हो तो `None` ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer (यदि नहीं है तो `None`)। `(setf a::fill-pointer …)` से लिखा जा सकता है |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | रो-मेजर क्रम में इटरेटर। यदि fill pointer है तो वहीं रुकता है |
 
 - **इंडेक्स `Vector<int>` हैं।** मेथड "अंत में एक ही टाइप के आर्ग्युमेंट कितनी भी बार दोहराए जाएँ" घोषित नहीं कर सकता, और `aref` शॉर्टहैंड उस अंतर को पाटता है।
@@ -249,10 +249,10 @@
 | `new` | `(Deque::new)` | `()→Deque<T>` | खाली अनुक्रम बनाता है |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | आगे / पीछे जोड़ता है |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | `push-back` जैसा ही ([`Push`](traits.md#4-push-trait-तत्व-जोड़ना) trait का मेथड) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व निकालकर लौटाता है। खाली हो तो `none` |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व निकालकर लौटाता है। खाली हो तो `None` |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | `pop-back` जैसा ही ([`Pop`](traits.md#5-pop-trait-तत्व-निकालना) trait का मेथड) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व देखता है (निकाले बिना) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | आगे से `i`-वाँ। सीमा के बाहर `none` |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | आगे से `i`-वाँ। सीमा के बाहर `None` |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`-वें पर ऊपर लिखता है। सीमा के बाहर panic |
 | `count` | `(count d)` | `Deque<T>→int` | तत्वों की संख्या |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | सब हटा देता है |
@@ -262,5 +262,5 @@
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

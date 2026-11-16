@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # मॉड्यूल और फ़ाइल संरचना
 
 यह गाइड बताती है कि कई फ़ाइलों से बना प्रोग्राम कैसे जोड़ा जाता है। विस्तृत नियम [सिंटैक्स संदर्भ](../reference/syntax.md#310-module--use--नेमस्पेस) के खंड 3.10 से 3.13 में हैं।
@@ -121,7 +121,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; इस मॉड्यूल का first => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; मानक लाइब्रेरी का first => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; मानक लाइब्रेरी का first => (Some 1)
 ```
 
 `shadow` के बाद उस मॉड्यूल में `first` लिखना आपकी अपनी परिभाषा को इंगित करता है। मानक लाइब्रेरी का

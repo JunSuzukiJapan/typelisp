@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 并发
 
 在 typelisp 中，通过启动**任务**（轻量级线程）让多项工作并发进行，任务之间通过**通道**传递值。这与 Go 的
@@ -53,7 +53,7 @@ got 30
 ```
 
 - `(send ch v)` 发送。通道满时等待到有空位。
-- `(recv ch)` 接收。等待到有值到达。返回值是 `Option<T>`，通道关闭且为空后返回 `none`。
+- `(recv ch)` 接收。等待到有值到达。返回值是 `Option<T>`，通道关闭且为空后返回 `None`。
 - 用 `doiter` 遍历通道，会一直接收值直到通道关闭。也可以直接传给 `map` 或 `filter`。
 - 向已关闭的通道 `send` 会 panic。
 

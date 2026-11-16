@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Module và cách bố trí tệp
 
 Tài liệu này giải thích cách ghép một chương trình gồm nhiều tệp. Các quy tắc chi tiết nằm ở các mục
@@ -130,7 +130,7 @@ Khi bạn quyết định module sẽ dùng định nghĩa của riêng mình, h
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first của module này => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first của thư viện chuẩn => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first của thư viện chuẩn => (Some 1)
 ```
 
 Sau `shadow`, viết `first` trong module đó sẽ chỉ định nghĩa của riêng bạn. Để dùng `first` của thư

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 트레이트
 
 트레이트는 "이 타입은 이런 연산을 지원한다"는 약속이다. 트레이트를 쓰면 여러 타입이 같은 이름의 연산을 공유할 수
@@ -133,12 +133,12 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-300, 900, 100 순서로 `money` 값이 든 `Vector`를 주면 `(some 900 yen)`을 반환한다.
+300, 900, 100 순서로 `money` 값이 든 `Vector`를 주면 `(Some 900 yen)`을 반환한다.
 
 ## 5. `:dyn`: 타입이 다른 값을 함께 다루기
 

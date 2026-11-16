@@ -418,7 +418,7 @@ well_known_symbols! {
     TAG_INT => "tag-int"
 
     "Appended for the `Option<T>` niche (2026-09-17). `(some-of REPR E)` is
-     `E`'s value as a tagged field word (`none` stays `sexpr`'s empty-list
+     `E`'s value as a tagged field word (`None` stays `sexpr`'s empty-list
      construct); `(pat-some REPR P)` rejects the empty-list word and applies
      `P` to the payload it untags by `REPR`; `(box-option KEY E)` puts a
      niched value into the `BoxedObj::Enum` box a `Sexpr` slot needs. The

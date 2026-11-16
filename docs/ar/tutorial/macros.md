@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # الماكرو (Macros)
 
 الماكرو دالة تأخذ برنامجًا وتعيد برنامجًا. وتتيح لك الماكرو ابتكار صياغة جديدة لا تستطيع الدوال التعبير
@@ -41,7 +41,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. تُفحص أنواع التوسيعات أيضًا
@@ -117,15 +117,15 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 ## 5. التوسيع بشكل مختلف بحسب الوسائط
 
 جسم الماكرو شيفرة typelisp عادية، فيمكنه فحص وسائطه بـ `if` أو `match` وبناء توسيع مختلف. والوسائط بيانات
-تعبيرات رمزية (`Option<Sexpr>`)، والقائمة الفارغة هي `none`.
+تعبيرات رمزية (`Option<Sexpr>`)، والقائمة الفارغة هي `None`.
 
 لنصنع `my-and` التي تعيد `true` إذا كانت كل شروطها صحيحة.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; لا وسائط
-    ((cons f more)
+    ((None) 'true)                                    ; لا وسائط
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; واحد فقط
          `(if ,f (my-and ,@more) false)))             ; اثنان أو أكثر
@@ -135,7 +135,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` نمط يأخذ رأس القائمة في `f` وباقيها في `more`.
+- `(Cons f more)` نمط يأخذ رأس القائمة في `f` وباقيها في `more`.
 - تختبر `sexpr-null` ما إذا كانت بيانات التعبير الرمزي قائمة فارغة.
 - فرع `_` الأخير لازم لأن لبيانات التعبيرات الرمزية صورًا غير القوائم (أعداد وسلاسل نصية وهكذا)، ويتطلب
   `match` تغطيتها أيضًا. ووسيط `&rest` قائمة دائمًا، فهذا الفرع لا يعمل فعليًا أبدًا.

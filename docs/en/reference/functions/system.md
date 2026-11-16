@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -54,20 +54,20 @@ not say which to take. `encode-universal-time` returns one of the two answers fo
 | Name | Form | Type | Description |
 |---|---|---|---|
 | `command-line-args` | `(command-line-args)` | `()→Vector<string>` | The command line. **Element 0 is the program name** |
-| `getenv` | `(getenv name)` | `string→Option<string>` | An environment variable. `none` if unset or not UTF-8 |
+| `getenv` | `(getenv name)` | `string→Option<string>` | An environment variable. `None` if unset or not UTF-8 |
 | `home-directory` | `(home-directory)` | `()→Option<string>` | `$HOME`. The basis of `user-homedir-pathname` ([Pathnames](streams-files.md#92-functions)) |
 | `lisp-implementation-type` | `(lisp-implementation-type)` | `()→string` | `"typelisp"` |
 | `lisp-implementation-version` | `(lisp-implementation-version)` | `()→string` | The implementation's version |
 | `machine-type` | `(machine-type)` | `()→string` | The CPU architecture (`x86_64` / `aarch64` …). The value of the **build target** |
 | `machine-instance` | `(machine-instance)` | `()→Option<string>` | The host name |
-| `machine-version` | `(machine-version)` | `()→Option<string>` | The name of the hardware **running now** (`Apple M1` / `Intel(R) Xeon(R) …`). `none` where it cannot be determined |
+| `machine-version` | `(machine-version)` | `()→Option<string>` | The name of the hardware **running now** (`Apple M1` / `Intel(R) Xeon(R) …`). `None` where it cannot be determined |
 | `software-type` | `(software-type)` | `()→string` | The OS (`macos` / `linux` …) |
 | `software-version` | `(software-version)` | `()→Option<string>` | The OS release (`uname -r`, for example `24.6.0`) |
-| `short-site-name` | `(short-site-name)` | `()→Option<string>` | A short name for the installation site. **Always `none`** |
-| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Likewise, a long name. **Always `none`** |
+| `short-site-name` | `(short-site-name)` | `()→Option<string>` | A short name for the installation site. **Always `None`** |
+| `long-site-name` | `(long-site-name)` | `()→Option<string>` | Likewise, a long name. **Always `None`** |
 
 The ones returning `Option` are items for which CL allows `NIL` (*or nil if no such name can be
-determined*). POSIX has no place to record site names, so they are always `none`; SBCL returns the
+determined*). POSIX has no place to record site names, so they are always `None`; SBCL returns the
 same. Note the difference between `machine-type` and `machine-version`: the former is the architecture
 this binary was **built** for, the latter is the chip **running** it now.
 
@@ -135,7 +135,7 @@ just evaluates `form`**: a degenerate behavior CLHS explicitly allows, so that s
 hang on a prompt no one can answer.
 
 The `$VISUAL` / `$EDITOR` of `ed` is split at whitespace, so `EDITOR="code -w"` works. If neither is
-set, the result is `err`: it does not guess `vi`. The line number is passed first, in the form `+N`.
+set, the result is `Err`: it does not guess `vi`. The line number is passed first, in the form `+N`.
 
 `dribble` records all three ways the session's output leaves the process: what
 `print`/`println`/`format` write, what is written to streams connected to standard output, and the
@@ -144,14 +144,14 @@ lines typed into the REPL along with the values the REPL prints back.
 ## 6. Parsing and evaluation
 
 All of these handle text and data from run time (which the program itself does not control), so on
-failure they return the `err` of a `Result` rather than panicking. The error types are concrete types
+failure they return the `Err` of a `Result` rather than panicking. The error types are concrete types
 per operation ([Error types](option-result.md#3-error-types-and-the-error-trait)).
 
 | Name | Form | Type | Description |
 |---|---|---|---|
-| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL's `parse-integer`. Skips leading and trailing whitespace (the same set as `trim`), reads at most one sign `+`/`-`, then digits in base `radix` (default 10, 2 to 36; digits above 10 in either case). There is no limit on the number of digits (`int`). Any other characters left over give `err`. With `:junk-allowed true`, it stops at the first non-digit and ignores the rest, but gives `err` if there is not a single digit (corresponding to CL's `nil`). It does not return CL's second value (the position where reading ended). A `radix` out of range panics (a mistake by the caller, not in the text) |
+| `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL's `parse-integer`. Skips leading and trailing whitespace (the same set as `trim`), reads at most one sign `+`/`-`, then digits in base `radix` (default 10, 2 to 36; digits above 10 in either case). There is no limit on the number of digits (`int`). Any other characters left over give `Err`. With `:junk-allowed true`, it stops at the first non-digit and ignores the rest, but gives `Err` if there is not a single digit (corresponding to CL's `nil`). It does not return CL's second value (the position where reading ended). A `radix` out of range panics (a mistake by the caller, not in the text) |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | A floating-point number. Also accepts `inf`/`nan` |
-| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Reads one `Sexpr` from `s` (with the same reader that reads source code). Unbalanced parentheses, unterminated strings and the like give `err`. Reading from a stream is `read-sexpr` ([Streams](streams-files.md#6-generic-functions-and-file-operations)) |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | Reads one `Sexpr` from `s` (with the same reader that reads source code). Unbalanced parentheses, unterminated strings and the like give `Err`. Reading from a stream is `read-sexpr` ([Streams](streams-files.md#6-generic-functions-and-file-operations)) |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` plus **the position where reading ended**. `(car r)` is the value and `(cdr r)` the position of the next character to read. `start` defaults to 0 |
 | `read-from-string-preserving-whitespace` | Same as above | Same as above | The same, but does not consume the whitespace that ended the datum. The difference shows in the returned position |
 | `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Type-checks `form` at run time and evaluates it. Follows CL's `eval` |
@@ -164,9 +164,9 @@ a time a loop rather than a rescan:
 (let ((s "1 2 3") (i 0) (going true))
   (while going
     (match (read-from-string s i)
-      ((ok p) (progn (println "~s" (car p)) (setf i (cdr p))
+      ((Ok p) (progn (println "~s" (car p)) (setf i (cdr p))
                      (if (>= i (length s)) (progn (setf going false) ()) ()) ()))
-      ((err e) (progn (setf going false) ())))))
+      ((Err e) (progn (setf going false) ())))))
 ```
 
 The difference made by `preserving-whitespace` is **one whitespace character**: CL's `read` consumes
@@ -186,23 +186,23 @@ definitions (`defun`/`defvar`/`defstruct`/`defenum`/`defmacro`) can be evaluated
 registered in the global environment immediately and permanently.
 
 ```lisp
-(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(eval (unwrap (read "(+ 40 2)")))                 ; => (Ok 42)
 (defvar (x i32) 10)
-(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; the global x is visible
-(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; returns the defined name
-(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; the definition just made is visible
+(eval (unwrap (read "(+ x 5)")))                  ; => (Ok 15)  ; the global x is visible
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (Ok sq)  ; returns the defined name
+(eval (unwrap (read "(sq 9)")))                   ; => (Ok 81)  ; the definition just made is visible
 ```
 
 - **Return value**: for an expression, the result as an `Option<Sexpr>`; for a definition, the symbol of
   the defined name (as in CL). To use the result, take the `Sexpr` apart with `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Differences due to static types (important)**: CL returns the actual value of the result, but in
   this language the return type can only be uniformly `Result<Option<Sexpr>,EvalError>`. Also, **code
   written statically cannot refer ahead to names that `eval` defines at run time**: a `(sq 9)` written
   directly in a file is checked before the `eval` that defines `sq` runs, and is "undefined". However,
   **later `eval`s can see it** (their type check runs at run time, after the definition). The REPL checks
   and runs one line at a time, so a name defined with `eval` can be called directly from the next line.
-- **Errors**: type errors and syntax errors return `err` (they do not panic). **Run-time panics** in the
+- **Errors**: type errors and syntax errors return `Err` (they do not panic). **Run-time panics** in the
   evaluated code (division by zero and so on) propagate as they would from code written directly. The
   cleanup of any `unwind-protect` in between runs
   ([Syntax Reference chapter 8](../syntax.md#8-non-local-exits-catch--throw--unwind-protect)).
@@ -253,7 +253,7 @@ or static method.
 
 **The value is decided at check time**: if the name does not resolve to any definition, it is a
 check-time error (like referring to an undefined variable). If it resolves but there is no docstring,
-the result is `Option::none`.
+the result is `Option::None`.
 
 **Not covered**:
 
@@ -273,19 +273,19 @@ How to define macros is in [Syntax Reference 3.14](../syntax.md#314-defmacro--ma
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | A new symbol. Its name is `" <prefix><n>"`, where `n` is `*gensym-counter*`. A leading space cannot be written in source, so the generated bindings never clash with written names |
 | `*gensym-counter*` | Variable | `int` | The number `gensym` uses next. As in CL, it can be read and set |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expands a macro call one step. `none` means "not a macro call" |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expands a macro call one step. `None` means "not a macro call" |
 | `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Repeats until it is no longer a macro |
 
 `macroexpand-1` returns an `Option`. CL reports "whether it expanded" as a second return value, but
-there are no multiple values, so `none` plays that role. **A macro that expands into a call of itself
+there are no multiple values, so `None` plays that role. **A macro that expands into a call of itself
 can never be confused with a non-macro.** One step of expansion is the same one the type checker uses,
 so what the program sees and what the checker saw never diverge.
 
 ```lisp
 (defmacro twice (x) `(+ ,x ,x))
-(macroexpand-1 '(twice 5))   ; => (ok (+ 5 5))
-(macroexpand-1 '(+ 1 2))     ; => (ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
-(macroexpand '(when true 1)) ; => (ok (if true (progn 1 ()) ()))
+(macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
+(macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
+(macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
 ```
 
 What CL has and this language does not: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

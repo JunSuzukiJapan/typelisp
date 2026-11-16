@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Łańcuchy znaków, znaki i kolekcje
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` i `Deque<T>`.
@@ -25,12 +25,12 @@
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | Porządek bez rozróżniania wielkości liter (`string-lessp` i tak dalej z CL). Przy wspólnym prefiksie krótszy jest mniejszy |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | Łańcuch złożony z `n` kopii `c` (`make-string` z CL) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | Pozycja, w której `sub` pojawia się po raz pierwszy. **`search` z CL ma argumenty w odwrotnej kolejności** (`(search pattern sequence)`). Pusty łańcuch jest znajdowany na pozycji 0. Słowa kluczowe opisano w [argumentach kluczowych funkcji na sekwencjach](sequences.md#6-argumenty-kluczowe) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | Pierwsza pozycja, w której się różnią. `none` tylko gdy są `equal`. Jeśli jeden jest prefiksem drugiego, koniec krótszego. Słowa kluczowe jak wyżej |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | Pierwsza pozycja, w której się różnią. `None` tylko gdy są `equal`. Jeśli jeden jest prefiksem drugiego, koniec krótszego. Słowa kluczowe jak wyżej |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | Usuwa znaki zawarte w `bag` z obu końców / z lewej / z prawej (`string-trim` i tak dalej z CL). Bez `bag` białe znaki `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | Dzieli w `sep`. CL nie ma odpowiednika. Kolejne separatory dają puste elementy. Powoduje panic, jeśli `sep` jest pusty |
 | `to-string` | `(to-string x)` | `T→string` | Konwertuje na łańcuch tak jak `~a`. Zaimplementowane dla `int`/`i32`/`f64`/`bool`/`char`/`string` (`princ-to-string` z CL) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | Koduje jako UTF-8 (każdy element 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Dekoduje. `none`, jeśli to nie jest poprawny UTF-8 |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Dekoduje. `None`, jeśli to nie jest poprawny UTF-8 |
 
 ## 2. Znaki `char`
 
@@ -77,7 +77,7 @@ elementu, a każde obliczenie tworzy nowy wektor). Jest też drukowana jako `#(1
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Odczytuje element `i`. Powoduje panic poza zakresem |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Zmienia element `i`. Powoduje panic poza zakresem. Można też napisać `(setf (get v i) x)` |
 | `len` | `(len v)` | `Vector<T>→int` | Liczba elementów |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Usuwa ostatni element i go zwraca. `none`, jeśli pusty (w przeciwieństwie do `get`/`set` nie powoduje panic) (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Usuwa ostatni element i go zwraca. `None`, jeśli pusty (w przeciwieństwie do `get`/`set` nie powoduje panic) (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Tworzy iterator implementujący `Iter` |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Dodaje `x` na koniec, jeśli nie ma elementu `eql` z nim (`pushnew` z CL. Nie musi przepisywać miejsca, więc jest metodą, a nie makrem) |
 
@@ -138,7 +138,7 @@ z powodu `NaN`).
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 W tablicy `equal` o tym, czy dwa klucze są tym samym, decyduje **sam typ klucza** (`sxhash` oraz `equal`
@@ -171,8 +171,8 @@ składni](../syntax.md#1-elementy-leksykalne)).
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` z CL. Rangi nie można zmienić. Elementy, które pozostają w zakresie, są zachowane pod swoimi indeksami, a nowe komórki dostają `init`. W przeciwieństwie do CL nie zwraca tablicy (każda tablica w tym języku jest dostosowywalna, więc nie ma drugiej tablicy do zwrócenia) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` z CL. Powoduje panic bez wskaźnika wypełnienia |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | To samo co `push-extend` (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` z CL. `none`, jeśli pusta (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Wskaźnik wypełnienia (`none`, jeśli go nie ma). Można go zapisać za pomocą `(setf a::fill-pointer …)` |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` z CL. `None`, jeśli pusta (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | Wskaźnik wypełnienia (`None`, jeśli go nie ma). Można go zapisać za pomocą `(setf a::fill-pointer …)` |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Iterator w porządku wierszowym (row-major). Zatrzymuje się na wskaźniku wypełnienia, jeśli jest |
 
 - **Indeksy to `Vector<int>`.** Metoda nie może zadeklarować „tego samego typu argumentu powtórzonego dowolną
@@ -265,10 +265,10 @@ Ciąg, do którego można dodawać i z którego można wyjmować z obu końców 
 | `new` | `(Deque::new)` | `()→Deque<T>` | Tworzy pusty ciąg |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Dodaje na początek / koniec |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | To samo co `push-back` (metoda traitu [`Push`](traits.md#4-trait-push-dodawanie-elementów)) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Wyjmuje element z początku / końca i go zwraca. `none`, gdy pusty |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Wyjmuje element z początku / końca i go zwraca. `None`, gdy pusty |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | To samo co `pop-back` (metoda traitu [`Pop`](traits.md#5-trait-pop-wyjmowanie-elementów)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Podgląda element z początku / końca (bez wyjmowania) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-ty od początku. `none` poza zakresem |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-ty od początku. `None` poza zakresem |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Nadpisuje `i`-ty. Panic poza zakresem |
 | `count` | `(count d)` | `Deque<T>→int` | Liczba elementów |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | Usuwa wszystko |
@@ -278,5 +278,5 @@ Ciąg, do którego można dodawać i z którego można wyjmować z obu końców 
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```

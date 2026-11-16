@@ -126,7 +126,7 @@ fn a_symbol_literal_pattern_compares_the_interned_symbol() {
 #[test]
 fn a_symbol_literal_pattern_works_inside_a_sexpr_pattern() {
     both(
-        r#"(defun f ((s Option<Sexpr>)) int (match s ((sym 'foo) 1) ((str "hi") 2) ((int 42) 3) (_ 0)))"#,
+        r#"(defun f ((s Option<Sexpr>)) int (match s ((Sym 'foo) 1) ((Str "hi") 2) ((Int 42) 3) (_ 0)))"#,
         r#"(+ (* 100 (f 'foo)) (+ (* 10 (f "hi")) (f 'zz)))"#,
         digits(1, 2, 0),
     );
@@ -136,7 +136,7 @@ fn a_symbol_literal_pattern_works_inside_a_sexpr_pattern() {
 ///
 /// `Eq` on `sexpr` is `eq` (`prelude.rs`) — CL's identity — which *is*
 /// content equality for every immediate: an interned symbol, an integer, a
-/// `char`, a `bool`. So these four need no `(sym ...)`/`(int ...)` wrapper.
+/// `char`, a `bool`. So these four need no `(Sym ...)`/`(Int ...)` wrapper.
 #[test]
 fn immediate_literals_match_a_sexpr_scrutinee_directly() {
     both(
@@ -159,7 +159,7 @@ fn a_boxed_literal_against_a_sexpr_scrutinee_matches_by_content() {
     );
     // The variant spelling still destructures and compares the `string`.
     both(
-        r#"(defun f ((s Sexpr)) int (match s ((str "hi") 1) (_ 0)))"#,
+        r#"(defun f ((s Sexpr)) int (match s ((Str "hi") 1) (_ 0)))"#,
         r#"(+ (* 10 (f "hi")) (f "no"))"#,
         10,
     );
@@ -261,10 +261,10 @@ fn a_type_without_eq_is_refused_at_the_pattern() {
 #[test]
 fn a_bare_variant_name_is_that_variant() {
     both(
-        "(defenum color (red) (blue))\
+        "(defenum color (Red) (Blue))\
          \n(use color::*)\
-         \n(defun f ((c color)) int (match c (red 1) (blue 2)))",
-        "(+ (* 10 (f (red))) (f (blue)))",
+         \n(defun f ((c color)) int (match c (Red 1) (Blue 2)))",
+        "(+ (* 10 (f (Red))) (f (Blue)))",
         12,
     );
 }
@@ -274,10 +274,10 @@ fn a_bare_variant_name_is_that_variant() {
 #[test]
 fn bare_variant_names_count_toward_exhaustiveness() {
     let e = err(
-        "(defenum color (red) (blue))\
+        "(defenum color (Red) (Blue))\
          \n(use color::*)\
-         \n(defun f ((c color)) int (match c (red 1)))\
-         \n(f (red))",
+         \n(defun f ((c color)) int (match c (Red 1)))\
+         \n(f (Red))",
     );
     assert!(e.contains("non-exhaustive"), "{}", e);
 }
@@ -287,10 +287,10 @@ fn bare_variant_names_count_toward_exhaustiveness() {
 #[test]
 fn a_bare_name_for_a_variant_with_fields_is_an_arity_error() {
     let e = err(
-        "(defenum shape (dot) (circle int))\
+        "(defenum shape (Dot) (Circle int))\
          \n(use shape)\
-         \n(defun f ((s shape)) int (match s (dot 0) (circle 1)))\
-         \n(f (dot))",
+         \n(defun f ((s shape)) int (match s (Dot 0) (Circle 1)))\
+         \n(f (Dot))",
     );
     assert!(e.contains("field"), "{}", e);
 }
@@ -301,13 +301,13 @@ fn a_bare_name_for_a_variant_with_fields_is_an_arity_error() {
 #[test]
 fn a_bare_name_that_names_no_variant_is_an_error() {
     let e = err(
-        "(defenum color (red) (blue))\
+        "(defenum color (Red) (Blue))\
          \n(use color::*)\
          \n(defun f ((n int)) int (match n (blues 1)))",
     );
     assert!(e.contains("`blues` is not a variant of `int`"), "{}", e);
-    let e = err("(defun f ((o Option<int>)) int (match o (None 0) ((some v) v)))");
-    assert!(e.contains("`None` is not a variant of `Option<int>`"), "{}", e);
+    let e = err("(defun f ((o Option<int>)) int (match o (none 0) ((Some v) v)))");
+    assert!(e.contains("`none` is not a variant of `Option<int>`"), "{}", e);
 }
 
 // ---- scrutinees with no variants -----------------------------------------

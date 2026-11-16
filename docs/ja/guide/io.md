@@ -12,14 +12,14 @@
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; ファイルが無ければ:
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
 失敗しないと分かっている場面や、失敗したら止まってよい小さなスクリプトでは `unwrap` で
-取り出せます。`err` だった場合は `panic` します。
+取り出せます。`Err` だった場合は `panic` します。
 
 ## 2. ファイル全体を読み書きする
 
@@ -28,8 +28,8 @@
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. ストリームで読み書きする
@@ -44,23 +44,23 @@
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; 1 行ずつ読む
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - 開く向きは `direction-input`（読む）・`direction-output`（書く。既存の内容は消える）・
   `direction-append`（末尾に追記）の 3 つです。
-- `read-line` はファイルの終わりで `none` を返します。
+- `read-line` はファイルの終わりで `None` を返します。
 - `with-open-file` を使わずに `open-file` で開いた場合は、`close` を必ず呼んでください。
   GC はストリームを閉じません。
 
@@ -76,7 +76,7 @@
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### 標準入出力
@@ -93,8 +93,8 @@
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -106,8 +106,8 @@
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; 拡張子だけ差し替える
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -146,14 +146,14 @@
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; 相手が閉じた
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; 相手が閉じた
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` はこの機械からの接続だけを受け、`"0.0.0.0"` はすべてのインタフェースで受けます。
@@ -168,8 +168,8 @@
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 時間の制限をかけるときは `:timeout`（秒）を渡します。
@@ -178,13 +178,13 @@
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; 次の読みに時計をかける
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; 次の読みに時計をかける
 ```
 
 ### 相手が切断したとき
 
 接続の相手がリセットしたり途中で切ったりしても、`panic` にはなりません。以降の読みは
-`none` を返し、書き込みは黙って捨てられます。きれいに閉じられたのか失敗したのかを区別したい
+`None` を返し、書き込みは黙って捨てられます。きれいに閉じられたのか失敗したのかを区別したい
 ときは `(socket-error c)` を調べます。
 
 ## 6. 名前解決（DNS）
@@ -193,13 +193,13 @@
 渡せば、その中で解決されます。解決は別のスレッドで行われるので、待っている間も他のタスクは
 走ります。名前が複数のアドレスを持つ場合は順に接続を試します。
 
-解決できなかった場合は `err` が返ります。
+解決できなかった場合は `Err` が返ります。
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -211,12 +211,12 @@
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 TLS のサーバは `tls-listen` に証明書と秘密鍵のファイル（PEM）を渡して作ります。
@@ -225,8 +225,8 @@ TLS のサーバは `tls-listen` に証明書と秘密鍵のファイル（PEM�
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; TCP の serve をそのまま使える
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; TCP の serve をそのまま使える
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 自己署名の証明書で試すときは、クライアント側で `:ca-file "cert.pem"` を渡してその証明書を
@@ -244,8 +244,8 @@ UDP はストリームではなく、データグラムを 1 つずつ送受信�
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -254,5 +254,5 @@ UDP はストリームではなく、データグラムを 1 つずつ送受信�
 ## 9. Unix ドメインソケット
 
 `unix-listen` / `unix-connect` にソケットファイルのパスを渡します。得られる値は TCP と同じ
-`socket-stream` です。`unix-listen` はファイルが既にあると `err` を返します。待ち受けを
+`socket-stream` です。`unix-listen` はファイルが既にあると `Err` を返します。待ち受けを
 `close` するとファイルは消えます。

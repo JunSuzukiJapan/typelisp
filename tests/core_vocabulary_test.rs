@@ -356,7 +356,7 @@ fn patterns() {
         // The empty list. Its own node rather than `Sexpr`'s variant 0:
         // the empty list outlives `nil` (docs/dev/null-elimination-plan.md).
         "(match (var v) sexpr ((pat-empty) (int-any-width 0)) ((pat-wild) (int-any-width 1)))",
-        // `Option<Sexpr>`'s `(some P)`: reject the empty list, then match
+        // `Option<Sexpr>`'s `(Some P)`: reject the empty list, then match
         // `P` against the same word (the niche makes them one value).
         "(match (var v) sexpr ((pat-nonempty (pat-bind x)) (var x)) ((pat-empty) (int-any-width 0)))",
         "(match (var v) int-any-width ((pat-bind x) (var x)))",
@@ -444,7 +444,7 @@ fn top_level() {
         // bridge reads a pattern's field kinds from.
         "(defstruct point (int-any-width int-any-width))",
         "(defenum m::color (red green blue) (() () ()))",
-        "(defenum option (none some) (() (sexpr)))",
+        "(defenum option (None Some) (() (sexpr)))",
         "(module m (defvar m::x int-any-width false (int-any-width 1)))",
         // A C function, declared. Fields 3-4 are `defun`'s own; field 2 is the
         // library to look the symbol up in (`()` for "the running process"),

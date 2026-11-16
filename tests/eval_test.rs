@@ -62,26 +62,26 @@ fn defun_and_call() {
 #[test]
 fn unwrap_or_some() {
     let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
-                 (match o ((some v) v) ((none) d))) \
-               (unwrap-or (Option::some 5) 0)";
+                 (match o ((Some v) v) ((None) d))) \
+               (unwrap-or (Option::Some 5) 0)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
 fn unwrap_or_none() {
     let src = "(defun unwrap-or ((o Option<int>) (d int)) int \
-                 (match o ((some v) v) ((none) d))) \
-               (unwrap-or (Option::none) 9)";
+                 (match o ((Some v) v) ((None) d))) \
+               (unwrap-or (Option::None) 9)";
     assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn result_match() {
     let prog = "(use std::num::ParseIntError) (defun unwrap-i ((r Result<int,ParseIntError>)) int \
-                  (match r ((ok v) v) ((err e) (panic \"err\")))) ";
-    assert_eq!(eval_ok(&format!("{} (unwrap-i (Result::ok 9))", prog)), Value::Int(9));
+                  (match r ((Ok v) v) ((Err e) (panic \"err\")))) ";
+    assert_eq!(eval_ok(&format!("{} (unwrap-i (Result::Ok 9))", prog)), Value::Int(9));
     assert_eq!(
-        run(&format!("(use std::num::ParseIntError) {} (unwrap-i (Result::err (ParseIntError::ParseIntError \"boom\")))", prog)),
+        run(&format!("(use std::num::ParseIntError) {} (unwrap-i (Result::Err (ParseIntError::ParseIntError \"boom\")))", prog)),
         Err(EvalError::Panic("err".into()))
     );
 }
@@ -442,8 +442,8 @@ fn float_sexpr_constructs_and_extracts_through_a_heap_boxed_value() {
     // `BoxedObj`) — this exercises `Heap::alloc_f64`/`construct_sexpr_core`'s
     // `SEXPR_F64` arm end to end, not just the mem-layer plumbing
     // `mem_test.rs` covers.
-    assert_sexpr_eq("(f64 3.5)", |h| h.alloc_f64(3.5));
-    assert_sexpr_eq("(sexpr-cons (f64 1.5) ())", |h| {
+    assert_sexpr_eq("(F64 3.5)", |h| h.alloc_f64(3.5));
+    assert_sexpr_eq("(sexpr-cons (F64 1.5) ())", |h| {
         let f = h.alloc_f64(1.5);
         h.cons(f, Value::Empty).unwrap()
     });
@@ -459,17 +459,17 @@ fn sexpr_cons_car_cdr_mirror_the_user_facing_ops() {
     // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's `Sexpr` cons/nil
     // operations — the free `cons`/`car`/`cdr` names are the generic `cons<T,U>`
     // pair now (Phase 4b), so a `Sexpr` list is built and walked here.
-    assert_sexpr_eq("(sexpr-cons (int 1) ())", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
-    assert_sexpr_eq("(sexpr-car (sexpr-cons (int 1) ()))", |_| Value::Int(1));
-    assert_sexpr_eq("(sexpr-cdr (sexpr-cons (int 1) ()))", |_| Value::Empty);
+    assert_sexpr_eq("(sexpr-cons (Int 1) ())", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
+    assert_sexpr_eq("(sexpr-car (sexpr-cons (Int 1) ()))", |_| Value::Int(1));
+    assert_sexpr_eq("(sexpr-cdr (sexpr-cons (Int 1) ()))", |_| Value::Empty);
 }
 
 #[test]
 fn sexpr_car_and_cdr_of_a_non_cons_atom_panic() {
     // An *atom* is a type confusion, so it still panics — CL rejects
     // `(car 5)` too.
-    assert_eq!(run("(sexpr-car (int 5))"), Err(EvalError::Panic("sexpr-car: not a cons".into())));
-    assert_eq!(run("(sexpr-cdr (int 5))"), Err(EvalError::Panic("sexpr-cdr: not a cons".into())));
+    assert_eq!(run("(sexpr-car (Int 5))"), Err(EvalError::Panic("sexpr-car: not a cons".into())));
+    assert_eq!(run("(sexpr-cdr (Int 5))"), Err(EvalError::Panic("sexpr-cdr: not a cons".into())));
     // The empty list is not a confusion, it is the end of a list — and both
     // tiers answer with the empty list rather than panicking (CL's
     // `(car nil) => nil`). `tests/match_sexpr_test.rs` asserts the value; the
@@ -482,22 +482,22 @@ fn sexpr_car_and_cdr_of_a_non_cons_atom_panic() {
 fn sexpr_tag_predicates_read_the_runtime_tag() {
     // The `sexpr-consp`/`sexpr-null`/`sexpr-atom` predicates inspect the runtime
     // tag directly (no `match`), so they survive Phase 5's `match`-to-enum fence.
-    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (int 1) ()))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (Int 1) ()))"), Value::Bool(true));
     assert_eq!(eval_ok("(sexpr-consp ())"), Value::Bool(false));
-    assert_eq!(eval_ok("(sexpr-consp (int 3))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-consp (Int 3))"), Value::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-null ())"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (int 1) ()))"), Value::Bool(false));
-    assert_eq!(eval_ok("(sexpr-null (int 3))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (Int 1) ()))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (Int 3))"), Value::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-atom ())"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (int 3))"), Value::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (int 1) ()))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-atom (Int 3))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (Int 1) ()))"), Value::Bool(false));
 }
 
 #[test]
 fn list_builds_cons_chain() {
-    assert_sexpr_eq("(list (int 1) (int 2))", |h| {
+    assert_sexpr_eq("(list (Int 1) (Int 2))", |h| {
         let tail = h.cons(Value::Int(2), Value::Empty).unwrap();
         h.cons(Value::Int(1), tail).unwrap()
     });
@@ -513,7 +513,7 @@ fn sexpr_cons_as_value() {
     // the generic `cons<T,U>` pair now — Symbol/Sexpr redesign Phase 4b).
     let src = "(defun apply2 ((f (fn (Option<Sexpr> Option<Sexpr>) Option<Sexpr>)) \
                               (a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr> (f a b)) \
-               (apply2 sexpr-cons (int 1) ())";
+               (apply2 sexpr-cons (Int 1) ())";
     assert_sexpr_eq(src, |h| h.cons(Value::Int(1), Value::Empty).unwrap());
 }
 
@@ -528,8 +528,8 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
     // instead of the loop's garbage.
     let mut src_heap = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let src = "(let ((kept (cons (int 1) (the Option<Sexpr> ())))) \
-                 (dotimes (i 50) (cons (int 2) (the Option<Sexpr> ()))) \
+    let src = "(let ((kept (cons (Int 1) (the Option<Sexpr> ())))) \
+                 (dotimes (i 50) (cons (Int 2) (the Option<Sexpr> ()))) \
                  (car kept))";
     let mut chk = Checker::new();
     let mut check_interp = Interp::new();
@@ -819,9 +819,9 @@ fn setf_on_a_sexpr_binding_survives_gc_and_releases_the_old_value() {
     // `s` is rebound mid-loop; the *new* cons must survive every later
     // collection and the old one must be reclaimable (with only 3 cells,
     // the loop can't run at all unless the old value's cell is freed).
-    let src = "(let ((s (cons (int 1) (the Option<Sexpr> ())))) \
-                 (setf s (cons (int 5) (the Option<Sexpr> ()))) \
-                 (dotimes (i 40) (cons (int 2) (the Option<Sexpr> ()))) \
+    let src = "(let ((s (cons (Int 1) (the Option<Sexpr> ())))) \
+                 (setf s (cons (Int 5) (the Option<Sexpr> ()))) \
+                 (dotimes (i 40) (cons (Int 2) (the Option<Sexpr> ()))) \
                  (car s))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(5));
 }
@@ -831,16 +831,16 @@ fn a_sexpr_car_bound_sexpr_survives_gc_pressure() {
     // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
     // extracted `car` is now bound with `sexpr-car` instead, exercising the
     // same "a let-bound `Sexpr` local stays rooted across GC" path.
-    let src = "(let ((s (sexpr-cons (int 8) ()))) \
+    let src = "(let ((s (sexpr-cons (Int 8) ()))) \
                  (let ((h (sexpr-car s))) \
-                   (dotimes (i 40) (sexpr-cons (int 2) ())) h))";
+                   (dotimes (i 40) (sexpr-cons (Int 2) ())) h))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(8));
 }
 
 #[test]
 fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
-    let src = "(defvar (g Option<Sexpr>) (sexpr-cons (int 3) ())) \
-               (dotimes (i 40) (sexpr-cons (int 2) ())) \
+    let src = "(defvar (g Option<Sexpr>) (sexpr-cons (Int 3) ())) \
+               (dotimes (i 40) (sexpr-cons (Int 2) ())) \
                (sexpr-car g)";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(3));
 }
@@ -853,9 +853,9 @@ fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
     // margin; the churn count (200, far over the heap size) is what now forces
     // the repeated collections the captured `s` must survive, so the test still
     // fails if the capture isn't rooted through GC.
-    let src = "(let ((s (cons (int 6) (the Option<Sexpr> ())))) \
+    let src = "(let ((s (cons (Int 6) (the Option<Sexpr> ())))) \
                  (let ((f (lambda () Sexpr (car s)))) \
-                   (dotimes (i 200) (cons (int 2) (the Option<Sexpr> ()))) \
+                   (dotimes (i 200) (cons (Int 2) (the Option<Sexpr> ()))) \
                    (f)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(6));
 }
@@ -872,8 +872,8 @@ fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
     // churn, far over the heap size, is what forces the collections now.
     let src = "(let ((mk (lambda ((s Option<Sexpr>)) (fn (int) Option<Sexpr>) \
                           (lambda ((n int)) Option<Sexpr> (sexpr-car s))))) \
-                 (let ((f (mk (sexpr-cons (int 4) ())))) \
-                   (dotimes (i 200) (sexpr-cons (int 2) ())) \
+                 (let ((f (mk (sexpr-cons (Int 4) ())))) \
+                   (dotimes (i 200) (sexpr-cons (Int 2) ())) \
                    (f 0)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(4));
 }
@@ -888,8 +888,8 @@ fn labels_siblings_mutually_recurse_under_gc_pressure() {
     // must survive.
     let src = "(labels ((is-even ((n int)) bool (if (= n 0) true (is-odd (- n 1)))) \
                         (is-odd ((n int)) bool (if (= n 0) false (is-even (- n 1))))) \
-                 (dotimes (i 200) (cons (int 2) (the Option<Sexpr> ()))) \
-                 (if (is-even 10) (int 1) (int 0)))";
+                 (dotimes (i 200) (cons (Int 2) (the Option<Sexpr> ()))) \
+                 (if (is-even 10) (Int 1) (Int 0)))";
     assert_eq!(eval_under_gc_pressure(src), Value::Int(1));
 }
 
@@ -898,8 +898,8 @@ fn setf_through_a_shared_capture_is_visible_to_the_sibling_closure() {
     // Two closures capture the same `Sexpr` binding; a write through one is
     // observed by the other — the shared-mutable-cell semantics the heap
     // cell representation must preserve.
-    let src = "(let ((s (cons (int 1) (the Option<Sexpr> ())))) \
-                 (let ((write (lambda () () (setf s (cons (int 9) (the Option<Sexpr> ()))) ())) \
+    let src = "(let ((s (cons (Int 1) (the Option<Sexpr> ())))) \
+                 (let ((write (lambda () () (setf s (cons (Int 9) (the Option<Sexpr> ()))) ())) \
                        (read (lambda () Sexpr (car s)))) \
                    (write) \
                    (read)))";
@@ -966,7 +966,7 @@ fn first_runtime_error_with_prelude(src: &str) -> EvalError {
 /// `(panic ...)` line, which the program cannot see or change.
 #[test]
 fn a_panic_inside_the_library_is_placed_at_the_programs_call() {
-    let src = "(defun first-or-die ((o Option<int>)) int\n  (unwrap o))\n(first-or-die (Option::none))";
+    let src = "(defun first-or-die ((o Option<int>)) int\n  (unwrap o))\n(first-or-die (Option::None))";
     let err = first_runtime_error_with_prelude(src);
     let loc = err.loc().expect("runtime error should carry a location");
     assert_eq!((&*loc.file, loc.line, loc.col), ("prog.typl", 2, 3), "{}", err);

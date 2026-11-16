@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Типи
 
 Типи, які є в typelisp, і стандартні трейти, що їх реалізує кожен тип. Як записувати типи, описано в
@@ -30,8 +30,8 @@
 
 | Тип | Зміст | Подробиці |
 |---|---|---|
-| `Option<T>` | Значення, яке є або якого немає. `some` / `none` | [Option і Result](functions/option-result.md) |
-| `Result<T,E>` | Успіх або невдача. `ok` / `err` | Те саме |
+| `Option<T>` | Значення, яке є або якого немає. `Some` / `None` | [Option і Result](functions/option-result.md) |
+| `Result<T,E>` | Успіх або невдача. `Ok` / `Err` | Те саме |
 | `Vector<T>` | Масив, що росте | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Хеш-таблиця. Як порівнюються ключі, визначає `:test` під час створення, а в таблиці `equal` тип ключів має реалізовувати `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Кортеж (від 1 до 12 елементів). Елементи читаються як `t::0` | [Синтаксис, розділ 2](syntax.md#2-запис-типів) |
@@ -46,8 +46,8 @@
 
 | Тип | Зміст | Подробиці |
 |---|---|---|
-| `Sexpr` | Непорожній S-вираз. 19 варіантів: `int`, від `i8` до `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Дані у вигляді S-виразів](functions/sequences.md#2-дані-у-вигляді-s-виразів-sexpr) |
-| `Option<Sexpr>` | Дані у вигляді S-виразів загалом. Порожній список `()` — це `none` | Те саме |
+| `Sexpr` | Непорожній S-вираз. 19 варіантів: `Int`, від `I8` до `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [Дані у вигляді S-виразів](functions/sequences.md#2-дані-у-вигляді-s-виразів-sexpr) |
+| `Option<Sexpr>` | Дані у вигляді S-виразів загалом. Порожній список `()` — це `None` | Те саме |
 
 ## 4. Типи у стандартній бібліотеці
 
@@ -72,7 +72,7 @@
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Потоки | [Потоки](functions/streams-files.md#3-конкретні-типи-потоків) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Складені потоки | [Складені потоки](functions/streams-files.md#4-складені-потоки) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Мережа | [Мережа](functions/network.md#1-типи) |
-| `ReadOutcome` | Результат `read-sexpr`. `datum` / `eof` | [Потоки](functions/streams-files.md#6-узагальнені-функції-та-файлові-операції) |
+| `ReadOutcome` | Результат `read-sexpr`. `Datum` / `Eof` | [Потоки](functions/streams-files.md#6-узагальнені-функції-та-файлові-операції) |
 | `universal-time` `internal-time` `decoded-time` | Час | [Час](functions/system.md#1-час) |
 | `heap-info` | Поточний стан купи | [Засоби реалізації](functions/system.md#51-поля-heap-info) |
 

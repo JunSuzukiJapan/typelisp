@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macro
 
 Una macro è una funzione che prende un programma e restituisce un programma. Le macro permettono di
@@ -45,7 +45,7 @@ espansione è il modo più rapido di procedere.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Anche le espansioni vengono controllate nei tipi
@@ -125,15 +125,15 @@ Allo stesso modo, una macro che ripete il proprio corpo un dato numero di volte 
 
 Il corpo di una macro è normale codice typelisp, quindi può ispezionare i propri argomenti con `if` o
 `match` e costruire un'espansione diversa. Gli argomenti sono dati S-expression (`Option<Sexpr>`), e
-la lista vuota è `none`.
+la lista vuota è `None`.
 
 Creiamo `my-and`, che restituisce `true` se tutte le sue condizioni sono vere.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
-    ((cons f more)
+    ((None) 'true)                                    ; no arguments
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -143,7 +143,7 @@ Creiamo `my-and`, che restituisce `true` se tutte le sue condizioni sono vere.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` è un pattern che prende la testa di una lista in `f` e il resto in `more`.
+- `(Cons f more)` è un pattern che prende la testa di una lista in `f` e il resto in `more`.
 - `sexpr-null` verifica se un dato S-expression è la lista vuota.
 - Il ramo finale `_` è necessario perché i dati S-expression hanno forme diverse dalle liste (numeri,
   stringhe e così via), e `match` richiede che anche quelle siano coperte. Un argomento `&rest` è

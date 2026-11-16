@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/io.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 文件 I/O、流与网络
 
 本指南说明文件读写、路径名以及套接字通信的基本写法。函数一览见[流与文件](../reference/functions/streams-files.md)
@@ -12,13 +12,13 @@
 ```lisp
 (use std::fs::read-file-string)
 (match (read-file-string "config.txt")
-  ((ok text) (println "~a" text))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok text) (println "~a" text))
+  ((Err e) (println "error: ~a" (message e))))
 ;; 文件不存在时：
 ;; error: config.txt: No such file or directory (os error 2)
 ```
 
-知道不会失败时，或者在失败了停止也无妨的小脚本中，可以用 `unwrap` 取出值。如果是 `err` 则会 panic。
+知道不会失败时，或者在失败了停止也无妨的小脚本中，可以用 `unwrap` 取出值。如果是 `Err` 则会 panic。
 
 ## 2. 一次读写整个文件
 
@@ -27,8 +27,8 @@
 ```lisp
 (use std::fs::read-file-lines std::fs::read-file-string std::fs::write-file-string)
 (unwrap (write-file-string "copy.txt" "abc\n"))
-(read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #("abc"))
+(read-file-string "copy.txt")      ; => (Ok "abc\n")
+(read-file-lines "copy.txt")       ; => (Ok #("abc"))
 ```
 
 ## 3. 用流读写
@@ -42,22 +42,22 @@
          (write-line out "first")
          (write-line out "second")
          (format out "total: ~a~%" 2))
-  ((ok _) ())
-  ((err e) (println "write failed: ~a" (message e))))
+  ((Ok _) ())
+  ((Err e) (println "write failed: ~a" (message e))))
 
 ;; 逐行读取
 (match (with-open-file (in "notes.txt" direction-input)
          (let ((n 0))
            (loop (match (read-line in)
-                   ((some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
-                   ((none) (break))))
+                   ((Some line) (progn (setf n (+ n 1)) (println "~a: ~a" n line)))
+                   ((None) (break))))
            n))
-  ((ok n) (println "~a lines" n))
-  ((err e) (println "read failed: ~a" (message e))))
+  ((Ok n) (println "~a lines" n))
+  ((Err e) (println "read failed: ~a" (message e))))
 ```
 
 - 打开方向有三种：`direction-input`（读）、`direction-output`（写，原有内容会被清除）、`direction-append`（追加到末尾）。
-- `read-line` 在文件末尾返回 `none`。
+- `read-line` 在文件末尾返回 `None`。
 - 不用 `with-open-file` 而用 `open-file` 打开时，请务必调用 `close`。GC 不会关闭流。
 
 按字节读写时，用 `open-binary-input` / `open-binary-output` 打开，并使用 `read-byte` / `write-byte`。字符流和
@@ -71,7 +71,7 @@
   (write-string s "b"))                  ; => "ab"
 
 (with-input-from-string (s "line1\nline2")
-  (read-line s))                         ; => (some "line1")
+  (read-line s))                         ; => (Some "line1")
 ```
 
 ### 标准输入输出
@@ -87,8 +87,8 @@
 (defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
-            ((some _) (setf n (+ n 1)))
-            ((none) (break))))
+            ((Some _) (setf n (+ n 1)))
+            ((None) (break))))
     n))
 ```
 
@@ -99,8 +99,8 @@
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")
-  (pathname-type p))       ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")
+  (pathname-type p))       ; => (Some "gz")
 
 ;; 只替换扩展名
 (namestring (merge-pathnames (make-pathname :type "json") (to-pathname "data/in.csv")))
@@ -137,14 +137,14 @@
 (use std::net::socket-stream std::net::tcp-listen)
 (defun serve ((c socket-stream)) ()
   (loop (match (read-line c)
-          ((some line) (write-line c (upcase line)))
-          ((none) (break))))                  ; 对方关闭了
+          ((Some line) (write-line c (upcase line)))
+          ((None) (break))))                  ; 对方关闭了
   (close c))
 
 (let ((l (unwrap (tcp-listen "127.0.0.1" 7777))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 `"127.0.0.1"` 只接受来自本机的连接，`"0.0.0.0"` 在所有网络接口上接受连接。关于任务，请参阅
@@ -159,8 +159,8 @@
 (match (with-connection (c "localhost" 7777)
          (write-line c "hello")
          (unwrap (read-line c)))
-  ((ok reply) (println "reply: ~a" reply))      ; reply: HELLO
-  ((err e) (println "~a" (message e))))
+  ((Ok reply) (println "reply: ~a" reply))      ; reply: HELLO
+  ((Err e) (println "~a" (message e))))
 ```
 
 要限制时间时，传入 `:timeout`（秒）。
@@ -169,12 +169,12 @@
 (use std::net::tcp-connect)
 (tcp-connect "example.com" 80 :timeout 5.0)
 (accept l :timeout 30.0)
-(if (wait-readable c 5.0) (read-line c) (Option::none))   ; 给下一次读取加上计时
+(if (wait-readable c 5.0) (read-line c) (Option::None))   ; 给下一次读取加上计时
 ```
 
 ### 对方断开连接时
 
-即使连接的对方重置或中途断开，也不会 panic。之后的读取返回 `none`，写入会被静默丢弃。想区分是正常关闭还是失败时，
+即使连接的对方重置或中途断开，也不会 panic。之后的读取返回 `None`，写入会被静默丢弃。想区分是正常关闭还是失败时，
 检查 `(socket-error c)`。
 
 ## 6. 名称解析（DNS）
@@ -182,13 +182,13 @@
 没有专门用于名称解析的函数。把主机名传给 `tcp-connect`、`tls-connect`、`send-to`，就会在其中解析。解析在另一个
 线程中进行，所以等待期间其他任务照常运行。一个名字有多个地址时会依次尝试连接。
 
-无法解析时返回 `err`。
+无法解析时返回 `Err`。
 
 ```lisp
 (use std::net::tcp-connect)
 (match (tcp-connect "no-such-host.invalid" 80 :timeout 3.0)
-  ((ok c) (close c))
-  ((err e) (println "~a" (message e))))
+  ((Ok c) (close c))
+  ((Err e) (println "~a" (message e))))
 ;; resolve: no-such-host.invalid:80: failed to lookup address information: ...
 ```
 
@@ -200,12 +200,12 @@
 ```lisp
 (use std::net::tls-connect)
 (match (tls-connect "example.com" 443 :timeout 10.0)
-  ((ok c)
+  ((Ok c)
    (progn
      (write-string c "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
      (println "~a" (unwrap (read-line c)))     ; HTTP/1.1 200 OK
      (close c)))
-  ((err e) (println "tls failed: ~a" (message e))))
+  ((Err e) (println "tls failed: ~a" (message e))))
 ```
 
 TLS 服务器通过把证书和私钥文件（PEM）传给 `tls-listen` 来创建。
@@ -214,8 +214,8 @@ TLS 服务器通过把证书和私钥文件（PEM）传给 `tls-listen` 来创�
 (use std::net::tls-listen)
 (let ((l (unwrap (tls-listen "0.0.0.0" 8443 "cert.pem" "key.pem"))))
   (loop (match (accept l)
-          ((ok c) (progn (task (serve c)) ()))   ; 可以直接使用 TCP 的 serve
-          ((err e) (println "accept: ~a" (message e))))))
+          ((Ok c) (progn (task (serve c)) ()))   ; 可以直接使用 TCP 的 serve
+          ((Err e) (println "accept: ~a" (message e))))))
 ```
 
 用自签名证书试验时，在客户端传入 `:ca-file "cert.pem"` 以信任该证书。双向 TLS 以及用一个监听器服务多个站点的方法见
@@ -232,8 +232,8 @@ UDP 不是流，而是一次收发一个数据报。数据是字节序列（`Vec
       (b (unwrap (udp-bind "127.0.0.1" 9999))))
   (unwrap (send-to a "localhost" 9999 (string->utf8 "ping")))
   (match (recv-from b :timeout 1.0)
-    ((ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
-    ((err e) (println "~a" (message e)))))
+    ((Ok d) (println "~a from ~a" (unwrap (utf8->string (bytes d))) (from d)))
+    ((Err e) (println "~a" (message e)))))
 ;; ping from 127.0.0.1:59161
 ```
 
@@ -242,4 +242,4 @@ UDP 不是流，而是一次收发一个数据报。数据是字节序列（`Vec
 ## 9. Unix 域套接字
 
 把套接字文件的路径传给 `unix-listen` / `unix-connect`。得到的值与 TCP 一样是 `socket-stream`。文件已存在时
-`unix-listen` 返回 `err`。关闭监听器时文件会被删除。
+`unix-listen` 返回 `Err`。关闭监听器时文件会被删除。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -34,9 +34,9 @@ für die sechs Typen fester Breite (die Tabelle für `int` steht in Kapitel 3).
 | `int->int` | `(int->int x)` | `T→int` | Erweiternde Umwandlung in `int` (immer exakt). Das, was `(as int x)` tut |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Erweiternde Umwandlung in `ratio` (immer exakt) |
 | `int->char` | `(int->char x)` | `T→char` | Deutet den Wert als Unicode-Skalarwert. Panic bei einem ungültigen Wert |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Eine Fassung von `int->char`, die bei Fehlschlag `none` zurückgibt |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Eine Fassung von `int->char`, die bei Fehlschlag `None` zurückgibt |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Breitenumwandlung. Werte, die nicht passen, werden abgeschnitten (wie Rusts `as`) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dieselbe Umwandlung als Frage. `none`, wenn der Wert nicht in diese Breite passt |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dieselbe Umwandlung als Frage. `None`, wenn der Wert nicht in diese Breite passt |
 
 Diese Umwandlungen sind auch das, was die Spezialformen `(as Type x)`/`(try-as Type x)`
 ([Syntaxreferenz](../syntax.md#7-weitere-spezialformen)) tun. Bitoperationen (`logand`/`ash`/`ldb` usw.) und
@@ -100,7 +100,7 @@ Es ist ein anderer Typ als die Ganzzahltypen fester Breite (Kapitel 1), ohne imp
 `(as int x)` ist die exakte Erweiterung von einer festen Breite, und `(as i32 n)` / `(try-as i32 n)` sind das
 Abschneiden / die Prüfung von `int` aus (dieselbe Bedeutung wie `int->W` / `try-int->W` in Kapitel 1).
 
-Die Ganzzahlvariante von `Sexpr` ist ebenfalls einfach `int` (`(int n)` akzeptiert sowohl Fixnums als auch
+Die Ganzzahlvariante von `Sexpr` ist ebenfalls einfach `Int` (`(Int n)` akzeptiert sowohl Fixnums als auch
 Bignums).
 
 Eingebaute Funktionen, die einen Index oder eine Anzahl nehmen (`substring`, `get` von `Vector`, die
@@ -146,7 +146,7 @@ passt, ist ein Laufzeitfehler („an integer argument does not fit a fixnum“).
 | `float->int` | `(float->int x)` | `f64→int` | Wandelt durch Abschneiden gegen null in `int` um (CLs `truncate`; exakt für endliche Werte jeder Größe). Panic bei Unendlich und NaN. Für eine feste Breite verwendet man `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Wandelt als exakte binäre rationale Zahl in ein `ratio` um (CLs `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Wandelt zwischen Gleitkommabreiten um. `float->f32` rundet zum nächsten Wert, `float->f64` ist immer exakt. Das, was `(as f32 x)` tut |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dieselbe Umwandlung als Frage. `none`, wenn das Runden den Wert ändert (das Erweitern auf `f64` ist immer `some`). Das, was `(try-as f32 x)` tut |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dieselbe Umwandlung als Frage. `None`, wenn das Runden den Wert ändert (das Erweitern auf `f64` ist immer `Some`). Das, was `(try-as f32 x)` tut |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CLs gleichnamige Funktionen. Aliasse von `floor`/`ceiling`/`round`/`truncate` oben: In CL geben die Varianten ohne Präfix Ganzzahlen zurück, daher entsprechen die mit `f`-Präfix dem Verhalten dieser Sprache |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | Jeweils 2 / 53 / 53 (nur die Genauigkeit von `0.0` ist 0). `f64` ist immer IEEE-754 binary64, daher sind es Konstanten |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` oder `-1.0` |
@@ -228,7 +228,7 @@ holt man den Wert mit `as`/`try-as` heraus.
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Vergleich |
 | `numerator` `denominator` | `(op x)` | `rational→int` | Zähler und Nenner in gekürzter Form |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Zur Null hin abgeschnitten, als `ratio`, nach `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` für eine ganze Zahl, sonst `none` (CLs `integerp`) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` für eine ganze Zahl, sonst `None` (CLs `integerp`) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Wie bei `ratio` (der Exponent von `expt` ist ein `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Wie bei `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Wie bei `ratio` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Voor Common Lisp-programmeurs
 
 typelisp erft de syntaxis van Common Lisp (CL) en veel van zijn functienamen, maar is een statisch
@@ -19,12 +19,12 @@ De booleaanse waarden zijn `true` en `false`. `nil` en `t` zijn niet gedefinieer
 - **De else-tak van `if` mag niet worden weggelaten.** `(if c x)` is een fout. Gebruik `when` /
   `unless` wanneer geen else-tak nodig is.
 - **"Geen waarde" wordt uitgedrukt met `Option<T>`.** Een functie die in CL nil teruggaf voor "niet
-  gevonden", geeft hier `(some x)` of `none` terug.
+  gevonden", geeft hier `(Some x)` of `None` terug.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - De lege lijst `()` is, afhankelijk van de context, ofwel de waarde van het type Unit (de
@@ -100,7 +100,7 @@ een functie, een globale variabele en een macro dezelfde naam hebben (anders dan
 ## 4. Lijsten en Vector
 
 Wat met een CL-lijst overeenkomt is **S-expressiedata**, waarvan het type `Option<Sexpr>` is (de lege
-lijst is `none`). `(list 1 2 3)` en `'(a b c)` hebben dit type. S-expressiedata is iets waarmee macro's
+lijst is `None`). `(list 1 2 3)` en `'(a b c)` hebben dit type. S-expressiedata is iets waarmee macro's
 en `read` werken; gebruik voor een gewone gegevenscontainer **`Vector<T>`**.
 
 | Wat je wilt | CL | typelisp |
@@ -184,17 +184,17 @@ Er is geen `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `
 Ze passen slecht bij statische typering. In plaats daarvan worden deze twee voor verschillende doelen
 gebruikt:
 
-- **Herstelbare fouten geven `Result<T,E>` terug.** De aanroeper scheidt `ok` / `err` met `match`.
+- **Herstelbare fouten geven `Result<T,E>` terug.** De aanroeper scheidt `Ok` / `Err` met `match`.
   Er is geen afkorting zoals `?` in Rust.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Niet-herstelbare fouten (bugs) zijn `panic`.** `(panic "message")`, `none` aan `unwrap` geven,
+- **Niet-herstelbare fouten (bugs) zijn `panic`.** `(panic "message")`, `None` aan `unwrap` geven,
   delen door 0 en een index buiten het bereik zijn van deze soort, en het programma stopt. De
   opruiming van `unwind-protect` wordt uitgevoerd voordat het stopt.
 

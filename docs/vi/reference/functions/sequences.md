@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,
@@ -30,25 +30,25 @@ của `cdr` là `Option<Sexpr>`, nó được in như phần tiếp theo của d
 ## 2. Dữ liệu S-expression `Sexpr`
 
 Kiểu dữ liệu `Sexpr` do `read` trả về có 19 variant:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` và `array` là dữ liệu viết dưới dạng `#(..)` và `#nA(..)` ([Tham chiếu cú
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` và `Array` là dữ liệu viết dưới dạng `#(..)` và `#nA(..)` ([Tham chiếu cú
 pháp](../syntax.md#1-cú-pháp-từ-vựng)), lần lượt chứa một `Vector<Option<Sexpr>>` và một
-`Array<Option<Sexpr>>`: `len`, `get` và các hàm khác dùng trực tiếp được trên `v` mà `(vector v)`
-`tuple` là dữ liệu viết bằng `#{..}`, và `v` mà `(tuple v)` gắn là một `Vector<Option<Sexpr>>` mới
+`Array<Option<Sexpr>>`: `len`, `get` và các hàm khác dùng trực tiếp được trên `v` mà `(Vector v)`
+`Tuple` là dữ liệu viết bằng `#{..}`, và `v` mà `(Tuple v)` gắn là một `Vector<Option<Sexpr>>` mới
 gồm các phần tử (để nhận tuple ở mọi độ dài bằng một kiểu).
 gắn.
 Các ô S-expression được xử lý không phải bằng `cons`/`car`/`cdr` tổng quát của chương 1 mà bằng các hàm
 `sexpr-*`. Chúng được dùng chủ yếu trong thân `defmacro` để dựng và tách các dạng.
 
 **Kiểu của dữ liệu S-expression là `Option<Sexpr>`.** Danh sách rỗng không phải một variant của `Sexpr` mà là
-`none` của `Option`, và bản thân `Sexpr` nghĩa là "một S-expression không rỗng". Vì vậy các hàm `sexpr-*`
+`None` của `Option`, và bản thân `Sexpr` nghĩa là "một S-expression không rỗng". Vì vậy các hàm `sexpr-*`
 nhận và trả về `Option<Sexpr>`.
 
-- `()` là danh sách rỗng ở chỗ mong đợi một `Option<Sexpr>` (cũng có thể viết `(Option::none)`)
+- `()` là danh sách rỗng ở chỗ mong đợi một `Option<Sexpr>` (cũng có thể viết `(Option::None)`)
 - `Sexpr` được mở rộng ngầm ở chỗ mong đợi một `Option<Sexpr>` (không có chuyển đổi lúc chạy). Chiều ngược
   lại, dùng một `Option<Sexpr>` như một `Sexpr`, khẳng định "đây không phải danh sách rỗng", nên phải nêu
   tường minh bằng `match` hoặc `unwrap`
-- Trong `match`, 19 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
+- Trong `match`, 19 variant của `Sexpr` và `None` có thể được viết **phẳng trong cùng một danh sách nhánh**
   ([Tham chiếu cú pháp](../syntax.md#43-match--so-khớp-mẫu))
 
 | Tên | Dạng | Kiểu | Mô tả |
@@ -60,7 +60,7 @@ nhận và trả về `Option<Sexpr>`.
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Có phải danh sách rỗng không |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Có phải không phải `Cons` không |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Có phải là `Sym` (symbol) không |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Nội dung của variant `int` (fixnum hoặc bignum). Panic với kiểu khác |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Nội dung của variant `Int` (fixnum hoặc bignum). Panic với kiểu khác |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | Nội dung của variant có độ rộng đó. Panic với kiểu khác |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Nội dung của các variant dấu phẩy động. Panic với kiểu khác |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Nội dung của một `Char`. Panic với kiểu khác |
@@ -74,9 +74,9 @@ nhận và trả về `Option<Sexpr>`.
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | Một danh sách `Sexpr` mới với `f` áp dụng cho từng phần tử của một danh sách `Sexpr` (`map` của chương 4 dành cho `Iter` và không duyệt được danh sách `Sexpr`) |
 
 Có chín hàm truy cập số, mỗi kiểu một hàm, vì một `Sexpr` là "nơi duy nhất mà kiểu của một giá trị không
-được viết ở chỗ nào khác". Một `u8` đưa vào một `Sexpr` đi vào dưới dạng variant `u8` và chỉ ra được bằng
+được viết ở chỗ nào khác". Một `u8` đưa vào một `Sexpr` đi vào dưới dạng variant `U8` và chỉ ra được bằng
 `(sexpr-u8 s)`. Truyền nó cho `(sexpr-int s)` sẽ panic; nó không bao giờ mở rộng đáp án một cách im lặng.
-Các số nguyên trong dữ liệu đã đọc (`'(1 2 3)`, đối số macro) thuộc variant `int` và được đọc bằng
+Các số nguyên trong dữ liệu đã đọc (`'(1 2 3)`, đối số macro) thuộc variant `Int` và được đọc bằng
 `(sexpr-int s)`.
 
 Các danh sách `Sexpr` không có thao tác phá hủy như `rplaca`/`nconc`. Một ô `Sexpr` không thể thay đổi sau
@@ -114,7 +114,7 @@ Các hàm nhận một vị từ (tương ứng với họ `-if` của CL):
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | Vị trí đầu tiên thỏa vị từ |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | Có bao nhiêu phần tử thỏa vị từ |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Mọi phần tử có thỏa vị từ không |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Có phần tử nào thỏa vị từ không (tương ứng với `some` của CL; một cái tên không trùng với hàm khởi tạo `some`) |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Có phần tử nào thỏa vị từ không (tương ứng với `some` của CL) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Gấp trái |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Gấp phải |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Gom tất cả các phần tử còn lại. Dùng để biến kết quả của một hàm `lazy` bên dưới thành `Vector` |
@@ -127,7 +127,7 @@ Các hàm nhận một vị từ (tương ứng với họ `-if` của CL):
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | Nối các iterator. Có thể đưa ba trở lên |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | `concatenate` của CL. Kiểu kết quả được viết là **một literal symbol có dấu nháy** (CL dùng một type specifier lúc chạy). `'vector` nhận một trở lên, `'string` nhận không hoặc nhiều hơn (`""` cho không). Danh sách `Sexpr` không được bao phủ (dùng `sexpr-append`) |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | Đảo ngược (không phá hủy) |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Phần tử `n` (`none` khi ngoài phạm vi) |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | Phần tử `n` (`None` khi ngoài phạm vi) |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` với thứ tự đối số ngược lại |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | `n` phần tử đầu tiên |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)` (`end` bị kẹp về độ dài) |
@@ -221,7 +221,7 @@ Tất cả là các hàm generic trên `Iter`, như ở chương 4. Các tập h
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | Ánh xạ trên các đuôi vì tác dụng phụ (đối ứng `maplist` của `mapc`) |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | Ánh xạ trên các đuôi và nối (đối ứng `maplist` của `mapcan`) |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | Vị trí `sub` xuất hiện đầu tiên. Nếu bên nhận là một `string`, phương thức của `string` được chọn ([Chuỗi](collections.md#1-chuỗi-string)) |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Vị trí đầu tiên mà chúng khác nhau. `none` nếu chúng bằng nhau |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | Vị trí đầu tiên mà chúng khác nhau. `None` nếu chúng bằng nhau |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | Trộn. CL yêu cầu đầu vào đã sắp xếp; hàm này sắp xếp phần nối |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | Thêm `x` **vào đầu** nếu nó chưa có |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | Các phép toán tập hợp. CL không quy định thứ tự; ở đây nó ổn định, **theo thứ tự xuất hiện đầu tiên** |
@@ -273,7 +273,7 @@ Hàm nào nhận keyword nào theo CL:
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; chỉ bỏ một phần tử, từ cuối
 (position 3 (iter v) :start 1)                          ; chỉ số tính so với toàn dãy
 ```

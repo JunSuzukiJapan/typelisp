@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makron
 
 Ett makro är en funktion som tar ett program och returnerar ett program. Med makron kan du skapa ny
@@ -44,7 +44,7 @@ att komma framåt att först titta på dess expansion.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Expansioner typkontrolleras också
@@ -120,15 +120,15 @@ På samma sätt kan ett makro som upprepar sin kropp ett givet antal gånger skr
 ## 5. Expandera olika beroende på argumenten
 
 En makrokropp är vanlig typelisp-kod, så den kan granska sina argument med `if` eller `match` och bygga
-en annan expansion. Argumenten är S-uttrycksdata (`Option<Sexpr>`), och den tomma listan är `none`.
+en annan expansion. Argumenten är S-uttrycksdata (`Option<Sexpr>`), och den tomma listan är `None`.
 
 Vi gör `my-and`, som returnerar `true` om alla dess villkor är sanna.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; inga argument
-    ((cons f more)
+    ((None) 'true)                                    ; inga argument
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; bara ett
          `(if ,f (my-and ,@more) false)))             ; två eller fler
@@ -138,7 +138,7 @@ Vi gör `my-and`, som returnerar `true` om alla dess villkor är sanna.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` är ett mönster som tar listans huvud till `f` och resten till `more`.
+- `(Cons f more)` är ett mönster som tar listans huvud till `f` och resten till `more`.
 - `sexpr-null` testar om S-uttrycksdata är den tomma listan.
 - Den sista `_`-grenen behövs eftersom S-uttrycksdata har andra former än listor (tal, strängar och så
   vidare), och `match` kräver att också de täcks. Ett `&rest`-argument är alltid en lista, så den här

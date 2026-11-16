@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Dành cho lập trình viên Common Lisp
 
 typelisp kế thừa cú pháp của Common Lisp (CL) và nhiều tên hàm của nó, nhưng là một ngôn ngữ có kiểu
@@ -19,12 +19,12 @@ Các giá trị boolean là `true` và `false`. `nil` và `t` không được đ
 - **Nhánh else của `if` không thể bỏ.** `(if c x)` là lỗi. Khi không cần nhánh else, hãy dùng
   `when` / `unless`.
 - **"Không có giá trị" được biểu diễn bằng `Option<T>`.** Một hàm trả về nil trong CL với nghĩa "không
-  tìm thấy" thì ở đây trả về `(some x)` hoặc `none`.
+  tìm thấy" thì ở đây trả về `(Some x)` hoặc `None`.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - Danh sách rỗng `()` tùy ngữ cảnh là giá trị của kiểu Unit (giá trị trả về của hàm không trả về gì)
@@ -96,7 +96,7 @@ hai trong số hàm, biến toàn cục và macro trùng tên (khác với CL, k
 ## 4. Danh sách và Vector
 
 Thứ tương ứng với list của CL là **dữ liệu S-expression**, có kiểu `Option<Sexpr>` (danh sách rỗng là
-`none`). `(list 1 2 3)` và `'(a b c)` có kiểu này. Dữ liệu S-expression là thứ mà macro và `read` làm
+`None`). `(list 1 2 3)` và `'(a b c)` có kiểu này. Dữ liệu S-expression là thứ mà macro và `read` làm
 việc với; với một vùng chứa dữ liệu thông thường, hãy dùng **`Vector<T>`**.
 
 | Điều bạn muốn | CL | typelisp |
@@ -177,17 +177,17 @@ phục giá trị gốc dù thân hàm được rời đi bằng cách nào.
 Không có `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error` hay `signal`.
 Chúng không hợp với kiểu tĩnh. Thay vào đó, hai thứ sau được dùng cho các mục đích khác nhau:
 
-- **Các lỗi có thể khôi phục trả về `Result<T,E>`.** Bên gọi tách `ok` / `err` bằng `match`. Không có
+- **Các lỗi có thể khôi phục trả về `Result<T,E>`.** Bên gọi tách `Ok` / `Err` bằng `match`. Không có
   cách viết tắt như `?` của Rust.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Các lỗi không thể khôi phục (bug) là `panic`.** `(panic "message")`, truyền `none` cho `unwrap`,
+- **Các lỗi không thể khôi phục (bug) là `panic`.** `(panic "message")`, truyền `None` cho `unwrap`,
   chia cho 0 và chỉ số ngoài phạm vi thuộc loại này, và chương trình dừng lại. Phần dọn dẹp của
   `unwind-protect` chạy trước khi nó dừng.
 

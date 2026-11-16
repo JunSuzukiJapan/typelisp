@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # 型別基礎
 
 typelisp 是靜態型別語言。本章說明型別檢查能為你做什麼、常用的型別（`Option`、`Result`、結構、列舉）以及泛型。閱讀本章前請先讀
@@ -43,39 +43,39 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 
 ## 2. `Option<T>`：可能沒有的值
 
-typelisp 沒有 `nil`。「可能沒有值」以 `Option<T>` 型別表示。`Option<T>` 的值要嘛是持有一個 `T` 值的 `some`，要嘛是什麼都不持有的
-`none`。
+typelisp 沒有 `nil`。「可能沒有值」以 `Option<T>` 型別表示。`Option<T>` 的值要嘛是持有一個 `T` 值的 `Some`，要嘛是什麼都不持有的
+`None`。
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
-`Option<int>` 不是 `int`，不能直接用於計算。`(+ (safe-div 10 2) 1)` 是型別錯誤。要使用其中的值，用 `match` 區分 `some` 與 `none`。
+`Option<int>` 不是 `int`，不能直接用於計算。`(+ (safe-div 10 2) 1)` 是型別錯誤。要使用其中的值，用 `match` 區分 `Some` 與 `None`。
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- 在 `(some q)` 分支中，內容被繫結到變數 `q`。
-- `match` 會檢查各分支是否**涵蓋了所有情況**。忘了寫 `(none)` 分支是型別錯誤。
+- 在 `(Some q)` 分支中，內容被繫結到變數 `q`。
+- `match` 會檢查各分支是否**涵蓋了所有情況**。忘了寫 `(None)` 分支是型別錯誤。
 
 ### 為什麼沒有 nil
 
 在許多語言中，`nil`（`null`）可以充當任何型別的值。因此，即使忘了處理「沒有值」的情況，也要到執行時才會發現。在 typelisp 中，可能沒有值的
-地方是 `Option<T>` 型別，不在 `match` 中處理 `none` 的情況就無法通過型別檢查。遺漏在執行前就會被發現。
+地方是 `Option<T>` 型別，不在 `match` 中處理 `None` 的情況就無法通過型別檢查。遺漏在執行前就會被發現。
 
 條件也遵循同樣的想法：`if` 的條件只能是 `bool`。沒有 Common Lisp 那種「`nil` 以外都為真」的規則。
 
@@ -83,11 +83,11 @@ none
 
 | 寫法 | 意義 |
 |---|---|
-| `(unwrap-or opt 預設值)` | `some` 時取內容，`none` 時取預設值 |
-| `(unwrap opt)` | 取出內容。`none` 時程式停止 |
+| `(unwrap-or opt 預設值)` | `Some` 時取內容，`None` 時取預設值 |
+| `(unwrap opt)` | 取出內容。`None` 時程式停止 |
 | `(is-some opt)` / `(is-none opt)` | 判斷是哪一種 |
 
-標準函式庫中也有很多回傳 `Option` 的函式。例如 `position` 找到時以 `some` 回傳位置，找不到時回傳 `none`。
+標準函式庫中也有很多回傳 `Option` 的函式。例如 `position` 找到時以 `Some` 回傳位置，找不到時回傳 `None`。
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -95,24 +95,24 @@ none
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`：可能失敗的操作
 
-可能失敗的操作回傳 `Result<T,E>`：成功時是持有值 `T` 的 `ok`，失敗時是持有錯誤 `E` 的 `err`。
+可能失敗的操作回傳 `Result<T,E>`：成功時是持有值 `T` 的 `Ok`，失敗時是持有錯誤 `E` 的 `Err`。
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -121,8 +121,8 @@ none
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 「沒有」不需要理由時用 `Option`，想說明失敗原因時用 `Result`。錯誤的處理方式在[錯誤處理](errors.md)中詳細說明。
@@ -187,27 +187,27 @@ none
 
 ```lisp
 (defenum shape
-  (circle int)        ; 半徑
-  (rect int int)      ; 寬與高
-  (dot))              ; 不持有值
+  (Circle int)        ; 半徑
+  (Rect int int)      ; 寬與高
+  (Dot))              ; 不持有值
 ```
 
-值要像 `shape::circle` 這樣加上型別名稱來建立。在 `match` 中依變體名稱拆解。
+值要像 `shape::Circle` 這樣加上型別名稱來建立。在 `match` 中依變體名稱拆解。
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 這裡 `match` 同樣會檢查是否涵蓋所有情況。之後為 `shape` 加上變體時，所有沒有處理該變體的 `match` 都會變成型別錯誤，因此不會漏掉需要修改的地方。
 
-寫了 `(use shape)` 之後，就可以不帶型別名稱寫 `(rect 5 6)`。
+寫了 `(use shape)` 之後，就可以不帶型別名稱寫 `(Rect 5 6)`。
 
 `Option` 與 `Result` 也是以這種機制建立的列舉。
 

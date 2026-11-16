@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Traity
 
 Trait to obietnica, że „ten typ obsługuje te operacje". Traity pozwalają kilku typom dzielić operacje o
@@ -139,12 +139,12 @@ W połączeniu z ograniczeniem traitu możesz napisać funkcję działającą dl
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-Dla `Vector` z wartościami `money` 300, 900 i 100 (w tej kolejności) zwraca `(some 900 yen)`.
+Dla `Vector` z wartościami `money` 300, 900 i 100 (w tej kolejności) zwraca `(Some 900 yen)`.
 
 ## 5. `:dyn`: wspólna obsługa wartości różnych typów
 

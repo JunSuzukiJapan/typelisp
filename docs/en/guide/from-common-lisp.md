@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # For Common Lisp Programmers
 
 typelisp inherits Common Lisp's (CL's) syntax and many of its function names, but it is a
@@ -19,12 +19,12 @@ The boolean values are `true` and `false`. `nil` and `t` are not defined.
 - **The else branch of `if` cannot be left out.** `(if c x)` is an error. When no else branch is
   needed, use `when` / `unless`.
 - **"No value" is expressed with `Option<T>`.** A function that returned nil in CL to mean "not
-  found" returns `(some x)` or `none` here.
+  found" returns `(Some x)` or `None` here.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - The empty list `()` is, depending on context, either the value of the Unit type (the return value
@@ -99,7 +99,7 @@ cannot have a function called `list` next to a variable called `list`).
 ## 4. Lists and Vector
 
 What corresponds to a CL list is **S-expression data**, whose type is `Option<Sexpr>` (the empty list
-is `none`). `(list 1 2 3)` and `'(a b c)` have this type. S-expression data is something macros and
+is `None`). `(list 1 2 3)` and `'(a b c)` have this type. S-expression data is something macros and
 `read` work with; for an ordinary data container, use **`Vector<T>`**.
 
 | What you want | CL | typelisp |
@@ -180,17 +180,17 @@ and restores the original however the body is left.
 There is no `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error` or `signal`.
 They fit poorly with static typing. Instead, these two are used for different purposes:
 
-- **Recoverable failures return `Result<T,E>`.** The caller separates `ok` / `err` with `match`.
+- **Recoverable failures return `Result<T,E>`.** The caller separates `Ok` / `Err` with `match`.
   There is no shorthand like Rust's `?`.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Unrecoverable failures (bugs) are `panic`.** `(panic "message")`, passing `none` to `unwrap`,
+- **Unrecoverable failures (bugs) are `panic`.** `(panic "message")`, passing `None` to `unwrap`,
   dividing by 0 and an index out of range are of this kind, and the program stops. The cleanup of
   `unwind-protect` runs before it stops.
 

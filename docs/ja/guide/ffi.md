@@ -65,7 +65,7 @@ C の関数を typelisp から呼ぶ方法を説明します。宣言できる�
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int は 64bit の値を落とさない
-(try-as i32 (unsafe (c-strlen s)))  ; i32 に入らなければ none
+(try-as i32 (unsafe (c-strlen s)))  ; i32 に入らなければ None
 (unsafe (c-malloc 16))              ; 整数リテラルはそのまま渡せる
 ```
 

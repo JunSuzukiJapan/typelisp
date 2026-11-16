@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -35,9 +35,9 @@ voor `int` staat in hoofdstuk 3).
 | `int->int` | `(int->int x)` | `T→int` | Verbredende conversie naar `int` (altijd exact). Wat `(as int x)` doet |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | Verbredende conversie naar `ratio` (altijd exact) |
 | `int->char` | `(int->char x)` | `T→char` | Interpreteert de waarde als een Unicode-scalarwaarde. Geeft een panic bij een ongeldige waarde |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Een versie van `int->char` die bij mislukking `none` teruggeeft |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | Een versie van `int->char` die bij mislukking `None` teruggeeft |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | Breedteconversie. Waarden die niet passen worden afgekapt (zoals `as` van Rust) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dezelfde conversie als vraag. `none` als de waarde niet in die breedte past |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dezelfde conversie als vraag. `None` als de waarde niet in die breedte past |
 
 Deze conversies zijn ook wat de speciale vormen `(as Type x)`/`(try-as Type x)`
 ([Syntaxreferentie](../syntax.md#7-overige-speciale-vormen)) doen. Bitbewerkingen
@@ -103,7 +103,7 @@ dan de gehele types met vaste breedte (hoofdstuk 1), zonder impliciete conversie
 exacte verbreding vanuit een vaste breedte, en `(as i32 n)` / `(try-as i32 n)` zijn het afkappen /
 controleren vanuit `int` (dezelfde betekenis als `int->W` / `try-int->W` in hoofdstuk 1).
 
-De gehele variant van `Sexpr` is ook gewoon `int` (`(int n)` accepteert zowel fixnums als bignums).
+De gehele variant van `Sexpr` is ook gewoon `Int` (`(Int n)` accepteert zowel fixnums als bignums).
 
 Ingebouwde functies die een index of een aantal nemen (`substring`, `get` van `Vector`, het
 verschuivingsaantal van `ash` enzovoort) accepteren `int`, maar een waarde doorgeven die niet in een
@@ -148,7 +148,7 @@ fixnum past is een runtimefout ("an integer argument does not fit a fixnum").
 | `float->int` | `(float->int x)` | `f64→int` | Converteert naar `int` door af te kappen richting nul (`truncate` van CL; exact voor eindige waarden van elke grootte). Geeft een panic bij oneindig en NaN. Gebruik voor een vaste breedte `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Converteert naar een `ratio` als het exacte binaire rationale getal (`rational` van CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Converteert tussen drijvendekommabreedtes. `float->f32` rondt af naar het dichtstbijzijnde, `float->f64` is altijd exact. Wat `(as f32 x)` doet |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dezelfde conversie als vraag. `none` als afronden de waarde verandert (verbreden naar `f64` is altijd `some`). Wat `(try-as f32 x)` doet |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dezelfde conversie als vraag. `None` als afronden de waarde verandert (verbreden naar `f64` is altijd `Some`). Wat `(try-as f32 x)` doet |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | Functies met dezelfde naam in CL. Aliassen van de bovenstaande `floor`/`ceiling`/`round`/`truncate`: in CL geven die zonder voorvoegsel gehele getallen terug, dus die met voorvoegsel `f` komen overeen met het gedrag van deze taal |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | Respectievelijk 2 / 53 / 53 (alleen de precisie van `0.0` is 0). `f64` is altijd IEEE-754 binary64, dus dit zijn constanten |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` of `-1.0` |
@@ -233,7 +233,7 @@ waarde eruit met `as`/`try-as`.
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Vergelijking |
 | `numerator` `denominator` | `(op x)` | `rational→int` | De teller en noemer in vereenvoudigde vorm |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Afgekapt naar nul, als `ratio`, naar `f64` |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` voor een geheel getal, anders `none` (CL's `integerp`) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(Some n)` voor een geheel getal, anders `None` (CL's `integerp`) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Als bij `ratio` (de exponent van `expt` is een `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Als bij `ratio` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Als bij `ratio` |

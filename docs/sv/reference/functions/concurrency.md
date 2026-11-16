@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tasks och kanaler
 
 Vokabulären för tasks (lättviktstrådar). `task` och `thread`, som startar dem, och `select`, som väntar
@@ -35,7 +35,7 @@ hur detta skiljer sig från Go finns i [Syntaxreferens 12.5](../syntax.md#125-va
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | En kanal med kapacitet `n`. `0` är ett möte (rendezvous, ingen buffert) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Väntar tills det finns plats och lämnar sedan över värdet |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Väntar tills ett värde kommer. `none` när den är stängd och tom |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Väntar tills ett värde kommer. `None` när den är stängd och tom |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Stänger den |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Hur många värden som finns i bufferten nu |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | Kapaciteten |
@@ -62,7 +62,7 @@ hur detta skiljer sig från Go finns i [Syntaxreferens 12.5](../syntax.md#125-va
 - **Att stänga en kanal som en task väntar på att göra `send` på får den tasken att ge panic** (Gos
   regel).
 - `recv` på en stängd kanal returnerar det som finns kvar i bufferten, och när den är tom fortsätter den
-  returnera `none`.
+  returnera `None`.
 - `close` löses upp efter mottagarens typ, så det är en annan sak än `close` i traitet `Stream`.
   `Chan<T>` implementerar inte `Stream`.
 - **En negativ kapacitet ger panic** (den avrundas inte tyst till 0).
@@ -195,8 +195,8 @@ kontrollera `is-cancelled` eller ta emot på `done`.
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -210,7 +210,7 @@ kontrollera `is-cancelled` eller ta emot på `done`.
 - **Avbrytningen når barnen.** En kontext som skapats med `with-cancel`/`with-timeout` avbryts
   tillsammans med sin förälder. Åt andra hållet (från barn till förälder) går det inte.
 - Ett barn till en kontext som redan avbrutits är avbrutet från början.
-- `done` stängs bara; inget värde skickas. En mottagning ger `none`.
+- `done` stängs bara; inget värde skickas. En mottagning ger `None`.
 - Varje anrop av `(Context::background)` skapar en egen rot. Gos `Background()` finns bara en av och
   kan inte avbrytas; här kan även en rot avbrytas, och det påverkar bara det som skapats ur den.
 - En kontext kan skickas mellan uppgifter och mellan trådar.

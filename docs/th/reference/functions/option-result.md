@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Option, Result และชนิดข้อผิดพลาด
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-ตัวสร้าง: `Option<T>` มี `(some T)` / `none` `Result<T,E>` มี `(ok T)` / `(err E)` `E` เป็นชนิดใดก็ได้:
+ตัวสร้าง: `Option<T>` มี `(Some T)` / `None` `Result<T,E>` มี `(Ok T)` / `(Err E)` `E` เป็นชนิดใดก็ได้:
 ชนิดข้อผิดพลาดที่เป็นรูปธรรมที่มีให้ในตัว และชนิดที่คุณเขียนเองด้วย `defstruct`/`defenum`
 ใส่ที่นั่นได้เหมือนกัน (บทที่ 3)
 
 | ชื่อ | รูปแบบ | Option | Result | คำอธิบาย |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | ดึงค่าออกมา panic เมื่อเป็น `none`/`err` |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | ดึงค่าออกมา panic เมื่อเป็น `None`/`Err` |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | ค่า หรือค่าเริ่มต้น |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | เป็น `some` หรือไม่ |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | เป็น `none` หรือไม่ |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | เป็น `ok` หรือไม่ |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | เป็น `err` หรือไม่ |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | ดึงค่าออกมา ถ้าเป็น `none`/`err` จะ panic ด้วย `msg` |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | ค่านั้น หรือผลของ `f` โดยจะเรียก `f` เฉพาะเมื่อเป็น `none`/`err` |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | ใช้ `f` กับเนื้อในของ `some`/`ok` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | ใช้ `f` กับเนื้อในของ `err` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | ถ้าเป็น `some`/`ok` จะส่งเนื้อในให้ `f` แล้วคืนผลของมัน |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | ถ้าเป็น `none`/`err` จะคืนผลของ `f` |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | เปลี่ยน `(some v)` เป็น `(ok v)` และ `none` เป็น `(err e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | เป็น `Some` หรือไม่ |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | เป็น `None` หรือไม่ |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | เป็น `Ok` หรือไม่ |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | เป็น `Err` หรือไม่ |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | ดึงค่าออกมา ถ้าเป็น `None`/`Err` จะ panic ด้วย `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | ค่านั้น หรือผลของ `f` โดยจะเรียก `f` เฉพาะเมื่อเป็น `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | ใช้ `f` กับเนื้อในของ `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | ใช้ `f` กับเนื้อในของ `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | ถ้าเป็น `Some`/`Ok` จะส่งเนื้อในให้ `f` แล้วคืนผลของมัน |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | ถ้าเป็น `None`/`Err` จะคืนผลของ `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | เปลี่ยน `(Some v)` เป็น `(Ok v)` และ `None` เป็น `(Err e)` |
 
-ตัวสร้าง `some`/`none`/`ok`/`err` ใช้เป็นชื่อเปล่าได้ในทุกโมดูลโดยไม่ต้อง `use`
-และเขียนพร้อมชื่อชนิดแบบ `Option::some` ก็ได้
+ตัวสร้าง `Some`/`None`/`Ok`/`Err` ใช้เป็นชื่อเปล่าได้ในทุกโมดูลโดยไม่ต้อง `use`
+และเขียนพร้อมชื่อชนิดแบบ `Option::Some` ก็ได้
 
 การแตกแขนงเขียนอย่างชัดแจ้งด้วย `match` หรือต่อกันเป็นสายด้วย `map`/`and-then` และเมธอดอื่นข้างบน ไม่มีไวยากรณ์ที่ตรงกับ `?` ของ Rust
 
@@ -35,12 +35,12 @@
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
+  (if (= 0 (mod n 2)) (Option::Some (truncate n 2)) (Option::None)))
 
-(-> (Option::some 8)
-    (and-then half)                          ; (some 4)
-    (and-then half)                          ; (some 2)
-    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+(-> (Option::Some 8)
+    (and-then half)                          ; (Some 4)
+    (and-then half)                          ; (Some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (Some 20)
     (unwrap-or 0))                           ; => 20
 
 (-> (parse-int "x")
@@ -50,28 +50,28 @@
 
 ## 2. การแสดงผลขณะรันของ `Option<T>`
 
-เช่นเดียวกับใน Rust **`Option<T>` มักไม่สร้างกล่อง (box)** `some v` คือ `v` เอง และ `none` คือ
+เช่นเดียวกับใน Rust **`Option<T>` มักไม่สร้างกล่อง (box)** `Some v` คือ `v` เอง และ `None` คือ
 ค่าลิสต์ว่าง ไม่มีการจัดสรรและไม่มีการอ้อม `Option<Sexpr>` (ซึ่งลิสต์ว่างคือ
-`none`), `Option<int>`, `Option<string>`, `Option<my-struct>`, `Option<f64>` และ `Option<(fn ...)>`
+`None`), `Option<int>`, `Option<string>`, `Option<my-struct>`, `Option<f64>` และ `Option<(fn ...)>`
 ล้วนอยู่ในรูปนี้
 
 จะใช้กล่องเฉพาะเมื่อไม่อาจแยกค่าของ `T` ออกจากค่าลิสต์ว่างได้:
 
 | `T` | การแสดงผล | เหตุผล |
 |---|---|---|
-| `Option<U>` (ซ้อนกัน) | กล่อง | `none` ภายในจะเป็นค่าเดียวกับ `none` ภายนอก |
+| `Option<U>` (ซ้อนกัน) | กล่อง | `None` ภายในจะเป็นค่าเดียวกับ `None` ภายนอก |
 | `()` | กล่อง | ค่าของ `()` คือค่าลิสต์ว่างเอง |
 | `ptr` / `c-long` / `c-ulong` | กล่อง | ทั้ง 64 บิตเป็นค่า ไม่เหลือที่ให้แยกความแตกต่าง |
 | อย่างอื่นทั้งหมด | ไม่มีกล่อง | — |
 
 การแสดงผลถูกกำหนดโดยชนิดเพียงอย่างเดียวและอ่านจากค่าไม่ได้ ตอนพิมพ์
-`(some ...)`/`none` ถูกสร้างขึ้นใหม่จากชนิดสถิต ดังนั้น `(format false "~a" opt)` พิมพ์
-`(some 1)` มีข้อจำกัดสองข้อ:
+`(Some ...)`/`None` ถูกสร้างขึ้นใหม่จากชนิดสถิต ดังนั้น `(format false "~a" opt)` พิมพ์
+`(Some 1)` มีข้อจำกัดสองข้อ:
 
 - **ใส่ใน `:dyn Trait` ไม่ได้** (การส่งค่า `Option<int>` ที่คุณเขียน
   `(impl Speak Option<int> ...)` ไว้ให้ `:dyn Speak` เป็นข้อผิดพลาด)
 - การ downcast `(the Option<T> ...)` จาก `Sexpr` **ต้องระบุตัวสร้าง**:
-  `(the Option<int> (some x))` / `(the Option<int> (none))` รูปแบบที่ผูกทั้งค่า
+  `(the Option<int> (Some x))` / `(the Option<int> (None))` รูปแบบที่ผูกทั้งค่า
   `(the Option<int> o)` เป็นข้อผิดพลาด
 
 ## 3. ชนิดข้อผิดพลาดและ trait `Error`
@@ -98,7 +98,7 @@
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | ข้อความของข้อผิดพลาด (เมทอดของ trait `Error`) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | สาเหตุที่ข้อผิดพลาดนี้ห่อไว้ หรือ `none` หากไม่มี (`Error::source` ของ Rust) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | สาเหตุที่ข้อผิดพลาดนี้ห่อไว้ หรือ `None` หากไม่มี (`Error::source` ของ Rust) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` implement `Error`) | ขยายชนิดข้อผิดพลาดที่เป็นรูปธรรมเป็น trait object |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` implement `Error`) | ข้อความและสายของสาเหตุที่ได้จากการตาม `source` หนึ่งสาเหตุต่อบรรทัด CL ไม่มีสิ่งที่ตรงกัน ("caused by" ของ Rust) |
 
@@ -110,10 +110,10 @@
 (defstruct io-err (path string))
 (impl Error io-err
   (defmethod message (self) string (append "io failed: " self::path))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; the concrete type goes into E as it is
-  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
+  (if (equal p "") (Result::Err (make-instance 'io-err :path "<empty>")) (Result::Ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; handle any kind uniformly
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -128,8 +128,8 @@
 (use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
-    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((Err e) (Result::Err e))))
 ```
 
 **ชนิดและ trait ใช้เนมสเปซเดียวกัน** (เหมือนใน Rust) ภายในโมดูลเดียว `defstruct`/`defenum` และ

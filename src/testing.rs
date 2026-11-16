@@ -178,7 +178,7 @@ pub fn run(
 
 /// Check `(NAME)` inside the test's module and run it. A test returning
 /// `Result<(), E>` is called as
-/// `(match (NAME) ((ok _) ()) ((err e) (panic (format false "..." SHOWN))))`,
+/// `(match (NAME) ((Ok _) ()) ((Err e) (panic (format false "..." SHOWN))))`,
 /// `SHOWN` being `(describe-error e)` for an `Error` and
 /// `(print-object e true)` otherwise ([`TestReturn`]), and the `panic`
 /// carrying the test's own location, so that is where a failure is reported.
@@ -189,7 +189,7 @@ fn run_one(heap: &mut Heap, checker: &Rc<RefCell<Checker>>, interp: &mut Interp,
     if t.returns != TestReturn::Unit {
         // The standard library's names, whichever module the test is in.
         let sym = |heap: &mut Heap, s: &str| Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, s));
-        let (e, ok, er, under) = (sym(heap, "e"), sym(heap, "ok"), sym(heap, "err"), sym(heap, "_"));
+        let (e, ok, er, under) = (sym(heap, "e"), sym(heap, "Ok"), sym(heap, "Err"), sym(heap, "_"));
         let print = match t.returns {
             TestReturn::ResultError => vec![sym(heap, "describe-error"), e],
             _ => vec![sym(heap, "print-object"), e, Value::Bool(true)],

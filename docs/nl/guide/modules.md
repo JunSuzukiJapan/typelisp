@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Modules en bestandsindeling
 
 Deze handleiding legt uit hoe je een programma samenstelt dat uit meerdere bestanden bestaat. De
@@ -136,7 +136,7 @@ definitie.
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; first van deze module => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first van de standaardbibliotheek => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; first van de standaardbibliotheek => (Some 1)
 ```
 
 Na `shadow` verwijst `first` in die module naar je eigen definitie. Om de `first` van de

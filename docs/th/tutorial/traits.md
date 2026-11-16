@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Trait
 
 trait คือคำมั่นสัญญาว่า "ชนิดนี้รองรับการดำเนินการเหล่านี้" trait ทำให้หลายชนิดใช้การดำเนินการ
@@ -139,12 +139,12 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-เมื่อให้ `Vector` ที่มีค่า `money` 300, 900 และ 100 ตามลำดับ มันคืน `(some 900 yen)`
+เมื่อให้ `Vector` ที่มีค่า `money` 300, 900 และ 100 ตามลำดับ มันคืน `(Some 900 yen)`
 
 ## 5. `:dyn`: การจัดการค่าต่างชนิดกันรวมกัน
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Tarefas e canais
 
 O vocabulário das tarefas (threads leves). `task` e `thread`, que as iniciam, e `select`, que espera várias
@@ -36,7 +36,7 @@ threads). Onde elas alternam e como isso difere do Go está em
 |---|---|---|---|
 | `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | Um canal de capacidade `n`. `0` é um encontro (sem buffer) |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | Espera até haver espaço e então entrega o valor |
-| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Espera até chegar um valor. `none` quando está fechado e vazio |
+| `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | Espera até chegar um valor. `None` quando está fechado e vazio |
 | `close` | `(close ch)` | `(Chan<T>)→()` | Fecha-o |
 | `len` | `(len ch)` | `(Chan<T>)→int` | Quantos valores há agora no buffer |
 | `cap` | `(cap ch)` | `(Chan<T>)→int` | A capacidade |
@@ -63,7 +63,7 @@ threads). Onde elas alternam e como isso difere do Go está em
 - **Fechar um canal em que uma tarefa espera para fazer `send` faz essa tarefa entrar em panic** (a regra do
   Go).
 - `recv` em um canal fechado devolve o que restou no buffer e, quando ele fica vazio, continua devolvendo
-  `none`.
+  `None`.
 - `close` é resolvido pelo tipo do receptor, então é algo diferente do `close` do trait `Stream`. `Chan<T>` não
   implementa `Stream`.
 - **Uma capacidade negativa causa panic** (não é arredondada silenciosamente para 0).
@@ -197,8 +197,8 @@ O `context.Context` do Go. É passado a um trabalho que se quer poder parar de f
     (select
       ((v (recv (done ctx))) (println "stopped") (break))
       ((j (recv jobs)) (match j
-                         ((some n) (println "job ~a" n))
-                         ((none) (break)))))))
+                         ((Some n) (println "job ~a" n))
+                         ((None) (break)))))))
 
 (let* ((ctx (Context::with-timeout (Context::background) 1.0))
        (jobs (the Chan<int> (Chan::new 0))))
@@ -212,7 +212,7 @@ O `context.Context` do Go. É passado a um trabalho que se quer poder parar de f
 - **O cancelamento chega aos filhos.** Um contexto criado com `with-cancel`/`with-timeout` é
   cancelado junto com o pai. No sentido contrário (do filho para o pai) não se propaga.
 - Um filho criado a partir de um contexto já cancelado já nasce cancelado.
-- `done` só é fechado; nenhum valor é enviado. Receber devolve `none`.
+- `done` só é fechado; nenhum valor é enviado. Receber devolve `None`.
 - Cada chamada de `(Context::background)` cria uma raiz separada. O `Background()` do Go é um só e
   não pode ser cancelado; aqui uma raiz também pode ser cancelada, e isso afeta só o que foi criado
   a partir dela.

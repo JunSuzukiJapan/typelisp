@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Typy
 
 Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy typ. Sposób zapisu typów opisano w
@@ -30,8 +30,8 @@ Nie ma 64-bitowego typu całkowitego. Dla liczb całkowitych, których szerokoś
 
 | Typ | Zawartość | Szczegóły |
 |---|---|---|
-| `Option<T>` | Wartość, która jest albo jej nie ma. `some` / `none` | [Option i Result](functions/option-result.md) |
-| `Result<T,E>` | Sukces lub porażka. `ok` / `err` | Jak wyżej |
+| `Option<T>` | Wartość, która jest albo jej nie ma. `Some` / `None` | [Option i Result](functions/option-result.md) |
+| `Result<T,E>` | Sukces lub porażka. `Ok` / `Err` | Jak wyżej |
 | `Vector<T>` | Rosnąca tablica | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Tablica haszująca. Sposób porównywania kluczy wyznacza `:test` przy tworzeniu, a w tablicy `equal` typ kluczy musi implementować `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | Krotka (od 1 do 12 elementów). Elementy czyta się przez `t::0` | [Składnia, rozdział 2](syntax.md#2-zapis-typów) |
@@ -46,8 +46,8 @@ list `(T U ...)` (ten sam typ co `cons-cell<T,cons-cell<U,()>>`) ([Referencja sk
 
 | Typ | Zawartość | Szczegóły |
 |---|---|---|
-| `Sexpr` | Niepuste S-wyrażenie. 19 wariantów: `int`, od `i8` do `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
-| `Option<Sexpr>` | Dane w postaci S-wyrażeń w ogólności. Pusta lista `()` to `none` | Jak wyżej |
+| `Sexpr` | Niepuste S-wyrażenie. 19 wariantów: `Int`, od `I8` do `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
+| `Option<Sexpr>` | Dane w postaci S-wyrażeń w ogólności. Pusta lista `()` to `None` | Jak wyżej |
 
 ## 4. Typy w bibliotece standardowej
 
@@ -72,7 +72,7 @@ samo jak typy, które piszesz sam, i wszystko, co można zrobić z `defstruct`, 
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Strumienie | [Strumienie](functions/streams-files.md#3-konkretne-typy-strumieni) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Strumienie złożone | [Strumienie złożone](functions/streams-files.md#4-strumienie-złożone) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | Sieć | [Sieć](functions/network.md#1-typy) |
-| `ReadOutcome` | Wynik `read-sexpr`. `datum` / `eof` | [Strumienie](functions/streams-files.md#6-funkcje-generyczne-i-operacje-na-plikach) |
+| `ReadOutcome` | Wynik `read-sexpr`. `Datum` / `Eof` | [Strumienie](functions/streams-files.md#6-funkcje-generyczne-i-operacje-na-plikach) |
 | `universal-time` `internal-time` `decoded-time` | Czas | [Czas](functions/system.md#1-czas) |
 | `heap-info` | Bieżący stan sterty | [Narzędzia implementacji](functions/system.md#51-pola-heap-info) |
 

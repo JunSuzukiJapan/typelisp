@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/errors.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 错误消息
 
 `typl` 给出的主要错误消息的含义和修正方法。
@@ -99,8 +99,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | 消息 | 含义与修正方法 |
 |---|---|
 | `panic: divide by zero` | 整数或有理数除以零。浮点数除以零不会 panic，而是得到 `inf`/`NaN` |
-| `panic: unwrap: called on none` | 对 `none` 进行了 `unwrap`。用 `match` 或 `unwrap-or` 处理 `none` 的情况 |
-| `panic: Vector: index 5 out of bounds` | 下标越界。用 `len` 确认长度，或者使用越界时返回 `none` 的函数（`nth`、`pop` 等） |
+| `panic: unwrap: called on None` | 对 `None` 进行了 `unwrap`。用 `match` 或 `unwrap-or` 处理 `None` 的情况 |
+| `panic: Vector: index 5 out of bounds` | 下标越界。用 `len` 确认长度，或者使用越界时返回 `None` 的函数（`nth`、`pop` 等） |
 | `panic: an integer argument does not fit a fixnum` | 给接受下标或个数的参数传入了 63 位放不下的 `int` |
 | `throw: no enclosing (catch 'oops) for this throw` | 执行了没有被同一标签的 `catch` 包围的 `throw` |
 | ``panic: throw: `oops` carries `...`, but the nearest (catch 'oops) carries `...` `` | `throw` 到达了同一标签但携带其他类型的 `catch` |

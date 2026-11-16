@@ -76,12 +76,12 @@ const PROGRAM: &str = r#"
 (defun a-float () f64 (let ((f 2.5)) (* f 2.0)))
 (defun matched ((o Option<int>)) int
   (let ((v 100))
-    (match o ((some v) v) ((none) v))))
+    (match o ((Some v) v) ((None) v))))
 (defun main () ()
   (println "~a ~a ~a ~a ~a ~a ~a" (folded 3) (assigned 10) (past-fixnum) (at-fixnum-edges)
            (shadowed 1) (nested-shadow) (wide))
   (println "~a ~a ~a ~a ~a ~a ~a" (captured 4) (leaves) (comparisons) (a-char) (a-float)
-           (matched (Option::some 7)) (matched (Option::none))))
+           (matched (Option::Some 7)) (matched (Option::None))))
 "#;
 
 const EXPECTED: &str = "13 45 13835058055282163716 -1 6 3 -8589934594\n7 0 14 z 5.0 7 100\n";

@@ -46,7 +46,7 @@ fn eprint_writes_to_standard_error_only() {
     let file = write_program(&dir);
     let (code, out, err) = output(Command::new(env!("CARGO_BIN_EXE_typl")).arg(&file));
     assert_eq!(code, 0, "{}", err);
-    assert_eq!(out, "side ran\nout\n(ok 5)\n");
+    assert_eq!(out, "side ran\nout\n(Ok 5)\n");
     assert_eq!(err, "a=1 b=7\nfrom eval\n");
 }
 
@@ -55,7 +55,7 @@ fn a_release_run_leaves_eprint_and_its_arguments_out() {
     let dir = scratch("run-release");
     let file = write_program(&dir);
     let (code, out, err) = output(Command::new(env!("CARGO_BIN_EXE_typl")).arg("--release").arg(&file));
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "out\n(ok 5)\n", ""));
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "out\n(Ok 5)\n", ""));
     // After the file name it is the program's own argument.
     let (_, _, err) = output(Command::new(env!("CARGO_BIN_EXE_typl")).arg(&file).arg("--release"));
     assert_eq!(err, "a=1 b=7\nfrom eval\n");
@@ -70,7 +70,7 @@ fn compile_file_builds_what_the_process_is() {
         output(Command::new(env!("CARGO_BIN_EXE_typl")).arg("--release").arg("build.typl").current_dir(&dir));
     assert_eq!(code, 0, "{}", err);
     let (code, out, err) = output(&mut Command::new(dir.join("prog-built")));
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "out\n(ok 5)\n", ""));
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "out\n(Ok 5)\n", ""));
 }
 
 #[test]
@@ -79,9 +79,9 @@ fn a_release_build_leaves_eprint_and_its_arguments_out() {
     let file = write_program(&dir);
     // `--release` is typl's own option, before `-c` or among its arguments.
     for (name, before, after, expected_out, expected_err) in [
-        ("prog-debug", false, false, "side ran\nout\n(ok 5)\n", "a=1 b=7\nfrom eval\n"),
-        ("prog-release", true, false, "out\n(ok 5)\n", ""),
-        ("prog-release-after", false, true, "out\n(ok 5)\n", ""),
+        ("prog-debug", false, false, "side ran\nout\n(Ok 5)\n", "a=1 b=7\nfrom eval\n"),
+        ("prog-release", true, false, "out\n(Ok 5)\n", ""),
+        ("prog-release-after", false, true, "out\n(Ok 5)\n", ""),
     ] {
         let release = before || after;
         let exe = dir.join(name);

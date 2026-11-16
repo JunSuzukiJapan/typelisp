@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # แมโคร
 
 แมโครคือฟังก์ชันที่รับโปรแกรมและคืนโปรแกรม แมโครทำให้คุณสร้างไวยากรณ์ใหม่
@@ -42,7 +42,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. การขยายก็ถูกตรวจสอบชนิดเช่นกัน
@@ -120,15 +120,15 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 
 ตัวเนื้อหาของแมโครเป็นโค้ด typelisp ธรรมดา จึงตรวจสอบอาร์กิวเมนต์ด้วย `if` หรือ `match` และ
 สร้างการขยายที่ต่างกันได้ อาร์กิวเมนต์เป็นข้อมูล S-expression (`Option<Sexpr>`) และลิสต์ว่าง
-คือ `none`
+คือ `None`
 
 ลองสร้าง `my-and` ที่คืน `true` หากทุกเงื่อนไขเป็นจริง
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; no arguments
-    ((cons f more)
+    ((None) 'true)                                    ; no arguments
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -138,7 +138,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` เป็นรูปแบบที่ดึงส่วนหัวของลิสต์ไปไว้ใน `f` และส่วนที่เหลือไว้ใน `more`
+- `(Cons f more)` เป็นรูปแบบที่ดึงส่วนหัวของลิสต์ไปไว้ใน `f` และส่วนที่เหลือไว้ใน `more`
 - `sexpr-null` ทดสอบว่าข้อมูล S-expression เป็นลิสต์ว่างหรือไม่
 - กิ่ง `_` สุดท้ายจำเป็นเพราะข้อมูล S-expression มีรูปแบบอื่นนอกจากลิสต์ (ตัวเลข
   สตริง และอื่น ๆ) และ `match` ต้องการให้ครอบคลุมสิ่งเหล่านั้นด้วย อาร์กิวเมนต์ `&rest` เป็น

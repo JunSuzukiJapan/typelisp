@@ -58,8 +58,8 @@ fn a_compiled_function_drives_a_native_scope_and_matches_its_option() {
                (defun keep ((s Scope<llvm-value>) (v llvm-value)) llvm-value \
                  (set s \"x\" v) \
                  (match (get s \"x\") \
-                   ((some w) w) \
-                   (none (panic \"missing\")))) \
+                   ((Some w) w) \
+                   (None (panic \"missing\")))) \
                (compile keep) \
                (defun new-scope () Scope<llvm-value> (Scope::new)) \
                (let ((b (llvm-builder::create))) \
@@ -72,8 +72,8 @@ fn a_compiled_function_sees_none_for_a_missing_scope_name() {
     let src = "(use std::collections::Scope) (use %core::llvm-value) \
                (defun probe ((s Scope<llvm-value>)) int \
                  (match (get s \"absent\") \
-                   ((some w) 1) \
-                   (none 0))) \
+                   ((Some w) 1) \
+                   (None 0))) \
                (compile probe) \
                (defun new-scope () Scope<llvm-value> (Scope::new)) \
                (probe (new-scope))";

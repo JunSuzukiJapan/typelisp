@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Option, Result và các kiểu lỗi
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-Hàm khởi tạo: `Option<T>` có `(some T)` / `none`. `Result<T,E>` có `(ok T)` / `(err E)`. `E` có thể là bất kỳ
+Hàm khởi tạo: `Option<T>` có `(Some T)` / `None`. `Result<T,E>` có `(Ok T)` / `(Err E)`. `E` có thể là bất kỳ
 kiểu nào: các kiểu lỗi cụ thể dựng sẵn, và các kiểu bạn tự viết bằng `defstruct`/`defenum`, đều vừa ở đó
 như nhau (chương 3).
 
 | Tên | Dạng | Option | Result | Mô tả |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Lấy giá trị ra. Panic với `none`/`err` |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Lấy giá trị ra. Panic với `None`/`Err` |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | Giá trị, hoặc giá trị mặc định |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Có phải là `some` không |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Có phải là `none` không |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Có phải là `ok` không |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Có phải là `err` không |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Lấy giá trị ra. Gặp `none`/`err` thì panic với `msg` |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Giá trị, hoặc kết quả của `f`. `f` chỉ được gọi khi gặp `none`/`err` |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Áp dụng `f` lên nội dung của `some`/`ok` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Áp dụng `f` lên nội dung của `err` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Gặp `some`/`ok` thì đưa nội dung cho `f` và trả về kết quả của nó |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Gặp `none`/`err` thì trả về kết quả của `f` |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Biến `(some v)` thành `(ok v)` và `none` thành `(err e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Có phải là `Some` không |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Có phải là `None` không |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Có phải là `Ok` không |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Có phải là `Err` không |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Lấy giá trị ra. Gặp `None`/`Err` thì panic với `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Giá trị, hoặc kết quả của `f`. `f` chỉ được gọi khi gặp `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Áp dụng `f` lên nội dung của `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Áp dụng `f` lên nội dung của `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Gặp `Some`/`Ok` thì đưa nội dung cho `f` và trả về kết quả của nó |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Gặp `None`/`Err` thì trả về kết quả của `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Biến `(Some v)` thành `(Ok v)` và `None` thành `(Err e)` |
 
-Các hàm khởi tạo `some`/`none`/`ok`/`err` dùng được dưới dạng tên trần trong mọi mô-đun mà không cần `use`.
-Cũng có thể viết kèm tên kiểu, như `Option::some`.
+Các hàm khởi tạo `Some`/`None`/`Ok`/`Err` dùng được dưới dạng tên trần trong mọi mô-đun mà không cần `use`.
+Cũng có thể viết kèm tên kiểu, như `Option::Some`.
 
 Rẽ nhánh được viết tường minh bằng `match`, hoặc nối chuỗi bằng `map`/`and-then` và các phương thức
 khác ở trên. Không có cú pháp tương ứng với `?` của Rust.
@@ -40,12 +40,12 @@ như vậy:
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
+  (if (= 0 (mod n 2)) (Option::Some (truncate n 2)) (Option::None)))
 
-(-> (Option::some 8)
-    (and-then half)                          ; (some 4)
-    (and-then half)                          ; (some 2)
-    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+(-> (Option::Some 8)
+    (and-then half)                          ; (Some 4)
+    (and-then half)                          ; (Some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (Some 20)
     (unwrap-or 0))                           ; => 20
 
 (-> (parse-int "x")
@@ -55,8 +55,8 @@ như vậy:
 
 ## 2. Biểu diễn lúc chạy của `Option<T>`
 
-Như trong Rust, **`Option<T>` thường không tạo hộp (box)**. `some v` chính là `v` và `none` là giá trị
-danh sách rỗng, không cấp phát và không gián tiếp. `Option<Sexpr>` (nơi danh sách rỗng là `none`),
+Như trong Rust, **`Option<T>` thường không tạo hộp (box)**. `Some v` chính là `v` và `None` là giá trị
+danh sách rỗng, không cấp phát và không gián tiếp. `Option<Sexpr>` (nơi danh sách rỗng là `None`),
 `Option<int>`, `Option<string>`, `Option<my-struct>`, `Option<f64>` và `Option<(fn ...)>` đều dùng dạng
 này.
 
@@ -64,18 +64,18 @@ Hộp chỉ được dùng khi một giá trị kiểu `T` không thể phân bi
 
 | `T` | Biểu diễn | Lý do |
 |---|---|---|
-| `Option<U>` (lồng nhau) | Hộp | `none` bên trong sẽ là cùng giá trị với `none` bên ngoài |
+| `Option<U>` (lồng nhau) | Hộp | `None` bên trong sẽ là cùng giá trị với `None` bên ngoài |
 | `()` | Hộp | Giá trị của `()` chính là giá trị danh sách rỗng |
 | `ptr` / `c-long` / `c-ulong` | Hộp | Cả 64 bit đều là giá trị, không còn chỗ để phân biệt |
 | Mọi thứ khác | Không hộp | — |
 
-Biểu diễn được quyết định chỉ bởi kiểu và không thể đọc ra từ một giá trị. Khi in, `(some ...)`/`none` được
-dựng lại từ kiểu tĩnh, nên `(format false "~a" opt)` in ra `(some 1)`. Có hai hạn chế:
+Biểu diễn được quyết định chỉ bởi kiểu và không thể đọc ra từ một giá trị. Khi in, `(Some ...)`/`None` được
+dựng lại từ kiểu tĩnh, nên `(format false "~a" opt)` in ra `(Some 1)`. Có hai hạn chế:
 
 - **Không thể đưa nó vào `:dyn Trait`** (truyền một giá trị `Option<int>` mà bạn đã viết
   `(impl Speak Option<int> ...)` cho một `:dyn Speak` là lỗi).
 - Một phép downcast `(the Option<T> ...)` từ một `Sexpr` **nêu tên một hàm khởi tạo**:
-  `(the Option<int> (some x))` / `(the Option<int> (none))`. Dạng gán toàn bộ giá trị,
+  `(the Option<int> (Some x))` / `(the Option<int> (None))`. Dạng gán toàn bộ giá trị,
   `(the Option<int> o)`, là lỗi.
 
 ## 3. Các kiểu lỗi và trait `Error`
@@ -102,7 +102,7 @@ lỗi của riêng bạn viết bằng `(defstruct my-err (...))` / `(defenum my
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | Thông điệp lỗi (một phương thức của trait `Error`) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | Nguyên nhân mà lỗi này bao bọc, hoặc `none` nếu không có (`Error::source` của Rust) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | Nguyên nhân mà lỗi này bao bọc, hoặc `None` nếu không có (`Error::source` của Rust) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` triển khai `Error`) | Mở rộng một kiểu lỗi cụ thể thành trait object |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` triển khai `Error`) | Thông điệp và chuỗi nguyên nhân tìm được bằng cách theo `source`, mỗi nguyên nhân một dòng. CL không có thứ tương ứng ("caused by" của Rust) |
 
@@ -114,10 +114,10 @@ sẵn:
 (defstruct io-err (path string))
 (impl Error io-err
   (defmethod message (self) string (append "io failed: " self::path))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; kiểu cụ thể đi vào E nguyên trạng
-  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
+  (if (equal p "") (Result::Err (make-instance 'io-err :path "<empty>")) (Result::Ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; xử lý mọi loại một cách đồng nhất
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -132,8 +132,8 @@ viết tường minh:
 (use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
-    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((Err e) (Result::Err e))))
 ```
 
 **Kiểu và trait dùng chung một không gian tên** (như trong Rust). Trong một module, một

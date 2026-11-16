@@ -31,7 +31,7 @@ fn traced(src: &str) -> String {
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *trace-output* (%internal::standard-stream-of *cap*))\n\
          {}\n\
-         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (match (%internal::stream-take-output-string *cap*) ((Ok s) s) ((Err _) \"<capture failed>\"))",
         src
     );
     let mut h = Heap::with_capacity(1 << 16);
@@ -365,7 +365,7 @@ fn trace_rendering_holds_its_roots_under_gc_stress() {
                    (trace shift)\n\
                    (shift (make-instance 'pt :x 1 :y 2) 3 \"four\")\n\
                    (shift (make-instance 'pt :x 5 :y 6) 7 \"eight\")\n\
-                   (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))";
+                   (match (%internal::stream-take-output-string *cap*) ((Ok s) s) ((Err _) \"<capture failed>\"))";
         let mut h = Heap::with_capacity(1 << 16);
         let mut chk = Checker::new();
         let mut interp = Interp::new();

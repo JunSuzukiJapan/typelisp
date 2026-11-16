@@ -197,7 +197,7 @@ fn every_variable_it_binds_is_an_option_sexpr() {
     assert_eq!(
         show(
             "(destructuring-bind (a b) (quote (1 2)) \
-               (+ (match a ((int n) n) (_ 0)) (match b ((int n) n) (_ 0))))"
+               (+ (match a ((Int n) n) (_ 0)) (match b ((Int n) n) (_ 0))))"
         ),
         "3"
     );

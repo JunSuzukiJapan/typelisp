@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -44,11 +44,11 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
   单独的 `:` 或像 `:a:b` 这样包含额外冒号的是读取错误。以 `::` 开头的不是关键字，而是绝对路径（见下文）。
   另外，`:dyn` 是只用于类型位置的保留关键字，写在其他位置是错误（见[第 2 章](#2-类型的写法)）。
 - **列表**：`(a b c)`。点对 `(a . b)` 也可以读取。
-- **向量**：`#(1 2 3)`（与 CL 相同）。内容全部是字面量，不会求值——`#(a b)` 中的 `a` 是符号而不是变量。元素类型由上下文决定（`(the Vector<i32> #(1 2))`），没有上下文时取第一个元素的类型（`#(1 2 3)` 是 `Vector<int>`）。元素类型必须一致，`#(1 "a")` 是类型错误。既没有元素也没有上下文的 `#()` 也是类型错误。每次求值都会创建新的向量。在期望 S 表达式数据的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 读到的数据），它是元素全部为数据的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `vector` 变体。
-- **数组**：`#2A((1 2) (3 4))`（与 CL 相同）。`#` 与 `A` 之间的数是维数，内容中列表嵌套的前这么多层就是各个维度。`#0A x` 是只有一个元素的零维数组。同一层的列表长度不一致是读取错误。类型的确定方式与向量相同，结果是 `Array<T>`（没有元素时需要上下文，例如 `(the Array<f64> #2A(()))`）。作为 S 表达式数据，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `array` 变体。
-- **元组**：`#{"foo" 123 45.6}`。内容全部是字面量，不求值（`#{a b}` 的 `a` 是符号）。各元素的类型按位置由上下文决定（`(the #{i32 f64} #{1 2.0})`），没有上下文时就是各元素自身的类型（`#{"foo" 123}` 是 `#{string int}`）。元素为 1～12 个。每次求值都会产生新的元组。要用计算出的值构造元组，使用 `(tuple a b)`。在期望 S 表达式数据的位置，它是元素全部为数据的元组——即 `Sexpr` 的 `tuple` 变体。
+- **向量**：`#(1 2 3)`（与 CL 相同）。内容全部是字面量，不会求值——`#(a b)` 中的 `a` 是符号而不是变量。元素类型由上下文决定（`(the Vector<i32> #(1 2))`），没有上下文时取第一个元素的类型（`#(1 2 3)` 是 `Vector<int>`）。元素类型必须一致，`#(1 "a")` 是类型错误。既没有元素也没有上下文的 `#()` 也是类型错误。每次求值都会创建新的向量。在期望 S 表达式数据的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 读到的数据），它是元素全部为数据的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `Vector` 变体。
+- **数组**：`#2A((1 2) (3 4))`（与 CL 相同）。`#` 与 `A` 之间的数是维数，内容中列表嵌套的前这么多层就是各个维度。`#0A x` 是只有一个元素的零维数组。同一层的列表长度不一致是读取错误。类型的确定方式与向量相同，结果是 `Array<T>`（没有元素时需要上下文，例如 `(the Array<f64> #2A(()))`）。作为 S 表达式数据，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `Array` 变体。
+- **元组**：`#{"foo" 123 45.6}`。内容全部是字面量，不求值（`#{a b}` 的 `a` 是符号）。各元素的类型按位置由上下文决定（`(the #{i32 f64} #{1 2.0})`），没有上下文时就是各元素自身的类型（`#{"foo" 123}` 是 `#{string int}`）。元素为 1～12 个。每次求值都会产生新的元组。要用计算出的值构造元组，使用 `(tuple a b)`。在期望 S 表达式数据的位置，它是元素全部为数据的元组——即 `Sexpr` 的 `Tuple` 变体。
 - **属性**：`#[test]` 是附加在下一个形式上的标记（与 Rust 的写法相同）。目前唯一的属性是 `test`，加在 `defun` 上（[3.16 `#[test]`](#316-test--测试函数)）。用 `read` 读取时，它成为列表 `(%internal::attribute (test) form)`。
-- **空列表 `()`**：根据上下文，是 `Unit` 类型的值，或者是 `Option<Sexpr>` 的 `none`。**`Sexpr` 没有空列表的变体**——`Sexpr`
+- **空列表 `()`**：根据上下文，是 `Unit` 类型的值，或者是 `Option<Sexpr>` 的 `None`。**`Sexpr` 没有空列表的变体**——`Sexpr`
   表示"非空的 S 表达式"，S 表达式数据的类型是 `Option<Sexpr>`（见 [4.3 match](#43-match--模式匹配) 的"`Option<Sexpr>` 的模式"）。
 - **quote/quasiquote/unquote**：
   - `'x` → `(quote x)`
@@ -90,7 +90,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
   内部：`Vector<:dyn Drawable>` `HashTable<string, :dyn Drawable>`。具体值在期望位置自动装箱，显式形式为 `(as :dyn Trait 式)`。
   `:dyn Sub` 的值可以直接传给要求其超 trait（传递继承的所有 trait）的 `:dyn Super` 的位置（向上转换）。不能传给没有继承关系的
   trait。可以成为 `:dyn` 的 trait 的条件见 [3.9 deftrait / impl](#39-deftrait--impl--trait-机制)。在类型位置以外写 `:dyn` 是错误。
-- 内置泛型类型：`Option<T>`（`(some T)` / `none`）、`Result<T,E>`（`(ok T)` / `(err E)`）、`HashTable<K,V>`、`Vector<T>`，以及
+- 内置泛型类型：`Option<T>`（`(Some T)` / `None`）、`Result<T,E>`（`(Ok T)` / `(Err E)`）、`HashTable<K,V>`、`Vector<T>`，以及
   并发机制的 `Task<T>` / `Thread<T>` / `Chan<T>`（[第 12 章](#12-并发任务)）。还有 S 表达式数据的类型 `Sexpr`。内置的具体错误
   类型有 `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`，标准库的结构体有
   `SimpleError` / `WrappedError`（`Error` 不是类型而是 trait——作为 `:dyn Error` 使用）。一览见 [types.md](types.md)。
@@ -119,7 +119,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; 没有默认值
-    (match suffix ((some s) (append name s)) ((none) name)))         ; 函数体中是 Option<string>
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; 函数体中是 Option<string>
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; 有默认值
   (pow 3)      ; n = 2
@@ -129,7 +129,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
   (mk :b "q")  ; 调用方写 `:name 值`，顺序任意。省略的取默认值
   ```
 
-  - **没有写默认式的参数的类型是 `Option<Type>`。** 省略时为 `none`，传入时调用方写的裸值自动包装为 `some`。CL 中"通过
+  - **没有写默认式的参数的类型是 `Option<Type>`。** 省略时为 `None`，传入时调用方写的裸值自动包装为 `Some`。CL 中"通过
     supplied-p 变量得知是否省略"的东西，在这里体现在静态类型一侧。
   - 写了默认式时，类型保持声明的 `Type`。省略时，那个**经过检查的式子**原样嵌入调用方（每次调用都求值）。
   - **`&key` 不能与 `&optional`/`&rest` 混在同一个参数列表中。** CL 本身有一个歧义（末尾的实际参数是由按位置填充的 `&optional`
@@ -292,7 +292,7 @@ CL 中对应的是 `(declaim (ftype (function (i32) bool) even2))`，但那伴�
 
 ```lisp
 (defstruct handle (p ptr))          ; 结构体的字段
-(defenum maybe (none) (some ptr))   ; 枚举的字段
+(defenum maybe (None) (Some ptr))   ; 枚举的字段
 (defvar (block ptr) ...)            ; 全局变量
 (defffi f (Vector<ptr>) i32)        ; 类型参数内部
 ```
@@ -689,8 +689,8 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 ; 泛型
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - 每个变体的形式是 `(VariantName FieldType...)`。字段只能按位置指定（没有名字）。至少需要一个变体，名字不能重复。
@@ -699,8 +699,8 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - 可以用 `match` / `if-let` 拆解。`match` 检查穷尽性（需要覆盖所有变体或有 `_`）：
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - 方法和静态方法与 `defstruct` 一样写在 `impl`（3.5）中。
 - 要让枚举本身 `pub`，写 `(pub defenum ...)`。
@@ -855,17 +855,17 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 ```
 
 - `module` 创建命名空间。**类型不是命名空间**（与 Rust 一样，类型只拥有静态方法和方法）。
-- `(use Type)` 引入的只有类型的名字。枚举的变体和静态方法要通过类型名书写，如 `Option::some` 或 `Chan::new`。即使在 `(use std::sync::Chan)` 之后，只要没有在任何地方定义名为 `new` 的函数，裸的 `(new 1)` 就是错误。
+- `(use Type)` 引入的只有类型的名字。枚举的变体和静态方法要通过类型名书写，如 `Option::Some` 或 `Chan::new`。即使在 `(use std::sync::Chan)` 之后，只要没有在任何地方定义名为 `new` 的函数，裸的 `(new 1)` 就是错误。
 - 要用裸名使用类型的构造函数和静态方法，可以像 `(use std::sync::Chan::new)` 这样逐个引入，或用 `(use Type::*)` 引入全部构造函数和公开的静态方法（结构体的构造函数不包括在内，因为结构体用 `make-instance` 创建）。不能用 `pub use` 再导出。
 - 不能从两个不同的类型引入同一个裸名（`(use std::sync::Chan::* std::sync::WaitGroup::*)` 是错误，因为两者都有 `new`）。引入与该模块定义的函数、全局变量、宏同名的名字也是错误。明知如此仍要替换时，使用 `shadowing-import`。
-- `Option` 的 `some`/`none` 和 `Result` 的 `ok`/`err` 由标准库向所有模块公开，所以不用 `use` 也能用裸名使用（与 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
+- `Option` 的 `Some`/`None` 和 `Result` 的 `Ok`/`Err` 由标准库向所有模块公开，所以不用 `use` 也能用裸名使用（与 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
 - **一个名字只有一个含义**。函数、全局变量和宏属于同一个命名空间，在同一模块中它们中的任意两个都不能
   取同一个名字（无论以什么顺序定义都会报错）。不像 CL 那样把函数和变量的命名空间分开。不同模块中的
   同名名字，较近的那个可见。
 - 裸名 `n` 的解析（调用 `(n a ...)` 的位置。特殊形式的名字在此之前决定）：
   1. 局部（参数，以及 `let`、`labels`、`macrolet`、`symbol-macrolet` 的绑定）
   2. 模块的名字 `n` 是宏时，该宏
-  3. 构造函数和静态方法：用 `use` 引入的，以及标准库公开的 `Sexpr` 的构造函数（`sym`、`int` 等）和 `Option`/`Result` 的构造函数
+  3. 构造函数和静态方法：用 `use` 引入的，以及标准库公开的 `Sexpr` 的构造函数（`Sym`、`Int` 等）和 `Option`/`Result` 的构造函数
   4. 第一个参数的类型的方法 `n`（方法**只**根据**第一个参数的类型**查找）
   5. 模块的名字 `n` 是函数或全局变量时，就是它（全局变量时调用其值所表示的函数）
 
@@ -986,20 +986,20 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
   (assert-equal (+ 1 2) 3))
 ```
 
-加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()` 或 `Result<(), E>`（也不能有类型参数）。不需要 `pub`。返回 `Result` 的测试在返回 `err` 时失败，并显示该错误，因此 `E` 必须实现 `Error` 或 `print-object`（与 Rust 要求测试的错误类型实现 `Debug` 相同）。是 `Error` 时用 `describe-error`（消息及原因链）显示，否则用 `print-object` 显示。`:dyn Error` 也是 `Error`，因此可以把各种错误归为一个类型返回。
+加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()` 或 `Result<(), E>`（也不能有类型参数）。不需要 `pub`。返回 `Result` 的测试在返回 `Err` 时失败，并显示该错误，因此 `E` 必须实现 `Error` 或 `print-object`（与 Rust 要求测试的错误类型实现 `Debug` 相同）。是 `Error` 时用 `describe-error`（消息及原因链）显示，否则用 `print-object` 显示。`:dyn Error` 也是 `Error`，因此可以把各种错误归为一个类型返回。
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **普通运行和 `compile-file` 会跳过它**，连内容也不检查（与 Rust 只在 `--test` 时编译测试相同）。程序本身无法调用测试函数。
 - 测试可以写在任何放置函数的文件中、任何 `module` 之内。也可以单独写在项目的 `tests/` 文件夹里。
-- 失败指 `panic`、运行时错误和返回 `err`。用 `assert`，或会打印两边的 `assert-equal`（[系统](functions/system.md)）来检查。即使一个测试失败，其余测试也会继续运行。
+- 失败指 `panic`、运行时错误和返回 `Err`。用 `assert`，或会打印两边的 `assert-equal`（[系统](functions/system.md)）来检查。即使一个测试失败，其余测试也会继续运行。
 
 ```sh
 typl test                 # 运行此文件夹中项目的全部测试
@@ -1123,14 +1123,14 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 模式的种类：
 - `_` —— 通配符
 - 变量名 —— 绑定模式（总是匹配）。但如果被匹配值的类型有该名字的变体，就解析为**下面的裸变体名模式**
-- 裸变体名 —— 匹配不带参数的变体（`(match c (red 1) (blue 2))`）。用裸名写带字段的变体会得到参数个数错误，所以像 `(circle r)`
+- 裸变体名 —— 匹配不带参数的变体（`(match c (Red 1) (Blue 2))`）。用裸名写带字段的变体会得到参数个数错误，所以像 `(Circle r)`
   这样用括号写
 - **立即值字面量**：整数 / `true`/`false` / 字符 —— 按字比较
 - **值字面量**：字符串 / 浮点数 / 符号（`'foo`）/ 多精度整数 / ratio —— 用该类型的 `equal`
   （[标准 trait](functions/traits.md#2-equal--ord比较)）按值比较。字符串比较的是内容，而不是同一性
 - `(:= expr)` —— 求值任意式子，用 `equal` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
   用户定义的 `Equal` 实现直接成为比较规则。`expr` 可以引用从该分支位置可见的任何东西（参数、外层绑定、全局变量）
-- `(Ctor sub-pattern...)` —— 构造函数模式（`(some x)` `(none)` `(cons a d)` `(ok v)` 等）
+- `(Ctor sub-pattern...)` —— 构造函数模式（`(Some x)` `(None)` `(Cons a d)` `(Ok v)` 等）
 - `(Type :slot pattern... :slot...)` — 结构体模式。在类型名之后用关键字写槽。关键字后面是模式时，
   用该模式匹配这个槽；后面是关键字或结束时，把槽绑定到同名的变量。没写的槽不参与匹配（不依赖字段的
   数量和顺序）：
@@ -1140,11 +1140,11 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; 绑定 x，并用 (some b) 匹配 y
+      ((point :x :y (Some b)) (+ x b))   ; 绑定 x，并用 (Some b) 匹配 y
       ((point :x a) a)))                 ; 绑定到 a
   ```
 - `#{p0 p1 ...}` —— 元组模式。逐个元素用子模式匹配。对 `Sexpr` 而言，只匹配元素个数相同的 `#{..}` 数据
-- `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(some (:or (circle r) (rect r _)))`）
+- `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(Some (:or (Circle r) (Rect r _)))`）
 
 用值字面量／`(:= expr)` 比较没有实现 `Equal` 的类型是类型错误（比起留下悄悄不匹配的分支，选择说明无法比较）。
 
@@ -1185,29 +1185,29 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - `(TypeName :slot pattern...)` — 以**类型名**开头的字段分解（仅限 struct）。与上面的结构体模式
   写法相同。例：对于 `(defstruct point (x f64) (y f64))`，写 `(point :x :y)`。
-- 裸变体名 `(VariantName sub-pattern...)` — 取出 `defenum` 的变体。解析为通过 `(use EnumType::*)` 等引入而可见的裸名（与调用构造函数时相同的可见性规则）。例：`(defenum color (red) (blue))` 在 `(use color::*)` 之后写 `(red)` `(blue)`。使用限定形式 `(EnumType::VariantName ...)` 则不需要 `use`。
+- 裸变体名 `(VariantName sub-pattern...)` — 取出 `defenum` 的变体。解析为通过 `(use EnumType::*)` 等引入而可见的裸名（与调用构造函数时相同的可见性规则）。例：`(defenum color (Red) (Blue))` 在 `(use color::*)` 之后写 `(Red)` `(Blue)`。使用限定形式 `(EnumType::VariantName ...)` 则不需要 `use`。
 - `(the Type pattern)` —— 以整个类型进行向下转换（整体绑定）。不拆解字段，把值原样交给 `pattern`。是在保持可变 struct 同一性的
   同时取出它的唯一写法，也是从 `Sexpr` 取出 `Vector<T>`/`HashTable<K,V>` 的唯一手段（两者没有字段拆解形式）。例：在
   `(the point p)` 之后 `(setf p::x 9)`，也会反映到列表中的原实例。
 
 **`Option<Sexpr>` 的模式**：S 表达式数据的类型不是 `Sexpr` 而是 `Option<Sexpr>`，空列表不是 `Sexpr` 的变体，而是 `Option` 的
-`none`。因此 `match` `Option<Sexpr>` 时，`Sexpr` 的 19 种变体和 `none` 可以**平铺在同一组分支中**（不需要剥去 `Option` 的外层
+`None`。因此 `match` `Option<Sexpr>` 时，`Sexpr` 的 19 种变体和 `None` 可以**平铺在同一组分支中**（不需要剥去 `Option` 的外层
 `match`）：
 
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
-    ((none)     0)          ; 空列表
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
+    ((None)     0)          ; 空列表
     (_          9)))
 ```
 
-穷尽性也在同一个平铺的全集——`Sexpr` 的 19 种变体加上 `none` 共 20 个——中检查。忘写 `(none)` 时，只要没有 `_` 就是错误。也可以写
-`(some x)`，绑定"非空的某物"。
+穷尽性也在同一个平铺的全集——`Sexpr` 的 19 种变体加上 `None` 共 20 个——中检查。忘写 `(None)` 时，只要没有 `_` 就是错误。也可以写
+`(Some x)`，绑定"非空的某物"。
 
-这个语法糖**恰好**只适用于 `Option<Sexpr>`。对 `Option<Option<Sexpr>>`，无法确定 `(int n)` 剥去的是哪一层，所以照常写两层 `match`。
+这个语法糖**恰好**只适用于 `Option<Sexpr>`。对 `Option<Option<Sexpr>>`，无法确定 `(Int n)` 剥去的是哪一层，所以照常写两层 `match`。
 
 **trait 对象（`:dyn Trait`，第 2 章）的被匹配值**也可以直接使用同样的向下转换模式——`match` 先拆开盒子再交给上面的 `Sexpr` 模式
 机制，所以没有额外的语法。实现类型的集合是开放的，所以不会穷尽，`_` 是必需的：
@@ -1233,7 +1233,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 **分支之间的类型推断**：所有分支必须是同一类型（`panic` 等发散的分支除外）。在没有期望类型的位置写的 `match` 中，分支会**互相**
-补足缺少的类型参数——`(Result::ok v)` 只决定 `T`，`(Result::err e)` 只决定 `E`，两者并列就决定了 `Result<T,E>`。到最后仍有任何
+补足缺少的类型参数——`(Result::Ok v)` 只决定 `T`，`(Result::Err e)` 只决定 `E`，两者并列就决定了 `Result<T,E>`。到最后仍有任何
 分支都无法决定的类型参数时，会成为该分支自身的错误（`cannot infer type argument ...`）。在 `match` 之外，无法决定的类型参数当场就是错误。
 
 使用向下转换模式的 `match` 的穷尽性检查，不计入 `Sexpr` 本身变体的覆盖（只列出向下转换模式的 `match` 需要用 `_` 收尾）。泛型 ADT
@@ -1341,7 +1341,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 | `:sum e` / `:count e` | 合计 / 为真的次数 |
 | `:maximize e` / `:minimize e` | 最大 / 最小。**`Option<T>`**（与 CL 对空序列返回 nil 相同。任意的 `Ord` 类型没有最小元） |
 | `:always e` / `:never e` | 全部满足则为 `true`，一旦不满足立即为 `false` |
-| `:thereis e` | `e` 是 **`Option<T>`**。返回第一个 `some`，没有时为 `none`（相当于 CL 的"第一个非 nil 值"的就是它。要测试 `bool` 用 `:always`/`:never`） |
+| `:thereis e` | `e` 是 **`Option<T>`**。返回第一个 `Some`，没有时为 `None`（相当于 CL 的"第一个非 nil 值"的就是它。要测试 `bool` 用 `:always`/`:never`） |
 | `:while e` / `:until e` | 在这里**正常结束**（`:finally` 会执行，收集的东西就是答案） |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | 让一个子句成为有条件的 |
 | `:return e` | 立即以该值退出（`:finally` 不执行。与 CL 相同） |
@@ -1359,7 +1359,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 
 省略 `:finally (return 0)` 是**类型错误**。这只是 `block` 的规则在起作用（5.1）：退出的类型 `int` 与循环用尽时留下的 `()` 不符。
 
-**循环的值**：有累积子句时为其累积（有多个时为第一个），`:always`/`:never` 时为 `true`，`:thereis` 时为 `none`，都没有时为 `()`。
+**循环的值**：有累积子句时为其累积（有多个时为第一个），`:always`/`:never` 时为 `true`，`:thereis` 时为 `None`，都没有时为 `()`。
 `:finally` 的最后是 `(return e)` 时，它就是值——这是 CL 的 `finally (return …)` 惯用法，是不做累积的循环表明自己答案的唯一方法。
 
 **与 CL 的区别 / 没有加入的东西**：
@@ -1420,7 +1420,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 (unreachable)                       ; 展开为 (panic "unreachable")。defmacro
 (todo)                              ; 展开为 (panic "todo")。defmacro
 (as Type expr)                      ; 数值/字符的类型转换。可能失败的转换失败时 panic
-(try-as Type expr)                  ; 与 as 相同，但以 Option<Type> 返回结果（失败时为 none）
+(try-as Type expr)                  ; 与 as 相同，但以 Option<Type> 返回结果（失败时为 None）
 (print control args...)             ; 展开格式写到标准输出（不换行）
 (println control args...)           ; 同上（末尾换行）
 (format dest control args...)       ; CL 的 format。返回展开结果的 string
@@ -1455,7 +1455,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 
 `as`/`try-as` 能处理的只有数值和字符的目录（`int`、固定宽度整数类型、`f32`/`f64`/`ratio`/`char` 之间）。同一类型不转换。**整数
 宽度之间（包括 `int`）以及 `f32`↔`f64` 是真正的转换**——`as` 截断／舍入，`try-as` 回答能否放进该宽度（精度）。`(as int x)` 是
-从固定宽度的精确扩展，`(as i32 n)` 是从 `int` 的截断。整数→`char` 可能因超出范围而失败，所以 `as` 会 panic，`try-as` 为 `none`。
+从固定宽度的精确扩展，`(as i32 n)` 是从 `int` 的截断。整数→`char` 可能因超出范围而失败，所以 `as` 会 panic，`try-as` 为 `None`。
 其他（扩展转换以及 `float->int`/`ratio->int` 的截断）总是成功。`float->int`/`ratio->int`/`char->int` 落到 `int`，要求更窄的宽度
 时接着调用 `int->W`。是展开为相应转换方法（[数值](functions/numbers.md)的 `int->char`/`int->int`/`int->W` 等）的语法糖。
 
@@ -1465,7 +1465,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 `documentation` 与 `quote`/`compile` 一样是不求值 `name`、作为未求值的裸符号/`::` 路径读取的特殊形式。与 CL 的
 `(documentation 'name 'function)` 不同，不接受类型参数——按变量→函数→类型→trait→宏的顺序（与把裸标识符作为表达式求值时的优先级
 相同）解析 `name`，返回找到的定义的文档字符串（`(documentation Type::method)` 专用于方法）。解析本身失败（没有该名字的定义）是检查时
-的错误，有定义但没有文档字符串时为 `Option::none`。全部在检查时作为常量确定——不会发生运行时的查找。不支持带模块限定的自由名
+的错误，有定义但没有文档字符串时为 `Option::None`。全部在检查时作为常量确定——不会发生运行时的查找。不支持带模块限定的自由名
 （`mod::name`，`Type::method` 除外）。
 
 ## 8. 非局部退出（catch / throw / unwind-protect）
@@ -1485,7 +1485,7 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; 找不到时照常为末尾的值
 ```
 
@@ -1621,10 +1621,10 @@ typl --image session.typld             # REPL 也一样
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => 读作 (not (equal 1 2))，即 true
 ```

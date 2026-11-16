@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -30,9 +30,9 @@
 | `int->int` | `(int->int x)` | `T→int` | `int`로의 확대 변환(항상 정확). `(as int x)`가 하는 일 |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio`로의 확대 변환(항상 정확) |
 | `int->char` | `(int->char x)` | `T→char` | 값을 Unicode 스칼라 값으로 해석한다. 잘못된 값이면 panic |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 실패하면 `none`을 반환하는 `int->char` |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | 실패하면 `None`을 반환하는 `int->char` |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | 폭 변환. 들어가지 않는 값은 잘린다(Rust의 `as`처럼) |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 같은 변환을 질문으로. 값이 그 폭에 들어가지 않으면 `none` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 같은 변환을 질문으로. 값이 그 폭에 들어가지 않으면 `None` |
 
 이 변환들은 특수 형식 `(as Type x)`/`(try-as Type x)`([문법 레퍼런스](../syntax.md#7-기타-특수-형식))가 하는 일이기도
 하다. 비트 연산(`logand`/`ash`/`ldb` 등)과 술어(`zerop`/`evenp` 등)는 타입에 걸쳐 같은 모양이므로 11장과 9장에 모았다.
@@ -83,7 +83,7 @@ CL의 `integer`이며 이 언어의 **정수**이다. 주석 없는 정수 리�
 폭에서의 정확한 확대이고, `(as i32 n)` / `(try-as i32 n)`은 `int`에서의 절단 / 검사이다(1장의 `int->W` / `try-int->W`와
 같은 의미).
 
-`Sexpr`의 정수 변형도 그냥 `int`이다(`(int n)`은 fixnum과 다배정도를 모두 받는다).
+`Sexpr`의 정수 변형도 그냥 `Int`이다(`(Int n)`은 fixnum과 다배정도를 모두 받는다).
 
 인덱스나 개수를 받는 내장 함수(`substring`, `Vector`의 `get`, `ash`의 시프트 양 등)는 `int`를 받지만 fixnum에 들어가지
 않는 값을 넘기면 실행 시 오류이다("an integer argument does not fit a fixnum").
@@ -127,7 +127,7 @@ CL의 `integer`이며 이 언어의 **정수**이다. 주석 없는 정수 리�
 | `float->int` | `(float->int x)` | `f64→int` | 0 쪽으로 버려 `int`로 바꾼다(CL의 `truncate`. 크기와 관계없이 유한한 값이면 정확). 무한대와 NaN이면 panic. 고정 폭이 필요하면 `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 정확한 2진 유리수로 `ratio`로 바꾼다(CL의 `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 부동소수점 폭 사이의 변환. `float->f32`는 가장 가까운 값으로 반올림, `float->f64`는 항상 정확. `(as f32 x)`가 하는 일 |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 같은 변환을 질문으로. 반올림으로 값이 바뀌면 `none`(`f64`로의 확대는 항상 `some`). `(try-as f32 x)`가 하는 일 |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 같은 변환을 질문으로. 반올림으로 값이 바뀌면 `None`(`f64`로의 확대는 항상 `Some`). `(try-as f32 x)`가 하는 일 |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL의 같은 이름의 함수. 위의 `floor`/`ceiling`/`round`/`truncate`의 별칭이다. CL에서는 접두사 없는 것이 정수를 반환하므로 `f`가 붙은 것이 이 언어의 동작과 맞는다 |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | 각각 2 / 53 / 53(`0.0`의 정밀도만 0). `f64`는 항상 IEEE-754 binary64이므로 상수이다 |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` 또는 `-1.0` |
@@ -205,7 +205,7 @@ CL의 `rational`에 해당하는 타입. 값은 `int` 또는 `ratio`이며 CL과
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | 비교 |
 | `numerator` `denominator` | `(op x)` | `rational→int` | 기약 분자·분모 |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | 0 방향 버림·`ratio`로·`f64`로 |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 정수면 `(some n)`, 아니면 `none`(CL의 `integerp`) |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 정수면 `(Some n)`, 아니면 `None`(CL의 `integerp`) |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio`와 같다(`expt`의 지수는 `int`) |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio`와 같다 |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio`와 같다 |

@@ -169,7 +169,7 @@ fn find_if_returns_the_first_match() {
     let src = format!(
         "{V123}
          (match (find-if (iter v) (lambda ((x int)) bool (> x 1)))
-           ((some n) n) ((none) -1))"
+           ((Some n) n) ((None) -1))"
     );
     assert_eq!(eval_ok(&src), Value::Int(2));
 }
@@ -179,7 +179,7 @@ fn find_if_returns_none_when_no_element_matches() {
     let src = format!(
         "{V123}
          (match (find-if (iter v) (lambda ((x int)) bool (> x 100)))
-           ((some n) n) ((none) -1))"
+           ((Some n) n) ((None) -1))"
     );
     assert_eq!(eval_ok(&src), Value::Int(-1));
 }
@@ -191,7 +191,7 @@ fn position_if_returns_the_index_of_the_first_match() {
     let src = format!(
         "{V123}
          (match (position-if (iter v) (lambda ((x int)) bool (= x 3)))
-           ((some i) i) ((none) -1))"
+           ((Some i) i) ((None) -1))"
     );
     assert_eq!(eval_ok(&src), Value::Int(2));
 }
@@ -201,7 +201,7 @@ fn position_if_returns_none_when_absent() {
     let src = format!(
         "{V123}
          (match (position-if (iter v) (lambda ((x int)) bool (= x 99)))
-           ((some i) i) ((none) -1))"
+           ((Some i) i) ((None) -1))"
     );
     assert_eq!(eval_ok(&src), Value::Int(-1));
 }
@@ -223,25 +223,25 @@ fn count_if_tallies_matching_elements() {
 
 #[test]
 fn find_returns_the_matching_element_by_equality() {
-    let src = format!("{V123} (match (find 2 (iter v)) ((some n) n) ((none) -1))");
+    let src = format!("{V123} (match (find 2 (iter v)) ((Some n) n) ((None) -1))");
     assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
 fn find_returns_none_when_absent() {
-    let src = format!("{V123} (match (find 99 (iter v)) ((some n) n) ((none) -1))");
+    let src = format!("{V123} (match (find 99 (iter v)) ((Some n) n) ((None) -1))");
     assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 #[test]
 fn position_returns_the_index_of_the_matching_element() {
-    let src = format!("{V123} (match (position 3 (iter v)) ((some i) i) ((none) -1))");
+    let src = format!("{V123} (match (position 3 (iter v)) ((Some i) i) ((None) -1))");
     assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
 fn position_returns_none_when_absent() {
-    let src = format!("{V123} (match (position 99 (iter v)) ((some i) i) ((none) -1))");
+    let src = format!("{V123} (match (position 99 (iter v)) ((Some i) i) ((None) -1))");
     assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 

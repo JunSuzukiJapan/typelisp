@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 序對、S 運算式與序列
 
 泛型序對 `cons-cell`、S 運算式資料 `Sexpr`、符號、建構在 `Iter` 之上的序列函式，以及高階函式。
@@ -25,18 +25,18 @@
 ## 2. S 運算式資料 `Sexpr`
 
 `read` 回傳的資料型別 `Sexpr` 有 19 種變體：
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`。
-`vector` 和 `array` 是用 `#(..)` 和 `#nA(..)` 寫的資料（[語法參考](../syntax.md#1-詞法元素)），內容分別是 `Vector<Option<Sexpr>>` 和 `Array<Option<Sexpr>>`——對 `(vector v)` 繫結的 `v` 可以直接使用 `len`、`get` 等。
-`tuple` 是用 `#{..}` 寫的資料，`(tuple v)` 繫結的 `v` 是依序排列元素的新 `Vector<Option<Sexpr>>`（為了用同一個型別接收任意長度的元組）。
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`。
+`Vector` 和 `Array` 是用 `#(..)` 和 `#nA(..)` 寫的資料（[語法參考](../syntax.md#1-詞法元素)），內容分別是 `Vector<Option<Sexpr>>` 和 `Array<Option<Sexpr>>`——對 `(Vector v)` 繫結的 `v` 可以直接使用 `len`、`get` 等。
+`Tuple` 是用 `#{..}` 寫的資料，`(Tuple v)` 繫結的 `v` 是依序排列元素的新 `Vector<Option<Sexpr>>`（為了用同一個型別接收任意長度的元組）。
 處理 S 運算式單元的不是第 1 章通用的 `cons`/`car`/`cdr`，而是 `sexpr-*` 函式。主要在 `defmacro` 的本體中用於組裝與拆解形式。
 
-**S 運算式資料的型別是 `Option<Sexpr>`。** 空串列不是 `Sexpr` 的變體，而是 `Option` 的 `none`，`Sexpr` 本身表示「非空的 S 運算式」。
+**S 運算式資料的型別是 `Option<Sexpr>`。** 空串列不是 `Sexpr` 的變體，而是 `Option` 的 `None`，`Sexpr` 本身表示「非空的 S 運算式」。
 因此 `sexpr-*` 的引數與回傳值都是 `Option<Sexpr>`。
 
-- 在期望 `Option<Sexpr>` 的位置，`()` 是空串列（也可以寫成 `(Option::none)`）
+- 在期望 `Option<Sexpr>` 的位置，`()` 是空串列（也可以寫成 `(Option::None)`）
 - 在期望 `Option<Sexpr>` 的位置，`Sexpr` 會隱式擴大（沒有執行期的轉換）。反方向——把 `Option<Sexpr>` 當作 `Sexpr` 使用——是在聲稱
   「不是空串列」，需要以 `match` 或 `unwrap` 明確表示
-- 在 `match` 中，`Sexpr` 的 19 種變體與 `none` 可以**平鋪在同一組分支中**（[語法參考](../syntax.md#43-match--模式比對)）
+- 在 `match` 中，`Sexpr` 的 19 種變體與 `None` 可以**平鋪在同一組分支中**（[語法參考](../syntax.md#43-match--模式比對)）
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
@@ -47,7 +47,7 @@
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 是否為空串列 |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | 是否不是 `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | 是否為 `Sym`（符號） |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` 變體的內容（fixnum 或多倍精度）。型別不符時 panic |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` 變體的內容（fixnum 或多倍精度）。型別不符時 panic |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | 該寬度變體的內容。型別不符時 panic |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | 浮點變體的內容。型別不符時 panic |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` 的內容。型別不符時 panic |
@@ -60,8 +60,8 @@
 | `sexpr-append` | `(sexpr-append a b)` | `(Option<Sexpr>,Option<Sexpr>)→Option<Sexpr>` | 串接兩個 `Sexpr` 串列（非破壞性）。`,@` 展開為它 |
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | 對 `Sexpr` 串列的每個元素套用 `f` 得到的新 `Sexpr` 串列（第 4 章的 `map` 用於 `Iter`，不能走訪 `Sexpr` 串列） |
 
-數值存取器依型別分為 9 個，是因為 `Sexpr` 是「值的型別在其他任何地方都沒有寫出的唯一場所」。放入 `Sexpr` 的 `u8` 以 `u8` 變體放入，只能
-用 `(sexpr-u8 s)` 取出。傳給 `(sexpr-int s)` 會 panic——不會默默擴大寬度來作答。讀入的資料（`'(1 2 3)`、巨集的引數）中的整數是 `int`
+數值存取器依型別分為 9 個，是因為 `Sexpr` 是「值的型別在其他任何地方都沒有寫出的唯一場所」。放入 `Sexpr` 的 `u8` 以 `U8` 變體放入，只能
+用 `(sexpr-u8 s)` 取出。傳給 `(sexpr-int s)` 會 panic——不會默默擴大寬度來作答。讀入的資料（`'(1 2 3)`、巨集的引數）中的整數是 `Int`
 變體，以 `(sexpr-int s)` 讀取。
 
 `Sexpr` 串列沒有 `rplaca`/`nconc` 之類的破壞性操作。`Sexpr` 單元建立後不能修改。
@@ -95,7 +95,7 @@
 | `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 第一個符合條件的位置 |
 | `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 符合條件的個數 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否所有元素都符合條件 |
-| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否有元素符合條件（相當於 CL 的 `some`。是不與 `some` 建構函式衝突的名稱） |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否有元素符合條件（相當於 CL 的 `some`） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左摺疊 |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右摺疊 |
 | `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 收集剩下的全部元素。用來把下面 `lazy` 函式的結果變成 `Vector` |
@@ -108,7 +108,7 @@
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | 串接迭代器。也可以寫 3 個以上 |
 | `concatenate` | `(concatenate 'Vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL 的 `concatenate`。結果型別寫成**引用符號的字面值**（CL 是執行期的型別指定子）。`'vector` 需要 1 個以上，`'string` 0 個以上（0 個時為 `""`）。`Sexpr` 串列不適用（用 `sexpr-append`） |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反轉（非破壞性） |
-| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | 第 `n` 個元素（超出範圍時為 `none`） |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | 第 `n` 個元素（超出範圍時為 `None`） |
 | `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | 引數順序不同的 `nth` |
 | `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 前 `n` 個 |
 | `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`（`end` 依長度截斷） |
@@ -191,7 +191,7 @@
 | `mapl` | `(mapl it f)` | `(Iter<A>,(fn (Vector<A>) ()))→()` | 對尾部的副作用映射（`maplist` 版的 `mapc`） |
 | `mapcon` | `(mapcon it f)` | `(Iter<A>,(fn (Vector<A>) Vector<U>))→Vector<U>` | 對尾部映射後串接（`maplist` 版的 `mapcan`） |
 | `search` | `(search it sub)` | `(Iter<A>,Iter<A>)→Option<int>` | `sub` 第一次出現的位置。接收者是 `string` 時選擇 `string` 的方法（[字串](collections.md#1-字串-string)） |
-| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 第一個不一致的位置。相等時為 `none` |
+| `mismatch` | `(mismatch a b)` | `(Iter<A>,Iter<A>)→Option<int>` | 第一個不一致的位置。相等時為 `None` |
 | `merge` | `(merge a b less)` | `(Iter<A>,Iter<A>,(fn (A A) bool))→Vector<A>` | 合併。CL 要求已排序，這裡對串接結果排序 |
 | `adjoin` | `(adjoin x it)` | `(A,Iter<A>)→Vector<A>` | 沒有時加到**開頭** |
 | `union` `intersection` `set-difference` `set-exclusive-or` | `(op a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 集合運算。CL 不規定順序，這裡依**首次出現順序**保持穩定 |
@@ -239,7 +239,7 @@ CL 中有而這裡沒有的：`list*`（沒有替換結尾的不正規串列這�
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (Some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; 只刪除尾端的 1 個
 (position 3 (iter v) :start 1)                          ; 索引相對於整個序列
 ```

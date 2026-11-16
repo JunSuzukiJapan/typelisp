@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Eşzamanlılık
 
 typelisp'te işi eşzamanlı çalıştırmak için **task'ler** (hafif thread'ler) başlatırsınız ve task'ler
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` gönderir. Kanal doluysa yer açılana kadar bekler.
 - `(recv ch)` alır. Bir değer gelene kadar bekler. Sonuç bir `Option<T>`'dir; kanal kapatılıp
-  boşaldığında `none` döndürür.
+  boşaldığında `None` döndürür.
 - Bir kanalı `doiter` ile yinelemek, kapanana kadar değer almaya devam eder. Doğrudan `map` ya da
   `filter`'a da geçirilebilir.
 - Kapalı bir kanala `send` panic olur.

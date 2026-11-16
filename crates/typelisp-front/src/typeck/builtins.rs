@@ -54,22 +54,29 @@ pub(crate) fn define(reg: &mut Registry) {
     // names too, which `std::prelude` offers every module, as Rust's prelude
     // brings in `Some`/`None`/`Ok`/`Err`.
     let variants = option_type(reg);
-    bare_constructors(reg, option, Path::builtin(wk::OPTION), &variants, &[]);
+    bare_constructors(reg, option, Path::builtin(wk::OPTION), &variants);
     let variants = result_type(reg);
-    bare_constructors(reg, result, Path::builtin(wk::RESULT), &variants, &[]);
+    bare_constructors(reg, result, Path::builtin(wk::RESULT), &variants);
     for ty in BUILTIN_ERROR_TYPES {
         error_type(reg, ty);
     }
-    // `Sexpr`'s data constructors (`int`/`str`/...) are bare names without a
-    // `use`, so `(int 5)` datum literals stay writable, all but `cons`:
-    // `(cons a b)` is the free `cons<T,U>` pair function, not the `Sexpr`
-    // cons cell. The constructors are `std::primitive`'s while the type is
-    // `std::sexpr`'s: several are spelled as the primitive types they hold
-    // (`int`, `f64`, `char` ...), and a name `std::prelude` offers is one
-    // path, so the constructor and the primitive type have to be one
-    // module's two definitions of it.
+    // `Sexpr`'s constructors (`Int`/`Str`/...) are bare names without a
+    // `use`, so `(Int 5)` datum literals stay writable. The type is
+    // `std::sexpr`'s; `Vector` and `Array` are spelled as the types they
+    // hold, and a name `std::prelude` offers is one path, so each of those
+    // two is the constructor of the module that defines that type. The rest
+    // are `std::primitive`'s.
     let variants = sexpr(reg);
-    bare_constructors(reg, primitive_ns, Path::builtin(wk::SEXPR), &variants, &["cons"]);
+    let vector_ns = Path::builtin(wk::VECTOR).ns();
+    let array_ns = std_module("array");
+    for (i, v) in variants.iter().enumerate() {
+        let ns = match i {
+            crate::sexpr_variant::VECTOR => vector_ns,
+            crate::sexpr_variant::ARRAY => array_ns,
+            _ => primitive_ns,
+        };
+        reg.ctors.insert((ns, intern_in(ns, v.name.name())), (Path::builtin(wk::SEXPR), i));
+    }
     hashtable(reg);
     vector(reg);
     task(reg);
@@ -159,9 +166,9 @@ pub(crate) fn define(reg: &mut Registry) {
     //
     // CL returns a second value saying whether anything expanded; there are
     // no multiple values here, so `macroexpand-1` answers `Option<Sexpr>` —
-    // `none` *is* "not a macro call", and it carries strictly more than CL's
+    // `None` *is* "not a macro call", and it carries strictly more than CL's
     // boolean, since the caller cannot mistake a macro that expands to itself
-    // for a non-macro. `macroexpand` repeats until `none` and answers the
+    // for a non-macro. `macroexpand` repeats until `None` and answers the
     // final form, as CL's does.
     function(reg, eval, "macroexpand-1", vec![option_of(sexpr_ty())], form_result.clone());
     function(reg, eval, "macroexpand", vec![option_of(sexpr_ty())], form_result);
@@ -309,14 +316,14 @@ pub(crate) fn runtime_types() -> Vec<(Path, TypeDef)> {
 /// `Option<T> = Some(T) | None`, its variants returned.
 fn option_type(reg: &mut Registry) -> Vec<Variant> {
     sum_type(reg, Path::builtin(wk::OPTION), &["T"], |[t]| {
-        vec![Variant { name: member_symbol("some"), fields: vec![t] }, Variant { name: member_symbol("none"), fields: vec![] }]
+        vec![Variant { name: member_symbol("Some"), fields: vec![t] }, Variant { name: member_symbol("None"), fields: vec![] }]
     })
 }
 
 /// `Result<T, E> = Ok(T) | Err(E)`, its variants returned.
 fn result_type(reg: &mut Registry) -> Vec<Variant> {
     sum_type(reg, Path::builtin(wk::RESULT), &["T", "E"], |[t, e]| {
-        vec![Variant { name: member_symbol("ok"), fields: vec![t] }, Variant { name: member_symbol("err"), fields: vec![e] }]
+        vec![Variant { name: member_symbol("Ok"), fields: vec![t] }, Variant { name: member_symbol("Err"), fields: vec![e] }]
     })
 }
 
@@ -378,7 +385,7 @@ fn error_type(reg: &mut Registry, ty: u32) {
 ///
 /// `Sexpr = i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | Char | Bool | Sym |
 /// Str | Cons(Option<Sexpr>, Option<Sexpr>) | Bignum | Ratio | Path`: every
-/// S-expression **but** the empty list, which is `Option<Sexpr>`'s `none`.
+/// S-expression **but** the empty list, which is `Option<Sexpr>`'s `None`.
 /// So the type S-expression data is passed around as is `Option<Sexpr>`, not
 /// `Sexpr`, and `car`/`cdr` return it.
 ///
@@ -387,7 +394,7 @@ fn error_type(reg: &mut Registry, ty: u32) {
 /// not be written.
 ///
 /// The `nil` variant is a **placeholder, not a constructor**. Writing it is
-/// refused with a message pointing at `none`; the slot survives only so that
+/// refused with a message pointing at `None`; the slot survives only so that
 /// the variant numbers (`crate::sexpr_variant`) — which are burned into the
 /// island's IR and into compiled code — keep their values. Renumbering them
 /// buys nothing and would invalidate every artifact.
@@ -666,7 +673,7 @@ fn chan(reg: &mut Registry) {
     // one is a program bug, which is the line `docs/dev/language-design.md`
     // §7.1 draws (and Go's own).
     def.instance("send", vec![chan.clone(), t.clone()], Type::Unit);
-    // `none` once the channel is closed **and** drained — which is what
+    // `None` once the channel is closed **and** drained — which is what
     // makes this the same shape as `Iter::next`, and so what lets `doiter`
     // run a channel with no new machinery (`impl Iter Chan<T>` in the
     // prelude).
@@ -794,10 +801,10 @@ fn sum_type<const N: usize>(reg: &mut Registry, path: Path, names: &[&str; N], v
     variants
 }
 
-/// Make the variants of the type `ty` but those named in `except` bare names
-/// of the module `ns`, each keyed by the name it is read under there.
-fn bare_constructors(reg: &mut Registry, ns: NsId, ty: Path, variants: &[Variant], except: &[&str]) {
-    for (i, v) in variants.iter().enumerate().filter(|(_, v)| !except.contains(&v.name.name())) {
+/// Make the variants of the type `ty` bare names of the module `ns`, each
+/// keyed by the name it is read under there.
+fn bare_constructors(reg: &mut Registry, ns: NsId, ty: Path, variants: &[Variant]) {
+    for (i, v) in variants.iter().enumerate() {
         reg.ctors.insert((ns, intern_in(ns, v.name.name())), (ty, i));
     }
 }

@@ -38,8 +38,8 @@ pub mod shim;
 /// Two questions, both unanswerable from the heap alone:
 ///
 /// - an enum box stores its type and variant *index*, never the variant's
-///   name — `(some 3)` prints as `(some 3)` only because someone can map
-///   `option`'s variant 0 back to `"some"`;
+///   name — `(Some 3)` prints as `(Some 3)` only because someone can map
+///   `option`'s variant 0 back to `"Some"`;
 /// - a type may implement the `print-object` trait, in which case its own
 ///   method decides the text, and finding that method means knowing the
 ///   program's method table.

@@ -108,7 +108,7 @@ fn a_ready_receive_arm_wins() {
                      ((v (recv b)) "b"))))
                (main)"#
         ),
-        "a=(some 7)"
+        "a=(Some 7)"
     );
 }
 
@@ -126,7 +126,7 @@ fn a_ready_send_arm_wins() {
                      (format false "~a ~a" r (recv b)))))
                (main)"#
         ),
-        "sent (some x)"
+        "sent (Some x)"
     );
 }
 
@@ -183,7 +183,7 @@ fn the_arm_that_wakes_it_is_the_one_that_runs() {
                      ((v (recv b)) (format false "b ~a" v)))))
                (main)"#
         ),
-        "b (some second)"
+        "b (Some second)"
     );
 }
 
@@ -212,7 +212,7 @@ fn a_parked_send_arm_is_taken_by_a_receiver() {
     );
 }
 
-/// A closed channel makes its receive arm ready, with `none` as the answer —
+/// A closed channel makes its receive arm ready, with `None` as the answer —
 /// so a `select` over a finished channel does not wait forever.
 #[test]
 fn a_closed_channel_makes_its_receive_arm_ready() {
@@ -227,7 +227,7 @@ fn a_closed_channel_makes_its_receive_arm_ready() {
                      ((v (recv b)) "b"))))
                (main)"#
         ),
-        "a=none"
+        "a=None"
     );
 }
 
@@ -370,7 +370,7 @@ fn compiled_select_agrees_with_the_interpreter() {
                        (task (feed a 42))
                        (append out (append "|" (to-string (waited a)))))))"#;
     let plain = text(&format!("{}\n(main)", src));
-    assert_eq!(plain, "sent|a=(some 7)|nothing|42");
+    assert_eq!(plain, "sent|a=(Some 7)|nothing|42");
     assert_eq!(text_compiled(&format!("{}\n(compile pick)\n(compile waited)\n(main)", src)), plain);
 }
 
@@ -384,7 +384,7 @@ fn a_compiled_send_arm_carries_a_float() {
                    (let ((f (the Chan<f64> (Chan::new 1))))
                      (format false "~a ~a" (offer f) (recv f))))"#;
     let plain = text(&format!("{}\n(main)", src));
-    assert_eq!(plain, "ok (some 2.5)");
+    assert_eq!(plain, "ok (Some 2.5)");
     assert_eq!(text_compiled(&format!("{}\n(compile offer)\n(main)", src)), plain);
 }
 
@@ -427,8 +427,8 @@ fn a_parked_select_holds_its_operands_through_gc_stress() {
                      (select
                        ((v (recv a))
                         (match v
-                          ((some s) (setf acc (append acc s)) ())
-                          ((none) (break))))
+                          ((Some s) (setf acc (append acc s)) ())
+                          ((None) (break))))
                        ((send b "never") ())))
                    acc))
                (main)"#

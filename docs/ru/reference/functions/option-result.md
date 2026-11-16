@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Option, Result и типы ошибок
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-Конструкторы: у `Option<T>` — `(some T)` / `none`. У `Result<T,E>` — `(ok T)` / `(err E)`. `E` может быть любым типом:
+Конструкторы: у `Option<T>` — `(Some T)` / `None`. У `Result<T,E>` — `(Ok T)` / `(Err E)`. `E` может быть любым типом:
 туда одинаково подходят встроенные конкретные типы ошибок и типы, которые вы пишете сами через `defstruct`/`defenum`
 (глава 3).
 
 | Имя | Форма | Option | Result | Описание |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Извлекает значение. Panic на `none`/`err` |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Извлекает значение. Panic на `None`/`Err` |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | Значение или значение по умолчанию |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Является ли `some` |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Является ли `none` |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Является ли `ok` |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Является ли `err` |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Извлекает значение. При `none`/`err` — panic с `msg` |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Значение или результат `f`. `f` вызывается только при `none`/`err` |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Применяет `f` к содержимому `some`/`ok` |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Применяет `f` к содержимому `err` |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | При `some`/`ok` передаёт содержимое в `f` и возвращает её результат |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | При `none`/`err` возвращает результат `f` |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Превращает `(some v)` в `(ok v)`, а `none` — в `(err e)` |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | Является ли `Some` |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | Является ли `None` |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Является ли `Ok` |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Является ли `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Извлекает значение. При `None`/`Err` — panic с `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Значение или результат `f`. `f` вызывается только при `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Применяет `f` к содержимому `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Применяет `f` к содержимому `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | При `Some`/`Ok` передаёт содержимое в `f` и возвращает её результат |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | При `None`/`Err` возвращает результат `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Превращает `(Some v)` в `(Ok v)`, а `None` — в `(Err e)` |
 
-Конструкторы `some`/`none`/`ok`/`err` можно использовать как голые имена в любом модуле без `use`.
-Их также можно писать с именем типа, например `Option::some`.
+Конструкторы `Some`/`None`/`Ok`/`Err` можно использовать как голые имена в любом модуле без `use`.
+Их также можно писать с именем типа, например `Option::Some`.
 
 Ветвление записывается явно через `match` или в виде цепочки через `map`/`and-then` и остальные
 методы выше. Синтаксиса, соответствующего `?` в Rust, нет.
@@ -40,12 +40,12 @@ Clojure). `(-> x (f a) (g b))` превращается в `(g (f x a) b)`. Им
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
+  (if (= 0 (mod n 2)) (Option::Some (truncate n 2)) (Option::None)))
 
-(-> (Option::some 8)
-    (and-then half)                          ; (some 4)
-    (and-then half)                          ; (some 2)
-    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+(-> (Option::Some 8)
+    (and-then half)                          ; (Some 4)
+    (and-then half)                          ; (Some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (Some 20)
     (unwrap-or 0))                           ; => 20
 
 (-> (parse-int "x")
@@ -55,26 +55,26 @@ Clojure). `(-> x (f a) (g b))` превращается в `(g (f x a) b)`. Им
 
 ## 2. Представление `Option<T>` во время выполнения
 
-Как и в Rust, **`Option<T>` обычно не создаёт обёртки**. `some v` — это само `v`, а `none` — значение пустого списка,
-без выделения памяти и без косвенности. `Option<Sexpr>` (где пустой список — `none`), `Option<int>`,
+Как и в Rust, **`Option<T>` обычно не создаёт обёртки**. `Some v` — это само `v`, а `None` — значение пустого списка,
+без выделения памяти и без косвенности. `Option<Sexpr>` (где пустой список — `None`), `Option<int>`,
 `Option<string>`, `Option<my-struct>`, `Option<f64>` и `Option<(fn ...)>` — все имеют такую форму.
 
 Обёртка используется только тогда, когда значение `T` нельзя отличить от значения пустого списка:
 
 | `T` | Представление | Причина |
 |---|---|---|
-| `Option<U>` (вложенный) | Обёртка | Внутренний `none` был бы тем же значением, что и внешний `none` |
+| `Option<U>` (вложенный) | Обёртка | Внутренний `None` был бы тем же значением, что и внешний `None` |
 | `()` | Обёртка | Значение `()` — это само значение пустого списка |
 | `ptr` / `c-long` / `c-ulong` | Обёртка | Все 64 бита — значение, места для различения не остаётся |
 | Всё остальное | Без обёртки | — |
 
-Представление определяется только типом и не читается из значения. При печати `(some ...)`/`none` восстанавливается
-по статическому типу, поэтому `(format false "~a" opt)` выводит `(some 1)`. Есть два ограничения:
+Представление определяется только типом и не читается из значения. При печати `(Some ...)`/`None` восстанавливается
+по статическому типу, поэтому `(format false "~a" opt)` выводит `(Some 1)`. Есть два ограничения:
 
 - **Его нельзя поместить в `:dyn Trait`** (передача значения `Option<int>`, для которого написано
   `(impl Speak Option<int> ...)`, в `:dyn Speak` — ошибка).
-- Нисходящее приведение `(the Option<T> ...)` из `Sexpr` **называет конструктор**: `(the Option<int> (some x))` /
-  `(the Option<int> (none))`. Форма, связывающая значение целиком, `(the Option<int> o)`, — ошибка.
+- Нисходящее приведение `(the Option<T> ...)` из `Sexpr` **называет конструктор**: `(the Option<int> (Some x))` /
+  `(the Option<int> (None))`. Форма, связывающая значение целиком, `(the Option<int> o)`, — ошибка.
 
 ## 3. Типы ошибок и трейт `Error`
 
@@ -100,7 +100,7 @@ Clojure). `(-> x (f a) (g b))` превращается в `(g (f x a) b)`. Им
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | Сообщение об ошибке (метод трейта `Error`) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | Причина, которую оборачивает эта ошибка, или `none`, если её нет (`Error::source` из Rust) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | Причина, которую оборачивает эта ошибка, или `None`, если её нет (`Error::source` из Rust) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E` реализует `Error`) | Расширяет конкретный тип ошибки до типажного объекта |
 | `describe-error` | `(describe-error e)` | `E→string` (`E` реализует `Error`) | Сообщение и цепочка причин, найденная по `source`, по одной причине на строку. В CL аналога нет («caused by» в Rust) |
 
@@ -111,10 +111,10 @@ Clojure). `(-> x (f a) (g b))` превращается в `(g (f x a) b)`. Им
 (defstruct io-err (path string))
 (impl Error io-err
   (defmethod message (self) string (append "io failed: " self::path))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; конкретный тип идёт в E как есть
-  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
+  (if (equal p "") (Result::Err (make-instance 'io-err :path "<empty>")) (Result::Ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; обрабатывать все виды единообразно
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -129,8 +129,8 @@ Clojure). `(-> x (f a) (g b))` превращается в `(g (f x a) b)`. Им
 (use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
-    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((Err e) (Result::Err e))))
 ```
 
 **Типы и трейты разделяют одно пространство имён** (как в Rust). В одном модуле `defstruct`/`defenum` и трейт не могут

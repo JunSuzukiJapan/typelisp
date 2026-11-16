@@ -11,7 +11,7 @@
 //! keeps its number ([`NIL`], [`RETIRED_BIGNUM`]), because compiled code and
 //! the committed island artifact have the old numbers in them.
 
-/// The empty list, before it became `Option<Sexpr>`'s `none`. Still in
+/// The empty list, before it became `Option<Sexpr>`'s `None`. Still in
 /// `sexpr_def` so nothing after it renumbers; `Checker` refuses to let it be
 /// written as a constructor or a pattern.
 pub const NIL: usize = 0;
@@ -53,13 +53,13 @@ pub const COUNT: usize = 21;
 
 /// Each variant's constructor name, indexed by its number.
 pub const NAMES: [&str; COUNT] = [
-    "nil", "int", "f64", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path", "f32", "i8", "i16", "u8",
-    "u16", "u32", "i32", "vector", "array", "tuple",
+    "Nil", "Int", "F64", "Char", "Bool", "Sym", "Str", "Cons", "Bignum", "Ratio", "Path", "F32", "I8", "I16", "U8",
+    "U16", "U32", "I32", "Vector", "Array", "Tuple",
 ];
 
 /// Whether `name` is one of `Sexpr`'s constructor names — what a pattern head
 /// against a `Sexpr` (or `Option<Sexpr>`) scrutinee is resolved as before any
-/// downcast is considered. That order matters for `vector` and `array`, which
+/// downcast is considered. That order matters for `Vector` and `Array`, which
 /// are also type names.
 pub fn is_ctor_name(name: &str) -> bool {
     NAMES.contains(&name)

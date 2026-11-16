@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Para programadores de Common Lisp
 
 typelisp herda a sintaxe do Common Lisp (CL) e muitos dos seus nomes de função, mas é uma linguagem com
@@ -19,12 +19,12 @@ Os valores booleanos são `true` e `false`. `nil` e `t` não estão definidos.
 - **O ramo else do `if` não pode ser omitido.** `(if c x)` é um erro. Quando não for preciso ramo else, use
   `when` / `unless`.
 - **"Sem valor" é expresso com `Option<T>`.** Uma função que no CL devolvia nil para indicar "não encontrado"
-  aqui devolve `(some x)` ou `none`.
+  aqui devolve `(Some x)` ou `None`.
 
   ```lisp
   (match (position 3 (iter v))
-    ((some i) (println "found at ~a" i))
-    ((none) (println "not found")))
+    ((Some i) (println "found at ~a" i))
+    ((None) (println "not found")))
   ```
 
 - A lista vazia `()` é, conforme o contexto, o valor do tipo Unit (o valor de retorno de uma função que não
@@ -97,7 +97,7 @@ uma função chamada `list` ao lado de uma variável chamada `list`).
 ## 4. Listas e Vector
 
 O que corresponde a uma lista do CL são os **dados de expressões S**, cujo tipo é `Option<Sexpr>` (a lista
-vazia é `none`). `(list 1 2 3)` e `'(a b c)` têm esse tipo. Os dados de expressões S são algo com que as
+vazia é `None`). `(list 1 2 3)` e `'(a b c)` têm esse tipo. Os dados de expressões S são algo com que as
 macros e `read` trabalham; para um contêiner de dados comum, use **`Vector<T>`**.
 
 | O que você quer | CL | typelisp |
@@ -178,17 +178,17 @@ restaura o original qualquer que seja a forma de sair do corpo.
 Não existem `define-condition`, `handler-case`, `handler-bind`, `restart-case`, `error` nem `signal`. Eles
 combinam mal com a tipagem estática. Em vez disso, usam-se estas duas coisas para propósitos diferentes:
 
-- **Falhas recuperáveis devolvem `Result<T,E>`.** Quem chama separa `ok` / `err` com `match`. Não há uma forma
+- **Falhas recuperáveis devolvem `Result<T,E>`.** Quem chama separa `Ok` / `Err` com `match`. Não há uma forma
   abreviada como o `?` do Rust.
 
   ```lisp
 (use std::num::parse-int)
   (match (parse-int "42x")
-    ((ok n) n)
-    ((err e) (progn (println "bad input: ~a" (message e)) 0)))
+    ((Ok n) n)
+    ((Err e) (progn (println "bad input: ~a" (message e)) 0)))
   ```
 
-- **Falhas irrecuperáveis (bugs) são `panic`.** `(panic "message")`, passar `none` para `unwrap`, dividir por 0
+- **Falhas irrecuperáveis (bugs) são `panic`.** `(panic "message")`, passar `None` para `unwrap`, dividir por 0
   e um índice fora do intervalo são desse tipo, e o programa para. A limpeza de `unwind-protect` é executada
   antes de parar.
 

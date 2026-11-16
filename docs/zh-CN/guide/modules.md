@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/guide/modules.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # 模块与文件结构
 
 本指南说明如何组织由多个文件构成的程序。详细的语法规则见[语法参考](../reference/syntax.md#310-module--use--命名空间)
@@ -120,7 +120,7 @@ type error: defun: `length` is a name the standard library offers every module; 
 (defun first ((a int) (b int)) int a)
 
 (println "~a" (first 10 20))                                          ; 本模块的 first => 10
-(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 标准库的 first => (some 1)
+(println "~a" (std::seq::first (iter (the Vector<int> #(1 2 3)))))    ; 标准库的 first => (Some 1)
 ```
 
 `shadow` 之后，在该模块中写 `first` 指的是自己的定义。要使用标准库的 `first`，就用路径写成

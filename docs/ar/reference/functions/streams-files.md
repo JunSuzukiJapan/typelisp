@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # التدفقات والملفات
 
 سمات التدفقات وتوابعها وأنواع التدفقات الملموسة وعمليات الملفات والمسارات. ومقابس الشبكة تدفقات أيضًا،
@@ -29,18 +29,18 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | العنصر التالي. `none` عند النهاية. **التابع الوحيد الذي يجب تنفيذه** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | العنصر التالي. `None` عند النهاية. **التابع الوحيد الذي يجب تنفيذه** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | المحرف التالي |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | حتى السطر الجديد التالي (يُستهلك السطر الجديد ويُزال). ويُعاد أيضًا آخر سطر لا ينتهي بسطر جديد |
 | `read-all` | `(read-all s)` | `(S)→string` | كل ما تبقى |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | محرف موجود في المتناول فقط. `none` بدلًا من الانتظار |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | محرف موجود في المتناول فقط. `None` بدلًا من الانتظار |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | يدفع حتى `n` محرفًا إلى `v` ويعيد كم قُرئ فعلًا. أقل من `n` عند النهاية فقط |
 
 `listen` في `InputStream` (أب `CharInput`):
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | هل يمكن الإجابة عن القراءة التالية دون انتظار. والافتراضي `false`، **الجانب الذي لا يكذب أبدًا**: فـ `true` تخمين، وتخمين خاطئ سيجعل `read-char-no-hang` تحجب. وكل التدفقات المضمنة تتجاوزه. **وفي التدفقات المعرَّفة من المستخدم التي لا تتجاوزه تعيد `read-char-no-hang` دائمًا `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | هل يمكن الإجابة عن القراءة التالية دون انتظار. والافتراضي `false`، **الجانب الذي لا يكذب أبدًا**: فـ `true` تخمين، وتخمين خاطئ سيجعل `read-char-no-hang` تحجب. وكل التدفقات المضمنة تتجاوزه. **وفي التدفقات المعرَّفة من المستخدم التي لا تتجاوزه تعيد `read-char-no-hang` دائمًا `None`** |
 
 تضيف `PeekInput` (التي ترث من `CharInput`) **إرجاع محرف واحد**. فالتدفق نفسه وحده له مكان يحفظ فيه المحرف
 المرجَع، فلا يمكن أن يكون لهذا تنفيذ افتراضي ولذلك هو سمة منفصلة. وتنفّذها `file-stream`/
@@ -88,7 +88,7 @@
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` أحد الثوابت الثلاثة `direction-input` / `direction-output` / `direction-append`. وتعيد
-`open-file` القيمة `(err FileError)` إذا تعذّر فتح الملف (فغياب ملف نتيجة عادية لا `panic`). ويمكن أن يكون
+`open-file` القيمة `(Err FileError)` إذا تعذّر فتح الملف (فغياب ملف نتيجة عادية لا `panic`). ويمكن أن يكون
 اسم الملف سلسلة نصية أو `pathname` (`Pathish` في الفصل 9).
 
 تعيد `(get-output-stream-string s)` ما كُتب إلى `string-output-stream` وتفرّغه. وكما في CL يمكن استخراجه
@@ -99,7 +99,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` حيث `ByteInput S` | البايت التالي. `none` عند نهاية الملف |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` حيث `ByteInput S` | البايت التالي. `None` عند نهاية الملف |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` حيث `ByteOutput S` | يكتب بايتًا واحدًا. خطأ خارج 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` حيث `ByteInput S` | نسخة المحارف، بالبايتات |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` حيث `ByteOutput S` | مثل ما سبق |
@@ -135,18 +135,18 @@
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` حيث `CharInput I`،`CharOutput O` | ينقل كل شيء |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` حيث `CharInput S` | كل الأسطر المتبقية |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` حيث `PeekInput S` | يقرأ `Sexpr` واحدًا (`read` في CL). `(ok eof)` عند نهاية الدخل، و`(ok (datum d))` عند قراءة واحد، و`err` إذا لم تكن بيانات. وهو **يستهلك المحرف الأبيض الواحد** الذي أنهى البيان (كما في CL). و`ReadOutcome` ليست `Option<Sexpr>` حتى لا تكون قراءة القائمة الفارغة `()` ونهاية الدخل القيمة نفسها |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` حيث `PeekInput S` | يقرأ `Sexpr` واحدًا (`read` في CL). `(Ok eof)` عند نهاية الدخل، و`(Ok (Datum d))` عند قراءة واحد، و`Err` إذا لم تكن بيانات. وهو **يستهلك المحرف الأبيض الواحد** الذي أنهى البيان (كما في CL). و`ReadOutcome` ليست `Option<Sexpr>` حتى لا تكون قراءة القائمة الفارغة `()` ونهاية الدخل القيمة نفسها |
 | `read-sexpr-preserving-whitespace` | مثل ما سبق | مثل ما سبق | المثل، لكنه يترك المحرف الأبيض (`read-preserving-whitespace` في CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` حيث `PeekInput S` | يقرأ حتى `ch` ويصنع قائمة. ويُستهلك `ch`. و`err` إذا نفد الدخل |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` حيث `PeekInput S` | يقرأ حتى `ch` ويصنع قائمة. ويُستهلك `ch`. و`Err` إذا نفد الدخل |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` حيث `CharOutput S`،`Iter I (Item string)` | يكتب سطرًا في كل مرة |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` حيث `Pathish P` | المحتويات كلها |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` حيث `Pathish P` | كل الأسطر |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` حيث `Pathish P` | يكتبه |
 | `probe-file` | `(probe-file name)` | `(P)→bool` حيث `Pathish P` | هل هو موجود |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | حذف وإعادة تسمية (الوسائط `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` حيث `Pathish P` | المسار المطلق مع حل الروابط الرمزية و`.`/`..`. و`err` إذا لم يكن موجودًا |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` حيث `Pathish P` | المسار المطلق مع حل الروابط الرمزية و`.`/`..`. و`Err` إذا لم يكن موجودًا |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` حيث `Pathish P` | وقت آخر تعديل. وهو **زمن عالمي (universal time)**، فيمكن لـ `decode-universal-time` ([الزمن](system.md#2-فك-ترميز-التواريخ-وترميزها)) قراءته |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` حيث `Pathish P` | اسم دخول المالك. و`err` إذا لم يكن الملف موجودًا، و`(ok none)` إذا لم يكن لمعرّف المستخدم (uid) الخاص بالمالك إدخال في قاعدة بيانات كلمات المرور: فالحالتان اللتان تميز بينهما CL تبقيان منفصلتين |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` حيث `Pathish P` | اسم دخول المالك. و`Err` إذا لم يكن الملف موجودًا، و`(Ok none)` إذا لم يكن لمعرّف المستخدم (uid) الخاص بالمالك إدخال في قاعدة بيانات كلمات المرور: فالحالتان اللتان تميز بينهما CL تبقيان منفصلتين |
 | `directory-p` | `(directory-p name)` | `(P)→bool` حيث `Pathish P` | هل هو مجلد. **وهي `false` أيضًا إذا لم يكن موجودًا**؛ استخدم `probe-file` للتمييز بين الحالتين |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` حيث `Pathish P` | يسرد المحتويات بـ truename (المسار المطلق مع حل الروابط الرمزية، كما في `truename`). وتُستبعد الروابط الرمزية التي هدفها مفقود. وتُستبعد `.`/`..`. والترتيب ما يعطيه نظام التشغيل |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` حيث `Pathish P` | ينشئه مع المجلدات الأم. وينجح إذا كان موجودًا |
@@ -197,8 +197,8 @@
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   يُقسَّم عند آخر نقطة
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   يُقسَّم عند آخر نقطة
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -224,10 +224,10 @@
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | يقسّم سلسلة نصية إلى أجزاء. وانتهاء بـ `/` (أو اسم فارغ) يعني "لا اسم"، أي مجلد |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | يبني واحدًا من المكونات المعطاة فقط (كلها `&key`). والاسم أو النوع المحذوف يبقى "غائبًا" وهو ما تملؤه `merge-pathnames` |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | مكونات المجلد، الأبعد أولًا |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | الاسم بدون النوع. `none` لمجلد |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | الاسم بدون النوع. `None` لمجلد |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | ما بعد آخر نقطة. والنقطة في البداية لا تُحتسب (فكل `.gitignore` هو الاسم) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | هل يبدأ من الجذر |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | مجلد المنزل. `none` إذا لم يوجد `$HOME` (وCL تسمح بـ `NIL` أيضًا) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | مجلد المنزل. `None` إذا لم يوجد `$HOME` (وCL تسمح بـ `NIL` أيضًا) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | الجزء حتى آخر `/` |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | جزء `name.type` فقط |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | يملأ المكونات الناقصة من `p` من `default`. و`p` النسبي يوضع تحت مجلد `default`؛ و`p` المطلق يحتفظ بمجلده |

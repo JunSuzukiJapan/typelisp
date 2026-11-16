@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Stream dan Berkas
 
 Trait dan metode stream, tipe stream konkret, operasi berkas, dan pathname. Socket jaringan juga
@@ -31,18 +31,18 @@ Setiap metode `CharInput` memiliki implementasi bawaan. Sebuah implementasi hany
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Elemen berikutnya. `none` di akhir. **Satu-satunya metode yang wajib diimplementasikan** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | Elemen berikutnya. `None` di akhir. **Satu-satunya metode yang wajib diimplementasikan** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | Karakter berikutnya |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | Sampai baris baru berikutnya (baris baru dikonsumsi dan dibuang). Baris terakhir yang tidak berakhir dengan baris baru juga dikembalikan |
 | `read-all` | `(read-all s)` | `(S)→string` | Semua yang tersisa |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Hanya karakter yang sudah tersedia. `none` dan bukan menunggu |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | Hanya karakter yang sudah tersedia. `None` dan bukan menunggu |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | Mendorong sampai `n` karakter ke `v` dan mengembalikan berapa banyak yang benar-benar dibaca. Kurang dari `n` hanya di akhir |
 
 `listen` ada di `InputStream` (induk `CharInput`):
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | Apakah pembacaan berikutnya dapat dijawab tanpa menunggu. Bawaannya `false`, **sisi yang tidak pernah berbohong**: `true` akan berupa tebakan, dan tebakan yang salah akan membuat `read-char-no-hang` terblokir. Semua stream bawaan menimpanya. **Untuk stream buatan pengguna yang tidak menimpanya, `read-char-no-hang` selalu mengembalikan `none`** |
+| `listen` | `(listen s)` | `(S)→bool` | Apakah pembacaan berikutnya dapat dijawab tanpa menunggu. Bawaannya `false`, **sisi yang tidak pernah berbohong**: `true` akan berupa tebakan, dan tebakan yang salah akan membuat `read-char-no-hang` terblokir. Semua stream bawaan menimpanya. **Untuk stream buatan pengguna yang tidak menimpanya, `read-char-no-hang` selalu mengembalikan `None`** |
 
 `PeekInput` (yang mewarisi `CharInput`) menambahkan **mengembalikan satu karakter**. Hanya stream itu
 sendiri yang memiliki tempat menyimpan karakter yang dikembalikan, sehingga ini tidak dapat memiliki
@@ -92,7 +92,7 @@ mencampur keduanya, `(fresh-line *standard-output*)` tidak mengetahui baris baru
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` adalah salah satu dari tiga konstanta `direction-input` / `direction-output` /
-`direction-append`. `open-file` mengembalikan `(err FileError)` jika berkas tidak dapat dibuka
+`direction-append`. `open-file` mengembalikan `(Err FileError)` jika berkas tidak dapat dibuka
 (berkas yang tidak ada adalah hasil biasa, bukan panic). Nama berkas dapat berupa string atau
 `pathname` (`Pathish` pada bab 9).
 
@@ -105,7 +105,7 @@ mengosongkannya. Seperti di CL, ia dapat diambil bahkan setelah `close`.
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Byte berikutnya. `none` di akhir berkas |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | Byte berikutnya. `None` di akhir berkas |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | Menulis satu byte. Kesalahan di luar 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | Versi karakter, dalam byte |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | Sama seperti di atas |
@@ -142,18 +142,18 @@ Semuanya adalah `defstruct` pada pustaka standar dan dapat disarangkan.
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | Memindahkan semuanya |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | Semua baris yang tersisa |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Membaca satu `Sexpr` (`read` pada CL). `(ok eof)` di akhir masukan, `(ok (datum d))` ketika satu dibaca, `err` jika bukan data. Ia **mengonsumsi satu karakter spasi putih** yang mengakhiri datum (seperti di CL). `ReadOutcome` bukan `Option<Sexpr>` agar membaca daftar kosong `()` dan akhir masukan bukan nilai yang sama |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | Membaca satu `Sexpr` (`read` pada CL). `(Ok eof)` di akhir masukan, `(Ok (Datum d))` ketika satu dibaca, `Err` jika bukan data. Ia **mengonsumsi satu karakter spasi putih** yang mengakhiri datum (seperti di CL). `ReadOutcome` bukan `Option<Sexpr>` agar membaca daftar kosong `()` dan akhir masukan bukan nilai yang sama |
 | `read-sexpr-preserving-whitespace` | Sama seperti di atas | Sama seperti di atas | Sama, tetapi membiarkan spasi putih (`read-preserving-whitespace` pada CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Membaca sampai `ch` dan membuat daftar. `ch` dikonsumsi. `err` jika masukan habis |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | Membaca sampai `ch` dan membuat daftar. `ch` dikonsumsi. `Err` jika masukan habis |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | Menulis satu baris sekali waktu |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | Seluruh isi |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Semua baris |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | Menuliskannya |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | Apakah ada |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | Menghapus, mengganti nama (argumennya `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Path absolut dengan tautan simbolik dan `.`/`..` diselesaikan. `err` jika tidak ada |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | Path absolut dengan tautan simbolik dan `.`/`..` diselesaikan. `Err` jika tidak ada |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | Waktu modifikasi terakhir. Berupa **universal time**, sehingga `decode-universal-time` ([Waktu](system.md#2-mendekode-dan-mengodekan-tanggal)) dapat membacanya |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Nama login pemilik. `err` jika berkas tidak ada, `(ok none)` jika uid pemilik tidak memiliki entri di basis data password: dua kasus yang dibedakan CL tetap dipisahkan |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | Nama login pemilik. `Err` jika berkas tidak ada, `(Ok none)` jika uid pemilik tidak memiliki entri di basis data password: dua kasus yang dibedakan CL tetap dipisahkan |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | Apakah direktori. **Juga `false` jika tidak ada**; gunakan `probe-file` untuk membedakan keduanya |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | Mendaftar isinya berdasarkan truename (path absolut dengan tautan simbolik diselesaikan, seperti `truename`). Tautan simbolik yang targetnya hilang dilewati. `.`/`..` dilewati. Urutannya sesuai yang diberikan OS |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | Membuatnya beserta induknya. Berhasil jika sudah ada |
@@ -207,8 +207,8 @@ nama, tipe (ekstensi), dan apakah dimulai dari akar.
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   split at the last dot
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   split at the last dot
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -235,10 +235,10 @@ dirinya, sehingga selama Anda menyerahkan string, tidak ada penguraian yang terj
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | Memecah string menjadi bagian-bagian. `/` di akhir (atau nama kosong) berarti "tanpa nama", yaitu direktori |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | Membangun satu dari komponen yang diberikan saja (semuanya `&key`). Nama atau tipe yang dihilangkan tetap "tidak ada" dan merupakan sesuatu yang diisi oleh `merge-pathnames` |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | Komponen direktori, yang terluar lebih dulu |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Nama tanpa tipe. `none` untuk direktori |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | Nama tanpa tipe. `None` untuk direktori |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | Setelah titik terakhir. Titik di awal tidak dihitung (seluruh `.gitignore` adalah nama) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | Apakah dimulai dari akar |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Direktori home. `none` jika tidak ada `$HOME` (CL juga mengizinkan `NIL`) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | Direktori home. `None` jika tidak ada `$HOME` (CL juga mengizinkan `NIL`) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | Bagian sampai `/` terakhir |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | Hanya bagian `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Mengisi komponen yang hilang dari `p` dengan `default`. `p` relatif ditaruh di bawah direktori `default`; `p` absolut mempertahankan direktorinya sendiri |

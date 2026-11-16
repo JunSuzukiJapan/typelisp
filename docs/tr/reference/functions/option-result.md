@@ -1,30 +1,30 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Option, Result ve Hata Türleri
 
 ## 1. `Option<T>` / `Result<T,E>`
 
-Yapıcılar: `Option<T>`'nin `(some T)` / `none`'ı vardır. `Result<T,E>`'nin `(ok T)` / `(err E)`'si vardır.
+Yapıcılar: `Option<T>`'nin `(Some T)` / `None`'ı vardır. `Result<T,E>`'nin `(Ok T)` / `(Err E)`'si vardır.
 `E` herhangi bir tür olabilir: yerleşik somut hata türleri ve `defstruct`/`defenum` ile kendi yazdığınız
 türler oraya aynı şekilde uyar (3. bölüm).
 
 | Ad | Biçim | Option | Result | Açıklama |
 |---|---|---|---|---|
-| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Değeri çıkarır. `none`/`err` durumunda panic olur |
+| `unwrap` | `(unwrap self)` | `Option<T>→T` | `Result<T,E>→T` | Değeri çıkarır. `None`/`Err` durumunda panic olur |
 | `unwrap-or` | `(unwrap-or self default)` | `(Option<T>,T)→T` | `(Result<T,E>,T)→T` | Değer ya da varsayılan |
-| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `some` olup olmadığı |
-| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `none` olup olmadığı |
-| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `ok` olup olmadığı |
-| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `err` olup olmadığı |
-| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Değeri çıkarır. `none`/`err` ise `msg` ile panic olur |
-| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Değer ya da `f`'nin sonucu. `f` yalnızca `none`/`err` iken çağrılır |
-| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `some`/`ok` içeriğine `f` uygular |
-| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `err` içeriğine `f` uygular |
-| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `some`/`ok` ise içeriği `f`'ye verir ve onun sonucunu döndürür |
-| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `none`/`err` ise `f`'nin sonucunu döndürür |
-| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(some v)`'yi `(ok v)`'ye, `none`'ı `(err e)`'ye çevirir |
+| `is-some` | `(is-some self)` | `Option<T>→bool` | — | `Some` olup olmadığı |
+| `is-none` | `(is-none self)` | `Option<T>→bool` | — | `None` olup olmadığı |
+| `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `Ok` olup olmadığı |
+| `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `Err` olup olmadığı |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Değeri çıkarır. `None`/`Err` ise `msg` ile panic olur |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Değer ya da `f`'nin sonucu. `f` yalnızca `None`/`Err` iken çağrılır |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok` içeriğine `f` uygular |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err` içeriğine `f` uygular |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok` ise içeriği `f`'ye verir ve onun sonucunu döndürür |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err` ise `f`'nin sonucunu döndürür |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `(Some v)`'yi `(Ok v)`'ye, `None`'ı `(Err e)`'ye çevirir |
 
-`some`/`none`/`ok`/`err` yapıcıları, `use` olmadan her modülde çıplak adlarıyla kullanılabilir.
-`Option::some` gibi tür adıyla da yazılabilirler.
+`Some`/`None`/`Ok`/`Err` yapıcıları, `use` olmadan her modülde çıplak adlarıyla kullanılabilir.
+`Option::Some` gibi tür adıyla da yazılabilirler.
 
 Dallanma `match` ile açıkça yazılır ya da yukarıdaki `map`/`and-then` ve diğerleriyle zincirlenir.
 Rust'taki `?`'ye karşılık gelen bir sözdizimi yoktur.
@@ -39,12 +39,12 @@ alınır. Bir metodun ilk argümanı alıcısıdır; bu yüzden birleştiriciler
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
+  (if (= 0 (mod n 2)) (Option::Some (truncate n 2)) (Option::None)))
 
-(-> (Option::some 8)
-    (and-then half)                          ; (some 4)
-    (and-then half)                          ; (some 2)
-    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+(-> (Option::Some 8)
+    (and-then half)                          ; (Some 4)
+    (and-then half)                          ; (Some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (Some 20)
     (unwrap-or 0))                           ; => 20
 
 (-> (parse-int "x")
@@ -54,8 +54,8 @@ alınır. Bir metodun ilk argümanı alıcısıdır; bu yüzden birleştiriciler
 
 ## 2. `Option<T>`'nin çalışma zamanı gösterimi
 
-Rust'taki gibi **`Option<T>` genellikle kutu oluşturmaz**. `some v`, `v`'nin kendisidir ve `none` boş
-liste değeridir; ayırma ve dolaylılık yoktur. `Option<Sexpr>` (boş listenin `none` olduğu),
+Rust'taki gibi **`Option<T>` genellikle kutu oluşturmaz**. `Some v`, `v`'nin kendisidir ve `None` boş
+liste değeridir; ayırma ve dolaylılık yoktur. `Option<Sexpr>` (boş listenin `None` olduğu),
 `Option<int>`, `Option<string>`, `Option<my-struct>`, `Option<f64>` ve `Option<(fn ...)>` hepsi bu
 biçimi alır.
 
@@ -63,19 +63,19 @@ Kutu yalnızca `T` türündeki bir değer boş liste değerinden ayırt edilemed
 
 | `T` | Gösterim | Neden |
 |---|---|---|
-| `Option<U>` (iç içe) | Kutu | İçteki `none`, dıştaki `none` ile aynı değer olurdu |
+| `Option<U>` (iç içe) | Kutu | İçteki `None`, dıştaki `None` ile aynı değer olurdu |
 | `()` | Kutu | `()`'nin değeri boş liste değerinin kendisidir |
 | `ptr` / `c-long` / `c-ulong` | Kutu | 64 bitin hepsi değerdir; ayırt etmek için yer kalmaz |
 | Diğer her şey | Kutu yok | — |
 
-Gösterim yalnızca tür tarafından belirlenir ve bir değerden okunamaz. Yazdırırken `(some ...)`/`none`
-statik türden yeniden oluşturulur; bu yüzden `(format false "~a" opt)` `(some 1)` yazdırır. İki kısıtlama
+Gösterim yalnızca tür tarafından belirlenir ve bir değerden okunamaz. Yazdırırken `(Some ...)`/`None`
+statik türden yeniden oluşturulur; bu yüzden `(format false "~a" opt)` `(Some 1)` yazdırır. İki kısıtlama
 vardır:
 
 - **Bir `:dyn Trait` içine konamaz** (`(impl Speak Option<int> ...)` yazdığınız bir `Option<int>` değerini
   bir `:dyn Speak`'e geçirmek hatadır).
 - Bir `Sexpr`'ten `(the Option<T> ...)` aşağı dönüşümü **bir yapıcı adlandırır**:
-  `(the Option<int> (some x))` / `(the Option<int> (none))`. Tüm değeri bağlayan biçim,
+  `(the Option<int> (Some x))` / `(the Option<int> (None))`. Tüm değeri bağlayan biçim,
   `(the Option<int> o)`, hatadır.
 
 ## 3. Hata türleri ve `Error` trait'i
@@ -102,7 +102,7 @@ yazdığınız kendi hata türleriniz gibi aynen ele alınırlar.
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
 | `message` | `(message e)` | `Self→string` | Hata mesajı (`Error` trait'inin bir metodu) |
-| `source` | `(source e)` | `Self→Option<:dyn Error>` | Bu hatanın sardığı neden ya da yoksa `none` (Rust'ın `Error::source`'u) |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | Bu hatanın sardığı neden ya da yoksa `None` (Rust'ın `Error::source`'u) |
 | `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>` (`E`, `Error`'ı gerçekleştirir) | Somut bir hata türünü trait nesnesine genişletir |
 | `describe-error` | `(describe-error e)` | `E→string` (`E`, `Error`'ı gerçekleştirir) | Mesaj ve `source` izlenerek bulunan nedenler zinciri; her satırda bir neden. CL'de karşılığı yoktur (Rust'ın "caused by"'ı) |
 
@@ -114,10 +114,10 @@ alınabilir:
 (defstruct io-err (path string))
 (impl Error io-err
   (defmethod message (self) string (append "io failed: " self::path))
-  (defmethod source (self) Option<:dyn Error> (Option::none)))
+  (defmethod source (self) Option<:dyn Error> (Option::None)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; the concrete type goes into E as it is
-  (if (equal p "") (Result::err (make-instance 'io-err :path "<empty>")) (Result::ok 3)))
+  (if (equal p "") (Result::Err (make-instance 'io-err :path "<empty>")) (Result::Ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; handle any kind uniformly
 (describe (make-instance 'io-err :path "/etc/app.conf"))
@@ -132,8 +132,8 @@ dönüşüm açıkça yazılır:
 (use std::error::as-dyn-error std::num::parse-int)
 (defun run ((s string)) Result<i32, :dyn Error>
   (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
-    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
-    ((err e) (Result::err e))))
+    ((Ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((Err e) (Result::Err e))))
 ```
 
 **Türler ve trait'ler tek bir ad alanını paylaşır** (Rust'taki gibi). Tek bir modül içinde bir

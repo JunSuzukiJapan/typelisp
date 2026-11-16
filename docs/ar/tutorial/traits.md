@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # السمات (Traits)
 
 السمة (trait) وعد بأن "هذا النوع يدعم هذه العمليات". تتيح السمات لعدة أنواع أن تشترك في عمليات بالاسم
@@ -136,12 +136,12 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((some b) (if (less b x) (Option::some x) best))
-             ((none) (Option::some x))))
-         (Option::none)))
+             ((Some b) (if (less b x) (Option::Some x) best))
+             ((None) (Option::Some x))))
+         (Option::None)))
 ```
 
-وإذا أُعطيت `Vector` فيه قيم `money` هي 300 و900 و100 بهذا الترتيب أعادت `(some 900 yen)`.
+وإذا أُعطيت `Vector` فيه قيم `money` هي 300 و900 و100 بهذا الترتيب أعادت `(Some 900 yen)`.
 
 ## 5. `:dyn`: التعامل مع قيم من أنواع مختلفة معًا
 

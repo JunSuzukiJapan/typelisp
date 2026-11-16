@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -70,23 +70,23 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
   ist ein `Vector<int>`). Alle Elemente müssen denselben Typ haben: `#(1 "a")` ist ein Typfehler,
   ebenso `#()` ohne Elemente und ohne Kontext. Jede Auswertung erzeugt einen neuen Vektor. Wo
   S-Ausdrucksdaten erwartet werden (`(the Option<Sexpr> #(1 x))`, `'#(..)`, was `read` liefert), ist
-  er ein `Vector<Option<Sexpr>>`, dessen Elemente alle Daten sind: die Variante `vector` von
+  er ein `Vector<Option<Sexpr>>`, dessen Elemente alle Daten sind: die Variante `Vector` von
   `Sexpr`.
 - **Arrays**: `#2A((1 2) (3 4))` (wie in CL). Die Zahl zwischen `#` und `A` ist der Rang, und die
   ersten so vielen Ebenen der Listenverschachtelung im Inhalt sind die Dimensionen. `#0A x` ist ein
   nulldimensionales Array mit einem Element. Listen derselben Ebene mit unterschiedlicher Länge sind
   ein Lesefehler. Der Typ wird wie bei Vektoren bestimmt und ist ein `Array<T>` (ohne Elemente muss
   der Kontext ihn liefern, etwa `(the Array<f64> #2A(()))`). Als S-Ausdrucksdaten ist es ein
-  `Array<Option<Sexpr>>`: die Variante `array` von `Sexpr`.
+  `Array<Option<Sexpr>>`: die Variante `Array` von `Sexpr`.
 - **Tupel**: `#{"foo" 123 45.6}`. Der Inhalt besteht ausschließlich aus Literalen und wird nicht
   ausgewertet (das `a` von `#{a b}` ist ein Symbol). Der Typ jedes Elements wird Position für
   Position vom Kontext bestimmt (`(the #{i32 f64} #{1 2.0})`), ohne Kontext ist es der eigene Typ
   des Elements (`#{"foo" 123}` ist `#{string int}`). Ein Tupel hat 1 bis 12 Elemente. Jede
   Auswertung erzeugt ein neues Tupel. Um eines aus berechneten Werten zu bauen, verwendet man
   `(tuple a b)`. Wo S-Ausdrucksdaten erwartet werden, ist es ein Tupel, dessen Elemente alle Daten
-  sind: die Variante `tuple` von `Sexpr`.
+  sind: die Variante `Tuple` von `Sexpr`.
 - **Attribute**: `#[test]` ist eine Markierung, die an der nächsten Form hängt (wie in Rust geschrieben). Das bisher einzige Attribut ist `test`, und es gehört an ein `defun` ([3.16 `#[test]`](#316-test--testfunktionen)). Mit `read` gelesen wird daraus die Liste `(%internal::attribute (test) form)`.
-- **Die leere Liste `()`**: je nach Kontext der Wert des Typs `Unit` oder das `none` von `Option<Sexpr>`.
+- **Die leere Liste `()`**: je nach Kontext der Wert des Typs `Unit` oder das `None` von `Option<Sexpr>`.
   **`Sexpr` hat keine Variante für die leere Liste**: `Sexpr` bedeutet „ein nicht leerer S-Ausdruck“, und der
   Typ von S-Ausdrucksdaten ist `Option<Sexpr>` (siehe „Muster für `Option<Sexpr>`“ in
   [4.3 match](#43-match--mustervergleich)).
@@ -158,7 +158,7 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
   Die Bedingungen, die ein Trait für die Verwendung mit `:dyn` erfüllen muss, stehen in
   [3.9 deftrait / impl](#39-deftrait--impl--traits). `:dyn` außerhalb einer Typstelle zu schreiben, ist ein
   Fehler.
-- Eingebaute generische Typen: `Option<T>` (`(some T)` / `none`), `Result<T,E>` (`(ok T)` / `(err E)`),
+- Eingebaute generische Typen: `Option<T>` (`(Some T)` / `None`), `Result<T,E>` (`(Ok T)` / `(Err E)`),
   `HashTable<K,V>`, `Vector<T>` und die Nebenläufigkeitstypen `Task<T>` / `Thread<T>` / `Chan<T>`
   ([Kapitel 12](#12-nebenläufigkeit-tasks)). Außerdem gibt es `Sexpr`, den Typ von S-Ausdrucksdaten. Die
   eingebauten konkreten Fehlertypen sind `ParseIntError` / `ParseFloatError` / `ReadError` / `EvalError` /
@@ -196,7 +196,7 @@ Die Namen der Spezialformen (reservierte Wörter wie `if`, `let` und `step`, die
 
   ```lisp
   (defun greet ((name string) &optional (suffix string)) string      ; ohne Standardwert
-    (match suffix ((some s) (append name s)) ((none) name)))         ; im Rumpf Option<string>
+    (match suffix ((Some s) (append name s)) ((None) name)))         ; im Rumpf Option<string>
 
   (defun pow ((b i32) &optional (n i32 2)) i32 ...)                  ; mit Standardwert
   (pow 3)      ; n = 2
@@ -206,8 +206,8 @@ Die Namen der Spezialformen (reservierte Wörter wie `if`, `let` und `step`, die
   (mk :b "q")  ; der Aufrufer schreibt `:name Wert` in beliebiger Reihenfolge; weggelassene nehmen ihre Standardwerte
   ```
 
-  - **Ein Parameter ohne Standardausdruck hat den Typ `Option<Type>`.** Weggelassen ist er `none`; übergeben,
-    wird der bloße Wert, den der Aufrufer geschrieben hat, automatisch in `some` gehüllt. Was CL mit einer
+  - **Ein Parameter ohne Standardausdruck hat den Typ `Option<Type>`.** Weggelassen ist er `None`; übergeben,
+    wird der bloße Wert, den der Aufrufer geschrieben hat, automatisch in `Some` gehüllt. Was CL mit einer
     supplied-p-Variable macht („wurde er übergeben?“), zeigt sich stattdessen auf der Seite des statischen
     Typs.
   - Mit Standardausdruck bleibt der Typ `Type` wie deklariert. Beim Weglassen wird dieser **geprüfte Ausdruck**
@@ -419,7 +419,7 @@ Variablen. Jedes der folgenden ist ein Fehler:
 
 ```lisp
 (defstruct handle (p ptr))          ; ein Strukturfeld
-(defenum maybe (none) (some ptr))   ; ein Enum-Feld
+(defenum maybe (None) (Some ptr))   ; ein Enum-Feld
 (defvar (block ptr) ...)            ; eine globale Variable
 (defffi f (Vector<ptr>) i32)        ; innerhalb eines Typarguments
 ```
@@ -890,8 +890,8 @@ Eine Liste `(Name option...)` an der Stelle des Namens gibt Optionen an (dieselb
 
 ; generisch
 (defenum Option<T>
-  (some T)
-  (none))
+  (Some T)
+  (None))
 ```
 
 - Jede Variante hat die Form `(VariantName FieldType...)`. Felder sind nur positionell (sie haben keine Namen).
@@ -902,8 +902,8 @@ Eine Liste `(Name option...)` an der Stelle des Namens gibt Optionen an (dieselb
   abdecken oder ein `_` haben):
   ```lisp
   (match opt
-    ((some v) v)
-    ((none) 0))
+    ((Some v) v)
+    ((None) 0))
   ```
 - Methoden und statische Methoden werden wie bei `defstruct` in `impl` (3.5) geschrieben.
 - Um das Enum selbst `pub` zu machen, schreibt man `(pub defenum ...)`.
@@ -1097,7 +1097,7 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
 - `module` erzeugt einen Namensraum. **Typen sind keine Namensräume** (wie in Rust hat ein Typ nur statische
   Methoden und Methoden).
 - `(use Type)` holt nur den Namen des Typs herein. Die Varianten eines Enums und die statischen Methoden
-  schreibt man über den Typnamen, etwa `Option::some` oder `Chan::new`. Auch nach
+  schreibt man über den Typnamen, etwa `Option::Some` oder `Chan::new`. Auch nach
   `(use std::sync::Chan)` ist ein bloßes `(new 1)` ein Fehler, solange nirgends eine Funktion namens
   `new` definiert ist.
 - Um Konstruktoren und statische Methoden eines Typs unter bloßen Namen zu verwenden, holt man sie
@@ -1108,7 +1108,7 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
   (`(use std::sync::Chan::* std::sync::WaitGroup::*)` ist ein Fehler, da beide `new` haben). Ebenso ist
   es ein Fehler, einen Namen hereinzuholen, der einer Funktion, globalen Variable oder Makro des Moduls
   gleicht. Um bewusst zu ersetzen, verwendet man `shadowing-import`.
-- `some`/`none` von `Option` und `ok`/`err` von `Result` bietet die Standardbibliothek jedem Modul an,
+- `Some`/`None` von `Option` und `Ok`/`Err` von `Result` bietet die Standardbibliothek jedem Modul an,
   daher sind sie ohne `use` unter dem bloßen Namen verwendbar (wie Rusts Prelude
   `Some`/`None`/`Ok`/`Err` hereinholt).
 - **Ein Name hat eine Bedeutung.** Funktionen, globale Variablen und Makros teilen sich einen
@@ -1120,7 +1120,7 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
   1. Lokale (Parameter sowie die Bindungen von `let`, `labels`, `macrolet` und `symbol-macrolet`)
   2. Wenn der Modulname `n` ein Makro ist, dieses Makro
   3. Konstruktoren und statische Methoden: die per `use` hereingeholten, sowie die Konstruktoren von
-     `Sexpr` (`sym`, `int` usw.) und von `Option`/`Result`, die die Standardbibliothek anbietet
+     `Sexpr` (`Sym`, `Int` usw.) und von `Option`/`Result`, die die Standardbibliothek anbietet
   4. Die Methode `n` des Typs des ersten Arguments (Methoden werden **nur über den Typ des ersten
      Arguments** gesucht)
   5. Wenn der Modulname `n` eine Funktion oder eine globale Variable ist, diese (bei einer globalen
@@ -1284,20 +1284,20 @@ Beispiele stehen unter
   (assert-equal (+ 1 2) 3))
 ```
 
-Ein mit `#[test]` markiertes `defun` ist eine Testfunktion, die `typl test` eine nach der anderen aufruft (wie Rusts `#[test]`). Sie darf keine Argumente nehmen und muss `()` oder `Result<(), E>` zurückgeben (Typparameter kann sie auch nicht nehmen). `pub` braucht sie nicht. Ein Test, der ein `Result` zurückgibt, schlägt fehl, wenn er ein `err` zurückgibt, und der Fehler wird angezeigt; daher muss `E` `Error` oder `print-object` implementieren (so wie Rust für den Fehlertyp eines Tests `Debug` verlangt). Ein `Error` wird mit `describe-error` (die Meldung und die Kette ihrer Ursachen) angezeigt, alles andere mit `print-object`. Auch `:dyn Error` ist ein `Error`, sodass ein Test verschiedene Fehler in einem Typ sammeln und zurückgeben kann.
+Ein mit `#[test]` markiertes `defun` ist eine Testfunktion, die `typl test` eine nach der anderen aufruft (wie Rusts `#[test]`). Sie darf keine Argumente nehmen und muss `()` oder `Result<(), E>` zurückgeben (Typparameter kann sie auch nicht nehmen). `pub` braucht sie nicht. Ein Test, der ein `Result` zurückgibt, schlägt fehl, wenn er ein `Err` zurückgibt, und der Fehler wird angezeigt; daher muss `E` `Error` oder `print-object` implementieren (so wie Rust für den Fehlertyp eines Tests `Debug` verlangt). Ein `Error` wird mit `describe-error` (die Meldung und die Kette ihrer Ursachen) angezeigt, alles andere mit `print-object`. Auch `:dyn Error` ist ein `Error`, sodass ein Test verschiedene Fehler in einem Typ sammeln und zurückgeben kann.
 
 ```lisp
 (use std::num::ParseIntError std::num::parse-int)
 #[test]
 (defun parses () Result<(),ParseIntError>
   (match (parse-int "12")
-    ((ok _) (Result::ok ()))
-    ((err e) (Result::err e))))
+    ((Ok _) (Result::Ok ()))
+    ((Err e) (Result::Err e))))
 ```
 
 - **Ein gewöhnlicher Lauf und `compile-file` überspringen sie**, ohne auch nur ihren Inhalt zu prüfen (so wie Rust Tests nur unter `--test` kompiliert). Das Programm selbst kann keine Testfunktion aufrufen.
 - Ein Test kann in jeder Datei stehen, die Funktionen enthält, und in jedem `module`. Tests lassen sich auch getrennt im Ordner `tests/` des Projekts ablegen.
-- Ein Test schlägt durch ein `panic`, einen Laufzeitfehler oder die Rückgabe eines `err` fehl. Geprüft wird mit `assert` oder mit `assert-equal`, das beide Seiten ausgibt ([System](functions/system.md)). Schlägt ein Test fehl, laufen die übrigen trotzdem.
+- Ein Test schlägt durch ein `panic`, einen Laufzeitfehler oder die Rückgabe eines `Err` fehl. Geprüft wird mit `assert` oder mit `assert-equal`, das beide Seiten ausgibt ([System](functions/system.md)). Schlägt ein Test fehl, laufen die übrigen trotzdem.
 
 ```sh
 typl test                 # alle Tests des Projekts in diesem Ordner ausführen
@@ -1436,9 +1436,9 @@ Arten von Mustern:
 - `_` — Platzhalter
 - Ein Variablenname — ein Bindungsmuster (passt immer). Hat der Typ des untersuchten Wertes jedoch eine
   Variante dieses Namens, wird er als **das unten beschriebene Muster mit bloßem Variantennamen** aufgelöst
-- Ein bloßer Variantenname — passt auf eine Variante ohne Argumente (`(match c (red 1) (blue 2))`). Eine Variante
+- Ein bloßer Variantenname — passt auf eine Variante ohne Argumente (`(match c (Red 1) (Blue 2))`). Eine Variante
   mit Feldern mit ihrem bloßen Namen zu schreiben, ist ein Stelligkeitsfehler; man schreibt sie in Klammern, wie
-  in `(circle r)`
+  in `(Circle r)`
 - **Direkte Literale**: Ganzzahlen / `true`/`false` / Zeichen — als Wörter verglichen
 - **Wertliterale**: Zeichenketten / Gleitkommazahlen / Symbole (`'foo`) / Bignum-Ganzzahlen / Brüche — nach
   Wert mit dem `equal` dieses Typs verglichen ([Standard-Traits](functions/traits.md#2-equal--ord-vergleich)).
@@ -1447,7 +1447,7 @@ Arten von Mustern:
   Typen ohne Literalsyntax zu vergleichen (`defstruct`-Instanzen, globale Variablen, berechnete Ergebnisse), und
   eine benutzerdefinierte `Equal`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
   beziehen, was von der Position des Zweigs aus sichtbar ist (Argumente, äußere Bindungen, globale Variablen)
-- `(Ctor sub-pattern...)` — Konstruktormuster (`(some x)` `(none)` `(cons a d)` `(ok v)` usw.)
+- `(Ctor sub-pattern...)` — Konstruktormuster (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` usw.)
 - `(Type :slot pattern... :slot...)` — Strukturmuster. Schreibe die Slots nach dem Typnamen als
   Schlüsselwörter. Folgt auf ein Schlüsselwort ein Muster, wird dieser Slot gegen das Muster geprüft;
   folgt ein Schlüsselwort oder nichts, wird der Slot an eine Variable seines eigenen Namens gebunden.
@@ -1459,14 +1459,14 @@ Arten von Mustern:
 
   (defun f ((p point)) i32
     (match p
-      ((point :x :y (some b)) (+ x b))   ; bindet x und prüft y gegen (some b)
+      ((point :x :y (Some b)) (+ x b))   ; bindet x und prüft y gegen (Some b)
       ((point :x a) a)))                 ; bindet a
   ```
 - `#{p0 p1 ...}` — ein Tupelmuster. Jedes Element wird mit seinem eigenen Teilmuster abgeglichen.
   Gegen ein `Sexpr` passt es nur auf `#{..}`-Daten mit derselben Anzahl an Elementen
 - `(:or p1 p2 ...)` — ein Oder-Muster: Es passt, wenn eine der Alternativen passt. Es gibt nur einen
   Rumpf, daher muss jede Alternative dieselben Variablen mit denselben Typen binden. Es kann auch
-  innerhalb eines Konstruktormusters stehen (`(some (:or (circle r) (rect r _)))`)
+  innerhalb eines Konstruktormusters stehen (`(Some (:or (Circle r) (Rect r _)))`)
 
 Einen Typ, der `Equal` nicht implementiert, mit einem Wertliteral / `(:= expr)` zu vergleichen, ist ein Typfehler
 (diese Sprache sagt lieber „diese lassen sich nicht vergleichen“, als einen Zweig stehen zu lassen, der
@@ -1521,8 +1521,8 @@ in `(list p 42)`:
   `(point :x :y)`.
 - Ein bloßer Variantenname `(VariantName sub-pattern...)` — entnimmt eine Variante eines `defenum`. Wird
   als bloßer Name aufgelöst, der durch Hereinholen sichtbar ist, etwa mit `(use EnumType::*)` (dieselben
-  Sichtbarkeitsregeln wie beim Aufruf des Konstruktors). Zum Beispiel für `(defenum color (red) (blue))`
-  nach `(use color::*)` `(red)` `(blue)`. Mit der qualifizierten Form `(EnumType::VariantName ...)` ist
+  Sichtbarkeitsregeln wie beim Aufruf des Konstruktors). Zum Beispiel für `(defenum color (Red) (Blue))`
+  nach `(use color::*)` `(Red)` `(Blue)`. Mit der qualifizierten Form `(EnumType::VariantName ...)` ist
   kein `use` nötig.
 - `(the Type pattern)` — ein Downcast des ganzen Typs (bindet ihn als Ganzes). Es zerlegt keine Felder; es
   übergibt den Wert unverändert an `pattern`. Die einzige Möglichkeit, eine veränderliche Struktur unter Erhalt
@@ -1531,26 +1531,26 @@ in `(list p 42)`:
   `(the point p)` ein `(setf p::x 9)` auch in der ursprünglichen Instanz in der Liste nieder.
 
 **Muster für `Option<Sexpr>`**: Der Typ von S-Ausdrucksdaten ist nicht `Sexpr`, sondern `Option<Sexpr>`, und die
-leere Liste ist keine Variante von `Sexpr`, sondern das `none` von `Option`. Vergleicht man daher ein
-`Option<Sexpr>`, lassen sich die 19 Varianten von `Sexpr` und `none` **flach in derselben Liste von Zweigen**
+leere Liste ist keine Variante von `Sexpr`, sondern das `None` von `Option`. Vergleicht man daher ein
+`Option<Sexpr>`, lassen sich die 19 Varianten von `Sexpr` und `None` **flach in derselben Liste von Zweigen**
 schreiben (es braucht kein äußeres `match`, um das `Option` abzuschälen):
 
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
-    ((none)     0)          ; die leere Liste
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
+    ((None)     0)          ; die leere Liste
     (_          9)))
 ```
 
-Die Vollständigkeit wird im selben flachen Universum geprüft: die 19 Varianten von `Sexpr` plus `none`,
-insgesamt 20. `(none)` zu vergessen, ist ein Fehler, sofern es kein `_` gibt. Auch `(some x)` lässt sich
+Die Vollständigkeit wird im selben flachen Universum geprüft: die 19 Varianten von `Sexpr` plus `None`,
+insgesamt 20. `(None)` zu vergessen, ist ein Fehler, sofern es kein `_` gibt. Auch `(Some x)` lässt sich
 schreiben und bindet „etwas nicht Leeres“.
 
 Dieser Zucker gilt **genau** nur für `Option<Sexpr>`. Bei `Option<Option<Sexpr>>` wäre unklar, welche Schicht
-`(int n)` abgeschält hat, daher schreibt man wie üblich zwei Ebenen `match`.
+`(Int n)` abgeschält hat, daher schreibt man wie üblich zwei Ebenen `match`.
 
 Dieselben Downcast-Muster lassen sich unverändert auf einen **Trait-Objekt-Wert (`:dyn Trait`, Kapitel 2)** als
 untersuchten Wert anwenden: `match` packt ihn aus und übergibt ihn dann der obigen Maschinerie für
@@ -1579,7 +1579,7 @@ abgleichen. Auch hier ist die Menge der implementierenden Typen offen, daher ist
 
 **Typableitung über Zweige hinweg**: Alle Zweige müssen denselben Typ haben (außer Zweigen, die divergieren, wie
 mit `panic`). In einem `match`, das dort steht, wo kein Typ erwartet wird, ergänzen die Zweige gegenseitig ihre
-fehlenden Typargumente: `(Result::ok v)` legt nur `T` fest und `(Result::err e)` nur `E`, aber zusammen legen sie
+fehlenden Typargumente: `(Result::Ok v)` legt nur `T` fest und `(Result::Err e)` nur `E`, aber zusammen legen sie
 `Result<T,E>` fest. Ein Typargument, das bis zum Ende kein Zweig festlegen kann, ist ein Fehler dieses Zweigs
 (`cannot infer type argument ...`). Außerhalb von `match` ist ein nicht festlegbares Typargument dort ein Fehler.
 
@@ -1702,7 +1702,7 @@ Bei mehreren `:for` schreiten sie **parallel** fort, und die Schleife endet, sob
 | `:sum e` / `:count e` | Die Summe / wie oft es wahr war |
 | `:maximize e` / `:minimize e` | Das Maximum / Minimum. **`Option<T>`** (so wie CL für eine leere Folge nil zurückgibt; ein beliebiger `Ord`-Typ hat kein kleinstes Element) |
 | `:always e` / `:never e` | `true`, wenn alle gelten; sofort `false`, sobald eines scheitert |
-| `:thereis e` | `e` ist ein **`Option<T>`**. Gibt das erste `some` zurück oder `none`, wenn es keines gibt (das entspricht CLs „erster nicht-nil-Wert“; um ein `bool` zu prüfen, verwendet man `:always`/`:never`) |
+| `:thereis e` | `e` ist ein **`Option<T>`**. Gibt das erste `Some` zurück oder `None`, wenn es keines gibt (das entspricht CLs „erster nicht-nil-Wert“; um ein `bool` zu prüfen, verwendet man `:always`/`:never`) |
 | `:while e` / `:until e` | **Endet hier normal** (`:finally` läuft, und das Gesammelte ist die Antwort) |
 | `:when e clause` / `:unless e clause` / `:if e clause [:else clause]` | Macht eine Klausel bedingt |
 | `:return e` | Verlässt sofort mit diesem Wert (`:finally` läuft nicht, wie in CL) |
@@ -1723,7 +1723,7 @@ aber hier gibt es kein `nil`, und `break`/`return` (Kapitel 5) bieten bereits �
 Der Typ `int` des Ausgangs passt nicht zum `()`, das die Schleife hinterlässt, wenn sie erschöpft ist.
 
 **Der Wert der Schleife** ist das Gesammelte der sammelnden Klausel, falls es eine gibt (die erste, wenn es
-mehrere gibt), `true` bei `:always`/`:never`, `none` bei `:thereis` und `()`, wenn es keine gibt. Ist das Letzte
+mehrere gibt), `true` bei `:always`/`:never`, `None` bei `:thereis` und `()`, wenn es keine gibt. Ist das Letzte
 in `:finally` `(return e)`, ist das der Wert: CLs Idiom `finally (return …)`, die einzige Möglichkeit, wie eine
 nicht sammelnde Schleife ihre eigene Antwort nennen kann.
 
@@ -1790,7 +1790,7 @@ usw.).
 (unreachable)                       ; expandiert zu (panic "unreachable"). defmacro
 (todo)                              ; expandiert zu (panic "todo"). defmacro
 (as Type expr)                      ; Umwandlung numerischer/Zeichentypen. Umwandlungen, die fehlschlagen können, lösen dann einen Panic aus
-(try-as Type expr)                  ; wie as, gibt das Ergebnis aber als Option<Type> zurück (none bei Fehlschlag)
+(try-as Type expr)                  ; wie as, gibt das Ergebnis aber als Option<Type> zurück (None bei Fehlschlag)
 (print control args...)             ; expandiert das Format und schreibt auf die Standardausgabe (ohne Zeilenumbruch)
 (println control args...)           ; dasselbe (mit einem Zeilenumbruch am Ende)
 (format dest control args...)       ; CLs format. gibt die expandierte Zeichenkette zurück
@@ -1833,7 +1833,7 @@ Breite, `f32`/`f64`/`ratio`/`char`). Derselbe Typ ist keine Umwandlung. **Umwand
 Ganzzahlbreiten (einschließlich `int`) und zwischen `f32`↔`f64` sind echte Umwandlungen**: `as` schneidet ab /
 rundet, und `try-as` beantwortet, ob es in diese Breite (Genauigkeit) passt. `(as int x)` ist die exakte
 Erweiterung von einer festen Breite, und `(as i32 n)` das Abschneiden von `int`. Ganzzahl → `char` kann außerhalb
-des Bereichs fehlschlagen, daher löst `as` einen Panic aus und `try-as` liefert `none`. Alles andere (Erweiterung
+des Bereichs fehlschlagen, daher löst `as` einen Panic aus und `try-as` liefert `None`. Alles andere (Erweiterung
 und das Abschneiden von `float->int`/`ratio->int`) gelingt immer. `float->int`/`ratio->int`/`char->int` landen
 bei `int`, und wird eine schmalere Breite verlangt, wird danach `int->W` aufgerufen. Das ist Zucker, der zu den
 entsprechenden Umwandlungsmethoden expandiert (`int->char`/`int->int`/`int->W` usw. unter
@@ -1847,7 +1847,7 @@ ganzen Zahl), nach `ratio` und `f64`; von `int`/`ratio` nach `rational`.
 Reihenfolge Variable → Funktion → Typ → Trait → Makro auf (dieselbe Priorität wie bei einem bloßen Bezeichner,
 der als Ausdruck ausgewertet wird) und gibt den Docstring der gefundenen Definition zurück
 (`(documentation Type::method)` ist für Methoden). Scheitert die Auflösung (keine Definition dieses Namens), ist
-das ein Fehler bei der Prüfung; eine Definition, die existiert, aber keinen Docstring hat, ergibt `Option::none`.
+das ein Fehler bei der Prüfung; eine Definition, die existiert, aber keinen Docstring hat, ergibt `Option::None`.
 Alles wird bei der Prüfung als Konstante bestimmt: Zur Laufzeit wird nichts nachgeschlagen. Modulqualifizierte
 freie Namen (`mod::name`, außer `Type::method`) werden nicht unterstützt.
 
@@ -1869,7 +1869,7 @@ Funktionsaufrufe hinweg.
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; wenn nicht gefunden, wie üblich der Wert am Ende
 ```
 
@@ -2048,10 +2048,10 @@ unverändert auf dem konkreten Typ.
 (set-macro-character #\!
   (lambda ((s string-input-stream) (c char)) Option<Sexpr>
     (match (read-sexpr s)
-      ((ok o) (match o
-                ((datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
-                ((eof) (quote ()))))
-      ((err e) (quote ())))))
+      ((Ok o) (match o
+                ((Datum d) (sexpr-cons (quote not) (sexpr-cons d (quote ()))))
+                ((Eof) (quote ()))))
+      ((Err e) (quote ())))))
 
 !(equal 1 2)   ; => gelesen als (not (equal 1 2)), also true
 ```

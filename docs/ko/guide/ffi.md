@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # C FFI (defffi)
 
 이 가이드에서는 typelisp에서 C 함수를 호출하는 방법을 설명한다. 선언할 수 있는 타입의 목록과 제한은
@@ -63,7 +63,7 @@
 
 ```lisp
 (as int (unsafe (c-strlen s)))      ; int는 64비트 값을 하나도 잃지 않는다
-(try-as i32 (unsafe (c-strlen s)))  ; i32에 들어가지 않으면 none
+(try-as i32 (unsafe (c-strlen s)))  ; i32에 들어가지 않으면 None
 (unsafe (c-malloc 16))              ; 정수 리터럴은 그대로 넘길 수 있다
 ```
 

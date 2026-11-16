@@ -86,8 +86,8 @@ fn flag(args: &[Value], i: usize, who: &str) -> Result<bool, ArgError> {
     }
 }
 
-/// An `Option<string>` argument. The type niches (`option.rs`): `none` is
-/// the empty word, `some` the string itself.
+/// An `Option<string>` argument. The type niches (`option.rs`): `None` is
+/// the empty word, `Some` the string itself.
 fn opt_text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Option<String>, ArgError> {
     match args.get(i) {
         Some(Value::Empty) => Ok(None),

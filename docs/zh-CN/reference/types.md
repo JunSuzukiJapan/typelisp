@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5c2b36cd4f77a0a204420bab90be0b6544dc3ebc -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 类型一览
 
 typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的写法见[语法参考第 2 章](syntax.md#2-类型的写法)，各类型的
@@ -29,8 +29,8 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | 类型 | 内容 | 详情 |
 |---|---|---|
-| `Option<T>` | 有值或没有值。`some` / `none` | [Option 与 Result](functions/option-result.md) |
-| `Result<T,E>` | 成功或失败。`ok` / `err` | 同上 |
+| `Option<T>` | 有值或没有值。`Some` / `None` | [Option 与 Result](functions/option-result.md) |
+| `Result<T,E>` | 成功或失败。`Ok` / `Err` | 同上 |
 | `Vector<T>` | 可变长数组 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | 哈希表。键的比较方式由创建时的 `:test` 决定，`equal` 表的键类型须实现 `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
 | `#{T0 T1 ...}` | 元组（元素 1～12 个）。元素用 `t::0` 读取 | [语法第 2 章](syntax.md#2-类型的写法) |
@@ -45,8 +45,8 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | 类型 | 内容 | 详情 |
 |---|---|---|
-| `Sexpr` | 非空的 S 表达式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array`、`tuple` 共 19 种变体 | [S 表达式数据](functions/sequences.md#2-s-表达式数据-sexpr) |
-| `Option<Sexpr>` | 一般的 S 表达式数据。空列表 `()` 是 `none` | 同上 |
+| `Sexpr` | 非空的 S 表达式。`Int`、`I8` 至 `U32`、`F32`、`F64`、`Char`、`Bool`、`Sym`、`Str`、`Cons`、`Ratio`、`Path`、`Vector`、`Array`、`Tuple` 共 19 种变体 | [S 表达式数据](functions/sequences.md#2-s-表达式数据-sexpr) |
+| `Option<Sexpr>` | 一般的 S 表达式数据。空列表 `()` 是 `None` | 同上 |
 
 ## 4. 标准库中的类型
 
@@ -70,7 +70,7 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | 流 | [流](functions/streams-files.md#3-具体流类型) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | 组合流 | [组合流](functions/streams-files.md#4-组合流) |
 | `socket-stream` `socket-byte-stream` `socket-listener` `udp-socket` `datagram` | 网络 | [网络](functions/network.md#1-类型) |
-| `ReadOutcome` | `read-sexpr` 的结果。`datum` / `eof` | [流](functions/streams-files.md#6-泛型函数与文件操作) |
+| `ReadOutcome` | `read-sexpr` 的结果。`Datum` / `Eof` | [流](functions/streams-files.md#6-泛型函数与文件操作) |
 | `universal-time` `internal-time` `decoded-time` | 时间 | [时间](functions/system.md#1-时间) |
 | `heap-info` | 堆的现状 | [实现工具](functions/system.md#51-heap-info-的字段) |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Dasar-dasar Tipe
 
 typelisp adalah bahasa dengan tipe statis. Bab ini menjelaskan apa yang dilakukan pemeriksa tipe
@@ -48,35 +48,35 @@ pada Common Lisp), karena setiap tipe sudah diketahui sebelum program dijalankan
 ## 2. `Option<T>`: nilai yang mungkin tidak ada
 
 typelisp tidak punya `nil`. "Mungkin tidak ada nilai" dinyatakan dengan tipe `Option<T>`. Nilai
-`Option<T>` adalah `some`, yang menyimpan satu nilai `T`, atau `none`, yang tidak menyimpan apa-apa.
+`Option<T>` adalah `Some`, yang menyimpan satu nilai `T`, atau `None`, yang tidak menyimpan apa-apa.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` bukan `int`, sehingga tidak dapat dipakai dalam aritmetika apa adanya.
-`(+ (safe-div 10 2) 1)` adalah kesalahan tipe. Untuk memakai isinya, pisahkan `some` dari `none`
+`(+ (safe-div 10 2) 1)` adalah kesalahan tipe. Untuk memakai isinya, pisahkan `Some` dari `None`
 dengan `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- Pada cabang `(some q)`, isinya diikat ke variabel `q`.
-- `match` memeriksa bahwa cabang-cabangnya **mencakup setiap kasus**. Melupakan cabang `(none)`
+- Pada cabang `(Some q)`, isinya diikat ke variabel `q`.
+- `match` memeriksa bahwa cabang-cabangnya **mencakup setiap kasus**. Melupakan cabang `(None)`
   adalah kesalahan tipe.
 
 ### Mengapa tidak ada nil
@@ -84,7 +84,7 @@ dengan `match`.
 Di banyak bahasa, `nil` (`null`) dapat menggantikan nilai bertipe apa pun. Akibatnya, lupa menangani
 kasus "tidak ada nilai" tidak diketahui sampai program dijalankan. Di typelisp, tempat yang nilainya
 mungkin tidak ada bertipe `Option<T>`, dan kode tidak lolos pemeriksa tipe kecuali `match`
-menangani kasus `none`. Kasus yang terlupa ditemukan sebelum program dijalankan.
+menangani kasus `None`. Kasus yang terlupa ditemukan sebelum program dijalankan.
 
 Kondisi mengikuti gagasan yang sama: hanya `bool` yang dapat menjadi kondisi `if`. Tidak ada aturan
 seperti "semua selain `nil` adalah benar" pada Common Lisp.
@@ -93,12 +93,12 @@ seperti "semua selain `nil` adalah benar" pada Common Lisp.
 
 | Bentuk | Arti |
 |---|---|
-| `(unwrap-or opt default)` | Isinya untuk `some`; nilai bawaan untuk `none` |
-| `(unwrap opt)` | Mengambil isinya. Menghentikan program pada `none` |
+| `(unwrap-or opt default)` | Isinya untuk `Some`; nilai bawaan untuk `None` |
+| `(unwrap opt)` | Mengambil isinya. Menghentikan program pada `None` |
 | `(is-some opt)` / `(is-none opt)` | Menguji yang mana |
 
 Banyak fungsi pustaka standar mengembalikan `Option`. Misalnya, `position` mengembalikan posisi di
-dalam `some` jika elemen ditemukan dan `none` jika tidak.
+dalam `Some` jika elemen ditemukan dan `None` jika tidak.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -106,25 +106,25 @@ dalam `some` jika elemen ditemukan dan `none` jika tidak.
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: operasi yang mungkin gagal
 
-Operasi yang dapat gagal mengembalikan `Result<T,E>`: `ok` yang menyimpan nilai `T` jika berhasil,
-atau `err` yang menyimpan kesalahan `E` jika gagal.
+Operasi yang dapat gagal mengembalikan `Result<T,E>`: `Ok` yang menyimpan nilai `T` jika berhasil,
+atau `Err` yang menyimpan kesalahan `E` jika gagal.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -133,8 +133,8 @@ Fungsi Anda sendiri juga dapat mengembalikan `Result`.
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Gunakan `Option` ketika ketiadaan nilai tidak perlu dijelaskan, dan `Result` ketika Anda ingin
@@ -205,30 +205,30 @@ menyimpan jumlah dan tipe nilai yang berbeda.
 
 ```lisp
 (defenum shape
-  (circle int)        ; radius
-  (rect int int)      ; width and height
-  (dot))              ; holds no value
+  (Circle int)        ; radius
+  (Rect int int)      ; width and height
+  (Dot))              ; holds no value
 ```
 
-Nilai dibuat dengan nama tipe di depan, seperti `shape::circle`. Pada `match`, nilai dibongkar
+Nilai dibuat dengan nama tipe di depan, seperti `shape::Circle`. Pada `match`, nilai dibongkar
 berdasarkan nama varian.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Di sini pun, `match` memeriksa bahwa setiap kasus tercakup. Jika kemudian Anda menambahkan varian ke
 `shape`, setiap `match` yang tidak menanganinya menjadi kesalahan tipe, sehingga tidak ada tempat
 yang perlu diperbaiki yang terlewat.
 
-Setelah `(use shape)`, Anda dapat menulis `(rect 5 6)` tanpa nama tipe.
+Setelah `(use shape)`, Anda dapat menulis `(Rect 5 6)` tanpa nama tipe.
 
 `Option` dan `Result` adalah enum yang dibangun dengan mekanisme yang sama.
 

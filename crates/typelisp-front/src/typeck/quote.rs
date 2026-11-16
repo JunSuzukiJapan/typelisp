@@ -5,7 +5,7 @@
 //! `42` is an integer's. A quoted list where a list type is expected is
 //! that type's cells (`typed_list`), and so is a quasiquoted one. Any other
 //! datum is S-expression data, `Option<Sexpr>`, since `'()` is one and the
-//! empty list is `none`.
+//! empty list is `None`.
 
 use crate::typeck::sexpr_value::option_of_sexpr;
 use crate::sexpr_variant::CONS;

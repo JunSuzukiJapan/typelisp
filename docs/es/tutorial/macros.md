@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macros
 
 Una macro es una función que recibe un programa y devuelve un programa. Las macros permiten crear nueva
@@ -44,7 +44,7 @@ forma más rápida de avanzar.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Las expansiones también pasan el comprobador de tipos
@@ -122,15 +122,15 @@ Del mismo modo, una macro que repite su cuerpo un número dado de veces se puede
 
 El cuerpo de una macro es código typelisp normal, así que puede examinar sus argumentos con `if` o `match`
 y construir una expansión distinta. Los argumentos son datos de expresiones S (`Option<Sexpr>`), y la
-lista vacía es `none`.
+lista vacía es `None`.
 
 Hagamos `my-and`, que devuelve `true` si todas sus condiciones son verdaderas.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; sin argumentos
-    ((cons f more)
+    ((None) 'true)                                    ; sin argumentos
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; solo uno
          `(if ,f (my-and ,@more) false)))             ; dos o más
@@ -140,7 +140,7 @@ Hagamos `my-and`, que devuelve `true` si todas sus condiciones son verdaderas.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` es un patrón que toma la cabeza de una lista en `f` y el resto en `more`.
+- `(Cons f more)` es un patrón que toma la cabeza de una lista en `f` y el resto en `more`.
 - `sexpr-null` comprueba si unos datos de expresiones S son la lista vacía.
 - La rama final `_` es necesaria porque los datos de expresiones S tienen formas además de las listas
   (números, cadenas, etc.), y `match` exige cubrirlas también. Un argumento `&rest` es siempre una lista,

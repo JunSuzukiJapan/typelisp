@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 4ce79a2281ce07134ab47f030c78c5c3efa6df89 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Concurrency
 
 In typelisp you run work concurrently by starting **tasks** (lightweight threads), and tasks pass
@@ -59,7 +59,7 @@ got 30
 
 - `(send ch v)` sends. If the channel is full, it waits until there is room.
 - `(recv ch)` receives. It waits until a value arrives. The result is an `Option<T>`; once the
-  channel is closed and empty, it returns `none`.
+  channel is closed and empty, it returns `None`.
 - Iterating a channel with `doiter` keeps receiving values until it is closed. It can also be
   passed straight to `map` or `filter`.
 - `send` on a closed channel panics.

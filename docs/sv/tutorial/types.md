@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
 # Grunderna i typer
 
 typelisp är ett statiskt typat språk. Det här kapitlet förklarar vad typkontrollen gör åt dig, de typer
@@ -48,42 +48,42 @@ Lisp), eftersom varje typ redan är känd innan programmet körs.
 ## 2. `Option<T>`: ett värde som kan saknas
 
 typelisp har inget `nil`. "Det kanske inte finns något värde" uttrycks med typen `Option<T>`. Ett värde
-av typen `Option<T>` är antingen `some`, som håller ett värde av typen `T`, eller `none`, som inte håller
+av typen `Option<T>` är antingen `Some`, som håller ett värde av typen `T`, eller `None`, som inte håller
 något.
 
 ```lisp
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
-      (Option::none)
-      (Option::some (truncate a b))))
+      (Option::None)
+      (Option::Some (truncate a b))))
 ```
 
 ```
 typl> (safe-div 10 2)
-(some 5)
+(Some 5)
 typl> (safe-div 1 0)
-none
+None
 ```
 
 `Option<int>` är inte `int`, så det kan inte användas i aritmetik som det är. `(+ (safe-div 10 2) 1)` är
-ett typfel. För att använda innehållet skiljer man `some` från `none` med `match`.
+ett typfel. För att använda innehållet skiljer man `Some` från `None` med `match`.
 
 ```lisp
 (defun show-div ((a int) (b int)) string
   (match (safe-div a b)
-    ((some q) (format false "~a" q))
-    ((none) "undefined")))
+    ((Some q) (format false "~a" q))
+    ((None) "undefined")))
 ```
 
-- I grenen `(some q)` binds innehållet till variabeln `q`.
-- `match` kontrollerar att dess grenar **täcker alla fall**. Att glömma grenen `(none)` är ett typfel.
+- I grenen `(Some q)` binds innehållet till variabeln `q`.
+- `match` kontrollerar att dess grenar **täcker alla fall**. Att glömma grenen `(None)` är ett typfel.
 
 ### Varför det inte finns något nil
 
 I många språk kan `nil` (`null`) stå i stället för ett värde av vilken typ som helst. Följden är att man
 inte märker att man glömt hantera fallet "inget värde" förrän programmet körs. I typelisp har en plats
 där ett värde kan saknas typen `Option<T>`, och koden passerar inte typkontrollen om inte `match`
-hanterar fallet `none`. Ett glömt fall upptäcks innan programmet körs.
+hanterar fallet `None`. Ett glömt fall upptäcks innan programmet körs.
 
 Villkor följer samma tanke: bara en `bool` kan vara villkor i `if`. Det finns ingen regel som Common
 Lisps "allt utom `nil` är sant".
@@ -92,12 +92,12 @@ Lisps "allt utom `nil` är sant".
 
 | Form | Betydelse |
 |---|---|
-| `(unwrap-or opt default)` | Innehållet för `some`; standardvärdet för `none` |
-| `(unwrap opt)` | Tar ut innehållet. Stoppar programmet vid `none` |
+| `(unwrap-or opt default)` | Innehållet för `Some`; standardvärdet för `None` |
+| `(unwrap opt)` | Tar ut innehållet. Stoppar programmet vid `None` |
 | `(is-some opt)` / `(is-none opt)` | Testar vilket av dem det är |
 
 Många funktioner i standardbiblioteket returnerar `Option`. Till exempel returnerar `position`
-positionen i `some` om elementet hittas och `none` om det inte gör det.
+positionen i `Some` om elementet hittas och `None` om det inte gör det.
 
 ```lisp
 (defvar (fruits Vector<string>) (Vector::new))
@@ -105,25 +105,25 @@ positionen i `some` om elementet hittas och `none` om det inte gör det.
 (push fruits "banana")
 
 (match (position "banana" (iter fruits))
-  ((some i) (println "found at ~a" i))
-  ((none) (println "not found")))
+  ((Some i) (println "found at ~a" i))
+  ((None) (println "not found")))
 ```
 
 ## 3. `Result<T,E>`: en operation som kan misslyckas
 
-En operation som kan misslyckas returnerar `Result<T,E>`: `ok` med ett värde av typen `T` vid lyckat
-resultat, eller `err` med ett fel `E` vid misslyckande.
+En operation som kan misslyckas returnerar `Result<T,E>`: `Ok` med ett värde av typen `T` vid lyckat
+resultat, eller `Err` med ett fel `E` vid misslyckande.
 
 ```lisp
 (use std::num::parse-int)
 (match (parse-int "42")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; n = 43
 
 (match (parse-int "4x2")
-  ((ok n) (println "n = ~a" (+ n 1)))
-  ((err e) (println "error: ~a" (message e))))
+  ((Ok n) (println "n = ~a" (+ n 1)))
+  ((Err e) (println "error: ~a" (message e))))
 ;; error: parse-int: invalid integer literal: "4x2"
 ```
 
@@ -132,8 +132,8 @@ Dina egna funktioner kan också returnera `Result`.
 ```lisp
 (defun checked-age ((n int)) Result<int,string>
   (if (< n 0)
-      (Result::err "age must not be negative")
-      (Result::ok n)))
+      (Result::Err "age must not be negative")
+      (Result::Ok n)))
 ```
 
 Använd `Option` när ett saknat värde inte behöver någon förklaring, och `Result` när du vill säga varför
@@ -203,29 +203,29 @@ värden.
 
 ```lisp
 (defenum shape
-  (circle int)        ; radie
-  (rect int int)      ; bredd och höjd
-  (dot))              ; håller inget värde
+  (Circle int)        ; radie
+  (Rect int int)      ; bredd och höjd
+  (Dot))              ; håller inget värde
 ```
 
-Värden skapas med typnamnet framför, som i `shape::circle`. I `match` plockas de isär efter
+Värden skapas med typnamnet framför, som i `shape::Circle`. I `match` plockas de isär efter
 variantnamn.
 
 ```lisp
 (defun area ((s shape)) int
   (match s
-    ((circle r) (* 3 r r))
-    ((rect w h) (* w h))
-    ((dot) 0)))
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))
+    ((Dot) 0)))
 
-(area (shape::circle 2))        ; => 12
-(area (shape::rect 3 4))        ; => 12
+(area (shape::Circle 2))        ; => 12
+(area (shape::Rect 3 4))        ; => 12
 ```
 
 Också här kontrollerar `match` att alla fall är täckta. Om du senare lägger till en variant i `shape`
 blir varje `match` som inte hanterar den ett typfel, så ingen plats som behöver rättas missas.
 
-Efter `(use shape)` kan du skriva `(rect 5 6)` utan typnamnet.
+Efter `(use shape)` kan du skriva `(Rect 5 6)` utan typnamnet.
 
 `Option` och `Result` är enums som byggts med samma mekanism.
 

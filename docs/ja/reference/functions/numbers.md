@@ -30,9 +30,9 @@
 | `int->int` | `(int->int x)` | `T→int` | `int` への拡大変換（常に正確）。`(as int x)` の実体 |
 | `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio` への拡大変換（常に正確） |
 | `int->char` | `(int->char x)` | `T→char` | Unicode スカラ値として解釈。不正な値は panic |
-| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `none` で返す版 |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `None` で返す版 |
 | `int->i8` `int->i16` `int->i32` `int->u8` `int->u16` `int->u32` | `(int->W x)` | `T→W` | 幅変換。入らない値は切り詰める（Rust の `as` と同じ） |
-| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして。値がその幅に入らなければ `none` |
+| `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして。値がその幅に入らなければ `None` |
 
 これらの変換は `(as Type x)`/`(try-as Type x)` 特殊形（[構文リファレンス](../syntax.md#7-その他の特殊形)）の
 実体でもある。ビット演算（`logand`/`ash`/`ldb` 等）と述語（`zerop`/`evenp` 等）は型をまたいで同じ形
@@ -90,7 +90,7 @@ CL の `integer`、そしてこの言語の**整数**——未注釈の整数リ
 `(as i32 n)` / `(try-as i32 n)` が `int` からの切り詰め / 判定（1 章の `int->W` / `try-int->W` と
 同じ意味）。
 
-`Sexpr` の整数の変種も `int` 1 つ（`(int n)` は fixnum も多倍長も受ける）。
+`Sexpr` の整数の変種も `Int` 1 つ（`(Int n)` は fixnum も多倍長も受ける）。
 
 添字や個数を取る組み込み（`substring`、`Vector` の `get`、`ash` の桁数など）は `int` を受けるが、
 fixnum に入らない値を渡すと実行時エラー（「an integer argument does not fit a fixnum」）になる。
@@ -134,7 +134,7 @@ fixnum に入らない値を渡すと実行時エラー（「an integer argument
 | `float->int` | `(float->int x)` | `f64→int` | ゼロ方向への切り捨てで `int` へ変換（CL の `truncate`。どんな大きさの有限値でも正確）。無限大・NaN は panic。固定幅が要るなら `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮動小数点の幅の変換。`float->f32` は最近接へ丸め、`float->f64` は常に正確。`(as f32 x)` の実体 |
-| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 同じ変換を問いとして。丸めで値が変わるなら `none`（`f64` への拡大は常に `some`）。`(try-as f32 x)` の実体 |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 同じ変換を問いとして。丸めで値が変わるなら `None`（`f64` への拡大は常に `Some`）。`(try-as f32 x)` の実体 |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL の同名関数。上の `floor`/`ceiling`/`round`/`truncate` の別名——CL では無印の方が整数を返すので、`f` 付きの方がこの言語の挙動に一致する |
 | `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | それぞれ 2 / 53 / 53（`0.0` の precision だけ 0）。`f64` は常に IEEE-754 binary64 なので定数 |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` か `-1.0` |
@@ -211,7 +211,7 @@ CL の `rational` にあたる型。値は `int` か `ratio` のどちらかで�
 | `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | 比較 |
 | `numerator` `denominator` | `(op x)` | `rational→int` | 既約分子・分母 |
 | `rational->int` `rational->ratio` `rational->float` | `(op x)` | | ゼロ方向切り捨て・`ratio` として・`f64` へ |
-| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 整数なら `(some n)`、そうでなければ `none`（CL の `integerp`） |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 整数なら `(Some n)`、そうでなければ `None`（CL の `integerp`） |
 | `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio` と同じ（`expt` の指数は `int`） |
 | `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio` と同じ |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio` と同じ |

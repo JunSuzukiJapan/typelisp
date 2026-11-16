@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 宏
 
 宏是接收程序并返回程序的函数。用宏可以自己创造函数无法实现的新语法。typelisp 的宏与 Common Lisp 的 `defmacro`
@@ -38,7 +38,7 @@
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. 展开结果也要经过类型检查
@@ -110,15 +110,15 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 ## 5. 根据参数的形状改变展开
 
 宏的函数体是普通的 typelisp 代码，所以可以用 `if` 或 `match` 检查参数，改变要展开的表达式。参数的类型是
-S 表达式数据（`Option<Sexpr>`），空列表是 `none`。
+S 表达式数据（`Option<Sexpr>`），空列表是 `None`。
 
 创建一个所有条件都为真时返回 `true` 的 `my-and`。
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; 没有参数
-    ((cons f more)
+    ((None) 'true)                                    ; 没有参数
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; 只有一个
          `(if ,f (my-and ,@more) false)))             ; 两个以上
@@ -128,7 +128,7 @@ S 表达式数据（`Option<Sexpr>`），空列表是 `none`。
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` 是把列表开头取到 `f`、其余取到 `more` 的模式。
+- `(Cons f more)` 是把列表开头取到 `f`、其余取到 `more` 的模式。
 - `sexpr-null` 判断 S 表达式数据是否为空列表。
 - 最后的 `_` 分支是必需的，因为 S 表达式数据还有列表以外的形状（数字、字符串等），`match` 要求覆盖它们。
   `&rest` 参数一定是列表，所以这个分支实际上不会执行。

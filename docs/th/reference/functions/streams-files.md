@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # สตรีมและไฟล์
 
 trait และเมทอดของสตรีม ชนิดสตรีมที่เป็นรูปธรรม การดำเนินการกับไฟล์ และ pathname ซ็อกเก็ตเครือข่ายก็เป็น
@@ -30,18 +30,18 @@ trait และเมทอดของสตรีม ชนิดสตรี�
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `read-item` | `(read-item s)` | `(S)→Option<Item>` | สมาชิกถัดไป `none` เมื่อถึงจุดสิ้นสุด **เมทอดเดียวที่ต้อง implement** |
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | สมาชิกถัดไป `None` เมื่อถึงจุดสิ้นสุด **เมทอดเดียวที่ต้อง implement** |
 | `read-char` | `(read-char s)` | `(S)→Option<char>` | อักขระถัดไป |
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | จนถึงการขึ้นบรรทัดใหม่ถัดไป (การขึ้นบรรทัดใหม่ถูกใช้และตัดออก) บรรทัดสุดท้ายที่ไม่ลงท้ายด้วยการขึ้นบรรทัดใหม่ก็ถูกคืนด้วย |
 | `read-all` | `(read-all s)` | `(S)→string` | ทุกอย่างที่เหลืออยู่ |
-| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | เฉพาะอักขระที่อยู่ในมืออยู่แล้ว `none` แทนที่จะรอ |
+| `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | เฉพาะอักขระที่อยู่ในมืออยู่แล้ว `None` แทนที่จะรอ |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | ผลักอักขระได้ถึง `n` ตัวลงใน `v` และคืนว่าอ่านได้จริงกี่ตัว น้อยกว่า `n` เฉพาะที่จุดสิ้นสุด |
 
 `listen` อยู่ใน `InputStream` (แม่ของ `CharInput`):
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `listen` | `(listen s)` | `(S)→bool` | การอ่านครั้งถัดไปตอบได้โดยไม่ต้องรอหรือไม่ ค่าเริ่มต้นคือ `false` **ด้านที่ไม่เคยโกหก**: `true` จะเป็นการเดา และการเดาผิดจะทำให้ `read-char-no-hang` บล็อก สตรีมที่มีให้ในตัวทั้งหมด override มัน **สำหรับสตรีมที่ผู้ใช้นิยามซึ่งไม่ override `read-char-no-hang` จะคืน `none` เสมอ** |
+| `listen` | `(listen s)` | `(S)→bool` | การอ่านครั้งถัดไปตอบได้โดยไม่ต้องรอหรือไม่ ค่าเริ่มต้นคือ `false` **ด้านที่ไม่เคยโกหก**: `true` จะเป็นการเดา และการเดาผิดจะทำให้ `read-char-no-hang` บล็อก สตรีมที่มีให้ในตัวทั้งหมด override มัน **สำหรับสตรีมที่ผู้ใช้นิยามซึ่งไม่ override `read-char-no-hang` จะคืน `None` เสมอ** |
 
 `PeekInput` (ที่สืบทอดจาก `CharInput`) เพิ่ม **การดันอักขระกลับหนึ่งตัว** เฉพาะตัวสตรีม
 เองที่มีที่เก็บอักขระที่ดันกลับ ดังนั้นสิ่งนี้มี implementation เริ่มต้นไม่ได้ และ
@@ -90,7 +90,7 @@ trait และเมทอดของสตรีม ชนิดสตรี�
 | `binary-file-stream` | `(open-binary name direction)` / `open-binary-input` / `open-binary-output` | `ByteInput` `ByteOutput` |
 
 `direction` เป็นหนึ่งในสามค่าคงที่ `direction-input` / `direction-output` /
-`direction-append` `open-file` คืน `(err FileError)` หากเปิดไฟล์ไม่ได้ (ไฟล์ที่หายไปเป็น
+`direction-append` `open-file` คืน `(Err FileError)` หากเปิดไฟล์ไม่ได้ (ไฟล์ที่หายไปเป็น
 ผลลัพธ์ธรรมดา ไม่ใช่ panic) ชื่อไฟล์เป็นสตริงหรือ `pathname` ก็ได้ (`Pathish` ใน
 บทที่ 9)
 
@@ -102,7 +102,7 @@ trait และเมทอดของสตรีม ชนิดสตรี�
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | ไบต์ถัดไป `none` ที่จุดสิ้นสุดของไฟล์ |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | ไบต์ถัดไป `None` ที่จุดสิ้นสุดของไฟล์ |
 | `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | เขียนหนึ่งไบต์ ข้อผิดพลาดนอก 0..255 |
 | `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | เวอร์ชันอักขระ ในหน่วยไบต์ |
 | `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | เหมือนข้างบน |
@@ -138,18 +138,18 @@ CL ตัดสินชนิดสมาชิกใน **การเรี�
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | ถ่ายโอนทุกอย่าง |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | ทุกบรรทัดที่เหลือ |
-| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | อ่านหนึ่ง `Sexpr` (`read` ของ CL) `(ok eof)` ที่จุดสิ้นสุดของอินพุต `(ok (datum d))` เมื่ออ่านได้หนึ่งตัว `err` หากไม่ใช่ข้อมูล มัน **ใช้อักขระช่องว่างหนึ่งตัว** ที่จบ datum (เหมือนใน CL) `ReadOutcome` ไม่ใช่ `Option<Sexpr>` เพื่อให้การอ่านลิสต์ว่าง `()` กับจุดสิ้นสุดของอินพุตไม่เป็นค่าเดียวกัน |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | อ่านหนึ่ง `Sexpr` (`read` ของ CL) `(Ok eof)` ที่จุดสิ้นสุดของอินพุต `(Ok (Datum d))` เมื่ออ่านได้หนึ่งตัว `Err` หากไม่ใช่ข้อมูล มัน **ใช้อักขระช่องว่างหนึ่งตัว** ที่จบ datum (เหมือนใน CL) `ReadOutcome` ไม่ใช่ `Option<Sexpr>` เพื่อให้การอ่านลิสต์ว่าง `()` กับจุดสิ้นสุดของอินพุตไม่เป็นค่าเดียวกัน |
 | `read-sexpr-preserving-whitespace` | เหมือนข้างบน | เหมือนข้างบน | เหมือนกัน แต่ทิ้งช่องว่างไว้ (`read-preserving-whitespace` ของ CL) |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | อ่านจนถึง `ch` และสร้างลิสต์ `ch` ถูกใช้ `err` หากอินพุตหมด |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | อ่านจนถึง `ch` และสร้างลิสต์ `ch` ถูกใช้ `Err` หากอินพุตหมด |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | เขียนทีละบรรทัด |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | เนื้อหาทั้งหมด |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | ทุกบรรทัด |
 | `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | เขียนออกไป |
 | `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | มีอยู่หรือไม่ |
 | `delete-file` / `rename-file` | | `→Result<(),FileError>` | ลบ เปลี่ยนชื่อ (อาร์กิวเมนต์เป็น `Pathish`) |
-| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | พาธสัมบูรณ์ที่แก้ symbolic link และ `.`/`..` แล้ว `err` หากไม่มีอยู่ |
+| `truename` | `(truename name)` | `(P)→Result<string,FileError>` where `Pathish P` | พาธสัมบูรณ์ที่แก้ symbolic link และ `.`/`..` แล้ว `Err` หากไม่มีอยู่ |
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | เวลาของการแก้ไขครั้งล่าสุด เป็น **universal time** ดังนั้น `decode-universal-time` ([เวลา](system.md#2-การถอดรหัสและการเข้ารหัสวันที่)) อ่านได้ |
-| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | ชื่อล็อกอินของเจ้าของ `err` หากไฟล์ไม่มีอยู่ `(ok none)` หาก uid ของเจ้าของไม่มีรายการในฐานข้อมูลรหัสผ่าน: สองกรณีที่ CL แยกกันถูกคงไว้แยกกัน |
+| `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | ชื่อล็อกอินของเจ้าของ `Err` หากไฟล์ไม่มีอยู่ `(Ok none)` หาก uid ของเจ้าของไม่มีรายการในฐานข้อมูลรหัสผ่าน: สองกรณีที่ CL แยกกันถูกคงไว้แยกกัน |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | เป็นไดเรกทอรีหรือไม่ **เป็น `false` ด้วยหากไม่มีอยู่** ใช้ `probe-file` เพื่อแยกสองกรณี |
 | `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | แสดงเนื้อหาตาม truename (พาธสัมบูรณ์ที่แก้ symbolic link แล้ว เหมือน `truename`) symbolic link ที่เป้าหมายหายไปถูกละไว้ `.`/`..` ถูกละไว้ ลำดับเป็นไปตามที่ OS ให้ |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | สร้างพร้อมไดเรกทอรีแม่ สำเร็จหากมีอยู่แล้ว |
@@ -202,8 +202,8 @@ pathname designator ของ CL แก้ไขผ่าน trait `Pathish` แ
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
   (pathname-directory p)   ; => #("var" "log")
-  (pathname-name p)        ; => (some "app.tar")   split at the last dot
-  (pathname-type p)        ; => (some "gz")
+  (pathname-name p)        ; => (Some "app.tar")   split at the last dot
+  (pathname-type p)        ; => (Some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
 
 (namestring (merge-pathnames (make-pathname :name "today" :type "log")
@@ -229,10 +229,10 @@ pathname designator ของ CL แก้ไขผ่าน trait `Pathish` แ
 | `parse-namestring` | `(parse-namestring s)` | `string→pathname` | แยกสตริงเป็นส่วน ๆ `/` ท้าย (หรือชื่อว่าง) หมายถึง "ไม่มีชื่อ" คือเป็นไดเรกทอรี |
 | `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | สร้างจากเฉพาะส่วนประกอบที่ให้ (ทั้งหมดเป็น `&key`) ชื่อหรือชนิดที่ละไว้ยังคง "ไม่มี" และเป็นสิ่งที่ `merge-pathnames` เติมให้ |
 | `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | ส่วนประกอบไดเรกทอรี ชั้นนอกสุดก่อน |
-| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | ชื่อที่ไม่มีชนิด `none` สำหรับไดเรกทอรี |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | ชื่อที่ไม่มีชนิด `None` สำหรับไดเรกทอรี |
 | `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | ส่วนหลังจุดสุดท้าย จุดนำหน้าไม่นับ (`.gitignore` ทั้งหมดเป็นชื่อ) |
 | `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | เริ่มที่รากหรือไม่ |
-| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | ไดเรกทอรีโฮม `none` หากไม่มี `$HOME` (CL ยอมให้ `NIL` ด้วย) |
+| `user-homedir-pathname` | `(user-homedir-pathname)` | `()→Option<pathname>` | ไดเรกทอรีโฮม `None` หากไม่มี `$HOME` (CL ยอมให้ `NIL` ด้วย) |
 | `directory-namestring` | `(directory-namestring p)` | `(P)→string` | ส่วนจนถึง `/` สุดท้าย |
 | `file-namestring` | `(file-namestring p)` | `(P)→string` | เฉพาะส่วน `name.type` |
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | เติมส่วนประกอบที่ขาดจาก `p` จาก `default` `p` แบบสัมพัทธ์ไปอยู่ใต้ไดเรกทอรีของ `default` `p` แบบสัมบูรณ์คงไดเรกทอรีของตัวเอง |

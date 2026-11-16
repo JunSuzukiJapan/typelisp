@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makra
 
 Makro to funkcja, która przyjmuje program i zwraca program. Makra pozwalają tworzyć nową składnię,
@@ -43,7 +43,7 @@ jest najszybszą drogą naprzód.
 
 ```
 typl> (macroexpand-1 '(my-unless (> 1 2) (println "one")))
-(ok (if (> 1 2) () (progn (println "one") ())))
+(Ok (if (> 1 2) () (progn (println "one") ())))
 ```
 
 ## 3. Rozwinięcia są także sprawdzane pod względem typów
@@ -121,15 +121,15 @@ W ten sam sposób można napisać makro powtarzające swoje ciało zadaną liczb
 
 Ciało makra to zwykły kod typelisp, więc może badać swoje argumenty za pomocą `if` lub `match` i
 budować inne rozwinięcie. Argumenty to dane w postaci S-wyrażeń (`Option<Sexpr>`), a pusta
-lista to `none`.
+lista to `None`.
 
 Zróbmy `my-and`, które zwraca `true`, jeśli wszystkie jego warunki są prawdziwe.
 
 ```lisp
 (defmacro my-and (&rest forms)
   (match forms
-    ((none) 'true)                                    ; brak argumentów
-    ((cons f more)
+    ((None) 'true)                                    ; brak argumentów
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; tylko jeden
          `(if ,f (my-and ,@more) false)))             ; dwa lub więcej
@@ -139,7 +139,7 @@ Zróbmy `my-and`, które zwraca `true`, jeśli wszystkie jego warunki są prawdz
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` to wzorzec, który bierze głowę listy do `f`, a resztę do `more`.
+- `(Cons f more)` to wzorzec, który bierze głowę listy do `f`, a resztę do `more`.
 - `sexpr-null` sprawdza, czy dane w postaci S-wyrażenia są pustą listą.
 - Końcowe ramię `_` jest potrzebne, ponieważ dane w postaci S-wyrażeń mają też inne postaci niż listy (liczby,
   łańcuchy znaków i tak dalej), a `match` wymaga pokrycia także ich. Argument `&rest` jest zawsze

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
 # Strings, tekens en collecties
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` en `Deque<T>`.
@@ -25,12 +25,12 @@ Strings zijn onveranderlijk.
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | Niet hoofdlettergevoelige ordening (`string-lessp` van CL enzovoort). Bij een gemeenschappelijk voorvoegsel is de kortste kleiner |
 | `string::filled` | `(string::filled n c)` | `(int,char)→string` | Een string van `n` kopieën van `c` (`make-string` van CL) |
 | `search` | `(search s sub)` | `(string,string)→Option<int>` | De positie waar `sub` het eerst voorkomt. **`search` van CL heeft de argumenten andersom** (`(search pattern sequence)`). De lege string wordt op 0 gevonden. Voor keywords zie [keyword-argumenten van sequenties](sequences.md#6-keyword-argumenten) |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | De eerste positie waar ze verschillen. `none` alleen wanneer ze `equal` zijn. Is de een een voorvoegsel van de ander, dan het einde van de kortste. Keywords als hierboven |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | De eerste positie waar ze verschillen. `None` alleen wanneer ze `equal` zijn. Is de een een voorvoegsel van de ander, dan het einde van de kortste. Keywords als hierboven |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string &optional string)→string` | Verwijdert tekens die in `bag` zitten van beide uiteinden / links / rechts (`string-trim` van CL enzovoort). Zonder `bag` witruimte `" \t\n\r"` |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | Splitst bij `sep`. CL heeft geen tegenhanger. Opeenvolgende scheidingstekens geven lege elementen. Geeft een panic als `sep` leeg is |
 | `to-string` | `(to-string x)` | `T→string` | Converteert naar een string zoals `~a` doet. Geïmplementeerd voor `int`/`i32`/`f64`/`bool`/`char`/`string` (`princ-to-string` van CL) |
 | `string->utf8` | `(string->utf8 s)` | `string→Vector<int>` | Codeert als UTF-8 (elk element 0..255) |
-| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Decodeert. `none` als het geen geldige UTF-8 is |
+| `utf8->string` | `(utf8->string bytes)` | `Vector<int>→Option<string>` | Decodeert. `None` als het geen geldige UTF-8 is |
 
 ## 2. Tekens `char`
 
@@ -78,7 +78,7 @@ eerste element, en elke evaluatie maakt een nieuwe vector). Ze wordt ook als `#(
 | `get` | `(get v i)` | `(Vector<T>,int)→T` | Leest element `i`. Geeft een panic buiten het bereik |
 | `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | Wijzigt element `i`. Geeft een panic buiten het bereik. Kan ook als `(setf (get v i) x)` worden geschreven |
 | `len` | `(len v)` | `Vector<T>→int` | Aantal elementen |
-| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Verwijdert het laatste element en geeft het terug. `none` als leeg (anders dan `get`/`set` geeft het geen panic) (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | Verwijdert het laatste element en geeft het terug. `None` als leeg (anders dan `get`/`set` geeft het geen panic) (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | Maakt een iterator die `Iter` implementeert |
 | `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` | Voegt `x` achteraan toe als er geen element is dat er `eql` aan is (CLs `pushnew`. Er hoeft geen plaats herschreven te worden, dus een methode in plaats van een macro) |
 
@@ -139,7 +139,7 @@ het met `logand` te combineren met `*sxhash-mask*` (2^30-1). Om een string te ha
 
 (let ((h (the HashTable<point,string> (HashTable::new :test 'equal))))
   (progn (set h (make-instance 'point :x 1 :y 2) "a")
-         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (Some "a")
 ```
 
 In een `equal`-tabel beslist **het sleuteltype zelf** (`sxhash` en `equal` uit `Equal`, de supertrait van
@@ -172,8 +172,8 @@ Een waarde kan als `#2A((1 2) (3 4))` worden geschreven
 | `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | `adjust-array` van CL. De rang kan niet veranderen. Elementen die binnen het bereik blijven behouden hun indexen, en nieuwe cellen krijgen `init`. Anders dan in CL geeft het de array niet terug (elke array in deze taal is aanpasbaar, dus er is geen tweede array om terug te geven) |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | `vector-push-extend` van CL. Geeft een panic zonder fill pointer |
 | `push` | `(push a x)` | `(Array<T>,T)→Unit` | Hetzelfde als `push-extend` (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
-| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` van CL. `none` als leeg (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | De fill pointer (`none` als er geen is). Kan met `(setf a::fill-pointer …)` worden geschreven |
+| `pop` | `(pop a)` | `Array<T>→Option<T>` | `vector-pop` van CL. `None` als leeg (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | De fill pointer (`None` als er geen is). Kan met `(setf a::fill-pointer …)` worden geschreven |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | Een iterator in row-major-volgorde. Stopt bij de fill pointer als die er is |
 
 - **Indexen zijn een `Vector<int>`.** Een methode kan niet declareren "hetzelfde type argument
@@ -267,10 +267,10 @@ Een reeks waaraan je aan beide kanten kunt toevoegen en uithalen (Rusts `VecDequ
 | `new` | `(Deque::new)` | `()→Deque<T>` | Maakt een lege reeks |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Voegt vooraan / achteraan toe |
 | `push` | `(push d x)` | `(Deque<T>,T)→Unit` | Hetzelfde als `push-back` (een methode van de trait [`Push`](traits.md#4-de-trait-push-elementen-toevoegen)) |
-| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Haalt het voorste / achterste element eruit en geeft het terug. `none` als leeg |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Haalt het voorste / achterste element eruit en geeft het terug. `None` als leeg |
 | `pop` | `(pop d)` | `Deque<T>→Option<T>` | Hetzelfde als `pop-back` (een methode van de trait [`Pop`](traits.md#5-de-trait-pop-elementen-uitnemen)) |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Bekijkt het voorste / achterste element (zonder het eruit te halen) |
-| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Het `i`-de vanaf voren. `none` buiten het bereik |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Het `i`-de vanaf voren. `None` buiten het bereik |
 | `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Overschrijft het `i`-de. Panic buiten het bereik |
 | `count` | `(count d)` | `Deque<T>→int` | Het aantal elementen |
 | `clear` | `(clear d)` | `Deque<T>→Unit` | Haalt alles weg |
@@ -280,5 +280,5 @@ Een reeks waaraan je aan beide kanten kunt toevoegen en uithalen (Rusts `VecDequ
 (use std::collections::Deque)
 (let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
-  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (Some 0) (Some 2) #<deque 1>
 ```
