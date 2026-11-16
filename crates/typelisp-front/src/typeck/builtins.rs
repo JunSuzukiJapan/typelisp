@@ -54,22 +54,29 @@ pub(crate) fn define(reg: &mut Registry) {
     // names too, which `std::prelude` offers every module, as Rust's prelude
     // brings in `Some`/`None`/`Ok`/`Err`.
     let variants = option_type(reg);
-    bare_constructors(reg, option, Path::builtin(wk::OPTION), &variants, &[]);
+    bare_constructors(reg, option, Path::builtin(wk::OPTION), &variants);
     let variants = result_type(reg);
-    bare_constructors(reg, result, Path::builtin(wk::RESULT), &variants, &[]);
+    bare_constructors(reg, result, Path::builtin(wk::RESULT), &variants);
     for ty in BUILTIN_ERROR_TYPES {
         error_type(reg, ty);
     }
-    // `Sexpr`'s data constructors (`int`/`str`/...) are bare names without a
-    // `use`, so `(int 5)` datum literals stay writable, all but `cons`:
-    // `(cons a b)` is the free `cons<T,U>` pair function, not the `Sexpr`
-    // cons cell. The constructors are `std::primitive`'s while the type is
-    // `std::sexpr`'s: several are spelled as the primitive types they hold
-    // (`int`, `f64`, `char` ...), and a name `std::prelude` offers is one
-    // path, so the constructor and the primitive type have to be one
-    // module's two definitions of it.
+    // `Sexpr`'s constructors (`Int`/`Str`/...) are bare names without a
+    // `use`, so `(Int 5)` datum literals stay writable. The type is
+    // `std::sexpr`'s; `Vector` and `Array` are spelled as the types they
+    // hold, and a name `std::prelude` offers is one path, so each of those
+    // two is the constructor of the module that defines that type. The rest
+    // are `std::primitive`'s.
     let variants = sexpr(reg);
-    bare_constructors(reg, primitive_ns, Path::builtin(wk::SEXPR), &variants, &["cons"]);
+    let vector_ns = Path::builtin(wk::VECTOR).ns();
+    let array_ns = std_module("array");
+    for (i, v) in variants.iter().enumerate() {
+        let ns = match i {
+            crate::sexpr_variant::VECTOR => vector_ns,
+            crate::sexpr_variant::ARRAY => array_ns,
+            _ => primitive_ns,
+        };
+        reg.ctors.insert((ns, intern_in(ns, v.name.name())), (Path::builtin(wk::SEXPR), i));
+    }
     hashtable(reg);
     vector(reg);
     task(reg);
@@ -794,10 +801,10 @@ fn sum_type<const N: usize>(reg: &mut Registry, path: Path, names: &[&str; N], v
     variants
 }
 
-/// Make the variants of the type `ty` but those named in `except` bare names
-/// of the module `ns`, each keyed by the name it is read under there.
-fn bare_constructors(reg: &mut Registry, ns: NsId, ty: Path, variants: &[Variant], except: &[&str]) {
-    for (i, v) in variants.iter().enumerate().filter(|(_, v)| !except.contains(&v.name.name())) {
+/// Make the variants of the type `ty` bare names of the module `ns`, each
+/// keyed by the name it is read under there.
+fn bare_constructors(reg: &mut Registry, ns: NsId, ty: Path, variants: &[Variant]) {
+    for (i, v) in variants.iter().enumerate() {
         reg.ctors.insert((ns, intern_in(ns, v.name.name())), (ty, i));
     }
 }

@@ -835,11 +835,11 @@ fn fnref_of_a_variadic_function_forwards_the_rest_list() {
         r#"
         (defun target ((a int) &rest (xs int)) int
           (match (sexpr-car xs)
-            ((int n) n)
+            ((Int n) n)
             (_ -1)))
         (defun run-it () int
           (let ((f target))
-            (apply f 1 (sexpr-cons (int 10) (int 20)))))
+            (apply f 1 (sexpr-cons (Int 10) (Int 20)))))
         (compile target)
         (compile run-it)
         (run-it)
@@ -1380,7 +1380,7 @@ fn compile_applies_an_interpreted_closure_handed_to_a_compiled_function() {
 ///
 /// The word itself says nothing about which of the two it is — that is the
 /// whole reason `BoxedObj::Closure` carries its own `params`/`ret`. Deciding
-/// by the value's shape instead is the mistake `(which (f64 1.5))` caught
+/// by the value's shape instead is the mistake `(which (F64 1.5))` caught
 /// when `f64` unified into one value world.
 #[test]
 fn an_interpreted_closure_called_from_compiled_code_crosses_tagged_values() {
@@ -1390,7 +1390,7 @@ fn an_interpreted_closure_called_from_compiled_code_crosses_tagged_values() {
           (lambda ((x Option<Sexpr>)) Option<Sexpr> (sexpr-cons x tail)))
         (defun apply-fn ((f (fn (Option<Sexpr>) Option<Sexpr>)) (v Option<Sexpr>)) Option<Sexpr> (f v))
         (compile apply-fn)
-        (sexpr-int (sexpr-car (apply-fn (consr (int 2)) (int 1))))
+        (sexpr-int (sexpr-car (apply-fn (consr (Int 2)) (Int 1))))
         "#,
     );
     assert_eq!(v, Value::Int(1));
@@ -1425,7 +1425,7 @@ fn an_interpreted_closure_held_by_compiled_code_survives_gc_pressure() {
         (defun outer ((f (fn (int) int)) (x int)) int
           (let ((ignored (loop
                            (if (eq x 0) (break) ())
-                           (sexpr-cons (int 0) (int 0))
+                           (sexpr-cons (Int 0) (Int 0))
                            (setf x (- x 1)))))
             (f 5)))
         (compile outer)
@@ -1759,7 +1759,7 @@ fn repeated_calls_through_a_captured_closure_survive_gc_pressure() {
             (labels ((rec ((y int)) int (cb y)))
               (let ((ignored (loop
                                (if (eq x 0) (break) ())
-                               (sexpr-cons (int 0) (int 0))
+                               (sexpr-cons (Int 0) (Int 0))
                                (setf x (- x 1)))))
                 (rec 5)))))
         (compile make-adder)
@@ -1794,7 +1794,7 @@ fn an_escaping_lambdas_captured_closure_survives_gc_pressure() {
           (let ((wrapper (make-wrapper n)))
             (let ((ignored (loop
                              (if (eq count 0) (break) ())
-                             (sexpr-cons (int 0) (int 0))
+                             (sexpr-cons (Int 0) (Int 0))
                              (setf count (- count 1)))))
               (wrapper 7))))
         (compile make-adder)
@@ -1884,7 +1884,7 @@ fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
         (defun pump ((c (fn () int)) (n int)) int
           (let ((ignored (loop
                            (if (eq n 0) (break) ())
-                           (sexpr-cons (int 0) (int 0))
+                           (sexpr-cons (Int 0) (Int 0))
                            (setf n (- n 1)))))
             (c)))
         (defun run-it ((start int) (n int)) int
@@ -2223,7 +2223,7 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
 /// and `sexpr-consp`/`sexpr-car`/`sexpr-cdr` walking — all already compilable
 /// (`Sexpr` `match` support, plus the `sexpr-*` `rt_*` shims
 /// `is_rt_builtin` recognizes). So a `dolist`-using function compiles with
-/// no `dolist`-specific machinery: this sums the `(int n)` elements of a
+/// no `dolist`-specific machinery: this sums the `(Int n)` elements of a
 /// `Sexpr` list argument entirely in native code (the quoted list is built by
 /// the tree-walking interpreter and handed to the compiled function), asserting
 /// the real total — not just that compilation succeeded — so a "compiles but
@@ -2237,7 +2237,7 @@ fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
         (defun sum-list-ints ((lst Option<Sexpr>)) int
           (let ((acc (the int 0)))
             (dolist (x lst acc)
-              (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))))
+              (match x ((Int n) (setf acc (+ acc n)) ()) (_ ())))))
         (compile not)
         (compile sum-list-ints)
         (sum-list-ints (quote (1 2 3 4 5)))
@@ -2323,7 +2323,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 
 // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
 
-/// `Expr::Construct` over `Sexpr` itself: `(int n)`/`(bool b)`/`()` all
+/// `Expr::Construct` over `Sexpr` itself: `(Int n)`/`(Bool b)`/`()` all
 /// compile to `compile-construct-sexpr`'s pure bit-tagging path (no heap
 /// allocation at all), round-tripping through `Expr::Call`'s existing
 /// `Sexpr` decode step (Stage 5) with no further bridging needed. Every
@@ -2332,7 +2332,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 /// already-existing gap (`Interp::eval`'s compiled-call dispatch only
 /// special-cases `Sexpr`-vs-`i64` parameters — same family as Stage 5's
 /// documented `bool`-*return* gap, just for arguments instead), not
-/// something this stage touches. `(char c)` is exercised at the
+/// something this stage touches. `(Char c)` is exercised at the
 /// `ast_bridge`/`compile-construct-sexpr` level only, not here — compiling
 /// a bare `char` *literal* at all (`compile-value`'s dispatch has no
 /// `"char"` arm, only `compile-construct-sexpr`'s own variant-3 encoding,
@@ -2342,7 +2342,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
 fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-int ((n int)) Sexpr (int n))
+        (defun make-int ((n int)) Sexpr (Int n))
         (compile make-int)
         (make-int 42)
         "#,
@@ -2352,7 +2352,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
 
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun make-true () Sexpr (bool true))
+        (defun make-true () Sexpr (Bool true))
         (compile make-true)
         (make-true)
         "#,
@@ -2375,7 +2375,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
 /// builds a brand-new string at run time (not something `compile-str`'s
 /// compile-time character embedding could produce) and `length`s the result,
 /// exercising `rt_str_append`'s own fresh allocation. (The former
-/// `(match (str "hi") ((str content) (eq content "hi")))` string-content-eq
+/// `(match (Str "hi") ((Str content) (eq content "hi")))` string-content-eq
 /// sub-cases were dropped when Symbol/Sexpr redesign Phase 5 fenced `match`
 /// off `Sexpr`; the fence has since been lifted — see the "compiled `match`
 /// on a `Sexpr` scrutinee" section at the end of this file.)
@@ -2411,7 +2411,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
           (let ((s (append "hello" " world")))
             (let ((ignored (loop
                              (if (eq n 0) (break) ())
-                             (sexpr-cons (int 0) (int 0))
+                             (sexpr-cons (Int 0) (Int 0))
                              (setf n (- n 1)))))
               (length s))))
         (compile str-survives-gc)
@@ -3292,7 +3292,7 @@ fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() 
         r#"
         (defun make-thing () int
           (loop
-            (let ((s (sexpr-cons (int 1) (int 2))))
+            (let ((s (sexpr-cons (Int 1) (Int 2))))
               (return 42))))
         (compile make-thing)
         (make-thing)
@@ -3346,7 +3346,7 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
         (compile trivial)
         (defun leaky-inner () int
           (loop
-            (let ((s (sexpr-cons (int 1) (int 2))))
+            (let ((s (sexpr-cons (Int 1) (Int 2))))
               (return 7))))
         (compile leaky-inner)
         "#;
@@ -3821,11 +3821,11 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
         r#"
         (defun f ((s Option<Sexpr>)) int
           (match s
-            ((int n) n)
-            ((cons (int a) _) a)
+            ((Int n) n)
+            ((Cons (Int a) _) a)
             (_ 0)))
         (compile f)
-        (+ (f (int 40)) (f (sexpr-cons (int 2) (str "tail"))))
+        (+ (f (Int 40)) (f (sexpr-cons (Int 2) (Str "tail"))))
         "#,
     );
     assert_eq!(v, Value::Int(42));
@@ -3844,8 +3844,8 @@ fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_
         (defun rt_cons ((a int) (b int)) int (+ a b))
         (compile rt_cons)
         (defun cons-and-extract () int
-          (match (sexpr-cons (int 5) (int 9))
-            ((cons (int x) (int y)) (+ x y))
+          (match (sexpr-cons (Int 5) (Int 9))
+            ((Cons (Int x) (Int y)) (+ x y))
             (_ 0)))
         (compile cons-and-extract)
         (+ (rt_cons 3 4) (cons-and-extract))
@@ -3878,7 +3878,7 @@ fn compile_of_a_user_function_spelled_like_a_builtin_calls_the_users_function() 
 
 /// The three numeric boxed variants share `TAG_BOXED`, so their arms dispatch
 /// through `rt_box_kind` — an `int` past the fixnum range (a bignum box) or
-/// a ratio scrutinee must *not* take a preceding `(f64 _)` arm even though
+/// a ratio scrutinee must *not* take a preceding `(F64 _)` arm even though
 /// it carries the same 3-bit tag.
 #[test]
 fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
@@ -3886,14 +3886,14 @@ fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
         r#"
         (defun which ((s Sexpr)) int
           (match s
-            ((f64 _) 1)
-            ((int _) 2)
-            ((ratio _) 3)
+            ((F64 _) 1)
+            ((Int _) 2)
+            ((Ratio _) 3)
             (_ 0)))
         (compile which)
-        (+ (+ (which (f64 1.5))
-              (* (the int 10) (which (int 99999999999999999999999999))))
-           (* (the int 100) (which (ratio 2/3))))
+        (+ (+ (which (F64 1.5))
+              (* (the int 10) (which (Int 99999999999999999999999999))))
+           (* (the int 100) (which (Ratio 2/3))))
         "#,
     );
     assert_eq!(v, Value::Int(321));
@@ -3913,13 +3913,13 @@ fn compile_match_distinguishes_every_integer_width_in_a_sexpr() {
         r#"
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((i8 _) 1) ((i16 _) 2) ((int _) 3)
-            ((u8 _) 4) ((u16 _) 5) ((u32 _) 6)
+            ((I8 _) 1) ((I16 _) 2) ((Int _) 3)
+            ((U8 _) 4) ((U16 _) 5) ((U32 _) 6)
             (_ 0)))
         (compile tag)
-        (+ (+ (+ (tag (i8 100)) (* 10 (tag (i16 100))))
-              (+ (* 100 (tag (int 100))) (* 1000 (tag (u8 100)))))
-           (+ (* 10000 (tag (u16 100))) (* 100000 (tag (u32 100)))))
+        (+ (+ (+ (tag (I8 100)) (* 10 (tag (I16 100))))
+              (+ (* 100 (tag (Int 100))) (* 1000 (tag (U8 100)))))
+           (+ (* 10000 (tag (U16 100))) (* 100000 (tag (U32 100)))))
         "#,
     );
     // One digit per width, so a wrong arm shows up as a wrong digit rather
@@ -3935,12 +3935,12 @@ fn compile_extracts_a_narrow_integer_payload_at_its_own_width() {
     let v = eval_ok_with_compiler(
         r#"
         (defun small ((s Option<Sexpr>)) int
-          (match s ((u8 n) (as int n)) (_ -1)))
+          (match s ((U8 n) (as int n)) (_ -1)))
         (defun big ((s Option<Sexpr>)) u32
-          (match s ((u32 n) n) (_ 0)))
+          (match s ((U32 n) n) (_ 0)))
         (compile small)
         (compile big)
-        (+ (small (u8 200)) (as int (- (big (u32 4000000000)) (the u32 3999999000))))
+        (+ (small (U8 200)) (as int (- (big (U32 4000000000)) (the u32 3999999000))))
         "#,
     );
     // 200 + (4000000000 - 3999999000) = 200 + 1000.
@@ -3962,13 +3962,13 @@ fn compiled_sexpr_tag_tests_agree_with_the_interpreter_for_every_variant() {
         (module a)
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((None) 1) ((int _) 2) ((f64 _) 3) ((char _) 4) ((bool _) 5)
-            ((sym _) 6) ((str _) 7) ((cons _ _) 8) ((path _) 9)
+            ((None) 1) ((Int _) 2) ((F64 _) 3) ((Char _) 4) ((Bool _) 5)
+            ((Sym _) 6) ((Str _) 7) ((Cons _ _) 8) ((Path _) 9)
             (_ 0)))
         (defun total () int
-          (+ (+ (+ (+ (tag ()) (* 10 (tag (int -5)))) (+ (* 100 (tag (f64 2.5))) (* 1000 (tag (char #\A)))))
-                (+ (* 10000 (tag (bool false))) (* 100000 (tag 'a-symbol))))
-             (+ (+ (* 1000000 (tag (str "s"))) (* 10000000 (tag (list 1 2))))
+          (+ (+ (+ (+ (tag ()) (* 10 (tag (Int -5)))) (+ (* 100 (tag (F64 2.5))) (* 1000 (tag (Char #\A)))))
+                (+ (* 10000 (tag (Bool false))) (* 100000 (tag 'a-symbol))))
+             (+ (+ (* 1000000 (tag (Str "s"))) (* 10000000 (tag (list 1 2))))
                 (* 100000000 (tag 'a::b)))))
     "#;
     let interpreted = eval_ok(&format!("{}\n(total)", program));
@@ -3989,9 +3989,9 @@ fn compile_match_distinguishes_the_two_float_widths() {
     let v = eval_ok_with_compiler(
         r#"
         (defun which ((s Option<Sexpr>)) int
-          (match s ((f32 _) 1) ((f64 _) 2) (_ 0)))
+          (match s ((F32 _) 1) ((F64 _) 2) (_ 0)))
         (compile which)
-        (+ (which (f32 1.5)) (* 10 (which (f64 1.5))))
+        (+ (which (F32 1.5)) (* 10 (which (F64 1.5))))
         "#,
     );
     assert_eq!(v, Value::Int(21));
@@ -4004,11 +4004,11 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
         r#"
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((None) 1) ((sym _) 2) ((str _) 3) ((bool _) 4)
+            ((None) 1) ((Sym _) 2) ((Str _) 3) ((Bool _) 4)
             (_ 0)))
         (compile tag)
         (+ (+ (tag ()) (* (the int 10) (tag (quote foo))))
-           (+ (* (the int 100) (tag (str "s"))) (* (the int 1000) (tag (bool false)))))
+           (+ (* (the int 100) (tag (Str "s"))) (* (the int 1000) (tag (Bool false)))))
         "#,
     );
     assert_eq!(v, Value::Int(4321));
@@ -4017,7 +4017,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
 /// A `sym`'s `Symbol` payload — unlike `bignum`/`ratio` (still `unsupported`)
 /// — is already a fully tagged immediate, the same passthrough kind
 /// `struct_field_kind` gives `Str`/`Sexpr` (`ast_bridge.rs`'s `Type::Symbol
-/// => 6`), so binding `(sym x)` and returning `x` compiles: `compile-sexpr-
+/// => 6`), so binding `(Sym x)` and returning `x` compiles: `compile-sexpr-
 /// field`'s variant-5 arm passes the tagged word through unchanged. Crossing
 /// back out to interpreted code exercises `Interp::decode_compiled_return`'s
 /// own `Type::Symbol` arm (added alongside this), which the un-fixed
@@ -4027,7 +4027,7 @@ fn compile_match_binds_and_returns_a_sym_payload() {
     let v = eval_string_with_compiler(
         r#"(use std::symbol::symbol->string) 
         (defun get-sym ((s Option<Sexpr>)) symbol
-          (match s ((sym x) x) (_ (panic "not a sym"))))
+          (match s ((Sym x) x) (_ (panic "not a sym"))))
         (compile get-sym)
         (symbol->string (get-sym (quote hello)))
         "#,
@@ -4046,7 +4046,7 @@ fn compile_match_dispatches_and_extracts_the_path_variant() {
     let v = eval_ok_with_compiler(
         r#"
         (defun path-segs ((s Option<Sexpr>)) Option<Sexpr>
-          (match s ((path segs) segs) (_ (panic "not a path"))))
+          (match s ((Path segs) segs) (_ (panic "not a path"))))
         (compile path-segs)
         (module dep)
         (let ((segs (path-segs (quote dep::head))))
@@ -4058,7 +4058,7 @@ fn compile_match_dispatches_and_extracts_the_path_variant() {
     assert_eq!(v, Value::Bool(true));
 }
 
-/// `(path segs)` construction, the inverse of the extraction test above: a
+/// `(Path segs)` construction, the inverse of the extraction test above: a
 /// compiled `Sexpr` list of `sym`s becomes a genuine `Value::Path` through
 /// the new `rt_list_to_path` runtime shim (`compile-construct-sexpr` variant
 /// `10`). The result crosses back out as an ordinary `Sexpr` (already
@@ -4070,10 +4070,10 @@ fn compile_construct_and_round_trips_the_path_variant() {
     let v = eval_ok_with_compiler(
         r#"
         (defun make-path ((segs Option<Sexpr>)) Option<Sexpr>
-          (path segs))
+          (Path segs))
         (compile make-path)
         (match (make-path (list (quote a) (quote b)))
-          ((path segs) (equal segs (list (quote a) (quote b))))
+          ((Path segs) (equal segs (list (quote a) (quote b))))
           (_ false))
         "#,
     );
@@ -4088,7 +4088,7 @@ fn compile_and_interpret_agree_on_a_sexpr_match() {
             r#"
             (defun sum ((s Option<Sexpr>)) int
               (match s
-                ((cons (int n) rest) (+ n (sum rest)))
+                ((Cons (Int n) rest) (+ n (sum rest)))
                 (_ 0)))
             {}
             (sum (quote (1 2 3 4)))
@@ -4383,7 +4383,7 @@ fn compile_dispatches_a_function_with_an_untaken_panic_branch_to_native_code() {
 /// A bare `char` literal now has a real compiled representation
 /// (`compile-char`/`sexpr-char`) — an oversight discovered while
 /// implementing `Expr::Quote`'s `Char` leaf (a real `Sexpr::Char`
-/// construction, e.g. `(char c)`, already routed through `compile-value` on
+/// construction, e.g. `(Char c)`, already routed through `compile-value` on
 /// its own literal-`char` argument form, which previously had no dispatch
 /// tag at all). This keeps the literal entirely inside the compiled
 /// function, comparing it via the native `char` `equal` (`compile-assoc`'s
@@ -4481,7 +4481,7 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
 }
 
 /// `(quote (1 2 3))` compiles to the same `compile-construct-sexpr`
-/// machinery an ordinary `(cons (int 1) ...)` construction already uses
+/// machinery an ordinary `(Cons (Int 1) ...)` construction already uses
 /// (`ast_bridge::translate_quote`) — a compiled function can build a quoted
 /// literal, and an ordinary compiled `match`-based `sum` (already proven
 /// correct against `Sexpr` scrutinees elsewhere in this file) can consume it.
@@ -4490,7 +4490,7 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
     let v = eval_ok_with_compiler(
         r#"
         (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
-        (defun sum ((s Option<Sexpr>)) int (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+        (defun sum ((s Option<Sexpr>)) int (match s ((Cons (Int n) rest) (+ n (sum rest))) (_ 0)))
         (compile make-quoted)
         (compile sum)
         (sum (make-quoted))
@@ -4505,7 +4505,7 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
 fn compile_and_interpret_agree_on_a_quoted_list() {
     let prog = r#"
         (defun make-quoted () Option<Sexpr> (quote (1 2 3)))
-        (defun sum ((s Option<Sexpr>)) int (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+        (defun sum ((s Option<Sexpr>)) int (match s ((Cons (Int n) rest) (+ n (sum rest))) (_ 0)))
     "#;
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile make-quoted)\n(compile sum)\n(sum (make-quoted))", prog));
     let interpreted = eval_ok(&format!("{}\n(sum (make-quoted))", prog));
@@ -4575,7 +4575,7 @@ fn compile_of_a_function_quoting_a_path_round_trips() {
 fn compile_of_a_function_matching_a_quoted_symbol_dispatches_by_tag() {
     let v = eval_ok_with_compiler(
         r#"
-        (defun q () int (match (the Option<Sexpr> (quote foo)) ((sym _) 1) (_ 0)))
+        (defun q () int (match (the Option<Sexpr> (quote foo)) ((Sym _) 1) (_ 0)))
         (compile q)
         (q)
         "#,

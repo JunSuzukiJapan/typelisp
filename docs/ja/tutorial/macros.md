@@ -125,7 +125,7 @@ typelisp のマクロは Common Lisp と同じく、名前の衝突を自動で�
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; 引数なし
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; 1 つだけ
          `(if ,f (my-and ,@more) false)))             ; 2 つ以上
@@ -135,7 +135,7 @@ typelisp のマクロは Common Lisp と同じく、名前の衝突を自動で�
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` は、リストの先頭を `f` に、残りを `more` に取り出すパターンです。
+- `(Cons f more)` は、リストの先頭を `f` に、残りを `more` に取り出すパターンです。
 - `sexpr-null` は、S 式データが空のリストかどうかを調べます。
 - 最後の `_` の腕が必要なのは、S 式データにはリスト以外（数や文字列など）の形もあり、
   `match` がそれらも尽くすよう求めるからです。`&rest` の引数は必ずリストなので、この腕が

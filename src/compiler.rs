@@ -725,8 +725,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `core_bridge::bignum_form`), so a `Bind` pattern trying to
 ;; extract any of these panics clearly here rather than producing garbage --
 ;; never reached for a `Wildcard` sub-pattern (`compile-ctor-subpatterns`
-;; skips the call entirely then), so tag-only dispatch on `(sym _)`/
-;; `(bignum _)`/`(ratio _)` arms still compiles fine.
+;; skips the call entirely then), so tag-only dispatch on `(Sym _)`/
+;; `(Bignum _)`/`(Ratio _)` arms still compiles fine.
 ;;
 ;; Relocated ahead of `bind-params` (closure-representation unification,
 ;; Stage 4): that function's own new `kind >= 10` cell branch needs to call
@@ -838,7 +838,7 @@ const SOURCE_TEMPLATE: &str = r#"
           (build-call builder (get-function m "rt_sexpr_tuple_items") args-ptr 1)))
     ;; `i8`/`i16`/`u8`/`u16`/`u32`/`i32`: the payload
     ;; is inside a `BoxedObj::Narrow`, and the variant says which type that
-    ;; box must be. `rt_narrow_value` refuses any other, so a `(u8 x)`
+    ;; box must be. `rt_narrow_value` refuses any other, so a `(U8 x)`
     ;; pattern can never bind a `u16` node's value. What comes back is the
     ;; plain normalized word compiled code carries every integer in.
     ((#%sexpr-i8 #%sexpr-i16 #%sexpr-u8 #%sexpr-u16 #%sexpr-u32 #%sexpr-i32)
@@ -6015,7 +6015,7 @@ const SOURCE_TEMPLATE: &str = r#"
   (if (sexpr-symp a)
       (equal (sexpr-sym-name a) name)
       (match a
-        ((str s) (equal s name))
+        ((Str s) (equal s name))
         (_ false))))
 
 ;; Whether anything in `e` spells `name`.
@@ -6027,7 +6027,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; Whether `a` is the `bool` atom `b`.
 (defun opt-bool-is-p ((a Option<Sexpr>) (b bool)) bool
   (match a
-    ((bool x) (eq x b))
+    ((Bool x) (eq x b))
     (_ false)))
 
 ;; Whether `e` is a literal node: one that compiles to a constant, reads
@@ -6097,7 +6097,7 @@ const SOURCE_TEMPLATE: &str = r#"
                (b (opt-arg-node (sexpr-car (sexpr-cdr args)))))
           (if (and (opt-int-literal-p a) (opt-int-literal-p b))
               (match (sexpr-car (sexpr-cdr rest))
-                ((str method) (opt-int-op method (opt-int-value a) (opt-int-value b) e))
+                ((Str method) (opt-int-op method (opt-int-value a) (opt-int-value b) e))
                 (_ e))
               e))
         e)))

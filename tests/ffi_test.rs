@@ -665,7 +665,7 @@ fn a_local_macro_passes_a_callback() {
                         (let ((txt (unsafe (let ((buf (c-strdup (sexpr-str s))))
                                              (c-qsort buf 4 1 (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1)))
                                              (let ((r (text-of buf \"\"))) (c-free buf) r)))))
-                          (str (format false \"~/bang/\" txt)))))
+                          (Str (format false \"~/bang/\" txt)))))
              (sorted \"cadb\")))
          (f)",
         QSORT

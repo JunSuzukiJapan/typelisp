@@ -10,7 +10,6 @@ use crate::types::Path;
 use crate::check::lower::CoreForms;
 use crate::typeck::registry::AdtKind;
 use crate::types::{path_is_builtin, Type};
-use typelisp_mem::symbols::member_symbol;
 use typelisp_mem::wk;
 
 use super::registry::Registry;
@@ -39,9 +38,7 @@ pub(crate) fn encoding(reg: &Registry, ty: &Type) -> Option<Encoding> {
             None => Encoding::Itself,
         });
     }
-    let name = sexpr_ctor_for(ty)?;
-    let sexpr = reg.type_def(&crate::types::Path::builtin(wk::SEXPR)).expect("`Sexpr` is built in");
-    Some(Encoding::Variant(sexpr.variant_index(member_symbol(name)).expect("`Sexpr` has a variant for each type it encodes")))
+    sexpr_variant_for(ty).map(Encoding::Variant)
 }
 
 /// Whether a value of type `ty`, a type parameter of a generic body
@@ -121,30 +118,30 @@ pub(crate) fn is_option_of_sexpr(ty: &Type) -> bool {
             && matches!(&args[0], Type::Named(a, _) if crate::types::path_is_builtin(a, typelisp_mem::wk::SEXPR)))
 }
 
-/// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
+/// The `Sexpr` variant that exactly represents a value of `elem_ty`
 /// (`Sexpr` itself needs no wrapping — see `typeck::sexpr_value`).
 /// `&rest`'s declared element type must be one of these (or `Sexpr`) since
 /// nothing else has a lossless `Sexpr` encoding to collect into a list with.
-pub(crate) fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
+pub(crate) fn sexpr_variant_for(elem_ty: &Type) -> Option<usize> {
+    use crate::sexpr_variant as sv;
     match elem_ty {
-        // One variant per width, spelled by the type's own name. There is no
-        // folding left to do: `Sexpr` has an `i8` and a `u32` because the
-        // types do, and a value that arrives here as a `u32` comes back out
-        // of the `Sexpr` as a `u32`.
-        Type::I8 => Some("i8"),
-        Type::I16 => Some("i16"),
-        Type::I32 => Some("i32"),
-        Type::U8 => Some("u8"),
-        Type::U16 => Some("u16"),
-        Type::U32 => Some("u32"),
-        Type::F32 => Some("f32"),
-        Type::F64 => Some("f64"),
-        Type::Int => Some("int"),
-        Type::Ratio => Some("ratio"),
-        Type::Char => Some("char"),
-        Type::Bool => Some("bool"),
-        Type::Str => Some("str"),
-        Type::Symbol => Some("sym"),
+        // One variant per width. There is no folding left to do: `Sexpr` has
+        // an `I8` and a `U32` because the types do, and a value that arrives
+        // here as a `u32` comes back out of the `Sexpr` as a `u32`.
+        Type::I8 => Some(sv::I8),
+        Type::I16 => Some(sv::I16),
+        Type::I32 => Some(sv::I32),
+        Type::U8 => Some(sv::U8),
+        Type::U16 => Some(sv::U16),
+        Type::U32 => Some(sv::U32),
+        Type::F32 => Some(sv::F32),
+        Type::F64 => Some(sv::F64),
+        Type::Int => Some(sv::INT),
+        Type::Ratio => Some(sv::RATIO),
+        Type::Char => Some(sv::CHAR),
+        Type::Bool => Some(sv::BOOL),
+        Type::Str => Some(sv::STR),
+        Type::Symbol => Some(sv::SYM),
         _ => None,
     }
 }

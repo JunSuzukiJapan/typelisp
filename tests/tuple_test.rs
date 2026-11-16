@@ -103,7 +103,7 @@ fn a_tuple_of_a_type_without_print_object_prints_as_a_tuple() {
 #[test]
 fn a_read_tuple_is_the_tuple_variant() {
     both(
-        r##"(match (rd "#{1 x \"s\"}") ((tuple v) (format false "~a ~s" (len v) (rd "#{1 x}"))) (_ "no"))"##,
+        r##"(match (rd "#{1 x \"s\"}") ((Tuple v) (format false "~a ~s" (len v) (rd "#{1 x}"))) (_ "no"))"##,
         r##"3 #{1 x}"##,
     );
 }

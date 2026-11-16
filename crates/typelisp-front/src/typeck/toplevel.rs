@@ -1126,18 +1126,18 @@ mod tests {
     /// `None` in one list, which must cover both.
     #[test]
     fn sexpr_patterns() {
-        let f = "(defun k ((x Option<Sexpr>)) int (match x ((cons a _) 1) ((int n) n) ((None) 0) (_ 9)))\n";
+        let f = "(defun k ((x Option<Sexpr>)) int (match x ((Cons a _) 1) ((Int n) n) ((None) 0) (_ 9)))\n";
         assert_eq!(run(&format!("{}(k (quote (1)))", f)).1, Value::Int(1));
         assert_eq!(run(&format!("{}(k 5)", f)).1, Value::Int(5));
         assert_eq!(run(&format!("{}(k ())", f)).1, Value::Int(0));
         assert_eq!(run(&format!("{}(k (quote a))", f)).1, Value::Int(9));
-        assert_eq!(run("(defun m ((x Option<Sexpr>)) int (match x ((Some (int n)) n) ((Some _) 1) ((None) 0)))\n(m 4)").1, Value::Int(4));
+        assert_eq!(run("(defun m ((x Option<Sexpr>)) int (match x ((Some (Int n)) n) ((Some _) 1) ((None) 0)))\n(m 4)").1, Value::Int(4));
         let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((Some _) 1)))");
         assert!(msg.contains("`(None)` is not covered"), "{}", msg);
-        let msg = check_err("(defun k ((x Sexpr)) int (match x ((cons a _) 1)))");
-        assert!(msg.contains("`(int _)` is not covered"), "{}", msg);
-        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((nil) 1) (_ 0)))");
-        assert!(msg.contains("`nil` is no longer a `Sexpr` constructor"), "{}", msg);
+        let msg = check_err("(defun k ((x Sexpr)) int (match x ((Cons a _) 1)))");
+        assert!(msg.contains("`(Int _)` is not covered"), "{}", msg);
+        let msg = check_err("(defun k ((x Option<Sexpr>)) int (match x ((Nil) 1) (_ 0)))");
+        assert!(msg.contains("`Nil` is no longer a `Sexpr` constructor"), "{}", msg);
     }
 
     /// A documentation string is kept, not checked as the body; `()` where

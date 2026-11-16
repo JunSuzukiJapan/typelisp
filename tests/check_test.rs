@@ -287,11 +287,11 @@ fn construct_some_infers_type_argument() {
 
 #[test]
 fn sexpr_cons_yields_an_option_sexpr() {
-    // `(sexpr-cons (int 1) ())`: both slots are `Option<Sexpr>`, and `()`
+    // `(sexpr-cons (Int 1) ())`: both slots are `Option<Sexpr>`, and `()`
     // adopts `None` there. (The free `cons`/`Cons` name is the generic
     // `cons<T,U>` pair now — the Sexpr cons cell is built through the
     // `sexpr-*` layer — Phase 4b.)
-    assert_eq!(ty("(sexpr-cons (int 1) ())"), opt_sexpr());
+    assert_eq!(ty("(sexpr-cons (Int 1) ())"), opt_sexpr());
 }
 
 #[test]
@@ -301,7 +301,7 @@ fn nil_is_no_longer_a_sexpr_constructor() {
     // variant numbering is untouched), which means `(Nil)` would otherwise
     // still *resolve* — hence an explicit gate with a migration message
     // rather than an "unknown constructor" error.
-    let err = program("(nil)").expect_err("`nil` should be retired");
+    let err = program("(Nil)").expect_err("`nil` should be retired");
     let msg = format!("{:?}", err);
     assert!(msg.contains("no longer a `Sexpr` constructor"), "unexpected error: {}", msg);
 }
@@ -323,7 +323,7 @@ fn nil_is_no_longer_a_sexpr_constructor() {
 #[test]
 fn an_option_sexpr_does_not_narrow_to_a_bare_sexpr() {
     // Widening: fine, and free.
-    assert!(program("(defun f ((s Option<Sexpr>)) int 1) (f (int 1))").is_ok());
+    assert!(program("(defun f ((s Option<Sexpr>)) int 1) (f (Int 1))").is_ok());
     // Narrowing: rejected.
     let err = program("(defun f ((s Sexpr)) int 1) (f (the Option<Sexpr> ()))")
         .expect_err("narrowing should be rejected");
@@ -349,7 +349,7 @@ fn the_empty_list_is_an_option_sexpr_none() {
 #[test]
 fn construct_int_field_adopts_the_declared_width() {
     // The `int` variant's field is an `int`; the literal must adopt that type.
-    assert_eq!(ty("(int 5)"), Type::Named(Path::builtin(typelisp::mem::wk::SEXPR), vec![]));
+    assert_eq!(ty("(Int 5)"), Type::Named(Path::builtin(typelisp::mem::wk::SEXPR), vec![]));
 }
 
 // ---- match ------------------------------------------------------------------
@@ -738,8 +738,8 @@ fn apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr() {
 
 #[test]
 fn sexpr_car_and_cdr_yield_an_option_sexpr() {
-    assert_eq!(ty("(sexpr-car (sexpr-cons (int 1) ()))"), opt_sexpr());
-    assert_eq!(ty("(sexpr-cdr (sexpr-cons (int 1) ()))"), opt_sexpr());
+    assert_eq!(ty("(sexpr-car (sexpr-cons (Int 1) ()))"), opt_sexpr());
+    assert_eq!(ty("(sexpr-cdr (sexpr-cons (Int 1) ()))"), opt_sexpr());
 }
 
 #[test]
@@ -757,13 +757,13 @@ fn sexpr_car_auto_wraps_a_scalar_argument_into_sexpr() {
 fn sexpr_cons_usable_as_function_value() {
     let src = "(defun apply2 ((f (fn (Option<Sexpr> Option<Sexpr>) Option<Sexpr>)) \
                               (a Option<Sexpr>) (b Option<Sexpr>)) Option<Sexpr> (f a b)) \
-               (apply2 sexpr-cons (int 1) ())";
+               (apply2 sexpr-cons (Int 1) ())";
     assert_eq!(ty_program(src), opt_sexpr());
 }
 
 #[test]
 fn list_builds_sexpr_cons_chain() {
-    assert_eq!(ty("(list (int 1) (int 2))"), opt_sexpr());
+    assert_eq!(ty("(list (Int 1) (Int 2))"), opt_sexpr());
     // `(list)` is the empty list, so its type has to be the one that can
     // hold it.
     assert_eq!(ty("(list)"), opt_sexpr());
@@ -863,7 +863,7 @@ fn the_overrides_an_integer_literals_default_type() {
 #[test]
 fn the_produces_the_same_expr_as_its_inner_form() {
     // `the` contributes no node of its own — checking `(the int 5)` yields
-    // exactly the same `(int 5)` the bare literal would.
+    // exactly the same `(Int 5)` the bare literal would.
     let c = form("(the int 5)").unwrap();
     assert_eq!(c.printed, "(expr (int 5))");
     assert_eq!(c.ty, Some(Type::Int));

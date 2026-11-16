@@ -3984,7 +3984,7 @@ pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(args: *const i64, argc:
     encode(t)
 }
 
-/// The payload a `(tuple v)` pattern binds: a fresh `Vector<Option<Sexpr>>`
+/// The payload a `(Tuple v)` pattern binds: a fresh `Vector<Option<Sexpr>>`
 /// of the elements of the tuple box `args[0]` — the interpreter's
 /// `match_sexpr_core` `tuple` arm, for compiled code.
 ///

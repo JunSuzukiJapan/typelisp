@@ -90,7 +90,7 @@ CL の `integer`、そしてこの言語の**整数**——未注釈の整数リ
 `(as i32 n)` / `(try-as i32 n)` が `int` からの切り詰め / 判定（1 章の `int->W` / `try-int->W` と
 同じ意味）。
 
-`Sexpr` の整数の変種も `int` 1 つ（`(int n)` は fixnum も多倍長も受ける）。
+`Sexpr` の整数の変種も `Int` 1 つ（`(Int n)` は fixnum も多倍長も受ける）。
 
 添字や個数を取る組み込み（`substring`、`Vector` の `get`、`ash` の桁数など）は `int` を受けるが、
 fixnum に入らない値を渡すと実行時エラー（「an integer argument does not fit a fixnum」）になる。

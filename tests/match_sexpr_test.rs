@@ -121,32 +121,32 @@ fn check(src: &str) -> Result<TopLevelForm, Error> {
 
 #[test]
 fn match_refines_an_int_payload_to_i64() {
-    assert_eq!(eval_ok("(match (i32 41) ((i32 n) (+ n 1)) (_ 0))"), Value::Int(42));
+    assert_eq!(eval_ok("(match (I32 41) ((I32 n) (+ n 1)) (_ 0))"), Value::Int(42));
 }
 
 #[test]
 fn match_refines_a_float_payload_to_f64() {
-    assert_eq!(eval_f64("(match (f64 2.5) ((f64 f) f) (_ 0.0))"), 2.5);
+    assert_eq!(eval_f64("(match (F64 2.5) ((F64 f) f) (_ 0.0))"), 2.5);
 }
 
 #[test]
 fn match_refines_a_str_payload_to_str() {
-    assert_eq!(eval_string("(match (str \"hello\") ((str s) s) (_ \"no\"))"), "hello");
+    assert_eq!(eval_string("(match (Str \"hello\") ((Str s) s) (_ \"no\"))"), "hello");
 }
 
 #[test]
 fn match_refines_a_sym_payload_to_symbol() {
-    // `(sym 'foo)`, matching the `(str ...)`/`(char ...)` spelling of its
+    // `(Sym 'foo)`, matching the `(Str ...)`/`(Char ...)` spelling of its
     // siblings: `'foo` on its own is a `Symbol` now, and a `Symbol` has no
     // variant to refine — the `sym` payload only exists once it is wrapped
     // into S-expression data.
-    assert_eq!(eval_string("(use std::symbol::symbol->string) (match (sym (quote foo)) ((sym s) (symbol->string s)) (_ \"no\"))"), "foo");
+    assert_eq!(eval_string("(use std::symbol::symbol->string) (match (Sym (quote foo)) ((Sym s) (symbol->string s)) (_ \"no\"))"), "foo");
 }
 
 #[test]
 fn match_refines_char_and_bool_payloads() {
-    assert_eq!(eval_ok("(match (char #\\a) ((char c) c) (_ #\\z))"), Value::Char('a'));
-    assert_eq!(eval_ok("(match (bool true) ((bool b) b) (_ false))"), Value::Bool(true));
+    assert_eq!(eval_ok("(match (Char #\\a) ((Char c) c) (_ #\\z))"), Value::Char('a'));
+    assert_eq!(eval_ok("(match (Bool true) ((Bool b) b) (_ false))"), Value::Bool(true));
 }
 
 #[test]
@@ -158,20 +158,20 @@ fn match_selects_the_none_arm_for_the_empty_list() {
 fn match_dispatches_int_and_ratio_arms() {
     // An `int` node is a fixnum or a bignum box; one arm catches both, and
     // the payload is the number whichever shape it had.
-    assert_eq!(eval_ok("(match (int 99999999999999999999999999) ((int _) 1) (_ 0))"), Value::Int(1));
-    assert_eq!(eval_ok("(match (int 7) ((int _) 1) (_ 0))"), Value::Int(1));
+    assert_eq!(eval_ok("(match (Int 99999999999999999999999999) ((Int _) 1) (_ 0))"), Value::Int(1));
+    assert_eq!(eval_ok("(match (Int 7) ((Int _) 1) (_ 0))"), Value::Int(1));
     assert_eq!(
-        eval_ok("(match (int 99999999999999999999999999) ((int n) (= n (- 100000000000000000000000000 1))) (_ false))"),
+        eval_ok("(match (Int 99999999999999999999999999) ((Int n) (= n (- 100000000000000000000000000 1))) (_ false))"),
         Value::Bool(true)
     );
-    assert_eq!(eval_ok("(match (ratio 2/3) ((ratio _) 1) (_ 0))"), Value::Int(1));
+    assert_eq!(eval_ok("(match (Ratio 2/3) ((Ratio _) 1) (_ 0))"), Value::Int(1));
 }
 
 /// `bignum` is no longer a `Sexpr` shape: writing it is refused with a
 /// message that says where the number went.
 #[test]
 fn the_bignum_variant_is_unconstructible() {
-    for src in ["(match (int 5) ((bignum _) 1) (_ 0))", "(bignum 5)"] {
+    for src in ["(match (Int 5) ((Bignum _) 1) (_ 0))", "(Bignum 5)"] {
         let msg = format!("{:?}", check(src).expect_err("bignum is retired"));
         assert!(msg.contains("folded into `int`"), "{}", msg);
     }
@@ -182,12 +182,12 @@ fn match_dispatches_a_runtime_chosen_variant() {
     let src = r#"
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((None) 0) ((int _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
-            ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((ratio _) 9)
-            ((path _) 10) ((f32 _) 11)
-            ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)
-            ((vector _) 18) ((array _) 19) ((tuple _) 20)))
-        (+ (+ (tag (int 1)) (* 10 (tag (str "s")))) (* 100 (tag (sexpr-cons () ()))))
+            ((None) 0) ((Int _) 1) ((F64 _) 2) ((Char _) 3) ((Bool _) 4)
+            ((Sym _) 5) ((Str _) 6) ((Cons _ _) 7) ((Ratio _) 9)
+            ((Path _) 10) ((F32 _) 11)
+            ((I8 _) 12) ((I16 _) 13) ((U8 _) 14) ((U16 _) 15) ((U32 _) 16) ((I32 _) 17)
+            ((Vector _) 18) ((Array _) 19) ((Tuple _) 20)))
+        (+ (+ (tag (Int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons () ()))))
     "#;
     // 1 + 60 + 700: int=1, str=6, cons=7 — and the match above is
     // exhaustive without a wildcard, exercising full variant coverage: every
@@ -202,32 +202,32 @@ fn match_dispatches_a_runtime_chosen_variant() {
 
 #[test]
 fn match_dispatches_and_destructures_the_path_arm() {
-    // A quoted `::`-path evaluates to `Value::Path` at runtime; `(path s)`
+    // A quoted `::`-path evaluates to `Value::Path` at runtime; `(Path s)`
     // binds `s : Sexpr`, a fresh proper list of the segments as `sym`s (the
     // same shape a quoted `'(dep head)` list already has).
     // `dep` is a module, so `dep::head` reads as a path: `dep` read at the
     // root, `head` read in `dep`.
     assert_eq!(
         eval_ok(
-            "(module dep) (match (quote dep::head) ((path s) (if (equal (sexpr-car s) (quote dep)) (equal (sexpr-sym-name (sexpr-car (sexpr-cdr s))) \"head\") false)) (_ false))"
+            "(module dep) (match (quote dep::head) ((Path s) (if (equal (sexpr-car s) (quote dep)) (equal (sexpr-sym-name (sexpr-car (sexpr-cdr s))) \"head\") false)) (_ false))"
         ),
         Value::Bool(true)
     );
     // Segments stay real `sym`s, not re-stringified text: the first one is
     // reachable through ordinary list access.
-    assert_eq!(eval_string("(module dep) (match (quote dep::head) ((path s) (sexpr-sym-name (sexpr-car s))) (_ \"no\"))"), "dep");
+    assert_eq!(eval_string("(module dep) (match (quote dep::head) ((Path s) (sexpr-sym-name (sexpr-car s))) (_ \"no\"))"), "dep");
     // `Path` also constructs one back from a segment list — the inverse of
     // the match arm above.
     assert_eq!(
         eval_ok(
-            "(match (path (list (quote a) (quote b) (quote c)))
-               ((path s) (equal s (list (quote a) (quote b) (quote c))))
+            "(match (Path (list (quote a) (quote b) (quote c)))
+               ((Path s) (equal s (list (quote a) (quote b) (quote c))))
                (_ false))"
         ),
         Value::Bool(true)
     );
     // A non-path scrutinee doesn't spuriously hit the `path` arm.
-    assert_eq!(eval_ok("(match (i32 1) ((path _) 1) (_ 0))"), Value::Int(0));
+    assert_eq!(eval_ok("(match (I32 1) ((Path _) 1) (_ 0))"), Value::Int(0));
 }
 
 // ---- structural (nested) patterns --------------------------------------------
@@ -235,7 +235,7 @@ fn match_dispatches_and_destructures_the_path_arm() {
 #[test]
 fn match_destructures_a_cons_with_nested_patterns() {
     assert_eq!(
-        eval_ok("(match (sexpr-cons (i32 7) (str \"tail\")) ((cons (i32 a) (str t)) a) (_ 0))"),
+        eval_ok("(match (sexpr-cons (I32 7) (Str \"tail\")) ((Cons (I32 a) (Str t)) a) (_ 0))"),
         Value::Int(7)
     );
 }
@@ -246,9 +246,9 @@ fn match_nested_pattern_mismatch_falls_through_to_the_next_arm() {
     // nested (int a) fails and the second arm catches the same cons.
     assert_eq!(
         eval_ok(
-            "(match (sexpr-cons (str \"car\") ())
-               ((cons (i32 a) _) a)
-               ((cons (str _) _) -1)
+            "(match (sexpr-cons (Str \"car\") ())
+               ((Cons (I32 a) _) a)
+               ((Cons (Str _) _) -1)
                (_ 0))"
         ),
         Value::Int(-1)
@@ -260,10 +260,10 @@ fn match_literal_sub_pattern_narrows_within_a_variant() {
     let src = r#"
         (defun pick ((s Sexpr)) i32
           (match s
-            ((i32 5) 50)
-            ((i32 n) n)
+            ((I32 5) 50)
+            ((I32 n) n)
             (_ 0)))
-        (+ (pick (i32 5)) (pick (i32 3)))
+        (+ (pick (I32 5)) (pick (I32 3)))
     "#;
     assert_eq!(eval_ok(src), Value::Int(53));
 }
@@ -275,7 +275,7 @@ fn match_walks_a_quoted_list() {
     let src = r#"
         (defun sum ((s Option<Sexpr>)) int
           (match s
-            ((cons (int n) rest) (+ n (sum rest)))
+            ((Cons (Int n) rest) (+ n (sum rest)))
             (_ 0)))
         (sum (quote (1 2 3 4)))
     "#;
@@ -286,17 +286,17 @@ fn match_walks_a_quoted_list() {
 
 #[test]
 fn if_let_binds_a_sexpr_pattern() {
-    assert_eq!(eval_ok_with_prelude("(if-let ((i32 n) (i32 41)) (+ n 1) 0)"), Value::Int(42));
-    assert_eq!(eval_ok_with_prelude("(if-let ((i32 n) (str \"x\")) (+ n 1) 0)"), Value::Int(0));
+    assert_eq!(eval_ok_with_prelude("(if-let ((I32 n) (I32 41)) (+ n 1) 0)"), Value::Int(42));
+    assert_eq!(eval_ok_with_prelude("(if-let ((I32 n) (Str \"x\")) (+ n 1) 0)"), Value::Int(0));
 }
 
 #[test]
 fn while_let_loops_over_a_sexpr_condition() {
     let src = r#"
-        (let ((x (the Option<Sexpr> (i32 3))) (acc (the i32 0)))
-          (while-let ((i32 n) x)
+        (let ((x (the Option<Sexpr> (I32 3))) (acc (the i32 0)))
+          (while-let ((I32 n) x)
             (setf acc (+ acc n))
-            (setf x (if (> n 1) (i32 (- n 1)) (the Option<Sexpr> ()))))
+            (setf x (if (> n 1) (I32 (- n 1)) (the Option<Sexpr> ()))))
           acc)
     "#;
     assert_eq!(eval_ok_with_prelude(src), Value::Int(6));
@@ -306,7 +306,7 @@ fn while_let_loops_over_a_sexpr_condition() {
 
 #[test]
 fn match_on_sexpr_without_full_coverage_is_a_type_error() {
-    let err = check("(match (i32 1) ((i32 n) n))").expect_err("should be non-exhaustive");
+    let err = check("(match (I32 1) ((I32 n) n))").expect_err("should be non-exhaustive");
     let msg = format!("{:?}", err);
     assert!(msg.contains("non-exhaustive"), "unexpected error: {}", msg);
 }
@@ -350,10 +350,10 @@ fn a_flat_match_on_an_option_sexpr_must_still_cover_none() {
     let err = check(
         "(defun tag ((s Option<Sexpr>)) i32
            (match s
-             ((int _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
-             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((ratio _) 9)
-             ((path _) 10) ((f32 _) 11)
-             ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)))",
+             ((Int _) 1) ((F64 _) 2) ((Char _) 3) ((Bool _) 4)
+             ((Sym _) 5) ((Str _) 6) ((Cons _ _) 7) ((Ratio _) 9)
+             ((Path _) 10) ((F32 _) 11)
+             ((I8 _) 12) ((I16 _) 13) ((U8 _) 14) ((U16 _) 15) ((U32 _) 16) ((I32 _) 17)))",
     )
     .expect_err("should be non-exhaustive without a `None` arm");
     let msg = format!("{:?}", err);
@@ -376,12 +376,12 @@ fn each_integer_width_matches_only_its_own_arm() {
     let src = r#"
         (defun tag ((s Option<Sexpr>)) int
           (match s
-            ((i8 _) 1) ((i16 _) 2) ((i32 _) 3)
-            ((u8 _) 4) ((u16 _) 5) ((u32 _) 6)
+            ((I8 _) 1) ((I16 _) 2) ((I32 _) 3)
+            ((U8 _) 4) ((U16 _) 5) ((U32 _) 6)
             (_ 0)))
-        (+ (+ (+ (tag (i8 100)) (* 10 (tag (i16 100))))
-              (+ (* 100 (tag (i32 100))) (* 1000 (tag (u8 100)))))
-           (+ (* 10000 (tag (u16 100))) (* 100000 (tag (u32 100)))))
+        (+ (+ (+ (tag (I8 100)) (* 10 (tag (I16 100))))
+              (+ (* 100 (tag (I32 100))) (* 1000 (tag (U8 100)))))
+           (+ (* 10000 (tag (U16 100))) (* 100000 (tag (U32 100)))))
     "#;
     // 1 + 20 + 300 + 4000 + 50000 + 600000, one digit per width.
     assert_eq!(eval_ok(src), Value::Int(654_321));
@@ -392,10 +392,10 @@ fn each_integer_width_matches_only_its_own_arm() {
 /// typed integer of that type already is.
 #[test]
 fn the_narrow_accessors_read_back_what_was_put_in() {
-    assert_eq!(eval_ok("(as i32 (sexpr-u8 (u8 200)))"), Value::Int(200));
-    assert_eq!(eval_ok("(as i32 (sexpr-i8 (i8 -100)))"), Value::Int(-100));
-    assert_eq!(eval_ok("(as i32 (sexpr-u16 (u16 60000)))"), Value::Int(60000));
-    assert_eq!(eval_ok("(as i32 (sexpr-i16 (i16 -30000)))"), Value::Int(-30000));
+    assert_eq!(eval_ok("(as i32 (sexpr-u8 (U8 200)))"), Value::Int(200));
+    assert_eq!(eval_ok("(as i32 (sexpr-i8 (I8 -100)))"), Value::Int(-100));
+    assert_eq!(eval_ok("(as i32 (sexpr-u16 (U16 60000)))"), Value::Int(60000));
+    assert_eq!(eval_ok("(as i32 (sexpr-i16 (I16 -30000)))"), Value::Int(-30000));
 }
 
 /// A `u32` above `i32`'s range survives the round trip.
@@ -406,13 +406,13 @@ fn the_narrow_accessors_read_back_what_was_put_in() {
 /// (`types::normalize_int`) broken in the process.
 #[test]
 fn a_u32_above_the_i32_range_survives_a_sexpr_round_trip() {
-    assert_eq!(eval_ok("(sexpr-u32 (u32 4000000000))"), Value::Int(4_000_000_000));
+    assert_eq!(eval_ok("(sexpr-u32 (U32 4000000000))"), Value::Int(4_000_000_000));
 }
 
 /// Reading a `u8` node with the wrong accessor panics rather than widening.
 #[test]
 fn a_narrow_accessor_refuses_another_width() {
-    let err = run("(sexpr-u16 (u8 7))").expect_err("should panic on the wrong width");
+    let err = run("(sexpr-u16 (U8 7))").expect_err("should panic on the wrong width");
     let msg = format!("{:?}", err);
     assert!(msg.contains("sexpr-u16"), "unexpected error: {}", msg);
 }
@@ -421,6 +421,6 @@ fn a_narrow_accessor_refuses_another_width() {
 /// declared field type, like any other constructor argument.
 #[test]
 fn a_narrow_variants_literal_is_range_checked() {
-    check("(u8 300)").expect_err("300 does not fit a u8");
-    check("(i8 -200)").expect_err("-200 does not fit an i8");
+    check("(U8 300)").expect_err("300 does not fit a u8");
+    check("(I8 -200)").expect_err("-200 does not fit an i8");
 }

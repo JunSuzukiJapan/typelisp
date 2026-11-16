@@ -27,10 +27,10 @@
 ## 2. S 式データ `Sexpr`
 
 `read` が返すデータ型 `Sexpr` は 19 の変種を持つ:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`。
-`vector` と `array` は `#(..)` と `#nA(..)` で書いたデータ（[構文リファレンス](../syntax.md#1-字句要素)）で、
-中身はそれぞれ `Vector<Option<Sexpr>>` と `Array<Option<Sexpr>>`——`(vector v)` で束縛した `v` には
-`len` や `get` がそのまま使える。`tuple` は `#{..}` で書いたデータで、`(tuple v)` で束縛した `v` は
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`。
+`Vector` と `Array` は `#(..)` と `#nA(..)` で書いたデータ（[構文リファレンス](../syntax.md#1-字句要素)）で、
+中身はそれぞれ `Vector<Option<Sexpr>>` と `Array<Option<Sexpr>>`——`(Vector v)` で束縛した `v` には
+`len` や `get` がそのまま使える。`Tuple` は `#{..}` で書いたデータで、`(Tuple v)` で束縛した `v` は
 要素を並べた新しい `Vector<Option<Sexpr>>` になる（要素数がいくつでも同じ型で受け取るため）。
 S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `sexpr-*` 関数である。主に
 `defmacro` の本体でフォームを組み立て・分解するときに使う。
@@ -55,7 +55,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 空リストかどうか |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons` でないか |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | `Sym`（シンボル）かどうか |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` 変種の中身（fixnum でも多倍長でも）。型違いは panic |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` 変種の中身（fixnum でも多倍長でも）。型違いは panic |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | その幅の変種の中身。型違いは panic |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | 浮動小数点の変種の中身。型違いは panic |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` の中身。型違いは panic |
@@ -69,9 +69,9 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | `Sexpr` リストの各要素へ `f` を適用した新しい `Sexpr` リスト（4 章の `map` は `Iter` 用で、`Sexpr` のリストは回せない） |
 
 数値のアクセサが型ごとに 9 本あるのは、`Sexpr` が「値の型がほかのどこにも書かれていない
-唯一の場所」だから。`Sexpr` に入れた `u8` は `u8` の変種として入り、`(sexpr-u8 s)` でしか
+唯一の場所」だから。`Sexpr` に入れた `u8` は `U8` 変種として入り、`(sexpr-u8 s)` でしか
 出てこない。`(sexpr-int s)` に渡せば panic する——黙って幅を広げて答えることはしない。
-読んだデータ（`'(1 2 3)`、マクロの引数）の整数は `int` 変種で、`(sexpr-int s)` で読む。
+読んだデータ（`'(1 2 3)`、マクロの引数）の整数は `Int` 変種で、`(sexpr-int s)` で読む。
 
 `Sexpr` のリストには `rplaca`/`nconc` のような破壊的操作が無い。`Sexpr` のセルは作った後に
 書き換えられない。

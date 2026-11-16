@@ -150,7 +150,7 @@ fn the_alternatives_must_bind_the_same_names() {
 #[test]
 fn the_alternatives_must_bind_at_the_same_types() {
     let msg = check_err(
-        "(defun f ((o Option<Sexpr>)) int (match o ((:or (int n) (str n)) 1) (_ 0)))",
+        "(defun f ((o Option<Sexpr>)) int (match o ((:or (Int n) (Str n)) 1) (_ 0)))",
     );
     assert!(msg.contains("the alternatives of `(:or ...)` must bind the same variables at the same types"), "{}", msg);
 }

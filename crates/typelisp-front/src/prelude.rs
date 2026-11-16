@@ -353,7 +353,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `Sexpr`). Unlike `doiter` — which iterates a *homogeneous* `Vector<T>`/any
 ;; `Iter` and yields a single static `Item` type — `dolist`'s element is the
 ;; heterogeneous `Sexpr` itself, so the loop body dispatches on its shape with
-;; an ordinary `match` (`(match var ((cons a d) ...) ((sym s) ...) ...)`);
+;; an ordinary `match` (`(match var ((Cons a d) ...) ((Sym s) ...) ...)`);
 ;; `dolist` deliberately does *not* fuse that `match` in, keeping iteration and
 ;; per-element pattern dispatch orthogonal (the body is a plain `progn`, so it
 ;; can also just use `var` without matching). `spec` is `(var list-form)` or
@@ -1345,14 +1345,14 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module %internal (pub defun dbind-head ((l Option<Sexpr>) (ll Option<Sexpr>)) Option<Sexpr>
   "The first element of `l`; an error naming the lambda list if there is none."
   (match l
-    ((cons a _) a)
+    ((Cons a _) a)
     (_ (panic (format false "destructuring-bind: too few elements for ~a" ll))))))
 
 (module %internal (pub defun dbind-end ((l Option<Sexpr>) (ll Option<Sexpr>)) ()
   "Nothing may be left over -- a lambda list is exact unless it says `&rest`
    or `&key`."
   (match l
-    ((cons _ _) (panic (format false "destructuring-bind: too many elements for ~a" ll)))
+    ((Cons _ _) (panic (format false "destructuring-bind: too many elements for ~a" ll)))
     (_ ()))))
 
 ;; A `&key` parameter is looked up by its keyword: the parameter `a` is
@@ -1368,10 +1368,10 @@ pub const SOURCE_TEMPLATE: &str = r##"
    wins, as CL's does. `None` tells absent from present-and-`()`, which is
    what lets the default stay unevaluated."
   (match l
-    ((cons k rest)
+    ((Cons k rest)
       (match rest
-        ((cons v more)
-          (if (match k ((sym s) (eq s (%internal::dbind-keyword name))) (_ false))
+        ((Cons v more)
+          (if (match k ((Sym s) (eq s (%internal::dbind-keyword name))) (_ false))
               (Option::Some v)
               (%internal::dbind-key-lookup more name)))
         (_ (panic "destructuring-bind: the &key part has an odd number of elements"))))
@@ -1380,17 +1380,17 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module %internal (pub defun dbind-name-memberp ((kw symbol) (params Option<Sexpr>)) bool
   "Whether the keyword `kw` is the one some parameter of `params` is passed under."
   (match params
-    ((cons a rest) (if (eq kw (%internal::dbind-keyword a)) true (%internal::dbind-name-memberp kw rest)))
+    ((Cons a rest) (if (eq kw (%internal::dbind-keyword a)) true (%internal::dbind-name-memberp kw rest)))
     (_ false))))
 
 (module %internal (pub defun dbind-keys-known ((l Option<Sexpr>) (allowed Option<Sexpr>) (ll Option<Sexpr>)) ()
   "Every keyword in the plist `l` is one the lambda list named. CL's
    `&allow-other-keys` has no counterpart, the same as in `defmacro`."
   (match l
-    ((cons k rest)
+    ((Cons k rest)
       (match rest
-        ((cons _ more)
-          (if (match k ((sym s) (%internal::dbind-name-memberp s allowed)) (_ false))
+        ((Cons _ more)
+          (if (match k ((Sym s) (%internal::dbind-name-memberp s allowed)) (_ false))
               (%internal::dbind-keys-known more allowed ll)
               (panic (format false "destructuring-bind: ~s is not a keyword of ~a" k ll))))
         (_ (panic (format false "destructuring-bind: the &key part of ~a has an odd number of elements" ll)))))
@@ -1400,11 +1400,11 @@ pub const SOURCE_TEMPLATE: &str = r##"
 
 (module %internal (pub defun dbind-par-name ((p Option<Sexpr>)) Option<Sexpr>
   "A parameter's name: `x`, or the `x` of `(x default)`."
-  (match p ((cons a _) a) (_ p))))
+  (match p ((Cons a _) a) (_ p))))
 
 (module %internal (pub defun dbind-par-default ((p Option<Sexpr>)) Option<Sexpr>
   "A parameter's default form, or `()` when it was written bare."
-  (match p ((cons _ d) (sexpr-car d)) (_ (quote ())))))
+  (match p ((Cons _ d) (sexpr-car d)) (_ (quote ())))))
 
 (module %internal (pub defun dbind-plain-name ((p Option<Sexpr>) (whole Option<Sexpr>)) Option<Sexpr>
   "A parameter that may not carry a default: a required one, or the one after
@@ -1413,7 +1413,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
    `dbind-par-name` would otherwise read `(b c)` as `b` defaulting to `c` and
    bind the sublist to `b` without a word."
   (match p
-    ((cons _ _) (panic (format false "destructuring-bind: ~a is a nested lambda list, which is not supported (in ~a)" p whole)))
+    ((Cons _ _) (panic (format false "destructuring-bind: ~a is a nested lambda list, which is not supported (in ~a)" p whole)))
     (_ p))))
 
 (module %internal (pub defun dbind-keyword-list ((params Option<Sexpr>)) Option<Sexpr>
@@ -1430,7 +1430,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module %internal (pub defun dbind-keys ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
   "The `&key` section: one binding per keyword, all reading the same tail."
   (match ll
-    ((cons p rest)
+    ((Cons p rest)
       (let ((g (gensym)))
         `(let ((,(%internal::dbind-par-name p)
                  (match (%internal::dbind-key-lookup ,tv (quote ,(%internal::dbind-par-name p)))
@@ -1445,7 +1445,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
    calling each other -- nothing in the prelude may be forward-declared, and
    two walks that call each other would need it."
   (match ll
-    ((cons p rest)
+    ((Cons p rest)
       (cond
         ((or (equal p (quote &rest)) (equal p (quote &body)))
          `(let ((,(%internal::dbind-plain-name (%internal::dbind-head rest whole) whole) ,tv))
@@ -1462,13 +1462,13 @@ pub const SOURCE_TEMPLATE: &str = r##"
    which is written into the arm that needs it, so it is not evaluated when
    the element was there."
   (match ll
-    ((cons p rest)
+    ((Cons p rest)
       (cond
         ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))
          (%internal::dbind-restkey ll tv whole body))
         (true
           (let ((g (gensym)) (next (gensym)))
-            `(let* ((,(%internal::dbind-par-name p) (match ,tv ((cons ,g _) ,g) (_ ,(%internal::dbind-par-default p))))
+            `(let* ((,(%internal::dbind-par-name p) (match ,tv ((Cons ,g _) ,g) (_ ,(%internal::dbind-par-default p))))
                     (,next (sexpr-cdr ,tv)))
                ,(%internal::dbind-opts rest next whole body))))))
     (_ (%internal::dbind-tail true tv whole body)))))
@@ -1476,7 +1476,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (module %internal (pub defun dbind-parts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
   "The required section, and the hand-off to each marker's own builder."
   (match ll
-    ((cons p rest)
+    ((Cons p rest)
       (cond
         ((equal p (quote &optional)) (%internal::dbind-opts rest tv whole body))
         ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))

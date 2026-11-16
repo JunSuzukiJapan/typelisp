@@ -227,7 +227,7 @@ fn a_builtin_error_has_no_source() {
           (match (source e) ((Some _) "some") ((None) "none")))
         (has-source (EvalError::EvalError "boom"))
     "#;
-    assert_eq!(run_str(src), "None");
+    assert_eq!(run_str(src), "none");
 }
 
 #[test]

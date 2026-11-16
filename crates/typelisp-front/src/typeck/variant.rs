@@ -60,36 +60,36 @@ pub(crate) fn check_variant(
     Ok(Typed { node: Node::Construct { owner, targs, variant, mutable: false, field_tys, args: checked }, ty, loc })
 }
 
-/// `Sexpr`'s `nil` variant — the old empty list.
+/// `Sexpr`'s `Nil` variant — the old empty list.
 ///
 /// The variant is still *in* `sexpr_def`, and deliberately so: its number is
 /// burned into the island's IR and into compiled code (`crate::sexpr_variant`
 /// says why numbers are only ever appended). Removing the entry would
 /// renumber every variant after it.
 ///
-/// What is gone is its *surface*: `(nil)` can no longer be written as a
+/// What is gone is its *surface*: `(Nil)` can no longer be written as a
 /// constructor or a pattern, because a writable empty-list `Sexpr` would
-/// make `Option<Sexpr>`'s niche unsound — `(Option::Some (nil))` and
+/// make `Option<Sexpr>`'s niche unsound — `(Option::Some (Nil))` and
 /// `(Option::None)` would be the same word. The empty list is reached as
 /// `Option<Sexpr>`'s `None`, and the core IR still spells it `(construct
 /// sexpr 0 ..)`, which the checker emits itself.
 pub(crate) const SEXPR_RESERVED_VARIANT: usize = crate::sexpr_variant::NIL;
 
-/// `Sexpr`'s old `bignum` variant, retired with the type: a bignum box is an
+/// `Sexpr`'s old `Bignum` variant, retired with the type: a bignum box is an
 /// `int` now. Same treatment as [`SEXPR_RESERVED_VARIANT`]:
 /// the slot stays so nothing renumbers, and its surface is refused.
 const SEXPR_RETIRED_BIGNUM: usize = crate::sexpr_variant::RETIRED_BIGNUM;
 
-/// Message for a `(bignum ..)` constructor or pattern.
-pub(crate) const BIGNUM_IS_GONE: &str = "`bignum` is no longer a `Sexpr` constructor: the `bignum` type was folded \
-     into `int`, so a big integer is `(int n)` like any other.";
+/// Message for a `(Bignum ..)` constructor or pattern.
+pub(crate) const BIGNUM_IS_GONE: &str = "`Bignum` is no longer a `Sexpr` constructor: the `bignum` type was folded \
+     into `int`, so a big integer is `(Int n)` like any other.";
 
-/// Message for a `(nil)` that survived in source somewhere.
-pub(crate) const NIL_IS_GONE: &str = "`nil` is no longer a `Sexpr` constructor: the empty list is \
+/// Message for a `(Nil)` that survived in source somewhere.
+pub(crate) const NIL_IS_GONE: &str = "`Nil` is no longer a `Sexpr` constructor: the empty list is \
      `Option<Sexpr>`'s `None`. Write `()` where an `Option<Sexpr>` is expected, or \
      `(Option::None)`; match it with `((None) ...)`.";
 
-/// Is `(adt, variant)` the retired `Sexpr::nil`?
+/// Is `(adt, variant)` the retired `Sexpr::Nil`?
 pub(crate) fn is_retired_nil(adt: &Path, variant: usize) -> bool {
     variant == SEXPR_RESERVED_VARIANT && crate::types::path_is_builtin(adt, typelisp_mem::wk::SEXPR)
 }

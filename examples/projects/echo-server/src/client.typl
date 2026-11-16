@@ -9,7 +9,7 @@
       (match (with-connection (c "127.0.0.1" port)
                (dolist (x '("one" "two" "three"))
                  (match x
-                   ((str line)
+                   ((Str line)
                     (write-line c line)
                     (match (read-line c)
                       ((Some reply) (println "echo: ~a" reply))

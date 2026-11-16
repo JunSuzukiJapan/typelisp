@@ -68,9 +68,9 @@ fn dolist_dispatches_on_element_shape() {
     let src = r#"(let ((ints 0) (syms 0) (strs 0))
                    (dolist (x (quote (1 foo "bar" 2 baz)))
                      (match x
-                       ((int _) (setf ints (+ ints 1)) ())
-                       ((sym _) (setf syms (+ syms 1)) ())
-                       ((str _) (setf strs (+ strs 1)) ())
+                       ((Int _) (setf ints (+ ints 1)) ())
+                       ((Sym _) (setf syms (+ syms 1)) ())
+                       ((Str _) (setf strs (+ strs 1)) ())
                        (_ ())))
                    (+ (* ints 100) (+ (* syms 10) strs)))"#;
     // 2 ints, 2 syms, 1 str -> 221
@@ -79,11 +79,11 @@ fn dolist_dispatches_on_element_shape() {
 
 #[test]
 fn dolist_sums_matched_int_bindings() {
-    // `var` is `Sexpr`-typed (inferred from `sexpr-car`); the `(int n)` pattern
+    // `var` is `Sexpr`-typed (inferred from `sexpr-car`); the `(Int n)` pattern
     // narrows it and binds `n : i64`, checked by the ordinary match machinery.
     let src = "(let ((acc (the int 0)))
                  (dolist (x (quote (1 2 3 4)))
-                   (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))
+                   (match x ((Int n) (setf acc (+ acc n)) ()) (_ ())))
                  acc)";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
@@ -102,7 +102,7 @@ fn dolist_returns_its_result_form() {
     // The optional third spec element is the whole construct's value.
     let src = "(let ((acc (the int 0)))
                  (dolist (x (quote (5 7 9)) acc)
-                   (match x ((int n) (setf acc (+ acc n)) ()) (_ ()))))";
+                   (match x ((Int n) (setf acc (+ acc n)) ()) (_ ()))))";
     assert_eq!(eval_ok(src), Value::Int(21));
 }
 
@@ -118,7 +118,7 @@ fn break_exits_dolist_early() {
     let src = "(let ((acc (the int 0)))
                  (dolist (x (quote (1 2 3 4)))
                    (match x
-                     ((int n) (if (= n 2) (break) (progn (setf acc (+ acc n)) ())))
+                     ((Int n) (if (= n 2) (break) (progn (setf acc (+ acc n)) ())))
                      (_ ())))
                  acc)";
     assert_eq!(eval_ok(src), Value::Int(1));
@@ -129,7 +129,7 @@ fn dolist_stops_at_a_dotted_tail() {
     // An improper (dotted) list stops at the first non-`cons` cdr rather than
     // erroring — the `sexpr-consp` guard, not a hard `car`/`cdr` on an atom.
     let src = "(let ((n 0))
-                 (dolist (x (sexpr-cons (int 1) (sexpr-cons (int 2) (int 3))))
+                 (dolist (x (sexpr-cons (Int 1) (sexpr-cons (Int 2) (Int 3))))
                    (setf n (+ n 1)))
                  n)";
     assert_eq!(eval_ok(src), Value::Int(2));
@@ -139,7 +139,7 @@ fn dolist_stops_at_a_dotted_tail() {
 fn dolist_body_match_still_gets_exhaustiveness_checking() {
     // The design payoff of Pattern A: the body's `match` is an ordinary match,
     // so it reuses the checker's exhaustiveness analysis for free.
-    let err = check("(dolist (x (quote (1 2))) (match x ((int n) n)))")
+    let err = check("(dolist (x (quote (1 2))) (match x ((Int n) n)))")
         .expect_err("non-exhaustive match in dolist body should be a type error");
     let msg = format!("{:?}", err);
     assert!(msg.contains("non-exhaustive"), "unexpected error: {}", msg);

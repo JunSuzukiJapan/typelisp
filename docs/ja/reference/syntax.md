@@ -60,17 +60,17 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   要素の型になる（`#(1 2 3)` は `Vector<int>`）。要素の型はそろっていなければならず、`#(1 "a")`
   は型エラー。要素も文脈も無い `#()` も型エラー。評価するたびに新しいベクタができる。
   S 式データが期待される場所（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` で読んだもの）では、
-  要素がすべてデータの `Vector<Option<Sexpr>>`——`Sexpr` の `vector` 変種——になる。
+  要素がすべてデータの `Vector<Option<Sexpr>>`——`Sexpr` の `Vector` 変種——になる。
 - **配列**: `#2A((1 2) (3 4))`（CL と同じ）。`#` と `A` の間の数が次元数で、中身のリストの
   入れ子の最初のその数の段が各次元になる。`#0A x` は要素 1 つの 0 次元配列。段ごとの長さが
   そろっていなければ読み取りエラー。型の決まり方はベクタと同じで `Array<T>` になる（要素が無い
   ときは `(the Array<f64> #2A(()))` のように文脈が要る）。S 式データとしては
-  `Array<Option<Sexpr>>`——`Sexpr` の `array` 変種——になる。
+  `Array<Option<Sexpr>>`——`Sexpr` の `Array` 変種——になる。
 - **タプル**: `#{"foo" 123 45.6}`。中身はすべてリテラルで、評価しない（`#{a b}` の `a` は記号）。
   要素の型は位置ごとに文脈で決まり（`(the #{i32 f64} #{1 2.0})`）、文脈が無ければ各要素自身の
   型になる（`#{"foo" 123}` は `#{string int}`）。要素は 1〜12 個。評価するたびに新しいタプルが
   できる。計算した値から作るには `(tuple a b)` を使う。S 式データが期待される場所では、要素が
-  すべてデータのタプル——`Sexpr` の `tuple` 変種——になる。
+  すべてデータのタプル——`Sexpr` の `Tuple` 変種——になる。
 - **属性**: `#[test]` は次のフォームに付く印（Rust と同じ書き方）。今ある属性は `test` だけで、
   `defun` に付ける（[3.16 `#[test]`](#316-test--テスト関数)）。`read` で読むと
   `(%internal::attribute (test) フォーム)` というリストになる。
@@ -1027,7 +1027,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   1. ローカル（引数、`let`・`labels`・`macrolet`・`symbol-macrolet` の束縛）
   2. モジュールの名前 `n` がマクロなら、そのマクロ
   3. 構成子と静的メソッド: `use` で取り込んだもの、標準ライブラリが公開する `Sexpr` の構成子
-     （`sym`、`int` など）と `Option`/`Result` の構成子
+     （`Sym`、`Int` など）と `Option`/`Result` の構成子
   4. 第 1 引数の型のメソッド `n`（メソッドは**第 1 引数の型だけ**から探す）
   5. モジュールの名前 `n` が関数かグローバル変数なら、それ（グローバル変数ならその値の関数を呼ぶ）
 
@@ -1342,7 +1342,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   （`defstruct` インスタンス、グローバル、計算結果）を比較する唯一の書き方であり、
   ユーザ定義の `Equal` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
   参照できる（引数、外側の束縛、グローバル）
-- `(Ctor sub-pattern...)` — コンストラクタパターン（`(Some x)` `(None)` `(cons a d)` `(Ok v)` など）
+- `(Ctor sub-pattern...)` — コンストラクタパターン（`(Some x)` `(None)` `(Cons a d)` `(Ok v)` など）
 - `(Type :slot pattern... :slot...)` — 構造体のパターン。型名の後にスロットをキーワードで書く。
   キーワードの次がパターンならそのスロットをそのパターンで照合し、次がキーワードか終わりなら
   スロットを同じ名前の変数に束縛する。書かなかったスロットは照合しない（フィールドの数や順序に
@@ -1424,9 +1424,9 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; 空リスト
     (_          9)))
 ```
@@ -1435,7 +1435,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 書き忘れれば `_` が無いかぎりエラーになる。`(Some x)` も書けて「空でない何か」を束縛する。
 
 この糖衣は `Option<Sexpr>` **ちょうど**にしか掛からない。`Option<Option<Sexpr>>` では
-`(int n)` がどちらの層を剥がしたのか決まらないので、通常どおり 2 段の `match` を書く。
+`(Int n)` がどちらの層を剥がしたのか決まらないので、通常どおり 2 段の `match` を書く。
 
 **trait オブジェクト（`:dyn Trait`、2 章）のスクルーティニー**にも同じ downcast パターンがそのまま
 使える——`match` は箱を外してから上の `Sexpr` パターン機構に渡すので、追加の構文はない。実装型の
@@ -1735,7 +1735,7 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; 見つからなければ通常どおり末尾の値
 ```
 
