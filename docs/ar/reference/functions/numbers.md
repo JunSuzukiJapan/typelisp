@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -91,7 +91,7 @@
 من عرض ثابت، و`(as i32 n)` / `(try-as i32 n)` هما الاقتطاع / الفحص من `int` (بالمعنى نفسه لـ `int->W` /
 `try-int->W` في الفصل 1).
 
-والمتغاير الصحيح من `Sexpr` هو أيضًا `int` فقط (`(int n)` تقبل fixnum وbignum معًا).
+والمتغاير الصحيح من `Sexpr` هو أيضًا `Int` فقط (`(Int n)` تقبل fixnum وbignum معًا).
 
 الدوال المضمنة التي تأخذ فهرسًا أو عددًا (`substring` و`get` في `Vector` وعدد الإزاحة في `ash` وهكذا) تقبل
 `int`، لكن تمرير قيمة لا تتسع في fixnum خطأ وقت التشغيل ("an integer argument does not fit a fixnum").

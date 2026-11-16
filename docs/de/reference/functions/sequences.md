@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Paare, S-Ausdrücke und Sequenzen
 
 Das generische Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, die auf `Iter` aufgebauten
@@ -32,12 +32,12 @@ der Typ des `cdr` `Option<Sexpr>`, wird er als Fortsetzung dieser S-Ausdrucks-Da
 ## 2. S-Ausdrucksdaten `Sexpr`
 
 Der von `read` zurückgegebene Datentyp `Sexpr` hat 19 Varianten:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` und `array` sind mit `#(..)` und `#nA(..)` geschriebene Daten
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` und `Array` sind mit `#(..)` und `#nA(..)` geschriebene Daten
 ([Syntaxreferenz](../syntax.md#1-lexikalische-elemente)) und enthalten einen `Vector<Option<Sexpr>>`
 bzw. ein `Array<Option<Sexpr>>`: `len`, `get` usw. funktionieren direkt auf dem `v`, das
-`(vector v)` bindet.
-`tuple` sind mit `#{..}` geschriebene Daten, und das `v`, das `(tuple v)` bindet, ist ein neuer
+`(Vector v)` bindet.
+`Tuple` sind mit `#{..}` geschriebene Daten, und das `v`, das `(Tuple v)` bindet, ist ein neuer
 `Vector<Option<Sexpr>>` der Elemente (damit ein Tupel beliebiger Länge mit einem Typ
 entgegengenommen wird).
 S-Ausdruckszellen werden nicht mit dem allgemeinen `cons`/`car`/`cdr` aus Kapitel 1 behandelt, sondern mit den
@@ -64,7 +64,7 @@ die Funktionen `sexpr-*` `Option<Sexpr>`.
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Ob es die leere Liste ist |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Ob es kein `Cons` ist |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Ob es ein `Sym` (Symbol) ist |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Der Inhalt der Variante `int` (Fixnum oder Bignum). Panic bei einem anderen Typ |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Der Inhalt der Variante `Int` (Fixnum oder Bignum). Panic bei einem anderen Typ |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | Der Inhalt der Variante dieser Breite. Panic bei einem anderen Typ |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Der Inhalt der Gleitkommavarianten. Panic bei einem anderen Typ |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Der Inhalt eines `Char`. Panic bei einem anderen Typ |
@@ -79,9 +79,9 @@ die Funktionen `sexpr-*` `Option<Sexpr>`.
 
 Es gibt neun numerische Zugriffsfunktionen, eine pro Typ, weil ein `Sexpr` „der einzige Ort ist, an dem der
 Typ eines Wertes nirgends sonst geschrieben steht“. Ein `u8`, das man in ein `Sexpr` steckt, geht als Variante
-`u8` hinein und kommt nur mit `(sexpr-u8 s)` heraus. Es an `(sexpr-int s)` zu übergeben, löst einen Panic
+`U8` hinein und kommt nur mit `(sexpr-u8 s)` heraus. Es an `(sexpr-int s)` zu übergeben, löst einen Panic
 aus; die Antwort wird nie stillschweigend erweitert. Die Ganzzahlen in gelesenen Daten (`'(1 2 3)`,
-Makroargumente) sind von der Variante `int` und werden mit `(sexpr-int s)` gelesen.
+Makroargumente) sind von der Variante `Int` und werden mit `(sexpr-int s)` gelesen.
 
 `Sexpr`-Listen haben keine destruktiven Operationen wie `rplaca`/`nconc`. Eine `Sexpr`-Zelle lässt sich nach
 der Erzeugung nicht ändern.

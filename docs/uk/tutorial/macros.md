@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Макроси
 
 Макрос — це функція, що приймає програму й повертає програму. Макроси дозволяють створювати новий
@@ -129,7 +129,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; no arguments
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -139,7 +139,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` — це візерунок, що бере голову списку в `f`, а решту в `more`.
+- `(Cons f more)` — це візерунок, що бере голову списку в `f`, а решту в `more`.
 - `sexpr-null` перевіряє, чи є дані у вигляді S-виразів порожнім списком.
 - Фінальна гілка `_` потрібна, бо дані у вигляді S-виразів мають й інші форми, ніж списки (числа,
   рядки тощо), і `match` вимагає охопити також їх. Аргумент `&rest` завжди є списком, тож ця гілка

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -195,7 +195,7 @@ rejestrowane w środowisku globalnym natychmiast i na stałe.
 
 - **Wartość zwracana**: dla wyrażenia wynik jako `Option<Sexpr>`; dla definicji symbol
   zdefiniowanej nazwy (jak w CL). Aby użyć wyniku, rozbierz `Sexpr` za pomocą `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Różnice wynikające z typów statycznych (ważne)**: CL zwraca faktyczną wartość wyniku, ale w
   tym języku typ zwracany może być tylko jednolicie `Result<Option<Sexpr>,EvalError>`. Ponadto **kod
   napisany statycznie nie może odwoływać się wprzód do nazw, które `eval` definiuje w czasie działania**: `(sq 9)` zapisane

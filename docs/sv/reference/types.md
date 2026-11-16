@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -46,7 +46,7 @@ Funktionstyper skrivs `(fn (argumenttyper...) returtyp)`, trait-objekt `:dyn Tra
 
 | Typ | Innehåll | Detaljer |
 |---|---|---|
-| `Sexpr` | Ett icke-tomt S-uttryck. 19 varianter: `int`, `i8` till `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-uttrycksdata](functions/sequences.md#2-s-uttrycksdata-sexpr) |
+| `Sexpr` | Ett icke-tomt S-uttryck. 19 varianter: `Int`, `I8` till `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S-uttrycksdata](functions/sequences.md#2-s-uttrycksdata-sexpr) |
 | `Option<Sexpr>` | S-uttrycksdata i allmänhet. Den tomma listan `()` är `None` | Som ovan |
 
 ## 4. Typer i standardbiblioteket

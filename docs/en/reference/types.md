@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Types
 
 The types typelisp has, and the standard traits each type implements. How to write types is in
@@ -46,7 +46,7 @@ types `(T U ...)` (the same type as `cons-cell<T,cons-cell<U,()>>`) ([Syntax Ref
 
 | Type | Contents | Details |
 |---|---|---|
-| `Sexpr` | A non-empty S-expression. 19 variants: `int`, `i8` to `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
+| `Sexpr` | A non-empty S-expression. 19 variants: `Int`, `I8` to `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
 | `Option<Sexpr>` | S-expression data in general. The empty list `()` is `None` | Same as above |
 
 ## 4. Types in the standard library

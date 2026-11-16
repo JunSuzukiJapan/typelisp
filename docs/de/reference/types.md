@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Typen
 
 Die Typen, die typelisp hat, und die Standard-Traits, die jeder Typ implementiert. Wie man Typen schreibt,
@@ -46,7 +46,7 @@ Listentypen `(T U ...)` (derselbe Typ wie `cons-cell<T,cons-cell<U,()>>`) ([Kapi
 
 | Typ | Inhalt | Details |
 |---|---|---|
-| `Sexpr` | Ein nicht leerer S-Ausdruck. 19 Varianten: `int`, `i8` bis `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-Ausdrucksdaten](functions/sequences.md#2-s-ausdrucksdaten-sexpr) |
+| `Sexpr` | Ein nicht leerer S-Ausdruck. 19 Varianten: `Int`, `I8` bis `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S-Ausdrucksdaten](functions/sequences.md#2-s-ausdrucksdaten-sexpr) |
 | `Option<Sexpr>` | S-Ausdrucksdaten im Allgemeinen. Die leere Liste `()` ist `None` | Wie oben |
 
 ## 4. Typen der Standardbibliothek

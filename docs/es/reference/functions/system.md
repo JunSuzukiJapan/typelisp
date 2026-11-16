@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tiempo, entorno e implementación
 
 Funciones de tiempo, consultas sobre el entorno de ejecución, herramientas de la implementación, análisis y
@@ -200,7 +200,7 @@ entorno global de inmediato y de forma permanente.
 
 - **Valor de retorno**: para una expresión, el resultado como `Option<Sexpr>`; para una definición, el
   símbolo del nombre definido (como en CL). Para usar el resultado, desarma el `Sexpr` con `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Diferencias debidas a los tipos estáticos (importante)**: CL devuelve el valor real del resultado, pero
   en este lenguaje el tipo de retorno solo puede ser uniformemente `Result<Option<Sexpr>,EvalError>`. Además,
   **el código escrito estáticamente no puede referirse por adelantado a nombres que `eval` define en tiempo

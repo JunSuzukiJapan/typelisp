@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Pasangan, S-Expression, dan Sekuens
 
 Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens yang ditulis di atas
@@ -32,12 +32,12 @@ dengan cons CL: `(cons 1 (cons "a" ()))` dicetak `(1 "a")` dan `(cons 3 1)` dice
 ## 2. Data S-expression `Sexpr`
 
 Tipe data `Sexpr` yang dikembalikan `read` memiliki 19 varian:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` dan `array` adalah data yang ditulis sebagai `#(..)` dan `#nA(..)` ([Referensi
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` dan `Array` adalah data yang ditulis sebagai `#(..)` dan `#nA(..)` ([Referensi
 Sintaks](../syntax.md#1-unsur-leksikal)), yang masing-masing memuat `Vector<Option<Sexpr>>` dan
 `Array<Option<Sexpr>>`: `len`, `get`, dan lainnya langsung berlaku pada `v` yang diikat oleh
-`(vector v)`.
-`tuple` adalah data yang ditulis dengan `#{..}`, dan `v` yang diikat `(tuple v)` adalah
+`(Vector v)`.
+`Tuple` adalah data yang ditulis dengan `#{..}`, dan `v` yang diikat `(Tuple v)` adalah
 `Vector<Option<Sexpr>>` baru berisi elemen-elemennya (agar tuple berapa pun panjangnya diterima
 dengan satu tipe).
 Sel S-expression ditangani bukan oleh `cons`/`car`/`cdr` umum pada bab 1 melainkan oleh fungsi
@@ -65,7 +65,7 @@ menerima dan mengembalikan `Option<Sexpr>`.
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Apakah daftar kosong |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Apakah bukan `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Apakah `Sym` (simbol) |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Isi varian `int` (fixnum atau bignum). Panic pada tipe lain |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Isi varian `Int` (fixnum atau bignum). Panic pada tipe lain |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | Isi varian dengan lebar itu. Panic pada tipe lain |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Isi varian floating-point. Panic pada tipe lain |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Isi `Char`. Panic pada tipe lain |
@@ -79,10 +79,10 @@ menerima dan mengembalikan `Option<Sexpr>`.
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | Daftar `Sexpr` baru dengan `f` diterapkan pada tiap elemen daftar `Sexpr` (`map` pada bab 4 untuk `Iter` dan tidak dapat menelusuri daftar `Sexpr`) |
 
 Ada sembilan pengakses numerik, satu per tipe, karena `Sexpr` adalah "satu-satunya tempat tipe sebuah
-nilai tidak ditulis di tempat lain". `u8` yang dimasukkan ke `Sexpr` masuk sebagai varian `u8` dan
+nilai tidak ditulis di tempat lain". `u8` yang dimasukkan ke `Sexpr` masuk sebagai varian `U8` dan
 keluar hanya dengan `(sexpr-u8 s)`. Memberikannya ke `(sexpr-int s)` melakukan panic; ia tidak pernah
 melebarkan jawaban secara diam-diam. Bilangan bulat pada data yang dibaca (`'(1 2 3)`, argumen makro)
-adalah varian `int` dan dibaca dengan `(sexpr-int s)`.
+adalah varian `Int` dan dibaca dengan `(sexpr-int s)`.
 
 Daftar `Sexpr` tidak memiliki operasi destruktif seperti `rplaca`/`nconc`. Sel `Sexpr` tidak dapat
 diubah setelah dibuat.

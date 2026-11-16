@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Liczby
 
 Operacje na liczbach całkowitych, zmiennoprzecinkowych, wymiernych, zespolonych i wartościach logicznych oraz inne
@@ -100,7 +100,7 @@ konwersji: `(as int x)` to dokładne rozszerzenie ze stałej szerokości, a `(as
 `(try-as i32 n)` to obcięcie / sprawdzenie z `int` (to samo znaczenie co `int->W` / `try-int->W`
 w rozdziale 1).
 
-Wariant całkowity `Sexpr` to także po prostu `int` (`(int n)` przyjmuje zarówno fixnum, jak i bignum).
+Wariant całkowity `Sexpr` to także po prostu `Int` (`(Int n)` przyjmuje zarówno fixnum, jak i bignum).
 
 Wbudowane funkcje przyjmujące indeks lub liczbę (`substring`, `get` z `Vector`, liczba przesunięć `ash` i
 tak dalej) akceptują `int`, ale przekazanie wartości, która nie mieści się w fixnum, jest błędem czasu działania („an integer

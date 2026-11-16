@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -202,7 +202,7 @@ geëvalueerd, en definities worden onmiddellijk en permanent in de globale omgev
 
 - **Returnwaarde**: voor een expressie het resultaat als `Option<Sexpr>`; voor een definitie het symbool
   van de gedefinieerde naam (zoals in CL). Om het resultaat te gebruiken, haal je de `Sexpr` met `match`
-  uit elkaar (`(int n)`/`(str s)`/…).
+  uit elkaar (`(Int n)`/`(Str s)`/…).
 - **Verschillen door statische types (belangrijk)**: CL geeft de werkelijke waarde van het resultaat
   terug, maar in deze taal kan het returntype alleen uniform `Result<Option<Sexpr>,EvalError>` zijn.
   Bovendien **kan statisch geschreven code niet vooruit verwijzen naar namen die `eval` tijdens runtime

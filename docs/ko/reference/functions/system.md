@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -180,7 +180,7 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
 ```
 
 - **반환값**: 식이면 결과를 `Option<Sexpr>`로, 정의면 정의한 이름의 심볼(CL과 같다). 결과를 쓰려면 `Sexpr`를 `match`로
-  분해한다(`(int n)`/`(str s)`/…).
+  분해한다(`(Int n)`/`(Str s)`/…).
 - **정적 타입에 의한 차이(중요)**: CL은 결과의 실제 값을 반환하지만 이 언어에서는 반환 타입이 한결같이
   `Result<Option<Sexpr>,EvalError>`일 수밖에 없다. 또 **정적으로 쓴 코드는 `eval`이 실행 시에 정의하는 이름을 앞질러
   참조할 수 없다**. 파일에 직접 쓴 `(sq 9)`는 `sq`를 정의하는 `eval`이 실행되기 전에 검사되어 "정의되지 않음"이 된다.

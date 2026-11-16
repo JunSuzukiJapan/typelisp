@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -191,7 +191,7 @@ ngay lập tức và vĩnh viễn vào môi trường toàn cục.
 
 - **Giá trị trả về**: với một biểu thức, kết quả dưới dạng một `Option<Sexpr>`; với một định nghĩa, symbol của
   tên đã định nghĩa (như trong CL). Để dùng kết quả, hãy tách `Sexpr` ra bằng `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Khác biệt do kiểu tĩnh (quan trọng)**: CL trả về giá trị thực của kết quả, nhưng trong ngôn ngữ này kiểu
   trả về chỉ có thể là `Result<Option<Sexpr>,EvalError>` đồng nhất. Ngoài ra, **mã viết tĩnh không thể tham
   chiếu tiến tới các tên mà `eval` định nghĩa lúc chạy**: một `(sq 9)` viết trực tiếp trong tệp được kiểm

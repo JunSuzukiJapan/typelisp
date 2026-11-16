@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makra
 
 Makro to funkcja, która przyjmuje program i zwraca program. Makra pozwalają tworzyć nową składnię,
@@ -129,7 +129,7 @@ Zróbmy `my-and`, które zwraca `true`, jeśli wszystkie jego warunki są prawdz
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; brak argumentów
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; tylko jeden
          `(if ,f (my-and ,@more) false)))             ; dwa lub więcej
@@ -139,7 +139,7 @@ Zróbmy `my-and`, które zwraca `true`, jeśli wszystkie jego warunki są prawdz
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` to wzorzec, który bierze głowę listy do `f`, a resztę do `more`.
+- `(Cons f more)` to wzorzec, który bierze głowę listy do `f`, a resztę do `more`.
 - `sexpr-null` sprawdza, czy dane w postaci S-wyrażenia są pustą listą.
 - Końcowe ramię `_` jest potrzebne, ponieważ dane w postaci S-wyrażeń mają też inne postaci niż listy (liczby,
   łańcuchy znaków i tak dalej), a `match` wymaga pokrycia także ich. Argument `&rest` jest zawsze

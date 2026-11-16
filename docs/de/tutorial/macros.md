@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makros
 
 Ein Makro ist eine Funktion, die ein Programm entgegennimmt und ein Programm zurückgibt. Mit Makros lässt sich
@@ -131,7 +131,7 @@ Bauen wir `my-and`, das `true` zurückgibt, wenn alle seine Bedingungen wahr sin
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; keine Argumente
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; nur eines
          `(if ,f (my-and ,@more) false)))             ; zwei oder mehr
@@ -141,7 +141,7 @@ Bauen wir `my-and`, das `true` zurückgibt, wenn alle seine Bedingungen wahr sin
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` ist ein Muster, das den Kopf einer Liste in `f` und den Rest in `more` nimmt.
+- `(Cons f more)` ist ein Muster, das den Kopf einer Liste in `f` und den Rest in `more` nimmt.
 - `sexpr-null` prüft, ob S-Ausdrucksdaten die leere Liste sind.
 - Der abschließende Zweig `_` ist nötig, weil S-Ausdrucksdaten neben Listen auch andere Formen haben (Zahlen,
   Zeichenketten usw.), und `match` verlangt, dass auch diese abgedeckt werden. Ein `&rest`-Argument ist immer

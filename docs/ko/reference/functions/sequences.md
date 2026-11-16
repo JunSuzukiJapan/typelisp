@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.
@@ -26,10 +26,10 @@
 ## 2. S 식 데이터 `Sexpr`
 
 `read`가 반환하는 데이터 타입 `Sexpr`에는 19개의 변형이 있다:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector`와 `array`는 `#(..)`와 `#nA(..)`로 쓴 데이터이며([문법 레퍼런스](../syntax.md#1-어휘-요소)), 각각
-`Vector<Option<Sexpr>>`와 `Array<Option<Sexpr>>`를 담는다. `(vector v)`로 묶은 `v`에는 `len`이나 `get`을 그대로 쓸 수
-`tuple`은 `#{..}`로 쓴 데이터이며, `(tuple v)`로 묶은 `v`는 요소를 늘어놓은 새 `Vector<Option<Sexpr>>`가 된다(요소 수가 몇 개든 같은
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector`와 `Array`는 `#(..)`와 `#nA(..)`로 쓴 데이터이며([문법 레퍼런스](../syntax.md#1-어휘-요소)), 각각
+`Vector<Option<Sexpr>>`와 `Array<Option<Sexpr>>`를 담는다. `(Vector v)`로 묶은 `v`에는 `len`이나 `get`을 그대로 쓸 수
+`Tuple`은 `#{..}`로 쓴 데이터이며, `(Tuple v)`로 묶은 `v`는 요소를 늘어놓은 새 `Vector<Option<Sexpr>>`가 된다(요소 수가 몇 개든 같은
 타입으로 받기 위해서다).
 있다.
 S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` 함수로 다룬다. 주로 `defmacro`의 본체에서 형식을 만들고
@@ -53,7 +53,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | 빈 리스트인지 |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons`가 아닌지 |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | `Sym`(심볼)인지 |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` 변형의 내용(fixnum 또는 다배정도). 다른 타입이면 panic |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` 변형의 내용(fixnum 또는 다배정도). 다른 타입이면 panic |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | 그 폭의 변형의 내용. 다른 타입이면 panic |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | 부동소수점 변형의 내용. 다른 타입이면 panic |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char`의 내용. 다른 타입이면 panic |
@@ -67,8 +67,8 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | `Sexpr` 리스트의 각 요소에 `f`를 적용한 새 `Sexpr` 리스트(4장의 `map`은 `Iter`용이며 `Sexpr` 리스트를 순회할 수 없다) |
 
 수 접근자가 타입마다 하나씩 9개 있는 것은 `Sexpr`가 "값의 타입이 다른 어디에도 쓰여 있지 않은 유일한 곳"이기 때문이다.
-`Sexpr`에 넣은 `u8`은 `u8` 변형으로 들어가 `(sexpr-u8 s)`로만 나온다. `(sexpr-int s)`에 넘기면 panic하며, 답을 조용히
-넓히는 일은 없다. 읽어 들인 데이터(`'(1 2 3)`, 매크로 인수)의 정수는 `int` 변형이며 `(sexpr-int s)`로 읽는다.
+`Sexpr`에 넣은 `u8`은 `U8` 변형으로 들어가 `(sexpr-u8 s)`로만 나온다. `(sexpr-int s)`에 넘기면 panic하며, 답을 조용히
+넓히는 일은 없다. 읽어 들인 데이터(`'(1 2 3)`, 매크로 인수)의 정수는 `Int` 변형이며 `(sexpr-int s)`로 읽는다.
 
 `Sexpr` 리스트에는 `rplaca`/`nconc` 같은 파괴적 연산이 없다. `Sexpr` 셀은 만든 뒤에 바꿀 수 없다.
 

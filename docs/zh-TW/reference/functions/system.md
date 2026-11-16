@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 時間、執行環境與實作
 
 時間、執行環境的查詢、實作工具、文字的解析與求值、文件字串，以及巨集相關的函式。
@@ -166,7 +166,7 @@ CL 從 `read-from-string` 回傳**2 個值**（值與位置），但這個語言
 ```
 
 - **回傳值**：運算式時以 `Option<Sexpr>` 回傳求值結果，定義時回傳所定義名稱的符號（與 CL 相同）。要使用結果，以 `match`
-  （`(int n)`/`(str s)`/…）拆解 `Sexpr`。
+  （`(Int n)`/`(Str s)`/…）拆解 `Sexpr`。
 - **由靜態型別帶來的差異（重要）**：CL 回傳結果的實際值，但這個語言只能把回傳型別統一為 `Result<Option<Sexpr>,EvalError>`。另外，
   **靜態撰寫的程式碼不能前置參照 `eval` 在執行期定義的名稱**——直接寫在檔案中的 `(sq 9)` 會在定義 `sq` 的 `eval` 執行之前被檢查，成為
   「未定義」。不過**之後的 `eval` 能看到它**（那個 `eval` 的型別檢查在執行期、定義之後進行）。REPL 逐行檢查與執行，所以以 `eval` 定義的

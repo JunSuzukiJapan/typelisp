@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -44,7 +44,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | टाइप | सामग्री | विवरण |
 |---|---|---|
-| `Sexpr` | एक गैर-खाली S-एक्सप्रेशन। 19 variant: `int`, `i8` से `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-एक्सप्रेशन डेटा](functions/sequences.md#2-s-एक्सप्रेशन-डेटा-sexpr) |
+| `Sexpr` | एक गैर-खाली S-एक्सप्रेशन। 19 variant: `Int`, `I8` से `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [S-एक्सप्रेशन डेटा](functions/sequences.md#2-s-एक्सप्रेशन-डेटा-sexpr) |
 | `Option<Sexpr>` | सामान्य रूप से S-एक्सप्रेशन डेटा। खाली सूची `()` `None` है | ऊपर जैसा |
 
 ## 4. स्टैंडर्ड लाइब्रेरी के टाइप

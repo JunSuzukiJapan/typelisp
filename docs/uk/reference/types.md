@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Типи
 
 Типи, які є в typelisp, і стандартні трейти, що їх реалізує кожен тип. Як записувати типи, описано в
@@ -46,7 +46,7 @@
 
 | Тип | Зміст | Подробиці |
 |---|---|---|
-| `Sexpr` | Непорожній S-вираз. 19 варіантів: `int`, від `i8` до `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Дані у вигляді S-виразів](functions/sequences.md#2-дані-у-вигляді-s-виразів-sexpr) |
+| `Sexpr` | Непорожній S-вираз. 19 варіантів: `Int`, від `I8` до `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [Дані у вигляді S-виразів](functions/sequences.md#2-дані-у-вигляді-s-виразів-sexpr) |
 | `Option<Sexpr>` | Дані у вигляді S-виразів загалом. Порожній список `()` — це `None` | Те саме |
 
 ## 4. Типи у стандартній бібліотеці

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # الأزواج والتعبيرات الرمزية والتسلسلات
 
 الزوج العام `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات المكتوبة فوق `Iter`
@@ -28,11 +28,11 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 ## 2. بيانات التعبيرات الرمزية `Sexpr`
 
 لنوع البيانات `Sexpr` الذي تعيده `read` تسعة عشر متغايرًا:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-و`vector` و`array` بيانات مكتوبة بالصيغة `#(..)` و`#nA(..)` ([مرجع
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+و`Vector` و`Array` بيانات مكتوبة بالصيغة `#(..)` و`#nA(..)` ([مرجع
 الصياغة](../syntax.md#1-العناصر-المعجمية))، تحمل على الترتيب `Vector<Option<Sexpr>>`
-و`Array<Option<Sexpr>>`: فتعمل `len` و`get` وغيرهما مباشرة على `v` الذي يربطه `(vector v)`.
-`tuple` بيانات مكتوبة بـ `#{..}`، و`v` التي يربطها `(tuple v)` متجه جديد `Vector<Option<Sexpr>>` من
+و`Array<Option<Sexpr>>`: فتعمل `len` و`get` وغيرهما مباشرة على `v` الذي يربطه `(Vector v)`.
+`Tuple` بيانات مكتوبة بـ `#{..}`، و`v` التي يربطها `(Tuple v)` متجه جديد `Vector<Option<Sexpr>>` من
 العناصر (ليُستقبل الصف بأي طول بنوع واحد).
 وتُعالَج خلايا التعبيرات الرمزية لا بـ `cons`/`car`/`cdr` العامة في الفصل 1 بل بدوال `sexpr-*`. وتُستخدم
 أساسًا في أجسام `defmacro` لبناء الصيغ وتفكيكها.
@@ -56,7 +56,7 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | هل هي القائمة الفارغة |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | هل ليست `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | هل هي `Sym` (رمز) |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | محتوى المتغاير `int` (fixnum أو bignum). ويحدث `panic` على نوع آخر |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | محتوى المتغاير `Int` (fixnum أو bignum). ويحدث `panic` على نوع آخر |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | محتوى المتغاير بذلك العرض. ويحدث `panic` على نوع آخر |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | محتوى متغايرات الفاصلة العائمة. ويحدث `panic` على نوع آخر |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | محتوى `Char`. ويحدث `panic` على نوع آخر |
@@ -70,9 +70,9 @@ cons في CL: ‏`(cons 1 (cons "a" ()))` تُطبع `(1 "a")` و`(cons 3 1)` ت
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | قائمة `Sexpr` جديدة بتطبيق `f` على كل عنصر من قائمة `Sexpr` (فـ `map` في الفصل 4 لـ `Iter` ولا تستطيع المرور على قائمة `Sexpr`) |
 
 توجد تسع دوال وصول عددية، واحدة لكل نوع، لأن `Sexpr` هو "الموضع الوحيد الذي لا يُكتب فيه نوع القيمة في أي
-مكان آخر". فـ `u8` يوضع في `Sexpr` يدخل على صورة المتغاير `u8` ولا يخرج إلا بـ `(sexpr-u8 s)`. وتمريره إلى
+مكان آخر". فـ `u8` يوضع في `Sexpr` يدخل على صورة المتغاير `U8` ولا يخرج إلا بـ `(sexpr-u8 s)`. وتمريره إلى
 `(sexpr-int s)` يحدث `panic`؛ فلا يوسّع الجواب بصمت أبدًا. والأعداد الصحيحة في البيانات المقروءة
-(`'(1 2 3)` ووسائط الماكرو) من المتغاير `int` وتُقرأ بـ `(sexpr-int s)`.
+(`'(1 2 3)` ووسائط الماكرو) من المتغاير `Int` وتُقرأ بـ `(sexpr-int s)`.
 
 وليس لقوائم `Sexpr` عمليات مُتلِفة مثل `rplaca`/`nconc`. فلا يمكن تغيير خلية `Sexpr` بعد صنعها.
 

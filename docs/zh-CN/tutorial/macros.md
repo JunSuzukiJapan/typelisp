@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 宏
 
 宏是接收程序并返回程序的函数。用宏可以自己创造函数无法实现的新语法。typelisp 的宏与 Common Lisp 的 `defmacro`
@@ -118,7 +118,7 @@ S 表达式数据（`Option<Sexpr>`），空列表是 `None`。
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; 没有参数
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; 只有一个
          `(if ,f (my-and ,@more) false)))             ; 两个以上
@@ -128,7 +128,7 @@ S 表达式数据（`Option<Sexpr>`），空列表是 `None`。
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` 是把列表开头取到 `f`、其余取到 `more` 的模式。
+- `(Cons f more)` 是把列表开头取到 `f`、其余取到 `more` 的模式。
 - `sexpr-null` 判断 S 表达式数据是否为空列表。
 - 最后的 `_` 分支是必需的，因为 S 表达式数据还有列表以外的形状（数字、字符串等），`match` 要求覆盖它们。
   `&rest` 参数一定是列表，所以这个分支实际上不会执行。

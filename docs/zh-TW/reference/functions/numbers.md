@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 數值
 
 整數、浮點數、有理數、複數、布林值的運算以及與數值相關的函式。呼叫形式的讀法見[內建函式](README.md)。
@@ -75,7 +75,7 @@ CL 的 `integer`，也就是這個語言的**整數**——未註記的整數字
 的同一性，`eql`/`=` 在整個範圍內是數值的同一性。它與固定寬度整數型別（第 1 章）是不同的型別，沒有隱式轉換——`(as int x)` 是從固定
 寬度的精確擴大，`(as i32 n)` / `(try-as i32 n)` 是從 `int` 的截斷／判定（與第 1 章的 `int->W` / `try-int->W` 意義相同）。
 
-`Sexpr` 的整數變體也只有 `int` 一種（`(int n)` 同時接受 fixnum 與多倍精度）。
+`Sexpr` 的整數變體也只有 `Int` 一種（`(Int n)` 同時接受 fixnum 與多倍精度）。
 
 接受索引或個數的內建函式（`substring`、`Vector` 的 `get`、`ash` 的位數等）接受 `int`，但傳入放不進 fixnum 的值會產生執行期錯誤
 （「an integer argument does not fit a fixnum」）。

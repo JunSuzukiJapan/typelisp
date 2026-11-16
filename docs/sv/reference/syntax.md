@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -68,19 +68,19 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   en `Vector<int>`). Alla element måste ha samma typ: `#(1 "a")` är ett typfel, liksom `#()` utan
   element och utan sammanhang. Varje evaluering skapar en ny vektor. Där S-uttrycksdata förväntas
   (`(the Option<Sexpr> #(1 x))`, `'#(..)`, det `read` returnerar) är det en `Vector<Option<Sexpr>>`
-  vars element alla är data: varianten `vector` av `Sexpr`.
+  vars element alla är data: varianten `Vector` av `Sexpr`.
 - **Arrayer**: `#2A((1 2) (3 4))` (som i CL). Talet mellan `#` och `A` är rangen, och lika många
   första nivåer av listnästling i innehållet är dimensionerna. `#0A x` är en nolldimensionell array
   med ett element. Listor på samma nivå med olika längd är ett läsfel. Typen bestäms som för
   vektorer och är en `Array<T>` (utan element måste sammanhanget ange den, som i
   `(the Array<f64> #2A(()))`). Som S-uttrycksdata är det en `Array<Option<Sexpr>>`: varianten
-  `array` av `Sexpr`.
+  `Array` av `Sexpr`.
 - **Tupler**: `#{"foo" 123 45.6}`. Innehållet består bara av literaler och evalueras inte (`a` i
   `#{a b}` är en symbol). Varje elements typ bestäms av sammanhanget, position för position
   (`(the #{i32 f64} #{1 2.0})`), och utan sammanhang är den elementets egen typ (`#{"foo" 123}` är
   `#{string int}`). En tupel har 1 till 12 element. Varje evaluering skapar en ny tupel. För att
   bygga en av beräknade värden använder man `(tuple a b)`. Där S-uttrycksdata förväntas är det en
-  tupel vars element alla är data: varianten `tuple` av `Sexpr`.
+  tupel vars element alla är data: varianten `Tuple` av `Sexpr`.
 - **Attribut**: `#[test]` är en markering som hör till nästa form (skriven som i Rust). Det enda attributet hittills är `test`, och det sätts på en `defun` ([3.16 `#[test]`](#316-test--testfunktioner)). Läst med `read` blir det listan `(%internal::attribute (test) form)`.
 - **Den tomma listan `()`**: beroende på sammanhang värdet av typen `Unit` eller `None` i
   `Option<Sexpr>`. **`Sexpr` har ingen variant för den tomma listan**: `Sexpr` betyder "ett icke-tomt
@@ -1086,7 +1086,7 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
   1. Lokala (parametrar samt bindningarna i `let`, `labels`, `macrolet` och `symbol-macrolet`)
   2. Om modulnamnet `n` är ett makro, det makrot
   3. Konstruktorer och statiska metoder: de som tagits in med `use`, och konstruktorerna för `Sexpr`
-     (`sym`, `int` med flera) och för `Option`/`Result` som standardbiblioteket erbjuder
+     (`Sym`, `Int` med flera) och för `Option`/`Result` som standardbiblioteket erbjuder
   4. Metoden `n` hos typen för det första argumentet (metoder söks **bara utifrån typen hos det första
      argumentet**)
   5. Om modulnamnet `n` är en funktion eller en global variabel, den (för en global variabel anropas
@@ -1404,7 +1404,7 @@ Slag av mönster:
   typer som saknar literalsyntax (`defstruct`-instanser, globaler, beräknade resultat), och en
   användardefinierad `Equal`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
   som syns från grenens position (argument, yttre bindningar, globaler)
-- `(Ctor sub-pattern...)` — konstruktormönster (`(Some x)` `(None)` `(cons a d)` `(Ok v)` och så vidare)
+- `(Ctor sub-pattern...)` — konstruktormönster (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` och så vidare)
 - `(Type :slot pattern... :slot...)` — structmönster. Skriv platserna efter typnamnet som nyckelord. Följs
   ett nyckelord av ett mönster matchas platsen mot mönstret; följs det av ett annat nyckelord eller
   ingenting binds platsen till en variabel med samma namn. Platser som inte skrivs matchas inte (mönstret
@@ -1491,9 +1491,9 @@ för att skala bort `Option` behövs):
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; den tomma listan
     (_          9)))
 ```
@@ -1503,7 +1503,7 @@ allt. Att glömma `(None)` är ett fel om det inte finns en `_`. `(Some x)` kan 
 "något icke-tomt".
 
 Det här sockret gäller **exakt** bara `Option<Sexpr>`. För `Option<Option<Sexpr>>` skulle det vara oklart
-vilket lager `(int n)` skalade bort, så skriv två nivåer av `match` som vanligt.
+vilket lager `(Int n)` skalade bort, så skriv två nivåer av `match` som vanligt.
 
 Samma nedkastningsmönster kan användas som de är på **en trait-objekt-scrutinee (`:dyn Trait`, kapitel 2)**:
 `match` packar upp den och lämnar den sedan till `Sexpr`-mönstermaskineriet ovan, så ingen ytterligare
@@ -1816,7 +1816,7 @@ lexikalt efter `catch` runt sig, och når ett `catch` med samma tagg över hur m
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; om det inte hittas, värdet på slutet som vanligt
 ```
 

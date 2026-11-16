@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macro's
 
 Een macro is een functie die een programma neemt en een programma teruggeeft. Met macro's kun je
@@ -133,7 +133,7 @@ Laten we `my-and` maken, dat `true` teruggeeft als al zijn voorwaarden waar zijn
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; no arguments
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -143,7 +143,7 @@ Laten we `my-and` maken, dat `true` teruggeeft als al zijn voorwaarden waar zijn
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` is een patroon dat de kop van een lijst in `f` en de rest in `more` neemt.
+- `(Cons f more)` is een patroon dat de kop van een lijst in `f` en de rest in `more` neemt.
 - `sexpr-null` test of S-expressiedata de lege lijst is.
 - De laatste `_`-tak is nodig omdat S-expressiedata andere vormen heeft dan lijsten (getallen,
   strings enzovoort), en `match` eist dat ook die zijn gedekt. Een `&rest`-argument is altijd een

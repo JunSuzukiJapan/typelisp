@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Пари, S-вирази та послідовності
 
 Узагальнена пара `cons-cell`, дані у вигляді S-виразів `Sexpr`, символи, функції над послідовностями,
@@ -30,11 +30,11 @@ cons-комірки CL: `(cons 1 (cons "a" ()))` друкується як `(1 "
 ## 2. Дані у вигляді S-виразів `Sexpr`
 
 Тип даних `Sexpr`, що повертає `read`, має 19 варіантів:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` і `array` — це дані, записані як `#(..)` і `#nA(..)` (див. [довідник із
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` і `Array` — це дані, записані як `#(..)` і `#nA(..)` (див. [довідник із
 синтаксису](../syntax.md#1-лексичні-елементи)); вони містять відповідно `Vector<Option<Sexpr>>` і
-`Array<Option<Sexpr>>`, тож `len`, `get` та інше працюють просто з `v`, зв'язаним у `(vector v)`.
-`tuple` — дані, записані через `#{..}`, а `v`, яку зв'язує `(tuple v)`, — новий
+`Array<Option<Sexpr>>`, тож `len`, `get` та інше працюють просто з `v`, зв'язаним у `(Vector v)`.
+`Tuple` — дані, записані через `#{..}`, а `v`, яку зв'язує `(Tuple v)`, — новий
 `Vector<Option<Sexpr>>` з елементів (щоб кортеж будь-якої довжини приймався одним типом).
 Комірки S-виразів обробляються не загальними `cons`/`car`/`cdr` з розділу 1, а функціями `sexpr-*`. Їх
 використовують насамперед у тілах `defmacro` для побудови та розбору форм.
@@ -60,7 +60,7 @@ cons-комірки CL: `(cons 1 (cons "a" ()))` друкується як `(1 "
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Чи це порожній список |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Чи це не `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Чи це `Sym` (символ) |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Вміст варіанта `int` (fixnum або bignum). Panic на іншому типі |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Вміст варіанта `Int` (fixnum або bignum). Panic на іншому типі |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | Вміст варіанта цієї ширини. Panic на іншому типі |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Вміст варіантів з рухомою комою. Panic на іншому типі |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Вміст `Char`. Panic на іншому типі |
@@ -74,9 +74,9 @@ cons-комірки CL: `(cons 1 (cons "a" ()))` друкується як `(1 "
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | Новий список `Sexpr`, у якому `f` застосовано до кожного елемента списку `Sexpr` (`map` з розділу 4 призначений для `Iter` і не може обійти список `Sexpr`) |
 
 Є дев'ять числових засобів доступу, по одному на тип, бо `Sexpr` — це «єдине місце, де тип значення не
-записано більше ніде». `u8`, поміщений у `Sexpr`, потрапляє туди як варіант `u8` і виходить лише через
+записано більше ніде». `u8`, поміщений у `Sexpr`, потрапляє туди як варіант `U8` і виходить лише через
 `(sexpr-u8 s)`. Передача його в `(sexpr-int s)` спричиняє panic; відповідь ніколи не розширюється мовчки.
-Цілі числа в прочитаних даних (`'(1 2 3)`, аргументи макросів) належать до варіанта `int` і читаються
+Цілі числа в прочитаних даних (`'(1 2 3)`, аргументи макросів) належать до варіанта `Int` і читаються
 через `(sexpr-int s)`.
 
 Списки `Sexpr` не мають деструктивних операцій на кшталт `rplaca`/`nconc`. Комірку `Sexpr` не можна

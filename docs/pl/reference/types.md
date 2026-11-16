@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Typy
 
 Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy typ. Sposób zapisu typów opisano w
@@ -46,7 +46,7 @@ list `(T U ...)` (ten sam typ co `cons-cell<T,cons-cell<U,()>>`) ([Referencja sk
 
 | Typ | Zawartość | Szczegóły |
 |---|---|---|
-| `Sexpr` | Niepuste S-wyrażenie. 19 wariantów: `int`, od `i8` do `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
+| `Sexpr` | Niepuste S-wyrażenie. 19 wariantów: `Int`, od `I8` do `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
 | `Option<Sexpr>` | Dane w postaci S-wyrażeń w ogólności. Pusta lista `()` to `None` | Jak wyżej |
 
 ## 4. Typy w bibliotece standardowej

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makro
 
 Makro adalah fungsi yang menerima program dan mengembalikan program. Dengan makro Anda dapat membuat
@@ -131,7 +131,7 @@ Mari buat `my-and`, yang mengembalikan `true` jika semua kondisinya benar.
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; no arguments
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -141,7 +141,7 @@ Mari buat `my-and`, yang mengembalikan `true` jika semua kondisinya benar.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` adalah pola yang mengambil kepala daftar ke `f` dan sisanya ke `more`.
+- `(Cons f more)` adalah pola yang mengambil kepala daftar ke `f` dan sisanya ke `more`.
 - `sexpr-null` menguji apakah data S-expression adalah daftar kosong.
 - Cabang `_` terakhir diperlukan karena data S-expression memiliki bentuk selain daftar (bilangan,
   string, dan sebagainya), dan `match` mensyaratkan bentuk-bentuk itu tercakup juga. Argumen `&rest`

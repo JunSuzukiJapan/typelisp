@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -169,7 +169,7 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 ```
 
 - **返回值**：表达式时以 `Option<Sexpr>` 返回求值结果，定义时返回所定义名字的符号（与 CL 相同）。要使用结果，用 `match`
-  （`(int n)`/`(str s)`/…）拆解 `Sexpr`。
+  （`(Int n)`/`(Str s)`/…）拆解 `Sexpr`。
 - **由静态类型带来的区别（重要）**：CL 返回结果的实际值，但本语言只能把返回类型统一为 `Result<Option<Sexpr>,EvalError>`。另外，
   **静态书写的代码不能前向引用 `eval` 在运行时定义的名字**——直接写在文件中的 `(sq 9)` 会在定义 `sq` 的 `eval` 运行之前被检查，
   成为"未定义"。不过**之后的 `eval` 能看到它**（那个 `eval` 的类型检查在运行时、定义之后进行）。REPL 逐行检查和执行，所以用

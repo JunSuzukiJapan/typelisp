@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -103,7 +103,7 @@ dan de gehele types met vaste breedte (hoofdstuk 1), zonder impliciete conversie
 exacte verbreding vanuit een vaste breedte, en `(as i32 n)` / `(try-as i32 n)` zijn het afkappen /
 controleren vanuit `int` (dezelfde betekenis als `int->W` / `try-int->W` in hoofdstuk 1).
 
-De gehele variant van `Sexpr` is ook gewoon `int` (`(int n)` accepteert zowel fixnums als bignums).
+De gehele variant van `Sexpr` is ook gewoon `Int` (`(Int n)` accepteert zowel fixnums als bignums).
 
 Ingebouwde functies die een index of een aantal nemen (`substring`, `get` van `Vector`, het
 verschuivingsaantal van `ash` enzovoort) accepteren `int`, maar een waarde doorgeven die niet in een

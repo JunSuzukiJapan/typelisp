@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -69,19 +69,19 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   Tüm elemanlar aynı türde olmalıdır: `#(1 "a")` bir tür hatasıdır; eleman ve bağlam olmadan `#()`
   da öyledir. Her değerlendirme yeni bir vektör oluşturur. S-ifade verisi beklenen yerlerde
   (`(the Option<Sexpr> #(1 x))`, `'#(..)`, `read`'in döndürdüğü), tüm elemanları veri olan bir
-  `Vector<Option<Sexpr>>`'dir: `Sexpr`'in `vector` varyantı.
+  `Vector<Option<Sexpr>>`'dir: `Sexpr`'in `Vector` varyantı.
 - **Diziler**: `#2A((1 2) (3 4))` (CL'deki gibi). `#` ile `A` arasındaki sayı derecedir (rank) ve
   içerikteki liste iç içeliğinin o kadar ilk düzeyi boyutları verir. `#0A x`, tek eleman tutan sıfır
   boyutlu bir dizidir. Aynı düzeyde uzunlukları farklı listeler okuma hatasıdır. Tür, vektörlerdeki
   gibi belirlenir ve bir `Array<T>`'dir (eleman yoksa bağlam vermelidir, örneğin
   `(the Array<f64> #2A(()))`). S-ifade verisi olarak bir `Array<Option<Sexpr>>`'dir: `Sexpr`'in
-  `array` varyantı.
+  `Array` varyantı.
 - **Demetler**: `#{"foo" 123 45.6}`. İçeriğin tümü sabittir ve değerlendirilmez (`#{a b}` içindeki
   `a` bir semboldür). Her öğenin türü bağlam tarafından konum konum belirlenir
   (`(the #{i32 f64} #{1 2.0})`), bağlam yoksa öğenin kendi türüdür (`#{"foo" 123}`, `#{string int}`
   olur). Bir demetin 1 ile 12 arasında öğesi vardır. Her değerlendirme yeni bir demet oluşturur.
   Hesaplanmış değerlerden bir demet kurmak için `(tuple a b)` kullanılır. S-ifadesi verisi beklenen
-  yerlerde, tüm öğeleri veri olan bir demettir: `Sexpr`'in `tuple` varyantı.
+  yerlerde, tüm öğeleri veri olan bir demettir: `Sexpr`'in `Tuple` varyantı.
 - **Öznitelikler**: `#[test]`, sonraki forma bağlanan bir işarettir (Rust'taki gibi yazılır). Şimdilik tek öznitelik `test`'tir ve bir `defun` üzerine konur ([3.16 `#[test]`](#316-test--test-fonksiyonları)). `read` ile okunduğunda `(%internal::attribute (test) form)` listesi olur.
 - **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `None`'ı.
   **`Sexpr`'in boş liste varyantı yoktur**: `Sexpr`, "boş olmayan bir S-ifade" demektir ve S-ifade
@@ -1085,7 +1085,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
   1. Yereller (parametreler ve `let`, `labels`, `macrolet`, `symbol-macrolet` bağlamaları)
   2. `n` modül adı bir makroysa, o makro
   3. Yapıcılar ve statik metotlar: `use` ile getirilenler ve standart kütüphanenin sunduğu `Sexpr`
-     (`sym`, `int` vb.) ile `Option`/`Result` yapıcıları
+     (`Sym`, `Int` vb.) ile `Option`/`Result` yapıcıları
   4. İlk argümanın türünün `n` metodu (metotlar **yalnızca ilk argümanın türüne göre** aranır)
   5. `n` modül adı bir fonksiyon veya global değişkense, o (global değişkende değeri olan fonksiyon
      çağrılır)
@@ -1400,7 +1400,7 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   olmayan türleri (`defstruct` örnekleri, globaller, hesaplanan sonuçlar) karşılaştırmanın tek yolu ve
   kullanıcı tanımlı bir `Equal` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
-- `(Ctor sub-pattern...)` — yapıcı örüntüleri (`(Some x)` `(None)` `(cons a d)` `(Ok v)` vb.)
+- `(Ctor sub-pattern...)` — yapıcı örüntüleri (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` vb.)
 - `(Type :slot pattern... :slot...)` — yapı desenleri. Yuvaları tür adından sonra anahtar sözcük olarak
   yazın. Bir anahtar sözcüğü bir desen izliyorsa o yuva desenle eşleştirilir; ardından başka bir anahtar
   sözcük geliyor ya da hiçbir şey gelmiyorsa yuva kendi adındaki bir değişkene bağlanır. Yazılmayan
@@ -1487,9 +1487,9 @@ bir `match` gerekmez):
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; the empty list
     (_          9)))
 ```
@@ -1497,7 +1497,7 @@ bir `match` gerekmez):
 Kapsamlılık aynı düz evrende denetlenir: `Sexpr`'in 19 varyantı artı `None`, toplam 20. `_` yoksa
 `(None)`'ı unutmak hatadır. `(Some x)` de yazılabilir ve "boş olmayan bir şeyi" bağlar.
 
-Bu şeker **tam olarak** yalnızca `Option<Sexpr>`'e uygulanır. `Option<Option<Sexpr>>` için `(int n)`'in
+Bu şeker **tam olarak** yalnızca `Option<Sexpr>`'e uygulanır. `Option<Option<Sexpr>>` için `(Int n)`'in
 hangi katmanı soyduğu belirsiz olurdu; bu yüzden olağan şekilde iki düzey `match` yazın.
 
 Aynı aşağı dönüşüm örüntüleri, **bir trait nesnesi (`:dyn Trait`, 2. bölüm) denetlenen değerinde** olduğu
@@ -1815,7 +1815,7 @@ sözcüksel olarak aramaz ve istenen sayıda fonksiyon çağrısı boyunca aynı
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; if not found, the value at the end as usual
 ```
 

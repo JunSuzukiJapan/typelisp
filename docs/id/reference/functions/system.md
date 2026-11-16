@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -205,7 +205,7 @@ langsung didaftarkan ke lingkungan global secara permanen.
 
 - **Nilai kembalian**: untuk ekspresi, hasilnya sebagai `Option<Sexpr>`; untuk definisi, simbol nama
   yang didefinisikan (seperti di CL). Untuk memakai hasilnya, bongkar `Sexpr` dengan `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Perbedaan akibat tipe statis (penting)**: CL mengembalikan nilai sebenarnya dari hasil, tetapi di
   bahasa ini tipe kembalian hanya dapat seragam `Result<Option<Sexpr>,EvalError>`. Selain itu,
   **kode yang ditulis secara statis tidak dapat merujuk ke depan pada nama yang didefinisikan `eval`

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -83,7 +83,7 @@ CL의 `integer`이며 이 언어의 **정수**이다. 주석 없는 정수 리�
 폭에서의 정확한 확대이고, `(as i32 n)` / `(try-as i32 n)`은 `int`에서의 절단 / 검사이다(1장의 `int->W` / `try-int->W`와
 같은 의미).
 
-`Sexpr`의 정수 변형도 그냥 `int`이다(`(int n)`은 fixnum과 다배정도를 모두 받는다).
+`Sexpr`의 정수 변형도 그냥 `Int`이다(`(Int n)`은 fixnum과 다배정도를 모두 받는다).
 
 인덱스나 개수를 받는 내장 함수(`substring`, `Vector`의 `get`, `ash`의 시프트 양 등)는 `int`를 받지만 fixnum에 들어가지
 않는 값을 넘기면 실행 시 오류이다("an integer argument does not fit a fixnum").

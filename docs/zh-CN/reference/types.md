@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 类型一览
 
 typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的写法见[语法参考第 2 章](syntax.md#2-类型的写法)，各类型的
@@ -45,7 +45,7 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | 类型 | 内容 | 详情 |
 |---|---|---|
-| `Sexpr` | 非空的 S 表达式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array`、`tuple` 共 19 种变体 | [S 表达式数据](functions/sequences.md#2-s-表达式数据-sexpr) |
+| `Sexpr` | 非空的 S 表达式。`Int`、`I8` 至 `U32`、`F32`、`F64`、`Char`、`Bool`、`Sym`、`Str`、`Cons`、`Ratio`、`Path`、`Vector`、`Array`、`Tuple` 共 19 种变体 | [S 表达式数据](functions/sequences.md#2-s-表达式数据-sexpr) |
 | `Option<Sexpr>` | 一般的 S 表达式数据。空列表 `()` 是 `None` | 同上 |
 
 ## 4. 标准库中的类型

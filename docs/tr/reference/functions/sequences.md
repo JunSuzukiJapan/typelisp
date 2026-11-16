@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Çiftler, S-İfadeler ve Diziler
 
 Jenerik çift `cons-cell`, S-ifade verisi `Sexpr`, semboller, `Iter` üzerine yazılmış dizi fonksiyonları ve
@@ -31,11 +31,11 @@ cons'larıyla aynıdır: `(cons 1 (cons "a" ()))` `(1 "a")`, `(cons 3 1)` ise `(
 ## 2. S-ifade verisi `Sexpr`
 
 `read`'in döndürdüğü `Sexpr` veri türünün 19 varyantı vardır:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` ve `array`, `#(..)` ve `#nA(..)` olarak yazılmış verilerdir ([Sözdizimi
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` ve `Array`, `#(..)` ve `#nA(..)` olarak yazılmış verilerdir ([Sözdizimi
 Başvurusu](../syntax.md#1-sözcüksel-öğeler)); sırasıyla bir `Vector<Option<Sexpr>>` ve bir
-`Array<Option<Sexpr>>` tutarlar: `(vector v)`'nin bağladığı `v` üzerinde `len`, `get` ve diğerleri
-`tuple`, `#{..}` ile yazılmış veridir ve `(tuple v)`'nin bağladığı `v`, öğelerden oluşan yeni bir
+`Array<Option<Sexpr>>` tutarlar: `(Vector v)`'nin bağladığı `v` üzerinde `len`, `get` ve diğerleri
+`Tuple`, `#{..}` ile yazılmış veridir ve `(Tuple v)`'nin bağladığı `v`, öğelerden oluşan yeni bir
 `Vector<Option<Sexpr>>`'dir (her uzunluktaki demet tek bir türle alınsın diye).
 doğrudan çalışır.
 S-ifade hücreleri, 1. bölümün genel `cons`/`car`/`cdr`'siyle değil, `sexpr-*` fonksiyonlarıyla ele alınır.
@@ -61,7 +61,7 @@ Esas olarak `defmacro` gövdelerinde formları oluşturmak ve ayrıştırmak iç
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Boş liste olup olmadığı |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | `Cons` olmayıp olmadığı |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Bir `Sym` (sembol) olup olmadığı |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` varyantının içeriği (fixnum ya da bignum). Başka bir türde panic olur |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` varyantının içeriği (fixnum ya da bignum). Başka bir türde panic olur |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | O genişlikteki varyantın içeriği. Başka bir türde panic olur |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Kayan noktalı varyantların içeriği. Başka bir türde panic olur |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Bir `Char`'ın içeriği. Başka bir türde panic olur |
@@ -75,9 +75,9 @@ Esas olarak `defmacro` gövdelerinde formları oluşturmak ve ayrıştırmak iç
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | Bir `Sexpr` listesinin her elemanına `f` uygulanmış yeni bir `Sexpr` listesi (4. bölümün `map`'i `Iter` içindir ve bir `Sexpr` listesinde gezemez) |
 
 Tür başına bir tane olmak üzere dokuz sayısal erişimci vardır; çünkü bir `Sexpr`, "bir değerin türünün
-başka hiçbir yerde yazılmadığı tek yer"dir. Bir `Sexpr` içine konan bir `u8`, `u8` varyantı olarak girer ve
+başka hiçbir yerde yazılmadığı tek yer"dir. Bir `Sexpr` içine konan bir `u8`, `U8` varyantı olarak girer ve
 yalnızca `(sexpr-u8 s)` ile çıkar. Onu `(sexpr-int s)`'e geçirmek panic olur; yanıtı asla sessizce
-genişletmez. Okunan verideki tamsayılar (`'(1 2 3)`, makro bağımsız değişkenleri) `int` varyantındandır ve
+genişletmez. Okunan verideki tamsayılar (`'(1 2 3)`, makro bağımsız değişkenleri) `Int` varyantındandır ve
 `(sexpr-int s)` ile okunur.
 
 `Sexpr` listelerinin `rplaca`/`nconc` gibi yıkıcı işlemleri yoktur. Bir `Sexpr` hücresi oluşturulduktan

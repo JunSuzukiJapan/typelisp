@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Números
 
 Operações sobre inteiros, números de ponto flutuante, racionais, números complexos e booleanos, e outras
@@ -98,7 +98,7 @@ inteiros de largura fixa (capítulo 1), sem conversão implícita: `(as int x)` 
 uma largura fixa, e `(as i32 n)` / `(try-as i32 n)` são o truncamento / a verificação a partir de `int` (o
 mesmo significado de `int->W` / `try-int->W` do capítulo 1).
 
-A variante inteira de `Sexpr` também é simplesmente `int` (`(int n)` aceita tanto fixnums quanto bignums).
+A variante inteira de `Sexpr` também é simplesmente `Int` (`(Int n)` aceita tanto fixnums quanto bignums).
 
 As funções embutidas que recebem um índice ou uma contagem (`substring`, `get` de `Vector`, a quantidade de
 deslocamento de `ash` etc.) aceitam `int`, mas passar um valor que não cabe em um fixnum é um erro em tempo de

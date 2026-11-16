@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 巨集
 
 巨集是接收程式並回傳程式的函式。用巨集可以自己創造函式做不到的新語法。typelisp 的巨集與 Common Lisp 的 `defmacro` 是同一種機制。
@@ -118,7 +118,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; 沒有引數
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; 只有一個
          `(if ,f (my-and ,@more) false)))             ; 兩個以上
@@ -128,7 +128,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` 是把串列開頭取到 `f`、其餘取到 `more` 的模式。
+- `(Cons f more)` 是把串列開頭取到 `f`、其餘取到 `more` 的模式。
 - `sexpr-null` 判斷 S 運算式資料是否為空串列。
 - 最後的 `_` 分支是必要的，因為 S 運算式資料還有串列以外的形狀（數字、字串等），`match` 要求涵蓋它們。`&rest` 的引數一定是串列，
   所以這個分支實際上不會執行。

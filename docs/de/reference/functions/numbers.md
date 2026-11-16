@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -100,7 +100,7 @@ Es ist ein anderer Typ als die Ganzzahltypen fester Breite (Kapitel 1), ohne imp
 `(as int x)` ist die exakte Erweiterung von einer festen Breite, und `(as i32 n)` / `(try-as i32 n)` sind das
 Abschneiden / die Prüfung von `int` aus (dieselbe Bedeutung wie `int->W` / `try-int->W` in Kapitel 1).
 
-Die Ganzzahlvariante von `Sexpr` ist ebenfalls einfach `int` (`(int n)` akzeptiert sowohl Fixnums als auch
+Die Ganzzahlvariante von `Sexpr` ist ebenfalls einfach `Int` (`(Int n)` akzeptiert sowohl Fixnums als auch
 Bignums).
 
 Eingebaute Funktionen, die einen Index oder eine Anzahl nehmen (`substring`, `get` von `Vector`, die

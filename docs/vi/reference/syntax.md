@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -64,18 +64,18 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   cùng kiểu: `#(1 "a")` là lỗi kiểu, `#()` không có phần tử lẫn ngữ cảnh cũng vậy. Mỗi lần đánh giá
   tạo ra một vector mới. Ở chỗ mong đợi dữ liệu S-expression (`(the Option<Sexpr> #(1 x))`,
   `'#(..)`, thứ `read` trả về), nó là `Vector<Option<Sexpr>>` mà mọi phần tử đều là dữ liệu: variant
-  `vector` của `Sexpr`.
+  `Vector` của `Sexpr`.
 - **Mảng**: `#2A((1 2) (3 4))` (giống CL). Số giữa `#` và `A` là hạng, và chừng ấy tầng lồng nhau
   đầu tiên của các danh sách trong nội dung là các chiều. `#0A x` là mảng không chiều chứa một phần
   tử. Các danh sách cùng tầng có độ dài khác nhau là lỗi đọc. Kiểu được quyết định như với vector và
   là `Array<T>` (khi không có phần tử, ngữ cảnh phải cho kiểu, như `(the Array<f64> #2A(()))`). Dưới
-  dạng dữ liệu S-expression nó là `Array<Option<Sexpr>>`: variant `array` của `Sexpr`.
+  dạng dữ liệu S-expression nó là `Array<Option<Sexpr>>`: variant `Array` của `Sexpr`.
 - **Tuple**: `#{"foo" 123 45.6}`. Nội dung toàn là literal và không được đánh giá (`a` của `#{a b}`
   là một ký hiệu). Kiểu của mỗi phần tử do ngữ cảnh quyết định theo từng vị trí
   (`(the #{i32 f64} #{1 2.0})`), và khi không có ngữ cảnh thì là kiểu của chính phần tử
   (`#{"foo" 123}` là `#{string int}`). Một tuple có từ 1 đến 12 phần tử. Mỗi lần đánh giá tạo ra một
   tuple mới. Để dựng từ các giá trị đã tính, dùng `(tuple a b)`. Ở nơi mong đợi dữ liệu
-  S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `tuple` của `Sexpr`.
+  S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `Tuple` của `Sexpr`.
 - **Thuộc tính**: `#[test]` là một dấu gắn vào dạng tiếp theo (viết như trong Rust). Hiện chỉ có một thuộc tính là `test`, và nó đặt lên một `defun` ([3.16 `#[test]`](#316-test--hàm-kiểm-thử)). Khi đọc bằng `read`, nó trở thành danh sách `(%internal::attribute (test) form)`.
 - **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `None` của `Option<Sexpr>`.
   **`Sexpr` không có variant danh sách rỗng**: `Sexpr` nghĩa là "một S-expression không rỗng", và kiểu của dữ
@@ -1059,7 +1059,7 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
   1. Biến cục bộ (tham số, và các ràng buộc của `let`, `labels`, `macrolet` và `symbol-macrolet`)
   2. Nếu tên module `n` là một macro, macro đó
   3. Hàm khởi tạo và phương thức tĩnh: những cái được đưa vào bằng `use`, và hàm khởi tạo của `Sexpr`
-     (`sym`, `int`, v.v.) cùng của `Option`/`Result` mà thư viện chuẩn cung cấp
+     (`Sym`, `Int`, v.v.) cùng của `Option`/`Result` mà thư viện chuẩn cung cấp
   4. Phương thức `n` của kiểu đối số đầu tiên (phương thức được tìm **chỉ theo kiểu của đối số đầu
      tiên**)
   5. Nếu tên module `n` là một hàm hoặc biến toàn cục, thì đó (với biến toàn cục, hàm là giá trị của nó
@@ -1367,7 +1367,7 @@ Các loại mẫu:
   không có cú pháp literal (các thể hiện `defstruct`, biến toàn cục, kết quả được tính), và một triển khai `Equal`
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
-- `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`(Some x)` `(None)` `(cons a d)` `(Ok v)`, v.v.)
+- `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`(Some x)` `(None)` `(Cons a d)` `(Ok v)`, v.v.)
 - `(Type :slot pattern... :slot...)` — mẫu struct. Viết các slot sau tên kiểu dưới dạng từ khóa. Nếu sau
   từ khóa là một mẫu, slot đó được so khớp với mẫu; nếu sau đó là một từ khóa khác hoặc không có gì, slot
   được ràng buộc với một biến cùng tên. Các slot không viết không được so khớp (mẫu không phụ thuộc vào
@@ -1451,9 +1451,9 @@ danh sách rỗng không phải một variant của `Sexpr` mà là `None` của
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; danh sách rỗng
     (_          9)))
 ```
@@ -1462,7 +1462,7 @@ Tính đầy đủ được kiểm tra trong cùng vũ trụ phẳng đó: 19 va
 `(None)` là lỗi trừ khi có một `_`. `(Some x)` cũng có thể viết và gán "một thứ không rỗng".
 
 Đường cú pháp này áp dụng **chính xác** chỉ cho `Option<Sexpr>`. Với `Option<Option<Sexpr>>`, sẽ không rõ
-`(int n)` đã bóc lớp nào, nên hãy viết hai tầng `match` như thường.
+`(Int n)` đã bóc lớp nào, nên hãy viết hai tầng `match` như thường.
 
 Các mẫu downcast tương tự có thể dùng nguyên trạng trên **một đối tượng trait object (`:dyn Trait`, chương
 2)**: `match` mở hộp nó rồi đưa cho bộ máy mẫu `Sexpr` ở trên, nên không có cú pháp bổ sung. Tập các kiểu triển
@@ -1771,7 +1771,7 @@ nghĩa từ vựng, và với tới một `catch` cùng tag xuyên qua bất k�
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; nếu không tìm thấy, giá trị ở cuối như thường lệ
 ```
 

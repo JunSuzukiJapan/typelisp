@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -71,19 +71,19 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   `Vector<int>`). Semua elemen harus bertipe sama: `#(1 "a")` adalah galat tipe, begitu pula `#()`
   tanpa elemen dan tanpa konteks. Setiap evaluasi membuat vektor baru. Di tempat yang mengharapkan
   data S-expression (`(the Option<Sexpr> #(1 x))`, `'#(..)`, hasil `read`), ia menjadi
-  `Vector<Option<Sexpr>>` yang semua elemennya data: varian `vector` dari `Sexpr`.
+  `Vector<Option<Sexpr>>` yang semua elemennya data: varian `Vector` dari `Sexpr`.
 - **Array**: `#2A((1 2) (3 4))` (seperti di CL). Angka di antara `#` dan `A` adalah rank, dan
   sejumlah itu tingkat pertama sarang list dalam isinya menjadi dimensi-dimensinya. `#0A x` adalah
   array berdimensi nol yang memuat satu elemen. List pada tingkat yang sama dengan panjang berbeda
   adalah galat pembacaan. Tipenya ditentukan seperti vektor dan berupa `Array<T>` (tanpa elemen,
   konteks harus memberikannya, seperti `(the Array<f64> #2A(()))`). Sebagai data S-expression ia
-  adalah `Array<Option<Sexpr>>`: varian `array` dari `Sexpr`.
+  adalah `Array<Option<Sexpr>>`: varian `Array` dari `Sexpr`.
 - **Tuple**: `#{"foo" 123 45.6}`. Isinya semuanya literal dan tidak dievaluasi (`a` pada `#{a b}`
   adalah simbol). Tipe setiap elemen ditentukan oleh konteks, posisi demi posisi
   (`(the #{i32 f64} #{1 2.0})`), dan tanpa konteks adalah tipe elemen itu sendiri (`#{"foo" 123}`
   adalah `#{string int}`). Tuple memiliki 1 sampai 12 elemen. Setiap evaluasi membuat tuple baru.
   Untuk membangunnya dari nilai yang dihitung, gunakan `(tuple a b)`. Di tempat yang mengharapkan
-  data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `tuple` dari `Sexpr`.
+  data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `Tuple` dari `Sexpr`.
 - **Atribut**: `#[test]` adalah tanda yang melekat pada bentuk berikutnya (ditulis seperti di Rust). Satu-satunya atribut sejauh ini adalah `test`, dan dipasang pada `defun` ([3.16 `#[test]`](#316-test--fungsi-uji)). Jika dibaca dengan `read`, ia menjadi daftar `(%internal::attribute (test) form)`.
 - **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `None` pada `Option<Sexpr>`.
   **`Sexpr` tidak memiliki varian daftar kosong**: `Sexpr` berarti "S-expression tak kosong", dan
@@ -1126,8 +1126,8 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 - Resolusi nama polos `n` (di posisi pemanggilan `(n a ...)`; nama bentuk khusus ditetapkan sebelumnya):
   1. Lokal (parameter, dan pengikatan `let`, `labels`, `macrolet`, serta `symbol-macrolet`)
   2. Jika nama modul `n` adalah makro, makro itu
-  3. Konstruktor dan metode statis: yang dibawa masuk dengan `use`, serta konstruktor `Sexpr` (`sym`,
-     `int`, dan sebagainya) dan `Option`/`Result` yang ditawarkan pustaka standar
+  3. Konstruktor dan metode statis: yang dibawa masuk dengan `use`, serta konstruktor `Sexpr` (`Sym`,
+     `Int`, dan sebagainya) dan `Option`/`Result` yang ditawarkan pustaka standar
   4. Metode `n` dari tipe argumen pertama (metode dicari **hanya berdasarkan tipe argumen pertama**)
   5. Jika nama modul `n` adalah fungsi atau variabel global, itulah (untuk variabel global, fungsi yang
      menjadi nilainya dipanggil)
@@ -1456,7 +1456,7 @@ Jenis pola:
   membandingkan tipe yang tidak memiliki sintaks literal (instans `defstruct`, variabel global, hasil
   komputasi), dan implementasi `Equal` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
-- `(Ctor sub-pattern...)` — pola konstruktor (`(Some x)` `(None)` `(cons a d)` `(Ok v)` dan sebagainya)
+- `(Ctor sub-pattern...)` — pola konstruktor (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` dan sebagainya)
 - `(Type :slot pattern... :slot...)` — pola struct. Tulis slot setelah nama tipe sebagai kata kunci. Jika
   sebuah kata kunci diikuti pola, slot itu dicocokkan dengan pola tersebut; jika diikuti kata kunci lain
   atau tidak ada apa-apa, slot diikat ke variabel bernama sama. Slot yang tidak ditulis tidak dicocokkan
@@ -1545,9 +1545,9 @@ daftar kosong bukan varian `Sexpr` melainkan `None` pada `Option`. Jadi ketika m
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; the empty list
     (_          9)))
 ```
@@ -1557,7 +1557,7 @@ Melupakan `(None)` adalah kesalahan kecuali ada `_`. `(Some x)` juga dapat ditul
 "sesuatu yang tak kosong".
 
 Gula sintaks ini berlaku **tepat** hanya untuk `Option<Sexpr>`. Untuk `Option<Option<Sexpr>>`, tidak
-jelas lapisan mana yang dikupas `(int n)`, jadi tulis dua tingkat `match` seperti biasa.
+jelas lapisan mana yang dikupas `(Int n)`, jadi tulis dua tingkat `match` seperti biasa.
 
 Pola downcast yang sama dapat dipakai apa adanya pada **scrutinee objek trait (`:dyn Trait`, bab 2)**:
 `match` membuka kotaknya lalu menyerahkannya ke mesin pola `Sexpr` di atas, sehingga tidak ada
@@ -1882,7 +1882,7 @@ fungsi.
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; if not found, the value at the end as usual
 ```
 

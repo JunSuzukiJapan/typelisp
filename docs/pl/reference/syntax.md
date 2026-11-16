@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -68,19 +68,19 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
   ten sam typ: `#(1 "a")` jest błędem typu, podobnie jak `#()` bez elementów i bez kontekstu. Każde
   obliczenie tworzy nowy wektor. Tam, gdzie oczekiwane są dane w postaci S-wyrażeń
   (`(the Option<Sexpr> #(1 x))`, `'#(..)`, to, co zwraca `read`), jest to `Vector<Option<Sexpr>>`,
-  którego wszystkie elementy są danymi: wariant `vector` typu `Sexpr`.
+  którego wszystkie elementy są danymi: wariant `Vector` typu `Sexpr`.
 - **Tablice**: `#2A((1 2) (3 4))` (tak jak w CL). Liczba między `#` a `A` to ranga, a tyle samo
   pierwszych poziomów zagnieżdżenia list w zawartości to wymiary. `#0A x` to tablica zerowymiarowa z
   jednym elementem. Listy na tym samym poziomie o różnych długościach są błędem odczytu. Typ ustala
   się tak jak dla wektorów i jest to `Array<T>` (bez elementów musi go podać kontekst, jak w
   `(the Array<f64> #2A(()))`). Jako dane w postaci S-wyrażeń jest to `Array<Option<Sexpr>>`: wariant
-  `array` typu `Sexpr`.
+  `Array` typu `Sexpr`.
 - **Krotki**: `#{"foo" 123 45.6}`. Zawartość to same literały i nie jest obliczana (`a` w `#{a b}`
   to symbol). Typ każdego elementu ustala kontekst, pozycja po pozycji
   (`(the #{i32 f64} #{1 2.0})`), a bez kontekstu jest to własny typ elementu (`#{"foo" 123}` to
   `#{string int}`). Krotka ma od 1 do 12 elementów. Każde obliczenie tworzy nową krotkę. Aby
   zbudować ją z obliczonych wartości, używa się `(tuple a b)`. Tam, gdzie oczekiwane są dane
-  S-wyrażeń, jest to krotka, której wszystkie elementy są danymi: wariant `tuple` typu `Sexpr`.
+  S-wyrażeń, jest to krotka, której wszystkie elementy są danymi: wariant `Tuple` typu `Sexpr`.
 - **Atrybuty**: `#[test]` to znacznik dołączony do następnej formy (zapisywany jak w Rust). Jedynym atrybutem jest na razie `test`, który umieszcza się na `defun` ([3.16 `#[test]`](#316-test--funkcje-testowe)). Odczytany przez `read` staje się listą `(%internal::attribute (test) form)`.
 - **Pusta lista `()`**: zależnie od kontekstu wartość typu `Unit` lub `None` z
   `Option<Sexpr>`. **`Sexpr` nie ma wariantu pustej listy**: `Sexpr` oznacza „niepuste S-wyrażenie",
@@ -1086,7 +1086,7 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
   wcześniej):
   1. Lokalne (parametry oraz wiązania `let`, `labels`, `macrolet` i `symbol-macrolet`)
   2. Jeśli nazwa modułu `n` jest makrem, to makro
-  3. Konstruktory i metody statyczne: dołączone przez `use` oraz konstruktory `Sexpr` (`sym`, `int`
+  3. Konstruktory i metody statyczne: dołączone przez `use` oraz konstruktory `Sexpr` (`Sym`, `Int`
      itd.) i `Option`/`Result` udostępniane przez bibliotekę standardową
   4. Metoda `n` typu pierwszego argumentu (metod szuka się **tylko według typu pierwszego argumentu**)
   5. Jeśli nazwa modułu `n` jest funkcją lub zmienną globalną, to ona (dla zmiennej globalnej wywoływana
@@ -1404,7 +1404,7 @@ Rodzaje wzorców:
   które nie mają składni literałów (instancje `defstruct`, zmienne globalne, obliczone wyniki), a zdefiniowana przez użytkownika
   implementacja `Equal` staje się regułą porównania bez zmian. `expr` może odwoływać się do wszystkiego, co jest widoczne z
   pozycji ramienia (argumenty, zewnętrzne wiązania, zmienne globalne)
-- `(Ctor sub-pattern...)` — wzorce konstruktorów (`(Some x)` `(None)` `(cons a d)` `(Ok v)` i tak dalej)
+- `(Ctor sub-pattern...)` — wzorce konstruktorów (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` i tak dalej)
 - `(Type :slot pattern... :slot...)` — wzorce struktur. Po nazwie typu zapisz sloty jako słowa kluczowe.
   Jeśli po słowie kluczowym następuje wzorzec, slot jest dopasowywany do tego wzorca; jeśli następuje inne
   słowo kluczowe lub nic, slot jest wiązany ze zmienną o tej samej nazwie. Niezapisane sloty nie są
@@ -1491,9 +1491,9 @@ pusta lista nie jest wariantem `Sexpr`, lecz `None` z `Option`. Zatem przy dopas
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; pusta lista
     (_          9)))
 ```
@@ -1503,7 +1503,7 @@ Zapomnienie `(None)` jest błędem, chyba że jest `_`. Można też zapisać `(S
 niepustego".
 
 Ten lukier dotyczy **dokładnie** tylko `Option<Sexpr>`. Dla `Option<Option<Sexpr>>` nie byłoby jasne,
-którą warstwę zdjęło `(int n)`, więc zapisz dwa poziomy `match` jak zwykle.
+którą warstwę zdjęło `(Int n)`, więc zapisz dwa poziomy `match` jak zwykle.
 
 Te same wzorce rzutowania w dół można stosować bez zmian względem **badanej wartości będącej obiektem traitu (`:dyn Trait`, rozdział 2)**:
 `match` ją rozpakowuje, a potem przekazuje do powyższego mechanizmu wzorców `Sexpr`, więc nie ma
@@ -1816,7 +1816,7 @@ otaczającego `catch` i sięga do `catch` o tym samym znaczniku przez dowolną l
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; jeśli nie znaleziono, wartość na końcu jak zwykle
 ```
 

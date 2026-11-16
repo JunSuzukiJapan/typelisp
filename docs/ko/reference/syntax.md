@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -46,15 +46,15 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   정해지고(`(the Vector<i32> #(1 2))`), 문맥이 없으면 첫 요소의 타입이 된다(`#(1 2 3)`은 `Vector<int>`). 요소의 타입은 모두 같아야
   하며 `#(1 "a")`는 타입 오류다. 요소도 문맥도 없는 `#()`도 타입 오류다. 평가할 때마다 새 벡터가 만들어진다. S 식 데이터가 기대되는
   곳(`(the Option<Sexpr> #(1 x))`, `'#(..)`, `read`로 읽은 것)에서는 요소가 모두 데이터인 `Vector<Option<Sexpr>>`, 곧
-  `Sexpr`의 `vector` 변형이 된다.
+  `Sexpr`의 `Vector` 변형이 된다.
 - **배열**: `#2A((1 2) (3 4))`(CL과 같다). `#`와 `A` 사이의 수가 차원 수이고, 내용 리스트의 중첩 중 처음 그 수만큼의 단이 각 차원이 된다.
   `#0A x`는 요소 하나를 가진 0차원 배열이다. 같은 단의 리스트 길이가 다르면 읽기 오류다. 타입은 벡터와 같은 방식으로 정해져 `Array<T>`가 된다(요소가 없으면
-  `(the Array<f64> #2A(()))`처럼 문맥이 필요하다). S 식 데이터로서는 `Array<Option<Sexpr>>`, 곧 `Sexpr`의 `array` 변형이
+  `(the Array<f64> #2A(()))`처럼 문맥이 필요하다). S 식 데이터로서는 `Array<Option<Sexpr>>`, 곧 `Sexpr`의 `Array` 변형이
   된다.
 - **튜플**: `#{"foo" 123 45.6}`. 내용은 모두 리터럴이며 평가하지 않는다(`#{a b}`의 `a`는 기호). 각 요소의 타입은 위치마다 문맥으로
   정해지고(`(the #{i32 f64} #{1 2.0})`), 문맥이 없으면 각 요소 자신의 타입이 된다(`#{"foo" 123}`는 `#{string int}`). 요소는
   1~12개. 평가할 때마다 새 튜플이 만들어진다. 계산한 값으로 만들려면 `(tuple a b)`를 쓴다. S 식 데이터가 기대되는 곳에서는 요소가 모두 데이터인 튜플, 곧
-  `Sexpr`의 `tuple` 변형이 된다.
+  `Sexpr`의 `Tuple` 변형이 된다.
 - **속성**: `#[test]`는 다음 폼에 붙는 표시입니다(Rust와 같은 표기). 현재 속성은 `test` 하나뿐이며 `defun`에 붙입니다([3.16 `#[test]`](#316-test--테스트-함수)). `read`로 읽으면 `(%internal::attribute (test) form)`이라는 리스트가 됩니다.
 - **빈 리스트 `()`**: 문맥에 따라 `Unit` 타입의 값이거나 `Option<Sexpr>`의 `None`이다. **`Sexpr`에는 빈 리스트 변형이
   없다.** `Sexpr`는 "비어 있지 않은 S 식"을 뜻하며, S 식 데이터의 타입은 `Option<Sexpr>`이다([4.3 match](#43-match--패턴-매칭)의
@@ -936,7 +936,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 - 맨 이름 `n`의 해석(호출 `(n a ...)`의 위치. 특수 형식의 이름은 이보다 먼저 정해진다):
   1. 지역(인수, `let`·`labels`·`macrolet`·`symbol-macrolet`의 바인딩)
   2. 모듈의 이름 `n`이 매크로라면 그 매크로
-  3. 생성자와 정적 메서드: `use`로 들여온 것, 표준 라이브러리가 공개하는 `Sexpr`의 생성자(`sym`, `int` 등)와 `Option`/`Result`의 생성자
+  3. 생성자와 정적 메서드: `use`로 들여온 것, 표준 라이브러리가 공개하는 `Sexpr`의 생성자(`Sym`, `Int` 등)와 `Option`/`Result`의 생성자
   4. 첫 번째 인수의 타입의 메서드 `n`(메서드는 **첫 번째 인수의 타입만**으로 찾는다)
   5. 모듈의 이름 `n`이 함수나 전역 변수라면 그것(전역 변수라면 그 값인 함수를 호출한다)
 
@@ -1216,7 +1216,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `(:= expr)` — 아무 식이나 평가해 `equal`로 비교한다. 리터럴 구문이 없는 타입(`defstruct` 인스턴스, 전역 변수, 계산
   결과)을 비교하는 유일한 방법이며, 사용자 정의 `Equal` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
   모든 것(인수, 바깥 바인딩, 전역 변수)을 참조할 수 있다
-- `(Ctor sub-pattern...)` — 생성자 패턴(`(Some x)` `(None)` `(cons a d)` `(Ok v)` 등)
+- `(Ctor sub-pattern...)` — 생성자 패턴(`(Some x)` `(None)` `(Cons a d)` `(Ok v)` 등)
 - `(Type :slot pattern... :slot...)` — 구조체의 패턴. 타입 이름 뒤에 슬롯을 키워드로 쓴다. 키워드
   다음이 패턴이면 그 슬롯을 그 패턴으로 대조하고, 다음이 키워드이거나 끝이면 슬롯을 같은 이름의 변수에
   바인딩한다. 쓰지 않은 슬롯은 대조하지 않는다(필드의 수나 순서에 의존하지 않는다):
@@ -1287,9 +1287,9 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; 빈 리스트
     (_          9)))
 ```
@@ -1297,7 +1297,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 망라성도 같은 평평한 전체 집합 — `Sexpr`의 19개 변형에 `None`을 더한 20개 — 에서 검사된다. `(None)`을 잊으면 `_`가 없는 한
 오류이다. `(Some x)`도 쓸 수 있으며 "비어 있지 않은 무언가"를 묶는다.
 
-이 편의 표기는 **정확히** `Option<Sexpr>`에만 적용된다. `Option<Option<Sexpr>>`에서는 `(int n)`이 어느 층을 벗겼는지 정할 수
+이 편의 표기는 **정확히** `Option<Sexpr>`에만 적용된다. `Option<Option<Sexpr>>`에서는 `(Int n)`이 어느 층을 벗겼는지 정할 수
 없으므로 평소처럼 `match`를 두 겹으로 쓴다.
 
 **트레이트 객체(`:dyn Trait`, 2장)의 검사 대상**에도 같은 다운캐스트 패턴을 그대로 쓸 수 있다. `match`가 상자를 연 뒤 위의
@@ -1589,7 +1589,7 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; 찾지 못하면 평소대로 마지막 값
 ```
 

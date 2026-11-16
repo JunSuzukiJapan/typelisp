@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -96,7 +96,7 @@ literal จำนวนเต็มที่ไม่มีคำอธิบา
 `(try-as i32 n)` คือการตัดทอน / การตรวจสอบจาก `int` (ความหมายเดียวกับ `int->W` / `try-int->W`
 ในบทที่ 1)
 
-variant จำนวนเต็มของ `Sexpr` ก็เป็นเพียง `int` (`(int n)` รับทั้ง fixnum และ bignum)
+variant จำนวนเต็มของ `Sexpr` ก็เป็นเพียง `Int` (`(Int n)` รับทั้ง fixnum และ bignum)
 
 ฟังก์ชันที่มีให้ในตัวที่รับดัชนีหรือจำนวนนับ (`substring`, `get` ของ `Vector`, จำนวนการเลื่อนของ `ash` และ
 อื่น ๆ) รับ `int` แต่การส่งค่าที่ไม่พอดี fixnum เป็นข้อผิดพลาดตอนรัน ("an integer

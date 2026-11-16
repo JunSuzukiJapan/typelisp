@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -69,21 +69,21 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   `Vector<int>`). Alle elementen moeten hetzelfde type hebben: `#(1 "a")` is een typefout, net als
   `#()` zonder elementen en zonder context. Elke evaluatie maakt een nieuwe vector. Waar
   S-expressiedata worden verwacht (`(the Option<Sexpr> #(1 x))`, `'#(..)`, wat `read` teruggeeft),
-  is het een `Vector<Option<Sexpr>>` waarvan alle elementen data zijn: de variant `vector` van
+  is het een `Vector<Option<Sexpr>>` waarvan alle elementen data zijn: de variant `Vector` van
   `Sexpr`.
 - **Arrays**: `#2A((1 2) (3 4))` (zoals in CL). Het getal tussen `#` en `A` is de rang, en evenveel
   eerste niveaus van lijstnesting in de inhoud zijn de dimensies. `#0A x` is een nuldimensionale
   array met één element. Lijsten op hetzelfde niveau met verschillende lengtes zijn een leesfout.
   Het type wordt bepaald zoals bij vectoren en is een `Array<T>` (zonder elementen moet de context
   het geven, zoals in `(the Array<f64> #2A(()))`). Als S-expressiedata is het een
-  `Array<Option<Sexpr>>`: de variant `array` van `Sexpr`.
+  `Array<Option<Sexpr>>`: de variant `Array` van `Sexpr`.
 - **Tuples**: `#{"foo" 123 45.6}`. De inhoud bestaat geheel uit literals en wordt niet geëvalueerd
   (de `a` van `#{a b}` is een symbool). Het type van elk element wordt per positie door de context
   bepaald (`(the #{i32 f64} #{1 2.0})`), en zonder context is het het eigen type van het element
   (`#{"foo" 123}` is `#{string int}`). Een tuple heeft 1 tot 12 elementen. Elke evaluatie maakt een
   nieuwe tuple. Om er een te bouwen uit berekende waarden gebruik je `(tuple a b)`. Waar
   S-expressiedata worden verwacht, is het een tuple waarvan alle elementen data zijn: de variant
-  `tuple` van `Sexpr`.
+  `Tuple` van `Sexpr`.
 - **Attributen**: `#[test]` is een markering die aan de volgende vorm vastzit (geschreven zoals in Rust). Het enige attribuut tot nu toe is `test`, en dat hoort bij een `defun` ([3.16 `#[test]`](#316-test--testfuncties)). Gelezen met `read` wordt het de lijst `(%internal::attribute (test) form)`.
 - **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `None` van
   `Option<Sexpr>`. **`Sexpr` heeft geen variant voor de lege lijst**: `Sexpr` betekent "een niet-lege
@@ -1128,7 +1128,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   1. Lokalen (parameters, en de bindingen van `let`, `labels`, `macrolet` en `symbol-macrolet`)
   2. Als de modulenaam `n` een macro is, die macro
   3. Constructors en statische methoden: de met `use` binnengehaalde, en de constructors van `Sexpr`
-     (`sym`, `int` enzovoort) en van `Option`/`Result` die de standaardbibliotheek aanbiedt
+     (`Sym`, `Int` enzovoort) en van `Option`/`Result` die de standaardbibliotheek aanbiedt
   4. De methode `n` van het type van het eerste argument (methoden worden **alleen via het type van het
      eerste argument** gezocht)
   5. Als de modulenaam `n` een functie of een globale variabele is, die (bij een globale variabele wordt de
@@ -1461,7 +1461,7 @@ Soorten patronen:
   berekende resultaten), en een door de gebruiker gedefinieerde `Equal`-implementatie wordt zoals ze is de
   vergelijkingsregel. `expr` kan naar alles verwijzen wat zichtbaar is vanaf de positie van de tak
   (argumenten, buitenste bindingen, globale variabelen)
-- `(Ctor sub-pattern...)` — constructorpatronen (`(Some x)` `(None)` `(cons a d)` `(Ok v)` enzovoort)
+- `(Ctor sub-pattern...)` — constructorpatronen (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` enzovoort)
 - `(Type :slot pattern... :slot...)` — structpatronen. Schrijf de slots na de typenaam als sleutelwoorden.
   Volgt op een sleutelwoord een patroon, dan wordt dat slot met het patroon vergeleken; volgt er een ander
   sleutelwoord of niets, dan wordt het slot gebonden aan een variabele met zijn eigen naam. Niet-geschreven
@@ -1550,9 +1550,9 @@ matcht, kunnen de 19 varianten van `Sexpr` en `None` **plat in dezelfde lijst ta
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; the empty list
     (_          9)))
 ```
@@ -1562,7 +1562,7 @@ Volledigheid wordt in hetzelfde platte universum gecontroleerd: de 19 varianten 
 bindt "iets niet-leegs".
 
 Deze suiker is **precies** alleen van toepassing op `Option<Sexpr>`. Bij `Option<Option<Sexpr>>` zou
-onduidelijk zijn welke laag `(int n)` afpelde, dus schrijf twee niveaus `match` zoals gebruikelijk.
+onduidelijk zijn welke laag `(Int n)` afpelde, dus schrijf twee niveaus `match` zoals gebruikelijk.
 
 Dezelfde downcast-patronen kunnen zoals ze zijn worden gebruikt op **een scrutinee van een trait-object
 (`:dyn Trait`, hoofdstuk 2)**: `match` pakt het uit en geeft het dan aan de bovenstaande
@@ -1887,7 +1887,7 @@ functieaanroepen heen.
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; if not found, the value at the end as usual
 ```
 

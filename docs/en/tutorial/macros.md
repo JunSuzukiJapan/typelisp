@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macros
 
 A macro is a function that takes a program and returns a program. Macros let you create new syntax
@@ -129,7 +129,7 @@ Let us make `my-and`, which returns `true` if all its conditions are true.
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; no arguments
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -139,7 +139,7 @@ Let us make `my-and`, which returns `true` if all its conditions are true.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` is a pattern that takes the head of a list into `f` and the rest into `more`.
+- `(Cons f more)` is a pattern that takes the head of a list into `f` and the rest into `more`.
 - `sexpr-null` tests whether S-expression data is the empty list.
 - The final `_` arm is needed because S-expression data has forms other than lists (numbers,
   strings and so on), and `match` requires those to be covered too. A `&rest` argument is always a

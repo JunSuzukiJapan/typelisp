@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makrolar
 
 Bir makro, bir program alıp bir program döndüren fonksiyondur. Makrolar, fonksiyonların ifade
@@ -129,7 +129,7 @@ Tüm koşulları doğruysa `true` döndüren `my-and`'i yapalım.
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; no arguments
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; just one
          `(if ,f (my-and ,@more) false)))             ; two or more
@@ -139,7 +139,7 @@ Tüm koşulları doğruysa `true` döndüren `my-and`'i yapalım.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)`, bir listenin başını `f`'ye, geri kalanını `more`'a alan bir örüntüdür.
+- `(Cons f more)`, bir listenin başını `f`'ye, geri kalanını `more`'a alan bir örüntüdür.
 - `sexpr-null`, S-ifade verisinin boş liste olup olmadığını sınar.
 - Son `_` kolu gereklidir, çünkü S-ifade verisinin listelerden başka biçimleri de vardır (sayılar,
   string'ler vb.) ve `match` bunların da kapsanmasını ister. Bir `&rest` bağımsız değişkeni her

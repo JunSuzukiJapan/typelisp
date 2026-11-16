@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -70,21 +70,21 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
   ist ein `Vector<int>`). Alle Elemente müssen denselben Typ haben: `#(1 "a")` ist ein Typfehler,
   ebenso `#()` ohne Elemente und ohne Kontext. Jede Auswertung erzeugt einen neuen Vektor. Wo
   S-Ausdrucksdaten erwartet werden (`(the Option<Sexpr> #(1 x))`, `'#(..)`, was `read` liefert), ist
-  er ein `Vector<Option<Sexpr>>`, dessen Elemente alle Daten sind: die Variante `vector` von
+  er ein `Vector<Option<Sexpr>>`, dessen Elemente alle Daten sind: die Variante `Vector` von
   `Sexpr`.
 - **Arrays**: `#2A((1 2) (3 4))` (wie in CL). Die Zahl zwischen `#` und `A` ist der Rang, und die
   ersten so vielen Ebenen der Listenverschachtelung im Inhalt sind die Dimensionen. `#0A x` ist ein
   nulldimensionales Array mit einem Element. Listen derselben Ebene mit unterschiedlicher Länge sind
   ein Lesefehler. Der Typ wird wie bei Vektoren bestimmt und ist ein `Array<T>` (ohne Elemente muss
   der Kontext ihn liefern, etwa `(the Array<f64> #2A(()))`). Als S-Ausdrucksdaten ist es ein
-  `Array<Option<Sexpr>>`: die Variante `array` von `Sexpr`.
+  `Array<Option<Sexpr>>`: die Variante `Array` von `Sexpr`.
 - **Tupel**: `#{"foo" 123 45.6}`. Der Inhalt besteht ausschließlich aus Literalen und wird nicht
   ausgewertet (das `a` von `#{a b}` ist ein Symbol). Der Typ jedes Elements wird Position für
   Position vom Kontext bestimmt (`(the #{i32 f64} #{1 2.0})`), ohne Kontext ist es der eigene Typ
   des Elements (`#{"foo" 123}` ist `#{string int}`). Ein Tupel hat 1 bis 12 Elemente. Jede
   Auswertung erzeugt ein neues Tupel. Um eines aus berechneten Werten zu bauen, verwendet man
   `(tuple a b)`. Wo S-Ausdrucksdaten erwartet werden, ist es ein Tupel, dessen Elemente alle Daten
-  sind: die Variante `tuple` von `Sexpr`.
+  sind: die Variante `Tuple` von `Sexpr`.
 - **Attribute**: `#[test]` ist eine Markierung, die an der nächsten Form hängt (wie in Rust geschrieben). Das bisher einzige Attribut ist `test`, und es gehört an ein `defun` ([3.16 `#[test]`](#316-test--testfunktionen)). Mit `read` gelesen wird daraus die Liste `(%internal::attribute (test) form)`.
 - **Die leere Liste `()`**: je nach Kontext der Wert des Typs `Unit` oder das `None` von `Option<Sexpr>`.
   **`Sexpr` hat keine Variante für die leere Liste**: `Sexpr` bedeutet „ein nicht leerer S-Ausdruck“, und der
@@ -1120,7 +1120,7 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
   1. Lokale (Parameter sowie die Bindungen von `let`, `labels`, `macrolet` und `symbol-macrolet`)
   2. Wenn der Modulname `n` ein Makro ist, dieses Makro
   3. Konstruktoren und statische Methoden: die per `use` hereingeholten, sowie die Konstruktoren von
-     `Sexpr` (`sym`, `int` usw.) und von `Option`/`Result`, die die Standardbibliothek anbietet
+     `Sexpr` (`Sym`, `Int` usw.) und von `Option`/`Result`, die die Standardbibliothek anbietet
   4. Die Methode `n` des Typs des ersten Arguments (Methoden werden **nur über den Typ des ersten
      Arguments** gesucht)
   5. Wenn der Modulname `n` eine Funktion oder eine globale Variable ist, diese (bei einer globalen
@@ -1447,7 +1447,7 @@ Arten von Mustern:
   Typen ohne Literalsyntax zu vergleichen (`defstruct`-Instanzen, globale Variablen, berechnete Ergebnisse), und
   eine benutzerdefinierte `Equal`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
   beziehen, was von der Position des Zweigs aus sichtbar ist (Argumente, äußere Bindungen, globale Variablen)
-- `(Ctor sub-pattern...)` — Konstruktormuster (`(Some x)` `(None)` `(cons a d)` `(Ok v)` usw.)
+- `(Ctor sub-pattern...)` — Konstruktormuster (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` usw.)
 - `(Type :slot pattern... :slot...)` — Strukturmuster. Schreibe die Slots nach dem Typnamen als
   Schlüsselwörter. Folgt auf ein Schlüsselwort ein Muster, wird dieser Slot gegen das Muster geprüft;
   folgt ein Schlüsselwort oder nichts, wird der Slot an eine Variable seines eigenen Namens gebunden.
@@ -1538,9 +1538,9 @@ schreiben (es braucht kein äußeres `match`, um das `Option` abzuschälen):
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; die leere Liste
     (_          9)))
 ```
@@ -1550,7 +1550,7 @@ insgesamt 20. `(None)` zu vergessen, ist ein Fehler, sofern es kein `_` gibt. Au
 schreiben und bindet „etwas nicht Leeres“.
 
 Dieser Zucker gilt **genau** nur für `Option<Sexpr>`. Bei `Option<Option<Sexpr>>` wäre unklar, welche Schicht
-`(int n)` abgeschält hat, daher schreibt man wie üblich zwei Ebenen `match`.
+`(Int n)` abgeschält hat, daher schreibt man wie üblich zwei Ebenen `match`.
 
 Dieselben Downcast-Muster lassen sich unverändert auf einen **Trait-Objekt-Wert (`:dyn Trait`, Kapitel 2)** als
 untersuchten Wert anwenden: `match` packt ihn aus und übergibt ihn dann der obigen Maschinerie für
@@ -1869,7 +1869,7 @@ Funktionsaufrufe hinweg.
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; wenn nicht gefunden, wie üblich der Wert am Ende
 ```
 

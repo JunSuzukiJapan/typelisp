@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # जोड़ियाँ, S-एक्सप्रेशन और अनुक्रम
 
 जेनेरिक जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, `Iter` के ऊपर लिखे अनुक्रम फ़ंक्शन, और उच्च-क्रम फ़ंक्शन।
@@ -23,11 +23,11 @@
 
 ## 2. S-एक्सप्रेशन डेटा `Sexpr`
 
-`read` द्वारा लौटाए जाने वाले डेटा टाइप `Sexpr` के 19 variant हैं: `int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`। S-एक्सप्रेशन सेल को अध्याय 1 के सामान्य `cons`/`car`/`cdr` से नहीं बल्कि `sexpr-*` फ़ंक्शन से संभाला जाता है। इनका उपयोग मुख्य रूप से `defmacro` बॉडी में फ़ॉर्म बनाने और खोलने के लिए होता है।
-`vector` और `array` `#(..)` और `#nA(..)` के रूप में लिखा गया डेटा हैं ([सिंटैक्स
+`read` द्वारा लौटाए जाने वाले डेटा टाइप `Sexpr` के 19 variant हैं: `Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`। S-एक्सप्रेशन सेल को अध्याय 1 के सामान्य `cons`/`car`/`cdr` से नहीं बल्कि `sexpr-*` फ़ंक्शन से संभाला जाता है। इनका उपयोग मुख्य रूप से `defmacro` बॉडी में फ़ॉर्म बनाने और खोलने के लिए होता है।
+`Vector` और `Array` `#(..)` और `#nA(..)` के रूप में लिखा गया डेटा हैं ([सिंटैक्स
 संदर्भ](../syntax.md#1-लेक्सिकल-तत्व)), जिनमें क्रमशः एक `Vector<Option<Sexpr>>` और एक
-`Array<Option<Sexpr>>` होता है: `(vector v)` से बँधे `v` पर `len`, `get` आदि सीधे काम करते हैं।
-`tuple` `#{..}` से लिखा गया डेटा है, और `(tuple v)` द्वारा बाँधा गया `v` तत्वों का नया `Vector<Option<Sexpr>>` है (ताकि किसी भी लंबाई का टपल एक ही टाइप से लिया जा सके)।
+`Array<Option<Sexpr>>` होता है: `(Vector v)` से बँधे `v` पर `len`, `get` आदि सीधे काम करते हैं।
+`Tuple` `#{..}` से लिखा गया डेटा है, और `(Tuple v)` द्वारा बाँधा गया `v` तत्वों का नया `Vector<Option<Sexpr>>` है (ताकि किसी भी लंबाई का टपल एक ही टाइप से लिया जा सके)।
 
 **S-एक्सप्रेशन डेटा का टाइप `Option<Sexpr>` है।** खाली सूची `Sexpr` का variant नहीं बल्कि `Option` का `None` है, और `Sexpr` का अर्थ स्वयं "एक गैर-खाली S-एक्सप्रेशन" है। इसलिए `sexpr-*` फ़ंक्शन `Option<Sexpr>` लेते और लौटाते हैं।
 
@@ -44,7 +44,7 @@
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | क्या यह खाली सूची है |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | क्या यह `Cons` नहीं है |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | क्या यह `Sym` (सिंबल) है |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `int` variant की सामग्री (fixnum या bignum)। दूसरे टाइप पर panic करता है |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | `Int` variant की सामग्री (fixnum या bignum)। दूसरे टाइप पर panic करता है |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | उस चौड़ाई के variant की सामग्री। दूसरे टाइप पर panic करता है |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | फ़्लोटिंग-पॉइंट variant की सामग्री। दूसरे टाइप पर panic करता है |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | `Char` की सामग्री। दूसरे टाइप पर panic करता है |
@@ -57,7 +57,7 @@
 | `sexpr-append` | `(sexpr-append a b)` | `(Option<Sexpr>,Option<Sexpr>)→Option<Sexpr>` | दो `Sexpr` सूचियों को जोड़ता है (अविनाशकारी रूप से)। `,@` इसी में विस्तारित होता है |
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | `Sexpr` सूची के हर तत्व पर `f` लगाकर नई `Sexpr` सूची (अध्याय 4 का `map` `Iter` के लिए है और `Sexpr` सूची पर नहीं चल सकता) |
 
-नौ संख्यात्मक एक्सेसर हैं, हर टाइप के लिए एक, क्योंकि `Sexpr` "वह एकमात्र जगह है जहाँ मान का टाइप और कहीं नहीं लिखा जाता"। `Sexpr` में रखा `u8` `u8` variant के रूप में जाता है और केवल `(sexpr-u8 s)` से बाहर आता है। उसे `(sexpr-int s)` को देने पर panic होता है; वह कभी चुपचाप उत्तर को चौड़ा नहीं करता। पढ़े गए डेटा (`'(1 2 3)`, macro आर्ग्युमेंट) के पूर्णांक `int` variant के होते हैं और `(sexpr-int s)` से पढ़े जाते हैं।
+नौ संख्यात्मक एक्सेसर हैं, हर टाइप के लिए एक, क्योंकि `Sexpr` "वह एकमात्र जगह है जहाँ मान का टाइप और कहीं नहीं लिखा जाता"। `Sexpr` में रखा `u8` `U8` variant के रूप में जाता है और केवल `(sexpr-u8 s)` से बाहर आता है। उसे `(sexpr-int s)` को देने पर panic होता है; वह कभी चुपचाप उत्तर को चौड़ा नहीं करता। पढ़े गए डेटा (`'(1 2 3)`, macro आर्ग्युमेंट) के पूर्णांक `Int` variant के होते हैं और `(sexpr-int s)` से पढ़े जाते हैं।
 
 `Sexpr` सूचियों में `rplaca`/`nconc` जैसे विनाशकारी ऑपरेशन नहीं हैं। `Sexpr` सेल बनने के बाद बदला नहीं जा सकता।
 

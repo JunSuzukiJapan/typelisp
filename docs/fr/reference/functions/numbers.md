@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Nombres
 
 Les opérations sur les entiers, les nombres à virgule flottante, les rationnels, les nombres complexes et les
@@ -100,7 +100,7 @@ plage. C'est un type différent des types entiers de largeur fixe (chapitre 1), 
 `(as int x)` est l'élargissement exact depuis une largeur fixe, et `(as i32 n)` / `(try-as i32 n)` sont la
 troncature / la vérification depuis `int` (le même sens que `int->W` / `try-int->W` au chapitre 1).
 
-La variante entière de `Sexpr` est aussi simplement `int` (`(int n)` accepte fixnums et bignums).
+La variante entière de `Sexpr` est aussi simplement `Int` (`(Int n)` accepte fixnums et bignums).
 
 Les fonctions intégrées qui prennent un indice ou un compte (`substring`, le `get` de `Vector`, la distance de
 décalage de `ash`, etc.) acceptent `int`, mais passer une valeur qui ne tient pas dans un fixnum est une erreur

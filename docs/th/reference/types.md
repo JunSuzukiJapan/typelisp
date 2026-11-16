@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -46,7 +46,7 @@
 
 | ชนิด | เนื้อหา | รายละเอียด |
 |---|---|---|
-| `Sexpr` | S-expression ที่ไม่ว่าง มี 19 variant: `int`, `i8` ถึง `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [ข้อมูล S-expression](functions/sequences.md#2-ข้อมูล-s-expression-sexpr) |
+| `Sexpr` | S-expression ที่ไม่ว่าง มี 19 variant: `Int`, `I8` ถึง `U32`, `F32`, `F64`, `Char`, `Bool`, `Sym`, `Str`, `Cons`, `Ratio`, `Path`, `Vector`, `Array`, `Tuple` | [ข้อมูล S-expression](functions/sequences.md#2-ข้อมูล-s-expression-sexpr) |
 | `Option<Sexpr>` | ข้อมูล S-expression โดยทั่วไป ลิสต์ว่าง `()` คือ `None` | เหมือนข้างบน |
 
 ## 4. ชนิดในไลบรารีมาตรฐาน

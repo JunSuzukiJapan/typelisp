@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macro
 
 Macro là một hàm nhận một chương trình và trả về một chương trình. Macro cho phép bạn tạo cú pháp mới
@@ -128,7 +128,7 @@ Hãy tạo `my-and`, trả về `true` nếu mọi điều kiện của nó đ�
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; không có đối số
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; chỉ có một
          `(if ,f (my-and ,@more) false)))             ; hai hoặc nhiều hơn
@@ -138,7 +138,7 @@ Hãy tạo `my-and`, trả về `true` nếu mọi điều kiện của nó đ�
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` là một mẫu lấy đầu của danh sách vào `f` và phần còn lại vào `more`.
+- `(Cons f more)` là một mẫu lấy đầu của danh sách vào `f` và phần còn lại vào `more`.
 - `sexpr-null` kiểm tra xem dữ liệu S-expression có phải là danh sách rỗng hay không.
 - Nhánh `_` cuối cùng là cần thiết vì dữ liệu S-expression có những dạng khác ngoài danh sách (số,
   chuỗi, v.v.), và `match` yêu cầu phải bao phủ cả chúng. Đối số `&rest` luôn là một danh sách, nên

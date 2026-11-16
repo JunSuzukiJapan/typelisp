@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -196,7 +196,7 @@ kalıcı olarak kaydedilir.
 
 - **Dönüş değeri**: bir ifade için sonuç bir `Option<Sexpr>` olarak; bir tanım için tanımlanan adın sembolü
   (CL'deki gibi). Sonucu kullanmak için `Sexpr`'i `match` ile ayrıştırın
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Statik türlerden kaynaklanan farklar (önemli)**: CL sonucun gerçek değerini döndürür, ancak bu dilde
   dönüş türü yalnızca tekdüze olarak `Result<Option<Sexpr>,EvalError>` olabilir. Ayrıca **statik olarak
   yazılmış kod, `eval`'in çalışma zamanında tanımladığı adlara ileri başvuru yapamaz**: doğrudan bir

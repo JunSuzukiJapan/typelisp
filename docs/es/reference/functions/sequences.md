@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Pares, expresiones S y secuencias
 
 El par genérico `cons-cell`, los datos de expresiones S `Sexpr`, los símbolos, las funciones de secuencia
@@ -31,12 +31,12 @@ cons de CL: `(cons 1 (cons "a" ()))` se imprime `(1 "a")` y `(cons 3 1)`, `(3 . 
 ## 2. Datos de expresiones S `Sexpr`
 
 El tipo de datos `Sexpr` que devuelve `read` tiene 19 variantes:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` y `array` son datos escritos como `#(..)` y `#nA(..)` ([referencia de
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` y `Array` son datos escritos como `#(..)` y `#nA(..)` ([referencia de
 sintaxis](../syntax.md#1-elementos-léxicos)), que contienen un `Vector<Option<Sexpr>>` y un
 `Array<Option<Sexpr>>` respectivamente: `len`, `get` y demás funcionan directamente sobre la `v` que
-liga `(vector v)`.
-`tuple` son datos escritos con `#{..}`, y la `v` que enlaza `(tuple v)` es un
+liga `(Vector v)`.
+`Tuple` son datos escritos con `#{..}`, y la `v` que enlaza `(Tuple v)` es un
 `Vector<Option<Sexpr>>` nuevo con los elementos (para recibir con un solo tipo una tupla de
 cualquier longitud).
 Las celdas de expresiones S no se manejan con los `cons`/`car`/`cdr` generales del capítulo 1 sino con las
@@ -62,7 +62,7 @@ sino el `None` de `Option`, y `Sexpr` en sí significa "una expresión S no vac�
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Si es la lista vacía |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Si no es un `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Si es un `Sym` (símbolo) |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | El contenido de la variante `int` (fixnum o bignum). Panic con otro tipo |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | El contenido de la variante `Int` (fixnum o bignum). Panic con otro tipo |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | El contenido de la variante de ese ancho. Panic con otro tipo |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | El contenido de las variantes de coma flotante. Panic con otro tipo |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | El contenido de un `Char`. Panic con otro tipo |
@@ -76,9 +76,9 @@ sino el `None` de `Option`, y `Sexpr` en sí significa "una expresión S no vac�
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | Una lista `Sexpr` nueva con `f` aplicada a cada elemento de una lista `Sexpr` (el `map` del capítulo 4 es para `Iter` y no puede recorrer una lista `Sexpr`) |
 
 Hay nueve accesores numéricos, uno por tipo, porque un `Sexpr` es "el único lugar donde el tipo de un valor
-no está escrito en ningún otro sitio". Un `u8` metido en un `Sexpr` entra como la variante `u8` y solo sale
+no está escrito en ningún otro sitio". Un `u8` metido en un `Sexpr` entra como la variante `U8` y solo sale
 con `(sexpr-u8 s)`. Pasarlo a `(sexpr-int s)` provoca un panic; nunca amplía la respuesta en silencio. Los
-enteros de los datos leídos (`'(1 2 3)`, argumentos de macros) son de la variante `int` y se leen con
+enteros de los datos leídos (`'(1 2 3)`, argumentos de macros) son de la variante `Int` y se leen con
 `(sexpr-int s)`.
 
 Las listas `Sexpr` no tienen operaciones destructivas como `rplaca`/`nconc`. Una celda `Sexpr` no se puede

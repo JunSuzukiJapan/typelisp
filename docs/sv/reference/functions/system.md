@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -191,7 +191,7 @@ globala miljön omedelbart och permanent.
 
 - **Returvärde**: för ett uttryck resultatet som en `Option<Sexpr>`; för en definition symbolen för det
   definierade namnet (som i CL). För att använda resultatet plockar man isär `Sexpr` med `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Skillnader på grund av statiska typer (viktigt)**: CL returnerar det faktiska värdet av resultatet,
   men i det här språket kan returtypen bara vara enhetligt `Result<Option<Sexpr>,EvalError>`. Dessutom
   **kan kod som skrivs statiskt inte referera framåt till namn som `eval` definierar vid körning**: ett

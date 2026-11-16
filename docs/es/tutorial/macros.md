@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Macros
 
 Una macro es una función que recibe un programa y devuelve un programa. Las macros permiten crear nueva
@@ -130,7 +130,7 @@ Hagamos `my-and`, que devuelve `true` si todas sus condiciones son verdaderas.
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; sin argumentos
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; solo uno
          `(if ,f (my-and ,@more) false)))             ; dos o más
@@ -140,7 +140,7 @@ Hagamos `my-and`, que devuelve `true` si todas sus condiciones son verdaderas.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` es un patrón que toma la cabeza de una lista en `f` y el resto en `more`.
+- `(Cons f more)` es un patrón que toma la cabeza de una lista en `f` y el resto en `more`.
 - `sexpr-null` comprueba si unos datos de expresiones S son la lista vacía.
 - La rama final `_` es necesaria porque los datos de expresiones S tienen formas además de las listas
   (números, cadenas, etc.), y `match` exige cubrirlas también. Un argumento `&rest` es siempre una lista,

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -66,19 +66,19 @@ and for reading error messages, [errors.md](errors.md).
   `Vector<int>`). The elements must all have the same type: `#(1 "a")` is a type error, and so is
   `#()` with neither elements nor context. Each evaluation makes a new vector. Where S-expression
   data is expected (`(the Option<Sexpr> #(1 x))`, `'#(..)`, what `read` returns), it is a
-  `Vector<Option<Sexpr>>` whose elements are all data: the `vector` variant of `Sexpr`.
+  `Vector<Option<Sexpr>>` whose elements are all data: the `Vector` variant of `Sexpr`.
 - **Arrays**: `#2A((1 2) (3 4))` (as in CL). The number between `#` and `A` is the rank, and the
   first that many levels of list nesting in the contents are the dimensions. `#0A x` is a
   zero-dimensional array holding one element. Lists at the same level that differ in length are a
   read error. The type is decided as for vectors and is an `Array<T>` (with no elements, the context
   has to give it, as in `(the Array<f64> #2A(()))`). As S-expression data it is an
-  `Array<Option<Sexpr>>`: the `array` variant of `Sexpr`.
+  `Array<Option<Sexpr>>`: the `Array` variant of `Sexpr`.
 - **Tuples**: `#{"foo" 123 45.6}`. The contents are all literals and are not evaluated (the `a` of
   `#{a b}` is a symbol). Each element's type is decided by the context, position by position
   (`(the #{i32 f64} #{1 2.0})`), and with no context it is the element's own type (`#{"foo" 123}` is
   `#{string int}`). A tuple has 1 to 12 elements. Each evaluation makes a new tuple. To build one
   from computed values, use `(tuple a b)`. Where S-expression data is expected, it is a tuple whose
-  elements are all data: the `tuple` variant of `Sexpr`.
+  elements are all data: the `Tuple` variant of `Sexpr`.
 - **Attributes**: `#[test]` is a mark attached to the next form (written as in Rust). The only attribute so far is `test`, which goes on a `defun` ([3.16 `#[test]`](#316-test--test-functions)). Read with `read`, it becomes the list `(%internal::attribute (test) form)`.
 - **The empty list `()`**: depending on context, the value of the `Unit` type or the `None` of
   `Option<Sexpr>`. **`Sexpr` has no empty-list variant**: `Sexpr` means "a non-empty S-expression",
@@ -1087,8 +1087,8 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
   this):
   1. Locals (parameters, and the bindings of `let`, `labels`, `macrolet` and `symbol-macrolet`)
   2. If the module name `n` is a macro, that macro
-  3. Constructors and static methods: those brought in by `use`, and the constructors of `Sexpr` (`sym`,
-     `int` and so on) and of `Option`/`Result`, which the standard library offers
+  3. Constructors and static methods: those brought in by `use`, and the constructors of `Sexpr` (`Sym`,
+     `Int` and so on) and of `Option`/`Result`, which the standard library offers
   4. The method `n` of the first argument's type (methods are looked up from **the type of the
      first argument only**)
   5. If the module name `n` is a function or a global variable, that (for a global variable, the
@@ -1406,7 +1406,7 @@ Kinds of patterns:
   that have no literal syntax (`defstruct` instances, globals, computed results), and a user-defined `Equal`
   implementation becomes the comparison rule as it is. `expr` can refer to anything visible from the
   arm's position (arguments, outer bindings, globals)
-- `(Ctor sub-pattern...)` — constructor patterns (`(Some x)` `(None)` `(cons a d)` `(Ok v)` and so on)
+- `(Ctor sub-pattern...)` — constructor patterns (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` and so on)
 - `(Type :slot pattern... :slot...)` — struct patterns. Write the slots after the type name as
   keywords. If a keyword is followed by a pattern, that slot is matched against the pattern; if it is
   followed by a keyword or nothing, the slot is bound to a variable of its own name. Slots not written
@@ -1494,9 +1494,9 @@ to peel off the `Option` is needed):
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; the empty list
     (_          9)))
 ```
@@ -1506,7 +1506,7 @@ Forgetting `(None)` is an error unless there is a `_`. `(Some x)` can also be wr
 non-empty".
 
 This sugar applies **exactly** to `Option<Sexpr>` only. For `Option<Option<Sexpr>>`, it would be unclear
-which layer `(int n)` peeled, so write two levels of `match` as usual.
+which layer `(Int n)` peeled, so write two levels of `match` as usual.
 
 The same downcast patterns can be used as they are on **a trait object (`:dyn Trait`, chapter 2)
 scrutinee**: `match` unboxes it and then hands it to the `Sexpr` pattern machinery above, so there is no
@@ -1821,7 +1821,7 @@ Unlike `break`/`return` (chapter 5), this is a **dynamic** exit: `throw` does no
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; if not found, the value at the end as usual
 ```
 

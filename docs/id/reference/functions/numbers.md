@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -102,7 +102,7 @@ numerik di seluruh rentang. Ia adalah tipe yang berbeda dari tipe bilangan bulat
 `(as i32 n)` / `(try-as i32 n)` adalah pemotongan / pemeriksaan dari `int` (makna yang sama seperti
 `int->W` / `try-int->W` pada bab 1).
 
-Varian bilangan bulat pada `Sexpr` juga hanya `int` (`(int n)` menerima fixnum maupun bignum).
+Varian bilangan bulat pada `Sexpr` juga hanya `Int` (`(Int n)` menerima fixnum maupun bignum).
 
 Fungsi bawaan yang menerima indeks atau jumlah (`substring`, `get` pada `Vector`, jumlah geser pada
 `ash`, dan sebagainya) menerima `int`, tetapi memberikan nilai yang tidak muat dalam fixnum adalah

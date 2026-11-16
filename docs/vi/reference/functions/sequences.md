@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,
@@ -30,11 +30,11 @@ của `cdr` là `Option<Sexpr>`, nó được in như phần tiếp theo của d
 ## 2. Dữ liệu S-expression `Sexpr`
 
 Kiểu dữ liệu `Sexpr` do `read` trả về có 19 variant:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` và `array` là dữ liệu viết dưới dạng `#(..)` và `#nA(..)` ([Tham chiếu cú
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` và `Array` là dữ liệu viết dưới dạng `#(..)` và `#nA(..)` ([Tham chiếu cú
 pháp](../syntax.md#1-cú-pháp-từ-vựng)), lần lượt chứa một `Vector<Option<Sexpr>>` và một
-`Array<Option<Sexpr>>`: `len`, `get` và các hàm khác dùng trực tiếp được trên `v` mà `(vector v)`
-`tuple` là dữ liệu viết bằng `#{..}`, và `v` mà `(tuple v)` gắn là một `Vector<Option<Sexpr>>` mới
+`Array<Option<Sexpr>>`: `len`, `get` và các hàm khác dùng trực tiếp được trên `v` mà `(Vector v)`
+`Tuple` là dữ liệu viết bằng `#{..}`, và `v` mà `(Tuple v)` gắn là một `Vector<Option<Sexpr>>` mới
 gồm các phần tử (để nhận tuple ở mọi độ dài bằng một kiểu).
 gắn.
 Các ô S-expression được xử lý không phải bằng `cons`/`car`/`cdr` tổng quát của chương 1 mà bằng các hàm
@@ -60,7 +60,7 @@ nhận và trả về `Option<Sexpr>`.
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Có phải danh sách rỗng không |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Có phải không phải `Cons` không |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Có phải là `Sym` (symbol) không |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Nội dung của variant `int` (fixnum hoặc bignum). Panic với kiểu khác |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Nội dung của variant `Int` (fixnum hoặc bignum). Panic với kiểu khác |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | Nội dung của variant có độ rộng đó. Panic với kiểu khác |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Nội dung của các variant dấu phẩy động. Panic với kiểu khác |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Nội dung của một `Char`. Panic với kiểu khác |
@@ -74,9 +74,9 @@ nhận và trả về `Option<Sexpr>`.
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | Một danh sách `Sexpr` mới với `f` áp dụng cho từng phần tử của một danh sách `Sexpr` (`map` của chương 4 dành cho `Iter` và không duyệt được danh sách `Sexpr`) |
 
 Có chín hàm truy cập số, mỗi kiểu một hàm, vì một `Sexpr` là "nơi duy nhất mà kiểu của một giá trị không
-được viết ở chỗ nào khác". Một `u8` đưa vào một `Sexpr` đi vào dưới dạng variant `u8` và chỉ ra được bằng
+được viết ở chỗ nào khác". Một `u8` đưa vào một `Sexpr` đi vào dưới dạng variant `U8` và chỉ ra được bằng
 `(sexpr-u8 s)`. Truyền nó cho `(sexpr-int s)` sẽ panic; nó không bao giờ mở rộng đáp án một cách im lặng.
-Các số nguyên trong dữ liệu đã đọc (`'(1 2 3)`, đối số macro) thuộc variant `int` và được đọc bằng
+Các số nguyên trong dữ liệu đã đọc (`'(1 2 3)`, đối số macro) thuộc variant `Int` và được đọc bằng
 `(sexpr-int s)`.
 
 Các danh sách `Sexpr` không có thao tác phá hủy như `rplaca`/`nconc`. Một ô `Sexpr` không thể thay đổi sau

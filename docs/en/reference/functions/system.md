@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -195,7 +195,7 @@ registered in the global environment immediately and permanently.
 
 - **Return value**: for an expression, the result as an `Option<Sexpr>`; for a definition, the symbol of
   the defined name (as in CL). To use the result, take the `Sexpr` apart with `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Differences due to static types (important)**: CL returns the actual value of the result, but in
   this language the return type can only be uniformly `Result<Option<Sexpr>,EvalError>`. Also, **code
   written statically cannot refer ahead to names that `eval` defines at run time**: a `(sq 9)` written

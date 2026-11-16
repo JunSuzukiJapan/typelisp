@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -101,7 +101,7 @@ konvertering: `(as int x)` är den exakta vidgningen från en fast bredd, och `(
 `(try-as i32 n)` är trunkeringen / kontrollen från `int` (samma betydelse som `int->W` / `try-int->W` i
 kapitel 1).
 
-Heltalsvarianten av `Sexpr` är också bara `int` (`(int n)` accepterar både fixnums och bignums).
+Heltalsvarianten av `Sexpr` är också bara `Int` (`(Int n)` accepterar både fixnums och bignums).
 
 Inbyggda funktioner som tar ett index eller ett antal (`substring`, `get` för `Vector`, skiftantalet i
 `ash` och så vidare) accepterar `int`, men att skicka ett värde som inte ryms i ett fixnum är ett fel vid

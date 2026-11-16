@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -95,7 +95,7 @@ fixnum, và `eql`/`=` là đồng nhất số trên toàn dải. Nó là một k
 `(as i32 n)` / `(try-as i32 n)` là phép cắt cụt / kiểm tra từ `int` (cùng ý nghĩa với `int->W` /
 `try-int->W` ở chương 1).
 
-Variant số nguyên của `Sexpr` cũng chỉ là `int` (`(int n)` chấp nhận cả fixnum và bignum).
+Variant số nguyên của `Sexpr` cũng chỉ là `Int` (`(Int n)` chấp nhận cả fixnum và bignum).
 
 Các hàm dựng sẵn nhận một chỉ số hoặc một số đếm (`substring`, `get` của `Vector`, khoảng dịch của `ash`,
 v.v.) chấp nhận `int`, nhưng truyền một giá trị không vừa fixnum là lỗi lúc chạy ("an integer argument does

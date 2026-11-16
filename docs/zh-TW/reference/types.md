@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/types.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 型別一覽
 
 typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的寫法見[語法參考第 2 章](syntax.md#2-型別的寫法)，各型別的函式與方法見
@@ -45,7 +45,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 | 型別 | 內容 | 詳情 |
 |---|---|---|
-| `Sexpr` | 非空的 S 運算式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array`、`tuple` 共 19 種變體 | [S 運算式資料](functions/sequences.md#2-s-運算式資料-sexpr) |
+| `Sexpr` | 非空的 S 運算式。`Int`、`I8` 至 `U32`、`F32`、`F64`、`Char`、`Bool`、`Sym`、`Str`、`Cons`、`Ratio`、`Path`、`Vector`、`Array`、`Tuple` 共 19 種變體 | [S 運算式資料](functions/sequences.md#2-s-運算式資料-sexpr) |
 | `Option<Sexpr>` | 一般的 S 運算式資料。空串列 `()` 是 `None` | 同上 |
 
 ## 4. 標準函式庫中的型別

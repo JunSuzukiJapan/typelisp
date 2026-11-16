@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Numeri
 
 Operazioni su interi, numeri in virgola mobile, razionali, numeri complessi e booleani, e altre funzioni
@@ -101,7 +101,7 @@ fissa (capitolo 1), senza conversione implicita: `(as int x)` è l'allargamento 
 fissa, e `(as i32 n)` / `(try-as i32 n)` sono il troncamento / controllo a partire da `int` (lo stesso
 significato di `int->W` / `try-int->W` nel capitolo 1).
 
-Anche la variante intera di `Sexpr` è semplicemente `int` (`(int n)` accetta sia fixnum sia bignum).
+Anche la variante intera di `Sexpr` è semplicemente `Int` (`(Int n)` accetta sia fixnum sia bignum).
 
 Le funzioni predefinite che prendono un indice o un conteggio (`substring`, `get` di `Vector`, il
 conteggio di scorrimento di `ash` e così via) accettano `int`, ma passare un valore che non sta in un

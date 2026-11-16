@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Numbers
 
 Operations on integers, floating-point numbers, rationals, complex numbers and booleans, and other
@@ -100,7 +100,7 @@ conversion: `(as int x)` is the exact widening from a fixed width, and `(as i32 
 `(try-as i32 n)` are the truncation / check from `int` (the same meaning as `int->W` / `try-int->W`
 in chapter 1).
 
-The integer variant of `Sexpr` is also just `int` (`(int n)` accepts both fixnums and bignums).
+The integer variant of `Sexpr` is also just `Int` (`(Int n)` accepts both fixnums and bignums).
 
 Built-ins that take an index or a count (`substring`, `get` of `Vector`, the shift count of `ash` and
 so on) accept `int`, but passing a value that does not fit a fixnum is a run-time error ("an integer

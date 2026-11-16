@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -31,12 +31,12 @@ conses: `(cons 1 (cons "a" ()))` skrivs ut som `(1 "a")` och `(cons 3 1)` som `(
 ## 2. S-uttrycksdata `Sexpr`
 
 Datatypen `Sexpr` som `read` returnerar har 19 varianter:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
-`vector` och `array` är data skrivna som `#(..)` och `#nA(..)` (se
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`.
+`Vector` och `Array` är data skrivna som `#(..)` och `#nA(..)` (se
 [syntaxreferensen](../syntax.md#1-lexikaliska-element)) som innehåller en `Vector<Option<Sexpr>>`
 respektive en `Array<Option<Sexpr>>`: `len`, `get` och resten fungerar direkt på den `v` som
-`(vector v)` binder.
-`tuple` är data skrivna med `#{..}`, och `v` som `(tuple v)` binder är en ny `Vector<Option<Sexpr>>`
+`(Vector v)` binder.
+`Tuple` är data skrivna med `#{..}`, och `v` som `(Tuple v)` binder är en ny `Vector<Option<Sexpr>>`
 av elementen (så att en tupel av vilken längd som helst tas emot med en typ).
 S-uttrycksceller hanteras inte med de allmänna `cons`/`car`/`cdr` i kapitel 1 utan med
 `sexpr-*`-funktionerna. De används främst i `defmacro`-kroppar för att bygga och plocka isär former.
@@ -62,7 +62,7 @@ och returnerar `Option<Sexpr>`.
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | Om det är den tomma listan |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | Om det inte är en `Cons` |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | Om det är en `Sym` (symbol) |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Innehållet i varianten `int` (fixnum eller bignum). Ger panic på en annan typ |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | Innehållet i varianten `Int` (fixnum eller bignum). Ger panic på en annan typ |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | Innehållet i varianten med den bredden. Ger panic på en annan typ |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | Innehållet i flyttalsvarianterna. Ger panic på en annan typ |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | Innehållet i en `Char`. Ger panic på en annan typ |
@@ -76,9 +76,9 @@ och returnerar `Option<Sexpr>`.
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | En ny `Sexpr`-lista med `f` tillämpad på varje element i en `Sexpr`-lista (`map` i kapitel 4 är för `Iter` och kan inte gå igenom en `Sexpr`-lista) |
 
 Det finns nio numeriska accessorer, en per typ, eftersom en `Sexpr` är "det enda ställe där ett värdes typ
-inte skrivs någon annanstans". En `u8` som läggs i en `Sexpr` går in som varianten `u8` och kommer bara ut
+inte skrivs någon annanstans". En `u8` som läggs i en `Sexpr` går in som varianten `U8` och kommer bara ut
 med `(sexpr-u8 s)`. Att skicka den till `(sexpr-int s)` ger panic; det vidgar aldrig svaret tyst. Heltalen i
-data som lästs (`'(1 2 3)`, makroargument) är av varianten `int` och läses med `(sexpr-int s)`.
+data som lästs (`'(1 2 3)`, makroargument) är av varianten `Int` och läses med `(sexpr-int s)`.
 
 `Sexpr`-listor har inga destruktiva operationer som `rplaca`/`nconc`. En `Sexpr`-cell kan inte ändras
 efter att den skapats.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 매크로
 
 매크로는 프로그램을 받아 프로그램을 반환하는 함수이다. 매크로를 쓰면 함수로는 표현할 수 없는 새로운 구문을 만들 수
@@ -124,7 +124,7 @@ Common Lisp와 마찬가지로 typelisp의 매크로는 이름 충돌을 자동�
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; 인수 없음
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; 하나뿐
          `(if ,f (my-and ,@more) false)))             ; 둘 이상
@@ -134,7 +134,7 @@ Common Lisp와 마찬가지로 typelisp의 매크로는 이름 충돌을 자동�
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)`는 리스트의 맨 앞을 `f`에, 나머지를 `more`에 넣는 패턴이다.
+- `(Cons f more)`는 리스트의 맨 앞을 `f`에, 나머지를 `more`에 넣는 패턴이다.
 - `sexpr-null`은 S 식 데이터가 빈 리스트인지 검사한다.
 - 마지막의 `_` 갈래가 필요한 것은 S 식 데이터에 리스트 이외의 형태(수, 문자열 등)가 있고 `match`가 그것들도 덮을
   것을 요구하기 때문이다. `&rest` 인수는 항상 리스트이므로 이 갈래가 실제로 실행되는 일은 없다.

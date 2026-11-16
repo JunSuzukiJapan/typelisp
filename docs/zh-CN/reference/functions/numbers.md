@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -79,7 +79,7 @@ CL 的 `integer`，也就是这门语言的**整数**——未注解的整数字
 类型，没有隐式转换——`(as int x)` 是从固定宽度的精确扩展，`(as i32 n)` / `(try-as i32 n)` 是从 `int` 的截断／判定
 （与第 1 章的 `int->W` / `try-int->W` 含义相同）。
 
-`Sexpr` 的整数变体也只有 `int` 一种（`(int n)` 同时接受 fixnum 和多精度）。
+`Sexpr` 的整数变体也只有 `Int` 一种（`(Int n)` 同时接受 fixnum 和多精度）。
 
 接受下标或个数的内置函数（`substring`、`Vector` 的 `get`、`ash` 的位数等）接受 `int`，但传入放不进 fixnum 的值会
 产生运行时错误（"an integer argument does not fit a fixnum"）。

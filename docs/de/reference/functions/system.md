@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Zeit, Umgebung und Implementierung
 
 Funktionen für Zeit, Abfragen der Laufzeitumgebung, Werkzeuge der Implementierung, Parsen und Auswerten von
@@ -198,7 +198,7 @@ sofort und dauerhaft in der globalen Umgebung registriert.
 
 - **Rückgabewert**: bei einem Ausdruck das Ergebnis als `Option<Sexpr>`; bei einer Definition das Symbol des
   definierten Namens (wie in CL). Um das Ergebnis zu verwenden, zerlegt man das `Sexpr` mit `match`
-  (`(int n)`/`(str s)`/…).
+  (`(Int n)`/`(Str s)`/…).
 - **Unterschiede durch statische Typen (wichtig)**: CL gibt den tatsächlichen Wert des Ergebnisses zurück, aber
   in dieser Sprache kann der Rückgabetyp nur einheitlich `Result<Option<Sexpr>,EvalError>` sein. Außerdem **kann
   statisch geschriebener Code nicht auf Namen vorausverweisen, die `eval` zur Laufzeit definiert**: Ein direkt in

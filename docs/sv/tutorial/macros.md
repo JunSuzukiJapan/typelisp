@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Makron
 
 Ett makro är en funktion som tar ett program och returnerar ett program. Med makron kan du skapa ny
@@ -128,7 +128,7 @@ Vi gör `my-and`, som returnerar `true` om alla dess villkor är sanna.
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; inga argument
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; bara ett
          `(if ,f (my-and ,@more) false)))             ; två eller fler
@@ -138,7 +138,7 @@ Vi gör `my-and`, som returnerar `true` om alla dess villkor är sanna.
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` är ett mönster som tar listans huvud till `f` och resten till `more`.
+- `(Cons f more)` är ett mönster som tar listans huvud till `f` och resten till `more`.
 - `sexpr-null` testar om S-uttrycksdata är den tomma listan.
 - Den sista `_`-grenen behövs eftersom S-uttrycksdata har andra former än listor (tal, strängar och så
   vidare), och `match` kräver att också de täcks. Ett `&rest`-argument är alltid en lista, så den här

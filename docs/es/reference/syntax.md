@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -70,19 +70,19 @@ incorporados, consulta [Funciones incorporadas](functions/README.md); para la li
   `Vector<int>`). Todos los elementos deben tener el mismo tipo: `#(1 "a")` es un error de tipo,
   igual que `#()` sin elementos ni contexto. Cada evaluación crea un vector nuevo. Donde se esperan
   datos de expresiones S (`(the Option<Sexpr> #(1 x))`, `'#(..)`, lo que devuelve `read`), es un
-  `Vector<Option<Sexpr>>` cuyos elementos son todos datos: la variante `vector` de `Sexpr`.
+  `Vector<Option<Sexpr>>` cuyos elementos son todos datos: la variante `Vector` de `Sexpr`.
 - **Arrays**: `#2A((1 2) (3 4))` (como en CL). El número entre `#` y `A` es el rango, y esa misma
   cantidad de primeros niveles de anidamiento de listas del contenido son las dimensiones. `#0A x`
   es un array de dimensión cero que contiene un elemento. Listas del mismo nivel con longitudes
   distintas son un error de lectura. El tipo se decide igual que en los vectores y es un `Array<T>`
   (sin elementos, el contexto tiene que darlo, como en `(the Array<f64> #2A(()))`). Como dato de
-  expresiones S es un `Array<Option<Sexpr>>`: la variante `array` de `Sexpr`.
+  expresiones S es un `Array<Option<Sexpr>>`: la variante `Array` de `Sexpr`.
 - **Tuplas**: `#{"foo" 123 45.6}`. El contenido son todo literales y no se evalúa (la `a` de
   `#{a b}` es un símbolo). El tipo de cada elemento lo decide el contexto, posición por posición
   (`(the #{i32 f64} #{1 2.0})`), y sin contexto es el tipo propio del elemento (`#{"foo" 123}` es
   `#{string int}`). Una tupla tiene de 1 a 12 elementos. Cada evaluación crea una tupla nueva. Para
   construir una a partir de valores calculados, se usa `(tuple a b)`. Donde se esperan datos de
-  S-expresión, es una tupla cuyos elementos son todos datos: la variante `tuple` de `Sexpr`.
+  S-expresión, es una tupla cuyos elementos son todos datos: la variante `Tuple` de `Sexpr`.
 - **Atributos**: `#[test]` es una marca que se une a la forma siguiente (escrita como en Rust). El único atributo por ahora es `test`, y va sobre un `defun` ([3.16 `#[test]`](#316-test--funciones-de-prueba)). Leído con `read`, se convierte en la lista `(%internal::attribute (test) form)`.
 - **La lista vacía `()`**: según el contexto, el valor del tipo `Unit` o el `None` de `Option<Sexpr>`.
   **`Sexpr` no tiene variante de lista vacía**: `Sexpr` significa "una expresión S no vacía", y el tipo de los
@@ -1103,8 +1103,8 @@ valores mediante `:dyn`, envuélvelos en una estructura, como en `(defstruct fla
   especiales se fijan antes de esto):
   1. Locales (parámetros, y los enlaces de `let`, `labels`, `macrolet` y `symbol-macrolet`)
   2. Si el nombre de módulo `n` es una macro, esa macro
-  3. Constructores y métodos estáticos: los traídos con `use`, y los constructores de `Sexpr` (`sym`,
-     `int`, etc.) y de `Option`/`Result` que ofrece la biblioteca estándar
+  3. Constructores y métodos estáticos: los traídos con `use`, y los constructores de `Sexpr` (`Sym`,
+     `Int`, etc.) y de `Option`/`Result` que ofrece la biblioteca estándar
   4. El método `n` del tipo del primer argumento (los métodos se buscan **solo por el tipo del primer
      argumento**)
   5. Si el nombre de módulo `n` es una función o una variable global, eso (para una variable global, se
@@ -1428,7 +1428,7 @@ Clases de patrones:
   tienen sintaxis literal (instancias de `defstruct`, globales, resultados calculados), y una implementación de
   `Equal` definida por el usuario se convierte tal cual en la regla de comparación. `expr` se puede referir a
   cualquier cosa visible desde la posición de la rama (argumentos, enlaces exteriores, globales)
-- `(Ctor sub-pattern...)` — patrones de constructor (`(Some x)` `(None)` `(cons a d)` `(Ok v)`, etc.)
+- `(Ctor sub-pattern...)` — patrones de constructor (`(Some x)` `(None)` `(Cons a d)` `(Ok v)`, etc.)
 - `(Type :slot pattern... :slot...)` — patrones de estructura. Escribe las ranuras después del nombre del
   tipo como palabras clave. Si a una palabra clave le sigue un patrón, esa ranura se compara con el patrón;
   si le sigue otra palabra clave o nada, la ranura se enlaza a una variable con su propio nombre. Las
@@ -1517,9 +1517,9 @@ la lista vacía no es una variante de `Sexpr` sino el `None` de `Option`. Así q
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; la lista vacía
     (_          9)))
 ```
@@ -1529,7 +1529,7 @@ Olvidar `(None)` es un error salvo que haya un `_`. También se puede escribir `
 vacío".
 
 Esta facilidad se aplica **exactamente** solo a `Option<Sexpr>`. Para `Option<Option<Sexpr>>`, no estaría claro
-qué capa quitó `(int n)`, así que escribe dos niveles de `match` como de costumbre.
+qué capa quitó `(Int n)`, así que escribe dos niveles de `match` como de costumbre.
 
 Los mismos patrones de conversión descendente se pueden usar tal cual sobre **un valor examinado que es un
 objeto trait (`:dyn Trait`, capítulo 2)**: `match` lo saca de la caja y después lo entrega a la maquinaria de
@@ -1849,7 +1849,7 @@ funciones.
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; si no se encuentra, el valor del final como de costumbre
 ```
 

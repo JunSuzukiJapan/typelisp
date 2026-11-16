@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/macros.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/macros.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # الماكرو (Macros)
 
 الماكرو دالة تأخذ برنامجًا وتعيد برنامجًا. وتتيح لك الماكرو ابتكار صياغة جديدة لا تستطيع الدوال التعبير
@@ -125,7 +125,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (defmacro my-and (&rest forms)
   (match forms
     ((None) 'true)                                    ; لا وسائط
-    ((cons f more)
+    ((Cons f more)
      (if (sexpr-null more)
          f                                            ; واحد فقط
          `(if ,f (my-and ,@more) false)))             ; اثنان أو أكثر
@@ -135,7 +135,7 @@ error: <stdin>:1:1: type error: type mismatch: expected `int`, found `string`
 (my-and (> 2 1) (> 1 3))      ; => false
 ```
 
-- `(cons f more)` نمط يأخذ رأس القائمة في `f` وباقيها في `more`.
+- `(Cons f more)` نمط يأخذ رأس القائمة في `f` وباقيها في `more`.
 - تختبر `sexpr-null` ما إذا كانت بيانات التعبير الرمزي قائمة فارغة.
 - فرع `_` الأخير لازم لأن لبيانات التعبيرات الرمزية صورًا غير القوائم (أعداد وسلاسل نصية وهكذا)، ويتطلب
   `match` تغطيتها أيضًا. ووسيط `&rest` قائمة دائمًا، فهذا الفرع لا يعمل فعليًا أبدًا.

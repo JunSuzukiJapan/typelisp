@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # คู่ S-expression และลำดับ
 
 คู่ generic `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับที่เขียนบน
@@ -29,9 +29,9 @@
 ## 2. ข้อมูล S-expression (`Sexpr`)
 
 ชนิดข้อมูล `Sexpr` ที่ `read` คืนมี 19 variant:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`
-`vector` และ `array` คือข้อมูลที่เขียนเป็น `#(..)` และ `#nA(..)` ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)) ซึ่งถือ `Vector<Option<Sexpr>>` และ `Array<Option<Sexpr>>` ตามลำดับ `len`, `get` และอื่น ๆ ใช้กับ `v` ที่ `(vector v)` ผูกไว้ได้โดยตรง
-`tuple` คือข้อมูลที่เขียนด้วย `#{..}` และ `v` ที่ `(tuple v)` ผูกไว้คือ `Vector<Option<Sexpr>>` ใหม่ที่เรียงสมาชิก (เพื่อรับทูเพิลทุกความยาวด้วยชนิดเดียว)
+`Int | I8 | I16 | I32 | U8 | U16 | U32 | F32 | F64 | Char | Bool | Sym | Str | Cons | Ratio | Path | Vector | Array | Tuple`
+`Vector` และ `Array` คือข้อมูลที่เขียนเป็น `#(..)` และ `#nA(..)` ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)) ซึ่งถือ `Vector<Option<Sexpr>>` และ `Array<Option<Sexpr>>` ตามลำดับ `len`, `get` และอื่น ๆ ใช้กับ `v` ที่ `(Vector v)` ผูกไว้ได้โดยตรง
+`Tuple` คือข้อมูลที่เขียนด้วย `#{..}` และ `v` ที่ `(Tuple v)` ผูกไว้คือ `Vector<Option<Sexpr>>` ใหม่ที่เรียงสมาชิก (เพื่อรับทูเพิลทุกความยาวด้วยชนิดเดียว)
 เซลล์ S-expression ถูกจัดการด้วยฟังก์ชัน `sexpr-*` ไม่ใช่ด้วย `cons`/`car`/`cdr` ทั่วไปของบทที่ 1
 ใช้หลัก ๆ ในตัวเนื้อหาของ `defmacro` เพื่อสร้างและแยกฟอร์ม
 
@@ -56,7 +56,7 @@
 | `sexpr-null` | `(sexpr-null s)` | `Option<Sexpr>→bool` | เป็นลิสต์ว่างหรือไม่ |
 | `sexpr-atom` | `(sexpr-atom s)` | `Option<Sexpr>→bool` | ไม่ใช่ `Cons` หรือไม่ |
 | `sexpr-symp` | `(sexpr-symp s)` | `Option<Sexpr>→bool` | เป็น `Sym` (สัญลักษณ์) หรือไม่ |
-| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | เนื้อหาของ variant `int` (fixnum หรือ bignum) panic กับชนิดอื่น |
+| `sexpr-int` | `(sexpr-int s)` | `Option<Sexpr>→int` | เนื้อหาของ variant `Int` (fixnum หรือ bignum) panic กับชนิดอื่น |
 | `sexpr-i8` `sexpr-i16` `sexpr-i32` `sexpr-u8` `sexpr-u16` `sexpr-u32` | `(sexpr-i32 s)` | `Option<Sexpr>→W` | เนื้อหาของ variant ความกว้างนั้น panic กับชนิดอื่น |
 | `sexpr-f32` `sexpr-f64` | `(sexpr-f64 s)` | `Option<Sexpr>→f32` / `→f64` | เนื้อหาของ variant จำนวนทศนิยม panic กับชนิดอื่น |
 | `sexpr-char` | `(sexpr-char s)` | `Option<Sexpr>→char` | เนื้อหาของ `Char` panic กับชนิดอื่น |
@@ -70,9 +70,9 @@
 | `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | ลิสต์ `Sexpr` ใหม่ที่ใช้ `f` กับแต่ละสมาชิกของลิสต์ `Sexpr` (`map` ของบทที่ 4 ใช้กับ `Iter` และเดินผ่านลิสต์ `Sexpr` ไม่ได้) |
 
 มีตัวเข้าถึงตัวเลขเก้าตัว หนึ่งตัวต่อชนิด เพราะ `Sexpr` คือ "ที่เดียวที่ชนิด
-ของค่าไม่ถูกเขียนไว้ที่อื่น" `u8` ที่ใส่ใน `Sexpr` เข้าไปเป็น variant `u8` และออกมา
+ของค่าไม่ถูกเขียนไว้ที่อื่น" `u8` ที่ใส่ใน `Sexpr` เข้าไปเป็น variant `U8` และออกมา
 ได้ด้วย `(sexpr-u8 s)` เท่านั้น การส่งให้ `(sexpr-int s)` จะ panic มันไม่ขยายคำตอบโดยไม่แจ้ง
-จำนวนเต็มในข้อมูลที่อ่านมา (`'(1 2 3)`, อาร์กิวเมนต์ของแมโคร) เป็น variant `int`
+จำนวนเต็มในข้อมูลที่อ่านมา (`'(1 2 3)`, อาร์กิวเมนต์ของแมโคร) เป็น variant `Int`
 และอ่านด้วย `(sexpr-int s)`
 
 ลิสต์ `Sexpr` ไม่มีการดำเนินการแบบทำลายอย่าง `rplaca`/`nconc` เซลล์ `Sexpr` เปลี่ยนแปลง

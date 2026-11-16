@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -99,7 +99,7 @@ türlerinden (1. bölüm) farklı bir türdür ve örtük dönüşüm yoktur: `(
 tam genişletmedir ve `(as i32 n)` / `(try-as i32 n)`, `int`'ten kırpma / denetimdir (1. bölümdeki
 `int->W` / `try-int->W` ile aynı anlam).
 
-`Sexpr`'in tamsayı varyantı da yalnızca `int`'tir (`(int n)` hem fixnum'ları hem bignum'ları kabul
+`Sexpr`'in tamsayı varyantı da yalnızca `Int`'tir (`(Int n)` hem fixnum'ları hem bignum'ları kabul
 eder).
 
 Bir indeks ya da sayı alan yerleşik fonksiyonlar (`substring`, `Vector`'ün `get`'i, `ash`'in kaydırma

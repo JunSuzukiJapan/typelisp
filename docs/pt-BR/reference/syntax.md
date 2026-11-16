@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -67,19 +67,19 @@ mensagens de erro, [errors.md](errors.md).
   `Vector<int>`). Todos os elementos devem ter o mesmo tipo: `#(1 "a")` é um erro de tipo, assim
   como `#()` sem elementos nem contexto. Cada avaliação cria um vetor novo. Onde se esperam dados de
   expressões S (`(the Option<Sexpr> #(1 x))`, `'#(..)`, o que `read` devolve), é um
-  `Vector<Option<Sexpr>>` cujos elementos são todos dados: a variante `vector` de `Sexpr`.
+  `Vector<Option<Sexpr>>` cujos elementos são todos dados: a variante `Vector` de `Sexpr`.
 - **Arrays**: `#2A((1 2) (3 4))` (como em CL). O número entre `#` e `A` é o posto, e essa mesma
   quantidade de primeiros níveis de aninhamento de listas no conteúdo são as dimensões. `#0A x` é um
   array de dimensão zero que contém um elemento. Listas do mesmo nível com comprimentos diferentes
   são um erro de leitura. O tipo é decidido como nos vetores e é um `Array<T>` (sem elementos, o
   contexto precisa fornecê-lo, como em `(the Array<f64> #2A(()))`). Como dado de expressões S é um
-  `Array<Option<Sexpr>>`: a variante `array` de `Sexpr`.
+  `Array<Option<Sexpr>>`: a variante `Array` de `Sexpr`.
 - **Tuplas**: `#{"foo" 123 45.6}`. O conteúdo é todo literal e não é avaliado (o `a` de `#{a b}` é
   um símbolo). O tipo de cada elemento é decidido pelo contexto, posição por posição
   (`(the #{i32 f64} #{1 2.0})`), e sem contexto é o tipo do próprio elemento (`#{"foo" 123}` é
   `#{string int}`). Uma tupla tem de 1 a 12 elementos. Cada avaliação cria uma tupla nova. Para
   construir uma a partir de valores calculados, use `(tuple a b)`. Onde dados de S-expressão são
-  esperados, é uma tupla cujos elementos são todos dados: a variante `tuple` de `Sexpr`.
+  esperados, é uma tupla cujos elementos são todos dados: a variante `Tuple` de `Sexpr`.
 - **Atributos**: `#[test]` é uma marca presa à forma seguinte (escrita como em Rust). O único atributo por enquanto é `test`, que vai sobre um `defun` ([3.16 `#[test]`](#316-test--funções-de-teste)). Lido com `read`, vira a lista `(%internal::attribute (test) form)`.
 - **A lista vazia `()`**: conforme o contexto, o valor do tipo `Unit` ou o `None` de `Option<Sexpr>`.
   **`Sexpr` não tem variante de lista vazia**: `Sexpr` significa "uma expressão S não vazia", e o tipo dos dados
@@ -1079,7 +1079,7 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
   antes disso):
   1. Locais (parâmetros, e as ligações de `let`, `labels`, `macrolet` e `symbol-macrolet`)
   2. Se o nome de módulo `n` é uma macro, essa macro
-  3. Construtores e métodos estáticos: os trazidos com `use`, e os construtores de `Sexpr` (`sym`, `int`
+  3. Construtores e métodos estáticos: os trazidos com `use`, e os construtores de `Sexpr` (`Sym`, `Int`
      etc.) e de `Option`/`Result` que a biblioteca padrão oferece
   4. O método `n` do tipo do primeiro argumento (métodos são procurados **só pelo tipo do primeiro
      argumento**)
@@ -1399,7 +1399,7 @@ Tipos de padrão:
   sintaxe literal (instâncias de `defstruct`, globais, resultados calculados), e uma implementação de `Equal`
   definida pelo usuário vira a regra de comparação como está. `expr` pode se referir a qualquer coisa visível da
   posição do ramo (argumentos, vínculos externos, globais)
-- `(Ctor sub-pattern...)` — padrões de construtor (`(Some x)` `(None)` `(cons a d)` `(Ok v)` etc.)
+- `(Ctor sub-pattern...)` — padrões de construtor (`(Some x)` `(None)` `(Cons a d)` `(Ok v)` etc.)
 - `(Type :slot pattern... :slot...)` — padrões de estrutura. Escreva os slots depois do nome do tipo como
   palavras-chave. Se uma palavra-chave é seguida de um padrão, esse slot é comparado com o padrão; se é
   seguida de outra palavra-chave ou de nada, o slot é ligado a uma variável com o seu próprio nome. Slots
@@ -1487,9 +1487,9 @@ externo para tirar o `Option`):
 ```lisp
 (defun tag ((s Option<Sexpr>)) i32
   (match s
-    ((int _)    1)
-    ((cons _ _) 2)
-    ((str _)    3)
+    ((Int _)    1)
+    ((Cons _ _) 2)
+    ((Str _)    3)
     ((None)     0)          ; a lista vazia
     (_          9)))
 ```
@@ -1498,7 +1498,7 @@ A exaustividade é verificada no mesmo universo plano: as 19 variantes de `Sexpr
 `(None)` é um erro a menos que haja um `_`. `(Some x)` também pode ser escrito, e vincula "algo não vazio".
 
 Esta facilidade se aplica **exatamente** só a `Option<Sexpr>`. Para `Option<Option<Sexpr>>`, não ficaria claro
-qual camada `(int n)` tirou, então escreva dois níveis de `match` como de costume.
+qual camada `(Int n)` tirou, então escreva dois níveis de `match` como de costume.
 
 Os mesmos padrões de downcast podem ser usados como estão sobre **um valor examinado que é um objeto trait
 (`:dyn Trait`, capítulo 2)**: `match` o tira da caixa e então o entrega à maquinaria de padrões de `Sexpr` acima,
@@ -1813,7 +1813,7 @@ Ao contrário de `break`/`return` (capítulo 5), esta é uma saída **dinâmica*
   (catch 'found
     (progn
       (dolist (x xs)
-        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+        (match x ((Int n) (if (> n 10) (throw 'found n) ())) (_ ())))
       -1)))                         ; se não for encontrado, o valor do final como de costume
 ```
 
