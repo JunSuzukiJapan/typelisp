@@ -81,7 +81,7 @@ pub(crate) fn check_defvar(
     let mutable = !matches!(which, Which::Defconstant);
     reg.values.insert(path, ValueDef::Var(VarDef { ty: ty.clone(), public: d.public, mutable }));
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: d.site.ns };
     let form = lower_rooted(heap, &mut lw, &value)?;
     reg.defvar_form(heap, &path, &ty, mutable, form, matches!(which, Which::Defparameter))
 }

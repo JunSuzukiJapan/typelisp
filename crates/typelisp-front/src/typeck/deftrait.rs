@@ -6,6 +6,7 @@
 //! (`docs/dev/checker-rebuild-plan.md` 7.4); a method's signature is written
 //! in them. An `impl` of the trait for a type gives the bodies.
 
+use super::wire::Ns;
 use crate::check::bound_name;
 use crate::typeck::registry::TraitBound;
 use crate::types::{ParamOwner, Path, Type};
@@ -141,7 +142,7 @@ pub(crate) fn check_deftrait(reg: &mut Registry, d: &mut Definer, heap: &mut Hea
         for t in &body {
             t.each_value(&mut |v| heap.push_permanent_root(v));
         }
-        reg.set_template(Base::Method(path, m), Some(Template { params: ps.into_iter().map(|(n, t, _)| (n, t)).collect(), ret, body: std::mem::take(&mut body) }));
+        reg.set_template(Base::Method(path, m), Some(Template { params: ps.into_iter().map(|(n, t, _)| (n, t)).collect(), ret, body: std::mem::take(&mut body), here: Ns(ns) }));
     }
     crate::check::forms::module_form(heap, &path, &[])
 }

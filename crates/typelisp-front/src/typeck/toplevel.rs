@@ -219,7 +219,7 @@ fn check_primary(
         typed
     };
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: ns };
     let form = lower_rooted(heap, &mut lw, &typed)?;
     let form = crate::check::core::tagged(heap, wk::EXPR, &[form])?;
     let ty = std::mem::replace(&mut typed.ty, Type::Unit);
@@ -352,7 +352,7 @@ fn specialize(heap: &mut Heap, reg: &Registry, requests: &mut Requests, req: &Re
         }
         (None, _) => unreachable!("a generic definition keeps its checked body: {:?}", req.base),
     };
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: template.here.0 };
     let (params, ret, body) = super::defun::lower_template(heap, &mut lw, &template)?;
     match (req.base, req.name) {
         (Base::Fn(_), Name::Fn(name)) => reg.defun_form(heap, &name, &params, &ret, &body),
@@ -387,7 +387,7 @@ fn builtin_specialization(heap: &mut Heap, reg: &Registry, requests: &mut Reques
     let call_args = params.iter().map(|(n, t)| Typed { node: Node::Local { name: *n }, ty: t.clone(), loc: None }).collect();
     let call = Typed { node: Node::MethodCall { owner, method, instance: def.instance, targs: Vec::new(), args: call_args }, ty: ret.clone(), loc: None };
     let none = Subst::default();
-    let mut lw = Lowering { reg, subst: &none, requests };
+    let mut lw = Lowering { reg, subst: &none, requests, here: owner.ns() };
     let body = vec![lower_rooted(heap, &mut lw, &call)?];
     reg.defmethod_form(heap, &owner, name, def.instance, &params, &ret, &body)
 }

@@ -227,6 +227,11 @@ impl<'a> Cx<'a> {
     /// a number literal's hole in them is decided first. So it is when the
     /// method can only be a blanket `impl`'s, whose bounds the type's
     /// arguments may decide.
+    ///
+    /// A receiver with no method `name` of its own — none of its type's, of
+    /// a blanket `impl` covering it, of the bounds on it when it is a type
+    /// parameter, or of its trait when it is a trait object — answers to the
+    /// method `name` every type has, when one is defined.
     pub(crate) fn receiver_method(&self, ty: &Type, name: SymRef) -> Result<Option<(Path, &'a MethodDef)>, Error> {
         let ty = self.with_default(ty);
         if let Some(owner) = crate::types::nominal_path(&ty) {
@@ -235,7 +240,21 @@ impl<'a> Cx<'a> {
                 self.decide_all(&ty);
             }
         }
-        receiver_method(self.reg, self.ns, &self.resolve(&ty), name)
+        let ty = self.resolve(&ty);
+        if let Some(found) = receiver_method(self.reg, self.ns, &ty, name)? {
+            return Ok(Some(found));
+        }
+        let own = match &ty {
+            Type::Param(p) => bound_method(self.reg, self.scope, *p, name).is_some(),
+            Type::Dyn(trait_path, _) => dyn_trait::has_method(self.reg, trait_path, name),
+            _ => false,
+        };
+        if own {
+            return Ok(None);
+        }
+        let Some(m) = self.reg.every_type_method(name) else { return Ok(None) };
+        let home = m.home.map_or(NsId::STD, |h| h.ns());
+        Ok((m.sig.public || super::resolve::sees(self.ns, home)).then_some((super::registry::every_type_owner(), m)))
     }
 
     /// Decide `ty`, when it is a number literal's hole nothing has decided
@@ -864,6 +883,15 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
 /// The error for a receiver of type `recv` that has no method `member`,
 /// when other types have one: the name is no missing function.
 fn no_method(cx: &Cx, recv: &Type, member: SymRef) -> Option<Error> {
+    // Every type's method of the name is unseen here, or the receiver
+    // would have answered to it.
+    if let Some(home) = cx.reg.every_type_method(member).and_then(|m| m.home) {
+        return Some(Error::TypeError(format!(
+            "`{}` is a method every type has, written as `{}` without `pub`, so only its own module sees it",
+            member,
+            typelisp_print::shared::name_view().definition(home.ns(), home.name_symbol())
+        )));
+    }
     let owners = cx.reg.types_with_instance_method(member);
     if owners.is_empty() {
         return None;

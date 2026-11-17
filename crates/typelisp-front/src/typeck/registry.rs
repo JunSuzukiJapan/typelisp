@@ -291,6 +291,12 @@ impl TraitDef {
     }
 }
 
+/// The owner of the methods every type has (`(defmethod f<T> ((x T)) ...)`),
+/// which no program can name: a leading space is unwritable in source.
+pub(crate) fn every_type_owner() -> Path {
+    Path::in_ns(NsId::STD, " every type")
+}
+
 /// A blanket `impl`, `(impl<T> Trait T ...)`: the owner its methods are
 /// defined under, which no program can name; its type parameter; the
 /// bounds a type meets to be covered; and the associated types it binds, by
@@ -356,13 +362,15 @@ pub(crate) struct VarDef {
 /// A generic function's or method's checked body, kept to be specialized:
 /// its parameters' names and types (a method's receiver first), its result
 /// type, and the body, every type in them settled except for the
-/// definition's own type parameters.
+/// definition's own type parameters; and the module the body was written
+/// in, which is what it sees from.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Template {
     #[serde(with = "super::wire::sym_pairs")]
     pub(crate) params: Vec<(SymRef, Type)>,
     pub(crate) ret: Type,
     pub(crate) body: Vec<Typed>,
+    pub(crate) here: super::wire::Ns,
 }
 
 /// Which writes a question about the registry's keys is about.
@@ -675,6 +683,13 @@ impl Registry {
         self.method_names.get(&name).is_some()
     }
 
+    /// The method `name` every type has: a `defmethod` whose receiver's type
+    /// is one of its own type parameters. A type's own method of that name
+    /// is looked up first ([`super::expr::Cx::receiver_method`]).
+    pub(crate) fn every_type_method(&self, name: SymRef) -> Option<&MethodDef> {
+        self.method(&every_type_owner(), name).filter(|m| m.instance)
+    }
+
     /// Define (or redefine) the method `name` of `owner`.
     pub(crate) fn define_method(&mut self, owner: Path, name: SymRef, def: MethodDef) {
         if self.defaulted.get(&(owner, name)).is_some() {
@@ -720,7 +735,7 @@ impl Registry {
         let mut out: Vec<String> = self
             .methods
             .iter()
-            .filter(|((owner, m), def)| *m == name && def.instance && self.blanket_owners.get(owner).is_none())
+            .filter(|((owner, m), def)| *m == name && def.instance && self.blanket_owners.get(owner).is_none() && *owner != every_type_owner())
             .map(|((owner, _), _)| view.definition(owner.ns(), owner.name_symbol()))
             .collect();
         for ((owner, m), insts) in self.inst_methods.iter() {

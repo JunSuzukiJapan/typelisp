@@ -247,7 +247,7 @@ fn check_default(
         tree
     };
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: d.site.ns };
     let lowered = lower_rooted(heap, &mut lw, &tree[0])?;
     tree.clear();
     value_to_owned(heap, lowered)
