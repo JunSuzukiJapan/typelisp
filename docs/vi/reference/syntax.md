@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -724,6 +724,27 @@ nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` c�
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+Khi kiểu của tham số đầu tiên đúng là một tham số kiểu do tên phương thức khai báo, phương thức trở thành **phương thức của mọi kiểu**. Có thể gọi nó với giá trị thuộc bất kỳ kiểu nào làm đối số đầu tiên.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    phương thức của mọi kiểu
+(pair-up 1 2)     ; => (10 20)    phương thức của int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    phương thức của int
+(twice "s")       ; => ("s" "s")  phương thức của mọi kiểu
+```
+
+- Nếu kiểu của đối số đầu tiên có phương thức cùng tên thì phương thức đó được ưu tiên. Định nghĩa cả hai không gây xung đột, theo thứ tự nào cũng được.
+- Bên trong một hàm generic mà kiểu của đối số đầu tiên là tham số kiểu, việc chọn được quyết định bởi kiểu mà hàm được gọi với. `twice` ở trên khi gọi với `int` sẽ gọi phương thức của `int`. Nếu một trait trong ràng buộc `:where` của tham số kiểu có phương thức cùng tên thì phương thức của trait đó được ưu tiên.
+- Khi đó, phương thức riêng của kiểu phải nhận và trả về cùng các kiểu như phương thức của mọi kiểu, ở các kiểu của lời gọi đó. Nếu khác nhau thì sẽ lỗi tại chỗ hàm được gọi với kiểu đó. Cũng sẽ lỗi nếu một trong hai có tham số `&optional` hoặc `&key`.
+- Khả năng hiển thị cũng được chỉ định bằng `(pub defmethod ...)`. Nếu phương thức riêng của kiểu không nhìn thấy được từ module nơi hàm được viết thì phương thức của mọi kiểu được gọi.
 
 ### 3.6 defstruct — struct (kiểu do người dùng định nghĩa)
 

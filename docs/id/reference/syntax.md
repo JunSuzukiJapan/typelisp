@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -776,6 +776,27 @@ metode bernama sama.
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+Jika tipe parameter pertama tepat sebuah parameter tipe yang dideklarasikan oleh nama method, method itu menjadi **method milik semua tipe**. Method ini dapat dipanggil dengan nilai bertipe apa pun sebagai argumen pertama.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    method milik semua tipe
+(pair-up 1 2)     ; => (10 20)    method milik int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    method milik int
+(twice "s")       ; => ("s" "s")  method milik semua tipe
+```
+
+- Jika tipe argumen pertama memiliki method bernama sama, method itu yang didahulukan. Mendefinisikan keduanya bukan konflik, dalam urutan apa pun.
+- Di dalam fungsi generik yang tipe argumen pertamanya adalah parameter tipe, pilihan ditentukan oleh tipe yang dipakai saat fungsi dipanggil. `twice` di atas memanggil method milik `int` jika dipanggil dengan `int`. Jika sebuah trait dalam batasan `:where` parameter tipe itu memiliki method bernama sama, method trait itu yang didahulukan.
+- Dalam hal itu, method milik tipe itu sendiri harus menerima dan mengembalikan tipe yang sama dengan method milik semua tipe, pada tipe-tipe pemanggilan itu. Jika berbeda, terjadi error di tempat fungsi dipanggil dengan tipe itu. Error juga terjadi jika salah satunya memiliki parameter `&optional` atau `&key`.
+- Visibilitas juga ditentukan dengan `(pub defmethod ...)`. Jika method milik tipe itu sendiri tidak terlihat dari modul tempat fungsi ditulis, yang dipanggil adalah method milik semua tipe.
 
 ### 3.6 defstruct — struct (tipe buatan pengguna)
 

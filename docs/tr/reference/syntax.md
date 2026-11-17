@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -748,6 +748,27 @@ ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme içi
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+İlk parametrenin türü tam olarak metodun adının bildirdiği bir tür parametresiyse, metot **her türün metodu** olur. İlk argüman olarak herhangi bir türden değerle çağrılabilir.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    her türün metodu
+(pair-up 1 2)     ; => (10 20)    int'in metodu
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    int'in metodu
+(twice "s")       ; => ("s" "s")  her türün metodu
+```
+
+- İlk argümanın türünün aynı adlı bir metodu varsa, o önceliklidir. İkisini birden tanımlamak çakışma değildir, sıra fark etmez.
+- İlk argümanın türünün bir tür parametresi olduğu genel bir fonksiyonun içinde seçim, fonksiyonun çağrıldığı türe göre yapılır. Yukarıdaki `twice` bir `int` ile çağrılınca `int`'in metodunu çağırır. Tür parametresinin `:where` sınırlarındaki bir trait aynı adlı bir metoda sahipse, o trait'in metodu önceliklidir.
+- Bu durumda türün kendi metodu, o çağrının türlerinde, her türün metoduyla aynı argüman ve dönüş türlerini almalıdır. Farklıysa, fonksiyonun o türle çağrıldığı yerde hata olur. İkisinden biri `&optional` veya `&key` parametrelerine sahipse de hata olur.
+- Görünürlük de `(pub defmethod ...)` ile belirtilir. Türün kendi metodu fonksiyonun yazıldığı modülden görünmüyorsa, her türün metodu çağrılır.
 
 ### 3.6 defstruct — struct'lar (kullanıcı tanımlı türler)
 

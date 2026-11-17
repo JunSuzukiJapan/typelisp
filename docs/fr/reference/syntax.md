@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -757,6 +757,27 @@ Un `defmethod` écrit hors d'un `impl` devient **une méthode du type de son pre
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+Lorsque le type du premier paramètre est exactement un paramètre de type déclaré par le nom de la méthode, la méthode devient **une méthode de tous les types**. Elle peut être appelée avec une valeur de n'importe quel type comme premier argument.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    méthode de tous les types
+(pair-up 1 2)     ; => (10 20)    méthode de int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    méthode de int
+(twice "s")       ; => ("s" "s")  méthode de tous les types
+```
+
+- Si le type du premier argument possède une méthode du même nom, c'est elle qui l'emporte. Définir les deux n'est pas un conflit, dans n'importe quel ordre.
+- Dans une fonction générique où le type du premier argument est un paramètre de type, le choix dépend du type avec lequel la fonction est appelée. `twice` ci-dessus appelle la méthode de `int` lorsqu'elle est appelée avec un `int`. Si un trait des bornes `:where` du paramètre de type possède une méthode du même nom, la méthode de ce trait l'emporte.
+- La méthode propre du type doit alors prendre et renvoyer les mêmes types que la méthode de tous les types, aux types de cet appel. Sinon, c'est une erreur là où la fonction est appelée avec ce type. C'est aussi une erreur si l'une des deux a des paramètres `&optional` ou `&key`.
+- La visibilité s'indique aussi avec `(pub defmethod ...)`. Si la méthode propre du type n'est pas visible depuis le module où la fonction est écrite, c'est la méthode de tous les types qui est appelée.
 
 ### 3.6 defstruct — structures (types définis par l'utilisateur)
 

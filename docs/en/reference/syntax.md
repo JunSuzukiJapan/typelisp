@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -745,6 +745,27 @@ A `defmethod` written outside an `impl` becomes **a method of its first paramete
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+When the first parameter's type is exactly a type parameter the method's name declares, the method is **a method of every type**. It can be called with a value of any type as the first argument.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    a method of every type
+(pair-up 1 2)     ; => (10 20)    a method of int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    a method of int
+(twice "s")       ; => ("s" "s")  a method of every type
+```
+
+- If the first argument's type has a method of the same name, that one takes precedence. Defining both is no conflict, in either order.
+- Inside a generic function where the first argument's type is a type parameter, the choice is made by the type the function is called with. `twice` above calls `int`'s method when called with an `int`. If a trait in the type parameter's `:where` bounds has a method of the same name, that trait's method takes precedence.
+- The type's own method must then take and return the same types as the method of every type, at that call's types. If they differ, it is an error where the function is called with that type. It is also an error if either has `&optional` or `&key` parameters.
+- Visibility is `(pub defmethod ...)` as well. If the type's own method is not visible from the module the function is written in, the method of every type is called.
 
 ### 3.6 defstruct — structs (user-defined types)
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -756,6 +756,27 @@ Un `defmethod` escrito fuera de un `impl` se convierte en **un método del tipo 
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+Cuando el tipo del primer parámetro es exactamente un parámetro de tipo que declara el nombre del método, el método pasa a ser **un método de todos los tipos**. Se puede llamar con un valor de cualquier tipo como primer argumento.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    método de todos los tipos
+(pair-up 1 2)     ; => (10 20)    método de int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    método de int
+(twice "s")       ; => ("s" "s")  método de todos los tipos
+```
+
+- Si el tipo del primer argumento tiene un método con el mismo nombre, ese tiene prioridad. Definir ambos no es un conflicto, en cualquier orden.
+- Dentro de una función genérica en la que el tipo del primer argumento es un parámetro de tipo, lo decide el tipo con el que se llama a la función. `twice` de arriba llama al método de `int` cuando se llama con un `int`. Si un trait de los límites `:where` del parámetro de tipo tiene un método con el mismo nombre, tiene prioridad el método de ese trait.
+- En ese caso, el método propio del tipo debe tomar y devolver los mismos tipos que el método de todos los tipos, con los tipos de esa llamada. Si difieren, es un error donde se llama a la función con ese tipo. También es un error si alguno de los dos tiene parámetros `&optional` o `&key`.
+- La visibilidad también se indica con `(pub defmethod ...)`. Si el método propio del tipo no es visible desde el módulo en que está escrita la función, se llama al método de todos los tipos.
 
 ### 3.6 defstruct — estructuras (tipos definidos por el usuario)
 

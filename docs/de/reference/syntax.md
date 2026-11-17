@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -770,6 +770,27 @@ Ein außerhalb eines `impl` geschriebenes `defmethod` wird zu **einer Methode de
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+Ist der Typ des ersten Parameters genau ein Typparameter, den der Methodenname deklariert, wird die Methode zu einer **Methode jedes Typs**. Sie kann mit einem Wert beliebigen Typs als erstem Argument aufgerufen werden.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    Methode jedes Typs
+(pair-up 1 2)     ; => (10 20)    Methode von int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    Methode von int
+(twice "s")       ; => ("s" "s")  Methode jedes Typs
+```
+
+- Hat der Typ des ersten Arguments eine Methode gleichen Namens, hat diese Vorrang. Beide zu definieren ist kein Konflikt, in beliebiger Reihenfolge.
+- In einer generischen Funktion, in der der Typ des ersten Arguments ein Typparameter ist, entscheidet der Typ, mit dem die Funktion aufgerufen wird. `twice` oben ruft mit einem `int` die Methode von `int` auf. Hat eine Trait in den `:where`-Schranken des Typparameters eine Methode gleichen Namens, hat die Methode dieser Trait Vorrang.
+- Die eigene Methode des Typs muss dann bei den Typen dieses Aufrufs dieselben Argument- und Rückgabetypen haben wie die Methode jedes Typs. Weichen sie ab, ist das ein Fehler an der Stelle, an der die Funktion mit diesem Typ aufgerufen wird. Ebenso ist es ein Fehler, wenn eine der beiden `&optional`- oder `&key`-Parameter hat.
+- Die Sichtbarkeit wird ebenfalls mit `(pub defmethod ...)` festgelegt. Ist die eigene Methode des Typs aus dem Modul, in dem die Funktion geschrieben ist, nicht sichtbar, wird die Methode jedes Typs aufgerufen.
 
 ### 3.6 defstruct — Strukturen (benutzerdefinierte Typen)
 

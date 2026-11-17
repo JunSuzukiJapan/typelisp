@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -745,6 +745,27 @@ En `defmethod` som skrivs utanför en `impl` blir **en metod hos typen för dess
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+När typen på den första parametern är exakt en typparameter som metodens namn deklarerar blir metoden **en metod för alla typer**. Den kan anropas med ett värde av vilken typ som helst som första argument.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    metod för alla typer
+(pair-up 1 2)     ; => (10 20)    metod för int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    metod för int
+(twice "s")       ; => ("s" "s")  metod för alla typer
+```
+
+- Om typen på det första argumentet har en metod med samma namn har den företräde. Att definiera båda är ingen konflikt, i valfri ordning.
+- I en generisk funktion där typen på det första argumentet är en typparameter avgörs valet av den typ som funktionen anropas med. `twice` ovan anropar `int`s metod när den anropas med en `int`. Om en trait i typparameterns `:where`-gränser har en metod med samma namn har den traitens metod företräde.
+- Typens egen metod måste då ta och returnera samma typer som metoden för alla typer, vid anropets typer. Om de skiljer sig är det ett fel där funktionen anropas med den typen. Det är också ett fel om någon av dem har `&optional`- eller `&key`-parametrar.
+- Synlighet anges också med `(pub defmethod ...)`. Om typens egen metod inte är synlig från modulen där funktionen är skriven anropas metoden för alla typer.
 
 ### 3.6 defstruct — structs (användardefinierade typer)
 

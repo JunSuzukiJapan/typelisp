@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -589,6 +589,27 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+当第 1 个参数的类型正是方法名中声明的类型参数本身时，该方法成为**所有类型的方法**。可以用任何类型的值作为第 1 个参数来调用。
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    所有类型的方法
+(pair-up 1 2)     ; => (10 20)    int 的方法
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    int 的方法
+(twice "s")       ; => ("s" "s")  所有类型的方法
+```
+
+- 如果第 1 个参数的类型有同名的方法，则优先使用它。两者都定义也不会冲突，定义的顺序也无关。
+- 在第 1 个参数的类型是类型参数的泛型函数中，由调用该函数时的类型决定。上面的 `twice` 以 `int` 调用时会调用 `int` 的方法。如果类型参数的 `:where` 约束中的 trait 有同名的方法，则优先使用该 trait 的方法。
+- 此时，类型自己的方法在该调用的类型下，必须与所有类型的方法接受和返回相同的类型。如果不同，会在以该类型调用函数的地方报错。如果两者之一有 `&optional` 或 `&key` 参数，也会报错。
+- 公开同样用 `(pub defmethod ...)`。如果类型自己的方法在编写函数的模块中不可见，则调用所有类型的方法。
 
 ### 3.6 defstruct — 结构体（用户定义类型）
 

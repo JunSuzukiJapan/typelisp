@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -780,6 +780,27 @@ Een `defmethod` die buiten een `impl` is geschreven, wordt **een methode van het
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+Als het type van de eerste parameter precies een typeparameter is die de naam van de methode declareert, wordt de methode **een methode van elk type**. Ze kan worden aangeroepen met een waarde van elk type als eerste argument.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    methode van elk type
+(pair-up 1 2)     ; => (10 20)    methode van int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    methode van int
+(twice "s")       ; => ("s" "s")  methode van elk type
+```
+
+- Als het type van het eerste argument een methode met dezelfde naam heeft, gaat die voor. Beide definiëren is geen conflict, in elke volgorde.
+- In een generieke functie waarin het type van het eerste argument een typeparameter is, beslist het type waarmee de functie wordt aangeroepen. `twice` hierboven roept met een `int` de methode van `int` aan. Als een trait in de `:where`-grenzen van de typeparameter een methode met dezelfde naam heeft, gaat de methode van die trait voor.
+- De eigen methode van het type moet dan bij de typen van die aanroep dezelfde argument- en resultaattypen hebben als de methode van elk type. Wijken ze af, dan is dat een fout op de plek waar de functie met dat type wordt aangeroepen. Het is ook een fout als een van beide `&optional`- of `&key`-parameters heeft.
+- Zichtbaarheid wordt eveneens met `(pub defmethod ...)` aangegeven. Is de eigen methode van het type niet zichtbaar vanuit de module waarin de functie is geschreven, dan wordt de methode van elk type aangeroepen.
 
 ### 3.6 defstruct — structs (door de gebruiker gedefinieerde types)
 

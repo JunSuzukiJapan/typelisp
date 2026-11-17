@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -581,6 +581,27 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+當第 1 個參數的型別正是方法名稱中宣告的型別參數本身時，該方法成為**所有型別的方法**。可以用任何型別的值作為第 1 個參數來呼叫。
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    所有型別的方法
+(pair-up 1 2)     ; => (10 20)    int 的方法
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    int 的方法
+(twice "s")       ; => ("s" "s")  所有型別的方法
+```
+
+- 如果第 1 個參數的型別有同名的方法，則優先使用它。兩者都定義也不會衝突，定義的順序也無關。
+- 在第 1 個參數的型別是型別參數的泛型函式中，由呼叫該函式時的型別決定。上面的 `twice` 以 `int` 呼叫時會呼叫 `int` 的方法。如果型別參數的 `:where` 約束中的 trait 有同名的方法，則優先使用該 trait 的方法。
+- 此時，型別自己的方法在該呼叫的型別下，必須與所有型別的方法接受和回傳相同的型別。如果不同，會在以該型別呼叫函式的地方報錯。如果兩者之一有 `&optional` 或 `&key` 參數，也會報錯。
+- 公開同樣用 `(pub defmethod ...)`。如果型別自己的方法在撰寫函式的模組中不可見，則呼叫所有型別的方法。
 
 ### 3.6 defstruct — 結構（使用者定義型別）
 
