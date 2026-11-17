@@ -14,7 +14,7 @@ fn typl(args: &[&str]) -> Output {
 fn version_prints_the_version() {
     let out = typl(&["--version"]);
     assert!(out.status.success());
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "typl 0.3.5\n");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "typl 0.3.6\n");
 }
 
 #[test]
