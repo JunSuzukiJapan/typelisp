@@ -19,6 +19,7 @@
 //! fields, defaults too, before the struct's own. A struct that includes
 //! another is not a subtype of it: the field list is all it takes.
 
+use super::wire::Ns;
 use crate::check::lower::CoreForms;
 use crate::typeck::registry::AdtKind;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
@@ -178,12 +179,12 @@ fn define_accessor(
     let sig = FnDef { public: field.public, ..FnDef::plain(own.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };
     reg.define_method(path, method, MethodDef { sig, instance: true, home: None, inst_args: None });
     if !own.is_empty() {
-        reg.set_template(Base::Method(path, method), Some(Template { params, ret, body: vec![body] }));
+        reg.set_template(Base::Method(path, method), Some(Template { params, ret, body: vec![body], here: Ns(path.ns()) }));
         return Ok(None);
     }
     reg.set_template(Base::Method(path, method), None);
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: path.ns() };
     let body = lower_all(heap, &mut lw, &[body])?;
     Ok(Some(reg.defmethod_form(heap, &path, method, true, &params, &ret, &body)?))
 }
@@ -438,12 +439,12 @@ fn define_body(
     if !own.is_empty() {
         // The body is kept past this form, so the values it holds are too.
         body.each_value(&mut |v| heap.push_permanent_root(v));
-        reg.set_template(Base::Method(path, method), Some(Template { params, ret, body: vec![body] }));
+        reg.set_template(Base::Method(path, method), Some(Template { params, ret, body: vec![body], here: Ns(path.ns()) }));
         return Ok(None);
     }
     reg.set_template(Base::Method(path, method), None);
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: path.ns() };
     let body = lower_all(heap, &mut lw, &[body])?;
     Ok(Some(reg.defmethod_form(heap, &path, method, instance, &params, &ret, &body)?))
 }

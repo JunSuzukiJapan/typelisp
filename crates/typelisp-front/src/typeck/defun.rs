@@ -6,6 +6,7 @@
 //! The generic function itself has no code: its definition lowers to an
 //! empty `(module PATH)`, the form that defines a name and runs nothing.
 
+use super::wire::Ns;
 use crate::check::lower::CoreForms;
 use crate::typeck::registry::TraitBound;
 use crate::types::{ParamOwner, Path, Type, TypeParam};
@@ -104,12 +105,12 @@ pub(crate) fn check_defun(
         for t in &body {
             t.each_value(&mut |v| heap.push_permanent_root(v));
         }
-        reg.set_template(Base::Fn(path), Some(Template { params, ret, body: std::mem::take(&mut body) }));
+        reg.set_template(Base::Fn(path), Some(Template { params, ret, body: std::mem::take(&mut body), here: Ns(ns) }));
         return crate::check::forms::module_form(heap, &path, &[]);
     }
     reg.set_template(Base::Fn(path), None);
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: ns };
     let forms = lower_all(heap, &mut lw, &body)?;
     reg.defun_form(heap, &path, &params, &ret, &forms)
 }

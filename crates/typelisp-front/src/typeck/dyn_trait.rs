@@ -290,29 +290,42 @@ pub(crate) fn check_dyn_call(
     args: &[(Value, Option<Loc>)],
     loc: Option<Loc>,
 ) -> Result<Typed, Error> {
-    let (tdef, slots) = object_safe(cx.reg, trait_path)?;
-    let at = dyn_at(tdef, trait_path, &receiver.ty, pins)?;
-    let Some(slot) = slots.iter().position(|(m, _)| *m == method) else {
+    let Some(DynMethod { slot, params, ret }) = dyn_method(cx.reg, trait_path, &receiver.ty, pins, method)? else {
         return Err(Error::TypeError(format!(
             "`{}` is not a method of `{}` — a `:dyn {}` value can only call the trait's own or inherited methods",
             method, trait_path, trait_path
         )));
     };
-    let decl = slots[slot].1;
-    let ddef = trait_def(cx.reg, &decl).expect("a supertrait is defined");
-    let sig = ddef.method(method).expect("the declaring trait has the method");
-    let at = at_in(cx.reg, trait_path, &at, &decl).expect("the declaring trait is in the chain");
-    let subst = Subst::some_of(&ddef.params, &at);
-    let want = sig.params.len() - 1;
-    if args.len() != want {
-        return Err(Error::TypeError(format!("{}::{}: expected {} argument(s), got {}", trait_path, method, want, args.len())));
+    if args.len() != params.len() {
+        return Err(Error::TypeError(format!("{}::{}: expected {} argument(s), got {}", trait_path, method, params.len(), args.len())));
     }
     let mut typed = vec![receiver];
-    for ((arg, arg_loc), pty) in args.iter().zip(&sig.params[1..]) {
-        typed.push(check_expr(cx, heap, locals, *arg, Some(&subst.apply(pty)), arg_loc.clone())?);
+    for ((arg, arg_loc), pty) in args.iter().zip(&params) {
+        typed.push(check_expr(cx, heap, locals, *arg, Some(pty), arg_loc.clone())?);
     }
-    let ret = subst.apply(&sig.ret);
     Ok(Typed { node: Node::DynCall { trait_path: *trait_path, method, slot, args: typed }, ty: ret, loc })
+}
+
+/// A method a `:dyn` value is called with through its table: its slot, the
+/// types of the arguments after the receiver, and the result's type.
+pub(crate) struct DynMethod {
+    pub(crate) slot: usize,
+    pub(crate) params: Vec<Type>,
+    pub(crate) ret: Type,
+}
+
+/// The method `method` of a `:dyn trait_path<pins>` value of type `ty`, its
+/// trait's own or inherited, when it has one.
+pub(crate) fn dyn_method(reg: &Registry, trait_path: &Path, ty: &Type, pins: &[Type], method: SymRef) -> Result<Option<DynMethod>, Error> {
+    let (tdef, slots) = object_safe(reg, trait_path)?;
+    let at = dyn_at(tdef, trait_path, ty, pins)?;
+    let Some(slot) = slots.iter().position(|(m, _)| *m == method) else { return Ok(None) };
+    let decl = slots[slot].1;
+    let ddef = trait_def(reg, &decl).expect("a supertrait is defined");
+    let sig = ddef.method(method).expect("the declaring trait has the method");
+    let at = at_in(reg, trait_path, &at, &decl).expect("the declaring trait is in the chain");
+    let subst = Subst::some_of(&ddef.params, &at);
+    Ok(Some(DynMethod { slot, params: sig.params[1..].iter().map(|p| subst.apply(p)).collect(), ret: subst.apply(&sig.ret) }))
 }
 
 /// The table for boxing a value of `concrete` as `:dyn trait_path`: each

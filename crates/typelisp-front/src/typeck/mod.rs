@@ -75,6 +75,7 @@ pub(crate) mod defun;
 pub(crate) mod defvar;
 pub(crate) mod documentation;
 pub(crate) mod dyn_trait;
+pub(crate) mod every_type;
 pub(crate) mod editor;
 pub(crate) mod exhaustive;
 pub(crate) mod format;

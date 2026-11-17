@@ -6,7 +6,13 @@
 //! (`docs/dev/checker-rebuild-plan.md` 7.3). `(defmethod pair-first<T,U> ((p
 //! Pair<T,U>)) T ...)` declares `T` and `U`; `Pair` declared its own, which
 //! are other parameters, whatever they are called.
+//!
+//! A receiver whose type is one of those parameters, `(defmethod f<T> ((x
+//! T)) ...)`, is any type's: the method is every type's, under an owner no
+//! program can name, and is specialized at each call like a generic
+//! function. A type's own method of the same name is looked up first.
 
+use super::wire::Ns;
 use crate::check::lower::CoreForms;
 use crate::typeck::registry::TraitBound;
 use crate::types::{is_type_application, prim_type_path, scalar_of_symbol, ParamOwner, Path, Type, TypeParam};
@@ -23,7 +29,7 @@ use super::block::check_named_body;
 use super::locals::Locals;
 use super::lower::Lowering;
 use super::define::Definer;
-use super::registry::{Definition, FnDef, MethodDef, Registry, Template, TypeEntry};
+use super::registry::{every_type_owner, Definition, FnDef, MethodDef, Registry, Template, TypeEntry};
 use super::resolve::find_named;
 use super::scope::TypeScope;
 use super::subst::Subst;
@@ -69,7 +75,13 @@ pub(crate) fn check_defmethod(
             name.name()
         )));
     }
-    let owner = receiver_type_path(heap, reg, ns, receiver[1])?;
+    // A receiver typed by one of the method's own type parameters is any
+    // type's: the method is every type's, and a type's own method of the
+    // name is looked up before it.
+    let owner = match receiver[1] {
+        Value::Symbol(id) if type_names.contains(&id) => every_type_owner(),
+        written => receiver_type_path(heap, reg, ns, written)?,
+    };
     let method = member_symbol(name.name());
     d.record(reg, Definition::Method(owner, method), doc);
     let root = TypeScope::empty();
@@ -194,12 +206,12 @@ pub(crate) fn define_method(
         for t in &body {
             t.each_value(&mut |v| heap.push_permanent_root(v));
         }
-        reg.set_template(Base::Method(owner, code_name), Some(Template { params, ret, body: std::mem::take(&mut body) }));
+        reg.set_template(Base::Method(owner, code_name), Some(Template { params, ret, body: std::mem::take(&mut body), here: Ns(ns) }));
         return Ok(None);
     }
     reg.set_template(Base::Method(owner, code_name), None);
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: ns };
     let forms = lower_all(heap, &mut lw, &body)?;
     let form = reg.defmethod_form(heap, &owner, code_name, instance, &params, &ret, &forms)?;
     heap.push_root(form);

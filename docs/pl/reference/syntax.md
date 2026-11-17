@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 46313ca48a3f77ece70a989aac8b477b6834735e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -745,6 +745,27 @@ samej nazwie.
 
 (second-elem #(10 20 30))   ; => 20
 ```
+
+Gdy typ pierwszego parametru jest dokładnie parametrem typu zadeklarowanym w nazwie metody, metoda staje się **metodą każdego typu**. Można ją wywołać z wartością dowolnego typu jako pierwszym argumentem.
+
+```lisp
+(defmethod pair-up<T, U> ((t T) (u U)) (T U)
+  `(,t ,u))
+(defmethod pair-up ((x int) (y int)) (int int)
+  `(,(* 10 x) ,(* 10 y)))
+
+(pair-up "a" 1)   ; => ("a" 1)    metoda każdego typu
+(pair-up 1 2)     ; => (10 20)    metoda int
+
+(defun twice<T> ((x T)) (T T) (pair-up x x))
+(twice 4)         ; => (40 40)    metoda int
+(twice "s")       ; => ("s" "s")  metoda każdego typu
+```
+
+- Jeśli typ pierwszego argumentu ma metodę o tej samej nazwie, ona ma pierwszeństwo. Zdefiniowanie obu nie jest konfliktem, w dowolnej kolejności.
+- W funkcji generycznej, w której typ pierwszego argumentu jest parametrem typu, wybór zależy od typu, z którym funkcja zostanie wywołana. Powyższa `twice` wywołana z `int` wywołuje metodę `int`. Jeśli trait z ograniczeń `:where` parametru typu ma metodę o tej samej nazwie, pierwszeństwo ma metoda tego traitu.
+- Własna metoda typu musi wtedy przyjmować i zwracać te same typy co metoda każdego typu, przy typach tego wywołania. Jeśli się różnią, jest to błąd w miejscu, w którym funkcja jest wywoływana z tym typem. Błędem jest też sytuacja, gdy któraś z nich ma parametry `&optional` lub `&key`.
+- Widoczność określa się również przez `(pub defmethod ...)`. Jeśli własna metoda typu nie jest widoczna z modułu, w którym napisano funkcję, wywoływana jest metoda każdego typu.
 
 ### 3.6 defstruct — struktury (typy definiowane przez użytkownika)
 

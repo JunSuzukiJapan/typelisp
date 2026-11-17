@@ -224,7 +224,7 @@ pub(crate) fn check_trait_impl(
         // A generic one is specialized where it is called.
         let Some(at) = at else { continue };
         let (template, subst) = default_body(reg, &trait_path, method, &at);
-        let mut lw = Lowering { reg, subst: &subst, requests };
+        let mut lw = Lowering { reg, subst: &subst, requests, here: template.here.0 };
         let (params, ret, body) = lower_template(heap, &mut lw, &template)?;
         let (instance, code_name) = match &inst {
             Some(args) => (reg.method_at(&owner, method, args).expect("defined above").instance, super::generic::method_specialization(&owner, method, args)),

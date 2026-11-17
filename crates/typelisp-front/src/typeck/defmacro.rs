@@ -111,7 +111,7 @@ pub(crate) fn macro_form(
         checked
     };
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: site.ns };
     let lowered = checked.iter().map(|t| lower_rooted(heap, &mut lw, t)).collect::<Result<Vec<_>, _>>()?;
     checked.clear();
     let lambda = MacroLambda { required: required.len(), optionals: opt_defaults, keys: key_defaults };
@@ -141,7 +141,7 @@ fn check_default(
         tree
     };
     let subst = Subst::default();
-    let mut lw = Lowering { reg, subst: &subst, requests };
+    let mut lw = Lowering { reg, subst: &subst, requests, here: site.ns };
     let lowered = lower_rooted(heap, &mut lw, &tree[0])?;
     tree.clear();
     Ok(vec![lowered])
