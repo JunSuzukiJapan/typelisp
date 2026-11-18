@@ -6335,7 +6335,7 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     // bootstrappers, a test evaluating one directly — comes through here
     // first. An `Interp` built *without* loading the island has no business
     // reaching those builtins, and gets a clear invariant error rather than a
-    // silently missing backend (see `eval::interp::set_llvm_builtin_hook`).
+    // silently missing backend (see `eval::interp::set_backend`).
     crate::compile::install_llvm_backend();
 
     let units = typelisp_front::dump::parse(ISLAND_DUMP, "compiler island")
