@@ -433,7 +433,6 @@ fn trait_at(reg: &Registry, from: Path, at: Vec<Option<Type>>, want: &Path, dept
     })
 }
 
-/// The type of an integer literal: the expected integer type if any, else `i32`.
 /// The trait method an operator spells when its receiver is a `where`-bounded
 /// type variable — `+` is `Add`'s `add`, `<` is `Ord`'s `less`.
 ///

@@ -2131,8 +2131,6 @@ pub(super) fn repr_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<Repr
         .collect()
 }
 
-/// A list of string literals — a `defstruct`/`defenum` form's field key
-/// templates.
 /// A list of field types ([`core::type_form`], parameters as `(type-param N)`),
 /// each read as the key template it spells.
 fn type_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<crate::TypeId>, EvalError> {
@@ -2147,6 +2145,8 @@ fn type_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<crate::TypeId>,
         .collect()
 }
 
+/// A list of string literals — a `defstruct`/`defenum` form's field key
+/// templates.
 fn str_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<String>, EvalError> {
     let vs = heap
         .list_to_vec(list)

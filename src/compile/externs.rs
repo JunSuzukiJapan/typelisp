@@ -255,9 +255,6 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
     })
 }
 
-/// Whether [`rt_builtin_symbol`] names a shim for `name` — the "this is not a
-/// call target to compile" question, asked where the shim's own name is not
-/// needed.
 /// The shim for a **method** that suspends the running task, or `None`.
 ///
 /// A second table because the free-function one is keyed by bare name and a
@@ -342,6 +339,9 @@ pub(crate) fn builtin_shim(path: &crate::Path) -> Option<&'static str> {
     (builtin_homes().get(&name.well_known()) == Some(&path.ns())).then_some(shim)
 }
 
+/// Whether [`rt_builtin_symbol`] names a shim for `name` — the "this is not a
+/// call target to compile" question, asked where the shim's own name is not
+/// needed.
 pub(crate) fn is_rt_builtin(path: &crate::Path) -> bool {
     builtin_shim(path).is_some()
 }

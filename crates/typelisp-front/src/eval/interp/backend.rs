@@ -35,20 +35,6 @@ pub struct FfiDecl {
     pub ret: TypeId,
 }
 
-/// Everything the interpreter needs from the LLVM backend, as plain `fn`
-/// pointers.
-///
-/// A hook rather than direct calls because all four are the *backend*
-/// (`crate::compile`), and the interpreter is the front end. Inverting the
-/// reference is what lets the front end stop naming `inkwell` at all — and
-/// let it become a crate that does not depend on the one holding LLVM,
-/// which it now is: `typelisp-front` (`docs/dev/implementation-log.md`,
-/// "typelisp-front クレートと AOT 内 eval").
-///
-/// Plain `fn` pointers rather than a trait object for the reason
-/// [`typelisp_print::runtime::PrintHooks`] uses them: these are only ever
-/// called Rust-side, never emitted as a call by the compiler, so there is no
-/// ABI to pin down and `Result`/`String` cross directly.
 /// What a function hands the compiler: its parameters, each with the
 /// representation its declared type lowers to, and its body forms.
 pub type FnBody = (Vec<(SymRef, Repr)>, Vec<Value>);
@@ -65,6 +51,20 @@ pub type DisassembleFn = fn(&Interp, &mut Heap, &crate::CompileTarget, bool) -> 
 /// `(defffi ...)`.
 pub type DefineFfiFn = fn(&Interp, &FfiDecl) -> Result<Rc<dyn CompiledBody>, String>;
 
+/// Everything the interpreter needs from the LLVM backend, as plain `fn`
+/// pointers.
+///
+/// A hook rather than direct calls because all four are the *backend*
+/// (`crate::compile`), and the interpreter is the front end. Inverting the
+/// reference is what lets the front end stop naming `inkwell` at all — and
+/// let it become a crate that does not depend on the one holding LLVM,
+/// which it now is: `typelisp-front` (`docs/dev/implementation-log.md`,
+/// "typelisp-front クレートと AOT 内 eval").
+///
+/// Plain `fn` pointers rather than a trait object for the reason
+/// [`typelisp_print::runtime::PrintHooks`] uses them: these are only ever
+/// called Rust-side, never emitted as a call by the compiler, so there is no
+/// ABI to pin down and `Result`/`String` cross directly.
 #[derive(Clone, Copy)]
 pub struct Backend {
     /// The `llvm-*`/native-scope builtins the compiler island calls to emit

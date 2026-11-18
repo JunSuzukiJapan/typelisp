@@ -536,9 +536,6 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
 }
 
-/// `(symbol-macrolet ((name form)...) body...)`: the body, in which each
-/// `name` stands for its `form`, checked where the name is written. A
-/// binding inside the body hides it as it hides a variable.
 /// `(unsafe body...)`: `body` in order, where a C function may be called
 /// and a C word be a value. Its value is the last form's.
 /// The outermost `unsafe` of a function owns the allocations in it
@@ -565,6 +562,9 @@ fn is_unsafe_form(heap: &Heap, v: Value) -> bool {
     matches!(v, Value::Cons(_)) && matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::UNSAFE))
 }
 
+/// `(symbol-macrolet ((name form)...) body...)`: the body, in which each
+/// `name` stands for its `form`, checked where the name is written. A
+/// binding inside the body hides it as it hides a variable.
 fn check_symbol_macrolet(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Value, Option<Loc>)], expected: Option<&Type>, loc: Option<Loc>) -> Result<Typed, Error> {
     let Some(((bindings, _), body)) = args.split_first() else {
         return Err(Error::TypeError("symbol-macrolet: (symbol-macrolet ((name form)...) body...)".into()));

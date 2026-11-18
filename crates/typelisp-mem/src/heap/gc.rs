@@ -293,12 +293,6 @@ impl Heap {
         debug_assert!(!self.is_native(), "{}: the heap was touched inside a native section", what);
     }
 
-    /// Run a mark-sweep collection. Returns the number of cons cells reclaimed.
-    /// Debug-only (runs under `gc_stress`): report any root that points at a
-    /// cell already on the free list. Such a root makes the mark phase mark a
-    /// cell the sweep then refuses to hand back, which is what drives `gc`'s
-    /// reclaim count below zero. Panics naming the root set and index — the
-    /// fact the underflow itself never reveals.
     /// Pushes what a root stack's open frames reference.
     ///
     /// Two filters, both needed. The mask says the slot holds a *tagged* word
@@ -324,6 +318,11 @@ impl Heap {
         }
     }
 
+    /// Debug-only (runs under `gc_stress`): report any root that points at a
+    /// cell already on the free list. Such a root makes the mark phase mark a
+    /// cell the sweep then refuses to hand back, which is what drives `gc`'s
+    /// reclaim count below zero. Panics naming the root set and index — the
+    /// fact the underflow itself never reveals.
     fn audit_roots_against_free_list(&self, session_roots: &[Value]) {
         use std::collections::HashSet;
         let mut freed: HashSet<usize> = HashSet::new();
@@ -366,6 +365,7 @@ impl Heap {
         }
     }
 
+    /// Run a mark-sweep collection. Returns the number of cons cells reclaimed.
     ///
     /// **Stop-the-world.** Every other thread with a view onto this heap is
     /// stopped for the duration (`docs/dev/os-threads-design.md` §4):

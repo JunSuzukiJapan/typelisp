@@ -1615,8 +1615,6 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
 /// from a stored payload but *interned* at run time, so they travel under
 /// `sexpr_variant::quoted`'s markers, which `compile-construct-sym`/
 /// `compile-construct-path` recognize and no ordinary variant can collide with.
-/// A symbol from the system module is named by its [`BUILTIN_SYMBOLS`] index
-/// rather than by its name — see [`sym_form`].
 use crate::sexpr_variant::{
     quoted::{
         ARRAY as SEXPR_QUOTED_ARRAY, PATH as SEXPR_PATH, SYM as SEXPR_SYM, VECTOR as SEXPR_QUOTED_VECTOR, TUPLE as SEXPR_QUOTED_TUPLE,

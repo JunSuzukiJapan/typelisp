@@ -53,6 +53,23 @@ pub(crate) fn format_call_sig_error(name: &str) -> String {
 }
 
 impl Interp {
+    /// Registers this `Interp` as the environment the printer asks its two
+    /// program questions of, and its control variables of — see
+    /// [`INTERP_PRINT_HOOKS`].
+    ///
+    /// Called at the point of use rather than once per session, for the same
+    /// reason [`Self::enter_compiled`] re-registers the heap on every
+    /// crossing: it is two stores, and a nested `Interp` (`compile-file`
+    /// builds one) would otherwise leave the slot naming an `Interp` that has
+    /// since returned.
+    ///
+    /// `pub` for the one caller that is *not* at a point of use:
+    /// `crate::shim::rt_eval_init` calls it on the immortal `Interp` it has
+    /// just leaked. Building that environment runs this from inside, against
+    /// an `Interp` still on `rt_eval_init`'s stack, and moving it into the
+    /// leak leaves the slot dangling — which the rest of the process then
+    /// follows, since an AOT program has no later crossing to refresh it.
+    /// Re-registering the moved address is what closes that.
     pub fn install_print_hooks(&self) {
         ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
         typelisp_print::runtime::set_print_hooks(Some(INTERP_PRINT_HOOKS));

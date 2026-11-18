@@ -46,9 +46,6 @@ impl Interp {
         typelisp_rt::vtable_define(id, addrs);
     }
 
-    /// Every vtable interned so far, as `(id, slots)` — for a code generator
-    /// that has to emit the table itself rather than patch it in from JIT
-    /// addresses (`compile::aot::build_main_wrapper`).
     /// Every enum in the program as `(definition, variant index, variant
     /// name)` — what an AOT executable's startup registers so its printer can
     /// name a variant (`typelisp_print::aot`), since the box carries only the
@@ -104,6 +101,9 @@ impl Interp {
         out
     }
 
+    /// Every vtable interned so far, as `(id, slots)` — for a code generator
+    /// that has to emit the table itself rather than patch it in from JIT
+    /// addresses (`compile::aot::build_main_wrapper`).
     pub fn vtable_descriptors(&self) -> Vec<(u32, Vec<(Path, SymRef)>)> {
         self.vtables.borrow().iter().cloned().enumerate().map(|(i, s)| (i as u32, s)).collect()
     }

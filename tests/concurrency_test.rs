@@ -614,14 +614,6 @@ fn a_compiled_yield_resumes_where_it_left_off() {
 
 // ---- sleep ---------------------------------------------------------------
 
-/// `(sleep secs)` stops **the task**, not the OS thread.
-///
-/// `a` is spawned first and sleeps, a little at a time, until `b` has marked
-/// the trail. If `sleep` held the thread, `b` would never get to run while `a`
-/// slept, and `a` would give up after its 500 naps (5 s) with "timeout". How
-/// long `b` takes to start does not matter, only that it starts while `a`
-/// sleeps. (It used to be `a` sleeping 200 ms against `b` sleeping 50 ms,
-/// which a loaded CI runner did not keep apart.)
 /// Sleepers that are all due at once wake earliest deadline first.
 ///
 /// The main task makes both sleep, then keeps the thread for 0.3 s without
@@ -648,6 +640,14 @@ fn sleepers_due_at_once_wake_earliest_deadline_first() {
     );
 }
 
+/// `(sleep secs)` stops **the task**, not the OS thread.
+///
+/// `a` is spawned first and sleeps, a little at a time, until `b` has marked
+/// the trail. If `sleep` held the thread, `b` would never get to run while `a`
+/// slept, and `a` would give up after its 500 naps (5 s) with "timeout". How
+/// long `b` takes to start does not matter, only that it starts while `a`
+/// sleeps. (It used to be `a` sleeping 200 ms against `b` sleeping 50 ms,
+/// which a loaded CI runner did not keep apart.)
 #[test]
 fn sleep_suspends_only_the_calling_task() {
     assert_eq!(

@@ -449,16 +449,6 @@ impl Type {
         })
     }
 
-    /// The six built-in integer types (`i8`/`i16`/`i32`, `u8`/`u16`/`u32`).
-    /// The one authoritative list, so callers that need to single out "an
-    /// integer type" (`typeck::literal`/pattern checking, `core_bridge`'s
-    /// struct-field classifier) share it instead of each re-enumerating all
-    /// six variants.
-    ///
-    /// There is deliberately no 64-bit-wide integer type: a runtime value is
-    /// a tagged word whose low 3 bits are the tag, so an immediate integer
-    /// has 61 bits — a type that claims 64 would have to lose the top 3
-    /// somewhere. Wider-than-`i32` arithmetic is `bignum`'s job.
     /// The two C-boundary word types. Not integers of this language (see
     /// [`Self::is_integer`]) — they carry no arithmetic — but convertible to
     /// and from one, which is the only way to compute with what C handed over.

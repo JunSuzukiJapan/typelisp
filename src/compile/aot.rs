@@ -1143,8 +1143,6 @@ fn build_main_wrapper(
 /// own default (`1 << 16`) does not hold.
 const EVAL_HEAP_CAPACITY: usize = 1 << 18;
 
-/// The name of the `eval` shim (`typelisp_front::shim`), which is what "this
-/// program evaluates at runtime" means at the IR level.
 /// The shims whose presence means the executable needs a whole interpreter in
 /// it, not just the runtime.
 ///

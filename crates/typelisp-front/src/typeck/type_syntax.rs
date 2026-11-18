@@ -329,7 +329,6 @@ fn dyn_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
     Ok(Type::Dyn(path, pins))
 }
 
-/// The type the name `id` stands for, applied to `args`.
 /// The path of the type the name `v` (a symbol or a `::` path) names.
 pub(crate) fn type_path(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Path, Error> {
     match v {
@@ -341,6 +340,7 @@ pub(crate) fn type_path(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Path, Erro
     }
 }
 
+/// The type the name `id` stands for, applied to `args`.
 fn named(heap: &Heap, cx: &TypeCx, id: SymRef, args: Vec<Type>, at: Option<&Loc>) -> Result<Type, Error> {
     match find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))) {
         Some((path, entry)) => {

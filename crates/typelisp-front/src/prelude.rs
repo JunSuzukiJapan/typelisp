@@ -20,50 +20,6 @@
 
 use crate::{Checker, Heap, Interp, Reader, Value};
 
-/// `consp`/`null`/`atom` only need `match` on `Sexpr`'s `Cons`/`Nil`
-/// constructors (already checker-level features); `equal` is the
-/// recursive-structural counterpart to `eq` (registry::sexpr_assoc) —
-/// `Cons` cells compare by walking both sides, and `Str` compares by
-/// content (via the primitive `string` type's own `eq`, since two
-/// separately-built `Sexpr::Str`s are never `eq`-identical even with the
-/// same text); every other variant (`Nil`/`Int`/`Float`/`Char`/`Bool`/`Sym`)
-/// is already correctly handled by `eq` itself.
-///
-/// The rest is a `Sexpr`-list library (roadmap step 7b — cl-equivalence
-/// catalog §2.2 e). Every
-/// function operates on plain `Sexpr` — no generics are needed here (unlike
-/// `HashTable<K,V>`) since a typelisp "list" already *is*
-/// `Sexpr`, a single concrete type — every Lisp's lists are built from cons
-/// cells, never a separate homogeneous array type. Item-based predicates (`member`/
-/// `remove`/`count`/`position`) compare with `eq` (matching CL's default
-/// `eql` test); their `-if` counterparts take a `(fn (Sexpr) bool)` instead.
-/// A helper a later definition depends on is placed earlier in this string,
-/// and that is a necessity, not a convention: a top-level `defun` may only
-/// call a name already seen. This file needs no `defsignature` anywhere — it
-/// has no mutual recursion at top level, which is worth keeping true.
-///
-/// `nconc`/`nreverse` are destructive (mutate existing cons cells via
-/// `set-car`/`set-cdr` instead of allocating new ones — see those functions'
-/// own comment below).
-///
-/// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some`/
-/// `is-none`/`is-ok`/`is-err`) are methods, not `defun`s — see the
-/// comment above their definitions below for why. `identity`/`const`/
-/// `compose`/`flip` are generic `defun`s — see the comment above their
-/// definitions for why those, unlike the accessors, fit `defun` rather than
-/// a method. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
-/// the `Sexpr`-list free function), and `assoc` (§4.2's list section) round
-/// out step 7c — `min`/`max`/`range` are not in the catalog, so they're left
-/// undone rather than guessed at.
-///
-/// `until`/`while-let` (roadmap step 8b, catalog §1.1) use `,@`
-/// (unquote-splicing, step 8a, by now already exercised by the loop/branch
-/// primitive reduction set further up) — see their own comments below.
-/// `case` (step 8c) additionally builds its expansion dynamically (mapping
-/// over `&rest clauses`) rather than from one fixed template — see its own
-/// comment for the key-quoting design decision this forces. `do` (step 8d)
-/// completes the roadmap's step-8 macro set, parallel-stepping multiple
-/// bindings via `gensym`-fresh temporaries (see its own comment).
 /// The committed prelude dump: the checked state these definitions produce,
 /// paired with the bitcode holding their native bodies. Written by
 /// `scripts/regen-prelude-bitcode.sh`, applied by
@@ -190,6 +146,50 @@ fn tuple_source() -> String {
     out
 }
 
+/// `consp`/`null`/`atom` only need `match` on `Sexpr`'s `Cons`/`Nil`
+/// constructors (already checker-level features); `equal` is the
+/// recursive-structural counterpart to `eq` (registry::sexpr_assoc) —
+/// `Cons` cells compare by walking both sides, and `Str` compares by
+/// content (via the primitive `string` type's own `eq`, since two
+/// separately-built `Sexpr::Str`s are never `eq`-identical even with the
+/// same text); every other variant (`Nil`/`Int`/`Float`/`Char`/`Bool`/`Sym`)
+/// is already correctly handled by `eq` itself.
+///
+/// The rest is a `Sexpr`-list library (roadmap step 7b — cl-equivalence
+/// catalog §2.2 e). Every
+/// function operates on plain `Sexpr` — no generics are needed here (unlike
+/// `HashTable<K,V>`) since a typelisp "list" already *is*
+/// `Sexpr`, a single concrete type — every Lisp's lists are built from cons
+/// cells, never a separate homogeneous array type. Item-based predicates (`member`/
+/// `remove`/`count`/`position`) compare with `eq` (matching CL's default
+/// `eql` test); their `-if` counterparts take a `(fn (Sexpr) bool)` instead.
+/// A helper a later definition depends on is placed earlier in this string,
+/// and that is a necessity, not a convention: a top-level `defun` may only
+/// call a name already seen. This file needs no `defsignature` anywhere — it
+/// has no mutual recursion at top level, which is worth keeping true.
+///
+/// `nconc`/`nreverse` are destructive (mutate existing cons cells via
+/// `set-car`/`set-cdr` instead of allocating new ones — see those functions'
+/// own comment below).
+///
+/// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some`/
+/// `is-none`/`is-ok`/`is-err`) are methods, not `defun`s — see the
+/// comment above their definitions below for why. `identity`/`const`/
+/// `compose`/`flip` are generic `defun`s — see the comment above their
+/// definitions for why those, unlike the accessors, fit `defun` rather than
+/// a method. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
+/// the `Sexpr`-list free function), and `assoc` (§4.2's list section) round
+/// out step 7c — `min`/`max`/`range` are not in the catalog, so they're left
+/// undone rather than guessed at.
+///
+/// `until`/`while-let` (roadmap step 8b, catalog §1.1) use `,@`
+/// (unquote-splicing, step 8a, by now already exercised by the loop/branch
+/// primitive reduction set further up) — see their own comments below.
+/// `case` (step 8c) additionally builds its expansion dynamically (mapping
+/// over `&rest clauses`) rather than from one fixed template — see its own
+/// comment for the key-quoting design decision this forces. `do` (step 8d)
+/// completes the roadmap's step-8 macro set, parallel-stepping multiple
+/// bindings via `gensym`-fresh temporaries (see its own comment).
 pub const SOURCE_TEMPLATE: &str = r##"
 ;; `not`: moved here from a Rust builtin (it has no dependency on the GC
 ;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it

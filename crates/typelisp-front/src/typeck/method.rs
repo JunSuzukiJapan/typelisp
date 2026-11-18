@@ -186,8 +186,6 @@ fn mentions(ty: &Type, p: &TypeParam) -> bool {
     found
 }
 
-/// Whether `(op receiver other)` is an operator of `int` or `ratio`, whose
-/// other operand may be the other kind of rational.
 /// `(op receiver other)`, an operator on an `int` and a `ratio` (CL's
 /// contagion): `rational`'s `op`, each operand widened to a `rational`.
 /// `(+ 1/2 1)` is `3/2`.
@@ -200,6 +198,8 @@ fn rational_call(cx: &Cx, method: SymRef, receiver: Typed, other: Typed, expecte
     Ok(Typed { node: Node::MethodCall { owner, method, instance: true, targs: Vec::new(), args }, ty: ret, loc })
 }
 
+/// Whether `(op receiver other)` is an operator of `int` or `ratio`, whose
+/// other operand may be the other kind of rational.
 fn is_rational_operator(cx: &Cx, op: SymRef, receiver: &Typed, rest: &[(Value, Option<Loc>)]) -> bool {
     const OPERATORS: [u32; 12] = [
         wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_OP_LT, wk::M_OP_LE, wk::M_OP_GT, wk::M_OP_GE,

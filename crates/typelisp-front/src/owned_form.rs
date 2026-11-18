@@ -214,15 +214,6 @@ pub struct OwnedCell {
     pub self_loc: Option<Loc>,
 }
 
-/// Serialization for [`Loc`], which lives in `typelisp-mem` and must keep
-/// living there without a `serde` dependency: every AOT executable links that
-/// crate, and only the ones that call `eval` should carry a serializer.
-///
-/// `serde(remote)` is exactly this case — the shape is written down here, once,
-/// against a type this crate does not own. `Arc<str>` round-trips through
-/// `serde`'s `rc` feature; the sharing is not preserved, which costs nothing:
-/// a restored form's cells all name the same file, and re-interning one string
-/// per cell is what the reader would have done anyway.
 /// `bignum`/`ratio` as their decimal spellings.
 ///
 /// Rather than turning on `num-bigint`/`num-rational`'s own `serde` features:
@@ -251,6 +242,15 @@ mod num_str {
     }
 }
 
+/// Serialization for [`Loc`], which lives in `typelisp-mem` and must keep
+/// living there without a `serde` dependency: every AOT executable links that
+/// crate, and only the ones that call `eval` should carry a serializer.
+///
+/// `serde(remote)` is exactly this case — the shape is written down here, once,
+/// against a type this crate does not own. `Arc<str>` round-trips through
+/// `serde`'s `rc` feature; the sharing is not preserved, which costs nothing:
+/// a restored form's cells all name the same file, and re-interning one string
+/// per cell is what the reader would have done anyway.
 pub(crate) mod loc_serde {
     use std::sync::Arc;
 

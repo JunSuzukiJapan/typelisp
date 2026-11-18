@@ -647,8 +647,6 @@ impl Interp {
     }
 
 
-    /// Execute a checked top-level form. Definitions register and return `None`;
-    /// a bare expression returns `Some(value)`.
     /// Every currently-registered top-level function's *local* name, in no
     /// particular order — for tooling and tests that need to enumerate what
     /// a given load produced (e.g. deriving the compiler island's own
@@ -659,42 +657,6 @@ impl Interp {
     }
 
 
-    /// Ensures `path` (a global some compiled function's body references)
-    /// has a compiled-global slot, promoting it from its ordinary
-    /// interpreter [`Slot`] on first reference; returns the slot's id
-    /// either way. See [`Self::compiled_globals`]'s doc comment for why
-    /// promotion — not moving every global's storage — is the shape this
-    /// takes: reads the global's *current* value (whatever the interpreter
-    /// last set it to) via the existing `Slot` and hands it to
-    /// `typelisp_rt::global_new`, which roots it permanently and returns its
-    /// id.
-    ///
-    /// Nothing is converted on the way. There used to be a crossing here — a
-    /// global's storage has the shape of a single always-live boxed-struct
-    /// field, so it went through the same `RtValue` -> `mem::Value` mapping a
-    /// field write did, with a raw-box/shift-tagged special case for an enum
-    /// global on top. The value worlds were unified and that mapping became the
-    /// identity, then went; the enum special case had already been retired by
-    /// the enum-representation unification's compiler flip.
-    ///
-    /// `pub(crate)`: `compile::aot::compile_file` calls this directly too,
-    /// once per `defvar`, *before* compiling any `defun` — eagerly, in file
-    /// declaration order, rather than waiting for some `defun` body to
-    /// reference it. That ordering matters only for AOT: the ids this
-    /// assigns are baked into compiled IR at this (the *compiling*)
-    /// process's `Heap`, but AOT's actual runtime storage is established by
-    /// a *different* `Heap` — the standalone executable's own, via a
-    /// generated startup sequence (`Self::add_compiled_global_init`) that
-    /// must call `rt_global_new` in this exact same order for the two
-    /// numberings to agree. Running that sequence in file-declaration order
-    /// is what keeps it correct even when one `defvar`'s initializer
-    /// references an earlier one — the checker's forward-reference
-    /// restriction guarantees "earlier in the file" for any such reference,
-    /// so eager, in-order promotion here guarantees "already promoted,
-    /// lower id" for it too. The JIT path (`Self::add_compiled_function`)
-    /// has no such concern — compiling and running happen in the same
-    /// `Heap` there, so lazy, reference-driven promotion (its own call
-    /// here) is simpler and just as correct.
     /// A global's current value, wherever it actually lives.
     ///
     /// A *promoted* global (one compiled code can reach) is stored in a
@@ -762,6 +724,42 @@ impl Interp {
         self.compiled_globals.borrow().get(path).copied()
     }
 
+    /// Ensures `path` (a global some compiled function's body references)
+    /// has a compiled-global slot, promoting it from its ordinary
+    /// interpreter [`Slot`] on first reference; returns the slot's id
+    /// either way. See [`Self::compiled_globals`]'s doc comment for why
+    /// promotion — not moving every global's storage — is the shape this
+    /// takes: reads the global's *current* value (whatever the interpreter
+    /// last set it to) via the existing `Slot` and hands it to
+    /// `typelisp_rt::global_new`, which roots it permanently and returns its
+    /// id.
+    ///
+    /// Nothing is converted on the way. There used to be a crossing here — a
+    /// global's storage has the shape of a single always-live boxed-struct
+    /// field, so it went through the same `RtValue` -> `mem::Value` mapping a
+    /// field write did, with a raw-box/shift-tagged special case for an enum
+    /// global on top. The value worlds were unified and that mapping became the
+    /// identity, then went; the enum special case had already been retired by
+    /// the enum-representation unification's compiler flip.
+    ///
+    /// `pub`: `compile::aot::compile_file` calls this directly too,
+    /// once per `defvar`, *before* compiling any `defun` — eagerly, in file
+    /// declaration order, rather than waiting for some `defun` body to
+    /// reference it. That ordering matters only for AOT: the ids this
+    /// assigns are baked into compiled IR at this (the *compiling*)
+    /// process's `Heap`, but AOT's actual runtime storage is established by
+    /// a *different* `Heap` — the standalone executable's own, via a
+    /// generated startup sequence (`compile::driver::add_compiled_global_init`) that
+    /// must call `rt_global_new` in this exact same order for the two
+    /// numberings to agree. Running that sequence in file-declaration order
+    /// is what keeps it correct even when one `defvar`'s initializer
+    /// references an earlier one — the checker's forward-reference
+    /// restriction guarantees "earlier in the file" for any such reference,
+    /// so eager, in-order promotion here guarantees "already promoted,
+    /// lower id" for it too. The JIT path (`compile::driver::prepare_targets`)
+    /// has no such concern — compiling and running happen in the same
+    /// `Heap` there, so lazy, reference-driven promotion (its own call
+    /// here) is simpler and just as correct.
     pub fn promote_global(&self, heap: &mut Heap, path: &Path) -> Result<usize, EvalError> {
         if let Some(&id) = self.compiled_globals.borrow().get(path) {
             return Ok(id);

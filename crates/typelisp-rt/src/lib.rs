@@ -444,16 +444,6 @@ mod tests {
         assert_eq!(popped, reassigned, "popping the binding's root now yields the reassigned value, not the original");
     }
 
-    /// Builds a tagged `Value::Str` via [`rt_str_new`] itself, rather than a
-    /// direct `heap.alloc_string(...)` call — every test below needs
-    /// pre-existing string content to exercise `rt_str_length`/`rt_str_ref`/
-    /// `rt_str_eq`/`rt_str_append` against, and (per the existing
-    /// `rt_heap_live_count_reflects_the_registered_heaps_real_state` test's
-    /// own comment) once a `Heap` is registered via [`set_active_heap`], every
-    /// further mutation must go through that same raw-pointer-derived access
-    /// path (here, another `rt_*` call) rather than reborrowing the original
-    /// `&mut heap` binding directly, which Stacked Borrows treats as
-    /// invalidating the raw pointer.
     /// The word of the type at `path` (walked down the module tree from the
     /// root) applied to the types `args` are the words of — what a compiled
     /// call site reads out of its type table and hands the shims.
@@ -465,6 +455,16 @@ mod tests {
         typelisp_mem::intern_type(typelisp_mem::TypeShape::Named(ns, intern_in(ns, name), args)).word()
     }
 
+    /// Builds a tagged `Value::Str` via [`rt_str_new`] itself, rather than a
+    /// direct `heap.alloc_string(...)` call — every test below needs
+    /// pre-existing string content to exercise `rt_str_length`/`rt_str_ref`/
+    /// `rt_str_eq`/`rt_str_append` against, and (per the existing
+    /// `rt_heap_live_count_reflects_the_registered_heaps_real_state` test's
+    /// own comment) once a `Heap` is registered via [`set_active_heap`], every
+    /// further mutation must go through that same raw-pointer-derived access
+    /// path (here, another `rt_*` call) rather than reborrowing the original
+    /// `&mut heap` binding directly, which Stacked Borrows treats as
+    /// invalidating the raw pointer.
     fn make_str(s: &str) -> i64 {
         let args: Vec<i64> = s.chars().map(|c| c as i64).collect();
         unsafe { rt_str_new(args.as_ptr(), args.len() as u32) }

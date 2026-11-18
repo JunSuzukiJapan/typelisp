@@ -2668,15 +2668,6 @@ impl Renderer {
         matches!(ctx.print_vars.cuts().1, Some(limit) if printed >= limit)
     }
 
-    /// Renders `v` at nesting `depth` the flat (non-pretty) way.
-    /// One field of a struct or enum box: rendered as the value it is —
-    /// unless the program's definition says the field is a niche-represented
-    /// `Option` (`PrintEnv::field_is_niched_option`), in which case the word
-    /// is that `Option`, and prints as `None` or `(Some ...)` around the
-    /// payload exactly as a boxed one would. The box is the only place a
-    /// niched `Option` can sit with nothing static to say what it is, so
-    /// this is the only place the question is asked.
-    #[allow(clippy::too_many_arguments)]
     /// A `Sexpr` `array` datum (`#nA(..)`): `#(..)` at rank 1, `#nA(..)` at
     /// any other rank — what `Array<T>`'s prelude `print-object` writes — or
     /// just the shape, `#<array 2x3>`, with `*print-array*` off.
@@ -2753,6 +2744,14 @@ impl Renderer {
         Ok(())
     }
 
+    /// One field of a struct or enum box: rendered as the value it is —
+    /// unless the program's definition says the field is a niche-represented
+    /// `Option` (`PrintEnv::field_is_niched_option`), in which case the word
+    /// is that `Option`, and prints as `None` or `(Some ...)` around the
+    /// payload exactly as a boxed one would. The box is the only place a
+    /// niched `Option` can sit with nothing static to say what it is, so
+    /// this is the only place the question is asked.
+    #[allow(clippy::too_many_arguments)]
     fn render_field(
         &mut self,
         heap: &mut Heap,
@@ -2778,6 +2777,7 @@ impl Renderer {
         Ok(())
     }
 
+    /// Renders `v` at nesting `depth` the flat (non-pretty) way.
     pub(crate) fn render(
         &mut self,
         heap: &mut Heap,

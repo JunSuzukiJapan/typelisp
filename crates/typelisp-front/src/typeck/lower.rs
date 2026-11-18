@@ -563,13 +563,13 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
     }
 }
 
-/// `pat`'s core form, unrooted.
 /// The symbol a `catch` or `throw` of `tag` carrying `carried` is matched by
 /// at run time, which names the pair of the two.
 fn run_time_tag(tag: SymRef, carried: &Type) -> SymRef {
     typelisp_mem::symbols::throw_tag_symbol(tag, &typelisp_mem::ConcreteNames::type_key(carried))
 }
 
+/// `pat`'s core form, unrooted.
 fn lower_pattern(heap: &mut Heap, lw: &mut Lowering, pat: &Pat) -> Result<Value, Error> {
     match pat {
         Pat::Wild => core::tagged(heap, wk::PAT_WILD, &[]),

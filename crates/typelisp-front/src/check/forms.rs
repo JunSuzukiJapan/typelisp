@@ -630,9 +630,6 @@ pub(crate) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
     }
 }
 
-/// Build a proper list `Value` from `items`, in order — the inverse of
-/// `heap.list_to_vec`, used by `typeck::impl_block` to reassemble a
-/// receiver/parameter form after substituting just its type position.
 /// Build a list, tagging each spine cell with its element's source span
 /// (`Heap::set_elem_loc`) — used by `check_impl`'s method-signature
 /// rebuild so the elements carried over unchanged keep the positions

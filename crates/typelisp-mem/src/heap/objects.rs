@@ -432,15 +432,6 @@ impl Heap {
         }
     }
 
-    /// True if `id` holds a `BoxedObj::Struct` with a `StructPayload::Fields`
-    /// payload (a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance) —
-    /// deliberately narrower than "any `Struct`" now that [`StructPayload`]
-    /// has more than one shape (see [`is_hashtable`](Self::is_hashtable)),
-    /// so a caller holding only a `Value::Boxed` (e.g. decoding a struct
-    /// field or a generic `match` scrutinee back into an interpreter-level
-    /// value) can tell a nested struct apart from a boxed float *or* a
-    /// `HashTable` without risking [`f64_value`](Self::f64_value)'s or
-    /// [`struct_field`](Self::struct_field)'s "wrong kind" panic.
     /// The arity of the `#{..}` datum `id` is, or `None` when it is no such
     /// box (see [`crate::tuple`]).
     pub fn sexpr_tuple_arity(&self, id: BoxId) -> Option<usize> {
@@ -450,6 +441,15 @@ impl Heap {
         crate::tuple::sexpr_tuple_arity(self.struct_type_key(id))
     }
 
+    /// True if `id` holds a `BoxedObj::Struct` with a `StructPayload::Fields`
+    /// payload (a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance) —
+    /// deliberately narrower than "any `Struct`" now that [`StructPayload`]
+    /// has more than one shape (see [`is_hashtable`](Self::is_hashtable)),
+    /// so a caller holding only a `Value::Boxed` (e.g. decoding a struct
+    /// field or a generic `match` scrutinee back into an interpreter-level
+    /// value) can tell a nested struct apart from a boxed float *or* a
+    /// `HashTable` without risking [`f64_value`](Self::f64_value)'s or
+    /// [`struct_field`](Self::struct_field)'s "wrong kind" panic.
     pub fn is_struct(&self, id: BoxId) -> bool {
         matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Fields(_), .. }))
     }
@@ -610,9 +610,6 @@ impl Heap {
         }
     }
 
-    /// True if `id` holds a `BoxedObj::Cell` — the peer of
-    /// [`is_struct`](Self::is_struct)/[`is_hashtable`](Self::is_hashtable)
-    /// for callers that decode a `Value::Boxed` without knowing its kind.
     /// [`cell_get`](Self::cell_get), or `None` when `id` does not hold a cell
     /// — the check and the read under one lock.
     pub fn try_cell_get(&self, id: BoxId) -> Option<Value> {
@@ -622,6 +619,9 @@ impl Heap {
         }
     }
 
+    /// True if `id` holds a `BoxedObj::Cell` — the peer of
+    /// [`is_struct`](Self::is_struct)/[`is_hashtable`](Self::is_hashtable)
+    /// for callers that decode a `Value::Boxed` without knowing its kind.
     pub fn is_cell(&self, id: BoxId) -> bool {
         matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Cell(_)))
     }
@@ -747,9 +747,6 @@ impl Heap {
         }
     }
 
-    /// A compiled closure's capture mask — bit `i` set means env slot `i`
-    /// holds a real tagged value (see [`BoxedObj::CompiledClosure`]).
-    /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
     /// A compiled closure's function, its body ABI, its capture mask and its
     /// captures (appended to `env`) — or `None` when `id` does not hold one.
     /// What applying it needs, under one lock rather than one per part.
@@ -763,6 +760,9 @@ impl Heap {
         }
     }
 
+    /// A compiled closure's capture mask — bit `i` set means env slot `i`
+    /// holds a real tagged value (see [`BoxedObj::CompiledClosure`]).
+    /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
     pub fn compiled_closure_mask(&self, id: BoxId) -> u64 {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { sexpr_mask, .. }) => *sexpr_mask,

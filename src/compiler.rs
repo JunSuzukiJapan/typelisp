@@ -6234,13 +6234,11 @@ m))))
 // now, behind `crate::load_compiler`) installs the native bodies so the island
 // runs compiled.
 
-/// The precompiled compiler-island bitcode (interp-closure removal Stage 3),
-/// embedded so [`load_aot`] needs no filesystem access at runtime. Kept in
-/// sync with `SOURCE` by `scripts/regen-compiler-island.sh` and the
-/// `island_artifacts_are_fresh` test.
 /// The committed island dump: the checked state every top-level `defun` in
 /// [`SOURCE`] produces, paired with the bitcode holding their native bodies.
-/// Written by `scripts/regen-compiler-island.sh`, applied by [`load_aot`].
+/// Written by `scripts/regen-compiler-island.sh`, applied by [`load_aot`],
+/// and embedded so that needs no filesystem access at run time;
+/// `island_artifacts_are_fresh` keeps it in step with `SOURCE`.
 ///
 /// `tests/island_self_compile_test.rs`'s `ISLAND_DEFUNS` is the list of them,
 /// and `island_defun_list_is_exhaustive` is what keeps it honest — this used
@@ -6297,6 +6295,18 @@ pub const ISLAND_DUMP_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_OPTION_NIC
 /// Which tag layout [`SOURCE`] as it stands **now** emits.
 pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_OPTION_NICHE;
 
+/// The module the island is written in: the core IR's, `%core`.
+pub fn island_module_segments() -> Vec<String> {
+    vec![typelisp_mem::symbols::CORE_MODULE.to_string()]
+}
+
+/// The island's function `name`, by its path in [`island_module_segments`].
+pub fn island_path(name: &str) -> crate::types::Path {
+    let mut segs = island_module_segments();
+    segs.push(name.to_string());
+    crate::types::Path::from_segments(segs)
+}
+
 /// Loads the compiler island as **native code** (interp-closure removal
 /// Stage 4): the committed dump's checked state and definitions — which
 /// registers each island `defun`'s `FnDef` and checker entry but allocates no
@@ -6316,18 +6326,6 @@ pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_OPTION_NICHE;
 /// which is what lets interpreted closures be removed entirely (Stage 8).
 /// `SOURCE` being fixed and the dump a committed, digest-checked artifact, any
 /// failure here is a build/bug condition, not a user error — hence the panics.
-/// The module the island is written in: the core IR's, `%core`.
-pub fn island_module_segments() -> Vec<String> {
-    vec![typelisp_mem::symbols::CORE_MODULE.to_string()]
-}
-
-/// The island's function `name`, by its path in [`island_module_segments`].
-pub fn island_path(name: &str) -> crate::types::Path {
-    let mut segs = island_module_segments();
-    segs.push(name.to_string());
-    crate::types::Path::from_segments(segs)
-}
-
 pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     // The island's whole purpose is emitting IR, so this is where the backend
     // that does the emitting becomes available: every path that can reach an

@@ -391,36 +391,20 @@ fn is_float_receiver(type_name: &Path) -> bool {
     crate::types::scalar_type(type_name).is_some_and(|t| t.is_float())
 }
 
-/// Built-in (Rust-implemented) instance/static methods for nominal types that
-/// have no `defmethod` body to run — currently `HashTable<K,V>`
-/// (`crate::typeck::builtins`'s `hashtable`).
-/// Mirrors `Interp::eval_builtin` for free functions: `assoc`'s eval arm
-/// tries `Interp::methods` (user `defmethod`s) first, falling back to this.
-/// Argument count/types are trusted (the checker already validated them
-/// against the methods' signatures), so arms index `args` directly
-/// rather than re-checking shape. Takes `heap` (unlike most of these arms
-/// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::f64`'s
-/// actual value (`Heap::f64_value`) to tell it apart from `eq`'s identity
-/// comparison — see `sexpr_eql`'s doc comment.
-/// `ret_ty` is the call site's checked return type (`assoc`/
-/// the unreachable-`panic` node a bounded generic's method call leaves behind) — [`vector_get`]
-/// consumes it to decode a `Vector<Sexpr>` element by its static type (see
-/// [`decode_field_typed`]), and `Scope::new` reads its `V` off it.
-/// `recv_ty` is the receiver argument's checked type (`args[0]`'s
-/// the call site's checked type, `None` on a receiver-less static call) —
-/// what `Scope<V>`'s instance methods dispatch their representation on;
-/// see the `"scope"` arm. `interp` carries the `struct_types` that
-/// classification reads ([`Interp::scope_is_heap`]).
 /// Dispatch a built-in type's method — a `defmethod` with no typelisp body, so
-/// the implementation lives here rather than in the registry.
+/// the implementation lives here rather than in the registry. `assoc`'s eval
+/// arm tries the program's own `defmethod`s first and falls back to this.
 ///
-/// Takes no types at all, which is the whole point: the container methods that
-/// return `Option<V>` (`HashTable::get`/`remove`, `Vector::pop`, `Scope::get`)
-/// used to be handed the call site's checked return type so the stored word
-/// could be decoded back into a Rust-side `RtValue` by its declared type. With
-/// one value world left, that decode is the identity — a stored field *is* the
-/// value — so `decode_field_typed`/`option_payload_ty`/`scope_elem_ty` are gone
-/// and nothing here needs to know `V`.
+/// Argument count and types are trusted (the checker validated them against
+/// the methods' signatures), so arms index `args` directly rather than
+/// re-checking shape.
+///
+/// The one type it is handed is `ret_type`, the result's runtime identity, for
+/// the builders that make a new container and have no field to read an
+/// instantiation off. Reading a stored value back needs none: with one value
+/// world a stored field *is* the value, so the container methods that return
+/// `Option<V>` (`HashTable::get`/`remove`, `Vector::pop`, `Scope::get`) decode
+/// nothing and need not know `V`.
 pub(crate) fn eval_builtin_method(
     heap: &mut Heap,
     type_name: &Path,

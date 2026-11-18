@@ -125,10 +125,6 @@ pub struct CompiledLibrary<'a> {
     pub body_layout: u8,
 }
 
-/// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —
-/// see its doc comment for why) re-exported under its old in-crate path so
-/// every existing `crate::compile::runtime::...` reference elsewhere in this
-/// crate keeps working unchanged.
 /// Which ABI the code this process compiles comes out under.
 ///
 /// It is the *committed island's* answer, not `SOURCE`'s: the island doing the
@@ -154,6 +150,10 @@ pub const EMITTED_BODY_ABI: u8 = crate::compiler::ISLAND_DUMP_EMITS_ABI;
 /// a body the runtime cannot decode.
 pub const EMITTED_LAYOUT: u8 = crate::compiler::ISLAND_DUMP_EMITS_LAYOUT;
 
+/// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —
+/// see its doc comment for why) re-exported under its old in-crate path so
+/// every existing `crate::compile::runtime::...` reference elsewhere in this
+/// crate keeps working unchanged.
 pub use typelisp_rt as runtime;
 
 /// The coroutine-ABI driver, which lives in `typelisp-rt` rather than here:
@@ -298,11 +298,6 @@ unsafe impl Sync for ContextCell {}
 
 static LLVM_CONTEXT: OnceLock<ContextCell> = OnceLock::new();
 
-/// The single process-wide LLVM `Context`. Modules/builders/values created
-/// from it borrow it for the life of the process (no per-compile teardown),
-/// which is what lets the interpreter's LLVM handle registry hold `'static`
-/// inkwell types instead of threading a lifetime through every value that
-/// could carry one.
 /// Verifies `module`, naming the functions that failed.
 ///
 /// `Module::verify`'s own message is the verifier's complaint with no
@@ -328,6 +323,11 @@ pub(crate) fn verify_module_naming_functions(module: &inkwell::module::Module<'s
     Err(format!("{} failed verification in {}: {}", label, bad.join(", "), e))
 }
 
+/// The single process-wide LLVM `Context`. Modules/builders/values created
+/// from it borrow it for the life of the process (no per-compile teardown),
+/// which is what lets the interpreter's LLVM handle registry hold `'static`
+/// inkwell types instead of threading a lifetime through every value that
+/// could carry one.
 pub fn llvm_context() -> &'static Context {
     &LLVM_CONTEXT.get_or_init(|| ContextCell(Context::create())).0
 }

@@ -604,6 +604,12 @@ fn frame_handler(raw: FrameRaw) -> i64 {
     unsafe { raw.word(typelisp_abi::FRAME_HANDLER_SLOT) }
 }
 
+/// [`activation`] resuming the frame `raw`: the body is handed the address of
+/// the frame's words, as the coroutine ABI says a resumed one is.
+unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw) -> i64 {
+    activation(f, raw.data() as i64)
+}
+
 /// Runs one compiled activation with the driver's catch around it.
 ///
 /// This is where raising an unwind meets the driver protocol. Compiled code
@@ -619,12 +625,6 @@ fn frame_handler(raw: FrameRaw) -> i64 {
 /// unwinding untouched (`park_activation_unwind`): a genuine bug in the
 /// runtime or in generated code must not come back as a plausible-looking
 /// typelisp condition.
-/// [`activation`] resuming the frame `raw`: the body is handed the address of
-/// the frame's words, as the coroutine ABI says a resumed one is.
-unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw) -> i64 {
-    activation(f, raw.data() as i64)
-}
-
 unsafe fn activation(f: CoroutineFn, arg: i64) -> i64 {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(arg))) {
         Ok(status) => status,
