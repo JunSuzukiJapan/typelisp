@@ -108,7 +108,7 @@ fn every_shared_constant_is_described() {
         ("crates/typelisp-abi/src/lib.rs", &["ABI_VERSION", "ABI_SYMBOL"]),
         ("crates/typelisp-mem/src/tagged.rs", &[]),
         ("crates/typelisp-rt/src/c_mem.rs", &[]),
-        ("crates/typelisp-rt/src/lib.rs", &[]),
+        ("crates/typelisp-rt/src/program.rs", &[]),
         ("crates/typelisp-rt/src/sys_builtin.rs", &[]),
         ("crates/typelisp-rt/src/stream_builtin.rs", &[]),
         ("crates/typelisp-rt/src/net_builtin.rs", &[]),
