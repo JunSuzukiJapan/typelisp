@@ -313,7 +313,7 @@ fn special_forms_from_checker() -> BTreeSet<String> {
 /// `well_known_symbols!` table that declares both.
 fn vocabulary_name(konst: &str) -> String {
     let konst: String = konst.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
-    let path = repo_root().join("crates/typelisp-mem/src/symbols.rs");
+    let path = repo_root().join("crates/typelisp-mem/src/symbols/well_known.rs");
     let src = std::fs::read_to_string(&path).expect("the symbol table is readable");
     let prefix = format!("{} => ", konst);
     let line = src
