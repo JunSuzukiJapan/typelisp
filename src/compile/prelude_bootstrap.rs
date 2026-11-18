@@ -239,7 +239,7 @@ pub fn load_interpreted_plan(heap: &mut Heap, chk: &mut crate::Checker, interp: 
 /// longer, and silent about what would actually have to be built.
 ///
 /// [`build_prelude_bitcode`] recomputes the set on every build
-/// ([`Interp::precheck_compilable`]) and fails unless it matches this list
+/// ([`crate::compile::driver::precheck_compilable`]) and fails unless it matches this list
 /// exactly, printing what it found — in both directions, so an entry that
 /// stops blocking anything is as loud as one that starts.
 pub const PRELUDE_COMPILE_UNSUPPORTED: &[(&str, &str)] = &[];
@@ -276,7 +276,7 @@ pub struct PreludePlan {
 
 impl PreludePlan {
     /// The items worth emitting: everything collected, minus whatever
-    /// [`Interp::precheck_compilable`] rejects.
+    /// [`crate::compile::driver::precheck_compilable`] rejects.
     ///
     /// Generator-side only. The *loader* does not repeat this walk — it hands
     /// `install_compiled_library` every collected item and lets the artifact
@@ -341,7 +341,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         }
         // No codegen of their own. `exec` still registers what they define:
         // an enum's variants and a struct's field representations, which the
-        // compile bridge reads back through `Interp::compile_definitions`.
+        // compile bridge reads back through `driver::compile_definitions`.
         // A declaration, not a body to emit: `Interp::exec` resolved the
         // symbol and hung a thunk on the `FnDef`, and there is nothing here to
         // compile. (The prelude itself declares no FFI — see `docs/ja/reference/syntax.md` §3.3
@@ -444,7 +444,7 @@ fn reconcile_unsupported(heap: &Heap, interp: &Interp, plan: &PreludePlan) -> Re
 /// `add_compiled_function` per item. No `main` wrapper and no
 /// addresses: this is a library of compiled functions, and the
 /// `rt_*` addresses are supplied at install time by
-/// `Interp::install_compiled_library`.
+/// `driver::install_compiled_library`.
 pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
     let mut heap = Heap::with_capacity(1 << 18);
     let mut chk = crate::Checker::new();
@@ -464,7 +464,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
     // Decide what is in before emitting anything: the island's `compile-call`
     // aborts the process on an undeclared callee rather than returning an
     // error, so "try it and see" is not available. See
-    // `Interp::precheck_compilable`.
+    // `driver::precheck_compilable`.
     reconcile_unsupported(&heap, &interp, &plan)?;
     let items = plan.compilable(&heap, &interp);
 

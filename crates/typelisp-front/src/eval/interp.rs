@@ -119,7 +119,7 @@ pub struct FnDef {
     ///
     /// Representations, not `Type`s: the type is gone from the IR by the time
     /// a definition is registered, and what the two consumers actually need is
-    /// exactly what a `Repr` says. `Interp::compile_function` needs an LLVM
+    /// exactly what a `Repr` says. `compile::driver::compile_function` needs an LLVM
     /// signature, and `encode_crossing_args` must be driven by the *declared*
     /// shape rather than the runtime value's — see
     /// `docs/dev/` and the crossing rule: whether a word is raw or tagged is

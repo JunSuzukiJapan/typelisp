@@ -25,7 +25,7 @@ use typelisp_mem::{wk, SymRef};
 /// `None` for an ordinary function whose name gets mangled instead.
 ///
 /// These builtins can never be `compile`d themselves (no typelisp body —
-/// direct cons-heap or OS access, Rust-only), so [`Interp::compile_function`]
+/// direct cons-heap or OS access, Rust-only), so [`crate::compile::driver::compile_function`]
 /// excludes them from its normal "every call target must already be compiled"
 /// check ([`is_rt_builtin`]) and instead always wires them via
 /// [`rt_extern_functions`]. The `sexpr-*` family is the island layer
@@ -377,7 +377,7 @@ fn builtin_homes() -> &'static std::collections::HashMap<u32, typelisp_mem::NsId
 /// the same way [`Interp::heap_repr_kind`] mirrors the checker's
 /// `is_heap_repr`.
 ///
-/// [`Interp::call_graph_edges`] needs this so it can reject — cleanly, up
+/// [`crate::compile::driver::call_graph_edges`] needs this so it can reject — cleanly, up
 /// front — a compile whose body calls a *non*-native primitive builtin
 /// (`i64::int->char`, `char::equalp`, ...): those have no compiled lowering
 /// *and* no function to link, so left to reach the island they hit its
@@ -1091,8 +1091,8 @@ mod scc_tests {
     use crate::eval::interp::{FnDef, Interp};
     use crate::types::Path;
 
-    /// Exercises the mutual-recursion branch of [`Interp::compute_sccs`]/
-    /// [`Interp::compile_scc`] without going through surface syntax.
+    /// Exercises the mutual-recursion branch of [`crate::compile::driver::compute_sccs`]/
+    /// [`crate::compile::driver::compile_scc`] without going through surface syntax.
     /// `Checker::check_form_at` checks one top-level form at a time, in file
     /// order, so a pair of top-level `defun`s can call each other only when
     /// the later one is declared first with `defsignature`

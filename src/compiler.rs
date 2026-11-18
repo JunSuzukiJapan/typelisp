@@ -147,7 +147,7 @@
 //! fail. Letting the Rust caller own the one `Rc<RefCell<Module>>` from the
 //! start (creating it itself, passing it in by reference, never trying to
 //! reclaim sole ownership) sidesteps the cycle entirely — see
-//! `Interp::add_compiled_function`.
+//! `driver::add_compiled_function`.
 //!
 //! `compile-value`/`compile-int-any-width`/`compile-var`/`compile-assoc`/`compile-apply`/
 //! `compile-labels`/... are ordinary top-level `defun`s that call each other
@@ -256,7 +256,7 @@
 //! is found via `get-function` under the node's `symbol`, which `core_bridge`
 //! spells with `ConcreteNames::method_symbol` (exactly the name its own LLVM
 //! function was given,
-//! `Interp::add_compiled_function`'s `internal_name`), and `Interp::compile_function` requires — and forward-
+//! `driver::add_compiled_function`'s `internal_name`), and `driver::compile_function` requires — and forward-
 //! declares — every such target the same way it already does for an
 //! `Expr::Call` target, so self-recursive method calls and ordinary
 //! method-to-method calls both Just Work without `compile-assoc` itself

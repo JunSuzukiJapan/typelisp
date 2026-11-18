@@ -710,21 +710,6 @@ impl Interp {
         self.target_def(target).is_some_and(|f| f.compiled.borrow().is_some())
     }
 
-    /// Looks up `target`'s registered body, enforcing the one constraint every
-    /// entry point into the compiler shares: a real type signature (so an LLVM
-    /// function type can be built — never set for a `defmacro`). A multi-
-    /// expression body is collapsed to one form via
-    /// [`crate::compile::symbols::single_body_expr`] (labels/closures
-    /// Stage 6 — see that function's doc comment for why this needs no
-    /// `compiler.rs` change). For an instance method, `params`/`sig.0`
-    /// already carry the receiver as element `0` (`typeck::defmethod`
-    /// pushes the receiver's own type onto `sig_params` before the method's
-    /// declared parameters) — so it flows through exactly like any other
-    /// parameter here, no special-casing needed. Shared by
-    /// [`Self::add_compiled_function`] (the actual AST-bridge step) and
-    /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
-    /// body slightly earlier — to collect `call` targets — before
-    /// `add_compiled_function` ever runs).
     /// Whether `target` is a `(defffi ...)` declaration.
     ///
     /// For the tools, which otherwise cannot tell its empty body from an
@@ -735,6 +720,17 @@ impl Interp {
         self.target_def(target).is_some_and(|f| f.ffi)
     }
 
+    /// Looks up `target`'s registered body, enforcing the one constraint every
+    /// entry point into the compiler shares: a real type signature (so an LLVM
+    /// function type can be built — never set for a `defmacro`). For an
+    /// instance method, `params`/`sig.0` already carry the receiver as element
+    /// `0` (`typeck::defmethod` pushes the receiver's own type onto
+    /// `sig_params` before the method's declared parameters) — so it flows
+    /// through exactly like any other parameter here, no special-casing
+    /// needed. Shared by the backend's `compile::driver::add_compiled_function`
+    /// (the actual bridge step) and `compile::driver::compile_function`/
+    /// `call_graph_edges` (which need the body slightly earlier — to collect
+    /// `call` targets — before `add_compiled_function` ever runs).
     pub fn compiled_fn_body(&self, target: &crate::CompileTarget) -> Result<FnBody, EvalError> {
         let f = self.target_def(target).ok_or_else(|| EvalError::NoSuchFunction(target.link_name()))?;
         let sig = f.sig.as_ref().ok_or_else(|| {

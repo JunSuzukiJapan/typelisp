@@ -6,7 +6,7 @@
 
 /// Every runtime function a compiled body can call, by name.
 ///
-/// `Interp::compile_function` declares all of these into its module before it
+/// `driver::compile_function` declares all of these into its module before it
 /// compiles anything, and the island's `get-function` aborts the process on a
 /// name that is not there. Exposed so anything else that drives
 /// `compile-function` directly — a test standing in for the driver, say — can
@@ -101,7 +101,7 @@ pub mod prelude_bootstrap;
 pub mod symbols;
 
 /// One precompiled bitcode artifact, ready to install into an `Interp` —
-/// everything `Interp::install_compiled_library` needs to know about it.
+/// everything `driver::install_compiled_library` needs to know about it.
 ///
 /// A struct rather than four positional parameters because the artifacts that
 /// go through it (the compiler island, the prelude, a session's own compiled
@@ -378,7 +378,7 @@ impl CompiledFn {
     /// module calls: the `rt_*` shims it declares, and every *other*
     /// already-`compile`d top-level function `fn_name`'s body calls, each
     /// forward-declared, with no body, in `module` under that same name — see
-    /// [`crate::eval::interp::Interp::compile_function`]'s doc comment for why
+    /// [`crate::compile::driver::compile_function`]'s doc comment for why
     /// that declaration has to exist *before* the typelisp compiler body ever
     /// runs (`compile-call`'s `get-function` needs to find *something* by that
     /// name). Must be called with [`COMPILE_LOCK`] held — which is also what
@@ -401,7 +401,7 @@ impl CompiledFn {
     /// Like [`Self::new`], for every name in `fn_names` — the SCC compile
     /// path, where a mutually recursive group of top-level functions is
     /// emitted into one module (every member forward-declared before any body
-    /// is translated — see [`crate::eval::interp::Interp::compile_scc`]'s doc
+    /// is translated — see [`crate::compile::driver::compile_scc`]'s doc
     /// comment) and linked once. A call from one member to another is resolved
     /// inside the module, the same way self-recursion is; `externals` is only
     /// ever the set of targets *outside* this group.

@@ -7,7 +7,7 @@
 //! it emits no GC root for the scope locals it threads through
 //! `compile-function`. `Heap::push_session_root` is what closes that gap:
 //! `rt_llvm_call` roots every scope it hands out for the length of the compile
-//! session (`Interp::run_compile_function`'s bracket).
+//! session (`compile::driver::run_compile_function`'s bracket).
 //!
 //! Under `set_gc_stress` every single `cons` collects, so a scope reachable
 //! only from a compiled local is freed at the very next allocation — which,

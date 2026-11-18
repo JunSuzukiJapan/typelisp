@@ -4,8 +4,8 @@
 //! executable that doesn't depend on whatever else happens to be loaded in
 //! the process that requested it), compiles every top-level `defun` into
 //! one shared LLVM module (reusing
-//! [`crate::eval::interp::Interp::add_compiled_function`], the exact same
-//! per-function compile step the JIT path (`Interp::compile_function`)
+//! [`crate::compile::driver::add_compiled_function`], the exact same
+//! per-function compile step the JIT path (`driver::compile_function`)
 //! uses — see that method's doc comment for why the module is built once,
 //! up front, in this file rather than per function), and links the result
 //! into a native executable via the system `cc`.
@@ -145,7 +145,7 @@ fn collect_aot_item(
             None
         }
         // The whole form travels, not just the initializer: the global's
-        // storage tagging is on the form (see `Interp::add_compiled_global_init`).
+        // storage tagging is on the form (see `driver::add_compiled_global_init`).
         wk::DEFVAR => {
             let name = core::definition_field(heap, tl, 0).ok_or_else(|| "compile-file: defvar without a name".to_string())?;
             Some((name, tl))
@@ -418,7 +418,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // builtin (`sexpr-car`, `eval`, `stream-read-char`, ...) arrives
         // already named for its shim, `symbols::callee_symbol_name` having
         // made that choice bridge-side. Unlike the JIT path
-        // (`Interp::compile_function`), no addresses are passed
+        // (`driver::compile_function`), no addresses are passed
         // here: these resolve as ordinary linker symbols against
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
         let ptr_ty = ctx.ptr_type(AddressSpace::default());

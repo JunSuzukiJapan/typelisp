@@ -56,7 +56,7 @@ pub fn upcast_define(from: u32, trait_id: u32, to: u32) {
 
 /// Installs (or replaces) vtable `id`'s slots. Called from the interpreter
 /// once a compilation unit's function addresses are final
-/// (`Interp::compile_scc`) and from AOT startup; a slot holding 0 means "not
+/// (`compile::driver::compile_scc`) and from AOT startup; a slot holding 0 means "not
 /// compiled", which the driver answers by asking the interpreter
 /// ([`reify_dyn_slot`]).
 pub fn vtable_define(id: u32, slots: Vec<(usize, u8)>) {

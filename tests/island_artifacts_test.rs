@@ -127,7 +127,7 @@ fn the_committed_island_matches_a_fresh_build() {
 /// guarantees past the end of the buffer (`get_size` is `LLVMGetBufferSize()
 /// + 1`), so that the slice can be handed straight back to
 /// `MemoryBuffer::create_from_memory_range_copy` — which is exactly what
-/// `Interp::install_compiled_library` does. That loader *asserts* the last byte
+/// `compile::driver::install_compiled_library` does. That loader *asserts* the last byte
 /// is NUL and then passes `len - 1` as the real size. Writer and reader are a
 /// pair; the file on disk is in the form the reader demands.
 ///

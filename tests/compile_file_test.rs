@@ -377,7 +377,7 @@ fn compiles_a_file_with_a_non_main_helper_function_too() {
 /// AOT side: `main` calls the earlier-defined `square` twice — proving
 /// `compile::aot::compile_file`'s simple one-pass loop needs no special
 /// handling for cross-function calls (see that module's doc comment for
-/// why), unlike `Interp::compile_function`'s JIT path.
+/// why), unlike `compile::driver::compile_function`'s JIT path.
 #[test]
 fn compiles_and_runs_main_calling_a_helper_function() {
     let src = r#"
@@ -554,7 +554,7 @@ fn a_top_level_entry_call_is_the_one_expression_allowed() {
 
 /// The Phase 2 core claim: the same typelisp source, compiled through the
 /// JIT path (`compile`) and the AOT path (`compile-file`), agrees — proving
-/// the per-function compile step (`Interp::add_compiled_function`) really
+/// the per-function compile step (`compile::driver::add_compiled_function`) really
 /// is shared, not two parallel implementations that happen to look similar.
 #[test]
 fn jit_and_aot_agree_on_the_same_source() {
@@ -630,7 +630,7 @@ fn jit_and_aot_agree_on_a_labels_body() {
 /// that calls a separately-defined helper function directly (labels/
 /// closures Stage 3, top-level `Expr::Call`) rather than bare arithmetic or
 /// a `labels` form. The JIT path needs an extra `(compile square)` before
-/// `(compile main)` — `Interp::compile_function`'s own forward-declare +
+/// `(compile main)` — `compile::driver::compile_function`'s own forward-declare +
 /// link-by-address requirement (see that method's doc comment) — that
 /// `compile::aot::compile_file`'s single shared module never needs (see
 /// that module's doc comment).
@@ -821,7 +821,7 @@ fn compiles_and_runs_main_that_writes_a_global() {
 
 /// Same claim as `jit_and_aot_agree_on_the_same_source`, but for a `main`
 /// that reads and assigns a `defvar` — proves JIT's lazy, reference-driven
-/// global promotion (`Interp::compile_function`) and AOT's eager,
+/// global promotion (`compile::driver::compile_function`) and AOT's eager,
 /// file-declaration-order promotion (`compile::aot::compile_file`) agree on
 /// the same result despite assigning compile-time ids in different orders
 /// (see `Interp::promote_global`'s doc comment).

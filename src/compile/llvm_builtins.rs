@@ -274,7 +274,7 @@ pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
 /// `LLVMAddFunction` does *not* do this — a second call with a colliding
 /// name silently gets uniquified (`"name.1"`), never merged with the first —
 /// so this reuse has to happen here. Needed since labels/closures Stage 5:
-/// [`Interp::compile_scc`] forward-declares every member of a mutually
+/// [`crate::compile::driver::compile_scc`] forward-declares every member of a mutually
 /// recursive group under its real internal name *before* any member's body
 /// is translated, and `compiler.rs`'s `compile-function` (the sole caller of
 /// this builtin) must attach that member's own body to that exact same
@@ -335,7 +335,7 @@ fn llvm_function_param(args: &[Value]) -> Result<Value, EvalError> {
 }
 
 /// Forward-declares `name` in `module` with the standard compiled-function
-/// ABI but **no body** — [`Interp::compile_function`]'s JIT-only step
+/// ABI but **no body** — [`crate::compile::driver::compile_function`]'s JIT-only step
 /// (labels/closures Stage 3, `call` to a different top-level function)
 /// that lets `compiler.rs`'s `compile-call` find an already-`compile`d
 /// function via `get-function` before the real call target's address is supplied

@@ -329,7 +329,7 @@ pub const LLVM_HANDLE_TYPES: [u32; 5] =
 
 /// The LLVM handle types that *have* methods, i.e. the receivers whose
 /// `assoc` lowers to an `llvm-op` node (`llvm_assoc_key`) and is
-/// therefore never a real call target (`Interp::compile_scc`'s filters).
+/// therefore never a real call target (`compile::driver::compile_scc`'s filters).
 /// Deliberately not [`LLVM_HANDLE_TYPES`]: the two lists answer different
 /// questions and used to differ only by accident.
 pub const LLVM_METHOD_RECEIVER_TYPES: [u32; 4] = [wk::LLVM_MODULE, wk::LLVM_FUNCTION, wk::LLVM_BUILDER, wk::SCOPE];

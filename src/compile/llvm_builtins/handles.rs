@@ -98,7 +98,7 @@ impl Drop for LlvmHandles {
 // A handle is an index into this vector, which is what lets one cross to
 // compiled code as a plain integer with no ownership attached. It grows for
 // the life of the thread except where `llvm_handles_mark`/`_release` bracket a
-// compile (`Interp::run_compile_function`), which is the one place a bounded
+// compile (`driver::run_compile_function`), which is the one place a bounded
 // batch of handles is known to be finished with.
 thread_local! {
     static LLVM_HANDLES: RefCell<LlvmHandles> = const { RefCell::new(LlvmHandles(Vec::new())) };
@@ -198,7 +198,7 @@ fn value_of_handle(raw: i64) -> Option<Value> {
 /// The current registry length — pass to [`llvm_handles_release`] to drop
 /// every handle issued after this point.
 ///
-/// [`Interp::run_compile_function`] brackets each compile with a pair, so the
+/// [`crate::compile::driver::run_compile_function`] brackets each compile with a pair, so the
 /// transient handles the native compiler registers while emitting one
 /// function's IR do not accumulate across many compiles. Everything else
 /// issued outside such a bracket lives as long as the thread.
@@ -212,7 +212,7 @@ pub(crate) fn llvm_handles_mark() -> usize {
 /// under `COMPILE_LOCK`: a released `Builder`/`Module` share is often the last
 /// one, and its destructor touches the shared LLVM Context — see
 /// [`LlvmHandles`]. The take nests inside the whole-compile guard the caller
-/// (`Interp::run_compile_function`) runs under; the registry's own `RefCell`
+/// (`driver::run_compile_function`) runs under; the registry's own `RefCell`
 /// borrow ends before the lock is taken, so a destructor that reached back
 /// into the registry could not deadlock on that either.
 pub(crate) fn llvm_handles_release(mark: usize) {

@@ -44,7 +44,7 @@ pub fn reset_global_table() {
 /// calls address it by. The Rust-side (non-FFI) counterpart of
 /// [`rt_global_new`], for the interpreter itself to promote an
 /// already-`defvar`d global to a compiled-global slot before generating IR
-/// (`typelisp::eval::Interp::add_compiled_function`) — avoids that caller
+/// (`compile::driver::add_compiled_function`) — avoids that caller
 /// round-tripping through the `extern "C"` tagged-`i64` ABI just to reach
 /// this same bookkeeping, the same reason [`encode`]/[`decode`] are already
 /// plain `pub fn`s rather than FFI-only.

@@ -1097,7 +1097,7 @@ fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// `(call PATH (R...) E...)` -> `(call "name" (kind . form)...)`.
 ///
 /// The island looks the callee up by the name written here and nothing else:
-/// the mangled name `Interp::compile_scc`/`compile::aot` declare an ordinary
+/// the mangled name `driver::compile_scc`/`compile::aot` declare an ordinary
 /// function under ([`ConcreteNames::symbol`]), or — for a free builtin with no
 /// typelisp body — the `crate::compile::runtime` shim that *is* its
 /// implementation ([`crate::compile::externs::rt_builtin_symbol`]). Both

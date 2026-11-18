@@ -116,7 +116,7 @@ fn a_declared_defun_can_be_called_before_it_is_defined() {
 
 #[test]
 fn two_top_level_defuns_can_be_mutually_recursive() {
-    // The case `Interp::compute_sccs`'s own test could only reach by
+    // The case `compile::driver::compute_sccs`'s own test could only reach by
     // hand-building `FnDef`s and bypassing the checker entirely (see
     // `scc_tests` in `eval/interp.rs`): surface syntax can express it, once
     // the ring is announced.

@@ -474,7 +474,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
     ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
     // call, even from a test driving the raw builtins directly rather than
-    // going through `Interp::compile_function`, must hold this.
+    // going through `compile::driver::compile_function`, must hold this.
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
@@ -524,7 +524,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     // hand-written IR literal's own `kind = 0` never reaches a dereferencing
     // path either way), so `rt_push_sexpr_root` needs an explicit
     // declaration here — this module is built by a direct `compile-function`
-    // call, bypassing `Interp::compile_function`'s automatic `rt_*`
+    // call, bypassing `compile::driver::compile_function`'s automatic `rt_*`
     // forward-declaration (see
     // `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc
     // comment for the same idiom).
@@ -1000,7 +1000,7 @@ fn the_compiler_body_compiles_a_self_referencing_call() {
 /// The end-to-end Stage 3 slice (top-level `Expr::Call`, non-recursive),
 /// from real typelisp source (not a hand-fed `Sexpr`, unlike the
 /// compiler-body tests above): `sum-of-squares` calls the *separately*
-/// `compile`d `square` twice. `Interp::compile_function`'s own module for
+/// `compile`d `square` twice. `compile::driver::compile_function`'s own module for
 /// `sum-of-squares` never contains `square`'s body, only a no-body forward
 /// declaration of it — proving the link against its address really does
 /// reach the other, already-running JIT code, not just a coincidentally
@@ -1046,7 +1046,7 @@ fn compile_transitively_compiles_a_called_function() {
 /// The end-to-end self-recursion counterpart of
 /// `the_compiler_body_compiles_a_self_referencing_call`, through the real
 /// `(compile name)` JIT path rather than a hand-fed `Sexpr`: proves
-/// `Interp::compile_function`'s call-target collection correctly excludes
+/// `compile::driver::compile_function`'s call-target collection correctly excludes
 /// self (no "must be compiled first" error, no forward declaration/
 /// address attempted for its own name). Deliberately
 /// never *called* — see that test's doc comment for why.
@@ -1219,7 +1219,7 @@ fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_nat
 /// calls it through `apply-indirect`/`coroutine-apply` — flowing from
 /// one `compile`d function's `i64` return straight into another's `i64`
 /// argument via the ordinary `Expr::Call`-dispatches-to-`Interp::compiled`
-/// path (see `Interp::compile_function`'s doc comment). This closure value
+/// path (see `compile::driver::compile_function`'s doc comment). This closure value
 /// happens to never get inspected by tree-walking code along the way here —
 /// unlike, since the closure-representation unification's boundary-opening
 /// (Stage 3), `compile_interp_applies_a_closure_returned_by_compiled_code`
@@ -1578,7 +1578,7 @@ fn compile_names_a_static_method_a_use_brought_in() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     // This module is built by a direct `compile-function` call (bypassing
-    // `Interp::compile_function`/`add_compiled_function`, which would
+    // `compile::driver::compile_function`/`add_compiled_function`, which would
     // otherwise forward-declare every `rt_*` shim automatically), so
     // `build-make-closure` needs `rt_coroutine_closure_new` explicitly declared
     // here —
@@ -1937,7 +1937,7 @@ fn the_compiler_body_compiles_an_integer_comparison() {
 // (Removed `compile_assoc_panics_on_an_unsupported_receiver_type` in
 // interp-closure removal Stage 8a.) It hand-fed `compile-function` a raw
 // `(assoc i32 "int->char" ...)` node — deliberately bypassing
-// `Interp::compile_function`'s up-front check — so the only thing left to catch
+// `compile::driver::compile_function`'s up-front check — so the only thing left to catch
 // the non-native `i32::int->char` was the island's `get-function` failing to
 // find it in the module. Under the AOT-native island that failure is an
 // `rt_llvm_call` process abort (it can't return a catchable error across the
@@ -2753,9 +2753,9 @@ fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
 /// `p::x`/`p::y`-style call (`Expr::Assoc`), and it's an ordinary `defun`
 /// (`self.fns`), not a method — `compile-assoc`'s new generic branch resolves
 /// each to the already-`compile`d `point::x`/`point::y` accessor via the
-/// mangled `get-function` lookup, and `Interp::compile_function` forward-
+/// mangled `get-function` lookup, and `compile::driver::compile_function` forward-
 /// declares/wires both *before* `sum-coords`'s own body is compiled (see
-/// `compile-assoc`'s and `Interp::compile_function`'s doc comments).
+/// `compile-assoc`'s and `compile::driver::compile_function`'s doc comments).
 #[test]
 fn compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body() {
     let v = run_with_compiler_and_prelude(
@@ -2981,7 +2981,7 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
 /// derived from it were built from the receiver type's *local* name only (`tl_box::n` for
 /// *both* structs) — so `compiler.rs`'s `get-function "tl_box::n"` inside
 /// `sum-both`'s own module would resolve to the *same* declared value for
-/// both calls, and whichever real address `Interp::compile_scc` supplied last
+/// both calls, and whichever real address `compile::driver::compile_scc` supplied last
 /// would silently win for both — reading `x::n`
 /// would return `y`'s field (or vice versa) instead of its own.
 #[test]
@@ -3280,7 +3280,7 @@ fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_met
 /// guard around that call, this lands *after* the block's terminator: not
 /// merely a leak but a malformed basic block (LLVM requires exactly one
 /// terminator, as the very last instruction). Reverting that guard reliably
-/// reproduces the failure this test guards against — `Interp::compile_function`'s
+/// reproduces the failure this test guards against — `compile::driver::compile_function`'s
 /// own `module.verify()` call (added alongside this fix specifically because
 /// this bug could otherwise reach the JIT engine as undefined behavior
 /// instead of a catchable error) rejects the module with "Terminator found
@@ -3449,7 +3449,7 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
 /// A user-defined method on a *primitive* receiver — the prelude's `impl
 /// Equal symbol` registers `symbol::equal` as an ordinary user method whose
 /// body `(eq self other)` lowers natively. Two former gates blocked this path:
-/// `Interp::compile_function` excluded every integer/`string` assoc
+/// `compile::driver::compile_function` excluded every integer/`string` assoc
 /// target from forward-declaration wholesale, and `compile-assoc`'s int
 /// branch dead-ended any method outside its fixed operator list into a
 /// panic instead of falling through to the mangled-name user-method call
@@ -6383,7 +6383,7 @@ fn the_island_compiles_a_bridged_let_and_if() {
 
 /// `(compile-function ...)` wrapped in a module with the runtime declared.
 fn compile_function_source(name: &str, params: &str, body: &str) -> String {
-    // The declarations `Interp::compile_function` installs. A test calling
+    // The declarations `compile::driver::compile_function` installs. A test calling
     // `compile-function` directly gets an empty module instead, and the
     // island's `get-function` aborts the process on a missing name — so the
     // set is taken from the driver's own rather than guessed at.
