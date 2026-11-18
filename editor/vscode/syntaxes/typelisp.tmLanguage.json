@@ -143,7 +143,7 @@
       }
     },
     "variable-definition": {
-      "match": "\\(\\s*(?:(pub)\\s+)?(defparameter|defconstant|defvar)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
+      "match": "\\(\\s*(?:(pub)\\s+)?(define\\-symbol\\-macro|defparameter|defconstant|defvar)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
       "captures": {
         "1": {
           "name": "storage.modifier.typelisp"
@@ -187,7 +187,7 @@
       "name": "support.function.typelisp"
     },
     "builtin-type": {
-      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:>])(?:string\\-output\\-stream|string\\-input\\-stream|binary\\-file\\-stream|take\\-while\\-iter|enumerate\\-iter|flat\\-map\\-iter|iterate\\-iter|file\\-stream|concatenated\\-stream|socket\\-byte\\-stream|broadcast\\-stream|socket\\-listener|standard\\-stream|two\\-way\\-stream|ParseFloatError|hashtable\\-iter|universal\\-time|internal\\-time|ParseIntError|socket\\-stream|decoded\\-time|random\\-state|WrappedError|echo\\-stream|outputstream|peek\\-stream|vector\\-iter|filter\\-iter|repeat\\-iter|ReadOutcome|SimpleError|array\\-iter|inputstream|chain\\-iter|SortedTable|byteoutput|charoutput|udp\\-socket|skip\\-iter|take\\-iter|WaitGroup|cons\\-cell|BitVector|EvalError|HashTable|ReadError|byteinput|charinput|fileerror|peekinput|map\\-iter|zip\\-iter|NetError|datagram|pathname|complex|pathish|c\\-ulong|c\\-long|HashSet|Context|Number|Option|Result|Thread|Vector|stream|string|symbol|Array|Error|Mutex|Sexpr|ratio|Deque|Scope|Bits|Iter|Chan|Self|Task|bool|char|hash|ptr|Add|Div|Mul|Ord|Rem|Sub|f32|f64|i16|i32|int|u16|u32|Equal|i8|u8)(?![-A-Za-z0-9_?!*/+.%&^~:])",
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:>])(?:string\\-output\\-stream|string\\-input\\-stream|binary\\-file\\-stream|take\\-while\\-iter|enumerate\\-iter|flat\\-map\\-iter|iterate\\-iter|file\\-stream|concatenated\\-stream|socket\\-byte\\-stream|broadcast\\-stream|socket\\-listener|standard\\-stream|two\\-way\\-stream|ParseFloatError|hashtable\\-iter|universal\\-time|internal\\-time|ParseIntError|socket\\-stream|decoded\\-time|random\\-state|WrappedError|Environment|echo\\-stream|outputstream|peek\\-stream|vector\\-iter|filter\\-iter|repeat\\-iter|ReadOutcome|SimpleError|array\\-iter|inputstream|chain\\-iter|SortedTable|byteoutput|charoutput|udp\\-socket|skip\\-iter|take\\-iter|WaitGroup|cons\\-cell|BitVector|EvalError|HashTable|ReadError|byteinput|charinput|fileerror|peekinput|map\\-iter|zip\\-iter|NetError|datagram|pathname|complex|pathish|c\\-ulong|c\\-long|HashSet|Context|Number|Option|Result|Thread|Vector|stream|string|symbol|Array|Error|Mutex|Sexpr|ratio|Deque|Scope|Bits|Iter|Chan|Self|Task|bool|char|hash|ptr|Add|Div|Mul|Ord|Rem|Sub|f32|f64|i16|i32|int|u16|u32|Equal|i8|u8)(?![-A-Za-z0-9_?!*/+.%&^~:])",
       "name": "support.type.typelisp"
     },
     "never-type": {

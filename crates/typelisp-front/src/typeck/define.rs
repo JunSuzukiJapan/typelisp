@@ -30,6 +30,7 @@ pub(crate) enum Kind {
     CStruct,
     Method,
     Macro,
+    SymbolMacro,
 }
 
 impl Kind {
@@ -43,6 +44,7 @@ impl Kind {
             Kind::CStruct => "C struct",
             Kind::Method => "method",
             Kind::Macro => "macro",
+            Kind::SymbolMacro => "symbol macro",
         }
     }
 }
@@ -105,6 +107,7 @@ impl Definer<'_> {
             Some(ValueDef::Fn(def)) => (Kind::Function, def.builtin),
             Some(ValueDef::Var(_)) => (Kind::Variable, false),
             Some(ValueDef::Macro { .. }) => (Kind::Macro, false),
+            Some(ValueDef::SymbolMacro { .. }) => (Kind::SymbolMacro, false),
         };
         if held != kind {
             return Err(clash(kind, name, held.word()));

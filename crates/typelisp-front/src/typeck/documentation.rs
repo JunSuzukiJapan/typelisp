@@ -118,6 +118,6 @@ fn value_doc(path: crate::types::Path, def: &ValueDef) -> Definition {
     match def {
         ValueDef::Fn(_) => Definition::Fn(path),
         ValueDef::Var(_) => Definition::Var(path),
-        ValueDef::Macro { .. } => Definition::Macro(path),
+        ValueDef::Macro { .. } | ValueDef::SymbolMacro { .. } => Definition::Macro(path),
     }
 }

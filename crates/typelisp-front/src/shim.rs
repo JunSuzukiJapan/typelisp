@@ -165,8 +165,9 @@ pub unsafe extern "C-unwind" fn rt_eval(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// `macroexpand-1` for compiled code: `args[0]` is the form, tagged; the
-/// result is the tagged `Result<Option<Sexpr>, EvalError>`.
+/// `macroexpand-1` for compiled code: `args[0]` is the form and `args[1]`
+/// the `Option<Environment>`, tagged; the result is the tagged
+/// `Result<Option<Sexpr>, EvalError>`.
 ///
 /// # Safety
 ///
@@ -176,8 +177,9 @@ pub unsafe extern "C-unwind" fn rt_macroexpand_1(args: *const i64, argc: u32) ->
     expand_shim(args, argc, "rt_macroexpand_1", Interp::macroexpand_1_form)
 }
 
-/// `macroexpand` for compiled code: `args[0]` is the form, tagged; the result
-/// is the tagged `Result<Sexpr, EvalError>`.
+/// `macroexpand` for compiled code: `args[0]` is the form and `args[1]` the
+/// `Option<Environment>`, tagged; the result is the tagged
+/// `Result<Option<Sexpr>, EvalError>`.
 ///
 /// # Safety
 ///
@@ -197,21 +199,22 @@ unsafe fn expand_shim(
     args: *const i64,
     argc: u32,
     who: &str,
-    f: impl Fn(&Interp, &mut typelisp_mem::Heap, typelisp_mem::Value) -> Result<typelisp_mem::Value, crate::eval::interp::EvalError>,
+    f: impl Fn(&Interp, &mut typelisp_mem::Heap, typelisp_mem::Value, typelisp_mem::Value) -> Result<typelisp_mem::Value, crate::eval::interp::EvalError>,
 ) -> i64 {
-    if argc < 1 {
-        fatal(&format!("{}: expected 1 argument", who));
+    if argc < 2 {
+        fatal(&format!("{}: expected 2 arguments", who));
     }
     let form = tagged_arg(args, 0);
+    let environment = tagged_arg(args, 1);
     let heap = active_heap();
     let env = AOT_ENV.with(|c| c.get());
     let result = if env.is_null() {
-        match with_active_interp(|i| f(i, heap, form)) {
+        match with_active_interp(|i| f(i, heap, form, environment)) {
             Some(r) => r,
             None => typelisp_abi::raise(NO_INTERPRETER_HERE.replace("{}", who)),
         }
     } else {
-        f(&*env, heap, form)
+        f(&*env, heap, form, environment)
     };
     match result {
         Ok(v) => encode(v),

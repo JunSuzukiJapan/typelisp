@@ -399,7 +399,7 @@ pub(crate) fn dyn_value_form(heap: &mut Heap, value: Value) -> Result<Value, Err
     core::tagged(heap, wk::DYN_VALUE, &[value])
 }
 
-/// `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) BODY...)`.
+/// `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...) ENVIRONMENT) BODY...)`.
 ///
 /// A macro is an ordinary callable body — expanding it is calling it — so
 /// the only extra structure is how the non-required regions of its lambda
@@ -443,6 +443,7 @@ pub(crate) fn defmacro_form(
         }
         let keys = keys.finish_list()?;
         l.push(keys);
+        l.push(Value::Bool(lambda.environment));
         l.finish_list()?
     };
     f.push(lam);

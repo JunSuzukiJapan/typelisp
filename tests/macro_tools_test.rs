@@ -250,3 +250,98 @@ fn a_symbol_macro_expansion_is_checked_at_the_use_site() {
         "42"
     );
 }
+
+// ---- `macroexpand` inside a macro, `&environment` ----------------------------
+//
+// CL's use of `macroexpand` is in a macro's own body, while the checker is
+// expanding it. The checker is busy then, so the expansion goes through the
+// place the call is being expanded at, which the evaluator holds for as long
+// as the macro runs; `&environment` names that place.
+
+/// What `(macroexpand form)` gives, quoted, as the macro's expansion.
+const SHOW: &str = "(defmacro show (form) (match (macroexpand form) ((Ok e) `(quote ,e)) ((Err _) ''err)))";
+/// The same, in the macro call's environment.
+const SHOW_HERE: &str =
+    "(defmacro show-here (form &environment env) (match (macroexpand form env) ((Ok e) `(quote ,e)) ((Err _) ''err)))";
+
+#[test]
+fn a_macro_body_can_macroexpand() {
+    let defs = format!("(defmacro twice (x) `(+ ,x ,x))\n{}", SHOW);
+    assert_eq!(show_after(&defs, "(show (twice 3))"), "(+ 3 3)");
+}
+
+/// With the call's environment, the local macros and symbol macros around
+/// it are expanded too; without one, CL's null lexical environment, they are
+/// not.
+#[test]
+fn the_environment_sees_the_local_macros_around_the_call() {
+    let defs = format!("{}\n{}", SHOW, SHOW_HERE);
+    assert_eq!(show_after(&defs, "(macrolet ((sq (x) `(* ,x ,x))) (show-here (sq 4)))"), "(* 4 4)");
+    assert_eq!(show_after(&defs, "(macrolet ((sq (x) `(* ,x ,x))) (show (sq 4)))"), "(sq 4)");
+    assert_eq!(show_after(&defs, "(symbol-macrolet ((p (car q))) (show-here p))"), "(car q)");
+    assert_eq!(show_after(&defs, "(symbol-macrolet ((p (car q))) (show p))"), "p");
+}
+
+/// A local binding hides a module-level macro in the environment as it does
+/// where the form is checked.
+#[test]
+fn a_local_variable_hides_a_macro_in_the_environment() {
+    let defs = format!("(defmacro twice (x) `(+ ,x ,x))\n{}", SHOW_HERE);
+    assert_eq!(show_after(&defs, "(let ((twice 1)) (show-here (twice 2)))"), "(twice 2)");
+    assert_eq!(show_after(&defs, "(show-here (twice 2))"), "(+ 2 2)");
+}
+
+/// `&environment` may stand anywhere in the lambda list, and takes no
+/// argument of the call.
+#[test]
+fn the_environment_parameter_takes_no_argument() {
+    assert_eq!(
+        show_after("(defmacro m (a &environment e &optional (b ''z)) `(list ',a ',b))", "(m x)"),
+        "(x (quote z))"
+    );
+    assert_eq!(show_after("(defmacro m (a &environment e &optional (b ''z)) `(list ',a ',b))", "(m x y)"), "(x y)");
+    let err = check_error("(defmacro m (&environment) 1)");
+    assert!(err.contains("&environment must be followed by a parameter name"), "{}", err);
+}
+
+/// An environment is good only while its macro runs, as CL's is: one kept
+/// past it is refused, not followed.
+#[test]
+fn an_environment_kept_past_its_expansion_is_refused() {
+    let defs = "(defmacro twice (x) `(+ ,x ,x))\n\
+                (defvar (kept Option<std::eval::Environment>) (None))\n\
+                (defmacro keep (&environment env) (setf kept (Some env)) ''ok)\n\
+                (keep)";
+    let out = show_after(defs, "(macroexpand '(twice 1) (match kept ((Some e) e) ((None) (panic \"none\"))))");
+    assert!(out.contains("macro expansion that has ended"), "{}", out);
+}
+
+// ---- `define-symbol-macro` ----------------------------------------------------
+
+#[test]
+fn a_global_symbol_macro_is_its_form() {
+    assert_eq!(show_after("(define-symbol-macro answer (+ 40 2))", "answer"), "42");
+    assert_eq!(show_after("(define-symbol-macro answer (+ 40 2))", "(macroexpand-1 'answer)"), "(Ok (+ 40 2))");
+    // A local binding of the name hides it.
+    assert_eq!(show_after("(define-symbol-macro answer (+ 40 2))", "(let ((answer 1)) answer)"), "1");
+}
+
+/// The expansion is checked where the name is written, so it sees what is
+/// defined after the symbol macro is.
+#[test]
+fn a_global_symbol_macro_is_a_place() {
+    let defs = "(define-symbol-macro c cell)\n(defvar (cell int) 0)";
+    assert_eq!(show_after(defs, "(progn (setf c 5) (incf c) cell)"), "6");
+}
+
+#[test]
+fn a_global_symbol_macro_is_a_module_level_name() {
+    let defs = "(module mm (pub define-symbol-macro three 3) (define-symbol-macro four 4) (pub defun h () int four))";
+    assert_eq!(show_after(defs, "(list mm::three (mm::h))"), "(3 4)");
+    let err = check_error(&format!("{}\nmm::four", defs));
+    assert!(err.contains("unresolved path: mm::four"), "{}", err);
+    let err = check_error("(define-symbol-macro c 1)\n(defun c () int 1)");
+    assert!(err.contains("a symbol macro of that name already exists here"), "{}", err);
+    let err = check_error("(define-symbol-macro c 1)\n(c)");
+    assert!(err.contains("is a symbol macro, which names a form and is not called"), "{}", err);
+}

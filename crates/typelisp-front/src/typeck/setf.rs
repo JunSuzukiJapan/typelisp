@@ -27,6 +27,13 @@ pub(crate) fn check_setf(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Val
         return Err(Error::TypeError("setf: (setf place value)".into()));
     };
     let value = (*value, value_loc.clone());
+    // A symbol macro's place is its form's.
+    if let Value::Symbol(_) | Value::Path(_) = *place {
+        if let Some(u) = super::macros::macro_use(cx.reg, cx.ns, heap, locals, *place)? {
+            let form = super::macros::Site::at(cx, locals).expand(cx.expander, heap, u, &[])?;
+            return check_setf(cx, heap, locals, &[(form, heap.cons_loc(form)), value], loc);
+        }
+    }
     match *place {
         Value::Path(id) => Err(Error::TypeError(format!("setf: `{}` is not a place", path_spelling(heap, id)))),
         Value::Cons(_) => {
@@ -39,11 +46,6 @@ pub(crate) fn check_setf(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(Val
                 Some(_) => Err(Error::TypeError("setf: place's head must be a function name".into())),
                 None => Err(Error::TypeError("setf: empty place".into())),
             }
-        }
-        // A symbol macro's place is its form's.
-        Value::Symbol(name) if locals.symbol_macro(name).is_some() => {
-            let form = locals.symbol_macro(name).expect("checked above");
-            check_setf(cx, heap, locals, &[(form, heap.cons_loc(form)), value], loc)
         }
         Value::Symbol(name) => set_variable(cx, heap, locals, name, value, loc),
         _ => Err(Error::TypeError("setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into())),

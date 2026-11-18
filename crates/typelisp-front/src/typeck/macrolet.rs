@@ -5,8 +5,7 @@
 //! the evaluator here, before the body is checked, so the calls of it in the
 //! body are expanded as a module-level macro's are.
 
-use crate::typeck::defmacro::{parse_macro_lambda_list, MacroShape};
-use crate::typeck::registry::MacroDef;
+use crate::typeck::defmacro::parse_macro_lambda_list;
 use crate::check::verify::bound_name;
 use crate::types::{Path, Type};
 use crate::{Error, Heap, Loc, Value};
@@ -37,14 +36,7 @@ pub(crate) fn check_macrolet(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[
         bound_name(name, "macrolet")?;
         let (_, rest) = split_doc(heap, rest);
         let params = parse_macro_lambda_list(heap, &heap.list_to_vec(*params)?)?;
-        let shape = MacroShape::of(&MacroDef {
-            required: params.0.len(),
-            optional: params.1.len(),
-            rest: params.2.is_some(),
-            keys: params.3.iter().map(|(n, _)| n.name().to_string()).collect(),
-            public: false,
-            builtin: false,
-        });
+        let shape = params.shape();
         // A leading space is unwritable in source, and the number keeps two
         // bindings of one name apart.
         let path = Path::root(&format!(" macrolet {} {}", cx.reg.next_local_macro(), name.name()));

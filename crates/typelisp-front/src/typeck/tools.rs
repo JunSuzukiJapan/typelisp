@@ -191,6 +191,7 @@ fn value_target(path: Path, def: &ValueDef, who: &str, name: &str) -> Result<Com
         ValueDef::Fn(f) if !f.builtin && !f.type_params.is_empty() => Err(None),
         ValueDef::Fn(_) | ValueDef::Macro { .. } => Ok(CompileTarget::Fn(path)),
         ValueDef::Var(_) => Err(Some(Error::TypeError(format!("{}: `{}` is a variable, not a function", who, name)))),
+        ValueDef::SymbolMacro { .. } => Err(Some(Error::TypeError(format!("{}: `{}` is a symbol macro, not a function", who, name)))),
     }
 }
 

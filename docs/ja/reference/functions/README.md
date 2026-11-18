@@ -34,6 +34,7 @@
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
 | `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
+| `std::eval` | `Environment` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`、`direction-input`、`direction-output`、`directory-p`、`open-binary`、`open-binary-input`、`open-binary-output`、`open-file`、`open-input`、`open-output`、`read-file-lines`、`read-file-string`、`write-file-string` |
 | `std::hash` | `*sxhash-mask*`、`sxhash-string` |

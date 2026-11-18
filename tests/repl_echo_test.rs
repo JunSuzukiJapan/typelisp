@@ -79,3 +79,20 @@ fn atoms_echo_readably() {
     assert_echo("", "1/3", "1/3");
     assert_echo("", "'(1 \"a\" b)", "(1 \"a\" b)");
 }
+
+/// `:type FORM` (or `:t FORM`) prints the type checking proves for the form,
+/// and runs nothing: what it defines is not kept, and what it prints is not
+/// printed.
+#[test]
+fn the_type_command_shows_a_form_type_without_running_it() {
+    let out = repl_stdout(
+        "(defun f ((a int) (b int)) int (+ a b))\n\
+         :type (f 1 2)\n\
+         :t (lambda ((x int)) int (f x x))\n\
+         :t (f 1\n\
+         2)\n\
+         :t (progn (println \"ran\") \"s\")\n",
+    );
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines, ["int", "(fn (int) int)", "int", "string"], "{:?}", out);
+}

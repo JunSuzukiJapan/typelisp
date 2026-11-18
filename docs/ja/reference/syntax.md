@@ -1047,7 +1047,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 - `Option` の `Some`/`None` と `Result` の `Ok`/`Err` は、標準ライブラリがどのモジュールにも
   公開しているので、`use` しなくても裸の名前で使える（Rust の prelude が `Some`/`None`/`Ok`/`Err`
   を取り込んでいるのと同じ）。
-- **1 つの名前は 1 つの意味を持つ**。関数・グローバル変数・マクロは 1 つの名前空間に入り、
+- **1 つの名前は 1 つの意味を持つ**。関数・グローバル変数・マクロ・シンボルマクロは 1 つの名前空間に入り、
   同じモジュールで 2 つに同じ名前は付けられない（どの順に定義してもエラー）。CL のように
   関数と変数で名前空間が分かれてはいない。別のモジュールの同じ名前なら、近いほうが見える。
 - 裸名 `n` の解決（呼び出し `(n a ...)` の位置。特殊形の名前はこれより先に決まる）:
@@ -1166,7 +1166,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ### 3.14 defmacro — マクロ定義
 
 ```lisp
-(defmacro name (必須... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (必須... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - 全パラメータ・戻り値は常に `Sexpr` 固定なので型注釈は書かない。
@@ -1177,6 +1177,10 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   - `&rest name` … 残りの位置引数を1つの `Sexpr` リストとしてまとめて受け取る。
   - `&key` … キーワード引数。`name` または `(name デフォルト式)`。呼び出し側は `:name 値` で渡す
     （順不同）。省略時はデフォルト式（無ければ空リスト `()`）。未知のキーワードや奇数個の `:key` 列はエラー。
+- `&environment env` … ラムダリストのどこに書いてもよい（高々1回）。呼び出しの引数は取らず、
+  `env` にはマクロ呼び出しの位置の環境（型は `std::eval::Environment`）が束縛される。
+  `(macroexpand form env)` に渡すと、呼び出しを囲む `macrolet`・`symbol-macrolet` の束縛も
+  展開する（[マクロ](functions/system.md#8-マクロ)）。
 - 例: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`。
 
 ### 3.15 macrolet / symbol-macrolet — 局所的なマクロ束縛
@@ -1189,6 +1193,9 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 どちらも**式**の特殊形で、実行時には何も残らない（本体がコンパイルされるのは展開後の形）。
 ラムダリストは `defmacro` と同じ。詳しい規則と例は
 [局所的なマクロ束縛](functions/system.md#9-局所的なマクロ束縛macrolet--symbol-macrolet)。
+
+トップレベルの定義形 `(define-symbol-macro name 展開形)` は、`symbol-macrolet` の大域版
+（[マクロ](functions/system.md#8-マクロ)）。
 
 ### 3.16 `#[test]` — テスト関数
 
