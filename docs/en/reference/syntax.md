@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1100,7 +1100,7 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
 - `Option`'s `Some`/`None` and `Result`'s `Ok`/`Err` are offered to every module by the standard
   library, so they can be used by bare name without a `use` (the same as Rust's prelude bringing in
   `Some`/`None`/`Ok`/`Err`).
-- **A name has one meaning.** Functions, global variables and macros share one namespace, and within
+- **A name has one meaning.** Functions, global variables, macros and symbol macros share one namespace, and within
   one module no two of them can have the same name (an error whichever is defined first). Functions and
   variables do not have separate namespaces as in CL. For the same name in different modules, the
   nearer one is visible.
@@ -1231,7 +1231,7 @@ are written `(pub x i32)` (3.6).
 ### 3.14 defmacro — macro definitions
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - All parameters and the return value are always `Sexpr`, so no type annotations are written.
@@ -1245,6 +1245,10 @@ are written `(pub x i32)` (3.6).
   - `&key` … keyword arguments. `name` or `(name default-expr)`. The caller passes them as `:name value`
     (in any order). When omitted, the default expression (the empty list `()` if none). Unknown keywords
     or an odd-length `:key` sequence are errors.
+- `&environment env` … may be written anywhere in the lambda list (at most once). It takes no
+  argument of the call; `env` is bound to the environment at the macro call's position (of type
+  `std::eval::Environment`). Passed to `(macroexpand form env)`, it expands the bindings of the
+  `macrolet` and `symbol-macrolet` around the call too ([Macros](functions/system.md#8-macros)).
 - Examples: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — local macro bindings
@@ -1258,6 +1262,9 @@ Both are **expression** special forms, and nothing remains at run time (what get
 expanded form of the body). The lambda list is the same as for `defmacro`. The detailed rules and
 examples are in
 [Local macro bindings](functions/system.md#9-local-macro-bindings-macrolet--symbol-macrolet).
+
+The top-level definition form `(define-symbol-macro name expansion)` is the global counterpart of
+`symbol-macrolet` ([Macros](functions/system.md#8-macros)).
 
 ### 3.16 `#[test]` — test functions
 

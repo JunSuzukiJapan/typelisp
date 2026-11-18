@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Tempo, ambiente e implementazione
 
 Funzioni per il tempo, interrogazioni sull'ambiente di esecuzione, strumenti di implementazione,
@@ -282,8 +282,9 @@ Come definire le macro è spiegato nel [Riferimento della sintassi 3.14](../synt
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Un nuovo simbolo. Il suo nome è `" <prefix><n>"`, dove `n` è `*gensym-counter*`. Uno spazio iniziale non si può scrivere nel sorgente, quindi i binding generati non confliggono mai con i nomi scritti |
 | `*gensym-counter*` | Variabile | `int` | Il numero che `gensym` usa dopo. Come in CL, si può leggere e impostare |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Espande una chiamata di macro di un passo. `None` significa "non è una chiamata di macro" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Ripete finché non è più una macro |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Espande di un passo una chiamata di macro o una macro di simbolo. `None` significa «nessuna delle due» |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Ripete finché non è più nessuna delle due |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | forma di definizione | Una macro di simbolo globale. Vedi sotto |
 
 `macroexpand-1` restituisce un `Option`. CL riporta "se è stata espansa" come secondo valore di ritorno, ma
 non esistono valori multipli, quindi `None` svolge quel ruolo. **Una macro che si espande in una chiamata
@@ -295,6 +296,43 @@ type checker, quindi ciò che il programma vede e ciò che il checker ha visto n
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Senza `env` si vedono solo le definizioni del modulo (l'ambiente lessicale nullo di CL). Con
+l'ambiente che il corpo di una macro ha ricevuto tramite `&environment` ([Riferimento della sintassi
+3.14](../syntax.md#314-defmacro--definizioni-di-macro)), vengono espanse anche le macro di
+`macrolet` e le macro di simbolo di `symbol-macrolet` attorno a quella chiamata di macro. Una
+variabile locale attorno alla chiamata nasconde una macro globale con lo stesso nome.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Il tipo dell'ambiente è `std::eval::Environment`. Il valore è utilizzabile solo mentre è in
+esecuzione la macro che lo ha ricevuto (come in CL); passato dopo, il risultato è un `Err`.
+
+`define-symbol-macro` definisce una macro di simbolo globale (la controparte globale di
+`symbol-macrolet`). Il nome è sostituito dall'espansione dove è scritto, e anche `setf` scrive
+nell'espansione. Il nome sta nello stesso spazio dei nomi di funzioni, variabili globali e macro;
+con `pub` si può usare fuori dal modulo come `mm::name`. Un legame di variabile locale nasconde una
+macro di simbolo con lo stesso nome. L'espansione è controllata dove il nome è scritto, quindi può
+contenere nomi che al momento della definizione non esistono ancora.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter diventa 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Ciò che CL ha e questo linguaggio no: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

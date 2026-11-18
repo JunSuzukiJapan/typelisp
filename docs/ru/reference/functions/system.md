@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Время, среда и реализация
 
 Функции для времени, запросов о среде выполнения, инструменты реализации, разбор и вычисление текста, строки
@@ -266,8 +266,9 @@ CL возвращает из `read-from-string` **два значения** (з�
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Новый символ. Его имя — `" <prefix><n>"`, где `n` — `*gensym-counter*`. Начальный пробел нельзя написать в исходнике, поэтому создаваемые привязки никогда не конфликтуют с написанными именами |
 | `*gensym-counter*` | Переменная | `int` | Число, которое `gensym` использует следующим. Как в CL, его можно читать и изменять |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Раскрывает вызов макроса на один шаг. `None` означает «не вызов макроса» |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Повторяет, пока это не перестанет быть макросом |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Раскрывает на один шаг вызов макроса или символьный макрос. `None` означает «ни то ни другое» |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Повторяет, пока форма не перестанет быть тем или другим |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | форма определения | Глобальный символьный макрос. См. ниже |
 
 `macroexpand-1` возвращает `Option`. CL сообщает «было ли раскрытие» вторым результатом, но множественных значений
 нет, поэтому эту роль играет `None`. **Макрос, раскрывающийся в вызов самого себя, никогда не спутать с немакросом.**
@@ -279,6 +280,43 @@ CL возвращает из `read-from-string` **два значения** (з�
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none показывается как пустой список (Option<Sexpr> прозрачен)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Без `env` видны только определения модуля (пустое лексическое окружение CL). С окружением, которое
+тело макроса получило через `&environment` ([Справочнике по синтаксису
+3.14](../syntax.md#314-defmacro--определения-макросов)), раскрываются также макросы `macrolet` и
+символьные макросы `symbol-macrolet` вокруг этого вызова макроса. Локальная переменная вокруг вызова
+скрывает глобальный макрос с тем же именем.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Тип окружения — `std::eval::Environment`. Значение можно использовать, только пока выполняется
+получивший его макрос (как в CL); если передать его позже, результатом будет `Err`.
+
+`define-symbol-macro` определяет глобальный символьный макрос (глобальный аналог `symbol-macrolet`).
+Имя заменяется раскрытием там, где оно написано, и `setf` тоже пишет в раскрытие. Имя находится в
+одном пространстве имён с функциями, глобальными переменными и макросами; с `pub` его можно
+использовать вне модуля как `mm::name`. Связывание локальной переменной скрывает символьный макрос с
+тем же именем. Раскрытие проверяется там, где написано имя, поэтому может содержать имена, которых
+ещё нет в момент определения.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter становится 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Что есть в CL и чего нет в этом языке: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` всегда совпадают,

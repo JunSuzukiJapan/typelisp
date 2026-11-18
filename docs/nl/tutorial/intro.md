@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Aan de slag
 
 Beginnend met het evalueren van expressies in de REPL behandelt dit hoofdstuk achtereenvolgens
@@ -8,12 +8,14 @@ functies, variabelen, voorwaarden, lussen, lijsten en `Vector`. Hoe je `typl` bo
 ## 1. De REPL starten
 
 Zonder argumenten gestart gaat `typl` de REPL (interactieve modus) in. Typ een expressie na
-`typl>` en ze wordt ter plekke geëvalueerd en de waarde wordt afgedrukt. `:quit` verlaat de REPL.
+`typl>` en ze wordt ter plekke geëvalueerd en de waarde wordt afgedrukt. Zet je `:type` (kort: `:t`) voor een expressie, dan wordt het type afgedrukt zonder de expressie te evalueren. `:quit` verlaat de REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

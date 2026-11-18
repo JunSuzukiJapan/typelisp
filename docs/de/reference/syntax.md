@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1132,7 +1132,7 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
 - `Some`/`None` von `Option` und `Ok`/`Err` von `Result` bietet die Standardbibliothek jedem Modul an,
   daher sind sie ohne `use` unter dem bloßen Namen verwendbar (wie Rusts Prelude
   `Some`/`None`/`Ok`/`Err` hereinholt).
-- **Ein Name hat eine Bedeutung.** Funktionen, globale Variablen und Makros teilen sich einen
+- **Ein Name hat eine Bedeutung.** Funktionen, globale Variablen, Makros und Symbolmakros teilen sich einen
   Namensraum, und innerhalb eines Moduls können keine zwei von ihnen denselben Namen haben (ein Fehler,
   egal welcher zuerst definiert wird). Funktionen und Variablen haben keine getrennten Namensräume wie in
   CL. Bei demselben Namen in verschiedenen Modulen ist der nähere sichtbar.
@@ -1268,7 +1268,7 @@ Die Methoden eines `impl` werden Eintrag für Eintrag als `(pub defmethod name .
 ### 3.14 defmacro — Makrodefinitionen
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Alle Parameter und der Rückgabewert sind immer `Sexpr`, daher schreibt man keine Typannotationen.
@@ -1282,6 +1282,11 @@ Die Methoden eines `impl` werden Eintrag für Eintrag als `(pub defmethod name .
   - `&key` … Schlüsselwortargumente. `name` oder `(name default-expr)`. Der Aufrufer übergibt sie als
     `:name value` (in beliebiger Reihenfolge). Wird eines weggelassen, der Standardausdruck (ohne einen die
     leere Liste `()`). Unbekannte Schlüsselwörter oder eine `:key`-Folge ungerader Länge sind Fehler.
+- `&environment env` … darf an beliebiger Stelle der Lambda-Liste stehen (höchstens einmal). Es
+  nimmt kein Argument des Aufrufs; `env` wird an die Umgebung an der Stelle des Makroaufrufs
+  gebunden (Typ `std::eval::Environment`). An `(macroexpand form env)` übergeben, expandiert es auch
+  die Bindungen von `macrolet` und `symbol-macrolet` um den Aufruf
+  ([Makros](functions/system.md#8-makros)).
 - Beispiele: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — lokale Makrobindungen
@@ -1295,6 +1300,9 @@ Beide sind Spezialformen für **Ausdrücke**, und zur Laufzeit bleibt nichts üb
 expandierte Form des Rumpfes). Die Lambda-Liste ist dieselbe wie bei `defmacro`. Die genauen Regeln und
 Beispiele stehen unter
 [Lokale Makrobindungen](functions/system.md#9-lokale-makrobindungen-macrolet--symbol-macrolet).
+
+Die Definitionsform `(define-symbol-macro name expansion)` auf oberster Ebene ist das globale
+Gegenstück zu `symbol-macrolet` ([Makros](functions/system.md#8-makros)).
 
 ### 3.16 `#[test]` — Testfunktionen
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # الزمن والبيئة والتنفيذ
 
 دوال الزمن والاستعلام عن بيئة التشغيل وأدوات التنفيذ وتحليل النصوص وتقييمها والسلاسل التوثيقية والماكرو.
@@ -260,8 +260,9 @@ time-zone is supplied, daylight saving time information is ignored*).
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | رمز جديد. واسمه `" <prefix><n>"`، حيث `n` هي `*gensym-counter*`. ولا يمكن كتابة مسافة في البداية في المصدر، فلا تتصادم الربطات المولَّدة أبدًا مع الأسماء المكتوبة |
 | `*gensym-counter*` | متغير | `int` | الرقم الذي ستستخدمه `gensym` تاليًا. وكما في CL يمكن قراءته وضبطه |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | توسّع استدعاء ماكرو خطوة واحدة. و`None` تعني "ليس استدعاء ماكرو" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | تتكرر حتى لا يبقى ماكرو |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | يوسّع استدعاء ماكرو أو ماكرو رمز خطوة واحدة. `None` تعني «لا هذا ولا ذاك» |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | يكرر حتى لا يكون أيًّا منهما |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | صيغة تعريف | ماكرو رمز عام. انظر أدناه |
 
 تعيد `macroexpand-1` قيمة `Option`. وتبلّغ CL عن "هل توسّعت" بقيمة راجعة ثانية، لكن لا قيم متعددة، فتؤدي
 `None` هذا الدور. و**لا يمكن أبدًا الخلط بين ماكرو تتوسع إلى استدعاء نفسها وبين ما ليس ماكرو.** وخطوة
@@ -272,6 +273,42 @@ time-zone is supplied, daylight saving time information is ignored*).
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; تظهر none على أنها القائمة الفارغة (Option<Sexpr> شفاف)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+بدون `env` لا تُرى إلا تعريفات الوحدة (البيئة المعجمية الفارغة في CL). وإذا مُرّرت البيئة التي
+تلقّاها جسم ماكرو عبر `&environment` ([مرجع الصياغة
+3.14](../syntax.md#314-defmacro--تعريف-الماكرو))، تُوسَّع أيضًا ماكروهات `macrolet` وماكروهات الرموز
+في `symbol-macrolet` المحيطة باستدعاء الماكرو ذلك. والمتغير المحلي المحيط بالاستدعاء يحجب الماكرو
+العام الذي يحمل الاسم نفسه.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+نوع البيئة هو `std::eval::Environment`. ولا تصلح القيمة إلا ما دام الماكرو الذي تلقّاها قيد التشغيل
+(كما في CL)؛ وإذا مُرّرت بعد ذلك كانت النتيجة `Err`.
+
+يعرّف `define-symbol-macro` ماكرو رمز عامًّا (النظير العام لـ `symbol-macrolet`). يُستبدل الاسم
+بالتوسيع حيث يُكتب، ويكتب `setf` أيضًا في التوسيع. ويقع الاسم في مساحة الأسماء نفسها مع الدوال
+والمتغيرات العامة والماكروهات، ومع `pub` يمكن استخدامه من خارج الوحدة بصيغة `mm::name`. وربط متغير
+محلي يحجب ماكرو الرمز الذي يحمل الاسم نفسه. ويُفحص التوسيع حيث يُكتب الاسم، لذا يجوز أن يحتوي أسماءً
+لم توجد بعد وقت التعريف.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; يصبح counter مساويًا لـ 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 ما في CL وليس في هذه اللغة: `eval-when` (فـ `:compile-toplevel`/`:load-toplevel`/`:execute` تتطابق دائمًا،

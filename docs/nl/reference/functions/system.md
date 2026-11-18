@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -283,8 +283,9 @@ Hoe je macro's definieert staat in [Syntaxreferentie 3.14](../syntax.md#314-defm
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Een nieuw symbool. De naam is `" <prefix><n>"`, waarbij `n` `*gensym-counter*` is. Een voorloopspatie kan in broncode niet worden geschreven, dus de gegenereerde bindingen botsen nooit met geschreven namen |
 | `*gensym-counter*` | Variabele | `int` | Het getal dat `gensym` hierna gebruikt. Zoals in CL kan het worden gelezen en gezet |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expandeert een macro-aanroep één stap. `None` betekent "geen macro-aanroep" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Herhaalt totdat het geen macro meer is |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Expandeert een macro-aanroep of een symboolmacro één stap. `None` betekent ‘geen van beide’ |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Herhaalt tot het geen van beide meer is |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | definitievorm | Een globale symboolmacro. Zie hieronder |
 
 `macroexpand-1` geeft een `Option` terug. CL meldt "of het expandeerde" als tweede returnwaarde, maar er
 zijn geen meervoudige waarden, dus `None` speelt die rol. **Een macro die naar een aanroep van zichzelf
@@ -296,6 +297,43 @@ typechecker gebruikt, dus wat het programma ziet en wat de checker zag lopen noo
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Zonder `env` worden alleen de definities van de module gezien (de lege lexicale omgeving van CL).
+Met de omgeving die een macrobody via `&environment` heeft gekregen ([Syntaxreferentie
+3.14](../syntax.md#314-defmacro--macrodefinities)), worden ook de macro's van `macrolet` en de
+symboolmacro's van `symbol-macrolet` rond die macro-aanroep geëxpandeerd. Een lokale variabele rond
+de aanroep verbergt een globale macro met dezelfde naam.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Het type van de omgeving is `std::eval::Environment`. De waarde is alleen bruikbaar zolang de macro
+die haar kreeg draait (zoals in CL); later meegegeven is het resultaat een `Err`.
+
+`define-symbol-macro` definieert een globale symboolmacro (de globale tegenhanger van
+`symbol-macrolet`). De naam wordt vervangen door de expansie waar hij geschreven staat, en ook
+`setf` schrijft naar de expansie. De naam zit in dezelfde naamruimte als functies, globale
+variabelen en macro's; met `pub` is hij buiten de module te gebruiken als `mm::name`. Een lokale
+variabelebinding verbergt een symboolmacro met dezelfde naam. De expansie wordt gecontroleerd waar
+de naam geschreven staat, dus ze mag namen bevatten die bij de definitie nog niet bestaan.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter wordt 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Wat CL heeft en deze taal niet: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` vallen altijd

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # 時間、執行環境與實作
 
 時間、執行環境的查詢、實作工具、文字的解析與求值、文件字串，以及巨集相關的函式。
@@ -232,8 +232,9 @@ CL 從 `read-from-string` 回傳**2 個值**（值與位置），但這個語言
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 新的符號。名稱是 `" <prefix><n>"`，`n` 是 `*gensym-counter*`。開頭的空格在原始碼中寫不出來，所以產生的繫結不會與寫出的名稱衝突 |
 | `*gensym-counter*` | 變數 | `int` | `gensym` 下次使用的編號。與 CL 一樣可以讀取與設定 |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 把巨集呼叫展開一層。`None` 表示「不是巨集呼叫」 |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 反覆展開，直到不再是巨集 |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | 將巨集呼叫或符號巨集展開一步。`None` 表示「兩者皆非」 |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | 重複直到兩者皆非 |
+| `define-symbol-macro` | `(define-symbol-macro name 展開形式)` | 定義形式 | 全域符號巨集。見下文 |
 
 `macroexpand-1` 回傳的是 `Option`——CL 以第 2 個回傳值傳達「是否展開了」，但沒有多值，所以由 `None` 擔任這一點。**展開為自己呼叫的巨集與
 非巨集不可能被混淆。** 展開的一層與型別檢查使用的是同一個，程式看到的與檢查看到的不會產生落差。
@@ -243,6 +244,33 @@ CL 從 `read-from-string` 回傳**2 個值**（值與位置），但這個語言
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none 以空串列輸出（Option<Sexpr> 是透明的）
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+省略 `env` 時，只看模組的定義來展開（CL 的空詞法環境）。傳入巨集本體透過 `&environment` 收到的環境（[語法參考 3.14](../syntax.md#314-defmacro--巨集定義)）時，包圍該巨集呼叫的 `macrolet` 的巨集與 `symbol-macrolet` 的符號巨集也會展開。包圍呼叫的區域變數會遮蔽同名的全域巨集。
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+環境的型別是 `std::eval::Environment`。該值只在收到它的巨集執行期間可用（與 CL 相同），之後再傳入會得到 `Err`。
+
+`define-symbol-macro` 定義全域符號巨集（`symbol-macrolet` 的全域版）。在寫出該名稱的位置，它會被替換為展開形式，`setf` 也會寫入展開後的位置。名稱與函式、全域變數、巨集處於同一命名空間，加上 `pub` 後可以在模組外以 `mm::name` 的形式使用。區域變數的繫結會遮蔽同名的符號巨集。展開形式在寫出名稱的位置檢查，所以可以包含定義時尚不存在的名稱。
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter 變為 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 CL 中有而這裡沒有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` 一律一致，沒有可選擇的區別）、`define-compiler-macro`、

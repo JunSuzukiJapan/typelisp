@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -251,8 +251,9 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 새 심볼. 이름은 `" <prefix><n>"`이며 `n`은 `*gensym-counter*`. 맨 앞의 공백은 소스에 쓸 수 없으므로 생성된 바인딩이 쓰인 이름과 겹치는 일은 없다 |
 | `*gensym-counter*` | 변수 | `int` | `gensym`이 다음에 쓰는 수. CL처럼 읽고 설정할 수 있다 |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 매크로 호출을 한 단계 전개한다. `None`은 "매크로 호출이 아니다"라는 뜻 |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 매크로가 아니게 될 때까지 반복한다 |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | 매크로 호출이나 심볼 매크로를 한 단계 전개한다. `None`은 "둘 다 아니다"라는 뜻 |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | 둘 다 아니게 될 때까지 반복한다 |
+| `define-symbol-macro` | `(define-symbol-macro name 전개-형식)` | 정의 형식 | 전역 심볼 매크로. 아래 참고 |
 
 `macroexpand-1`은 `Option`을 반환한다. CL은 "전개했는지"를 두 번째 반환값으로 알리지만 다중 값이 없으므로 `None`이 그 역할을
 한다. **자기 자신의 호출로 전개되는 매크로가 매크로 아닌 것과 혼동되는 일은 결코 없다.** 한 단계의 전개는 타입 검사기가 쓰는
@@ -263,6 +264,37 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none은 빈 리스트로 보인다(Option<Sexpr>는 투명)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+`env`를 생략하면 모듈의 정의만 보고 전개한다(CL의 빈 렉시컬 환경). 매크로 본문이 `&environment`로 받은 환경([문법 레퍼런스
+3.14](../syntax.md#314-defmacro--매크로-정의))을 넘기면, 그 매크로 호출을 둘러싼 `macrolet`의 매크로와 `symbol-macrolet`의 심볼
+매크로도 전개한다. 호출을 둘러싼 로컬 변수는 같은 이름의 전역 매크로를 가린다.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+환경의 타입은 `std::eval::Environment`. 값은 그 환경을 받은 매크로가 실행되는 동안에만 쓸 수 있다(CL과 같다). 나중에 넘기면 `Err`가 된다.
+
+`define-symbol-macro`는 전역 심볼 매크로를 정의한다(`symbol-macrolet`의 전역판). 그 이름을 쓴 위치에서 전개 형식으로 바뀌고, `setf`도
+전개된 곳에 쓴다. 이름은 함수·전역 변수·매크로와 같은 이름공간에 들어가며, `pub`을 붙이면 모듈 밖에서 `mm::name`처럼 쓸 수 있다. 로컬 변수 바인딩은 같은 이름의
+심볼 매크로를 가린다. 전개 형식은 이름을 쓴 위치에서 검사되므로, 정의 시점에는 아직 없는 이름을 포함해도 된다.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter가 5가 된다
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 CL에 있고 이 언어에 없는 것: `eval-when`(`:compile-toplevel`/`:load-toplevel`/`:execute`가 항상 일치하므로 고를 구별이

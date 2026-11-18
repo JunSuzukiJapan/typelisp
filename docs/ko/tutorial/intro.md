@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # 시작하기
 
 REPL에서 식을 평가하는 것부터 시작해 함수, 변수, 조건 분기, 반복, 리스트와 `Vector`를 차례로 다룬다. `typl`을
@@ -7,12 +7,14 @@ REPL에서 식을 평가하는 것부터 시작해 함수, 변수, 조건 분기
 ## 1. REPL 시작하기
 
 인수 없이 시작하면 `typl`은 REPL(대화형 모드)에 들어간다. `typl>` 뒤에 식을 입력하면 그 자리에서 평가되어 값이
-출력된다. `:quit`로 REPL을 빠져나온다.
+출력된다. 식 앞에 `:type`(줄여서 `:t`)을 붙이면 평가하지 않고 그 타입을 출력한다. `:quit`로 REPL을 빠져나온다.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

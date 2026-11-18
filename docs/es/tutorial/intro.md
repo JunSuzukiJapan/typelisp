@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Primeros pasos
 
 Empezando por evaluar expresiones en el REPL, este capítulo recorre, por orden, funciones, variables,
@@ -8,12 +8,14 @@ condicionales, bucles, y listas y `Vector`. Para compilar `typl`, consulta el
 ## 1. Iniciar el REPL
 
 Si se inicia sin argumentos, `typl` entra en el REPL (modo interactivo). Escribe una expresión tras
-`typl>` y se evalúa en el acto y se imprime su valor. `:quit` sale del REPL.
+`typl>` y se evalúa en el acto y se imprime su valor. Si se antepone `:type` (abreviado `:t`) a una expresión, se imprime su tipo sin evaluarla. `:quit` sale del REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

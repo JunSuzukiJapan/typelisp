@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -273,8 +273,9 @@ Sposób definiowania makr opisano w [Referencji składni 3.14](../syntax.md#314-
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Nowy symbol. Jego nazwa to `" <prefix><n>"`, gdzie `n` to `*gensym-counter*`. Początkowej spacji nie da się zapisać w kodzie źródłowym, więc wygenerowane wiązania nigdy nie kolidują z zapisanymi nazwami |
 | `*gensym-counter*` | Zmienna | `int` | Liczba, której `gensym` użyje następnym razem. Jak w CL, można ją odczytać i ustawić |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Rozwija wywołanie makra o jeden krok. `None` oznacza „to nie jest wywołanie makra" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Powtarza, aż to już nie będzie makro |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Rozwija o jeden krok wywołanie makra albo makro symbolu. `None` oznacza „ani jedno, ani drugie” |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Powtarza, aż nie będzie ani jednym, ani drugim |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | forma definicji | Globalne makro symbolu. Zob. niżej |
 
 `macroexpand-1` zwraca `Option`. CL zgłasza „czy rozwinięto" jako drugą wartość zwracaną, ale
 nie ma wielu wartości, więc tę rolę pełni `None`. **Makra, które rozwija się do wywołania samego siebie,
@@ -286,6 +287,43 @@ więc to, co widzi program, i to, co widział moduł sprawdzający, nigdy się n
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none pokazuje się jako pusta lista (Option<Sexpr> jest przezroczysty)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Bez `env` widoczne są tylko definicje modułu (puste środowisko leksykalne CL). Ze środowiskiem,
+które ciało makra otrzymało przez `&environment` ([Referencji składni
+3.14](../syntax.md#314-defmacro--definicje-makr)), rozwijane są także makra z `macrolet` i makra
+symboli z `symbol-macrolet` otaczające to wywołanie makra. Zmienna lokalna otaczająca wywołanie
+przesłania globalne makro o tej samej nazwie.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Typ środowiska to `std::eval::Environment`. Wartości można używać tylko, dopóki działa makro, które
+ją otrzymało (jak w CL); przekazana później daje `Err`.
+
+`define-symbol-macro` definiuje globalne makro symbolu (globalny odpowiednik `symbol-macrolet`).
+Nazwa jest zastępowana rozwinięciem tam, gdzie jest zapisana, a `setf` także zapisuje do
+rozwinięcia. Nazwa należy do tej samej przestrzeni nazw co funkcje, zmienne globalne i makra; z
+`pub` można jej używać spoza modułu jako `mm::name`. Wiązanie zmiennej lokalnej przesłania makro
+symbolu o tej samej nazwie. Rozwinięcie jest sprawdzane tam, gdzie zapisano nazwę, więc może
+zawierać nazwy, których w chwili definicji jeszcze nie ma.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter staje się 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Czego CL ma, a ten język nie: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

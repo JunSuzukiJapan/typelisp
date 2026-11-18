@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Bắt đầu
 
 Bắt đầu từ việc đánh giá biểu thức trong REPL, chương này lần lượt trình bày hàm, biến, rẽ nhánh,
@@ -7,12 +7,14 @@ vòng lặp, danh sách và `Vector`. Về cách build `typl`, xem [README.md](.
 ## 1. Khởi động REPL
 
 Khi khởi động không có đối số, `typl` vào REPL (chế độ tương tác). Gõ một biểu thức sau `typl>` và nó
-được đánh giá ngay tại chỗ rồi giá trị được in ra. `:quit` thoát khỏi REPL.
+được đánh giá ngay tại chỗ rồi giá trị được in ra. Đặt `:type` (viết tắt `:t`) trước một biểu thức để in kiểu của nó mà không đánh giá. `:quit` thoát khỏi REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

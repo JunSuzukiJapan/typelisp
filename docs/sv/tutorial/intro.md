@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Komma igång
 
 Kapitlet utgår från att utvärdera uttryck i REPL och går sedan igenom funktioner, variabler, villkor,
@@ -8,12 +8,14 @@ slingor samt listor och `Vector`, i den ordningen. Hur man bygger `typl` beskriv
 ## 1. Starta REPL
 
 Startas `typl` utan argument hamnar den i REPL (interaktivt läge). Skriv ett uttryck efter
-`typl>` så utvärderas det direkt och värdet skrivs ut. `:quit` lämnar REPL.
+`typl>` så utvärderas det direkt och värdet skrivs ut. Skriv `:type` (kort `:t`) före ett uttryck för att skriva ut dess typ utan att utvärdera det. `:quit` lämnar REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

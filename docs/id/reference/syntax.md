@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1140,7 +1140,7 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 - Pustaka standar menawarkan `Some`/`None` milik `Option` dan `Ok`/`Err` milik `Result` ke setiap modul,
   sehingga dapat dipakai dengan nama polos tanpa `use` (sama seperti prelude Rust yang membawa masuk
   `Some`/`None`/`Ok`/`Err`).
-- **Sebuah nama hanya punya satu arti.** Fungsi, variabel global, dan makro berbagi satu ruang nama, dan
+- **Sebuah nama hanya punya satu arti.** Fungsi, variabel global, makro, dan makro simbol berbagi satu ruang nama, dan
   dalam satu modul tidak boleh ada dua di antaranya yang bernama sama (galat, mana pun yang didefinisikan
   lebih dulu). Fungsi dan variabel tidak punya ruang nama terpisah seperti di CL. Untuk nama yang sama di
   modul berbeda, yang lebih dekat yang terlihat.
@@ -1272,7 +1272,7 @@ Metode `impl` dijadikan publik per item, dengan menulis `(pub defmethod name ...
 ### 3.14 defmacro — definisi makro
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Semua parameter dan nilai kembalian selalu `Sexpr`, sehingga tidak ada anotasi tipe yang ditulis.
@@ -1288,6 +1288,11 @@ Metode `impl` dijadikan publik per item, dengan menulis `(pub defmethod name ...
     `:name value` (dalam urutan apa pun). Ketika dihilangkan, ekspresi bawaan (daftar kosong `()`
     jika tidak ada). Keyword yang tidak dikenal atau urutan `:key` berpanjang ganjil adalah
     kesalahan.
+- `&environment env` … boleh ditulis di mana saja dalam daftar lambda (paling banyak sekali). Ia
+  tidak mengambil argumen pemanggilan; `env` diikat ke lingkungan di posisi pemanggilan makro
+  (bertipe `std::eval::Environment`). Bila diberikan ke `(macroexpand form env)`, ikatan `macrolet`
+  dan `symbol-macrolet` yang mengelilingi pemanggilan juga diekspansi
+  ([Makro](functions/system.md#8-makro)).
 - Contoh: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — pengikatan makro lokal
@@ -1301,6 +1306,9 @@ Keduanya adalah bentuk khusus **ekspresi**, dan tidak ada yang tersisa saat dija
 dikompilasi adalah bentuk ekspansi dari badan). Daftar lambda-nya sama seperti `defmacro`. Aturan
 terperinci dan contohnya ada di
 [Pengikatan makro lokal](functions/system.md#9-pengikatan-makro-lokal-macrolet--symbol-macrolet).
+
+Bentuk definisi tingkat atas `(define-symbol-macro name expansion)` adalah padanan global
+`symbol-macrolet` ([Makro](functions/system.md#8-makro)).
 
 ### 3.16 `#[test]` — fungsi uji
 

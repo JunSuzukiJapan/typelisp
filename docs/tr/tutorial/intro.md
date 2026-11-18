@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Başlarken
 
 Bu bölüm, REPL'de ifade değerlendirmekten başlayarak sırasıyla fonksiyonları, değişkenleri,
@@ -8,12 +8,14 @@ koşulları, döngüleri, listeleri ve `Vector`'ü ele alır. `typl`'nin nasıl 
 ## 1. REPL'i başlatma
 
 Bağımsız değişken olmadan başlatılan `typl`, REPL'e (etkileşimli kip) girer. `typl>` isteminden sonra
-bir ifade yazın; ifade anında değerlendirilir ve değeri yazdırılır. `:quit` REPL'den çıkar.
+bir ifade yazın; ifade anında değerlendirilir ve değeri yazdırılır. Bir ifadenin önüne `:type` (kısaca `:t`) yazılırsa ifade değerlendirilmeden türü yazdırılır. `:quit` REPL'den çıkar.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

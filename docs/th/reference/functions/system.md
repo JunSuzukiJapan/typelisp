@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # เวลา สภาพแวดล้อม และการ implement
 
 ฟังก์ชันสำหรับเวลา การสอบถามสภาพแวดล้อมขณะรัน เครื่องมือของการ implement การแยกวิเคราะห์และ
@@ -272,8 +272,9 @@ hover ของ language server (`typl-lsp`) แสดง docstring ด้วย
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | สัญลักษณ์ใหม่ ชื่อของมันคือ `" <prefix><n>"` โดย `n` คือ `*gensym-counter*` ช่องว่างนำหน้าเขียนในซอร์สไม่ได้ ดังนั้นการผูกที่สร้างขึ้นจะไม่ชนกับชื่อที่เขียน |
 | `*gensym-counter*` | ตัวแปร | `int` | หมายเลขที่ `gensym` ใช้ครั้งถัดไป เหมือนใน CL อ่านและตั้งค่าได้ |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | ขยายการเรียกแมโครหนึ่งขั้น `None` หมายถึง "ไม่ใช่การเรียกแมโคร" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | ทำซ้ำจนไม่ใช่แมโครอีก |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | ขยายการเรียกแมโครหรือแมโครสัญลักษณ์หนึ่งขั้น `None` หมายถึง "ไม่ใช่ทั้งสองอย่าง" |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | ทำซ้ำจนไม่ใช่ทั้งสองอย่าง |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | ฟอร์มนิยาม | แมโครสัญลักษณ์ระดับโกลบอล ดูด้านล่าง |
 
 `macroexpand-1` คืน `Option` CL รายงาน "ขยายหรือไม่" เป็นค่าที่คืนค่าที่สอง แต่
 ไม่มีค่าหลายค่า จึงให้ `None` ทำหน้าที่นั้น **แมโครที่ขยายเป็นการเรียกตัวเอง
@@ -285,6 +286,33 @@ hover ของ language server (`typl-lsp`) แสดง docstring ด้วย
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+ถ้าไม่ให้ `env` จะเห็นเฉพาะนิยามของโมดูล (สภาพแวดล้อมเชิงศัพท์ว่างของ CL) ถ้าให้สภาพแวดล้อมที่ตัวแมโครได้รับผ่าน `&environment` ([เอกสารอ้างอิงไวยากรณ์ 3.14](../syntax.md#314-defmacro--การนิยามแมโคร)) แมโครของ `macrolet` และแมโครสัญลักษณ์ของ `symbol-macrolet` ที่ล้อมการเรียกแมโครนั้นจะถูกขยายด้วย ตัวแปรโลคัลที่ล้อมการเรียกจะบังแมโครโกลบอลชื่อเดียวกัน
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+ชนิดของสภาพแวดล้อมคือ `std::eval::Environment` ค่านี้ใช้ได้เฉพาะขณะที่แมโครที่ได้รับมันยังทำงานอยู่ (เหมือน CL) ถ้าส่งไปทีหลังผลลัพธ์จะเป็น `Err`
+
+`define-symbol-macro` นิยามแมโครสัญลักษณ์ระดับโกลบอล (รุ่นโกลบอลของ `symbol-macrolet`) ชื่อจะถูกแทนด้วยรูปที่ขยายตรงที่เขียนชื่อนั้น และ `setf` ก็เขียนลงรูปที่ขยายด้วย ชื่ออยู่ในเนมสเปซเดียวกับฟังก์ชัน ตัวแปรโกลบอล และแมโคร ถ้าใส่ `pub` จะใช้จากนอกโมดูลได้ในรูป `mm::name` การผูกตัวแปรโลคัลจะบังแมโครสัญลักษณ์ชื่อเดียวกัน รูปที่ขยายถูกตรวจตรงที่เขียนชื่อ จึงมีชื่อที่ยังไม่มีอยู่ตอนนิยามได้
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter กลายเป็น 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 สิ่งที่ CL มีแต่ภาษานี้ไม่มี: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

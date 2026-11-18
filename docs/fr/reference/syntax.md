@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1112,7 +1112,7 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
 - La bibliothèque standard offre à tous les modules `Some`/`None` d'`Option` et `Ok`/`Err` de `Result` :
   ils s'utilisent donc par nom nu sans `use` (comme le prélude de Rust importe
   `Some`/`None`/`Ok`/`Err`).
-- **Un nom n'a qu'un sens.** Les fonctions, les variables globales et les macros partagent un espace de
+- **Un nom n'a qu'un sens.** Les fonctions, les variables globales, les macros et les macros de symbole partagent un espace de
   noms, et dans un même module deux d'entre elles ne peuvent pas porter le même nom (c'est une erreur, quel
   que soit l'ordre de définition). Les fonctions et les variables n'ont pas d'espaces de noms séparés comme
   en CL. Pour un même nom dans des modules différents, c'est le plus proche qui est visible.
@@ -1244,7 +1244,7 @@ Les méthodes d'un `impl` se rendent publiques élément par élément, en écri
 ### 3.14 defmacro — définitions de macros
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Tous les paramètres et la valeur de retour sont toujours des `Sexpr` ; on n'écrit donc pas d'annotations de type.
@@ -1259,6 +1259,11 @@ Les méthodes d'un `impl` se rendent publiques élément par élément, en écri
   - `&key` … arguments mots-clés. `name` ou `(name default-expr)`. L'appelant les passe sous la forme `:name value`
     (dans n'importe quel ordre). Omis, l'expression par défaut (la liste vide `()` s'il n'y en a pas). Les mots-clés
     inconnus ou une suite `:key` de longueur impaire sont des erreurs.
+- `&environment env` … peut s'écrire n'importe où dans la liste lambda (au plus une fois). Il ne
+  prend aucun argument de l'appel ; `env` est lié à l'environnement à la position de l'appel de
+  macro (de type `std::eval::Environment`). Passé à `(macroexpand form env)`, il développe aussi les
+  liaisons de `macrolet` et `symbol-macrolet` autour de l'appel
+  ([Macros](functions/system.md#8-macros)).
 - Exemples : `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — liaisons de macros locales
@@ -1272,6 +1277,9 @@ Ce sont toutes deux des formes spéciales d'**expression**, et rien ne subsiste 
 la forme développée du corps). La liste lambda est la même que pour `defmacro`. Les règles détaillées et les exemples
 se trouvent dans
 [Liaisons de macros locales](functions/system.md#9-liaisons-de-macros-locales-macrolet--symbol-macrolet).
+
+La forme de définition de premier niveau `(define-symbol-macro name expansion)` est l'équivalent
+global de `symbol-macrolet` ([Macros](functions/system.md#8-macros)).
 
 ### 3.16 `#[test]` — fonctions de test
 

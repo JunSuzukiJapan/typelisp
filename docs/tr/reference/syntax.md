@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1098,7 +1098,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 - Standart kütüphane `Option`'ın `Some`/`None`'ını ve `Result`'ın `Ok`/`Err`'ini her modüle sunar; bu
   yüzden `use` olmadan çıplak adla kullanılabilirler (Rust'ın prelude'unun `Some`/`None`/`Ok`/`Err`'i
   getirmesi gibi).
-- **Bir adın tek bir anlamı vardır.** Fonksiyonlar, global değişkenler ve makrolar tek bir ad alanını
+- **Bir adın tek bir anlamı vardır.** Fonksiyonlar, global değişkenler, makrolar ve sembol makroları tek bir ad alanını
   paylaşır ve bir modül içinde bunlardan ikisi aynı adı taşıyamaz (hangisi önce tanımlanırsa tanımlansın
   hatadır). CL'deki gibi fonksiyon ve değişken için ayrı ad alanları yoktur. Farklı modüllerde aynı ad
   varsa yakın olan görünür.
@@ -1222,7 +1222,7 @@ Bir `impl`'in metotları öğe öğe `(pub defmethod name ...)` yazılarak açı
 ### 3.14 defmacro — makro tanımları
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Tüm parametreler ve dönüş değeri her zaman `Sexpr`'dir; bu yüzden tür ek açıklaması yazılmaz.
@@ -1236,6 +1236,10 @@ Bir `impl`'in metotları öğe öğe `(pub defmethod name ...)` yazılarak açı
   - `&key` … anahtar sözcüklü bağımsız değişkenler. `name` ya da `(name default-expr)`. Çağıran bunları
     `:name value` olarak geçirir (her sırada). Atlandığında varsayılan ifade (yoksa boş liste `()`).
     Bilinmeyen anahtar sözcükler ya da tek uzunluklu bir `:key` dizisi hatadır.
+- `&environment env` … lambda listesinin herhangi bir yerine yazılabilir (en fazla bir kez).
+  Çağrıdan argüman almaz; `env`, makro çağrısının bulunduğu yerdeki ortama bağlanır (türü
+  `std::eval::Environment`). `(macroexpand form env)`'e verilirse, çağrıyı saran `macrolet` ve
+  `symbol-macrolet` bağlamalarını da açar ([Makrolar](functions/system.md#8-makrolar)).
 - Örnekler: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — yerel makro bağlamaları
@@ -1249,6 +1253,9 @@ Bir `impl`'in metotları öğe öğe `(pub defmethod name ...)` yazılarak açı
 biçimidir). Lambda listesi `defmacro` ile aynıdır. Ayrıntılı kurallar ve örnekler
 [Yerel makro bağlamaları](functions/system.md#9-yerel-makro-bağlamaları-macrolet--symbol-macrolet)
 bölümündedir.
+
+Üst düzey tanım formu `(define-symbol-macro name expansion)`, `symbol-macrolet`'in global
+karşılığıdır ([Makrolar](functions/system.md#8-makrolar)).
 
 ### 3.16 `#[test]` — test fonksiyonları
 

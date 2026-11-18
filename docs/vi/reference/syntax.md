@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1072,7 +1072,7 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 - Thư viện chuẩn cung cấp `Some`/`None` của `Option` và `Ok`/`Err` của `Result` cho mọi mô-đun, nên có
   thể dùng chúng bằng tên trần mà không cần `use` (giống như prelude của Rust đưa vào
   `Some`/`None`/`Ok`/`Err`).
-- **Một tên chỉ có một nghĩa.** Hàm, biến toàn cục và macro dùng chung một không gian tên, và trong một
+- **Một tên chỉ có một nghĩa.** Hàm, biến toàn cục, macro và macro ký hiệu dùng chung một không gian tên, và trong một
   module không thể có hai trong số chúng trùng tên (lỗi bất kể cái nào được định nghĩa trước). Hàm và biến
   không có không gian tên riêng như trong CL. Với cùng một tên ở các module khác nhau, cái gần hơn được
   nhìn thấy.
@@ -1196,7 +1196,7 @@ Các trường của struct được viết `(pub x i32)` (3.6).
 ### 3.14 defmacro — định nghĩa macro
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Mọi tham số và giá trị trả về luôn là `Sexpr`, nên không viết chú thích kiểu.
@@ -1210,6 +1210,10 @@ Các trường của struct được viết `(pub x i32)` (3.6).
   - `&key` … các đối số keyword. `name` hoặc `(name default-expr)`. Bên gọi truyền chúng dưới dạng `:name value`
     (theo thứ tự bất kỳ). Khi bị bỏ qua, là biểu thức mặc định (danh sách rỗng `()` nếu không có). Keyword lạ
     hoặc một dãy `:key` có độ dài lẻ là lỗi.
+- `&environment env` … có thể viết ở bất kỳ đâu trong danh sách lambda (nhiều nhất một lần). Nó
+  không nhận đối số nào của lời gọi; `env` được ràng buộc với môi trường tại vị trí lời gọi macro
+  (kiểu `std::eval::Environment`). Truyền cho `(macroexpand form env)` thì các ràng buộc `macrolet`
+  và `symbol-macrolet` bao quanh lời gọi cũng được mở rộng ([Macro](functions/system.md#8-macro)).
 - Ví dụ: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — ràng buộc macro cục bộ
@@ -1222,6 +1226,9 @@ Các trường của struct được viết `(pub x i32)` (3.6).
 Cả hai là các dạng đặc biệt **biểu thức**, và không có gì còn lại lúc chạy (thứ được biên dịch là dạng đã khai
 triển của thân). Danh sách lambda giống như của `defmacro`. Các quy tắc chi tiết và ví dụ nằm ở
 [Ràng buộc macro cục bộ](functions/system.md#9-ràng-buộc-macro-cục-bộ-macrolet--symbol-macrolet).
+
+Dạng định nghĩa cấp cao nhất `(define-symbol-macro name expansion)` là bản toàn cục của
+`symbol-macrolet` ([Macro](functions/system.md#8-macro)).
 
 ### 3.16 `#[test]` — hàm kiểm thử
 

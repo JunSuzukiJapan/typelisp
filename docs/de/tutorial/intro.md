@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Erste Schritte
 
 Ausgehend vom Auswerten von Ausdrücken in der REPL behandelt dieses Kapitel der Reihe nach Funktionen,
@@ -8,12 +8,14 @@ Variablen, Verzweigungen, Schleifen sowie Listen und `Vector`. Wie man `typl` ba
 ## 1. Die REPL starten
 
 Ohne Argumente gestartet, geht `typl` in die REPL (den interaktiven Modus). Ein Ausdruck, der nach `typl>`
-eingegeben wird, wird sofort ausgewertet und sein Wert ausgegeben. `:quit` verlässt die REPL.
+eingegeben wird, wird sofort ausgewertet und sein Wert ausgegeben. Steht `:type` (kurz `:t`) vor einem Ausdruck, wird sein Typ ausgegeben, ohne ihn auszuwerten. `:quit` verlässt die REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

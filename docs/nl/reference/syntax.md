@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1140,7 +1140,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
 - De standaardbibliotheek biedt `Some`/`None` van `Option` en `Ok`/`Err` van `Result` aan elke module
   aan, dus ze zijn zonder `use` onder de kale naam te gebruiken (zoals de prelude van Rust
   `Some`/`None`/`Ok`/`Err` binnenhaalt).
-- **Een naam heeft één betekenis.** Functies, globale variabelen en macro's delen één naamruimte, en binnen
+- **Een naam heeft één betekenis.** Functies, globale variabelen, macro's en symboolmacro's delen één naamruimte, en binnen
   één module kunnen geen twee ervan dezelfde naam hebben (een fout, welke er ook eerst wordt gedefinieerd).
   Functies en variabelen hebben geen gescheiden naamruimten zoals in CL. Bij dezelfde naam in verschillende
   modules is de dichtstbijzijnde zichtbaar.
@@ -1278,7 +1278,7 @@ Structvelden worden `(pub x i32)` geschreven (3.6).
 ### 3.14 defmacro — macrodefinities
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Alle parameters en de returnwaarde zijn altijd `Sexpr`, dus er worden geen typeannotaties geschreven.
@@ -1293,6 +1293,11 @@ Structvelden worden `(pub x i32)` geschreven (3.6).
   - `&key` … keyword-argumenten. `name` of `(name default-expr)`. De aanroeper geeft ze door als
     `:name value` (in willekeurige volgorde). Bij weglating de standaardexpressie (de lege lijst `()` als
     er geen is). Onbekende keywords of een `:key`-reeks van oneven lengte zijn fouten.
+- `&environment env` … mag overal in de lambdalijst staan (hoogstens één keer). Het neemt geen
+  argument van de aanroep; `env` wordt gebonden aan de omgeving op de plaats van de macro-aanroep
+  (van het type `std::eval::Environment`). Meegegeven aan `(macroexpand form env)` expandeert het
+  ook de bindingen van `macrolet` en `symbol-macrolet` rond de aanroep
+  ([Macro's](functions/system.md#8-macros)).
 - Voorbeelden: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — lokale macrobindingen
@@ -1306,6 +1311,9 @@ Beide zijn **expressie**-speciale vormen, en tijdens runtime blijft er niets ove
 is de geëxpandeerde vorm van de body). De lambdalijst is dezelfde als bij `defmacro`. De gedetailleerde
 regels en voorbeelden staan in
 [Lokale macrobindingen](functions/system.md#9-lokale-macrobindingen-macrolet--symbol-macrolet).
+
+De definitievorm op topniveau `(define-symbol-macro name expansion)` is de globale tegenhanger van
+`symbol-macrolet` ([Macro's](functions/system.md#8-macros)).
 
 ### 3.16 `#[test]` — testfuncties
 

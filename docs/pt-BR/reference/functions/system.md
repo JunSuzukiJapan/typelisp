@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Tempo, ambiente e implementação
 
 Funções de tempo, consultas sobre o ambiente de execução, ferramentas da implementação, análise e avaliação de
@@ -271,8 +271,9 @@ Como definir macros está em [Referência de sintaxe 3.14](../syntax.md#314-defm
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Um símbolo novo. Seu nome é `" <prefix><n>"`, em que `n` é `*gensym-counter*`. Um espaço inicial não pode ser escrito no código-fonte, então os vínculos gerados nunca colidem com nomes escritos |
 | `*gensym-counter*` | Variável | `int` | O número que `gensym` usa em seguida. Como no CL, pode ser lido e definido |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expande uma chamada de macro em um passo. `None` significa "não é uma chamada de macro" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Repete até deixar de ser uma macro |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Expande um passo uma chamada de macro ou uma macro de símbolo. `None` significa "nenhuma das duas" |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Repete até que não seja mais nenhuma das duas |
+| `define-symbol-macro` | `(define-symbol-macro name expansão)` | forma de definição | Uma macro de símbolo global. Veja abaixo |
 
 `macroexpand-1` devolve um `Option`. O CL relata "se expandiu" como segundo valor de retorno, mas não há valores
 múltiplos, então `None` faz esse papel. **Uma macro que se expande em uma chamada a si mesma nunca pode ser
@@ -284,6 +285,43 @@ que o programa vê e o que o verificador viu nunca divergem.
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none aparece como a lista vazia (Option<Sexpr> é transparente)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Sem `env`, só as definições do módulo são vistas (o ambiente léxico nulo de CL). Com o ambiente que
+o corpo de uma macro recebeu por `&environment` ([Referência de sintaxe
+3.14](../syntax.md#314-defmacro--definição-de-macros)), as macros de `macrolet` e as macros de
+símbolo de `symbol-macrolet` em volta dessa chamada de macro também são expandidas. Uma variável
+local em volta da chamada esconde uma macro global de mesmo nome.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+O tipo do ambiente é `std::eval::Environment`. O valor só pode ser usado enquanto a macro que o
+recebeu está executando (como em CL); passado depois, o resultado é um `Err`.
+
+`define-symbol-macro` define uma macro de símbolo global (a contraparte global de
+`symbol-macrolet`). O nome é substituído pela expansão onde é escrito, e `setf` também escreve na
+expansão. O nome fica no mesmo namespace que funções, variáveis globais e macros; com `pub`, pode
+ser usado fora do módulo como `mm::name`. Um binding de variável local esconde uma macro de símbolo
+de mesmo nome. A expansão é verificada onde o nome é escrito, então pode conter nomes que ainda não
+existem quando a definição é feita.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter passa a ser 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 O que o CL tem e esta linguagem não: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` sempre
