@@ -2616,13 +2616,13 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; The callee is found by `get-function` under the
 ;; node's `symbol` — exactly the
 ;; name its own LLVM function was given
-;; (`Interp::add_compiled_function`'s
+;; (`compile::driver::add_compiled_function`'s
 ;; `internal_name`), so a self-recursive method call
 ;; resolves to the `add-function` `compile-function`'s
 ;; own first step already declared, the same way a
 ;; self-recursive `Expr::Call` does in `compile-call`.
 ;; Every *other* method this body calls must already
-;; be `compile`d — `Interp::compile_function` checks
+;; be `compile`d — `compile::driver::compile_function` checks
 ;; that and forward-declares each one under this same
 ;; mangled name before this function's own body is
 ;; compiled, mirroring `Expr::Call`'s targets — so
@@ -5526,8 +5526,8 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; `(global id kind)` — `id` is `path`'s already-
 ;; promoted compiled-global slot
-;; (`Interp::add_compiled_function`'s
-;; `collect_global_targets`/`promote_global` step,
+;; (`compile::driver::prepare_targets`'s
+;; `collect_targets`/`promote_global` step,
 ;; `typelisp_rt::global_new`) — a permanent GC root, so
 ;; unlike `compile-var`'s locally-bound name this needs
 ;; no `env`/`fn-env` lookup at all, just a direct
@@ -5582,7 +5582,7 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; `(global-init kind value-form)` — AOT's synthesized
 ;; startup sequence's own step, one per promoted global
-;; (`Interp::add_compiled_global_init`,
+;; (`compile::driver::add_compiled_global_init`,
 ;; `compile::aot`): unlike `compile-set-global`, there
 ;; is no existing slot to overwrite yet, so this calls
 ;; `rt_global_new` (one argument, no `id`) instead of
