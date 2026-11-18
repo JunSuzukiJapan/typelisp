@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -235,8 +235,9 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 新的符号。名字是 `" <prefix><n>"`，`n` 是 `*gensym-counter*`。开头的空格在源代码中写不出来，所以生成的绑定不会与写出的名字冲突 |
 | `*gensym-counter*` | 变量 | `int` | `gensym` 下次使用的编号。与 CL 一样可以读取和设置 |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 把宏调用展开一层。`None` 表示"不是宏调用" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | 反复展开，直到不再是宏 |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | 将宏调用或符号宏展开一步。`None` 表示“两者都不是” |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | 重复直到两者都不是 |
+| `define-symbol-macro` | `(define-symbol-macro name 展开形式)` | 定义形式 | 全局符号宏。见下文 |
 
 `macroexpand-1` 返回的是 `Option`——CL 用第 2 个返回值传达"是否展开了"，但没有多值，所以由 `None` 承担这一点。**展开为自身调用
 的宏与非宏不可能被混淆。** 展开的一层与类型检查使用的是同一个，程序看到的与检查看到的不会出现偏差。
@@ -246,6 +247,33 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none 作为空列表输出（Option<Sexpr> 是透明的）
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+省略 `env` 时，只看模块的定义来展开（CL 的空词法环境）。传入宏体通过 `&environment` 收到的环境（[语法参考 3.14](../syntax.md#314-defmacro--宏定义)）时，包围该宏调用的 `macrolet` 的宏和 `symbol-macrolet` 的符号宏也会展开。包围调用的局部变量会遮蔽同名的全局宏。
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+环境的类型是 `std::eval::Environment`。该值只在收到它的宏运行期间可用（与 CL 相同），之后再传入会得到 `Err`。
+
+`define-symbol-macro` 定义全局符号宏（`symbol-macrolet` 的全局版）。在写出该名字的位置，它会被替换为展开形式，`setf` 也会写入展开后的位置。名字与函数、全局变量、宏处于同一命名空间，加上 `pub` 后可以在模块外以 `mm::name` 的形式使用。局部变量的绑定会遮蔽同名的符号宏。展开形式在写出名字的位置检查，所以可以包含定义时尚不存在的名字。
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter 变为 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 CL 中有而这里没有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` 总是一致，没有可选择的区别）、

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Час, середовище та реалізація
 
 Функції для часу, запитів про середовище виконання, засобів реалізації, розбору й обчислення тексту,
@@ -274,8 +274,9 @@ CL повертає **два значення** (значення й позиц�
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Новий символ. Його назва — `" <prefix><n>"`, де `n` — `*gensym-counter*`. Початковий пробіл не можна записати у вихідному коді, тож згенеровані зв'язування ніколи не конфліктують із записаними назвами |
 | `*gensym-counter*` | Змінна | `int` | Число, яке `gensym` використає наступним. Як у CL, його можна читати й задавати |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Розгортає виклик макроса на один крок. `None` означає «це не виклик макроса» |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Повторює, доки це більше не макрос |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Розкриває на один крок виклик макросу або символьний макрос. `None` означає «ні те, ні інше» |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Повторює, доки форма не перестане бути тим чи іншим |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | форма визначення | Глобальний символьний макрос. Див. нижче |
 
 `macroexpand-1` повертає `Option`. CL повідомляє «чи розгорнуто» як друге значення, але множинних значень
 немає, тож цю роль виконує `None`. **Макрос, що розгортається у виклик самого себе, ніколи не можна
@@ -287,6 +288,43 @@ CL повертає **два значення** (значення й позиц�
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Без `env` видно лише визначення модуля (порожнє лексичне оточення CL). З оточенням, яке тіло макросу
+отримало через `&environment` ([Довіднику із синтаксису
+3.14](../syntax.md#314-defmacro--визначення-макросів)), розкриваються також макроси `macrolet` і
+символьні макроси `symbol-macrolet` навколо цього виклику макросу. Локальна змінна навколо виклику
+приховує глобальний макрос з тим самим іменем.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Тип оточення — `std::eval::Environment`. Значення можна використовувати лише, поки виконується
+макрос, що його отримав (як у CL); якщо передати його пізніше, результатом буде `Err`.
+
+`define-symbol-macro` визначає глобальний символьний макрос (глобальний відповідник
+`symbol-macrolet`). Ім'я замінюється розкриттям там, де його написано, і `setf` теж пише в
+розкриття. Ім'я перебуває в одному просторі імен із функціями, глобальними змінними й макросами; з
+`pub` його можна використовувати поза модулем як `mm::name`. Зв'язування локальної змінної приховує
+символьний макрос з тим самим іменем. Розкриття перевіряється там, де написано ім'я, тож воно може
+містити імена, яких ще немає на момент визначення.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter стає 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Що є в CL, а в цій мові немає: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` завжди

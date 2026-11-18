@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Memulai
 
 Dimulai dari mengevaluasi ekspresi di REPL, bab ini membahas fungsi, variabel, percabangan,
@@ -8,12 +8,14 @@ perulangan, serta daftar dan `Vector`, secara berurutan. Untuk cara membangun `t
 ## 1. Memulai REPL
 
 Jika dijalankan tanpa argumen, `typl` masuk ke REPL (mode interaktif). Ketik ekspresi setelah
-`typl>` dan ekspresi itu dievaluasi saat itu juga lalu nilainya dicetak. `:quit` keluar dari REPL.
+`typl>` dan ekspresi itu dievaluasi saat itu juga lalu nilainya dicetak. Tulis `:type` (singkatnya `:t`) di depan ekspresi untuk mencetak tipenya tanpa mengevaluasinya. `:quit` keluar dari REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

@@ -596,6 +596,16 @@ pub struct Interp {
     /// borrow across an `exec` that could `eval`) keeps the two from
     /// double-borrowing — see `Self::eval_form` and the drivers' own comments.
     pub(crate) checker: Option<Rc<RefCell<crate::typeck::checker::Checker>>>,
+    /// The macro calls being expanded now, innermost last: the number the
+    /// expansion's `Environment` value carries, and where the call is. An
+    /// entry lives exactly as long as its [`MacroExpander::expand_macro`]
+    /// call, which is what makes the pointer good. It is how a
+    /// `macroexpand` the macro's body makes expands — the checker is
+    /// borrowed by the check that is expanding, so it cannot be asked.
+    expansions: RefCell<Vec<(i64, *const (dyn crate::typeck::checker::ExpansionEnv + 'static))>>,
+    /// The number the next expansion is given. Never reused, so an
+    /// `Environment` kept after its expansion ended is told from a live one.
+    next_expansion: Cell<i64>,
     /// Every `defvar`/`defconstant` global some compiled function has
     /// referenced, promoted to a compiled-global slot (a permanent GC root
     /// — `typelisp_rt::global_new`) and mapped to the id that slot got.
@@ -745,10 +755,10 @@ impl Interp {
         // standard library's modules where the checker defines them, so the
         // printer finds them.
         let mut root = scope::ModuleScope::default();
-        use crate::typeck::builtins::{chan_of, task_of, thread_of};
-        let handles: Vec<Path> = [task_of, thread_of, chan_of]
+        use crate::typeck::builtins::{chan_of, environment_type, task_of, thread_of};
+        let handles: Vec<Path> = [task_of(crate::Type::Int), thread_of(crate::Type::Int), chan_of(crate::Type::Int), environment_type()]
             .into_iter()
-            .map(|handle_of| match handle_of(crate::Type::Int) {
+            .map(|handle| match handle {
                 crate::Type::Named(p, _) => p,
                 _ => unreachable!("a handle type is named"),
             })
@@ -810,6 +820,8 @@ impl Interp {
             retired_callback_bodies: RefCell::new(Vec::new()),
             root: RefCell::new(root),
             checker: None,
+            expansions: RefCell::new(Vec::new()),
+            next_expansion: Cell::new(1),
             compiled_globals: RefCell::new(HashMap::new()),
             vtables: RefCell::new(Vec::new()),
             vtable_ids: RefCell::new(HashMap::new()),
@@ -1750,7 +1762,9 @@ impl Interp {
     /// `apply` has consumed `argv` (and `apply`'s own cell allocations can
     /// never trigger a collection — see `Self::slot`), so the raw `argv`
     /// pointers stay valid in the gap between.
-    fn bind_macro_args(&self, heap: &mut Heap, f: &FnDef, raw_args: &[Value]) -> Result<Vec<Value>, EvalError> {
+    /// `environment` is what an `&environment` parameter is bound to, the
+    /// last parameter; rooted by the caller.
+    fn bind_macro_args(&self, heap: &mut Heap, f: &FnDef, raw_args: &[Value], environment: Option<Value>) -> Result<Vec<Value>, EvalError> {
         let lambda = f
             .lambda
             .as_ref()
@@ -1778,6 +1792,7 @@ impl Interp {
             } else if raw_args.len() > n_req {
                 return Err(EvalError::Panic(format!("expected {} argument(s), got {}", n_req, raw_args.len())));
             }
+            argv.extend(environment);
             return Ok(argv);
         }
 
@@ -1853,6 +1868,7 @@ impl Interp {
         // the caller (`expand_macro` roots the raw args, and every value in
         // `argv` is either one of those or a default the caller roots next).
         heap.truncate_roots(roots_base);
+        argv.extend(environment);
         Ok(argv)
     }
 
@@ -2094,8 +2110,8 @@ impl Interp {
             wk::F_READ => Some(self.eval_read(heap, args)),
             wk::F_READ_DATUM_AT => Some(self.eval_read_datum_at(heap, args)),
             wk::F_EVAL => Some(self.eval_form(heap, &args[0])),
-            wk::F_MACROEXPAND_1 => Some(self.macroexpand_1_form(heap, args[0])),
-            wk::F_MACROEXPAND => Some(self.macroexpand_form(heap, args[0])),
+            wk::F_MACROEXPAND_1 => Some(self.macroexpand_1_form(heap, args[0], args[1])),
+            wk::F_MACROEXPAND => Some(self.macroexpand_form(heap, args[0], args[1])),
             // `eq`/`eql`/`equalp` on any type: the free functions (the
             // free-function overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
@@ -2489,8 +2505,11 @@ impl Interp {
     /// both what this language has (no multiple values) and strictly more
     /// informative: a macro whose expansion is its own call form is
     /// distinguishable from a non-macro, which CL's boolean cannot do.
-    pub fn macroexpand_1_form(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
-        match self.expand_step(heap, form) {
+    ///
+    /// `env` is the `Option<Environment>` the call was given: `Value::Empty`
+    /// for none.
+    pub fn macroexpand_1_form(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        match self.expand_step(heap, form, env) {
             Ok(Some(v)) => {
                 heap.push_root(v);
                 let some = heap.alloc_option(TypeId::OPTION_SEXPR, Some(v));
@@ -2514,12 +2533,12 @@ impl Interp {
     /// CL's `macroexpand`: [`Self::macroexpand_1_form`] until the form is no
     /// longer a macro call. A macro that expands to a call of itself would
     /// spin here exactly as it does in CL's expander, and in the checker.
-    pub fn macroexpand_form(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
+    pub fn macroexpand_form(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let mut cur = form;
         let mark = heap.root_count();
         heap.push_root(cur);
         loop {
-            match self.expand_step(heap, cur) {
+            match self.expand_step(heap, cur, env) {
                 Ok(Some(next)) => {
                     cur = next;
                     heap.push_root(cur);
@@ -2538,18 +2557,51 @@ impl Interp {
         Ok(out)
     }
 
-    /// One expansion step, or `None` when `form` is not a macro call.
-    fn expand_step(&self, heap: &mut Heap, form: Value) -> Result<Option<Value>, String> {
-        let checker = match &self.checker {
-            Some(c) => Rc::clone(c),
-            None => {
-                return Err("macroexpand: unavailable in this context (no checker handle)".to_string())
-            }
-        };
+    /// One expansion step, or `None` when `form` is not a macro use, in the
+    /// `Option<Environment>` `env`.
+    ///
+    /// With an environment, at the macro call it was made for, which must
+    /// still be being expanded. Without one, CL's null lexical environment:
+    /// the module's definitions — those of the check that is expanding a
+    /// macro now, when one is, since that check holds the checker.
+    fn expand_step(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Option<Value>, String> {
         let mark = heap.root_count();
         heap.push_root(form);
-        let out = checker.borrow().try_expand_toplevel_macro(heap, self, form);
+        let out = self.expand_step_in(heap, form, env);
         heap.truncate_roots(mark);
+        out
+    }
+
+    fn expand_step_in(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Option<Value>, String> {
+        use crate::typeck::checker::ExpansionEnv;
+        let site = match env {
+            Value::Empty => self.expansions.borrow().last().map(|(_, site)| (*site, false)),
+            Value::Boxed(id) => {
+                let Value::Int(serial) = heap.struct_field(id, 0) else {
+                    unreachable!("an `Environment` holds its expansion's number")
+                };
+                match self.expansions.borrow().iter().find(|(n, _)| *n == serial) {
+                    Some((_, site)) => Some((*site, true)),
+                    None => {
+                        return Err("macroexpand: the environment is of a macro expansion that has ended; it is good only while the macro that was given it runs".to_string())
+                    }
+                }
+            }
+            other => unreachable!("an `Option<Environment>` is the empty list or a box, not {:?}", other),
+        };
+        if let Some((site, lexical)) = site {
+            // SAFETY: the entry is in `expansions`, so the `expand_macro`
+            // call that pushed it, and the place it points at, are still on
+            // the stack below this one.
+            let site = unsafe { &*site };
+            return site.expand_1(heap, self, form, lexical).map_err(|e| e.to_string());
+        }
+        let checker = match &self.checker {
+            Some(c) => Rc::clone(c),
+            None => return Err("macroexpand: unavailable in this context (no checker handle)".to_string()),
+        };
+        let checker = checker.borrow();
+        let out = checker.toplevel_env().expand_1(heap, self, form, false);
         out.map_err(|e| e.to_string())
     }
 
@@ -2715,11 +2767,28 @@ impl MacroExpander for Interp {
     /// on the way out. Plain LIFO — `apply` leaves the root stack exactly as
     /// it found it, because bindings are cells and need no roots pushed for
     /// them.
-    fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String> {
+    fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>, env: &dyn crate::typeck::checker::ExpansionEnv) -> Result<Value, String> {
         let f = self.root.borrow().get_fn(path).ok_or_else(|| format!("no such macro: {}", path))?;
+        let mark = heap.root_count();
         for v in &raw_args {
             heap.push_root(*v);
         }
+        let serial = self.next_expansion.get();
+        self.next_expansion.set(serial + 1);
+        // SAFETY: only the lifetime is erased. `Expanding` takes the entry
+        // out again before this call returns, by unwinding too, and `env`
+        // outlives the call.
+        let site: *const (dyn crate::typeck::checker::ExpansionEnv + 'static) = unsafe { std::mem::transmute(env as *const dyn crate::typeck::checker::ExpansionEnv) };
+        self.expansions.borrow_mut().push((serial, site));
+        let _expanding = Expanding(self, serial);
+        // What an `&environment` parameter is bound to: this call's number,
+        // in a box that is an `Environment`.
+        let environment = f.lambda.as_ref().is_some_and(|l| l.environment).then(|| {
+            let ty = crate::type_key::type_id(&crate::typeck::builtins::environment_type());
+            let v = crate::type_key::alloc_struct_of(heap, ty, vec![Value::Int(serial)]);
+            heap.push_root(v);
+            v
+        });
         // A closure built while a macro body executes (check-time expansion)
         // is JIT-compiled like any other (interp-closure removal Stage 6,
         // retiring Stage 7's `jit_suppressed` guard): the island is always
@@ -2743,13 +2812,11 @@ impl MacroExpander for Interp {
         // *binding* stays interpreted either way — `bind_macro_args` is what
         // evaluates omitted `&optional`/`&key` defaults, and it runs before
         // this — so only the body crosses.
-        let result = match self.bind_macro_args(heap, &f, &raw_args) {
+        let result = match self.bind_macro_args(heap, &f, &raw_args, environment) {
             Ok(argv) => self.enter(heap, &f, argv),
             Err(e) => Err(e),
         };
-        for _ in &raw_args {
-            heap.pop_root();
-        }
+        heap.truncate_roots(mark);
         match result {
             Ok(v) => Ok(v),
             Err(e) => Err(e.to_string()),
@@ -2763,6 +2830,17 @@ impl MacroExpander for Interp {
     /// *scope* is the checker's table, not this registration.
     fn install(&self, heap: &mut Heap, form: Value) -> Result<(), String> {
         self.exec(heap, form).map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
+/// A macro call [`Interp::expand_macro`] is expanding: its entry in
+/// `expansions`, taken out when the expansion ends.
+struct Expanding<'i>(&'i Interp, i64);
+
+impl Drop for Expanding<'_> {
+    fn drop(&mut self) {
+        let popped = self.0.expansions.borrow_mut().pop();
+        debug_assert_eq!(popped.map(|(n, _)| n), Some(self.1), "expansions end in the order they began");
     }
 }
 

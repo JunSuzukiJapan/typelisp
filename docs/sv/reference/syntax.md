@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1099,7 +1099,7 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 - Standardbiblioteket erbjuder alla moduler `Some`/`None` från `Option` och `Ok`/`Err` från `Result`, så
   de kan användas under det nakna namnet utan `use` (på samma sätt som Rusts prelude tar in
   `Some`/`None`/`Ok`/`Err`).
-- **Ett namn har en betydelse.** Funktioner, globala variabler och makron delar en namnrymd, och inom en
+- **Ett namn har en betydelse.** Funktioner, globala variabler, makron och symbolmakron delar en namnrymd, och inom en
   modul kan inte två av dem ha samma namn (ett fel oavsett vilken som definieras först). Funktioner och
   variabler har inte separata namnrymder som i CL. För samma namn i olika moduler är det närmaste synligt.
 - Upplösning av ett naket namn `n` (i anropspositionen `(n a ...)`; namn på specialformer bestäms före
@@ -1228,7 +1228,7 @@ Metoderna i en `impl` görs publika post för post, som `(pub defmethod name ...
 ### 3.14 defmacro — makrodefinitioner
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Alla parametrar och returvärdet är alltid `Sexpr`, så inga typannoteringar skrivs.
@@ -1242,6 +1242,10 @@ Metoderna i en `impl` görs publika post för post, som `(pub defmethod name ...
   - `&key` … nyckelordsargument. `name` eller `(name default-expr)`. Anroparen skickar dem som
     `:name value` (i vilken ordning som helst). När de utelämnas används standarduttrycket (den tomma
     listan `()` om det saknas). Okända nyckelord eller en `:key`-följd av udda längd är fel.
+- `&environment env` … får stå var som helst i lambdalistan (högst en gång). Den tar inget argument
+  från anropet; `env` binds till miljön vid makroanropets plats (av typen `std::eval::Environment`).
+  Skickad till `(macroexpand form env)` expanderar den även bindningarna från `macrolet` och
+  `symbol-macrolet` runt anropet ([Makron](functions/system.md#8-makron)).
 - Exempel: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — lokala makrobindningar
@@ -1255,6 +1259,9 @@ Båda är **uttrycks**-specialformer, och ingenting finns kvar vid körning (det
 expanderade formen av kroppen). Lambdalistan är densamma som för `defmacro`. De detaljerade reglerna och
 exemplen finns i
 [Lokala makrobindningar](functions/system.md#9-lokala-makrobindningar-macrolet--symbol-macrolet).
+
+Definitionsformen på toppnivå `(define-symbol-macro name expansion)` är den globala motsvarigheten
+till `symbol-macrolet` ([Makron](functions/system.md#8-makron)).
 
 ### 3.16 `#[test]` — testfunktioner
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -267,8 +267,9 @@ Cách định nghĩa macro nằm ở [Tham chiếu cú pháp 3.14](../syntax.md#
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Một symbol mới. Tên của nó là `" <prefix><n>"`, trong đó `n` là `*gensym-counter*`. Một dấu cách ở đầu không thể viết trong mã nguồn, nên các ràng buộc được sinh ra không bao giờ xung đột với các tên đã viết |
 | `*gensym-counter*` | Biến | `int` | Số mà `gensym` dùng tiếp theo. Như trong CL, nó có thể đọc và đặt |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Khai triển một lời gọi macro một bước. `None` nghĩa là "không phải một lời gọi macro" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Lặp lại cho đến khi không còn là macro |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Mở rộng một bước một lời gọi macro hoặc một macro ký hiệu. `None` nghĩa là "không phải cả hai" |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Lặp lại cho đến khi không còn là cả hai |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | dạng định nghĩa | Một macro ký hiệu toàn cục. Xem bên dưới |
 
 `macroexpand-1` trả về một `Option`. CL báo "có khai triển hay không" dưới dạng giá trị trả về thứ hai, nhưng
 không có đa giá trị, nên `None` đóng vai trò đó. **Một macro khai triển thành một lời gọi chính nó không bao giờ
@@ -280,6 +281,42 @@ chương trình thấy và những gì bộ kiểm tra thấy không bao giờ k
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none hiển thị là danh sách rỗng (Option<Sexpr> là trong suốt)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Khi bỏ `env`, chỉ các định nghĩa của module được xét (môi trường từ vựng rỗng của CL). Khi truyền
+môi trường mà thân macro nhận qua `&environment` ([Tham chiếu cú pháp
+3.14](../syntax.md#314-defmacro--định-nghĩa-macro)), các macro của `macrolet` và macro ký hiệu của
+`symbol-macrolet` bao quanh lời gọi macro đó cũng được mở rộng. Biến cục bộ bao quanh lời gọi che
+macro toàn cục cùng tên.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Kiểu của môi trường là `std::eval::Environment`. Giá trị chỉ dùng được khi macro đã nhận nó còn đang
+chạy (giống CL); truyền về sau thì kết quả là `Err`.
+
+`define-symbol-macro` định nghĩa một macro ký hiệu toàn cục (bản toàn cục của `symbol-macrolet`).
+Tên được thay bằng dạng mở rộng tại nơi nó được viết, và `setf` cũng ghi vào dạng mở rộng. Tên nằm
+trong cùng không gian tên với hàm, biến toàn cục và macro; khi có `pub`, có thể dùng nó từ ngoài
+module dưới dạng `mm::name`. Ràng buộc biến cục bộ che macro ký hiệu cùng tên. Dạng mở rộng được
+kiểm tra tại nơi viết tên, nên có thể chứa những tên chưa tồn tại lúc định nghĩa.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter trở thành 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Những gì CL có mà ngôn ngữ này không có: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` luôn

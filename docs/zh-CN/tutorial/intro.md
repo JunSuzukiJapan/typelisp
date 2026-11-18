@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # 入门
 
 本章从在 REPL 中求值表达式开始，依次介绍函数、变量、条件分支、循环，以及列表和 `Vector`。
@@ -7,12 +7,14 @@
 ## 1. 启动 REPL
 
 不带参数启动 `typl` 即进入 REPL（交互模式）。在 `typl>` 后输入表达式，它会被立即求值并显示结果。
-输入 `:quit` 退出。
+在表达式前加上 `:type`（简写 `:t`），会不求值而显示它的类型。输入 `:quit` 退出。
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

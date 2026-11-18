@@ -28,7 +28,10 @@ use super::wire::RebuiltUnit;
 /// Implemented by the evaluator, which runs the macro's body; the checker
 /// names only this trait, so it does not depend on the evaluator.
 pub trait MacroExpander {
-    fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String>;
+    /// `env` is where the call is: what a `macroexpand` the body makes sees,
+    /// and what an `&environment` parameter stands for. It lives only as
+    /// long as this call.
+    fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>, env: &dyn ExpansionEnv) -> Result<Value, String>;
 
     /// Runs a checked form whose effect the next form's checking depends on —
     /// a `(defmacro ...)`, so that a later [`Self::expand_macro`] on its path
@@ -44,6 +47,16 @@ pub trait MacroExpander {
     /// the same top-level form is checked. These are the edges where checking
     /// installs something itself.
     fn install(&self, heap: &mut Heap, form: Value) -> Result<(), String>;
+}
+
+/// Where a macro call is expanded: the definitions and the module there, and
+/// the local macros, symbol macros and variables around it — CL's lexical
+/// environment, as `macroexpand-1` takes it.
+pub trait ExpansionEnv {
+    /// One expansion step of `form` here: `None` when it is no macro call
+    /// and no symbol macro. With `lexical` false, only the module's
+    /// definitions are seen — CL's null lexical environment.
+    fn expand_1(&self, heap: &mut Heap, expander: &dyn MacroExpander, form: Value, lexical: bool) -> Result<Option<Value>, Error>;
 }
 
 /// What checking a top-level form produces: a *core top-level form*, one of
@@ -226,6 +239,35 @@ impl Checker {
                 let hole = crate::check::forms::hole_form(heap, loc)?;
                 crate::check::forms::expr_form(heap, hole)
             }
+        }
+    }
+
+    /// The type checking proves for the expression `v` in the current
+    /// module, with nothing checking it wrote kept: the REPL's `:type`. The
+    /// form is not run. A form that defines something has no type and is
+    /// refused.
+    pub fn type_of_form(&mut self, heap: &mut Heap, expander: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<Type, Error> {
+        let loc = heap.cons_loc(v).or(loc_hint);
+        let site = self.site(self.ns);
+        if !self.published.get() {
+            self.publish_names(heap);
+        }
+        let reg = &mut self.reg;
+        publish_name_view(reg, site.ns);
+        let at = |e: Error| match &loc {
+            Some(l) => e.at(l.clone()),
+            None => e,
+        };
+        if in_module(heap, site, v).map_err(at)?.is_some() {
+            return Err(at(Error::TypeError("an `in-module` form has no type".into())));
+        }
+        let roots_base = heap.root_count();
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.tests);
+        heap.truncate_roots(roots_base);
+        reg.rollback();
+        match result.map_err(at)? {
+            (_, Some(ty), _) => Ok(ty),
+            (_, None, _) => Err(at(Error::TypeError("a definition has no type".into()))),
         }
     }
 
@@ -532,5 +574,11 @@ impl Checker {
     /// caller must root the expansion before anything that may allocate.
     pub(crate) fn try_expand_toplevel_macro(&self, heap: &mut Heap, expander: &dyn MacroExpander, v: Value) -> Result<Option<Value>, Error> {
         super::macros::expand_toplevel(&self.reg, expander, heap, self.ns, v)
+    }
+
+    /// The module's definitions as a place to expand in, where no local is
+    /// bound.
+    pub(crate) fn toplevel_env(&self) -> super::macros::Site<'_> {
+        super::macros::Site::toplevel(&self.reg, self.ns)
     }
 }

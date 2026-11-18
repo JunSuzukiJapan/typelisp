@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Temps, environnement et implémentation
 
 Les fonctions de temps, les questions sur l'environnement d'exécution, les outils de l'implémentation, l'analyse et
@@ -274,8 +274,9 @@ La façon de définir des macros se trouve dans
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Un nouveau symbole. Son nom est `" <prefix><n>"`, où `n` est `*gensym-counter*`. Un espace initial ne peut pas s'écrire dans le source ; les liaisons générées n'entrent donc jamais en conflit avec des noms écrits |
 | `*gensym-counter*` | Variable | `int` | Le nombre que `gensym` utilisera ensuite. Comme en CL, il peut être lu et modifié |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Développe un appel de macro d'un pas. `None` signifie « pas un appel de macro » |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Répète jusqu'à ce que ce ne soit plus une macro |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Développe d'une étape un appel de macro ou une macro de symbole. `None` signifie « ni l'un ni l'autre » |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Répète jusqu'à ce que ce ne soit plus ni l'un ni l'autre |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | forme de définition | Une macro de symbole globale. Voir ci-dessous |
 
 `macroexpand-1` renvoie une `Option`. CL signale « s'il y a eu développement » par une seconde valeur de retour, mais
 il n'y a pas de valeurs multiples ; `None` joue donc ce rôle. **Une macro qui se développe en un appel d'elle-même
@@ -287,6 +288,43 @@ vérificateur de types ; ce que voit le programme et ce qu'a vu le vérificateur
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none s'affiche comme la liste vide (Option<Sexpr> est transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Sans `env`, seules les définitions du module sont vues (l'environnement lexical nul de CL). Avec
+l'environnement qu'un corps de macro a reçu par `&environment` ([Référence de la syntaxe
+3.14](../syntax.md#314-defmacro--définitions-de-macros)), les macros de `macrolet` et les macros de
+symbole de `symbol-macrolet` autour de cet appel de macro sont aussi développées. Une variable
+locale autour de l'appel masque une macro globale du même nom.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Le type de l'environnement est `std::eval::Environment`. La valeur n'est utilisable que pendant
+l'exécution de la macro qui l'a reçue (comme en CL) ; passée plus tard, le résultat est un `Err`.
+
+`define-symbol-macro` définit une macro de symbole globale (l'équivalent global de
+`symbol-macrolet`). Le nom est remplacé par l'expansion là où il est écrit, et `setf` écrit aussi
+dans l'expansion. Le nom est dans le même espace de noms que les fonctions, les variables globales
+et les macros ; avec `pub`, il s'utilise hors du module sous la forme `mm::name`. Une liaison de
+variable locale masque une macro de symbole du même nom. L'expansion est vérifiée là où le nom est
+écrit ; elle peut donc contenir des noms qui n'existent pas encore au moment de la définition.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter devient 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Ce que CL a et que ce langage n'a pas : `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` coïncident

@@ -537,6 +537,9 @@ fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rus
     let _ = rl.load_history(&hist_path);
 
     let mut pending = String::new();
+    // Whether `pending` is the form of a `:type` command rather than forms
+    // to run.
+    let mut showing_type = false;
     loop {
         let prompt = if pending.is_empty() { PROMPT_PRIMARY } else { PROMPT_CONTINUE };
         // Native: while this thread waits for a keystroke it holds nothing
@@ -553,12 +556,25 @@ fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rus
                 // runtime — see `typelisp_abi::dribble`'s module docs.
                 typelisp_abi::dribble::note(&line);
                 typelisp_abi::dribble::note("\n");
-                pending.push_str(&line);
+                let text = match pending.is_empty().then(|| type_command(&line)).flatten() {
+                    Some(form) => {
+                        showing_type = true;
+                        form
+                    }
+                    None => line.as_str(),
+                };
+                pending.push_str(text);
                 pending.push('\n');
-                try_run_pending(&mut heap, &reader, &checker, &mut interp, &mut loader, &mut pending);
+                if showing_type {
+                    show_pending_type(&mut heap, &reader, &checker, &interp, &mut pending);
+                    showing_type = !pending.is_empty();
+                } else {
+                    try_run_pending(&mut heap, &reader, &checker, &mut interp, &mut loader, &mut pending);
+                }
             }
             Err(ReadlineError::Interrupted) => {
                 pending.clear();
+                showing_type = false;
                 println!();
             }
             Err(ReadlineError::Eof) => break,
@@ -758,6 +774,73 @@ fn try_run_pending(
     pending.clear();
     if let Some(e) = fatal {
         eprintln!("error: {}", e);
+    }
+}
+
+/// The text after the REPL command `:type` (or its short name `:t`) on
+/// `line`, when `line` is one: the form whose type to show.
+fn type_command(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    [":type", ":t"].iter().find_map(|cmd| {
+        let rest = line.strip_prefix(cmd)?;
+        (rest.is_empty() || rest.starts_with(char::is_whitespace)).then_some(rest)
+    })
+}
+
+/// The REPL's `:type`: reads the forms in `pending` and prints the type
+/// checking proves for each, running none of them. Like
+/// [`try_run_pending`], it leaves `pending` holding what is unread when a
+/// form is not finished yet, and empties it otherwise.
+fn show_pending_type(heap: &mut Heap, reader: &Reader, checker: &RefCell<Checker>, interp: &Interp, pending: &mut String) {
+    let mark = heap.root_count();
+    let mut forms = reader.forms_within("<stdin>", pending, checker.borrow().current_module());
+    let mut consumed = 0usize;
+    let mut read_any = false;
+    let mut incomplete = false;
+    let mut fatal: Option<Error> = None;
+    loop {
+        let (v, loc) = match forms.next_form_with(heap, Some(interp)) {
+            Ok(Some(pair)) => pair,
+            Ok(None) => break,
+            Err(e) => {
+                match is_incomplete(&e) {
+                    true => incomplete = true,
+                    false => fatal = Some(e),
+                }
+                break;
+            }
+        };
+        read_any = true;
+        let result = checker.borrow_mut().type_of_form(heap, interp, v, Some(loc));
+        for w in checker.borrow_mut().take_warnings() {
+            eprintln!("{}", w);
+        }
+        match result {
+            Ok(ty) => {
+                let text = ty.to_string();
+                typelisp_abi::dribble::note(&text);
+                typelisp_abi::dribble::note("\n");
+                println!("{}", text);
+            }
+            Err(e) => {
+                fatal = Some(e);
+                break;
+            }
+        }
+        consumed = forms.pos();
+    }
+    while heap.root_count() > mark {
+        heap.pop_root();
+    }
+    if incomplete {
+        *pending = pending.chars().skip(consumed).collect();
+        return;
+    }
+    pending.clear();
+    match fatal {
+        Some(e) => eprintln!("error: {}", e),
+        None if !read_any => eprintln!("error: :type needs a form, as in `:type (+ 1 2)`"),
+        None => {}
     }
 }
 

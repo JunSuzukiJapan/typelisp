@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -285,8 +285,9 @@ Cara mendefinisikan makro ada di [Referensi Sintaks 3.14](../syntax.md#314-defma
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Simbol baru. Namanya `" <prefix><n>"`, dengan `n` adalah `*gensym-counter*`. Spasi di awal tidak dapat ditulis pada kode sumber, sehingga pengikatan yang dihasilkan tidak pernah bentrok dengan nama yang ditulis |
 | `*gensym-counter*` | Variabel | `int` | Bilangan yang dipakai `gensym` berikutnya. Seperti di CL, dapat dibaca dan disetel |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Mengekspansi pemanggilan makro satu langkah. `None` berarti "bukan pemanggilan makro" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Mengulang sampai bukan makro lagi |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Mengekspansi satu langkah pemanggilan makro atau makro simbol. `None` berarti "bukan keduanya" |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Mengulang sampai bukan keduanya lagi |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | bentuk definisi | Makro simbol global. Lihat di bawah |
 
 `macroexpand-1` mengembalikan `Option`. CL melaporkan "apakah diekspansi" sebagai nilai kembalian
 kedua, tetapi tidak ada nilai ganda, sehingga `None` berperan itu. **Makro yang berekspansi menjadi
@@ -299,6 +300,43 @@ dilihat pemeriksa tidak pernah berbeda.
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Tanpa `env`, yang terlihat hanya definisi modul (lingkungan leksikal kosong CL). Dengan lingkungan
+yang diterima badan makro melalui `&environment` ([Referensi Sintaks
+3.14](../syntax.md#314-defmacro--definisi-makro)), makro `macrolet` dan makro simbol
+`symbol-macrolet` yang mengelilingi pemanggilan makro itu juga diekspansi. Variabel lokal yang
+mengelilingi pemanggilan menyembunyikan makro global bernama sama.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Tipe lingkungan adalah `std::eval::Environment`. Nilainya hanya bisa dipakai selama makro yang
+menerimanya berjalan (sama dengan CL); bila diberikan sesudahnya, hasilnya `Err`.
+
+`define-symbol-macro` mendefinisikan makro simbol global (padanan global `symbol-macrolet`). Nama
+itu diganti dengan ekspansinya di tempat ia ditulis, dan `setf` juga menulis ke ekspansinya. Nama
+itu berada di ruang nama yang sama dengan fungsi, variabel global, dan makro; dengan `pub` ia bisa
+dipakai dari luar modul sebagai `mm::name`. Pengikatan variabel lokal menyembunyikan makro simbol
+bernama sama. Ekspansinya diperiksa di tempat nama ditulis, jadi boleh berisi nama yang belum ada
+saat definisi dibuat.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter menjadi 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Yang dimiliki CL dan tidak dimiliki bahasa ini: `eval-when` (`:compile-toplevel`/`:load-toplevel`/

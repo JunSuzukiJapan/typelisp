@@ -299,7 +299,14 @@ impl FrameStack {
                         // either. The value slot is set because a resume block
                         // reads it like any other, and the island discards
                         // this one.
-                        Ok((crate::sched::Waiting::Yield, _)) => {
+                        //
+                        // A call that needs the interpreter's thread is the
+                        // same: a Rust caller waits on this frame, so there is
+                        // no thread to move to, and the call goes on where it
+                        // is — as a macro body the checker runs makes its
+                        // `macroexpand` (the call itself says when no
+                        // interpreter is here).
+                        Ok((crate::sched::Waiting::Yield | crate::sched::Waiting::Main, _)) => {
                             self.set_top_value(heap, 0);
                             self.resume(heap, base)
                         }

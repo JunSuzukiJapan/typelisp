@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Pierwsze kroki
 
 Zaczynając od obliczania wyrażeń w REPL, ten rozdział omawia po kolei funkcje, zmienne,
@@ -8,12 +8,14 @@ instrukcje warunkowe, pętle oraz listy i `Vector`. Informacje o budowaniu `typl
 ## 1. Uruchamianie REPL
 
 Uruchomiony bez argumentów `typl` wchodzi do REPL (trybu interaktywnego). Wpisz wyrażenie po
-`typl>`, a zostanie ono od razu obliczone, po czym wypisana będzie jego wartość. `:quit` kończy REPL.
+`typl>`, a zostanie ono od razu obliczone, po czym wypisana będzie jego wartość. Poprzedzenie wyrażenia `:type` (w skrócie `:t`) wypisuje jego typ bez obliczania go. `:quit` kończy REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

@@ -2257,9 +2257,9 @@ fn macro_lambda(heap: &Heap, form: Value, i: usize) -> Result<MacroLambda, EvalE
     let parts = heap
         .list_to_vec(v)
         .map_err(|e| EvalError::Internal(format!("exec: (defmacro ..) lambda list: {}", e)))?;
-    let [required, opts, keys] = parts.as_slice() else {
+    let [required, opts, keys, Value::Bool(environment)] = parts.as_slice() else {
         return Err(EvalError::Internal(format!(
-            "exec: (defmacro ..) lambda list is not (REQUIRED OPTIONALS KEYS): {}",
+            "exec: (defmacro ..) lambda list is not (REQUIRED OPTIONALS KEYS ENVIRONMENT): {}",
             core::print(heap, v)
         )));
     };
@@ -2298,7 +2298,7 @@ fn macro_lambda(heap: &Heap, form: Value, i: usize) -> Result<MacroLambda, EvalE
         };
         key_defaults.push((heap.symbol_spelling(sym).to_string(), default.to_vec()));
     }
-    Ok(MacroLambda { required, optionals, keys: key_defaults })
+    Ok(MacroLambda { required, optionals, keys: key_defaults, environment: *environment })
 }
 
 #[cfg(test)]

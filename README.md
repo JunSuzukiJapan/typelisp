@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 1c4e233adfd9cadd91ffda5f298d17ff63cdd88f -->
+<!-- translated-from: README_JP.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -412,7 +412,8 @@ you installed it with `install.sh` or `cargo install` and added it to `PATH`, or
 ### Interactive mode (REPL)
 
 Started without arguments, `typl` enters interactive mode (the REPL). Each expression you type is
-evaluated on the spot and its result is printed. Type `:quit` or `:exit` to leave.
+evaluated on the spot and its result is printed. `:type EXPR` (short: `:t EXPR`) prints an
+expression's type without evaluating it. Type `:quit` or `:exit` to leave.
 
 ```sh
 typl

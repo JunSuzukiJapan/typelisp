@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.61
+# ABI バージョン 0.3.62
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.61 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.62 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `4ba7f940be322e72`
+内容ハッシュ (FNV-1a 64): `7722b0f382947718`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -771,6 +771,8 @@
 | 654 | `sxhash-eq` |
 | 655 | `sxhash-eql` |
 | 656 | `sxhash-equalp` |
+| 657 | `&environment` |
+| 658 | `define-symbol-macro` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -916,6 +918,7 @@
 | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` | none | 0 | 0 |
 | `std::collections::HashTable<K,V>` | `std::collections::HashTable<K,V>` | hashtable | 6 | 2 |
 | `std::collections::Scope<V>` | `std::collections::Scope<V>` | scope | 6 | 2 |
+| `std::eval::Environment` | `std::eval::Environment` | struct | 6 | 2 |
 | `std::option::Option<(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)>` | `std::option::Option<(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)>` | niche | 101 | 2 |
 | `std::option::Option<T>` | `std::option::Option<T>` | enum | 6 | 2 |
 | `std::option::Option<V>` | `std::option::Option<V>` | enum | 6 | 2 |
@@ -1461,6 +1464,9 @@
 - インスタンス `pop-frame`: `(std::collections::Scope<V>) -> ()`
 - インスタンス `push-frame`: `(std::collections::Scope<V>) -> ()`
 - インスタンス `set`: `(std::collections::Scope<V>, string, V) -> ()`
+
+### `std::eval::Environment` (struct, 型引数 [])
+
 
 ### `std::eval::EvalError` (sum, 型引数 [])
 
@@ -2225,8 +2231,8 @@
 | `std::env::software-type` | `rt_software_type` | `() -> string` |
 | `std::env::software-version` | `rt_software_version` | `() -> std::option::Option<string>` |
 | `std::eval::eval` | `rt_eval` | `(std::option::Option<std::sexpr::Sexpr>) -> std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::eval::EvalError>` |
-| `std::eval::macroexpand` | `rt_macroexpand` | `(std::option::Option<std::sexpr::Sexpr>) -> std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::eval::EvalError>` |
-| `std::eval::macroexpand-1` | `rt_macroexpand_1` | `(std::option::Option<std::sexpr::Sexpr>) -> std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::eval::EvalError>` |
+| `std::eval::macroexpand` | `rt_macroexpand` | `(std::option::Option<std::sexpr::Sexpr>, &optional, env: std::eval::Environment) -> std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::eval::EvalError>` |
+| `std::eval::macroexpand-1` | `rt_macroexpand_1` | `(std::option::Option<std::sexpr::Sexpr>, &optional, env: std::eval::Environment) -> std::result::Result<std::option::Option<std::sexpr::Sexpr>,std::eval::EvalError>` |
 | `std::fmt::pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
 | `std::fmt::pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
 | `std::fmt::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |

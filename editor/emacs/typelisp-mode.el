@@ -73,11 +73,12 @@ a spelling for a type, expanded where it is written -- and so does a
 `def-c-struct', a struct laid out for C that only a typed pointer reaches.")
 
 (defconst typelisp-variable-definition-forms
-  '("defvar" "defparameter" "defconstant")
+  '("defvar" "defparameter" "defconstant" "define-symbol-macro")
   "Definition forms whose defined name is a variable.
 `defvar' initializes only an unbound global, `defparameter' always assigns --
 CL's distinction, which is what makes re-loading a file keep the values a
-session has changed.")
+session has changed.  `define-symbol-macro' names a form that the name
+stands for where it is written, as a variable's name stands for its value.")
 
 (defconst typelisp-special-forms
   '(;; binding & conditionals (docs/ja/reference/syntax.md §4)
@@ -400,7 +401,7 @@ PRNG stream (CLHS 12.1.6).
     "HashSet" "SortedTable" "Deque"
     ;; the handles `task' and `thread' hand back, the channel tasks talk over,
     ;; and the two `sync' types built on channels
-    "Task" "Thread" "Chan" "WaitGroup" "Mutex" "Context"
+    "Task" "Thread" "Chan" "WaitGroup" "Mutex" "Context" "Environment"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.
@@ -929,6 +930,7 @@ has already claimed it for `font-lock-string-face'."
     ("deftype"     . defun)
     ("def-c-struct" . defun)
     ("defvar"      . defun)
+    ("define-symbol-macro" . 1)
     ("defconstant" . defun)
     ("module"      . defun)
     ("impl"        . defun)

@@ -55,9 +55,13 @@ pub(crate) fn check_path_call(
                 }
                 Some(ValueDef::Macro { shape, .. }) => {
                     let spelling = path_spelling(heap, id);
-                    let expanded = expand(cx.expander, heap, &path, *shape, &spelling, args)?;
+                    let expanded = expand(cx.expander, heap, &path, *shape, &spelling, args, &super::macros::Site::at(cx, locals))?;
                     check_expr(cx, heap, locals, expanded, expected, loc)
                 }
+                Some(ValueDef::SymbolMacro { .. }) => Err(Error::TypeError(format!(
+                    "`{}` is a symbol macro, which names a form and is not called",
+                    path_spelling(heap, id)
+                ))),
                 None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
             }
         }
@@ -197,6 +201,7 @@ pub(crate) fn check_path_value(cx: &Cx, heap: &Heap, id: PathId, expected: Optio
                 Some(ValueDef::Var(var)) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
                 Some(ValueDef::Fn(def)) => super::lambda::fn_value(cx, path, def, expected, loc),
                 Some(ValueDef::Macro { .. }) => Err(Error::TypeError(format!("`{}` is a macro, which has no value", path_spelling(heap, id)))),
+                Some(ValueDef::SymbolMacro { .. }) => unreachable!("`check_expr` expanded the symbol macro `{}`", path_spelling(heap, id)),
                 None => Err(Error::TypeError(format!("unresolved path: {}", path_spelling(heap, id)))),
             }
         }

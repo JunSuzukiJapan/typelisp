@@ -15,7 +15,7 @@ use crate::types::{internal_ns, prelude_ns, std_module, ParamOwner, Path, Type, 
 use typelisp_mem::symbols::{intern, intern_in, member_symbol, NsId};
 use typelisp_mem::{wk, StdModule};
 
-use super::registry::{FnDef, MethodDef, Registry, TypeDef, TypeEntry};
+use super::registry::{FnDef, MethodDef, OptKeyParam, Registry, TypeDef, TypeEntry};
 use super::subst::Subst;
 
 /// Write every built-in definition into `reg`, with the modules they are in,
@@ -170,8 +170,18 @@ pub(crate) fn define(reg: &mut Registry) {
     // boolean, since the caller cannot mistake a macro that expands to itself
     // for a non-macro. `macroexpand` repeats until `None` and answers the
     // final form, as CL's does.
-    function(reg, eval, "macroexpand-1", vec![option_of(sexpr_ty())], form_result.clone());
-    function(reg, eval, "macroexpand", vec![option_of(sexpr_ty())], form_result);
+    //
+    // The optional second argument is CL's `env`: where an `&environment`
+    // parameter was bound, the local macros and symbol macros there are
+    // expanded too. Omitted, only the module's definitions are seen — CL's
+    // null lexical environment. It has no default, so the function is
+    // handed an `Option<Environment>`.
+    environment(reg, eval);
+    for name in ["macroexpand-1", "macroexpand"] {
+        let env_param = OptKeyParam { name: intern("env"), decl_ty: environment_type(), default: None };
+        let def = FnDef { optionals: vec![env_param], ..builtin_fn(Vec::new(), vec![option_of(sexpr_ty())], form_result.clone()) };
+        reg.define_fn(Path::in_ns(eval, name), def);
+    }
     // The pretty printer's user-callable layout operators (CLHS 22.2.1),
     // minus the stream argument typelisp has no streams for. They act on the
     // logical block the `pprint-logical-block` special form opened
@@ -294,7 +304,7 @@ pub(crate) fn define(reg: &mut Registry) {
 /// The built-in types whose values the runtime builds and prints without a
 /// definition form ever running: `Option`, `Result` and the concrete error
 /// types, whose variants' names a printed value needs, and `Vector`,
-/// `Task`, `Thread` and `Chan`, the built-in structs. Written by the same
+/// `Task`, `Thread`, `Chan` and `Environment`, the built-in structs. Written by the same
 /// functions [`define`] calls, for the interpreter to seed its own scope tree
 /// with (`Interp::new`).
 pub(crate) fn runtime_types() -> Vec<(Path, TypeDef)> {
@@ -308,6 +318,7 @@ pub(crate) fn runtime_types() -> Vec<(Path, TypeDef)> {
     task(&mut reg);
     thread_type(&mut reg);
     chan(&mut reg);
+    environment(&mut reg, std_module("eval"));
     let mut types: Vec<(Path, TypeDef)> = reg.types.iter().filter_map(|(p, _)| Some((*p, reg.type_def(p)?.clone()))).collect();
     types.sort_by_key(|(p, _)| p.to_string());
     types
@@ -605,6 +616,25 @@ fn task(reg: &mut Registry) {
     // builtin answers with a value or an error and has no way to say "not
     // yet".
     def.instance("wait", vec![task_of(t.clone())], t);
+}
+
+/// `Environment`, the type of a macro's `&environment` parameter — spelled
+/// once, here, for [`task_of`]'s reason.
+pub(crate) fn environment_type() -> Type {
+    Type::Named(Path::in_ns(std_module("eval"), "Environment"), Vec::new())
+}
+
+/// `Environment`: where a macro call is being expanded — CL's lexical
+/// environment, which an `&environment` parameter is bound to and
+/// `macroexpand`/`macroexpand-1` take.
+///
+/// Builtin rather than a `defstruct` in the prelude because the checker
+/// gives the parameter this type where it checks `defmacro`, which the
+/// island's macros are checked without the prelude. The runtime value is a
+/// boxed struct holding the evaluator's number for the expansion and **no
+/// readable fields**; it is good only while that expansion runs, as CL's is.
+fn environment(reg: &mut Registry, eval: NsId) {
+    BuiltinType::new(reg, Path::in_ns(eval, "Environment"), AdtKind::Struct, &[]);
 }
 
 /// `Thread<T>`, the type `(thread (f ...))` yields — spelled once, here, for

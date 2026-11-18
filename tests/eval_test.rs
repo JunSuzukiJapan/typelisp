@@ -204,6 +204,8 @@ fn while_loop_with_setf() {
 #[test]
 fn setf_returns_assigned_value() {
     assert_eq!(eval_ok("(let ((x 0)) (setf x 7))"), Value::Int(7));
+    // A global's too, which the type already said.
+    assert_eq!(eval_ok("(defvar (g int) 0) (+ 1 (setf g 7))"), Value::Int(8));
 }
 
 #[test]

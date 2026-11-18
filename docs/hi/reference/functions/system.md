@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # समय, पर्यावरण और इम्प्लीमेंटेशन
 
 समय के फ़ंक्शन, रनटाइम पर्यावरण के बारे में प्रश्न, इम्प्लीमेंटेशन उपकरण, पाठ को पार्स और मूल्यांकित करना, डॉकस्ट्रिंग और macro।
@@ -209,8 +209,9 @@ macro कैसे परिभाषित करें यह [सिंटै
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | नया सिंबल। उसका नाम `" <prefix><n>"` है, जहाँ `n` `*gensym-counter*` है। आरंभ का रिक्त स्थान सोर्स में नहीं लिखा जा सकता, इसलिए बनाई गई बाइंडिंग कभी लिखे नामों से नहीं टकरातीं |
 | `*gensym-counter*` | वेरिएबल | `int` | वह संख्या जो `gensym` अगली बार उपयोग करता है। CL की तरह, इसे पढ़ा और सेट किया जा सकता है |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | macro कॉल का एक चरण विस्तार करता है। `None` का अर्थ "यह macro कॉल नहीं है" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | तब तक दोहराता है जब तक वह macro न रहे |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | किसी मैक्रो कॉल या सिंबल मैक्रो को एक चरण फैलाता है। `None` का अर्थ है "दोनों में से कोई नहीं" |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | तब तक दोहराता है जब तक वह दोनों में से कोई न रहे |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | परिभाषा फ़ॉर्म | ग्लोबल सिंबल मैक्रो। नीचे देखें |
 
 `macroexpand-1` `Option` लौटाता है। CL "क्या विस्तार हुआ" को दूसरे रिटर्न मान के रूप में रिपोर्ट करता है, लेकिन कई मान नहीं हैं, इसलिए `None` वह भूमिका निभाता है। **जो macro स्वयं के कॉल में विस्तारित होता है उसे कभी गैर-macro से भ्रमित नहीं किया जा सकता।** विस्तार का एक चरण वही है जो टाइप चेकर उपयोग करता है, इसलिए प्रोग्राम जो देखता है और चेकर ने जो देखा वे कभी अलग नहीं होते।
 
@@ -219,6 +220,43 @@ macro कैसे परिभाषित करें यह [सिंटै
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none खाली सूची के रूप में दिखता है (Option<Sexpr> पारदर्शी है)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+`env` न देने पर केवल मॉड्यूल की परिभाषाएँ देखी जाती हैं (CL का खाली लेक्सिकल एनवायरनमेंट)। किसी
+मैक्रो बॉडी को `&environment` से मिला एनवायरनमेंट ([सिंटैक्स संदर्भ
+3.14](../syntax.md#314-defmacro--macro-परिभाषाएँ)) देने पर, उस मैक्रो कॉल को घेरने वाले `macrolet`
+के मैक्रो और `symbol-macrolet` के सिंबल मैक्रो भी फैलाए जाते हैं। कॉल को घेरने वाला लोकल वेरिएबल उसी
+नाम के ग्लोबल मैक्रो को छिपा देता है।
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+एनवायरनमेंट का टाइप `std::eval::Environment` है। यह मान तभी तक इस्तेमाल हो सकता है जब तक उसे पाने
+वाला मैक्रो चल रहा हो (CL की तरह); बाद में देने पर परिणाम `Err` होता है।
+
+`define-symbol-macro` एक ग्लोबल सिंबल मैक्रो परिभाषित करता है (`symbol-macrolet` का ग्लोबल रूप)। नाम
+जहाँ लिखा जाता है वहाँ उसके विस्तार से बदल जाता है, और `setf` भी विस्तार में लिखता है। नाम फ़ंक्शन,
+ग्लोबल वेरिएबल और मैक्रो वाले ही नेमस्पेस में होता है; `pub` लगाने पर मॉड्यूल के बाहर से `mm::name`
+के रूप में इस्तेमाल हो सकता है। लोकल वेरिएबल का बाइंडिंग उसी नाम के सिंबल मैक्रो को छिपा देता है।
+विस्तार की जाँच वहाँ होती है जहाँ नाम लिखा गया है, इसलिए उसमें ऐसे नाम हो सकते हैं जो परिभाषा के समय
+अभी मौजूद न हों।
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter 5 हो जाता है
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 जो CL में है और इस भाषा में नहीं: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` हमेशा एक ही होते हैं, इसलिए चुनने को कोई भेद नहीं), `define-compiler-macro`, `load-time-value`, `make-symbol`/`copy-symbol`/`gentemp` (अनइंटर्न्ड सिंबल; बाइंडिंग नाम से खोजी जाती हैं, इसलिए कुछ हासिल नहीं होता)।

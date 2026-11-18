@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ cedb434055399f2f83e17dcdaa55007fe4fc9dad -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # 내장 함수
 
 내장 함수, 메서드, 표준 라이브러리의 목록. 문법(특수 형식과 정의 방법)은 [문법 레퍼런스](../syntax.md), 타입 목록은
@@ -35,6 +35,7 @@
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
 | `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
+| `std::eval` | `Environment` |
 | `std::fmt` | `pprint-list-exhausted` |
 | `std::fs` | `direction-append`、`direction-input`、`direction-output`、`directory-p`、`open-binary`、`open-binary-input`、`open-binary-output`、`open-file`、`open-input`、`open-output`、`read-file-lines`、`read-file-string`、`write-file-string` |
 | `std::hash` | `*sxhash-mask*`、`sxhash-string` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -865,7 +865,7 @@ vtable 進行動態分派：
 - 要以裸名使用型別的建構函式與靜態方法，可以像 `(use std::sync::Chan::new)` 這樣逐一引入，或用 `(use Type::*)` 引入全部建構函式與公開的靜態方法（結構體的建構函式不包含在內，因為結構體以 `make-instance` 建立）。不能用 `pub use` 再匯出。
 - 不能從兩個不同的型別引入同一個裸名（`(use std::sync::Chan::* std::sync::WaitGroup::*)` 是錯誤，因為兩者都有 `new`）。引入與該模組定義的函式、全域變數、巨集同名的名稱也是錯誤。明知如此仍要取代時，使用 `shadowing-import`。
 - `Option` 的 `Some`/`None` 與 `Result` 的 `Ok`/`Err` 由標準函式庫向所有模組公開，所以不用 `use` 也能以裸名使用（與 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
-- **一個名稱只有一個意義**。函式、全域變數與巨集屬於同一個命名空間，在同一模組中其中任意兩個都不能
+- **一個名稱只有一個意義**。函式、全域變數、巨集與符號巨集屬於同一個命名空間，在同一模組中其中任意兩個都不能
   取同一個名稱（無論以什麼順序定義都是錯誤）。不像 CL 那樣把函式與變數的命名空間分開。不同模組中的
   同名名稱，較近的那個可見。
 - 裸名 `n` 的解析（呼叫 `(n a ...)` 的位置。特殊形式的名稱在此之前決定）：
@@ -958,7 +958,7 @@ vtable 進行動態分派：
 ### 3.14 defmacro — 巨集定義
 
 ```lisp
-(defmacro name (必要... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (必要... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - 所有參數與回傳值一律是 `Sexpr`，所以不寫型別註記。
@@ -968,6 +968,7 @@ vtable 進行動態分派：
   - `&rest name` … 把剩餘的位置引數合為一個 `Sexpr` 串列接收。
   - `&key` … 關鍵字引數。`name` 或 `(name 預設式)`。呼叫端以 `:name 值` 傳入（順序任意）。省略時為預設式（沒有時為空串列 `()`）。未知的關鍵字
     或奇數個的 `:key` 序列是錯誤。
+- `&environment env` … 可以寫在 lambda 串列的任意位置（最多一次）。它不接收呼叫的引數，`env` 繫結到巨集呼叫位置的環境（型別為 `std::eval::Environment`）。傳給 `(macroexpand form env)` 時，也會展開包圍呼叫的 `macrolet`、`symbol-macrolet` 的繫結（[巨集](functions/system.md#8-巨集)）。
 - 例：`(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`。
 
 ### 3.15 macrolet / symbol-macrolet — 區域巨集繫結
@@ -979,6 +980,8 @@ vtable 進行動態分派：
 
 兩者都是**運算式**的特殊形式，執行期什麼也不留下（被編譯的是本體展開後的形式）。lambda 清單與 `defmacro` 相同。詳細規則與例子見
 [區域巨集繫結](functions/system.md#9-區域巨集繫結macrolet--symbol-macrolet)。
+
+頂層定義形式 `(define-symbol-macro name 展開形式)` 是 `symbol-macrolet` 的全域版（[巨集](functions/system.md#8-巨集)）。
 
 ### 3.16 `#[test]` — 測試函式
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1099,7 +1099,7 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
 - Biblioteka standardowa udostępnia każdemu modułowi `Some`/`None` z `Option` i `Ok`/`Err` z `Result`,
   więc można ich używać pod gołą nazwą bez `use` (tak jak prelude Rusta dołącza
   `Some`/`None`/`Ok`/`Err`).
-- **Nazwa ma jedno znaczenie.** Funkcje, zmienne globalne i makra dzielą jedną przestrzeń nazw i w jednym
+- **Nazwa ma jedno znaczenie.** Funkcje, zmienne globalne, makra i makra symboli dzielą jedną przestrzeń nazw i w jednym
   module żadne dwie z nich nie mogą mieć tej samej nazwy (błąd bez względu na kolejność definicji).
   Funkcje i zmienne nie mają osobnych przestrzeni nazw jak w CL. Dla tej samej nazwy w różnych modułach
   widoczna jest bliższa.
@@ -1229,7 +1229,7 @@ struktury zapisuje się `(pub x i32)` (3.6).
 ### 3.14 defmacro — definicje makr
 
 ```lisp
-(defmacro name (required... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (required... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Wszystkie parametry i wartość zwracana są zawsze `Sexpr`, więc nie zapisuje się adnotacji typów.
@@ -1243,6 +1243,10 @@ struktury zapisuje się `(pub x i32)` (3.6).
   - `&key` … argumenty kluczowe. `name` lub `(name default-expr)`. Wywołujący przekazuje je jako `:name value`
     (w dowolnej kolejności). Po pominięciu wyrażenie domyślne (pusta lista `()`, jeśli go nie ma). Nieznane słowa kluczowe
     lub ciąg `:key` o nieparzystej długości są błędami.
+- `&environment env` … może stać w dowolnym miejscu listy lambda (najwyżej raz). Nie przyjmuje
+  żadnego argumentu wywołania; `env` jest wiązane ze środowiskiem w miejscu wywołania makra (typu
+  `std::eval::Environment`). Przekazane do `(macroexpand form env)` rozwija także wiązania
+  `macrolet` i `symbol-macrolet` otaczające wywołanie ([Makra](functions/system.md#8-makra)).
 - Przykłady: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — lokalne wiązania makr
@@ -1255,6 +1259,9 @@ struktury zapisuje się `(pub x i32)` (3.6).
 Obie to **wyrażeniowe** formy specjalne i nic nie zostaje w czasie działania (kompilowana jest rozwinięta postać
 ciała). Lista lambda jest taka sama jak w `defmacro`. Szczegółowe reguły i przykłady znajdują się w
 [Lokalnych wiązaniach makr](functions/system.md#9-lokalne-wiązania-makr-macrolet--symbol-macrolet).
+
+Forma definicji najwyższego poziomu `(define-symbol-macro name expansion)` jest globalnym
+odpowiednikiem `symbol-macrolet` ([Makra](functions/system.md#8-makra)).
 
 ### 3.16 `#[test]` — funkcje testowe
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -273,8 +273,9 @@ How to define macros is in [Syntax Reference 3.14](../syntax.md#314-defmacro--ma
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | A new symbol. Its name is `" <prefix><n>"`, where `n` is `*gensym-counter*`. A leading space cannot be written in source, so the generated bindings never clash with written names |
 | `*gensym-counter*` | Variable | `int` | The number `gensym` uses next. As in CL, it can be read and set |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expands a macro call one step. `None` means "not a macro call" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Repeats until it is no longer a macro |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Expands a macro call or a symbol macro one step. `None` means "neither" |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Repeats until it is neither |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | definition form | A global symbol macro. See below |
 
 `macroexpand-1` returns an `Option`. CL reports "whether it expanded" as a second return value, but
 there are no multiple values, so `None` plays that role. **A macro that expands into a call of itself
@@ -286,6 +287,43 @@ so what the program sees and what the checker saw never diverge.
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Without `env`, only the module's definitions are seen (CL's null lexical environment). Given the
+environment a macro body received through `&environment` ([Syntax Reference
+3.14](../syntax.md#314-defmacro--macro-definitions)), the `macrolet` macros and `symbol-macrolet`
+symbol macros around that macro call are expanded too. A local variable around the call hides a
+global macro of the same name.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+The environment's type is `std::eval::Environment`. The value is usable only while the macro that
+received it is running (as in CL); passed later, the result is an `Err`.
+
+`define-symbol-macro` defines a global symbol macro (the global counterpart of `symbol-macrolet`).
+The name is replaced by the expansion where it is written, and `setf` writes to the expansion too.
+The name is in the same namespace as functions, global variables and macros; with `pub` it can be
+used from outside the module as `mm::name`. A local variable binding hides a symbol macro of the
+same name. The expansion is checked where the name is written, so it may contain names that do not
+exist yet when the definition is made.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter becomes 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 What CL has and this language does not: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

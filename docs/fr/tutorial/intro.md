@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Premiers pas
 
 En partant de l'évaluation d'expressions dans la REPL, ce chapitre aborde dans l'ordre les fonctions, les
@@ -8,12 +8,14 @@ variables, les conditionnelles, les boucles, ainsi que les listes et `Vector`. P
 ## 1. Lancer la REPL
 
 Lancé sans arguments, `typl` entre dans la REPL (mode interactif). Tapez une expression après `typl>` : elle est
-évaluée sur-le-champ et sa valeur est affichée. `:quit` quitte la REPL.
+évaluée sur-le-champ et sa valeur est affichée. Précédée de `:type` (en abrégé `:t`), une expression n'est pas évaluée : son type est affiché. `:quit` quitte la REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

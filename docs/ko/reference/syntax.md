@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -951,7 +951,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 - 타입의 생성자와 정적 메서드를 맨 이름으로 쓰려면 `(use std::sync::Chan::new)`처럼 하나씩 들여오거나, `(use Type::*)`로 생성자와 공개된 정적 메서드를 모두 들여온다(구조체의 생성자는 `make-instance`로 만들므로 포함하지 않는다). `pub use`로 다시 공개할 수는 없다.
 - 같은 맨 이름을 서로 다른 두 타입에서 들여올 수는 없다(`(use std::sync::Chan::* std::sync::WaitGroup::*)`는 둘 다 `new`가 있으므로 오류). 모듈이 정의한 함수·전역 변수·매크로와 같은 이름을 들여오는 것도 오류다. 알고서 바꾸려면 `shadowing-import`를 쓴다.
 - `Option`의 `Some`/`None`과 `Result`의 `Ok`/`Err`는 표준 라이브러리가 모든 모듈에 공개하므로 `use` 없이 맨 이름으로 쓸 수 있다(Rust의 prelude가 `Some`/`None`/`Ok`/`Err`를 들여오는 것과 같다).
-- **한 이름은 한 가지 뜻을 가진다**. 함수·전역 변수·매크로는 한 이름공간에 들어가며, 같은 모듈에서 그중
+- **한 이름은 한 가지 뜻을 가진다**. 함수·전역 변수·매크로·심볼 매크로는 한 이름공간에 들어가며, 같은 모듈에서 그중
   두 개에 같은 이름을 붙일 수 없다(어떤 순서로 정의해도 오류). CL처럼 함수와 변수의 이름공간이 나뉘어
   있지 않다. 다른 모듈의 같은 이름이라면 가까운 쪽이 보인다.
 - 맨 이름 `n`의 해석(호출 `(n a ...)`의 위치. 특수 형식의 이름은 이보다 먼저 정해진다):
@@ -1053,7 +1053,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ### 3.14 defmacro — 매크로 정의
 
 ```lisp
-(defmacro name (필수... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (필수... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - 매개변수와 반환값은 모두 항상 `Sexpr`이므로 타입 주석은 쓰지 않는다.
@@ -1064,6 +1064,9 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   - `&rest name` … 남은 위치 인수를 하나의 `Sexpr` 리스트로 모아 받는다.
   - `&key` … 키워드 인수. `name` 또는 `(name 기본값-식)`. 호출하는 쪽은 `:name 값`으로 넘긴다(순서 자유). 생략하면 기본값
     식(없으면 빈 리스트 `()`). 알 수 없는 키워드나 홀수 개의 `:key` 열은 오류이다.
+- `&environment env` … 람다 리스트의 어디에 써도 된다(최대 1번). 호출의 인자는 받지 않으며, `env`에는 매크로 호출 위치의 환경(타입은
+  `std::eval::Environment`)이 바인딩된다. `(macroexpand form env)`에 넘기면 호출을 둘러싼
+  `macrolet`·`symbol-macrolet`의 바인딩도 전개한다([매크로](functions/system.md#8-매크로)).
 - 예: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — 지역 매크로 바인딩
@@ -1076,6 +1079,9 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 둘 다 **식**의 특수 형식이며 실행 시에는 아무것도 남지 않는다(컴파일되는 것은 본체를 전개한 형식이다). 람다 목록은
 `defmacro`와 같다. 자세한 규칙과 예는 [지역 매크로 바인딩](functions/system.md#9-지역-매크로-바인딩macrolet--symbol-macrolet)에
 있다.
+
+최상위 정의 형식 `(define-symbol-macro name 전개-형식)`는 `symbol-macrolet`의
+전역판이다([매크로](functions/system.md#8-매크로)).
 
 ### 3.16 `#[test]` — 테스트 함수
 

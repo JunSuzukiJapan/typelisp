@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -275,8 +275,9 @@ Makroların nasıl tanımlanacağı
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | Yeni bir sembol. Adı `" <prefix><n>"`'dir; burada `n`, `*gensym-counter*`'dır. Baştaki bir boşluk kaynakta yazılamaz; bu yüzden üretilen bağlamalar yazılmış adlarla asla çakışmaz |
 | `*gensym-counter*` | Değişken | `int` | `gensym`'in sonraki kullandığı sayı. CL'deki gibi okunabilir ve ayarlanabilir |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Bir makro çağrısını bir adım açar. `None`, "bir makro çağrısı değil" demektir |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Artık bir makro olmayana kadar tekrarlar |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Bir makro çağrısını ya da bir sembol makrosunu bir adım açar. `None` "ikisi de değil" demektir |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | İkisi de olmayana kadar tekrarlar |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | tanım formu | Global bir sembol makrosu. Aşağıya bakın |
 
 `macroexpand-1` bir `Option` döndürür. CL "açılıp açılmadığını" ikinci bir dönüş değeri olarak bildirir,
 ancak çoklu değerler yoktur; bu yüzden bu rolü `None` oynar. **Kendi çağrısına açılan bir makro asla bir
@@ -288,6 +289,42 @@ yüzden programın gördüğü ile denetleyicinin gördüğü asla ayrışmaz.
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none shows as the empty list (Option<Sexpr> is transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+`env` verilmezse yalnızca modülün tanımları görülür (CL'nin boş sözcüksel ortamı). Bir makro
+gövdesinin `&environment` ile aldığı ortam ([Sözdizimi Başvurusu
+3.14](../syntax.md#314-defmacro--makro-tanımları)) verilirse, o makro çağrısını saran `macrolet`
+makroları ve `symbol-macrolet` sembol makroları da açılır. Çağrıyı saran bir yerel değişken, aynı
+adlı global bir makroyu gizler.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Ortamın türü `std::eval::Environment`'tir. Değer yalnızca onu alan makro çalışırken kullanılabilir
+(CL'deki gibi); sonradan verilirse sonuç bir `Err` olur.
+
+`define-symbol-macro` global bir sembol makrosu tanımlar (`symbol-macrolet`'in global karşılığı).
+Ad, yazıldığı yerde açılımla değiştirilir ve `setf` de açılıma yazar. Ad, fonksiyonlar, global
+değişkenler ve makrolarla aynı ad alanındadır; `pub` ile modülün dışından `mm::name` biçiminde
+kullanılabilir. Yerel bir değişken bağlaması aynı adlı sembol makrosunu gizler. Açılım, adın
+yazıldığı yerde denetlenir; bu yüzden tanım yapıldığında henüz var olmayan adlar içerebilir.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter 5 olur
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 CL'de olup bu dilde olmayanlar: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute` her zaman

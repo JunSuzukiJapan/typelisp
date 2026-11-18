@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # 入門
 
 本章從在 REPL 中對運算式求值開始，依序介紹函式、變數、條件分支、迴圈，以及串列與 `Vector`。`typl` 的建置方法請參閱
@@ -6,12 +6,14 @@
 
 ## 1. 啟動 REPL
 
-不帶引數啟動 `typl` 就會進入 REPL（互動模式）。在 `typl>` 之後輸入運算式，它會立即被求值並顯示結果。輸入 `:quit` 結束。
+不帶引數啟動 `typl` 就會進入 REPL（互動模式）。在 `typl>` 之後輸入運算式，它會立即被求值並顯示結果。在運算式前加上 `:type`（簡寫 `:t`），會不求值而顯示它的型別。輸入 `:quit` 結束。
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

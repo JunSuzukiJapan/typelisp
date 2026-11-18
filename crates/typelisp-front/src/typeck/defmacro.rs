@@ -9,6 +9,7 @@
 //! ([`crate::typeck::checker::MacroExpander`]).
 
 use crate::wk;
+use crate::typeck::builtins::environment_type;
 use crate::typeck::sexpr_value::option_of_sexpr;
 use crate::check::bound_name;
 use crate::typeck::registry::MacroDef;
@@ -48,20 +49,46 @@ pub(crate) fn check_defmacro(
     bound_name(name, "defmacro")?;
     d.value(reg, Kind::Macro, name)?;
     let (doc, body) = split_doc(heap, body);
-    let (required, optionals, rest, keys) = parse_macro_lambda_list(heap, &heap.list_to_vec(*params)?)?;
-    let def = MacroDef {
-        required: required.len(),
-        optional: optionals.len(),
-        rest: rest.is_some(),
-        keys: keys.iter().map(|(n, _)| n.name().to_string()).collect(),
-        public: d.public,
-        builtin: false,
-    };
+    let params = parse_macro_lambda_list(heap, &heap.list_to_vec(*params)?)?;
     let path = Path::of_symbol(d.site.ns, name);
-    reg.values.insert(path, ValueDef::Macro { public: d.public, shape: MacroShape::of(&def) });
+    reg.values.insert(path, ValueDef::Macro { public: d.public, shape: params.shape() });
     d.record(reg, Definition::Macro(path), doc);
     let site = MacroSite { reg, expander: d.expander, ns: d.site.ns, notes: d.notes };
-    macro_form(&site, heap, requests, &path, (required, optionals, rest, keys), body)
+    macro_form(&site, heap, requests, &path, params, body)
+}
+
+/// `(define-symbol-macro name expansion)` — `parts` without the head — and
+/// its core form, unrooted: CL's global symbol macro. The name stands for
+/// `expansion` wherever it is written and no nearer binding hides it, a
+/// place for `setf` too.
+///
+/// The evaluator holds the expansion as the body of a macro of no
+/// arguments at the name's path, `(quote expansion)`, so the definition is
+/// run, kept in a dump and compiled as a `defmacro` is.
+pub(crate) fn check_define_symbol_macro(
+    reg: &mut Registry,
+    d: &mut Definer,
+    heap: &mut Heap,
+    requests: &mut Requests,
+    parts: &[(Value, Option<Loc>)],
+) -> Result<Value, Error> {
+    let [(name, _), (expansion, at)] = parts else {
+        return Err(Error::TypeError("define-symbol-macro: (define-symbol-macro name expansion)".into()));
+    };
+    let Value::Symbol(name) = *name else {
+        return Err(Error::TypeError("define-symbol-macro: the name must be a symbol".into()));
+    };
+    let name = d.ownable(heap, name, "define-symbol-macro")?;
+    bound_name(name, "define-symbol-macro")?;
+    d.value(reg, Kind::SymbolMacro, name)?;
+    let path = Path::of_symbol(d.site.ns, name);
+    reg.values.insert(path, ValueDef::SymbolMacro { public: d.public });
+    d.record(reg, Definition::Macro(path), None);
+    let quote = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::QUOTE));
+    let body = crate::check::core::list(heap, &[quote, *expansion])?;
+    heap.push_root(body);
+    let site = MacroSite { reg, expander: d.expander, ns: d.site.ns, notes: d.notes };
+    macro_form(&site, heap, requests, &path, MacroParams::default(), &[(body, at.clone())])
 }
 
 /// Where a macro's body is checked: what is defined there, what expands
@@ -73,9 +100,6 @@ pub(crate) struct MacroSite<'a> {
     pub(crate) notes: &'a super::expr::Notes,
 }
 
-/// A macro's parameter list as `parse_macro_lambda_list` reads it.
-pub(crate) type MacroParams = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
-
 /// The macro `path` with the parameters `params` and the body `body`,
 /// checked at `site`: its definition's core form, unrooted.
 pub(crate) fn macro_form(
@@ -83,7 +107,7 @@ pub(crate) fn macro_form(
     heap: &mut Heap,
     requests: &mut Requests,
     path: &Path,
-    (required, optionals, rest, keys): MacroParams,
+    MacroParams { required, optionals, rest, keys, environment }: MacroParams,
     body: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
     // Each default sees the parameters before it.
@@ -105,7 +129,10 @@ pub(crate) fn macro_form(
     let mut checked = {
         let cx = Cx::new(reg, site.expander, site.ns, &scope, None, site.notes);
         let root = Locals::empty();
-        let locals = root.bind(bound.iter().map(|n| (*n, sexpr.clone(), None)).collect())?;
+        // The environment is bound last, and is no S-expression.
+        let mut binds: Vec<_> = bound.iter().map(|n| (*n, sexpr.clone(), None)).collect();
+        binds.extend(environment.map(|n| (n, environment_type(), None)));
+        let locals = root.bind(binds)?;
         let (mut checked, _) = check_body(&cx, heap, &locals, body, Some(&sexpr))?;
         cx.settle(heap, &mut checked)?;
         checked
@@ -114,7 +141,8 @@ pub(crate) fn macro_form(
     let mut lw = Lowering { reg, subst: &subst, requests, here: site.ns };
     let lowered = checked.iter().map(|t| lower_rooted(heap, &mut lw, t)).collect::<Result<Vec<_>, _>>()?;
     checked.clear();
-    let lambda = MacroLambda { required: required.len(), optionals: opt_defaults, keys: key_defaults };
+    bound.extend(environment);
+    let lambda = MacroLambda { required: required.len(), optionals: opt_defaults, keys: key_defaults, environment: environment.is_some() };
     crate::check::forms::defmacro_form(heap, path, &bound, rest.is_some(), &lambda, &lowered)
 }
 
@@ -170,6 +198,9 @@ pub struct MacroLambda {
     /// Each `&key` param's `(name, default-value body)`, in order — matched at
     /// the call site by the keyword symbol `:name`.
     pub keys: Vec<(String, Vec<Value>)>,
+    /// Whether the last parameter is an `&environment` one, which the call
+    /// fills with where it is expanded rather than with an argument.
+    pub environment: bool,
 }
 
 /// The call-site arity shape of a macro, derived from its [`MacroDef`] and
@@ -185,6 +216,9 @@ pub(crate) struct MacroShape {
 }
 
 impl MacroShape {
+    /// What a symbol macro is called with: nothing.
+    pub(crate) const NONE: MacroShape = MacroShape { required: 0, optional: 0, rest: false, has_keys: false };
+
     pub(crate) fn of(def: &MacroDef) -> MacroShape {
         MacroShape { required: def.required, optional: def.optional, rest: def.rest, has_keys: !def.keys.is_empty() }
     }
@@ -223,13 +257,39 @@ impl MacroShape {
     }
 }
 
-/// What a `defmacro` lambda list parses into: the required parameter names,
-/// the `&optional` parameters (each with its default form, if it declared
-/// one), the `&rest` name, and the `&key` parameters in the same shape as the
-/// optionals.
-pub(crate) type MacroLambdaList = (Vec<SymRef>, Vec<(SymRef, Option<Value>)>, Option<SymRef>, Vec<(SymRef, Option<Value>)>);
+/// What a `defmacro` lambda list parses into.
+#[derive(Default)]
+pub(crate) struct MacroParams {
+    /// The required parameters' names.
+    pub(crate) required: Vec<SymRef>,
+    /// The `&optional` parameters, each with its default form, if it
+    /// declared one.
+    pub(crate) optionals: Vec<(SymRef, Option<Value>)>,
+    /// The `&rest` (or `&body`) parameter's name.
+    pub(crate) rest: Option<SymRef>,
+    /// The `&key` parameters, in the shape of the optionals.
+    pub(crate) keys: Vec<(SymRef, Option<Value>)>,
+    /// The `&environment` parameter's name.
+    pub(crate) environment: Option<SymRef>,
+}
 
-pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLambdaList, Error> {
+impl MacroParams {
+    /// How many arguments a call may have.
+    pub(crate) fn shape(&self) -> MacroShape {
+        MacroShape::of(&MacroDef {
+            required: self.required.len(),
+            optional: self.optionals.len(),
+            rest: self.rest.is_some(),
+            keys: self.keys.iter().map(|(n, _)| n.name().to_string()).collect(),
+            public: false,
+            builtin: false,
+        })
+    }
+}
+
+/// CL's macro lambda list: required names, then `&optional`, `&rest` and
+/// `&key` ones, with `&environment name` anywhere among them, once.
+pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroParams, Error> {
     // Section rank: required=0, &optional=1, &rest=2, &key=3. A marker may
     // only advance the rank forward, so each appears at most once and in
     // order.
@@ -238,8 +298,10 @@ pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Resu
     let mut optionals: Vec<(SymRef, Option<Value>)> = Vec::new();
     let mut rest_name: Option<SymRef> = None;
     let mut keys: Vec<(SymRef, Option<Value>)> = Vec::new();
+    let mut environment: Option<SymRef> = None;
 
-    for p in param_vals {
+    let mut params = param_vals.iter();
+    while let Some(p) = params.next() {
         if let Value::Symbol(id) = p {
             match id.well_known() {
                 wk::OPTIONAL => {
@@ -263,6 +325,16 @@ pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Resu
                     rank = 3;
                     continue;
                 }
+                wk::AMP_ENVIRONMENT => {
+                    if environment.is_some() {
+                        return Err(Error::TypeError("defmacro: &environment may appear only once".into()));
+                    }
+                    let Some(name) = params.next() else {
+                        return Err(Error::TypeError("defmacro: &environment must be followed by a parameter name".into()));
+                    };
+                    environment = Some(macro_param_name(*name, "&environment")?);
+                    continue;
+                }
                 _ => {}
             }
         }
@@ -281,7 +353,7 @@ pub(crate) fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Resu
     if rank == 2 && rest_name.is_none() {
         return Err(Error::TypeError("defmacro: &rest must be followed by exactly one parameter name".into()));
     }
-    Ok((required_names, optionals, rest_name, keys))
+    Ok(MacroParams { required: required_names, optionals, rest: rest_name, keys, environment })
 }
 
 /// A bare-symbol lambda-list parameter name (`required`/`&rest`).

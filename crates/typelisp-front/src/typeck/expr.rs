@@ -510,12 +510,14 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         }
         return Ok(Typed { node: Node::Literal { tag: lit.tag, value: lit.value }, ty: lit.ty, loc });
     }
-    match v {
-        // A symbol macro is its form, written here.
-        Value::Symbol(id) if locals.symbol_macro(id).is_some() => {
-            let form = locals.symbol_macro(id).expect("checked above");
-            check_expr(cx, heap, locals, form, expected, loc)
+    // A symbol macro is its form, written here.
+    if let Value::Symbol(_) | Value::Path(_) = v {
+        if let Some(u) = macros::macro_use(cx.reg, cx.ns, heap, locals, v)? {
+            let form = macros::Site::at(cx, locals).expand(cx.expander, heap, u, &[])?;
+            return check_expr(cx, heap, locals, form, expected, loc);
         }
+    }
+    match v {
         Value::Symbol(id) => check_symbol(cx, heap, locals, id, expected, loc),
         Value::Path(id) => path_call::check_path_value(cx, heap, id, expected, loc),
         Value::Cons(_) => check_list(cx, heap, locals, v, expected, loc),
@@ -629,6 +631,9 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected:
     if let Some((_, ValueDef::Macro { .. })) = value {
         return Err(Error::TypeError(format!("`{}` is a macro, which has no value", heap.symbol_spelling(id))));
     }
+    if let Some((_, ValueDef::SymbolMacro { .. })) = value {
+        unreachable!("`check_expr` expanded the symbol macro `{}`", heap.symbol_spelling(id))
+    }
     if ctor_named(cx.reg, cx.ns, id).is_some() || static_use_named(cx.reg, cx.ns, id).is_some() {
         return Err(Error::TypeError(format!(
             "`{}` is a constructor or a static method, which is called rather than taken as a value",
@@ -638,7 +643,7 @@ fn check_symbol(cx: &Cx, heap: &mut Heap, locals: &Locals, id: SymRef, expected:
     match value {
         Some((path, ValueDef::Fn(def))) => lambda::fn_value(cx, path, def, expected, loc),
         Some((path, ValueDef::Var(var))) => Ok(Typed { node: Node::Global { path }, ty: var.ty.clone(), loc }),
-        Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched above"),
+        Some((_, ValueDef::Macro { .. } | ValueDef::SymbolMacro { .. })) => unreachable!("a macro was dispatched above"),
         None => {
             // A method of other types than the expected function's receiver.
             if let Some(Type::Fn(params, _, _)) = expected.map(|e| cx.resolve(e)) {
@@ -779,8 +784,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     }
     crate::check::verify::expression_head(head, TOPLEVEL_FORM_HEADS)?;
     let spelling = heap.symbol_spelling(head);
-    if let Some((path, shape)) = locals.local_macro(head) {
-        let expanded = macros::expand(cx.expander, heap, &path, shape, spelling, args)?;
+    if let Some((path, shape, _)) = macros::macro_call(cx.reg, cx.ns, heap, locals, elems[0].0)? {
+        let expanded = macros::expand(cx.expander, heap, &path, shape, spelling, args, &macros::Site::at(cx, locals))?;
         return check_expr(cx, heap, locals, expanded, expected, loc);
     }
     if let Some((ty, bound)) = locals.lookup_bound(head)? {
@@ -792,10 +797,6 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
     let head_is_fn = matches!(value, Some((_, ValueDef::Fn(_))));
     if let Some(checked) = sugar::check_sugar(cx, heap, locals, head, head_is_fn, args, expected, loc.clone()) {
         return checked;
-    }
-    if let Some((path, ValueDef::Macro { shape, .. })) = value {
-        let expanded = macros::expand(cx.expander, heap, &path, *shape, spelling, args)?;
-        return check_expr(cx, heap, locals, expanded, expected, loc);
     }
     if let Some((owner, variant)) = ctor_named(cx.reg, cx.ns, head) {
         return variant::check_variant(cx, heap, locals, owner, variant, args, expected, loc);
@@ -958,6 +959,9 @@ fn call_function(
             lambda::check_apply(cx, heap, locals, callee, first, rest, expected, loc)
         }
         Some((_, ValueDef::Macro { .. })) => unreachable!("a macro was dispatched before the call"),
+        Some((_, ValueDef::SymbolMacro { .. })) => {
+            Err(Error::TypeError(format!("`{}` is a symbol macro, which names a form and is not called", spelling)))
+        }
         None => Err(Error::NoSuchFunction(spelling.to_string())),
     }
 }
@@ -1044,5 +1048,5 @@ pub(crate) const TOPLEVEL_FORM_HEADS: &[u32] = &[
     wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
     wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,
     wk::DEFTRAIT, wk::DEFTYPE, wk::IMPL, wk::USE, wk::LOAD, wk::IMPORT,
-    wk::SHADOWING_IMPORT, wk::IN_MODULE, wk::DEF_C_STRUCT, wk::SHADOW,
+    wk::SHADOWING_IMPORT, wk::IN_MODULE, wk::DEF_C_STRUCT, wk::SHADOW, wk::DEFINE_SYMBOL_MACRO,
 ];

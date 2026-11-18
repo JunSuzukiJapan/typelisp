@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Primi passi
 
 Partendo dalla valutazione di espressioni nel REPL, questo capitolo tratta nell'ordine funzioni,
@@ -8,12 +8,14 @@ variabili, condizionali, cicli, liste e `Vector`. Per sapere come compilare `typ
 ## 1. Avviare il REPL
 
 Avviato senza argomenti, `typl` entra nel REPL (modalità interattiva). Digita un'espressione dopo
-`typl>` e viene valutata subito e il suo valore viene stampato. `:quit` esce dal REPL.
+`typl>` e viene valutata subito e il suo valore viene stampato. Anteponendo `:type` (abbreviato `:t`) a un'espressione, se ne stampa il tipo senza valutarla. `:quit` esce dal REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

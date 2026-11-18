@@ -55,6 +55,7 @@ fn push_definitions(reg: &Registry, keep: impl Fn(&Path) -> bool, out: &mut Vec<
             ValueDef::Fn(def) => candidate(name, CompletionKind::Function, format!("({:?}) -> {:?}", def.params, def.ret)),
             ValueDef::Var(def) => candidate(name, CompletionKind::Variable, format!("{:?}", def.ty)),
             ValueDef::Macro { .. } => candidate(name, CompletionKind::Macro, "macro".to_string()),
+            ValueDef::SymbolMacro { .. } => candidate(name, CompletionKind::Macro, "symbol macro".to_string()),
         });
     }
     for (path, entry) in reg.types.iter().filter(|(p, _)| keep(p)) {
@@ -121,7 +122,7 @@ pub(crate) fn definitions(reg: &Registry) -> Vec<Defined> {
         let kind = match def {
             ValueDef::Fn(_) => DefinedKind::Function,
             ValueDef::Var(_) => DefinedKind::Variable,
-            ValueDef::Macro { .. } => DefinedKind::Macro,
+            ValueDef::Macro { .. } | ValueDef::SymbolMacro { .. } => DefinedKind::Macro,
         };
         out.push(Defined { path: *path, kind, methods: Vec::new(), fields: Vec::new() });
     }

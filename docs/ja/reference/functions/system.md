@@ -258,8 +258,9 @@ CL の `(documentation 'name 'function)` と異なり型引数を取らない代
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 新しいシンボル。名前は `" <prefix><n>"` で `n` は `*gensym-counter*`。先頭の空白はソースに書けないので、生成した束縛が書かれた名前と衝突しない |
 | `*gensym-counter*` | 変数 | `int` | `gensym` が次に使う番号。CL 同様、読んでも設定してもよい |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`None` は「マクロ呼び出しではない」 |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | マクロでなくなるまで繰り返す |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しかシンボルマクロを 1 段展開。`None` は「どちらでもない」 |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | どちらでもなくなるまで繰り返す |
+| `define-symbol-macro` | `(define-symbol-macro name 展開形)` | 定義形 | 大域のシンボルマクロ。下を参照 |
 
 `macroexpand-1` が返すのは `Option`——CL は「展開したか」を第 2 返り値で伝えるが、多値が
 無いので `None` がそれに当たる。**自分自身の呼び出しへ展開するマクロと非マクロを取り違えようが
@@ -270,6 +271,41 @@ CL の `(documentation 'name 'function)` と異なり型引数を取らない代
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none は空リストとして出る（Option<Sexpr> は透過）
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+`env` を省くと、モジュールの定義だけを見て展開する（CL の空の字句環境）。マクロの本体で
+`&environment` に受けた環境（[構文リファレンス 3.14](../syntax.md#314-defmacro--マクロ定義)）を
+渡すと、そのマクロ呼び出しを囲む `macrolet` のマクロと `symbol-macrolet` のシンボルマクロも
+展開する。呼び出しを囲むローカル変数は、同じ名前の大域マクロを隠す。
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+環境の型は `std::eval::Environment`。値が使えるのは、その環境を受けたマクロが動いている間だけ
+（CL と同じ）。後から渡すと `Err` になる。
+
+`define-symbol-macro` は大域のシンボルマクロを定義する（`symbol-macrolet` の大域版）。その名前を
+書いた位置で展開形に置き換わり、`setf` でも展開先へ書く。名前は関数・グローバル変数・マクロと
+同じ名前空間に入り、`pub` を付ければモジュールの外から `mm::name` のように使える。
+ローカル変数の束縛は同名のシンボルマクロを隠す。展開形は名前を書いた位置で検査されるので、
+定義の時点ではまだ無い名前を含んでいてもよい。
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter が 5 になる
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 CL にあってここに無いもの: `eval-when`（`:compile-toplevel`/`:load-toplevel`/`:execute` が

@@ -1029,6 +1029,11 @@ well_known_symbols! {
     F_SXHASH_EQ => "sxhash-eq"
     F_SXHASH_EQL => "sxhash-eql"
     F_SXHASH_EQUALP => "sxhash-equalp"
+    "Appended 2026-11-18. `&environment` is a macro lambda-list keyword, recognized
+     by identity like the others; `define-symbol-macro` is the head of a
+     top-level definition form."
+    AMP_ENVIRONMENT => "&environment"
+    DEFINE_SYMBOL_MACRO => "define-symbol-macro"
 }
 
 

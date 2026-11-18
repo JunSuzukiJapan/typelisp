@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -880,7 +880,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 - 要用裸名使用类型的构造函数和静态方法，可以像 `(use std::sync::Chan::new)` 这样逐个引入，或用 `(use Type::*)` 引入全部构造函数和公开的静态方法（结构体的构造函数不包括在内，因为结构体用 `make-instance` 创建）。不能用 `pub use` 再导出。
 - 不能从两个不同的类型引入同一个裸名（`(use std::sync::Chan::* std::sync::WaitGroup::*)` 是错误，因为两者都有 `new`）。引入与该模块定义的函数、全局变量、宏同名的名字也是错误。明知如此仍要替换时，使用 `shadowing-import`。
 - `Option` 的 `Some`/`None` 和 `Result` 的 `Ok`/`Err` 由标准库向所有模块公开，所以不用 `use` 也能用裸名使用（与 Rust 的 prelude 引入 `Some`/`None`/`Ok`/`Err` 相同）。
-- **一个名字只有一个含义**。函数、全局变量和宏属于同一个命名空间，在同一模块中它们中的任意两个都不能
+- **一个名字只有一个含义**。函数、全局变量、宏和符号宏属于同一个命名空间，在同一模块中它们中的任意两个都不能
   取同一个名字（无论以什么顺序定义都会报错）。不像 CL 那样把函数和变量的命名空间分开。不同模块中的
   同名名字，较近的那个可见。
 - 裸名 `n` 的解析（调用 `(n a ...)` 的位置。特殊形式的名字在此之前决定）：
@@ -975,7 +975,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 ### 3.14 defmacro — 宏定义
 
 ```lisp
-(defmacro name (必需... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (必需... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - 所有参数和返回值总是 `Sexpr`，所以不写类型注解。
@@ -986,6 +986,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
   - `&rest name` … 把剩余的位置参数合为一个 `Sexpr` 列表接收。
   - `&key` … 关键字参数。`name` 或 `(name 默认式)`。调用方用 `:name 值` 传入（顺序任意）。省略时为默认式（没有时为空列表 `()`）。
     未知的关键字或奇数个的 `:key` 序列是错误。
+- `&environment env` … 可以写在 lambda 列表的任意位置（最多一次）。它不接收调用的实参，`env` 绑定到宏调用位置的环境（类型为 `std::eval::Environment`）。传给 `(macroexpand form env)` 时，也会展开包围调用的 `macrolet`、`symbol-macrolet` 的绑定（[宏](functions/system.md#8-宏)）。
 - 例：`(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`。
 
 ### 3.15 macrolet / symbol-macrolet — 局部宏绑定
@@ -997,6 +998,8 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 
 两者都是**表达式**的特殊形式，运行时什么也不留下（被编译的是函数体展开后的形式）。lambda 列表与 `defmacro` 相同。详细规则和例子见
 [局部宏绑定](functions/system.md#9-局部宏绑定macrolet--symbol-macrolet)。
+
+顶层定义形式 `(define-symbol-macro name 展开形式)` 是 `symbol-macrolet` 的全局版（[宏](functions/system.md#8-宏)）。
 
 ### 3.16 `#[test]` — 测试函数
 

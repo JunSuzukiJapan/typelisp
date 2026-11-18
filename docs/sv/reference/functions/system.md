@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -269,8 +269,9 @@ Hur man definierar makron finns i [Syntaxreferens 3.14](../syntax.md#314-defmacr
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | En ny symbol. Dess namn är `" <prefix><n>"`, där `n` är `*gensym-counter*`. Ett inledande mellanslag kan inte skrivas i källkod, så de genererade bindningarna krockar aldrig med skrivna namn |
 | `*gensym-counter*` | Variabel | `int` | Numret som `gensym` använder härnäst. Som i CL kan det läsas och sättas |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Expanderar ett makroanrop ett steg. `None` betyder "inte ett makroanrop" |
-| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | Upprepar tills det inte längre är ett makro |
+| `macroexpand-1` | `(macroexpand-1 form)` / `(macroexpand-1 form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Expanderar ett makroanrop eller ett symbolmakro ett steg. `None` betyder ”ingetdera” |
+| `macroexpand` | `(macroexpand form)` / `(macroexpand form env)` | `(Option<Sexpr> &optional Environment)→Result<Option<Sexpr>,EvalError>` | Upprepar tills det är ingetdera |
+| `define-symbol-macro` | `(define-symbol-macro name expansion)` | definitionsform | Ett globalt symbolmakro. Se nedan |
 
 `macroexpand-1` returnerar ett `Option`. CL rapporterar "om det expanderade" som ett andra returvärde, men
 det finns inga flera värden, så `None` spelar den rollen. **Ett makro som expanderar till ett anrop av sig
@@ -282,6 +283,42 @@ det programmet ser och det kontrollen såg divergerar aldrig.
 (macroexpand-1 '(twice 5))   ; => (Ok (+ 5 5))
 (macroexpand-1 '(+ 1 2))     ; => (Ok ())      ; none visas som den tomma listan (Option<Sexpr> är transparent)
 (macroexpand '(when true 1)) ; => (Ok (if true (progn 1 ()) ()))
+```
+
+Utan `env` ses bara modulens definitioner (CL:s tomma lexikala miljö). Med miljön som en makrokropp
+fått genom `&environment` ([Syntaxreferens 3.14](../syntax.md#314-defmacro--makrodefinitioner))
+expanderas även makrona från `macrolet` och symbolmakrona från `symbol-macrolet` runt det
+makroanropet. En lokal variabel runt anropet döljer ett globalt makro med samma namn.
+
+```lisp
+(defmacro expanded (form &environment env)
+  (match (macroexpand form env)
+    ((Ok e) `(quote ,e))
+    ((Err _) ''error)))
+
+(macrolet ((sq (x) `(* ,x ,x)))
+  (expanded (sq 4)))                 ; => (* 4 4)
+(symbol-macrolet ((head (car q)))
+  (expanded head))                   ; => (car q)
+```
+
+Miljöns typ är `std::eval::Environment`. Värdet kan användas bara medan makrot som fick det körs
+(som i CL); skickas det senare blir resultatet ett `Err`.
+
+`define-symbol-macro` definierar ett globalt symbolmakro (den globala motsvarigheten till
+`symbol-macrolet`). Namnet ersätts med expansionen där det skrivs, och `setf` skriver också till
+expansionen. Namnet ligger i samma namnrymd som funktioner, globala variabler och makron; med `pub`
+kan det användas utanför modulen som `mm::name`. En lokal variabelbindning döljer ett symbolmakro
+med samma namn. Expansionen kontrolleras där namnet skrivs, så den får innehålla namn som ännu inte
+finns när definitionen görs.
+
+```lisp
+(defvar (counter int) 0)
+(define-symbol-macro c counter)
+(setf c 5)                           ; counter blir 5
+(+ c 1)                              ; => 6
+(let ((c 1)) c)                      ; => 1
+(macroexpand-1 'c)                   ; => (Ok counter)
 ```
 
 Vad CL har och det här språket inte har: `eval-when` (`:compile-toplevel`/`:load-toplevel`/`:execute`

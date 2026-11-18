@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 90644c30488992ef4d57c089e42071920ad7ecb9 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1092,7 +1092,7 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
 - A biblioteca padrão oferece a todos os módulos `Some`/`None` de `Option` e `Ok`/`Err` de `Result`,
   então eles podem ser usados pelo nome nu sem `use` (assim como o prelude do Rust traz
   `Some`/`None`/`Ok`/`Err`).
-- **Um nome tem um só significado.** Funções, variáveis globais e macros compartilham um namespace, e dentro
+- **Um nome tem um só significado.** Funções, variáveis globais, macros e macros de símbolo compartilham um namespace, e dentro
   de um módulo duas delas não podem ter o mesmo nome (é um erro qualquer que seja definida primeiro).
   Funções e variáveis não têm namespaces separados como no CL. Para o mesmo nome em módulos diferentes, o
   mais próximo é o visível.
@@ -1223,7 +1223,7 @@ de uma estrutura são escritos `(pub x i32)` (3.6).
 ### 3.14 defmacro — definição de macros
 
 ```lisp
-(defmacro name (obrigatórios... &optional opt... &rest rest-name &key key...) body...)
+(defmacro name (obrigatórios... &optional opt... &rest rest-name &key key... &environment env) body...)
 ```
 
 - Todos os parâmetros e o valor de retorno são sempre `Sexpr`, então não se escrevem anotações de tipo.
@@ -1238,6 +1238,10 @@ de uma estrutura são escritos `(pub x i32)` (3.6).
   - `&key` … argumentos de palavra-chave. `name` ou `(name expr-padrão)`. Quem chama os passa como `:name valor`
     (em qualquer ordem). Quando omitidos, a expressão padrão (a lista vazia `()` se não houver). Palavras-chave
     desconhecidas ou uma sequência `:key` de comprimento ímpar são erros.
+- `&environment env` … pode ser escrito em qualquer lugar da lista lambda (no máximo uma vez). Não
+  recebe nenhum argumento da chamada; `env` é ligado ao ambiente na posição da chamada de macro (de
+  tipo `std::eval::Environment`). Passado a `(macroexpand form env)`, expande também os bindings de
+  `macrolet` e `symbol-macrolet` em volta da chamada ([Macros](functions/system.md#8-macros)).
 - Exemplos: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`.
 
 ### 3.15 macrolet / symbol-macrolet — vínculos de macros locais
@@ -1250,6 +1254,9 @@ de uma estrutura são escritos `(pub x i32)` (3.6).
 Ambas são formas especiais de **expressão**, e nada resta em tempo de execução (o que é compilado é a forma
 expandida do corpo). A lista lambda é a mesma de `defmacro`. As regras detalhadas e os exemplos estão em
 [Vínculos de macros locais](functions/system.md#9-vínculos-de-macros-locais-macrolet--symbol-macrolet).
+
+A forma de definição de nível superior `(define-symbol-macro name expansão)` é a contraparte global
+de `symbol-macrolet` ([Macros](functions/system.md#8-macros)).
 
 ### 3.16 `#[test]` — funções de teste
 

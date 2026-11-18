@@ -328,15 +328,17 @@ pub(crate) struct TraitImpl {
     pub(crate) bounds: Vec<(TypeParam, Vec<TraitBound>)>,
 }
 
-/// What a module-level name in the value name space is: one of three, never
+/// What a module-level name in the value name space is: one of four, never
 /// two of them (`docs/dev/name-resolution.md` 1). Of a macro, whether it is
 /// `pub` and how many arguments a call of it may have; its body is the
-/// evaluator's, which expands it.
+/// evaluator's, which expands it. A symbol macro's expansion is the
+/// evaluator's too, held as the body of a macro of no arguments at its path.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ValueDef {
     Fn(FnDef),
     Var(VarDef),
     Macro { public: bool, shape: MacroShape },
+    SymbolMacro { public: bool },
 }
 
 impl ValueDef {
@@ -345,7 +347,7 @@ impl ValueDef {
         match self {
             ValueDef::Fn(def) => def.public,
             ValueDef::Var(def) => def.public,
-            ValueDef::Macro { public, .. } => *public,
+            ValueDef::Macro { public, .. } | ValueDef::SymbolMacro { public } => *public,
         }
     }
 }

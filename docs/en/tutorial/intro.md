@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
 # Getting Started
 
 Starting from evaluating expressions in the REPL, this chapter covers functions, variables,
@@ -8,12 +8,14 @@ conditionals, loops, and lists and `Vector`, in that order. For how to build `ty
 ## 1. Starting the REPL
 
 Started without arguments, `typl` enters the REPL (interactive mode). Type an expression after
-`typl>` and it is evaluated on the spot and its value is printed. `:quit` leaves the REPL.
+`typl>` and it is evaluated on the spot and its value is printed. Put `:type` (short: `:t`) before an expression to print its type without evaluating it. `:quit` leaves the REPL.
 
 ```
 $ typl
 typl> (+ 1 2)
 3
+typl> :type (+ 1 2)
+int
 typl> :quit
 ```
 

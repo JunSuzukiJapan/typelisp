@@ -170,6 +170,22 @@ impl<'p> Locals<'p> {
         None
     }
 
+    /// Whether the nearest binding of `name` here is a local variable — what
+    /// [`Self::lookup`] finds, asked without noting a capture.
+    pub(crate) fn binds(&self, name: SymRef) -> bool {
+        let mut frame = Some(self);
+        while let Some(f) = frame {
+            if f.binds.iter().any(|(n, _, _)| *n == name) {
+                return true;
+            }
+            if f.macros.iter().any(|(n, _)| *n == name) {
+                return false;
+            }
+            frame = f.parent;
+        }
+        false
+    }
+
     /// The type of the local variable `name` here, if it is one. A capture
     /// is refused when the capturing function is handed to C, and when it
     /// is of a typed pointer: the function can be called after the `unsafe`

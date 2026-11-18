@@ -2896,13 +2896,14 @@ impl Interp {
                         EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id))
                     })?;
                     heap.set_permanent_root(perm_idx, v);
-                    return Ok((State::Apply(Value::Empty), None));
+                    return Ok((State::Apply(v), None));
                 }
                 let slot = self.root.borrow().get_global(&path);
                 match slot {
+                    // `setf`'s value is the value assigned.
                     Some(slot) => {
                         slot.set(heap, v);
-                        Ok((State::Apply(Value::Empty), None))
+                        Ok((State::Apply(v), None))
                     }
                     None => Err(EvalError::Unbound(path.to_string())),
                 }
